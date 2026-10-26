@@ -15,7 +15,11 @@ fn opaque_handles_preserve_payloads_and_declaration_identity() {
     let nat = Term::Data {
         name: "Nat".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![], vec![DataField::Recursive]],
+        indices: vec![],
+        constructors: vec![vec![], vec![DataField::Recursive]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     let zero = Term::Construct {
         data: Box::new(nat.clone()),
@@ -31,7 +35,8 @@ fn opaque_handles_preserve_payloads_and_declaration_identity() {
     let same_name_different_declaration = Term::Data {
         name: "Nat".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![]],
+        indices: vec![],
+        constructors: vec![vec![]].into_iter().map(Into::into).collect(),
     };
     assert_ne!(handle(nat.clone()), handle(same_name_different_declaration));
     assert_eq!(handle(nat.clone()), handle(nat));

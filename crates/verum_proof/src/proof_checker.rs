@@ -451,7 +451,8 @@ pub(crate) fn lift_term_one_binder(term: Term) -> Term {
 /// Recursive occurrences are explicit and strictly positive by construction.
 /// Value fields are types in the declaration's surrounding binder context;
 /// `Dependent` fields instead see all preceding constructor fields, in order.
-/// Indexed, nested and function-valued recursion are not part of this fragment.
+/// Indexed recursive occurrences carry an explicit index tuple. Nested and
+/// function-valued recursion are not part of this fragment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum DataField {
@@ -459,6 +460,68 @@ pub enum DataField {
     /// Type under one binder for each earlier field (including recursive fields).
     Dependent(Box<Term>),
     Recursive,
+    /// Positive recursive occurrence at indices in the preceding-field context.
+    RecursiveAt(Vec<Term>),
+}
+
+/// Constructor telescope and its resulting family indices. Legacy unindexed
+/// certificates serialize just the field array; both wire forms have one
+/// internal representation and are checked by the same rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataConstructor<F = DataField, T = Term> {
+    pub fields: Vec<F>,
+    pub indices: Vec<T>,
+}
+
+impl<F, T> From<Vec<F>> for DataConstructor<F, T> {
+    fn from(fields: Vec<F>) -> Self {
+        Self {
+            fields,
+            indices: Vec::new(),
+        }
+    }
+}
+
+impl<F, T> std::ops::Deref for DataConstructor<F, T> {
+    type Target = [F];
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl<F: Serialize, T: Serialize> Serialize for DataConstructor<F, T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        if self.indices.is_empty() {
+            self.fields.serialize(serializer)
+        } else {
+            let mut result = serializer.serialize_struct("DataConstructor", 2)?;
+            result.serialize_field("fields", &self.fields)?;
+            result.serialize_field("indices", &self.indices)?;
+            result.end()
+        }
+    }
+}
+
+impl<'de, F: Deserialize<'de>, T: Deserialize<'de>> Deserialize<'de> for DataConstructor<F, T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Indexed<F, T> {
+            fields: Vec<F>,
+            indices: Vec<T>,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire<F, T> {
+            Legacy(Vec<F>),
+            Indexed(Indexed<F, T>),
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Legacy(fields) => fields.into(),
+            Wire::Indexed(Indexed { fields, indices }) => Self { fields, indices },
+        })
+    }
 }
 
 /// A proof term. Types ARE terms (CIC-style); a "type" is a term
@@ -471,7 +534,10 @@ pub enum Term {
     Data {
         name: String,
         level: Level,
-        constructors: Vec<Vec<DataField>>,
+        /// Index-type telescope. Each type binds its preceding indices.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        indices: Vec<Term>,
+        constructors: Vec<DataConstructor>,
     },
     /// A saturated constructor selected from its checked declaration.
     Construct {
@@ -587,14 +653,22 @@ impl Term {
             Term::Data {
                 name,
                 level,
+                indices,
                 constructors,
             } => Term::Data {
                 name,
                 level,
+                indices: indices
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, ty)| map(ty, i))
+                    .collect(),
                 constructors: constructors
                     .into_iter()
-                    .map(|fields| {
-                        fields
+                    .map(|constructor| {
+                        let count = constructor.fields.len();
+                        let fields = constructor
+                            .fields
                             .into_iter()
                             .enumerate()
                             .map(|(index, field)| match field {
@@ -603,8 +677,19 @@ impl Term {
                                     DataField::Dependent(Box::new(map(*t, index)))
                                 }
                                 DataField::Recursive => DataField::Recursive,
+                                DataField::RecursiveAt(indices) => DataField::RecursiveAt(
+                                    indices.into_iter().map(|t| map(t, index)).collect(),
+                                ),
                             })
-                            .collect()
+                            .collect();
+                        DataConstructor {
+                            fields,
+                            indices: constructor
+                                .indices
+                                .into_iter()
+                                .map(|t| map(t, count))
+                                .collect(),
+                        }
                     })
                     .collect(),
             },
@@ -987,7 +1072,10 @@ fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
                                 let mut result = case.clone();
                                 for (field, argument) in fields.iter().zip(args.iter()) {
                                     result = Term::app(result, argument.clone());
-                                    if matches!(field, DataField::Recursive) {
+                                    if matches!(
+                                        field,
+                                        DataField::Recursive | DataField::RecursiveAt(_)
+                                    ) {
                                         result = Term::app(
                                             result,
                                             Term::Induct {
@@ -1109,26 +1197,40 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
             Term::Data {
                 name: an,
                 level: al,
+                indices: ai,
                 constructors: ac,
             },
             Term::Data {
                 name: bn,
                 level: bl,
+                indices: bi,
                 constructors: bc,
             },
         ) => {
             an == bn
                 && level_eq(al, bl)
+                && terms_def_eq(ai, bi)
                 && ac.len() == bc.len()
                 && ac.iter().zip(bc).all(|(a, b)| {
-                    a.len() == b.len()
-                        && a.iter().zip(b).enumerate().all(|(index, (a, b))| {
-                            match (field_value_type(a, index), field_value_type(b, index)) {
-                                (None, None) => true,
-                                (Some(a), Some(b)) => def_eq(&a, &b),
-                                _ => false,
-                            }
-                        })
+                    a.fields.len() == b.fields.len()
+                        && terms_def_eq(&a.indices, &b.indices)
+                        && a.fields
+                            .iter()
+                            .zip(&b.fields)
+                            .enumerate()
+                            .all(|(index, (a, b))| {
+                                match (recursive_indices(a), recursive_indices(b)) {
+                                    (Some(a), Some(b)) => terms_def_eq(a, b),
+                                    (None, None) => match (
+                                        field_value_type(a, index),
+                                        field_value_type(b, index),
+                                    ) {
+                                        (Some(a), Some(b)) => def_eq(&a, &b),
+                                        _ => false,
+                                    },
+                                    _ => false,
+                                }
+                            })
                 })
         }
         (
@@ -1282,13 +1384,34 @@ fn eta_match(lam_body: &Term, other: &Term) -> bool {
 fn is_free_in(term: &Term, target: usize) -> bool {
     match term {
         Term::Let { value, body } => is_free_in(value, target) || is_free_in(body, target + 1),
-        Term::Data { constructors, .. } => constructors.iter().any(|fields| {
-            fields.iter().enumerate().any(|(index, field)| match field {
-                DataField::Value(t) => is_free_in(t, target),
-                DataField::Dependent(t) => is_free_in(t, target + index),
-                DataField::Recursive => false,
-            })
-        }),
+        Term::Data {
+            indices,
+            constructors,
+            ..
+        } => {
+            indices
+                .iter()
+                .enumerate()
+                .any(|(i, ty)| is_free_in(ty, target + i))
+                || constructors.iter().any(|constructor| {
+                    constructor
+                        .indices
+                        .iter()
+                        .any(|t| is_free_in(t, target + constructor.fields.len()))
+                        || constructor
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .any(|(index, field)| match field {
+                                DataField::Value(t) => is_free_in(t, target),
+                                DataField::Dependent(t) => is_free_in(t, target + index),
+                                DataField::Recursive => false,
+                                DataField::RecursiveAt(indices) => {
+                                    indices.iter().any(|t| is_free_in(t, target + index))
+                                }
+                            })
+                })
+        }
         Term::Construct { data, args, .. } => {
             is_free_in(data, target) || args.iter().any(|t| is_free_in(t, target))
         }
@@ -1524,15 +1647,23 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
 
         Term::Data {
             level,
+            indices,
             constructors,
             ..
         } => {
-            for fields in constructors {
+            let mut index_context = ctx.clone();
+            for ty in indices {
+                let kind = infer(&index_context, ty)?;
+                expect_universe(&kind).ok_or_else(|| CheckError::NotAType(ty.clone()))?;
+                index_context = index_context.extend(ty.clone());
+            }
+            for constructor in constructors {
                 let mut local = ctx.clone();
-                for (index, field) in fields.iter().enumerate() {
-                    let domain = field_value_type(field, index)
-                        .unwrap_or_else(|| shift_up(term.clone(), index, 0));
-                    if !matches!(field, DataField::Recursive) {
+                for (index, field) in constructor.fields.iter().enumerate() {
+                    let domain = field_domain(term, field, index);
+                    if let Some(values) = recursive_indices(field) {
+                        check_indices(&local, indices, values, index)?;
+                    } else {
                         let kind = infer(&local, &domain)?;
                         let field_level = expect_universe(&kind)
                             .ok_or_else(|| CheckError::NotAType(domain.clone()))?;
@@ -1544,8 +1675,19 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     }
                     local = local.extend(domain);
                 }
+                check_indices(
+                    &local,
+                    indices,
+                    &constructor.indices,
+                    constructor.fields.len(),
+                )?;
             }
-            Ok(Term::Universe(level.clone().normalize()))
+            Ok(indices
+                .iter()
+                .rev()
+                .fold(Term::Universe(level.clone().normalize()), |result, ty| {
+                    Term::pi(ty.clone(), result)
+                }))
         }
         Term::Construct {
             data,
@@ -1559,41 +1701,69 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     "constructor owner is not a data declaration".into(),
                 ));
             };
-            let fields = constructors
+            let constructor = constructors
                 .get(*constructor)
                 .ok_or_else(|| CheckError::InvalidInductive("unknown constructor".into()))?;
-            if fields.len() != args.len() {
+            if constructor.fields.len() != args.len() {
                 return Err(CheckError::InvalidInductive(
                     "constructor field arity mismatch".into(),
                 ));
             }
-            for (index, (field, argument)) in fields.iter().zip(args).enumerate() {
-                let domain = field_value_type(field, index)
-                    .unwrap_or_else(|| shift_up(declaration.clone(), index, 0));
-                let expected = instantiate_fields(domain, &args[..index]);
+            for (index, (field, argument)) in constructor.fields.iter().zip(args).enumerate() {
+                let expected =
+                    instantiate_fields(field_domain(&declaration, field, index), &args[..index]);
                 check_against(ctx, argument, &expected)?;
             }
-            Ok(declaration)
+            let result = constructor
+                .indices
+                .iter()
+                .map(|t| instantiate_fields(t.clone(), args))
+                .collect::<Vec<_>>();
+            Ok(apply_terms(declaration, &result))
         }
         Term::Induct {
             scrutinee,
             motive,
             cases,
         } => {
-            let declaration = whnf(infer(ctx, scrutinee)?);
-            let Term::Data { constructors, .. } = &declaration else {
-                return Err(CheckError::InvalidInductive(
-                    "induction requires a data scrutinee".into(),
-                ));
+            let actual = whnf(infer(ctx, scrutinee)?);
+            let (declaration, values) = split_family(actual).ok_or_else(|| {
+                CheckError::InvalidInductive(
+                    "induction requires a fully applied data family".into(),
+                )
+            })?;
+            let Term::Data {
+                indices,
+                constructors,
+                ..
+            } = &declaration
+            else {
+                unreachable!()
             };
             infer(ctx, &declaration)?;
-            let motive_kind = whnf(infer(ctx, motive)?);
-            let Term::Pi(domain, result) = motive_kind else {
+            let mut motive_kind = infer(ctx, motive)?;
+            for ty in indices {
+                let Term::Pi(domain, result) = whnf(motive_kind) else {
+                    return Err(CheckError::InvalidInductive(
+                        "induction motive omits a family index".into(),
+                    ));
+                };
+                if !def_eq(&domain, ty) {
+                    return Err(CheckError::InvalidInductive(
+                        "induction motive index domain mismatch".into(),
+                    ));
+                }
+                motive_kind = *result;
+            }
+            let Term::Pi(domain, result) = whnf(motive_kind) else {
                 return Err(CheckError::InvalidInductive(
                     "induction motive is not a family".into(),
                 ));
             };
-            if !def_eq(&domain, &declaration) || expect_universe(&result).is_none() {
+            let references: Vec<_> = (0..indices.len()).rev().map(Term::Var).collect();
+            let expected_domain =
+                apply_terms(shift_up(declaration.clone(), indices.len(), 0), &references);
+            if !def_eq(&domain, &expected_domain) || expect_universe(&result).is_none() {
                 return Err(CheckError::InvalidInductive(
                     "induction motive domain or universe mismatch".into(),
                 ));
@@ -1603,11 +1773,17 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     "induction case count mismatch".into(),
                 ));
             }
-            for (index, (fields, case)) in constructors.iter().zip(cases).enumerate() {
-                let expected = induction_case_type(&declaration, motive, index, fields);
-                check_against(ctx, case, &expected)?;
+            for (index, (constructor, case)) in constructors.iter().zip(cases).enumerate() {
+                check_against(
+                    ctx,
+                    case,
+                    &induction_case_type(&declaration, motive, index, constructor),
+                )?;
             }
-            Ok(Term::app((**motive).clone(), (**scrutinee).clone()))
+            Ok(Term::app(
+                apply_terms((**motive).clone(), &values),
+                (**scrutinee).clone(),
+            ))
         }
 
         // T-Var
@@ -1800,7 +1976,7 @@ fn field_value_type(field: &DataField, preceding: usize) -> Option<Term> {
     match field {
         DataField::Value(ty) => Some(shift_up((**ty).clone(), preceding, 0)),
         DataField::Dependent(ty) => Some((**ty).clone()),
-        DataField::Recursive => None,
+        DataField::Recursive | DataField::RecursiveAt(_) => None,
     }
 }
 
@@ -1813,57 +1989,121 @@ fn instantiate_fields(mut term: Term, arguments: &[Term]) -> Term {
     term
 }
 
-/// Generate a branch telescope from the declaration, preserving every captured
-/// binder and interleaving recursive fields with their dependent hypotheses.
-/// Both algorithms use this syntactic telescope, but infer and reduce it
-/// independently (substitution versus semantic closures).
+fn recursive_indices(field: &DataField) -> Option<&[Term]> {
+    match field {
+        DataField::Recursive => Some(&[]),
+        DataField::RecursiveAt(indices) => Some(indices),
+        _ => None,
+    }
+}
+
+fn apply_terms(head: Term, arguments: &[Term]) -> Term {
+    arguments.iter().cloned().fold(head, Term::app)
+}
+
+fn terms_def_eq(a: &[Term], b: &[Term]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| def_eq(a, b))
+}
+
+fn field_domain(data: &Term, field: &DataField, preceding: usize) -> Term {
+    field_value_type(field, preceding).unwrap_or_else(|| {
+        apply_terms(
+            shift_up(data.clone(), preceding, 0),
+            recursive_indices(field).unwrap(),
+        )
+    })
+}
+
+/// Decompose a fully saturated family without trusting a serialized index claim.
+fn split_family(mut term: Term) -> Option<(Term, Vec<Term>)> {
+    let mut values = Vec::new();
+    while let Term::App(head, arg) = term {
+        values.push(*arg);
+        term = whnf(*head);
+    }
+    values.reverse();
+    match &term {
+        Term::Data { indices, .. } if indices.len() == values.len() => Some((term, values)),
+        _ => None,
+    }
+}
+
+fn check_indices(
+    ctx: &Context,
+    telescope: &[Term],
+    arguments: &[Term],
+    ambient_shift: usize,
+) -> Result<(), CheckError> {
+    if telescope.len() != arguments.len() {
+        return Err(CheckError::InvalidInductive(
+            "family index arity mismatch".into(),
+        ));
+    }
+    for (index, (ty, value)) in telescope.iter().zip(arguments).enumerate() {
+        let expected = instantiate_fields(
+            shift_up(ty.clone(), ambient_shift, index),
+            &arguments[..index],
+        );
+        check_against(ctx, value, &expected)?;
+    }
+    Ok(())
+}
+
+/// Embed an ordinary field telescope into a branch with interleaved hypotheses.
+fn rebind_fields(term: &Term, positions: &[usize], depth: usize) -> Term {
+    let references: Vec<_> = positions.iter().map(|p| Term::Var(depth - 1 - p)).collect();
+    instantiate_fields(shift_up(term.clone(), depth, positions.len()), &references)
+}
+
+/// Generate the dependent branch signature, transporting recursive indices and
+/// the constructor's result indices through the very same field embedding.
 pub(crate) fn induction_case_type(
     data: &Term,
     motive: &Term,
-    constructor: usize,
-    fields: &[DataField],
+    index: usize,
+    constructor: &DataConstructor,
 ) -> Term {
     let mut domains = Vec::new();
     let mut positions = Vec::new();
-    for field in fields {
+    for field in &constructor.fields {
         let depth = domains.len();
-        let domain = match field {
-            DataField::Value(ty) => shift_up((**ty).clone(), depth, 0),
-            DataField::Dependent(ty) => {
-                let references: Vec<_> = positions
-                    .iter()
-                    .map(|position| Term::Var(depth - 1 - position))
-                    .collect();
-                instantiate_fields(
-                    shift_up((**ty).clone(), depth, positions.len()),
-                    &references,
-                )
-            }
-            DataField::Recursive => shift_up(data.clone(), depth, 0),
-        };
-        positions.push(depth);
+        let domain = rebind_fields(
+            &field_domain(data, field, positions.len()),
+            &positions,
+            depth,
+        );
         domains.push(domain);
-        if matches!(field, DataField::Recursive) {
+        if let Some(indices) = recursive_indices(field) {
+            let arguments: Vec<_> = indices
+                .iter()
+                .map(|t| rebind_fields(t, &positions, depth + 1))
+                .collect();
             domains.push(Term::app(
-                shift_up(motive.clone(), depth + 1, 0),
+                apply_terms(shift_up(motive.clone(), depth + 1, 0), &arguments),
                 Term::Var(0),
             ));
         }
+        positions.push(depth);
     }
     let depth = domains.len();
+    let indices: Vec<_> = constructor
+        .indices
+        .iter()
+        .map(|t| rebind_fields(t, &positions, depth))
+        .collect();
     let applied = Term::Construct {
         data: Box::new(shift_up(data.clone(), depth, 0)),
-        constructor,
-        args: positions
-            .into_iter()
-            .map(|position| Term::Var(depth - 1 - position))
-            .collect(),
+        constructor: index,
+        args: positions.iter().map(|p| Term::Var(depth - 1 - p)).collect(),
     };
-    let mut result = Term::app(shift_up(motive.clone(), depth, 0), applied);
-    for domain in domains.into_iter().rev() {
-        result = Term::pi(domain, result);
-    }
-    result
+    let result = Term::app(
+        apply_terms(shift_up(motive.clone(), depth, 0), &indices),
+        applied,
+    );
+    domains
+        .into_iter()
+        .rev()
+        .fold(result, |result, domain| Term::pi(domain, result))
 }
 
 /// Check a term against a well-formed expected type. Introduction forms use

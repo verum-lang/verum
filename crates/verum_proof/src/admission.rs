@@ -88,12 +88,19 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
             Node::Term(t, binders) => match t {
                 Term::Data {
                     level,
+                    indices,
                     constructors,
                     ..
                 } => {
                     queue.push((Node::Level(level), depth + 1));
+                    for (index, ty) in indices.iter().enumerate() {
+                        queue.push((Node::Term(ty, binders + index), depth + 1));
+                    }
                     count += constructors.len();
                     for fields in constructors {
+                        for term in &fields.indices {
+                            queue.push((Node::Term(term, binders + fields.len()), depth + 1));
+                        }
                         for (index, field) in fields.iter().enumerate() {
                             count += 1;
                             match field {
@@ -104,6 +111,11 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
                                     queue.push((Node::Term(ty, binders + index), depth + 1))
                                 }
                                 DataField::Recursive => {}
+                                DataField::RecursiveAt(indices) => {
+                                    for term in indices {
+                                        queue.push((Node::Term(term, binders + index), depth + 1));
+                                    }
+                                }
                             }
                         }
                     }
@@ -176,11 +188,11 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
     Ok(())
 }
 
-// The wire representation can add five JSON containers between consecutive
-// logical nodes (Data -> payload -> constructors -> fields -> Value). The
+// Indexed constructor declarations can add eight JSON containers between
+// consecutive logical nodes, including field and index arrays. The
 // judgment envelope adds fewer than eight. Bound those containers before
 // recursive deserialization; the unchanged logical limits are checked next.
-const MAX_JSON_NESTING: usize = 5 * (MAX_DEPTH + 1) + 8;
+const MAX_JSON_NESTING: usize = 8 * (MAX_DEPTH + 1) + 8;
 
 fn json_envelope(bytes: &[u8]) -> Result<(), &'static str> {
     let mut containers = Vec::new();

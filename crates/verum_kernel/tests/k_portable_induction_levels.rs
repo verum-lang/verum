@@ -6,15 +6,23 @@ fn universe_translation_visits_inductive_declarations_and_nested_value_fields() 
     let inner = Term::Data {
         name: "Inner".into(),
         level: Level::Concrete(1),
-        constructors: vec![vec![DataField::Value(Box::new(Term::universe(0)))]],
+        indices: vec![],
+        constructors: vec![vec![DataField::Value(Box::new(Term::universe(0)))]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     let outer = Term::Data {
         name: "Outer".into(),
         level: Level::Concrete(2),
+        indices: vec![],
         constructors: vec![
             vec![DataField::Value(Box::new(inner))],
             vec![DataField::Recursive],
-        ],
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     };
     let lifted = shift_universes(&outer, 3);
     let Term::Data {
@@ -55,7 +63,11 @@ fn universe_translation_preserves_constructor_ownership_and_induction() {
     let nat = Term::Data {
         name: "Nat".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![], vec![DataField::Recursive]],
+        indices: vec![],
+        constructors: vec![vec![], vec![DataField::Recursive]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     let zero = Term::Construct {
         data: Box::new(nat.clone()),
@@ -98,10 +110,14 @@ fn universe_translation_preserves_dependent_constructor_telescopes() {
     let declaration = Term::Data {
         name: "Package".into(),
         level: Level::Concrete(1),
+        indices: vec![],
         constructors: vec![vec![
             DataField::Dependent(Box::new(Term::universe(0))),
             DataField::Dependent(Box::new(Term::var(0))),
-        ]],
+        ]]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     };
     let cert = Certificate {
         term: declaration,

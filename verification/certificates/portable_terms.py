@@ -7,7 +7,7 @@ no typing authority.
 
 def var(name): return ('Var', name)
 
-def universe(): return ('Universe',)
+def universe(level=0): return ('Universe', level)
 
 def pi(name, domain, body): return ('Pi', name, domain, body)
 
@@ -37,7 +37,11 @@ def second(value): return ('Snd', value)
 
 def sigma(name, domain, body): return ('Sigma', name, domain, body)
 
-def data(name, constructors): return ('Data', name, constructors)
+def data(name, constructors, indices=(), level=0): return ('Data', name, constructors, indices, level)
+
+def indexed_constructor(fields, indices): return ('Constructor', fields, indices)
+
+def recursive_field(name, *indices): return ('RecursiveAt', name, indices)
 
 def value_field(term): return ('Value', term)
 
@@ -82,7 +86,7 @@ def lower(term, context=()):
     if kind == 'Var':
         if term[1] not in context: raise ValueError(f'unbound generator variable: {term[1]}')
         return {'Var': context.index(term[1])}
-    if kind == 'Universe': return {'Universe': {'Concrete': 0}}
+    if kind == 'Universe': return {'Universe': {'Concrete': term[1]}}
     if kind == 'Let':
         return {'Let': {'value': lower(term[2], context), 'body': lower(term[3], (term[1],) + context)}}
     if kind in ('Pi', 'Lam', 'Sigma'):
@@ -93,12 +97,23 @@ def lower(term, context=()):
     if kind == 'Id': return {'Id': dict(zip(('ty', 'lhs', 'rhs'), (lower(x, context) for x in term[1:])))}
     if kind == 'J': return {'J': dict(zip(('motive', 'base', 'scrutinee'), (lower(x, context) for x in term[1:])))}
     if kind == 'Data':
+        indices, index_context = [], context
+        for name, domain in term[3]:
+            indices.append(lower(domain, index_context))
+            index_context = (name,) + index_context
         constructors = []
-        for fields in term[2]:
+        for constructor in term[2]:
+            if isinstance(constructor, tuple) and constructor[0] == 'Constructor':
+                fields, result_indices = constructor[1:]
+            else:
+                fields, result_indices = constructor, ()
             lowered, field_context = [], context
             for field in fields:
                 if field[0] == 'Dependent':
                     lowered.append({'Dependent': lower(field[2], field_context)})
+                    binder = field[1]
+                elif field[0] == 'RecursiveAt':
+                    lowered.append({'RecursiveAt': [lower(index, field_context) for index in field[2]]})
                     binder = field[1]
                 elif field[0] == 'Value':
                     lowered.append({'Value': lower(field[1], context)})
@@ -109,8 +124,12 @@ def lower(term, context=()):
                 else:
                     raise ValueError(f'unknown constructor field: {field[0]}')
                 field_context = (binder,) + field_context
-            constructors.append(lowered)
-        return {'Data': {'name': term[1], 'level': {'Concrete': 0}, 'constructors': constructors}}
+            result = [lower(index, field_context) for index in result_indices]
+            constructors.append({'fields': lowered, 'indices': result} if result else lowered)
+        declaration = {'name': term[1], 'level': {'Concrete': term[4]}, 'constructors': constructors}
+        if indices:
+            declaration['indices'] = indices
+        return {'Data': declaration}
     if kind == 'Construct': return {'Construct': {'data': lower(term[1], context), 'constructor': term[2], 'args': [lower(x, context) for x in term[3]]}}
     if kind == 'Induct': return {'Induct': {'scrutinee': lower(term[1], context), 'motive': lower(term[2], context), 'cases': [lower(x, context) for x in term[3]]}}
     raise ValueError(kind)

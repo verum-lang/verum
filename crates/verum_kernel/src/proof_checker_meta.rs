@@ -16,7 +16,7 @@
 //! and its witness through the same `Certificate::verify` boundary as normal
 //! mode. `check_with_universe_lift` is the lower-level contextual judgment API.
 
-use crate::proof_checker::{Certificate, CheckError, Context, DataField, Term, check};
+use crate::proof_checker::{Certificate, CheckError, Context, DataConstructor, DataField, Term, check};
 
 // =============================================================================
 // Universe-shift transformation
@@ -40,30 +40,18 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
         return term.clone();
     }
     match term {
-        Term::Data {
-            name,
-            level,
-            constructors,
-        } => Term::Data {
-            name: name.clone(),
-            level: level.clone().shifted_by(lift),
-            constructors: constructors
-                .iter()
-                .map(|fields| {
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            DataField::Value(ty) => {
-                                DataField::Value(Box::new(shift_universes(ty, lift)))
-                            }
-                            DataField::Dependent(ty) => {
-                                DataField::Dependent(Box::new(shift_universes(ty, lift)))
-                            }
-                            DataField::Recursive => DataField::Recursive,
-                        })
-                        .collect()
-                })
-                .collect(),
+        Term::Data { name, level, indices, constructors } => Term::Data {
+            name: name.clone(), level: level.clone().shifted_by(lift),
+            indices: indices.iter().map(|t| shift_universes(t, lift)).collect(),
+            constructors: constructors.iter().map(|constructor| DataConstructor {
+                fields: constructor.fields.iter().map(|field| match field {
+                    DataField::Value(ty) => DataField::Value(Box::new(shift_universes(ty, lift))),
+                    DataField::Dependent(ty) => DataField::Dependent(Box::new(shift_universes(ty, lift))),
+                    DataField::Recursive => DataField::Recursive,
+                    DataField::RecursiveAt(indices) => DataField::RecursiveAt(indices.iter().map(|t| shift_universes(t, lift)).collect()),
+                }).collect(),
+                indices: constructor.indices.iter().map(|t| shift_universes(t, lift)).collect(),
+            }).collect(),
         },
         Term::Construct {
             data,

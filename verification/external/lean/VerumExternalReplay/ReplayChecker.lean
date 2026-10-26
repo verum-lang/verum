@@ -87,20 +87,34 @@ partial def termFromJson (j : Json) : Except String Term := do
   let fields ← j.getObj?
   unless fields.toArray.size == 1 do throw "a term must contain exactly one constructor"
   if let .ok v := j.getObjVal? "Data" then do
-    exactKeys v ["name", "level", "constructors"]
+    let rawIndices := v.getObjVal? "indices"
+    exactKeys v (if rawIndices.isOk then ["name", "level", "indices", "constructors"] else ["name", "level", "constructors"])
     let name ← (← v.getObjVal? "name").getStr?
     let level ← levelFromJson (← v.getObjVal? "level")
+    let indices ← match rawIndices with
+      | .ok xs => (← xs.getArr?).toList.mapM termFromJson
+      | .error _ => pure []
     let constructors ← (← v.getObjVal? "constructors").getArr?
-    let fields ← constructors.toList.mapM fun constructor => do
-      let raw ← constructor.getArr?
-      raw.toList.mapM fun field => do
+    let constructors ← constructors.toList.mapM fun constructor => do
+      let (raw, result) ← match constructor.getArr? with
+        | .ok fields => pure (fields, [])
+        | .error _ => do
+          exactKeys constructor ["fields", "indices"]
+          let fields ← (← constructor.getObjVal? "fields").getArr?
+          let indices ← (← (← constructor.getObjVal? "indices").getArr?).toList.mapM termFromJson
+          pure (fields, indices)
+      let fields ← raw.toList.mapM fun field => do
         if let .ok "Recursive" := field.getStr? then return .recursive
+        if let .ok xs := field.getObjVal? "RecursiveAt" then
+          exactKeys field ["RecursiveAt"]
+          return .recursiveAt (← (← xs.getArr?).toList.mapM termFromJson)
         if let .ok ty := field.getObjVal? "Dependent" then
           exactKeys field ["Dependent"]
           return .dependent (← termFromJson ty)
         exactKeys field ["Value"]
         return .value (← termFromJson (← field.getObjVal? "Value"))
-    return .data name level fields
+      pure (⟨fields, result⟩ : DataConstructor Term)
+    return .data name level indices constructors
   else if let .ok v := j.getObjVal? "Let" then do
     exactKeys v ["value", "body"]
     return .letE (← termFromJson (← v.getObjVal? "value")) (← termFromJson (← v.getObjVal? "body"))

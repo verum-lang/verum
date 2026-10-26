@@ -46,7 +46,7 @@
 //!     `BothAccept` / `BothReject` / `Disagreement` /
 //!     `NotYetSelfHosting` (the last unused once this lands).
 
-use crate::proof_checker::{CheckError, DataField, Level, Term};
+use crate::proof_checker::{CheckError, DataConstructor, DataField, Level, Term};
 use std::sync::Arc;
 
 // =============================================================================
@@ -70,6 +70,12 @@ pub struct Closure {
 }
 
 impl Closure {
+    fn apply_fields(&self, previous: &[Value]) -> Value {
+        let mut env = self.env.clone();
+        env.extend(previous.iter().cloned().map(Arc::new));
+        eval(&self.body, &env)
+    }
+
     /// Apply this closure to a value: extend its environment with
     /// the argument and evaluate the body.
     pub fn apply(&self, arg: Value) -> Value {
@@ -86,18 +92,31 @@ pub enum FieldValue {
     Value(Closure),
     Dependent(Closure),
     Recursive,
+    RecursiveAt(Vec<Closure>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ConstructorValue {
+    pub fields: Vec<FieldValue>,
+    pub indices: Vec<Closure>,
 }
 
 impl FieldValue {
     fn domain(&self, previous: &[Value]) -> Option<Value> {
         match self {
             Self::Value(closure) => Some(eval(&closure.body, &closure.env)),
-            Self::Dependent(closure) => {
-                let mut env = closure.env.clone();
-                env.extend(previous.iter().cloned().map(Arc::new));
-                Some(eval(&closure.body, &env))
+            Self::Dependent(closure) => Some(closure.apply_fields(previous)),
+            Self::Recursive | Self::RecursiveAt(_) => None,
+        }
+    }
+
+    fn recursive_indices(&self, previous: &[Value]) -> Option<Vec<Value>> {
+        match self {
+            Self::Recursive => Some(Vec::new()),
+            Self::RecursiveAt(indices) => {
+                Some(indices.iter().map(|c| c.apply_fields(previous)).collect())
             }
-            Self::Recursive => None,
+            _ => None,
         }
     }
 }
@@ -121,7 +140,9 @@ pub enum Value {
     VData {
         name: String,
         level: Level,
-        constructors: Vec<Vec<FieldValue>>,
+        indices: Vec<Closure>,
+        constructors: Vec<ConstructorValue>,
+        arguments: Vec<Value>,
     },
     VConstruct {
         data: Box<Value>,
@@ -240,30 +261,38 @@ pub fn eval(term: &Term, env: &Env) -> Value {
         Term::Data {
             name,
             level,
+            indices,
             constructors,
-        } => Value::VData {
-            name: name.clone(),
-            level: level.clone(),
-            constructors: constructors
-                .iter()
-                .map(|fields| {
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            DataField::Value(ty) => FieldValue::Value(Closure {
-                                env: env.clone(),
-                                body: Arc::new((**ty).clone()),
-                            }),
-                            DataField::Dependent(ty) => FieldValue::Dependent(Closure {
-                                env: env.clone(),
-                                body: Arc::new((**ty).clone()),
-                            }),
-                            DataField::Recursive => FieldValue::Recursive,
-                        })
-                        .collect()
-                })
-                .collect(),
-        },
+        } => {
+            let capture = |t: &Term| Closure {
+                env: env.clone(),
+                body: Arc::new(t.clone()),
+            };
+            Value::VData {
+                name: name.clone(),
+                level: level.clone(),
+                indices: indices.iter().map(capture).collect(),
+                arguments: Vec::new(),
+                constructors: constructors
+                    .iter()
+                    .map(|constructor| ConstructorValue {
+                        fields: constructor
+                            .fields
+                            .iter()
+                            .map(|field| match field {
+                                DataField::Value(ty) => FieldValue::Value(capture(ty)),
+                                DataField::Dependent(ty) => FieldValue::Dependent(capture(ty)),
+                                DataField::Recursive => FieldValue::Recursive,
+                                DataField::RecursiveAt(indices) => {
+                                    FieldValue::RecursiveAt(indices.iter().map(capture).collect())
+                                }
+                            })
+                            .collect(),
+                        indices: constructor.indices.iter().map(capture).collect(),
+                    })
+                    .collect(),
+            }
+        }
         Term::Construct {
             data,
             constructor,
@@ -376,11 +405,11 @@ pub fn apply_induct(scrutinee: Value, motive: Value, cases: Vec<Value>) -> Value
             if let (Some(fields), Some(case)) =
                 (constructors.get(*constructor), cases.get(*constructor))
             {
-                if fields.len() == args.len() {
+                if fields.fields.len() == args.len() {
                     let mut result = case.clone();
-                    for (field, argument) in fields.iter().zip(args) {
+                    for (field, argument) in fields.fields.iter().zip(args) {
                         result = apply_value(result, argument.clone());
-                        if matches!(field, FieldValue::Recursive) {
+                        if matches!(field, FieldValue::Recursive | FieldValue::RecursiveAt(_)) {
                             result = apply_value(
                                 result,
                                 apply_induct(argument.clone(), motive.clone(), cases.clone()),
@@ -431,6 +460,22 @@ pub fn apply_j(motive: Value, base: Value, scrutinee: Value) -> Value {
 pub fn apply_value(f: Value, x: Value) -> Value {
     match f {
         Value::VLam { body, .. } => body.apply(x),
+        Value::VData {
+            name,
+            level,
+            indices,
+            constructors,
+            mut arguments,
+        } if arguments.len() < indices.len() => {
+            arguments.push(x);
+            Value::VData {
+                name,
+                level,
+                indices,
+                constructors,
+                arguments,
+            }
+        }
         Value::VNeutral(n) => Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(x))),
         other => {
             // wrap the non-function head in NStuck so def_eq
@@ -476,34 +521,60 @@ pub fn quote(value: &Value, level: usize) -> Term {
         Value::VData {
             name,
             level: data_level,
+            indices,
             constructors,
-        } => Term::Data {
-            name: name.clone(),
-            level: data_level.clone(),
-            constructors: constructors
+            arguments,
+        } => {
+            let index_vars = fresh_values(level, indices.len());
+            let data = Term::Data {
+                name: name.clone(),
+                level: data_level.clone(),
+                indices: indices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| quote(&c.apply_fields(&index_vars[..i]), level + i))
+                    .collect(),
+                constructors: constructors
+                    .iter()
+                    .map(|constructor| {
+                        let previous = fresh_values(level, constructor.fields.len());
+                        DataConstructor {
+                            fields: constructor
+                                .fields
+                                .iter()
+                                .enumerate()
+                                .map(|(i, field)| match field {
+                                    FieldValue::Value(c) => DataField::Value(Box::new(quote(
+                                        &c.apply_fields(&[]),
+                                        level,
+                                    ))),
+                                    FieldValue::Dependent(c) => DataField::Dependent(Box::new(
+                                        quote(&c.apply_fields(&previous[..i]), level + i),
+                                    )),
+                                    FieldValue::Recursive => DataField::Recursive,
+                                    FieldValue::RecursiveAt(indices) => DataField::RecursiveAt(
+                                        indices
+                                            .iter()
+                                            .map(|c| {
+                                                quote(&c.apply_fields(&previous[..i]), level + i)
+                                            })
+                                            .collect(),
+                                    ),
+                                })
+                                .collect(),
+                            indices: constructor
+                                .indices
+                                .iter()
+                                .map(|c| quote(&c.apply_fields(&previous), level + previous.len()))
+                                .collect(),
+                        }
+                    })
+                    .collect(),
+            };
+            arguments
                 .iter()
-                .map(|fields| {
-                    let previous: Vec<_> = (0..fields.len())
-                        .map(|index| Value::VNeutral(Neutral::NVar(level + index)))
-                        .collect();
-                    fields
-                        .iter()
-                        .enumerate()
-                        .map(|(index, field)| match field {
-                            FieldValue::Value(closure) => DataField::Value(Box::new(quote(
-                                &eval(&closure.body, &closure.env),
-                                level,
-                            ))),
-                            FieldValue::Dependent(_) => DataField::Dependent(Box::new(quote(
-                                &field.domain(&previous[..index]).expect("dependent domain"),
-                                level + index,
-                            ))),
-                            FieldValue::Recursive => DataField::Recursive,
-                        })
-                        .collect()
-                })
-                .collect(),
-        },
+                .fold(data, |head, arg| Term::app(head, quote(arg, level)))
+        }
         Value::VConstruct {
             data,
             constructor,
@@ -617,29 +688,61 @@ pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
             Value::VData {
                 name: an,
                 level: al,
+                indices: ai,
                 constructors: ac,
+                arguments: aa,
             },
             Value::VData {
                 name: bn,
                 level: bl,
+                indices: bi,
                 constructors: bc,
+                arguments: ba,
             },
         ) => {
+            let index_vars = fresh_values(level, ai.len());
             an == bn
                 && crate::proof_checker::level_eq(al, bl)
+                && values_def_eq(aa, ba, level)
+                && ai.len() == bi.len()
+                && ai.iter().zip(bi).enumerate().all(|(i, (a, b))| {
+                    def_eq(
+                        &a.apply_fields(&index_vars[..i]),
+                        &b.apply_fields(&index_vars[..i]),
+                        level + i,
+                    )
+                })
                 && ac.len() == bc.len()
                 && ac.iter().zip(bc).all(|(a, b)| {
-                    let previous: Vec<_> = (0..a.len())
-                        .map(|index| Value::VNeutral(Neutral::NVar(level + index)))
-                        .collect();
-                    a.len() == b.len()
-                        && a.iter().zip(b).enumerate().all(|(index, (a, b))| {
-                            match (a.domain(&previous[..index]), b.domain(&previous[..index])) {
-                                (Some(a), Some(b)) => def_eq(&a, &b, level + index),
-                                (None, None) => true,
-                                _ => false,
-                            }
+                    let previous = fresh_values(level, a.fields.len());
+                    a.fields.len() == b.fields.len()
+                        && a.indices.len() == b.indices.len()
+                        && a.indices.iter().zip(&b.indices).all(|(a, b)| {
+                            def_eq(
+                                &a.apply_fields(&previous),
+                                &b.apply_fields(&previous),
+                                level + previous.len(),
+                            )
                         })
+                        && a.fields
+                            .iter()
+                            .zip(&b.fields)
+                            .enumerate()
+                            .all(|(i, (a, b))| {
+                                match (
+                                    a.recursive_indices(&previous[..i]),
+                                    b.recursive_indices(&previous[..i]),
+                                ) {
+                                    (Some(a), Some(b)) => values_def_eq(&a, &b, level + i),
+                                    (None, None) => {
+                                        match (a.domain(&previous[..i]), b.domain(&previous[..i])) {
+                                            (Some(a), Some(b)) => def_eq(&a, &b, level + i),
+                                            _ => false,
+                                        }
+                                    }
+                                    _ => false,
+                                }
+                            })
                 })
         }
         (
@@ -903,6 +1006,38 @@ pub fn infer(ctx: &NbeContext, term: &Term) -> Result<Term, CheckError> {
     Ok(quote(&inferred_value, ctx.level()))
 }
 
+fn fresh_values(level: usize, count: usize) -> Vec<Value> {
+    (0..count)
+        .map(|i| Value::VNeutral(Neutral::NVar(level + i)))
+        .collect()
+}
+
+fn apply_values(head: Value, arguments: Vec<Value>) -> Value {
+    arguments.into_iter().fold(head, apply_value)
+}
+
+fn values_def_eq(a: &[Value], b: &[Value], level: usize) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| def_eq(a, b, level))
+}
+
+fn check_index_arguments(
+    ctx: &NbeContext,
+    telescope: &[Closure],
+    arguments: &[Term],
+) -> Result<Vec<Value>, CheckError> {
+    if telescope.len() != arguments.len() {
+        return Err(CheckError::InvalidInductive(
+            "family index arity mismatch".into(),
+        ));
+    }
+    let mut values = Vec::new();
+    for (domain, argument) in telescope.iter().zip(arguments) {
+        check_value(ctx, argument, &domain.apply_fields(&values))?;
+        values.push(eval(argument, ctx.env()));
+    }
+    Ok(values)
+}
+
 /// Internal: infer the type as a semantic Value (avoids quote/eval
 /// roundtrips during recursive checking).
 fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
@@ -914,13 +1049,27 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
 
         Term::Data {
             level,
+            indices,
             constructors,
             ..
         } => {
+            let mut index_context = ctx.clone();
+            for ty in indices {
+                let kind = infer_value(&index_context, ty)?;
+                expect_universe(&kind).ok_or_else(|| CheckError::NotAType(ty.clone()))?;
+                index_context = index_context.extend(eval(ty, index_context.env()));
+            }
             let declaration = eval(term, ctx.env());
-            for fields in constructors {
+            let Value::VData {
+                indices: index_domains,
+                ..
+            } = &declaration
+            else {
+                unreachable!()
+            };
+            for constructor in constructors {
                 let mut local = ctx.clone();
-                for field in fields {
+                for field in &constructor.fields {
                     let domain = match field {
                         DataField::Value(ty) | DataField::Dependent(ty) => {
                             let field_ctx = if matches!(field, DataField::Dependent(_)) {
@@ -941,12 +1090,26 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                             }
                             eval(ty, field_ctx.env())
                         }
-                        DataField::Recursive => declaration.clone(),
+                        DataField::Recursive => apply_values(
+                            declaration.clone(),
+                            check_index_arguments(&local, index_domains, &[])?,
+                        ),
+                        DataField::RecursiveAt(arguments) => apply_values(
+                            declaration.clone(),
+                            check_index_arguments(&local, index_domains, arguments)?,
+                        ),
                     };
                     local = local.extend(domain);
                 }
+                check_index_arguments(&local, index_domains, &constructor.indices)?;
             }
-            Ok(Value::VUniverse(level.clone().normalize()))
+            let signature = indices
+                .iter()
+                .rev()
+                .fold(Term::Universe(level.clone().normalize()), |result, ty| {
+                    Term::pi(ty.clone(), result)
+                });
+            Ok(eval(&signature, ctx.env()))
         }
         Term::Construct {
             data,
@@ -955,51 +1118,104 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
         } => {
             infer_value(ctx, data)?;
             let declaration = eval(data, ctx.env());
-            let Value::VData { constructors, .. } = &declaration else {
+            let Value::VData {
+                constructors,
+                arguments,
+                ..
+            } = &declaration
+            else {
                 return Err(CheckError::InvalidInductive(
                     "constructor owner is not a data declaration".into(),
                 ));
             };
-            let fields = constructors
+            if !arguments.is_empty() {
+                return Err(CheckError::InvalidInductive(
+                    "constructor owner is an applied family".into(),
+                ));
+            }
+            let constructor = constructors
                 .get(*constructor)
                 .ok_or_else(|| CheckError::InvalidInductive("unknown constructor".into()))?;
-            if fields.len() != args.len() {
+            if constructor.fields.len() != args.len() {
                 return Err(CheckError::InvalidInductive(
                     "constructor field arity mismatch".into(),
                 ));
             }
             let mut previous = Vec::with_capacity(args.len());
-            for (field, argument) in fields.iter().zip(args) {
-                let expected = field
-                    .domain(&previous)
-                    .unwrap_or_else(|| declaration.clone());
+            for (field, argument) in constructor.fields.iter().zip(args) {
+                let expected = field.domain(&previous).unwrap_or_else(|| {
+                    apply_values(
+                        declaration.clone(),
+                        field.recursive_indices(&previous).unwrap(),
+                    )
+                });
                 check_value(ctx, argument, &expected)?;
                 previous.push(eval(argument, ctx.env()));
             }
-            Ok(declaration)
+            let result = constructor
+                .indices
+                .iter()
+                .map(|c| c.apply_fields(&previous))
+                .collect();
+            Ok(apply_values(declaration, result))
         }
         Term::Induct {
             scrutinee,
             motive,
             cases,
         } => {
-            let declaration = infer_value(ctx, scrutinee)?;
+            let mut declaration = infer_value(ctx, scrutinee)?;
+            let values = match &mut declaration {
+                Value::VData {
+                    indices, arguments, ..
+                } if indices.len() == arguments.len() => std::mem::take(arguments),
+                _ => {
+                    return Err(CheckError::InvalidInductive(
+                        "induction requires a fully applied data family".into(),
+                    ));
+                }
+            };
             let raw_declaration = quote(&declaration, ctx.level());
             let Term::Data { constructors, .. } = &raw_declaration else {
-                return Err(CheckError::InvalidInductive(
-                    "induction requires a data scrutinee".into(),
-                ));
+                unreachable!()
             };
             infer_value(ctx, &raw_declaration)?;
-            let motive_kind = infer_value(ctx, motive)?;
+            let Value::VData { indices, .. } = &declaration else {
+                unreachable!()
+            };
+            let mut motive_kind = infer_value(ctx, motive)?;
+            let mut references = Vec::new();
+            for index_domain in indices {
+                let Value::VPi { domain, codomain } = motive_kind else {
+                    return Err(CheckError::InvalidInductive(
+                        "induction motive omits a family index".into(),
+                    ));
+                };
+                if !def_eq(
+                    &domain,
+                    &index_domain.apply_fields(&references),
+                    ctx.level() + references.len(),
+                ) {
+                    return Err(CheckError::InvalidInductive(
+                        "induction motive index domain mismatch".into(),
+                    ));
+                }
+                let reference = Value::VNeutral(Neutral::NVar(ctx.level() + references.len()));
+                motive_kind = codomain.apply(reference.clone());
+                references.push(reference);
+            }
             let Value::VPi { domain, codomain } = motive_kind else {
                 return Err(CheckError::InvalidInductive(
                     "induction motive is not a family".into(),
                 ));
             };
-            if !def_eq(&domain, &declaration, ctx.level())
-                || expect_universe(&codomain.apply(Value::VNeutral(Neutral::NVar(ctx.level()))))
-                    .is_none()
+            let depth = ctx.level() + references.len();
+            if !def_eq(
+                &domain,
+                &apply_values(declaration.clone(), references),
+                depth,
+            ) || expect_universe(&codomain.apply(Value::VNeutral(Neutral::NVar(depth))))
+                .is_none()
             {
                 return Err(CheckError::InvalidInductive(
                     "induction motive domain or universe mismatch".into(),
@@ -1010,17 +1226,17 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                     "induction case count mismatch".into(),
                 ));
             }
-            for (index, (fields, case)) in constructors.iter().zip(cases).enumerate() {
+            for (index, (constructor, case)) in constructors.iter().zip(cases).enumerate() {
                 let expected = crate::proof_checker::induction_case_type(
                     &raw_declaration,
                     motive,
                     index,
-                    fields,
+                    constructor,
                 );
                 check_value(ctx, case, &eval(&expected, ctx.env()))?;
             }
             Ok(apply_value(
-                eval(motive, ctx.env()),
+                apply_values(eval(motive, ctx.env()), values),
                 eval(scrutinee, ctx.env()),
             ))
         }

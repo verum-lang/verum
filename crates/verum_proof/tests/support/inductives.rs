@@ -4,7 +4,11 @@ pub fn nat() -> Term {
     Term::Data {
         name: "Nat".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![], vec![DataField::Recursive]],
+        indices: vec![],
+        constructors: vec![vec![], vec![DataField::Recursive]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     }
 }
 pub fn ctor(data: Term, constructor: usize, args: Vec<Term>) -> Term {
@@ -24,10 +28,14 @@ pub fn list(element: Term) -> Term {
     Term::Data {
         name: "List".into(),
         level: Level::Concrete(0),
+        indices: vec![],
         constructors: vec![
             vec![],
             vec![DataField::Value(Box::new(element)), DataField::Recursive],
-        ],
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     }
 }
 pub fn induct(value: Term, motive: Term, cases: Vec<Term>) -> Term {
@@ -114,6 +122,7 @@ pub fn outcome() -> Term {
     Term::Data {
         name: "Outcome".into(),
         level: Level::Concrete(0),
+        indices: vec![],
         constructors: vec![
             vec![DataField::Value(Box::new(nat()))],
             vec![
@@ -121,7 +130,10 @@ pub fn outcome() -> Term {
                 DataField::Value(Box::new(nat())),
             ],
             vec![DataField::Value(Box::new(nat()))],
-        ],
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     }
 }
 pub fn outcome_payload() -> Term {
@@ -195,10 +207,14 @@ pub fn battery() -> Vec<(&'static str, Certificate, bool)> {
     let tree = Term::Data {
         name: "Tree".into(),
         level: Level::Concrete(0),
+        indices: vec![],
         constructors: vec![
             vec![DataField::Value(Box::new(nat()))],
             vec![DataField::Recursive, DataField::Recursive],
-        ],
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     };
     let leaf = |value| ctor(tree.clone(), 0, vec![value]);
     let value = ctor(tree.clone(), 1, vec![leaf(zero()), leaf(succ(zero()))]);
@@ -303,7 +319,7 @@ pub fn battery() -> Vec<(&'static str, Certificate, bool)> {
     ));
     let mut changed_owner = nat();
     if let Term::Data { constructors, .. } = &mut changed_owner {
-        constructors[1] = vec![];
+        constructors[1] = vec![].into();
     }
     rows.push((
         "owner-shape-forgery",
@@ -328,7 +344,11 @@ pub fn battery() -> Vec<(&'static str, Certificate, bool)> {
     let bad_data = Term::Data {
         name: "Bad".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![DataField::Value(Box::new(Term::universe(0)))]],
+        indices: vec![],
+        constructors: vec![vec![DataField::Value(Box::new(Term::universe(0)))]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     rows.push((
         "universe-demotion",
@@ -338,7 +358,11 @@ pub fn battery() -> Vec<(&'static str, Certificate, bool)> {
     let open = Term::Data {
         name: "Open".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![DataField::Value(Box::new(Term::var(0)))]],
+        indices: vec![],
+        constructors: vec![vec![DataField::Value(Box::new(Term::var(0)))]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     rows.push((
         "unbound-field-dependency",
@@ -406,6 +430,8 @@ pub fn battery() -> Vec<(&'static str, Certificate, bool)> {
     );
     rows.push(("forged-general-theorem", wrong_claim, false));
     rows.extend(dependent_fields_battery());
+    rows.extend(indexed_battery());
+    rows.extend(dependent_index_battery());
     rows
 }
 
@@ -413,6 +439,7 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
     let package = Term::Data {
         name: "Package".into(),
         level: Level::Concrete(1),
+        indices: vec![],
         constructors: vec![vec![
             DataField::Value(Box::new(Term::universe(0))),
             DataField::Dependent(Box::new(Term::var(0))),
@@ -421,7 +448,10 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
                 Term::var(0),
                 Term::var(0),
             ))),
-        ]],
+        ]]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     };
     let packed = ctor(package.clone(), 0, vec![nat(), zero(), Term::refl(zero())]);
     let project = Term::lam(
@@ -444,6 +474,7 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
     let tree = Term::Data {
         name: "EvidenceTree".into(),
         level: Level::Concrete(1),
+        indices: vec![],
         constructors: vec![
             vec![],
             vec![
@@ -456,7 +487,10 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
                     Term::var(0),
                 ))),
             ],
-        ],
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     };
     let leaf = ctor(tree.clone(), 0, vec![]);
     let tree_value = ctor(
@@ -563,10 +597,14 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
         let malformed = Term::Data {
             name: "Malformed".into(),
             level: Level::Concrete(1),
+            indices: vec![],
             constructors: vec![vec![
                 DataField::Value(Box::new(Term::universe(0))),
                 DataField::Dependent(Box::new(Term::var(index))),
-            ]],
+            ]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         };
         rows.push((name, certificate(malformed, Term::universe(1)), false));
     }
@@ -589,7 +627,8 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
                 Term::Data {
                     name: "InvalidField".into(),
                     level: Level::Concrete(0),
-                    constructors: vec![fields],
+                    indices: vec![],
+                    constructors: vec![fields].into_iter().map(Into::into).collect(),
                 },
                 Term::universe(0),
             ),
@@ -599,6 +638,7 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
     let captured = Term::Data {
         name: "CapturedEvidence".into(),
         level: Level::Concrete(0),
+        indices: vec![],
         constructors: vec![vec![
             DataField::Value(Box::new(Term::var(1))),
             DataField::Dependent(Box::new(Term::id_ty(
@@ -606,7 +646,10 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
                 Term::var(0),
                 Term::var(1),
             ))),
-        ]],
+        ]]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     };
     rows.push((
         "dependent-field-captured-parameters",
@@ -629,10 +672,14 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
     let concrete = Term::Data {
         name: "CapturedEvidence".into(),
         level: Level::Concrete(0),
+        indices: vec![],
         constructors: vec![vec![
             DataField::Value(Box::new(nat())),
             DataField::Dependent(Box::new(Term::id_ty(nat(), Term::var(0), zero()))),
-        ]],
+        ]]
+        .into_iter()
+        .map(Into::into)
+        .collect(),
     };
     let abstraction = Term::lam(
         Term::universe(0),
@@ -647,4 +694,311 @@ fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
         true,
     ));
     rows
+}
+
+fn vector(element: Term) -> Term {
+    use verum_proof::proof_checker::DataConstructor;
+    Term::Data {
+        name: "Vector".into(),
+        level: Level::Concrete(0),
+        indices: vec![nat()],
+        constructors: vec![
+            DataConstructor {
+                fields: vec![],
+                indices: vec![zero()],
+            },
+            DataConstructor {
+                fields: vec![
+                    DataField::Value(Box::new(nat())),
+                    DataField::Value(Box::new(element)),
+                    DataField::RecursiveAt(vec![Term::var(1)]),
+                ],
+                indices: vec![succ(Term::var(2))],
+            },
+        ],
+    }
+}
+
+fn vector_length(v: &Term) -> Term {
+    Term::lam(
+        nat(),
+        Term::lam(
+            Term::app(v.clone(), Term::var(0)),
+            induct(
+                Term::var(0),
+                Term::lam(nat(), Term::lam(Term::app(v.clone(), Term::var(0)), nat())),
+                vec![
+                    zero(),
+                    Term::lam(
+                        nat(),
+                        Term::lam(
+                            nat(),
+                            Term::lam(
+                                Term::app(v.clone(), Term::var(1)),
+                                Term::lam(nat(), succ(Term::var(0))),
+                            ),
+                        ),
+                    ),
+                ],
+            ),
+        ),
+    )
+}
+
+fn indexed_battery() -> Vec<(&'static str, Certificate, bool)> {
+    let v = vector(nat());
+    let nil = ctor(v.clone(), 0, vec![]);
+    let one = ctor(v.clone(), 1, vec![zero(), zero(), nil.clone()]);
+    let length = vector_length(&v);
+    let computed = Term::app(Term::app(length.clone(), succ(zero())), one.clone());
+    let length_goal = Term::pi(nat(), Term::pi(Term::app(v.clone(), Term::var(0)), nat()));
+    let property = Term::lam(
+        nat(),
+        Term::lam(
+            Term::app(v.clone(), Term::var(0)),
+            Term::id_ty(
+                nat(),
+                Term::app(Term::app(length.clone(), Term::var(1)), Term::var(0)),
+                Term::var(1),
+            ),
+        ),
+    );
+    let step = Term::lam(
+        nat(),
+        Term::lam(
+            nat(),
+            Term::lam(
+                Term::app(v.clone(), Term::var(1)),
+                Term::lam(
+                    Term::id_ty(
+                        nat(),
+                        Term::app(Term::app(length.clone(), Term::var(2)), Term::var(0)),
+                        Term::var(2),
+                    ),
+                    Term::j(
+                        Term::lam(
+                            nat(),
+                            Term::id_ty(
+                                nat(),
+                                succ(Term::app(
+                                    Term::app(length.clone(), Term::var(4)),
+                                    Term::var(2),
+                                )),
+                                succ(Term::var(0)),
+                            ),
+                        ),
+                        Term::refl(succ(Term::app(
+                            Term::app(length.clone(), Term::var(3)),
+                            Term::var(1),
+                        ))),
+                        Term::var(0),
+                    ),
+                ),
+            ),
+        ),
+    );
+    let preservation = Term::lam(
+        nat(),
+        Term::lam(
+            Term::app(v.clone(), Term::var(0)),
+            induct(Term::var(0), property, vec![Term::refl(zero()), step]),
+        ),
+    );
+    let preservation_goal = Term::pi(
+        nat(),
+        Term::pi(
+            Term::app(v.clone(), Term::var(0)),
+            Term::id_ty(
+                nat(),
+                Term::app(Term::app(length.clone(), Term::var(1)), Term::var(0)),
+                Term::var(1),
+            ),
+        ),
+    );
+    let mut rows = vec![
+        (
+            "indexed-family-formation",
+            certificate(v.clone(), Term::pi(nat(), Term::universe(0))),
+            true,
+        ),
+        (
+            "indexed-constructor-nil",
+            certificate(nil.clone(), Term::app(v.clone(), zero())),
+            true,
+        ),
+        (
+            "indexed-constructor-changed-index",
+            certificate(one.clone(), Term::app(v.clone(), succ(zero()))),
+            true,
+        ),
+        (
+            "indexed-general-elimination",
+            certificate(length.clone(), length_goal),
+            true,
+        ),
+        (
+            "indexed-general-length-preservation",
+            certificate(preservation, preservation_goal),
+            true,
+        ),
+        (
+            "indexed-computation",
+            certificate(
+                Term::refl(computed.clone()),
+                Term::id_ty(nat(), computed, succ(zero())),
+            ),
+            true,
+        ),
+        (
+            "indexed-forged-result-index",
+            certificate(one.clone(), Term::app(v.clone(), zero())),
+            false,
+        ),
+        (
+            "indexed-wrong-recursive-index",
+            certificate(
+                ctor(v.clone(), 1, vec![zero(), zero(), one]),
+                Term::app(v.clone(), succ(zero())),
+            ),
+            false,
+        ),
+        (
+            "indexed-applied-constructor-owner",
+            certificate(
+                ctor(Term::app(v.clone(), zero()), 0, vec![]),
+                Term::app(v.clone(), zero()),
+            ),
+            false,
+        ),
+        (
+            "indexed-unsaturated-family-is-not-type",
+            certificate(nil.clone(), v.clone()),
+            false,
+        ),
+        (
+            "indexed-motive-omits-index",
+            certificate(
+                induct(
+                    nil,
+                    Term::lam(Term::app(v.clone(), zero()), nat()),
+                    vec![zero(), length],
+                ),
+                nat(),
+            ),
+            false,
+        ),
+    ];
+    for (name, result) in [
+        ("indexed-missing-result-index", vec![]),
+        ("indexed-wrong-result-type", vec![Term::universe(0)]),
+        ("indexed-escaping-result", vec![Term::var(0)]),
+    ] {
+        let mut malformed = v.clone();
+        if let Term::Data { constructors, .. } = &mut malformed {
+            constructors[0].indices = result;
+        }
+        rows.push((
+            name,
+            certificate(malformed, Term::pi(nat(), Term::universe(0))),
+            false,
+        ));
+    }
+    let generic = Term::lam(Term::universe(0), ctor(vector(Term::var(0)), 0, vec![]));
+    rows.push((
+        "indexed-captured-type-parameter",
+        certificate(
+            generic,
+            Term::pi(Term::universe(0), Term::app(vector(Term::var(0)), zero())),
+        ),
+        true,
+    ));
+    rows
+}
+
+fn dependent_index_battery() -> Vec<(&'static str, Certificate, bool)> {
+    use verum_proof::proof_checker::DataConstructor;
+    let family = Term::Data {
+        name: "TypedWitness".into(),
+        level: Level::Concrete(1),
+        indices: vec![Term::universe(0), Term::var(0)],
+        constructors: vec![DataConstructor {
+            fields: vec![
+                DataField::Dependent(Box::new(Term::universe(0))),
+                DataField::Dependent(Box::new(Term::var(0))),
+            ],
+            indices: vec![Term::var(1), Term::var(0)],
+        }],
+    };
+    let applied = |a, x| Term::app(Term::app(family.clone(), a), x);
+    let value = ctor(family.clone(), 0, vec![nat(), zero()]);
+    let motive = Term::lam(
+        Term::universe(0),
+        Term::lam(
+            Term::var(0),
+            Term::lam(applied(Term::var(1), Term::var(0)), nat()),
+        ),
+    );
+    let eliminate = Term::lam(
+        Term::universe(0),
+        Term::lam(
+            Term::var(0),
+            Term::lam(
+                applied(Term::var(1), Term::var(0)),
+                induct(
+                    Term::var(0),
+                    motive,
+                    vec![Term::lam(
+                        Term::universe(0),
+                        Term::lam(Term::var(0), zero()),
+                    )],
+                ),
+            ),
+        ),
+    );
+    let mut bad_result = family.clone();
+    if let Term::Data { constructors, .. } = &mut bad_result {
+        constructors[0].indices[1] = nat();
+    }
+    vec![
+        (
+            "dependent-index-telescope",
+            certificate(
+                family.clone(),
+                Term::pi(Term::universe(0), Term::pi(Term::var(0), Term::universe(1))),
+            ),
+            true,
+        ),
+        (
+            "dependent-index-constructor",
+            certificate(value.clone(), applied(nat(), zero())),
+            true,
+        ),
+        (
+            "dependent-index-general-elimination",
+            certificate(
+                eliminate,
+                Term::pi(
+                    Term::universe(0),
+                    Term::pi(
+                        Term::var(0),
+                        Term::pi(applied(Term::var(1), Term::var(0)), nat()),
+                    ),
+                ),
+            ),
+            true,
+        ),
+        (
+            "dependent-index-forged-value",
+            certificate(value, applied(nat(), succ(zero()))),
+            false,
+        ),
+        (
+            "dependent-index-result-mismatch",
+            certificate(
+                bad_result,
+                Term::pi(Term::universe(0), Term::pi(Term::var(0), Term::universe(1))),
+            ),
+            false,
+        ),
+    ]
 }

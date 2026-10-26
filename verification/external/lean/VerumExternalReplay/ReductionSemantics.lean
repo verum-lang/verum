@@ -16,13 +16,13 @@ inductive HeadStep : Term → Term → Prop where
   | first (a b : Term) : HeadStep (.fst (.pair a b)) a
   | second (a b : Term) : HeadStep (.snd (.pair a b)) b
   | transport (motive base value : Term) : HeadStep (.transport motive base (.refl value)) base
-  | induction (name : String) (level : Level) (constructors : List (List (DataField Term)))
+  | induction (name : String) (level : Level) (indices : List Term) (constructors : List (DataConstructor Term))
       (ctor : Nat) (args : List Term) (motive : Term) (cases : List Term)
-      (fields : List (DataField Term)) (branch : Term)
+      (fields : DataConstructor Term) (branch : Term)
       (fieldsFound : constructors[ctor]? = some fields) (branchFound : cases[ctor]? = some branch)
-      (arity : fields.length = args.length) :
-      HeadStep (.induct (.construct (.data name level constructors) ctor args) motive cases)
-        (applyInductionCase motive cases fields args branch)
+      (arity : fields.fields.length = args.length) :
+      HeadStep (.induct (.construct (.data name level indices constructors) ctor args) motive cases)
+        (applyInductionCase motive cases fields.fields args branch)
   | appHead {a b : Term} (argument : Term) : HeadStep a b → HeadStep (.app a argument) (.app b argument)
   | fstHead {a b : Term} : HeadStep a b → HeadStep (.fst a) (.fst b)
   | sndHead {a b : Term} : HeadStep a b → HeadStep (.snd a) (.snd b)
@@ -65,7 +65,7 @@ theorem whnfFuel_reduces (fuel : Nat) (term : Term) : HeadSteps term (whnfFuel f
     | «universe» level =>
       simp only [whnfFuel]
       exact .refl _
-    | data name level constructors =>
+    | data name level indices constructors =>
       simp only [whnfFuel]
       exact .refl _
     | construct data ctor args =>
@@ -140,18 +140,18 @@ theorem whnfFuel_reduces (fuel : Nat) (term : Term) : HeadSteps term (whnfFuel f
         have declarationPath := HeadSteps.lift (fun declaration => .induct (.construct declaration ctor args) motive cases)
           (HeadStep.inductDeclaration ctor args motive cases) (ih data)
         split
-        next name level constructors declarationEq =>
+        next name level indices constructors declarationEq =>
           split
           next fields branch fieldsEq branchEq =>
             split
             next arity =>
               have path : HeadSteps (.induct (.construct data ctor args) motive cases)
-                  (.induct (.construct (.data name level constructors) ctor args) motive cases) := by
+                  (.induct (.construct (.data name level indices constructors) ctor args) motive cases) := by
                 simpa only [declarationEq] using declarationPath
               exact constructorPath.trans (path.trans (.step
-                (.induction name level constructors ctor args motive cases fields branch fieldsEq branchEq
+                (.induction name level indices constructors ctor args motive cases fields branch fieldsEq branchEq
                   (by simpa only [beq_iff_eq] using arity))
-                (ih (applyInductionCase motive cases fields args branch))))
+                (ih (applyInductionCase motive cases fields.fields args branch))))
             next arity => exact headPath
           next => exact headPath
         next => exact headPath

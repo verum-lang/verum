@@ -14,7 +14,7 @@ theorem applyInductionCase_eq_fold (motive : Term) (cases : List Term)
     applyInductionCase motive cases fields args branch =
       (fields.zip args).foldl (fun body (field, arg) =>
         match field with
-        | .recursive => .app (.app body arg) (.induct arg motive cases)
+        | .recursive | .recursiveAt _ => .app (.app body arg) (.induct arg motive cases)
         | .value _ | .dependent _ => .app body arg) branch := by
   induction fields generalizing args branch with
   | nil => simp [applyInductionCase]
@@ -50,7 +50,7 @@ theorem scope_applyInductionCase (bound : Nat) (motive : Term) (cases : List Ter
       have parts : scopeError bound arg = none ∧ scopeTerms bound tail = none := by
         simpa only [scopeTerms, Option.or_eq_none_iff] using argsGood
       cases field with
-      | recursive =>
+      | recursive | recursiveAt _ =>
         apply ih tail _ parts.2
         simp only [scopeError, branchGood, parts.1, motiveGood, casesGood, Option.or_none]
       | value ty | dependent ty =>
@@ -68,7 +68,7 @@ theorem scope_whnfFuel (fuel bound : Nat) (term : Term)
     cases term with
     | var index => simpa only [whnfFuel] using good
     | «universe» level => simpa only [whnfFuel] using good
-    | data name level constructors => simpa only [whnfFuel] using good
+    | data name level indices constructors => simpa only [whnfFuel] using good
     | construct data ctor args => simpa only [whnfFuel] using good
     | pi a b => simpa only [whnfFuel] using good
     | lam a b => simpa only [whnfFuel] using good
@@ -135,12 +135,12 @@ theorem scope_whnfFuel (fuel bound : Nat) (term : Term)
           simpa only [headEq, scopeError, Option.or_eq_none_iff] using headGood
         have argsGood := constructorGood.2
         split
-        next name level constructors declarationEq =>
+        next name level indices constructors declarationEq =>
           split
           next fields branch fieldsEq branchEq =>
             split
             next arity =>
-              exact ih _ (scope_applyInductionCase bound motive cases fields args branch
+              exact ih _ (scope_applyInductionCase bound motive cases fields.fields args branch
                 parts.2.1 parts.2.2 argsGood
                 (scopeTerms_member bound cases parts.2.2 branch (List.mem_of_getElem? branchEq)))
             next arity => simpa only [headEq] using neutralGood

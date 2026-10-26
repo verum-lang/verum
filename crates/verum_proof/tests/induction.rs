@@ -57,7 +57,11 @@ fn admission_counts_constructor_and_recursive_slot_nodes() {
     let declaration = Term::Data {
         name: "ManyConstructors".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![]; MAX_NODES + 1],
+        indices: vec![],
+        constructors: vec![vec![]; MAX_NODES + 1]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     let cert = fixtures::certificate(declaration, Term::universe(0));
     let judgment = Judgment {
@@ -78,10 +82,14 @@ fn admission_scopes_dependent_fields_without_admitting_self_references() {
         let declaration = Term::Data {
             name: "Package".into(),
             level: Level::Concrete(1),
+            indices: vec![],
             constructors: vec![vec![
                 DataField::Value(Box::new(Term::universe(0))),
                 DataField::Dependent(Box::new(Term::var(index))),
-            ]],
+            ]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         };
         let certificate = fixtures::certificate(declaration, Term::universe(1));
         let report = replay(

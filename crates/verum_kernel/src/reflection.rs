@@ -80,7 +80,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::proof_checker::{DataField, Level, Term};
+use crate::proof_checker::{DataConstructor, DataField, Level, Term};
 use verum_common::{List, Text};
 
 // =============================================================================
@@ -96,7 +96,12 @@ pub enum ReflectedDataField {
     Dependent(Box<ReflectedTerm>),
     /// A direct recursive occurrence of the enclosing declaration.
     Recursive,
+    /// Positive recursive occurrence at indices in the preceding-field context.
+    RecursiveAt(Vec<ReflectedTerm>),
 }
+
+/// Reflected constructor fields and result indices use the portable wire shape.
+pub type ReflectedDataConstructor = DataConstructor<ReflectedDataField, ReflectedTerm>;
 
 /// Serializable mirror of `proof_checker::Term`.
 ///
@@ -116,8 +121,11 @@ pub enum ReflectedTerm {
         name: Text,
         /// The declaration's universe.
         level: Level,
-        /// Constructor field telescopes.
-        constructors: List<List<ReflectedDataField>>,
+        /// Family index-type telescope.
+        #[serde(default)]
+        indices: List<ReflectedTerm>,
+        /// Constructor field telescopes and result indices.
+        constructors: List<ReflectedDataConstructor>,
     },
     /// Constructor owned by an explicit declaration.
     Construct {
@@ -284,14 +292,17 @@ impl From<&Term> for ReflectedTerm {
             Term::Data {
                 name,
                 level,
+                indices,
                 constructors,
             } => Self::Data {
                 name: Text::from(name.as_str()),
                 level: level.clone(),
+                indices: indices.iter().map(Self::from).collect(),
                 constructors: constructors
                     .iter()
-                    .map(|fields| {
-                        fields
+                    .map(|constructor| DataConstructor {
+                        fields: constructor
+                            .fields
                             .iter()
                             .map(|field| match field {
                                 DataField::Recursive => ReflectedDataField::Recursive,
@@ -301,8 +312,12 @@ impl From<&Term> for ReflectedTerm {
                                 DataField::Dependent(ty) => {
                                     ReflectedDataField::Dependent(Box::new(Self::from(ty.as_ref())))
                                 }
+                                DataField::RecursiveAt(indices) => ReflectedDataField::RecursiveAt(
+                                    indices.iter().map(Self::from).collect(),
+                                ),
                             })
-                            .collect()
+                            .collect(),
+                        indices: constructor.indices.iter().map(Self::from).collect(),
                     })
                     .collect(),
             },
@@ -388,25 +403,45 @@ impl TryFrom<&ReflectedTerm> for Term {
             ReflectedTerm::Data {
                 name,
                 level,
+                indices,
                 constructors,
             } => Ok(Self::Data {
                 name: name.as_str().to_owned(),
                 level: level.clone(),
+                indices: indices
+                    .iter()
+                    .map(Self::try_from)
+                    .collect::<Result<_, _>>()?,
                 constructors: constructors
                     .iter()
-                    .map(|fields| {
-                        fields
-                            .iter()
-                            .map(|field| match field {
-                                ReflectedDataField::Recursive => Ok(DataField::Recursive),
-                                ReflectedDataField::Value(ty) => Self::try_from(ty.as_ref())
-                                    .map(|t| DataField::Value(Box::new(t))),
-                                ReflectedDataField::Dependent(ty) => Self::try_from(ty.as_ref())
-                                    .map(|t| DataField::Dependent(Box::new(t))),
-                            })
-                            .collect()
+                    .map(|constructor| {
+                        Ok(DataConstructor {
+                            fields: constructor
+                                .fields
+                                .iter()
+                                .map(|field| match field {
+                                    ReflectedDataField::Recursive => Ok(DataField::Recursive),
+                                    ReflectedDataField::Value(ty) => Self::try_from(ty.as_ref())
+                                        .map(|t| DataField::Value(Box::new(t))),
+                                    ReflectedDataField::Dependent(ty) => {
+                                        Self::try_from(ty.as_ref())
+                                            .map(|t| DataField::Dependent(Box::new(t)))
+                                    }
+                                    ReflectedDataField::RecursiveAt(indices) => indices
+                                        .iter()
+                                        .map(Self::try_from)
+                                        .collect::<Result<_, _>>()
+                                        .map(DataField::RecursiveAt),
+                                })
+                                .collect::<Result<_, ReflectionError>>()?,
+                            indices: constructor
+                                .indices
+                                .iter()
+                                .map(Self::try_from)
+                                .collect::<Result<_, _>>()?,
+                        })
                     })
-                    .collect::<Result<_, _>>()?,
+                    .collect::<Result<_, ReflectionError>>()?,
             }),
             ReflectedTerm::Construct {
                 data,
@@ -767,13 +802,36 @@ pub fn is_reflected_well_formed(judgment: &ReflectedJudgment) -> bool {
 /// the outer call.
 fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
     match term {
-        ReflectedTerm::Data { constructors, .. } => constructors.iter().all(|fields| {
-            fields.iter().enumerate().all(|(index, field)| match field {
-                ReflectedDataField::Recursive => true,
-                ReflectedDataField::Value(ty) => debruijn_in_range(ty, depth),
-                ReflectedDataField::Dependent(ty) => debruijn_in_range(ty, depth + index),
-            })
-        }),
+        ReflectedTerm::Data {
+            indices,
+            constructors,
+            ..
+        } => {
+            indices
+                .iter()
+                .enumerate()
+                .all(|(index, ty)| debruijn_in_range(ty, depth + index))
+                && constructors.iter().all(|constructor| {
+                    constructor
+                        .indices
+                        .iter()
+                        .all(|t| debruijn_in_range(t, depth + constructor.fields.len()))
+                        && constructor
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .all(|(index, field)| match field {
+                                ReflectedDataField::Recursive => true,
+                                ReflectedDataField::Value(ty) => debruijn_in_range(ty, depth),
+                                ReflectedDataField::Dependent(ty) => {
+                                    debruijn_in_range(ty, depth + index)
+                                }
+                                ReflectedDataField::RecursiveAt(indices) => {
+                                    indices.iter().all(|t| debruijn_in_range(t, depth + index))
+                                }
+                            })
+                })
+        }
         ReflectedTerm::Construct { data, args, .. } => {
             debruijn_in_range(data, depth) && args.iter().all(|arg| debruijn_in_range(arg, depth))
         }

@@ -44,12 +44,18 @@ inductive DataField (T : Type) where
   | value : T → DataField T
   | dependent : T → DataField T
   | recursive : DataField T
+  | recursiveAt : List T → DataField T
+  deriving Inhabited, Repr
+
+structure DataConstructor (T : Type) where
+  fields : List (DataField T)
+  indices : List T
   deriving Inhabited, Repr
 
 /-- Native certificate terms: dependent functions and pairs, with
     intensional equality and transport. -/
 inductive Term : Type where
-  | data (name : String) (level : Level) (constructors : List (List (DataField Term)))
+  | data (name : String) (level : Level) (indices : List Term) (constructors : List (DataConstructor Term))
   | construct (data : Term) (constructor : Nat) (args : List Term)
   | induct (scrutinee motive : Term) (cases : List Term)
   | letE (value body : Term)
@@ -284,7 +290,7 @@ def scopeError (bound : Nat) (t : Term) : Option Nat :=
   | .fst value | .snd value | .refl value => scopeError bound value
   | .identity a b c | .transport a b c =>
     (scopeError bound a).or ((scopeError bound b).or (scopeError bound c))
-  | .data _ _ constructors => scopeConstructors bound constructors
+  | .data _ _ indices constructors => (scopeTelescope bound indices).or (scopeConstructors bound constructors)
   | .construct data _ args => (scopeError bound data).or (scopeTerms bound args)
   | .induct value motive cases =>
     (scopeError bound value).or ((scopeError bound motive).or (scopeTerms bound cases))
@@ -296,6 +302,12 @@ def scopeTerms (bound : Nat) (terms : List Term) : Option Nat :=
   | term :: rest => (scopeError bound term).or (scopeTerms bound rest)
 termination_by sizeOf terms
 
+def scopeTelescope (bound : Nat) (types : List Term) : Option Nat :=
+  match types with
+  | [] => none
+  | ty :: rest => (scopeError bound ty).or (scopeTelescope (bound + 1) rest)
+termination_by sizeOf types
+
 def scopeFields (bound : Nat) (fields : List (DataField Term)) (preceding : Nat := 0) : Option Nat :=
   match fields with
   | [] => none
@@ -303,12 +315,15 @@ def scopeFields (bound : Nat) (fields : List (DataField Term)) (preceding : Nat 
   | .value term :: rest => (scopeError bound term).or (scopeFields bound rest (preceding + 1))
   | .dependent term :: rest =>
     (scopeError (bound + preceding) term).or (scopeFields bound rest (preceding + 1))
+  | .recursiveAt indices :: rest =>
+    (scopeTerms (bound + preceding) indices).or (scopeFields bound rest (preceding + 1))
 termination_by sizeOf fields
 
-def scopeConstructors (bound : Nat) (constructors : List (List (DataField Term))) : Option Nat :=
+def scopeConstructors (bound : Nat) (constructors : List (DataConstructor Term)) : Option Nat :=
   match constructors with
   | [] => none
-  | fields :: rest => (scopeFields bound fields).or (scopeConstructors bound rest)
+  | ⟨fields, indices⟩ :: rest => (scopeFields bound fields).or
+    ((scopeTerms (bound + fields.length) indices).or (scopeConstructors bound rest))
 termination_by sizeOf constructors
 
 end
@@ -327,7 +342,7 @@ mutual
 def mapVars (replace : Nat → Nat → Term) (cutoff : Nat) (t : Term) : Term :=
   match t with
   | .letE value body => .letE (mapVars replace cutoff value) (mapVars replace (cutoff+1) body)
-  | .data name level constructors => .data name level (mapConstructors replace cutoff constructors)
+  | .data name level indices constructors => .data name level (mapTelescope replace cutoff indices) (mapConstructors replace cutoff constructors)
   | .construct data ctor args => .construct (mapVars replace cutoff data) ctor (mapTerms replace cutoff args)
   | .induct value motive cases => .induct (mapVars replace cutoff value) (mapVars replace cutoff motive) (mapTerms replace cutoff cases)
   | .var i        => replace cutoff i
@@ -350,6 +365,12 @@ def mapTerms (replace : Nat → Nat → Term) (cutoff : Nat) (terms : List Term)
   | term :: rest => mapVars replace cutoff term :: mapTerms replace cutoff rest
 termination_by sizeOf terms
 
+def mapTelescope (replace : Nat → Nat → Term) (cutoff : Nat) (types : List Term) : List Term :=
+  match types with
+  | [] => []
+  | ty :: rest => mapVars replace cutoff ty :: mapTelescope replace (cutoff + 1) rest
+termination_by sizeOf types
+
 def mapFields (replace : Nat → Nat → Term) (cutoff : Nat)
     (fields : List (DataField Term)) (preceding : Nat := 0) : List (DataField Term) :=
   match fields with
@@ -358,16 +379,27 @@ def mapFields (replace : Nat → Nat → Term) (cutoff : Nat)
   | .value term :: rest => .value (mapVars replace cutoff term) :: mapFields replace cutoff rest (preceding + 1)
   | .dependent term :: rest =>
     .dependent (mapVars replace (cutoff + preceding) term) :: mapFields replace cutoff rest (preceding + 1)
+  | .recursiveAt indices :: rest =>
+    .recursiveAt (mapTerms replace (cutoff + preceding) indices) :: mapFields replace cutoff rest (preceding + 1)
 termination_by sizeOf fields
 
 def mapConstructors (replace : Nat → Nat → Term) (cutoff : Nat)
-    (constructors : List (List (DataField Term))) : List (List (DataField Term)) :=
+    (constructors : List (DataConstructor Term)) : List (DataConstructor Term) :=
   match constructors with
   | [] => []
-  | fields :: rest => mapFields replace cutoff fields :: mapConstructors replace cutoff rest
+  | ⟨fields, indices⟩ :: rest =>
+    ⟨mapFields replace cutoff fields, mapTerms replace (cutoff + fields.length) indices⟩ ::
+      mapConstructors replace cutoff rest
 termination_by sizeOf constructors
 
 end
+
+theorem mapFields_length (replace : Nat → Nat → Term) (cutoff : Nat)
+    (fields : List (DataField Term)) (preceding : Nat := 0) :
+    (mapFields replace cutoff fields preceding).length = fields.length := by
+  induction fields generalizing preceding with
+  | nil => simp only [mapFields, List.length_nil]
+  | cons field rest ih => cases field <;> simp only [mapFields, List.length_cons, ih]
 
 /-- Raise every variable at or above the cutoff; universe levels are unchanged. -/
 def shiftUp (amount cutoff : Nat) (t : Term) : Term :=
@@ -394,7 +426,7 @@ def applyInductionCase (motive : Term) (cases : List Term)
   | field :: rest, arg :: tail =>
     let next := Term.app branch arg
     let applied := match field with
-      | .recursive => Term.app next (.induct arg motive cases)
+      | .recursive | .recursiveAt _ => Term.app next (.induct arg motive cases)
       | .value _ | .dependent _ => next
     applyInductionCase motive cases rest tail applied
   | _, _ => branch
@@ -416,11 +448,11 @@ def whnfFuel (fuel : Nat) (t : Term) : Term :=
       match head with
       | .construct data ctor args =>
         match whnfFuel fuel data with
-        | .data _ _ constructors =>
+        | .data _ _ _ constructors =>
           match constructors[ctor]?, cases[ctor]? with
           | some fields, some branch =>
-            if fields.length == args.length then
-              whnfFuel fuel (applyInductionCase motive cases fields args branch)
+            if fields.fields.length == args.length then
+              whnfFuel fuel (applyInductionCase motive cases fields.fields args branch)
             else .induct head motive cases
           | _, _ => .induct head motive cases
         | _ => .induct head motive cases
@@ -454,10 +486,15 @@ def whnf (t : Term) : Term := whnfFuel whnfFuelCeiling t
 partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   match t with
   | .letE value body => isFreeIn target value || isFreeIn (target+1) body
-  | .data _ _ constructors => constructors.any (fun fields => fields.zipIdx.any (fun (field, index) => match field with
-    | .value ty => isFreeIn target ty
-    | .dependent ty => isFreeIn (target + index) ty
-    | .recursive => false))
+  | .data _ _ indices constructors =>
+    indices.zipIdx.any (fun (ty,i) => isFreeIn (target+i) ty) ||
+    constructors.any (fun constructor =>
+      constructor.indices.any (isFreeIn (target + constructor.fields.length)) ||
+      constructor.fields.zipIdx.any (fun (field, index) => match field with
+        | .value ty => isFreeIn target ty
+        | .dependent ty => isFreeIn (target + index) ty
+        | .recursive => false
+        | .recursiveAt indices => indices.any (isFreeIn (target + index))))
   | .construct data _ args => isFreeIn target data || args.any (isFreeIn target)
   | .induct value motive cases => isFreeIn target value || isFreeIn target motive || cases.any (isFreeIn target)
   | .var i        => i = target
@@ -478,11 +515,27 @@ def fieldValueType (field : DataField Term) (preceding : Nat) : Option Term :=
   match field with
   | .value ty => some (shiftUp preceding 0 ty)
   | .dependent ty => some ty
-  | .recursive => none
+  | .recursive | .recursiveAt _ => none
 
 /-- Eliminate a telescope using values in the common ambient context. -/
 def instantiateFields (term : Term) (arguments : List Term) : Term :=
   arguments.zipIdx.foldr (fun (arg, remaining) result => subst 0 (shiftUp remaining 0 arg) result) term
+
+def recursiveIndices : DataField Term → Option (List Term)
+  | .recursive => some []
+  | .recursiveAt indices => some indices
+  | _ => none
+
+def applyTerms (head : Term) (arguments : List Term) : Term := arguments.foldl Term.app head
+
+def fieldDomain (data : Term) (field : DataField Term) (preceding : Nat) : Term :=
+  (fieldValueType field preceding).getD (applyTerms (shiftUp preceding 0 data) ((recursiveIndices field).getD []))
+
+partial def splitFamily (term : Term) (values : List Term := []) : Option (Term × List Term) :=
+  match term with
+  | .app head arg => splitFamily (whnf head) (arg :: values)
+  | .data _ _ indices _ => if indices.length == values.length then some (term, values) else none
+  | _ => none
 
 mutual
 
@@ -494,12 +547,16 @@ partial def defEq (a b : Term) : Bool :=
 
 partial def defEqWhnf : Term → Term → Bool
 
-  | .data an al ac, .data bn bl bc =>
-    an == bn && Level.eq al bl && ac.length == bc.length && (ac.zip bc).all (fun (a,b) =>
-      a.length == b.length && (a.zip b).zipIdx.all (fun ((x,y), index) => match fieldValueType x index, fieldValueType y index with
-        | none, none => true
-        | some x, some y => defEq x y
-        | _, _ => false))
+  | .data an al ai ac, .data bn bl bi bc =>
+    an == bn && Level.eq al bl && termsDefEq ai bi && ac.length == bc.length &&
+      (ac.zip bc).all (fun (a,b) => a.fields.length == b.fields.length && termsDefEq a.indices b.indices &&
+        (a.fields.zip b.fields).zipIdx.all (fun ((x,y), index) =>
+          match recursiveIndices x, recursiveIndices y with
+          | some x, some y => termsDefEq x y
+          | none, none => match fieldValueType x index, fieldValueType y index with
+            | some x, some y => defEq x y
+            | _, _ => false
+          | _, _ => false))
   | .construct a ai aa, .construct b bi ba =>
     ai == bi && defEq a b && aa.length == ba.length && (aa.zip ba).all (fun (x,y) => defEq x y)
   | .induct a am ac, .induct b bm bc =>
@@ -524,6 +581,9 @@ partial def defEqWhnf : Term → Term → Bool
   | .lam _ body,   other         => etaMatch body other
   | other,         .lam _ body   => etaMatch body other
   | _,             _             => false
+
+partial def termsDefEq (a b : List Term) : Bool :=
+  a.length == b.length && (a.zip b).all (fun (a,b) => defEq a b)
 
 /-- η-equivalence helper — mirrors `proof_checker::eta_match`. -/
 partial def etaMatch (lamBody other : Term) : Bool :=
@@ -555,23 +615,24 @@ def expectUniverse (t : Term) : Option Level :=
 
 /-- Independently construct each case telescope from explicit recursive slots.
     Captured parameters remain in the surrounding de Bruijn context. -/
-def inductionCaseType (data motive : Term) (ctor : Nat) (fields : List (DataField Term)) : Term := Id.run do
+def rebindFields (term : Term) (positions : List Nat) (depth : Nat) : Term :=
+  instantiateFields (shiftUp depth positions.length term) (positions.map (fun p => .var (depth - 1 - p)))
+
+def inductionCaseType (data motive : Term) (ctor : Nat) (constructor : DataConstructor Term) : Term := Id.run do
   let mut domains : List Term := []
   let mut positions : List Nat := []
-  for field in fields do
+  for field in constructor.fields do
     let depth := domains.length
-    let domain := match field with
-      | .value ty => shiftUp depth 0 ty
-      | .recursive => shiftUp depth 0 data
-      | .dependent ty => instantiateFields (shiftUp depth positions.length ty)
-          (positions.map (fun i => .var (depth - 1 - i)))
-    positions := positions ++ [depth]
+    let domain := rebindFields (fieldDomain data field positions.length) positions depth
     domains := domains ++ [domain]
-    if let .recursive := field then
-      domains := domains ++ [.app (shiftUp (depth + 1) 0 motive) (.var 0)]
+    if let some indices := recursiveIndices field then
+      let arguments := indices.map (fun t => rebindFields t positions (depth + 1))
+      domains := domains ++ [.app (applyTerms (shiftUp (depth + 1) 0 motive) arguments) (.var 0)]
+    positions := positions ++ [depth]
   let depth := domains.length
+  let indices := constructor.indices.map (fun t => rebindFields t positions depth)
   let value := Term.construct (shiftUp depth 0 data) ctor (positions.map (fun i => .var (depth - 1 - i)))
-  return domains.foldr Term.pi (.app (shiftUp depth 0 motive) value)
+  return domains.foldr Term.pi (.app (applyTerms (shiftUp depth 0 motive) indices) value)
 
 mutual
 
@@ -581,42 +642,54 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
   | .letE value body => do
     let _ ← infer Γ value
     infer Γ (subst 0 value body)
-  | .data _ level constructors => do
-    for fields in constructors do
+  | .data _ level indices constructors => do
+    let mut indexContext := Γ
+    for ty in indices do
+      let kind ← infer indexContext ty
+      let some _ := expectUniverse kind | throw (.not_a_type ty)
+      indexContext := ty :: indexContext
+    for constructor in constructors do
       let mut fieldContext := Γ
-      for (field, index) in fields.zipIdx do
-        let domain := (fieldValueType field index).getD (shiftUp index 0 t)
-        if let some _ := fieldValueType field index then
+      for (field, index) in constructor.fields.zipIdx do
+        let domain := fieldDomain t field index
+        if let some values := recursiveIndices field then
+          checkIndices fieldContext indices values index
+        else
           let kind ← infer fieldContext domain
           let some fieldLevel := expectUniverse kind | throw (.not_a_type domain)
           unless Level.eq (Level.maxCanonical fieldLevel level) level do
             throw (.invalid_inductive "field exceeds declaration universe")
         fieldContext := domain :: fieldContext
-    return .universe (Level.normalize level)
+      checkIndices fieldContext indices constructor.indices constructor.fields.length
+    return indices.foldr Term.pi (.universe (Level.normalize level))
   | .construct data ctor args => do
     let _ ← infer Γ data
     let declaration := whnf data
-    let .data _ _ constructors := declaration | throw (.invalid_inductive "constructor owner is not a data declaration")
-    let some fields := constructors[ctor]? | throw (.invalid_inductive "unknown constructor")
-    unless fields.length == args.length do throw (.invalid_inductive "constructor field arity mismatch")
-    for ((field, arg), index) in (fields.zip args).zipIdx do
-      let domain := (fieldValueType field index).getD (shiftUp index 0 declaration)
-      let expected := instantiateFields domain (args.take index)
-      checkAgainst Γ arg expected
-    return declaration
+    let .data _ _ _ constructors := declaration | throw (.invalid_inductive "constructor owner is not a data declaration")
+    let some constructor := constructors[ctor]? | throw (.invalid_inductive "unknown constructor")
+    unless constructor.fields.length == args.length do throw (.invalid_inductive "constructor field arity mismatch")
+    for ((field, arg), index) in (constructor.fields.zip args).zipIdx do
+      checkAgainst Γ arg (instantiateFields (fieldDomain declaration field index) (args.take index))
+    return applyTerms declaration (constructor.indices.map (fun t => instantiateFields t args))
   | .induct value motive cases => do
-    let declaration := whnf (← infer Γ value)
-    let .data _ _ constructors := declaration | throw (.invalid_inductive "induction requires a data scrutinee")
+    let actual := whnf (← infer Γ value)
+    let some (declaration, values) := splitFamily actual | throw (.invalid_inductive "induction requires a fully applied data family")
+    let .data _ _ indices constructors := declaration | throw (.invalid_inductive "invalid family head")
     let _ ← infer Γ declaration
-    let motiveKind := whnf (← infer Γ motive)
-    let .pi domain result := motiveKind | throw (.invalid_inductive "induction motive is not a family")
-    unless defEq domain declaration && (expectUniverse result).isSome do
+    let mut motiveKind ← infer Γ motive
+    for ty in indices do
+      let .pi domain result := whnf motiveKind | throw (.invalid_inductive "induction motive omits a family index")
+      unless defEq domain ty do throw (.invalid_inductive "induction motive index domain mismatch")
+      motiveKind := result
+    let .pi domain result := whnf motiveKind | throw (.invalid_inductive "induction motive is not a family")
+    let references := (List.range indices.length).reverse.map Term.var
+    let expectedDomain := applyTerms (shiftUp indices.length 0 declaration) references
+    unless defEq domain expectedDomain && (expectUniverse result).isSome do
       throw (.invalid_inductive "induction motive domain or universe mismatch")
     unless cases.length == constructors.length do throw (.invalid_inductive "induction case count mismatch")
-    for (index, (fields, branch)) in (constructors.zip cases).zipIdx |>.map (fun (pair,i) => (i,pair)) do
-      let expected := inductionCaseType declaration motive index fields
-      checkAgainst Γ branch expected
-    return .app motive value
+    for ((constructor, branch), index) in (constructors.zip cases).zipIdx do
+      checkAgainst Γ branch (inductionCaseType declaration motive index constructor)
+    return .app (applyTerms motive values) value
   | .var i =>
     match lookupCtx Γ i with
     | some T => Except.ok T
@@ -739,6 +812,11 @@ partial def checkAgainst (Γ : Ctx) (t expected : Term) : Except CheckError Unit
   | _, _ =>
     let inferred ← infer Γ t
     unless defEq inferred expected do throw (.type_mismatch expected inferred)
+
+partial def checkIndices (Γ : Ctx) (telescope arguments : List Term) (ambientShift : Nat) : Except CheckError Unit := do
+  unless telescope.length == arguments.length do throw (.invalid_inductive "family index arity mismatch")
+  for ((ty,value), index) in (telescope.zip arguments).zipIdx do
+    checkAgainst Γ value (instantiateFields (shiftUp ambientShift index ty) (arguments.take index))
 
 partial def checkDomain (Γ : Ctx) (t expected : Term) : Except CheckError Unit :=
   match checkAgainst Γ t expected with

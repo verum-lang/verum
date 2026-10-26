@@ -14,7 +14,7 @@ mutual
 theorem mapVars_identity (cutoff : Nat) (t : Term) :
     mapVars (fun _ i => .var i) cutoff t = t := by
   cases t with
-  | data name level constructors => simp only [mapVars, mapConstructors_identity cutoff constructors]
+  | data name level indices constructors => simp only [mapVars, mapTelescope_identity cutoff indices, mapConstructors_identity cutoff constructors]
   | construct data ctor args => simp only [mapVars, mapVars_identity cutoff data, mapTerms_identity cutoff args]
   | induct value motive cases => simp only [mapVars, mapVars_identity cutoff value, mapVars_identity cutoff motive, mapTerms_identity cutoff cases]
   | letE value body => simp only [mapVars, mapVars_identity cutoff value, mapVars_identity (cutoff + 1) body]
@@ -39,6 +39,13 @@ theorem mapTerms_identity (cutoff : Nat) (terms : List Term) :
   | cons term rest => simp only [mapTerms, mapVars_identity cutoff term, mapTerms_identity cutoff rest]
 termination_by sizeOf terms
 
+theorem mapTelescope_identity (cutoff : Nat) (types : List Term) :
+    mapTelescope (fun _ i => .var i) cutoff types = types := by
+  cases types with
+  | nil => simp only [mapTelescope]
+  | cons ty rest => simp only [mapTelescope, mapVars_identity cutoff ty, mapTelescope_identity (cutoff + 1) rest]
+termination_by sizeOf types
+
 theorem mapFields_identity (cutoff : Nat) (fields : List (DataField Term)) (preceding : Nat := 0) :
     mapFields (fun _ i => .var i) cutoff fields preceding = fields := by
   cases fields with
@@ -48,13 +55,17 @@ theorem mapFields_identity (cutoff : Nat) (fields : List (DataField Term)) (prec
     | recursive => simp only [mapFields, mapFields_identity cutoff rest (preceding + 1)]
     | value term => simp only [mapFields, mapVars_identity cutoff term, mapFields_identity cutoff rest (preceding + 1)]
     | dependent term => simp only [mapFields, mapVars_identity (cutoff + preceding) term, mapFields_identity cutoff rest (preceding + 1)]
+    | recursiveAt indices => simp only [mapFields, mapTerms_identity (cutoff + preceding) indices, mapFields_identity cutoff rest (preceding + 1)]
 termination_by sizeOf fields
 
-theorem mapConstructors_identity (cutoff : Nat) (constructors : List (List (DataField Term))) :
+theorem mapConstructors_identity (cutoff : Nat) (constructors : List (DataConstructor Term)) :
     mapConstructors (fun _ i => .var i) cutoff constructors = constructors := by
   cases constructors with
   | nil => simp only [mapConstructors]
-  | cons fields rest => simp only [mapConstructors, mapFields_identity cutoff fields, mapConstructors_identity cutoff rest]
+  | cons constructor rest =>
+    cases constructor with
+    | mk fields indices => simp only [mapConstructors, mapFields_identity cutoff fields,
+        mapTerms_identity (cutoff + fields.length) indices, mapConstructors_identity cutoff rest]
 termination_by sizeOf constructors
 
 end
@@ -66,7 +77,7 @@ theorem mapVars_fusion (f g h : Nat → Nat → Term)
     (cutoff : Nat) (t : Term) :
     mapVars g cutoff (mapVars f cutoff t) = mapVars h cutoff t := by
   cases t with
-  | data name level constructors => simp only [mapVars, mapConstructors_fusion f g h law cutoff constructors]
+  | data name level indices constructors => simp only [mapVars, mapTelescope_fusion f g h law cutoff indices, mapConstructors_fusion f g h law cutoff constructors]
   | construct data ctor args => simp only [mapVars, mapVars_fusion f g h law cutoff data, mapTerms_fusion f g h law cutoff args]
   | induct value motive cases => simp only [mapVars, mapVars_fusion f g h law cutoff value, mapVars_fusion f g h law cutoff motive, mapTerms_fusion f g h law cutoff cases]
   | letE value body => simp only [mapVars, mapVars_fusion f g h law cutoff value, mapVars_fusion f g h law (cutoff + 1) body]
@@ -93,6 +104,16 @@ theorem mapTerms_fusion (f g h : Nat → Nat → Term)
   | cons term rest => simp only [mapTerms, mapVars_fusion f g h law cutoff term, mapTerms_fusion f g h law cutoff rest]
 termination_by sizeOf terms
 
+theorem mapTelescope_fusion (f g h : Nat → Nat → Term)
+    (law : ∀ cutoff i, mapVars g cutoff (f cutoff i) = h cutoff i)
+    (cutoff : Nat) (types : List Term) :
+    mapTelescope g cutoff (mapTelescope f cutoff types) = mapTelescope h cutoff types := by
+  cases types with
+  | nil => simp only [mapTelescope]
+  | cons ty rest => simp only [mapTelescope, mapVars_fusion f g h law cutoff ty,
+      mapTelescope_fusion f g h law (cutoff + 1) rest]
+termination_by sizeOf types
+
 theorem mapFields_fusion (f g h : Nat → Nat → Term)
     (law : ∀ cutoff i, mapVars g cutoff (f cutoff i) = h cutoff i)
     (cutoff : Nat) (fields : List (DataField Term)) (preceding : Nat := 0) :
@@ -104,15 +125,19 @@ theorem mapFields_fusion (f g h : Nat → Nat → Term)
     | recursive => simp only [mapFields, mapFields_fusion f g h law cutoff rest (preceding + 1)]
     | value term => simp only [mapFields, mapVars_fusion f g h law cutoff term, mapFields_fusion f g h law cutoff rest (preceding + 1)]
     | dependent term => simp only [mapFields, mapVars_fusion f g h law (cutoff + preceding) term, mapFields_fusion f g h law cutoff rest (preceding + 1)]
+    | recursiveAt indices => simp only [mapFields, mapTerms_fusion f g h law (cutoff + preceding) indices, mapFields_fusion f g h law cutoff rest (preceding + 1)]
 termination_by sizeOf fields
 
 theorem mapConstructors_fusion (f g h : Nat → Nat → Term)
     (law : ∀ cutoff i, mapVars g cutoff (f cutoff i) = h cutoff i)
-    (cutoff : Nat) (constructors : List (List (DataField Term))) :
+    (cutoff : Nat) (constructors : List (DataConstructor Term)) :
     mapConstructors g cutoff (mapConstructors f cutoff constructors) = mapConstructors h cutoff constructors := by
   cases constructors with
   | nil => simp only [mapConstructors]
-  | cons fields rest => simp only [mapConstructors, mapFields_fusion f g h law cutoff fields, mapConstructors_fusion f g h law cutoff rest]
+  | cons constructor rest =>
+    cases constructor with
+    | mk fields indices => simp only [mapConstructors, mapFields_length, mapFields_fusion f g h law cutoff fields,
+        mapTerms_fusion f g h law (cutoff + fields.length) indices, mapConstructors_fusion f g h law cutoff rest]
 termination_by sizeOf constructors
 
 end

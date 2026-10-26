@@ -5,7 +5,11 @@ fn nat() -> Term {
     Term::Data {
         name: "Nat".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![], vec![DataField::Recursive]],
+        indices: vec![],
+        constructors: vec![vec![], vec![DataField::Recursive]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     }
 }
 fn zero() -> Term {
@@ -23,13 +27,17 @@ fn reflection_round_trips_declarations_owned_constructors_induction_and_definiti
         Term::Data {
             name: "List".into(),
             level: Level::Concrete(0),
+            indices: vec![],
             constructors: vec![
                 vec![],
                 vec![
                     DataField::Value(Box::new(Term::var(0))),
                     DataField::Recursive,
                 ],
-            ],
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         },
     );
     let induction = Term::Induct {
@@ -59,7 +67,11 @@ fn reflection_checks_captured_field_variables_and_local_definition_scope() {
     let open = Term::Data {
         name: "Open".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![DataField::Value(Box::new(Term::var(0)))]],
+        indices: vec![],
+        constructors: vec![vec![DataField::Value(Box::new(Term::var(0)))]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     for bad in [
         open,
@@ -81,10 +93,14 @@ fn reflected_dependent_fields_own_only_their_preceding_binders() {
         let term = Term::Data {
             name: "Package".into(),
             level: Level::Concrete(1),
+            indices: vec![],
             constructors: vec![vec![
                 DataField::Value(Box::new(Term::universe(0))),
                 DataField::Dependent(Box::new(Term::var(index))),
-            ]],
+            ]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         };
         let reflected = ReflectedTerm::from(&term);
         assert_eq!(Term::try_from(&reflected).unwrap(), term);
@@ -96,4 +112,37 @@ fn reflected_dependent_fields_own_only_their_preceding_binders() {
             expected
         );
     }
+}
+
+#[test]
+fn indexed_reflection_preserves_each_telescope_and_rejects_escaping_indices() {
+    use verum_kernel::proof_checker::DataConstructor;
+    let family = Term::Data {
+        name: "Family".into(),
+        level: Level::Concrete(1),
+        indices: vec![Term::universe(0)],
+        constructors: vec![DataConstructor {
+            fields: vec![
+                DataField::Dependent(Box::new(Term::universe(0))),
+                DataField::RecursiveAt(vec![Term::var(0)]),
+            ],
+            indices: vec![Term::var(1)],
+        }],
+    };
+    let reflected = ReflectedTerm::from(&family);
+    let encoded = serde_json::to_vec(&reflected).unwrap();
+    let decoded: ReflectedTerm = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(Term::try_from(&decoded).unwrap(), family);
+    assert!(is_reflected_well_formed(&ReflectedJudgment::closed(
+        reflected,
+        ReflectedTerm::from(&Term::universe(2))
+    )));
+    let mut escaping = family;
+    if let Term::Data { constructors, .. } = &mut escaping {
+        constructors[0].indices[0] = Term::var(2);
+    }
+    assert!(!is_reflected_well_formed(&ReflectedJudgment::closed(
+        ReflectedTerm::from(&escaping),
+        ReflectedTerm::from(&Term::universe(2))
+    )));
 }

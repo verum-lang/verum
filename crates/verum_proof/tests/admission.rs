@@ -46,6 +46,32 @@ fn unknown_and_duplicate_fields_cannot_smuggle_an_authority() {
     assert!(!replay(&serde_json::to_vec(&json).unwrap()).accepted);
 }
 #[test]
+fn indexed_constructor_wire_rejects_ambiguous_or_asserted_indices() {
+    let declaration = serde_json::json!({"Data": {
+        "name": "Unit", "level": 0, "constructors": [{"fields": [], "indices": []}]
+    }});
+    let mut judgment = serde_json::to_value(identity()).unwrap();
+    judgment["statement"] = serde_json::json!({"Universe": 0});
+    judgment["certificate"]["claimed_type"] = judgment["statement"].clone();
+    judgment["certificate"]["term"] = declaration;
+    assert!(replay(&serde_json::to_vec(&judgment).unwrap()).accepted);
+    let valid = serde_json::to_string(&judgment).unwrap();
+    for constructor in [
+        r#"{"fields":[],"indices":[],"positive":true}"#,
+        r#"{"fields":[],"indices":[],"indices":[]}"#,
+        r#"{"fields":[],"fields":[],"indices":[]}"#,
+        r#"{"fields":[]}"#,
+    ] {
+        let source = valid.replace(r#"{"fields":[],"indices":[]}"#, constructor);
+        assert_ne!(source, valid);
+        assert_eq!(
+            replay(source.as_bytes()).diagnostic.unwrap().code,
+            "invalid_certificate"
+        );
+    }
+}
+
+#[test]
 fn ill_formed_goal_and_free_variables_fail_with_diagnostics() {
     let mut j = identity();
     j.certificate.term = Term::var(0);
@@ -79,13 +105,18 @@ fn wire_wrappers_do_not_reduce_the_logical_term_depth_budget() {
         let mut data = Term::Data {
             name: "Leaf".into(),
             level: Level::Concrete(0),
-            constructors: vec![vec![]],
+            indices: vec![],
+            constructors: vec![vec![]].into_iter().map(Into::into).collect(),
         };
         for _ in 0..depth {
             data = Term::Data {
                 name: "Nested".into(),
                 level: Level::Concrete(0),
-                constructors: vec![vec![DataField::Value(Box::new(data))]],
+                indices: vec![],
+                constructors: vec![vec![DataField::Value(Box::new(data))]]
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
             };
         }
         Judgment {
@@ -114,7 +145,7 @@ fn wire_wrappers_do_not_reduce_the_logical_term_depth_budget() {
 
 #[test]
 fn json_preflight_bounds_nesting_without_interpreting_quoted_delimiters() {
-    let nested = format!("{}0{}", "[".repeat(400), "]".repeat(400));
+    let nested = format!("{}0{}", "[".repeat(1024), "]".repeat(1024));
     assert_eq!(
         replay(nested.as_bytes()).diagnostic.unwrap().code,
         "json_depth_limit"
@@ -147,7 +178,8 @@ fn scope_boundary_terms() -> Vec<Term> {
     let data = Term::Data {
         name: "Unit".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![]],
+        indices: vec![],
+        constructors: vec![vec![]].into_iter().map(Into::into).collect(),
     };
     let unit = Term::Construct {
         data: Box::new(data.clone()),
@@ -172,7 +204,11 @@ fn scope_boundary_terms() -> Vec<Term> {
         Term::Data {
             name: "Field".into(),
             level: Level::Concrete(0),
-            constructors: vec![vec![DataField::Value(Box::new(free.clone()))]],
+            indices: vec![],
+            constructors: vec![vec![DataField::Value(Box::new(free.clone()))]]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         },
         Term::Construct {
             data: Box::new(data.clone()),
@@ -226,7 +262,11 @@ fn captured_datatype_fields_and_nested_local_binders_remain_admissible() {
     let data = Term::Data {
         name: "Capture".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![DataField::Value(Box::new(Term::var(0)))]],
+        indices: vec![],
+        constructors: vec![vec![DataField::Value(Box::new(Term::var(0)))]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     let statement = Term::pi(Term::universe(0), Term::universe(0));
     let judgment = Judgment {

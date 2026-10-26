@@ -20,9 +20,10 @@ theorem scope_mapVars (n m : Nat) (replace : Nat → Nat → Term)
     · exact law cutoff i bound
     · simp [scopeError, bound] at good
   | «universe» level => simp only [mapVars, scopeError]
-  | data name level constructors =>
-    simp only [mapVars, scopeError] at good ⊢
-    exact scope_mapConstructors n m replace law cutoff constructors good
+  | data name level indices constructors =>
+    simp only [mapVars, scopeError, Option.or_eq_none_iff] at good ⊢
+    exact ⟨scope_mapTelescope n m replace law cutoff indices good.1,
+      scope_mapConstructors n m replace law cutoff constructors good.2⟩
   | construct data ctor args =>
     simp only [mapVars, scopeError, Option.or_eq_none_iff] at good ⊢
     exact ⟨scope_mapVars n m replace law cutoff data good.1, scope_mapTerms n m replace law cutoff args good.2⟩
@@ -75,6 +76,21 @@ theorem scope_mapTerms (n m : Nat) (replace : Nat → Nat → Term)
     exact ⟨scope_mapVars n m replace law cutoff term good.1, scope_mapTerms n m replace law cutoff rest good.2⟩
 termination_by sizeOf terms
 
+theorem scope_mapTelescope (n m : Nat) (replace : Nat → Nat → Term)
+    (law : ∀ depth i, i < n + depth → scopeError (m + depth) (replace depth i) = none)
+    (cutoff : Nat) (types : List Term) (good : scopeTelescope (n + cutoff) types = none) :
+    scopeTelescope (m + cutoff) (mapTelescope replace cutoff types) = none := by
+  cases types with
+  | nil => simp only [mapTelescope, scopeTelescope]
+  | cons ty rest =>
+    simp only [mapTelescope, scopeTelescope, Option.or_eq_none_iff] at good ⊢
+    constructor
+    · exact scope_mapVars n m replace law cutoff ty good.1
+    · have tail := scope_mapTelescope n m replace law (cutoff + 1) rest
+        (by simpa only [Nat.add_assoc] using good.2)
+      simpa only [Nat.add_assoc] using tail
+termination_by sizeOf types
+
 theorem scope_mapFields (n m : Nat) (replace : Nat → Nat → Term)
     (law : ∀ depth i, i < n + depth → scopeError (m + depth) (replace depth i) = none)
     (cutoff : Nat) (fields : List (DataField Term)) (preceding : Nat)
@@ -98,17 +114,32 @@ theorem scope_mapFields (n m : Nat) (replace : Nat → Nat → Term)
           (by simpa only [Nat.add_assoc] using good.1)
         simpa only [Nat.add_assoc] using head
       · exact scope_mapFields n m replace law cutoff rest (preceding + 1) good.2
+    | recursiveAt indices =>
+      simp only [mapFields, scopeFields, Option.or_eq_none_iff] at good ⊢
+      constructor
+      · have head := scope_mapTerms n m replace law (cutoff + preceding) indices
+          (by simpa only [Nat.add_assoc] using good.1)
+        simpa only [Nat.add_assoc] using head
+      · exact scope_mapFields n m replace law cutoff rest (preceding + 1) good.2
 termination_by sizeOf fields
 
 theorem scope_mapConstructors (n m : Nat) (replace : Nat → Nat → Term)
     (law : ∀ depth i, i < n + depth → scopeError (m + depth) (replace depth i) = none)
-    (cutoff : Nat) (constructors : List (List (DataField Term))) (good : scopeConstructors (n + cutoff) constructors = none) :
+    (cutoff : Nat) (constructors : List (DataConstructor Term)) (good : scopeConstructors (n + cutoff) constructors = none) :
     scopeConstructors (m + cutoff) (mapConstructors replace cutoff constructors) = none := by
   cases constructors with
   | nil => simp only [mapConstructors, scopeConstructors]
-  | cons fields rest =>
-    simp only [mapConstructors, scopeConstructors, Option.or_eq_none_iff] at good ⊢
-    exact ⟨scope_mapFields n m replace law cutoff fields 0 good.1, scope_mapConstructors n m replace law cutoff rest good.2⟩
+  | cons constructor rest =>
+    cases constructor with
+    | mk fields indices =>
+      simp only [mapConstructors, scopeConstructors, mapFields_length, Option.or_eq_none_iff] at good ⊢
+      constructor
+      · exact scope_mapFields n m replace law cutoff fields 0 good.1
+      · constructor
+        · have result := scope_mapTerms n m replace law (cutoff + fields.length) indices
+            (by simpa only [Nat.add_assoc] using good.2.1)
+          simpa only [Nat.add_assoc] using result
+        · exact scope_mapConstructors n m replace law cutoff rest good.2.2
 termination_by sizeOf constructors
 
 end

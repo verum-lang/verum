@@ -21,7 +21,8 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
     let bit = Term::Data {
         name: "Bit".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![], vec![]],
+        indices: vec![],
+        constructors: vec![vec![], vec![]].into_iter().map(Into::into).collect(),
     };
     let zero = Term::Construct {
         data: Box::new(bit.clone()),
@@ -31,7 +32,11 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
     let holder = Term::Data {
         name: "Evidence".into(),
         level: Level::Concrete(0),
-        constructors: vec![vec![DataField::Value(Box::new(witness_type()))]],
+        indices: vec![],
+        constructors: vec![vec![DataField::Value(Box::new(witness_type()))]]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     };
     let lifted = Term::sigma(
         Term::var(2),
