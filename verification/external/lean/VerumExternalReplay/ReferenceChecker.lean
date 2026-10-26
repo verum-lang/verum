@@ -4,7 +4,7 @@
 
 /-! Independent re-implementation of the structural fragment of
     `crates/verum_kernel/src/proof_checker.rs` (Var / Universe /
-    Pi / Lam / App, plus β-reduction, α-equivalence, η-equivalence,
+    Pi / Lam / App / Sigma / Id / Refl / J, plus β-reduction, α-equivalence, η-equivalence,
     universe-overflow handling, and post-FV-19 universe
     polymorphism).
 
@@ -20,9 +20,8 @@
 
     **Universe polymorphism (FV-19)**: `Universe` carries a
     structured `Level` (Concrete / Var / Succ / Max).  The Lean
-    side uses `Nat` for the concrete carrier (unbounded — overflow
-    is reported information-only); the Rust side uses `u32` and
-    rejects `u32::MAX + 1`.  Equality is decided up to algebraic
+    side uses `Nat` for storage but enforces the Rust `u32`
+    concrete-level ceiling during inference. Equality is decided up to algebraic
     normalisation (idempotency, identity at zero, common-succ
     factoring, lexicographic flattening of `Max`). -/
 
@@ -38,9 +37,8 @@ inductive Level : Type where
   | max      (a b : Level)
   deriving DecidableEq, Inhabited, Repr
 
-/-- Minimal CoC `Term` — mirrors `proof_checker::Term` post-FV-20.
-    The structural fragment is Var/Universe/Pi/Lam/App plus
-    Sigma/Pair/Fst/Snd for dependent pairs. -/
+/-- Native certificate terms: dependent functions and pairs, with
+    intensional equality and transport. -/
 inductive Term : Type where
   | var      (i : Nat)
   | universe (lvl : Level)
@@ -52,6 +50,9 @@ inductive Term : Type where
   | pair     (fst : Term) (snd : Term)
   | fst      (p : Term)
   | snd      (p : Term)
+  | identity (ty lhs rhs : Term)
+  | refl     (value : Term)
+  | transport (motive base path : Term)
   deriving DecidableEq, Inhabited, Repr
 
 /-- Type-checking error — mirrors `proof_checker::CheckError` for
@@ -61,6 +62,8 @@ inductive CheckError : Type where
   | not_a_type           (t : Term)
   | not_a_function       (t : Term)
   | not_a_sigma          (t : Term)  -- FV-20: T-Fst/Snd-Elim
+  | not_an_identity      (t : Term)
+  | not_a_valid_j_motive (t : Term)
   | domain_mismatch      (expected actual : Term)
   | type_mismatch        (expected actual : Term)
   | universe_overflow    (level : Nat)
@@ -238,6 +241,9 @@ partial def shiftUp (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
   | .pair a b     => .pair (shiftUp amount cutoff a) (shiftUp amount cutoff b)
   | .fst p        => .fst (shiftUp amount cutoff p)
   | .snd p        => .snd (shiftUp amount cutoff p)
+  | .identity a x y => .identity (shiftUp amount cutoff a) (shiftUp amount cutoff x) (shiftUp amount cutoff y)
+  | .refl x => .refl (shiftUp amount cutoff x)
+  | .transport p h e => .transport (shiftUp amount cutoff p) (shiftUp amount cutoff h) (shiftUp amount cutoff e)
 
 /-- Shift down — inverse of `shiftUp`. -/
 partial def shiftDown (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
@@ -254,6 +260,9 @@ partial def shiftDown (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
   | .pair a b     => .pair (shiftDown amount cutoff a) (shiftDown amount cutoff b)
   | .fst p        => .fst (shiftDown amount cutoff p)
   | .snd p        => .snd (shiftDown amount cutoff p)
+  | .identity a x y => .identity (shiftDown amount cutoff a) (shiftDown amount cutoff x) (shiftDown amount cutoff y)
+  | .refl x => .refl (shiftDown amount cutoff x)
+  | .transport p h e => .transport (shiftDown amount cutoff p) (shiftDown amount cutoff h) (shiftDown amount cutoff e)
 
 /-- Substitute `replacement` for `var target` in `t`. -/
 partial def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
@@ -270,6 +279,9 @@ partial def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
   | .pair a b   => .pair (subst target replacement a) (subst target replacement b)
   | .fst p      => .fst (subst target replacement p)
   | .snd p      => .snd (subst target replacement p)
+  | .identity a x y => .identity (subst target replacement a) (subst target replacement x) (subst target replacement y)
+  | .refl x => .refl (subst target replacement x)
+  | .transport p h e => .transport (subst target replacement p) (subst target replacement h) (subst target replacement e)
 
 /-- Fuel ceiling for whnf. -/
 def whnfFuelCeiling : Nat := 1 <<< 20
@@ -295,6 +307,10 @@ partial def whnfFuel (fuel : Nat) (t : Term) : Term :=
       match p' with
       | .pair _ b => whnfFuel (fuel - 1) b
       | other     => .snd other
+    | .transport p h e =>
+      match whnfFuel (fuel - 1) e with
+      | .refl _ => whnfFuel (fuel - 1) h
+      | other => .transport p h other
     | other => other
 
 /-- Public whnf. -/
@@ -312,6 +328,9 @@ partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   | .pair a b     => isFreeIn target a || isFreeIn target b
   | .fst p        => isFreeIn target p
   | .snd p        => isFreeIn target p
+  | .identity a x y => isFreeIn target a || isFreeIn target x || isFreeIn target y
+  | .refl x => isFreeIn target x
+  | .transport p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
 
 mutual
 
@@ -336,6 +355,9 @@ partial def defEqWhnf : Term → Term → Bool
   | .pair a1 b1,   .pair a2 b2   => defEq a1 a2 && defEq b1 b2
   | .fst p1,       .fst p2       => defEq p1 p2
   | .snd p1,       .snd p2       => defEq p1 p2
+  | .identity a x y, .identity b u v => defEq a b && defEq x u && defEq y v
+  | .refl x, .refl y => defEq x y
+  | .transport p h e, .transport q k f => defEq p q && defEq h k && defEq e f
   | .lam _ body,   other         => etaMatch body other
   | other,         .lam _ body   => etaMatch body other
   | _,             _             => false
@@ -376,11 +398,14 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     | some T => Except.ok T
     | none   => Except.error (.unbound_variable i)
   | .universe l =>
-    -- T-Univ: Universe(l) : Universe(succ(l)).  Lean's Nat is
-    -- unbounded so concrete overflow is information-only — the
-    -- Rust side's `Level::checked_succ` is the load-bearing
-    -- gate that pins parity at the u32::MAX boundary.
-    Except.ok (.universe (Level.checkedSucc (Level.normalize l)))
+    -- The certificate format uses Rust's bounded concrete universe levels.
+    -- The independent checker enforces that boundary, despite using Nat.
+    let normal := Level.normalize l
+    match normal with
+    | .concrete n =>
+      if n ≥ 4294967295 then .error (.universe_overflow n)
+      else .ok (.universe (Level.checkedSucc normal))
+    | _ => .ok (.universe (Level.checkedSucc normal))
   | .pi a b =>
     match infer Γ a with
     | .error e => .error e
@@ -457,6 +482,27 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
       match whnf pTy with
       | .sigma _ b => .ok (subst 0 (.fst p) b)
       | other      => .error (.not_a_sigma other)
+  | .identity a x y => do
+    let kind ← infer Γ a
+    let some level := expectUniverse kind | .error (.not_a_type a)
+    for endpoint in [x, y] do
+      let actual ← infer Γ endpoint
+      unless defEq a actual do throw (.domain_mismatch a actual)
+    return .universe level
+  | .refl x => do
+    let ty ← infer Γ x
+    return .identity ty x x
+  | .transport motive base path => do
+    let pathTy ← infer Γ path
+    let .identity carrier lhs rhs := whnf pathTy | .error (.not_an_identity (whnf pathTy))
+    let motiveTy ← infer Γ motive
+    let .pi domain codomain := whnf motiveTy | .error (.not_a_valid_j_motive motive)
+    unless defEq domain carrier do throw (.domain_mismatch carrier domain)
+    let some _ := expectUniverse codomain | .error (.not_a_valid_j_motive motive)
+    let baseTy ← infer Γ base
+    let expected := whnf (.app motive lhs)
+    unless defEq baseTy expected do throw (.domain_mismatch expected baseTy)
+    return .app motive rhs
 
 /-- Check that `t` has type `expected` in `Γ`. -/
 partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit :=
