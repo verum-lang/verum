@@ -94,9 +94,12 @@ partial def termFromJson (j : Json) : Except String Term := do
     let fields ← constructors.toList.mapM fun constructor => do
       let raw ← constructor.getArr?
       raw.toList.mapM fun field => do
-        if let .ok "Recursive" := field.getStr? then return none
+        if let .ok "Recursive" := field.getStr? then return .recursive
+        if let .ok ty := field.getObjVal? "Dependent" then
+          exactKeys field ["Dependent"]
+          return .dependent (← termFromJson ty)
         exactKeys field ["Value"]
-        return some (← termFromJson (← field.getObjVal? "Value"))
+        return .value (← termFromJson (← field.getObjVal? "Value"))
     return .data name level fields
   else if let .ok v := j.getObjVal? "Let" then do
     exactKeys v ["value", "body"]

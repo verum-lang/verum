@@ -405,5 +405,246 @@ pub fn battery() -> Vec<(&'static str, Certificate, bool)> {
         Term::id_ty(nat(), Term::app(copy(), Term::var(0)), zero()),
     );
     rows.push(("forged-general-theorem", wrong_claim, false));
+    rows.extend(dependent_fields_battery());
+    rows
+}
+
+fn dependent_fields_battery() -> Vec<(&'static str, Certificate, bool)> {
+    let package = Term::Data {
+        name: "Package".into(),
+        level: Level::Concrete(1),
+        constructors: vec![vec![
+            DataField::Value(Box::new(Term::universe(0))),
+            DataField::Dependent(Box::new(Term::var(0))),
+            DataField::Dependent(Box::new(Term::id_ty(
+                Term::var(1),
+                Term::var(0),
+                Term::var(0),
+            ))),
+        ]],
+    };
+    let packed = ctor(package.clone(), 0, vec![nat(), zero(), Term::refl(zero())]);
+    let project = Term::lam(
+        package.clone(),
+        induct(
+            Term::var(0),
+            Term::lam(package.clone(), Term::universe(0)),
+            vec![Term::lam(
+                Term::universe(0),
+                Term::lam(
+                    Term::var(0),
+                    Term::lam(
+                        Term::id_ty(Term::var(1), Term::var(0), Term::var(0)),
+                        Term::var(2),
+                    ),
+                ),
+            )],
+        ),
+    );
+    let tree = Term::Data {
+        name: "EvidenceTree".into(),
+        level: Level::Concrete(1),
+        constructors: vec![
+            vec![],
+            vec![
+                DataField::Recursive,
+                DataField::Value(Box::new(Term::universe(0))),
+                DataField::Dependent(Box::new(Term::var(0))),
+                DataField::Dependent(Box::new(Term::id_ty(
+                    Term::var(1),
+                    Term::var(0),
+                    Term::var(0),
+                ))),
+            ],
+        ],
+    };
+    let leaf = ctor(tree.clone(), 0, vec![]);
+    let tree_value = ctor(
+        tree.clone(),
+        1,
+        vec![leaf, nat(), zero(), Term::refl(zero())],
+    );
+    let size = Term::lam(
+        tree.clone(),
+        induct(
+            Term::var(0),
+            Term::lam(tree.clone(), nat()),
+            vec![
+                zero(),
+                Term::lam(
+                    tree.clone(),
+                    Term::lam(
+                        nat(),
+                        Term::lam(
+                            Term::universe(0),
+                            Term::lam(
+                                Term::var(0),
+                                Term::lam(
+                                    Term::id_ty(Term::var(1), Term::var(0), Term::var(0)),
+                                    succ(Term::var(3)),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ],
+        ),
+    );
+    let reduced = Term::app(size.clone(), tree_value);
+    let mut rows = vec![
+        (
+            "dependent-telescope-formation",
+            certificate(package.clone(), Term::universe(1)),
+            true,
+        ),
+        (
+            "dependent-telescope-construction",
+            certificate(packed.clone(), package.clone()),
+            true,
+        ),
+        (
+            "dependent-telescope-general-elimination",
+            certificate(
+                project.clone(),
+                Term::pi(package.clone(), Term::universe(0)),
+            ),
+            true,
+        ),
+        (
+            "dependent-telescope-computation",
+            certificate(
+                Term::refl(Term::app(project.clone(), packed.clone())),
+                Term::id_ty(Term::universe(0), Term::app(project, packed), nat()),
+            ),
+            true,
+        ),
+        (
+            "dependent-field-after-recursion",
+            certificate(size, Term::pi(tree, nat())),
+            true,
+        ),
+        (
+            "dependent-recursive-computation",
+            certificate(
+                Term::refl(reduced.clone()),
+                Term::id_ty(nat(), reduced, succ(zero())),
+            ),
+            true,
+        ),
+        (
+            "dependent-field-wrong-argument",
+            certificate(
+                ctor(
+                    package.clone(),
+                    0,
+                    vec![nat(), Term::universe(0), Term::refl(zero())],
+                ),
+                package.clone(),
+            ),
+            false,
+        ),
+        (
+            "dependent-field-wrong-evidence",
+            certificate(
+                ctor(
+                    package.clone(),
+                    0,
+                    vec![nat(), zero(), Term::refl(succ(zero()))],
+                ),
+                package.clone(),
+            ),
+            false,
+        ),
+    ];
+    for (name, index) in [
+        ("dependent-field-self-reference", 1),
+        ("dependent-field-forward-reference", 2),
+    ] {
+        let malformed = Term::Data {
+            name: "Malformed".into(),
+            level: Level::Concrete(1),
+            constructors: vec![vec![
+                DataField::Value(Box::new(Term::universe(0))),
+                DataField::Dependent(Box::new(Term::var(index))),
+            ]],
+        };
+        rows.push((name, certificate(malformed, Term::universe(1)), false));
+    }
+    for (name, fields) in [
+        (
+            "dependent-field-not-a-type",
+            vec![
+                DataField::Value(Box::new(nat())),
+                DataField::Dependent(Box::new(Term::var(0))),
+            ],
+        ),
+        (
+            "dependent-field-universe-demotion",
+            vec![DataField::Dependent(Box::new(Term::universe(0)))],
+        ),
+    ] {
+        rows.push((
+            name,
+            certificate(
+                Term::Data {
+                    name: "InvalidField".into(),
+                    level: Level::Concrete(0),
+                    constructors: vec![fields],
+                },
+                Term::universe(0),
+            ),
+            false,
+        ));
+    }
+    let captured = Term::Data {
+        name: "CapturedEvidence".into(),
+        level: Level::Concrete(0),
+        constructors: vec![vec![
+            DataField::Value(Box::new(Term::var(1))),
+            DataField::Dependent(Box::new(Term::id_ty(
+                Term::var(2),
+                Term::var(0),
+                Term::var(1),
+            ))),
+        ]],
+    };
+    rows.push((
+        "dependent-field-captured-parameters",
+        certificate(
+            Term::lam(
+                Term::universe(0),
+                Term::lam(
+                    Term::var(0),
+                    ctor(
+                        captured.clone(),
+                        0,
+                        vec![Term::var(0), Term::refl(Term::var(0))],
+                    ),
+                ),
+            ),
+            Term::pi(Term::universe(0), Term::pi(Term::var(0), captured.clone())),
+        ),
+        true,
+    ));
+    let concrete = Term::Data {
+        name: "CapturedEvidence".into(),
+        level: Level::Concrete(0),
+        constructors: vec![vec![
+            DataField::Value(Box::new(nat())),
+            DataField::Dependent(Box::new(Term::id_ty(nat(), Term::var(0), zero()))),
+        ]],
+    };
+    let abstraction = Term::lam(
+        Term::universe(0),
+        Term::lam(
+            Term::var(0),
+            ctor(captured, 0, vec![Term::var(0), Term::refl(Term::var(0))]),
+        ),
+    );
+    rows.push((
+        "dependent-field-beta-preserves-capture",
+        certificate(Term::app(Term::app(abstraction, nat()), zero()), concrete),
+        true,
+    ));
     rows
 }

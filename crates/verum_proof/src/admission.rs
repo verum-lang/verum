@@ -93,10 +93,18 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
                 } => {
                     queue.push((Node::Level(level), depth + 1));
                     count += constructors.len();
-                    for field in constructors.iter().flatten() {
-                        count += 1;
-                        if let DataField::Value(ty) = field {
-                            queue.push((Node::Term(ty, binders), depth + 1));
+                    for fields in constructors {
+                        for (index, field) in fields.iter().enumerate() {
+                            count += 1;
+                            match field {
+                                DataField::Value(ty) => {
+                                    queue.push((Node::Term(ty, binders), depth + 1))
+                                }
+                                DataField::Dependent(ty) => {
+                                    queue.push((Node::Term(ty, binders + index), depth + 1))
+                                }
+                                DataField::Recursive => {}
+                            }
                         }
                     }
                     if count > MAX_NODES {

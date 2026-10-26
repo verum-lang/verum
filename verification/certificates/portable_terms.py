@@ -41,6 +41,8 @@ def data(name, constructors): return ('Data', name, constructors)
 
 def value_field(term): return ('Value', term)
 
+def dependent_field(name, term): return ('Dependent', name, term)
+
 RECURSIVE = ('Recursive',)
 
 def construct(declaration, constructor, *arguments): return ('Construct', declaration, constructor, arguments)
@@ -91,9 +93,24 @@ def lower(term, context=()):
     if kind == 'Id': return {'Id': dict(zip(('ty', 'lhs', 'rhs'), (lower(x, context) for x in term[1:])))}
     if kind == 'J': return {'J': dict(zip(('motive', 'base', 'scrutinee'), (lower(x, context) for x in term[1:])))}
     if kind == 'Data':
-        return {'Data': {'name': term[1], 'level': {'Concrete': 0}, 'constructors': [
-            [('Recursive' if field[0] == 'Recursive' else {'Value': lower(field[1], context)}) for field in fields]
-            for fields in term[2]]}}
+        constructors = []
+        for fields in term[2]:
+            lowered, field_context = [], context
+            for field in fields:
+                if field[0] == 'Dependent':
+                    lowered.append({'Dependent': lower(field[2], field_context)})
+                    binder = field[1]
+                elif field[0] == 'Value':
+                    lowered.append({'Value': lower(field[1], context)})
+                    binder = object()  # An unnamed field still occupies one binder.
+                elif field[0] == 'Recursive':
+                    lowered.append('Recursive')
+                    binder = object()
+                else:
+                    raise ValueError(f'unknown constructor field: {field[0]}')
+                field_context = (binder,) + field_context
+            constructors.append(lowered)
+        return {'Data': {'name': term[1], 'level': {'Concrete': 0}, 'constructors': constructors}}
     if kind == 'Construct': return {'Construct': {'data': lower(term[1], context), 'constructor': term[2], 'args': [lower(x, context) for x in term[3]]}}
     if kind == 'Induct': return {'Induct': {'scrutinee': lower(term[1], context), 'motive': lower(term[2], context), 'cases': [lower(x, context) for x in term[3]]}}
     raise ValueError(kind)

@@ -38,10 +38,18 @@ inductive Level : Type where
   | offset   (base : Level) (by_ : Nat)
   deriving DecidableEq, Inhabited, Repr
 
+/-- Value fields use the surrounding context; dependent fields also see
+    every earlier constructor field. Recursive occurrences remain explicit. -/
+inductive DataField (T : Type) where
+  | value : T → DataField T
+  | dependent : T → DataField T
+  | recursive : DataField T
+  deriving Inhabited, Repr
+
 /-- Native certificate terms: dependent functions and pairs, with
     intensional equality and transport. -/
 inductive Term : Type where
-  | data (name : String) (level : Level) (constructors : List (List (Option Term)))
+  | data (name : String) (level : Level) (constructors : List (List (DataField Term)))
   | construct (data : Term) (constructor : Nat) (args : List Term)
   | induct (scrutinee motive : Term) (cases : List Term)
   | letE (value body : Term)
@@ -288,14 +296,16 @@ def scopeTerms (bound : Nat) (terms : List Term) : Option Nat :=
   | term :: rest => (scopeError bound term).or (scopeTerms bound rest)
 termination_by sizeOf terms
 
-def scopeFields (bound : Nat) (fields : List (Option Term)) : Option Nat :=
+def scopeFields (bound : Nat) (fields : List (DataField Term)) (preceding : Nat := 0) : Option Nat :=
   match fields with
   | [] => none
-  | none :: rest => scopeFields bound rest
-  | some term :: rest => (scopeError bound term).or (scopeFields bound rest)
+  | .recursive :: rest => scopeFields bound rest (preceding + 1)
+  | .value term :: rest => (scopeError bound term).or (scopeFields bound rest (preceding + 1))
+  | .dependent term :: rest =>
+    (scopeError (bound + preceding) term).or (scopeFields bound rest (preceding + 1))
 termination_by sizeOf fields
 
-def scopeConstructors (bound : Nat) (constructors : List (List (Option Term))) : Option Nat :=
+def scopeConstructors (bound : Nat) (constructors : List (List (DataField Term))) : Option Nat :=
   match constructors with
   | [] => none
   | fields :: rest => (scopeFields bound fields).or (scopeConstructors bound rest)
@@ -309,8 +319,8 @@ def checkScope (bound : Nat) (t : Term) : Except CheckError Unit :=
   | some index => .error (.unbound_variable index)
 
 /- One total traversal owns the binding discipline for renaming and
-    substitution. Constructor value fields, arguments and induction branches
-    introduce no implicit binders; let bodies, Pi, Lam and Sigma introduce one.
+    substitution. Dependent fields bind each earlier field; value fields,
+    arguments and induction branches introduce no implicit binders; let bodies, Pi, Lam and Sigma introduce one.
     The explicit nested-list helpers expose decreasing structural recursion. -/
 mutual
 
@@ -341,15 +351,17 @@ def mapTerms (replace : Nat → Nat → Term) (cutoff : Nat) (terms : List Term)
 termination_by sizeOf terms
 
 def mapFields (replace : Nat → Nat → Term) (cutoff : Nat)
-    (fields : List (Option Term)) : List (Option Term) :=
+    (fields : List (DataField Term)) (preceding : Nat := 0) : List (DataField Term) :=
   match fields with
   | [] => []
-  | none :: rest => none :: mapFields replace cutoff rest
-  | some term :: rest => some (mapVars replace cutoff term) :: mapFields replace cutoff rest
+  | .recursive :: rest => .recursive :: mapFields replace cutoff rest (preceding + 1)
+  | .value term :: rest => .value (mapVars replace cutoff term) :: mapFields replace cutoff rest (preceding + 1)
+  | .dependent term :: rest =>
+    .dependent (mapVars replace (cutoff + preceding) term) :: mapFields replace cutoff rest (preceding + 1)
 termination_by sizeOf fields
 
 def mapConstructors (replace : Nat → Nat → Term) (cutoff : Nat)
-    (constructors : List (List (Option Term))) : List (List (Option Term)) :=
+    (constructors : List (List (DataField Term))) : List (List (DataField Term)) :=
   match constructors with
   | [] => []
   | fields :: rest => mapFields replace cutoff fields :: mapConstructors replace cutoff rest
@@ -377,13 +389,13 @@ def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
     Recursive hypotheses follow their own field immediately. The reducer checks
     arity first; truncation on malformed input matches `zip` exactly. -/
 def applyInductionCase (motive : Term) (cases : List Term)
-    (fields : List (Option Term)) (args : List Term) (branch : Term) : Term :=
+    (fields : List (DataField Term)) (args : List Term) (branch : Term) : Term :=
   match fields, args with
   | field :: rest, arg :: tail =>
     let next := Term.app branch arg
     let applied := match field with
-      | none => Term.app next (.induct arg motive cases)
-      | some _ => next
+      | .recursive => Term.app next (.induct arg motive cases)
+      | .value _ | .dependent _ => next
     applyInductionCase motive cases rest tail applied
   | _, _ => branch
 termination_by structural fields
@@ -442,7 +454,10 @@ def whnf (t : Term) : Term := whnfFuel whnfFuelCeiling t
 partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   match t with
   | .letE value body => isFreeIn target value || isFreeIn (target+1) body
-  | .data _ _ constructors => constructors.any (fun fields => fields.any (fun field => field.any (isFreeIn target)))
+  | .data _ _ constructors => constructors.any (fun fields => fields.zipIdx.any (fun (field, index) => match field with
+    | .value ty => isFreeIn target ty
+    | .dependent ty => isFreeIn (target + index) ty
+    | .recursive => false))
   | .construct data _ args => isFreeIn target data || args.any (isFreeIn target)
   | .induct value motive cases => isFreeIn target value || isFreeIn target motive || cases.any (isFreeIn target)
   | .var i        => i = target
@@ -458,6 +473,17 @@ partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   | .refl x => isFreeIn target x
   | .transport p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
 
+/-- Field domain in the frame of every preceding field. -/
+def fieldValueType (field : DataField Term) (preceding : Nat) : Option Term :=
+  match field with
+  | .value ty => some (shiftUp preceding 0 ty)
+  | .dependent ty => some ty
+  | .recursive => none
+
+/-- Eliminate a telescope using values in the common ambient context. -/
+def instantiateFields (term : Term) (arguments : List Term) : Term :=
+  arguments.zipIdx.foldr (fun (arg, remaining) result => subst 0 (shiftUp remaining 0 arg) result) term
+
 mutual
 
 /-- α + β + η-equality after WHNF reduction. -/
@@ -470,7 +496,7 @@ partial def defEqWhnf : Term → Term → Bool
 
   | .data an al ac, .data bn bl bc =>
     an == bn && Level.eq al bl && ac.length == bc.length && (ac.zip bc).all (fun (a,b) =>
-      a.length == b.length && (a.zip b).all (fun (x,y) => match x,y with
+      a.length == b.length && (a.zip b).zipIdx.all (fun ((x,y), index) => match fieldValueType x index, fieldValueType y index with
         | none, none => true
         | some x, some y => defEq x y
         | _, _ => false))
@@ -529,15 +555,19 @@ def expectUniverse (t : Term) : Option Level :=
 
 /-- Independently construct each case telescope from explicit recursive slots.
     Captured parameters remain in the surrounding de Bruijn context. -/
-def inductionCaseType (data motive : Term) (ctor : Nat) (fields : List (Option Term)) : Term := Id.run do
+def inductionCaseType (data motive : Term) (ctor : Nat) (fields : List (DataField Term)) : Term := Id.run do
   let mut domains : List Term := []
   let mut positions : List Nat := []
   for field in fields do
     let depth := domains.length
-    let domain := shiftUp depth 0 (field.getD data)
+    let domain := match field with
+      | .value ty => shiftUp depth 0 ty
+      | .recursive => shiftUp depth 0 data
+      | .dependent ty => instantiateFields (shiftUp depth positions.length ty)
+          (positions.map (fun i => .var (depth - 1 - i)))
     positions := positions ++ [depth]
     domains := domains ++ [domain]
-    if field.isNone then
+    if let .recursive := field then
       domains := domains ++ [.app (shiftUp (depth + 1) 0 motive) (.var 0)]
   let depth := domains.length
   let value := Term.construct (shiftUp depth 0 data) ctor (positions.map (fun i => .var (depth - 1 - i)))
@@ -553,12 +583,15 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     infer Γ (subst 0 value body)
   | .data _ level constructors => do
     for fields in constructors do
-      for field in fields do
-        if let some ty := field then
-          let kind ← infer Γ ty
-          let some fieldLevel := expectUniverse kind | throw (.not_a_type ty)
+      let mut fieldContext := Γ
+      for (field, index) in fields.zipIdx do
+        let domain := (fieldValueType field index).getD (shiftUp index 0 t)
+        if let some _ := fieldValueType field index then
+          let kind ← infer fieldContext domain
+          let some fieldLevel := expectUniverse kind | throw (.not_a_type domain)
           unless Level.eq (Level.maxCanonical fieldLevel level) level do
             throw (.invalid_inductive "field exceeds declaration universe")
+        fieldContext := domain :: fieldContext
     return .universe (Level.normalize level)
   | .construct data ctor args => do
     let _ ← infer Γ data
@@ -566,8 +599,9 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     let .data _ _ constructors := declaration | throw (.invalid_inductive "constructor owner is not a data declaration")
     let some fields := constructors[ctor]? | throw (.invalid_inductive "unknown constructor")
     unless fields.length == args.length do throw (.invalid_inductive "constructor field arity mismatch")
-    for (field, arg) in fields.zip args do
-      let expected := field.getD declaration
+    for ((field, arg), index) in (fields.zip args).zipIdx do
+      let domain := (fieldValueType field index).getD (shiftUp index 0 declaration)
+      let expected := instantiateFields domain (args.take index)
       checkAgainst Γ arg expected
     return declaration
   | .induct value motive cases => do

@@ -79,6 +79,29 @@ impl Closure {
     }
 }
 
+/// Field domains retain their binding frame until previous constructor
+/// arguments are available. Recursive fields are positive by construction.
+#[derive(Debug, Clone)]
+pub enum FieldValue {
+    Value(Closure),
+    Dependent(Closure),
+    Recursive,
+}
+
+impl FieldValue {
+    fn domain(&self, previous: &[Value]) -> Option<Value> {
+        match self {
+            Self::Value(closure) => Some(eval(&closure.body, &closure.env)),
+            Self::Dependent(closure) => {
+                let mut env = closure.env.clone();
+                env.extend(previous.iter().cloned().map(Arc::new));
+                Some(eval(&closure.body, &env))
+            }
+            Self::Recursive => None,
+        }
+    }
+}
+
 /// Semantic value — the result of evaluating a term in an
 /// environment. The fundamental data layer of NbE.
 ///
@@ -98,7 +121,7 @@ pub enum Value {
     VData {
         name: String,
         level: Level,
-        constructors: Vec<Vec<Option<Value>>>,
+        constructors: Vec<Vec<FieldValue>>,
     },
     VConstruct {
         data: Box<Value>,
@@ -227,8 +250,15 @@ pub fn eval(term: &Term, env: &Env) -> Value {
                     fields
                         .iter()
                         .map(|field| match field {
-                            DataField::Value(ty) => Some(eval(ty, env)),
-                            DataField::Recursive => None,
+                            DataField::Value(ty) => FieldValue::Value(Closure {
+                                env: env.clone(),
+                                body: Arc::new((**ty).clone()),
+                            }),
+                            DataField::Dependent(ty) => FieldValue::Dependent(Closure {
+                                env: env.clone(),
+                                body: Arc::new((**ty).clone()),
+                            }),
+                            DataField::Recursive => FieldValue::Recursive,
                         })
                         .collect()
                 })
@@ -350,7 +380,7 @@ pub fn apply_induct(scrutinee: Value, motive: Value, cases: Vec<Value>) -> Value
                     let mut result = case.clone();
                     for (field, argument) in fields.iter().zip(args) {
                         result = apply_value(result, argument.clone());
-                        if field.is_none() {
+                        if matches!(field, FieldValue::Recursive) {
                             result = apply_value(
                                 result,
                                 apply_induct(argument.clone(), motive.clone(), cases.clone()),
@@ -453,11 +483,22 @@ pub fn quote(value: &Value, level: usize) -> Term {
             constructors: constructors
                 .iter()
                 .map(|fields| {
+                    let previous: Vec<_> = (0..fields.len())
+                        .map(|index| Value::VNeutral(Neutral::NVar(level + index)))
+                        .collect();
                     fields
                         .iter()
-                        .map(|field| match field {
-                            Some(ty) => DataField::Value(Box::new(quote(ty, level))),
-                            None => DataField::Recursive,
+                        .enumerate()
+                        .map(|(index, field)| match field {
+                            FieldValue::Value(closure) => DataField::Value(Box::new(quote(
+                                &eval(&closure.body, &closure.env),
+                                level,
+                            ))),
+                            FieldValue::Dependent(_) => DataField::Dependent(Box::new(quote(
+                                &field.domain(&previous[..index]).expect("dependent domain"),
+                                level + index,
+                            ))),
+                            FieldValue::Recursive => DataField::Recursive,
                         })
                         .collect()
                 })
@@ -588,11 +629,16 @@ pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
                 && crate::proof_checker::level_eq(al, bl)
                 && ac.len() == bc.len()
                 && ac.iter().zip(bc).all(|(a, b)| {
+                    let previous: Vec<_> = (0..a.len())
+                        .map(|index| Value::VNeutral(Neutral::NVar(level + index)))
+                        .collect();
                     a.len() == b.len()
-                        && a.iter().zip(b).all(|(a, b)| match (a, b) {
-                            (Some(a), Some(b)) => def_eq(a, b, level),
-                            (None, None) => true,
-                            _ => false,
+                        && a.iter().zip(b).enumerate().all(|(index, (a, b))| {
+                            match (a.domain(&previous[..index]), b.domain(&previous[..index])) {
+                                (Some(a), Some(b)) => def_eq(&a, &b, level + index),
+                                (None, None) => true,
+                                _ => false,
+                            }
                         })
                 })
         }
@@ -871,17 +917,33 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             constructors,
             ..
         } => {
-            for field in constructors.iter().flatten() {
-                if let DataField::Value(ty) = field {
-                    let kind = infer_value(ctx, ty)?;
-                    let field_level = expect_universe(&kind)
-                        .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
-                    if !crate::proof_checker::level_eq(&field_level.max_with(level.clone()), level)
-                    {
-                        return Err(CheckError::InvalidInductive(
-                            "field exceeds declaration universe".into(),
-                        ));
-                    }
+            let declaration = eval(term, ctx.env());
+            for fields in constructors {
+                let mut local = ctx.clone();
+                for field in fields {
+                    let domain = match field {
+                        DataField::Value(ty) | DataField::Dependent(ty) => {
+                            let field_ctx = if matches!(field, DataField::Dependent(_)) {
+                                &local
+                            } else {
+                                ctx
+                            };
+                            let kind = infer_value(field_ctx, ty)?;
+                            let field_level = expect_universe(&kind)
+                                .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
+                            if !crate::proof_checker::level_eq(
+                                &field_level.max_with(level.clone()),
+                                level,
+                            ) {
+                                return Err(CheckError::InvalidInductive(
+                                    "field exceeds declaration universe".into(),
+                                ));
+                            }
+                            eval(ty, field_ctx.env())
+                        }
+                        DataField::Recursive => declaration.clone(),
+                    };
+                    local = local.extend(domain);
                 }
             }
             Ok(Value::VUniverse(level.clone().normalize()))
@@ -906,9 +968,13 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                     "constructor field arity mismatch".into(),
                 ));
             }
+            let mut previous = Vec::with_capacity(args.len());
             for (field, argument) in fields.iter().zip(args) {
-                let expected = field.as_ref().unwrap_or(&declaration);
-                check_value(ctx, argument, expected)?;
+                let expected = field
+                    .domain(&previous)
+                    .unwrap_or_else(|| declaration.clone());
+                check_value(ctx, argument, &expected)?;
+                previous.push(eval(argument, ctx.env()));
             }
             Ok(declaration)
         }

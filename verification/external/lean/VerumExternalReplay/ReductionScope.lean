@@ -10,12 +10,12 @@ set_option warningAsError true
 /-- The allocation-free branch application retains the exact former semantics,
     including malformed arity truncation and recursive-hypothesis ordering. -/
 theorem applyInductionCase_eq_fold (motive : Term) (cases : List Term)
-    (fields : List (Option Term)) (args : List Term) (branch : Term) :
+    (fields : List (DataField Term)) (args : List Term) (branch : Term) :
     applyInductionCase motive cases fields args branch =
       (fields.zip args).foldl (fun body (field, arg) =>
         match field with
-        | none => .app (.app body arg) (.induct arg motive cases)
-        | some _ => .app body arg) branch := by
+        | .recursive => .app (.app body arg) (.induct arg motive cases)
+        | .value _ | .dependent _ => .app body arg) branch := by
   induction fields generalizing args branch with
   | nil => simp [applyInductionCase]
   | cons field rest ih =>
@@ -37,7 +37,7 @@ theorem scopeTerms_member (bound : Nat) (terms : List Term)
     · exact ih parts.2 rest
 
 theorem scope_applyInductionCase (bound : Nat) (motive : Term) (cases : List Term)
-    (fields : List (Option Term)) (args : List Term) (branch : Term)
+    (fields : List (DataField Term)) (args : List Term) (branch : Term)
     (motiveGood : scopeError bound motive = none) (casesGood : scopeTerms bound cases = none)
     (argsGood : scopeTerms bound args = none) (branchGood : scopeError bound branch = none) :
     scopeError bound (applyInductionCase motive cases fields args branch) = none := by
@@ -50,10 +50,10 @@ theorem scope_applyInductionCase (bound : Nat) (motive : Term) (cases : List Ter
       have parts : scopeError bound arg = none ∧ scopeTerms bound tail = none := by
         simpa only [scopeTerms, Option.or_eq_none_iff] using argsGood
       cases field with
-      | none =>
+      | recursive =>
         apply ih tail _ parts.2
         simp only [scopeError, branchGood, parts.1, motiveGood, casesGood, Option.or_none]
-      | some ty =>
+      | value ty | dependent ty =>
         apply ih tail _ parts.2
         simp only [scopeError, branchGood, parts.1, Option.or_none]
 

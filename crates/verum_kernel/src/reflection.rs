@@ -92,6 +92,8 @@ use verum_common::{List, Text};
 pub enum ReflectedDataField {
     /// A nonrecursive field with its explicit type.
     Value(Box<ReflectedTerm>),
+    /// Type under all preceding constructor-field binders.
+    Dependent(Box<ReflectedTerm>),
     /// A direct recursive occurrence of the enclosing declaration.
     Recursive,
 }
@@ -296,6 +298,9 @@ impl From<&Term> for ReflectedTerm {
                                 DataField::Value(ty) => {
                                     ReflectedDataField::Value(Box::new(Self::from(ty.as_ref())))
                                 }
+                                DataField::Dependent(ty) => {
+                                    ReflectedDataField::Dependent(Box::new(Self::from(ty.as_ref())))
+                                }
                             })
                             .collect()
                     })
@@ -396,6 +401,8 @@ impl TryFrom<&ReflectedTerm> for Term {
                                 ReflectedDataField::Recursive => Ok(DataField::Recursive),
                                 ReflectedDataField::Value(ty) => Self::try_from(ty.as_ref())
                                     .map(|t| DataField::Value(Box::new(t))),
+                                ReflectedDataField::Dependent(ty) => Self::try_from(ty.as_ref())
+                                    .map(|t| DataField::Dependent(Box::new(t))),
                             })
                             .collect()
                     })
@@ -760,12 +767,13 @@ pub fn is_reflected_well_formed(judgment: &ReflectedJudgment) -> bool {
 /// the outer call.
 fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
     match term {
-        ReflectedTerm::Data { constructors, .. } => {
-            constructors.iter().flatten().all(|field| match field {
+        ReflectedTerm::Data { constructors, .. } => constructors.iter().all(|fields| {
+            fields.iter().enumerate().all(|(index, field)| match field {
                 ReflectedDataField::Recursive => true,
                 ReflectedDataField::Value(ty) => debruijn_in_range(ty, depth),
+                ReflectedDataField::Dependent(ty) => debruijn_in_range(ty, depth + index),
             })
-        }
+        }),
         ReflectedTerm::Construct { data, args, .. } => {
             debruijn_in_range(data, depth) && args.iter().all(|arg| debruijn_in_range(arg, depth))
         }

@@ -16,9 +16,9 @@ inductive HeadStep : Term → Term → Prop where
   | first (a b : Term) : HeadStep (.fst (.pair a b)) a
   | second (a b : Term) : HeadStep (.snd (.pair a b)) b
   | transport (motive base value : Term) : HeadStep (.transport motive base (.refl value)) base
-  | induction (name : String) (level : Level) (constructors : List (List (Option Term)))
+  | induction (name : String) (level : Level) (constructors : List (List (DataField Term)))
       (ctor : Nat) (args : List Term) (motive : Term) (cases : List Term)
-      (fields : List (Option Term)) (branch : Term)
+      (fields : List (DataField Term)) (branch : Term)
       (fieldsFound : constructors[ctor]? = some fields) (branchFound : cases[ctor]? = some branch)
       (arity : fields.length = args.length) :
       HeadStep (.induct (.construct (.data name level constructors) ctor args) motive cases)

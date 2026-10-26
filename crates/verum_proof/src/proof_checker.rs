@@ -450,12 +450,14 @@ pub(crate) fn lift_term_one_binder(term: Term) -> Term {
 /// Constructor fields in the portable first-order inductive fragment.
 /// Recursive occurrences are explicit and strictly positive by construction.
 /// Value fields are types in the declaration's surrounding binder context;
-/// fields do not bind names in later field types. Indexed, nested and
-/// function-valued recursive positions are not part of this fragment.
+/// `Dependent` fields instead see all preceding constructor fields, in order.
+/// Indexed, nested and function-valued recursion are not part of this fragment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum DataField {
     Value(Box<Term>),
+    /// Type under one binder for each earlier field (including recursive fields).
+    Dependent(Box<Term>),
     Recursive,
 }
 
@@ -578,9 +580,9 @@ pub enum Term {
 }
 
 impl Term {
-    /// Map the immediate term children of a data node. Data nodes introduce
-    /// no de Bruijn binders: captured parameters remain in the outer context.
-    fn map_data_terms(self, mut map: impl FnMut(Term) -> Term) -> Term {
+    /// Map each immediate data child together with its local binder count.
+    /// Dependent fields see earlier fields; all other children use the ambient frame.
+    fn map_data_terms(self, mut map: impl FnMut(Term, usize) -> Term) -> Term {
         match self {
             Term::Data {
                 name,
@@ -594,8 +596,12 @@ impl Term {
                     .map(|fields| {
                         fields
                             .into_iter()
-                            .map(|field| match field {
-                                DataField::Value(t) => DataField::Value(Box::new(map(*t))),
+                            .enumerate()
+                            .map(|(index, field)| match field {
+                                DataField::Value(t) => DataField::Value(Box::new(map(*t, 0))),
+                                DataField::Dependent(t) => {
+                                    DataField::Dependent(Box::new(map(*t, index)))
+                                }
                                 DataField::Recursive => DataField::Recursive,
                             })
                             .collect()
@@ -607,18 +613,18 @@ impl Term {
                 constructor,
                 args,
             } => Term::Construct {
-                data: Box::new(map(*data)),
+                data: Box::new(map(*data, 0)),
                 constructor,
-                args: args.into_iter().map(map).collect(),
+                args: args.into_iter().map(|t| map(t, 0)).collect(),
             },
             Term::Induct {
                 scrutinee,
                 motive,
                 cases,
             } => Term::Induct {
-                scrutinee: Box::new(map(*scrutinee)),
-                motive: Box::new(map(*motive)),
-                cases: cases.into_iter().map(map).collect(),
+                scrutinee: Box::new(map(*scrutinee, 0)),
+                motive: Box::new(map(*motive, 0)),
+                cases: cases.into_iter().map(|t| map(t, 0)).collect(),
             },
             _ => unreachable!("map_data_terms requires a data node"),
         }
@@ -796,7 +802,7 @@ pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
             body: Box::new(shift_up(*body, amount, cutoff + 1)),
         },
         data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
-            data.map_data_terms(|child| shift_up(child, amount, cutoff))
+            data.map_data_terms(|child, binders| shift_up(child, amount, cutoff + binders))
         }
         Term::Var(i) => {
             if i >= cutoff {
@@ -864,7 +870,7 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
             body: Box::new(subst(*body, target + 1, replacement)),
         },
         data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
-            data.map_data_terms(|child| subst(child, target, replacement))
+            data.map_data_terms(|child, binders| subst(child, target + binders, replacement))
         }
         Term::Var(i) => {
             use std::cmp::Ordering;
@@ -1116,10 +1122,12 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
                 && ac.len() == bc.len()
                 && ac.iter().zip(bc).all(|(a, b)| {
                     a.len() == b.len()
-                        && a.iter().zip(b).all(|(a, b)| match (a, b) {
-                            (DataField::Recursive, DataField::Recursive) => true,
-                            (DataField::Value(a), DataField::Value(b)) => def_eq(a, b),
-                            _ => false,
+                        && a.iter().zip(b).enumerate().all(|(index, (a, b))| {
+                            match (field_value_type(a, index), field_value_type(b, index)) {
+                                (None, None) => true,
+                                (Some(a), Some(b)) => def_eq(&a, &b),
+                                _ => false,
+                            }
                         })
                 })
         }
@@ -1274,9 +1282,12 @@ fn eta_match(lam_body: &Term, other: &Term) -> bool {
 fn is_free_in(term: &Term, target: usize) -> bool {
     match term {
         Term::Let { value, body } => is_free_in(value, target) || is_free_in(body, target + 1),
-        Term::Data { constructors, .. } => constructors.iter().flatten().any(|field| match field {
-            DataField::Value(t) => is_free_in(t, target),
-            DataField::Recursive => false,
+        Term::Data { constructors, .. } => constructors.iter().any(|fields| {
+            fields.iter().enumerate().any(|(index, field)| match field {
+                DataField::Value(t) => is_free_in(t, target),
+                DataField::Dependent(t) => is_free_in(t, target + index),
+                DataField::Recursive => false,
+            })
         }),
         Term::Construct { data, args, .. } => {
             is_free_in(data, target) || args.iter().any(|t| is_free_in(t, target))
@@ -1325,7 +1336,7 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
             body: Box::new(shift_down(*body, amount, cutoff + 1)),
         },
         data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
-            data.map_data_terms(|child| shift_down(child, amount, cutoff))
+            data.map_data_terms(|child, binders| shift_down(child, amount, cutoff + binders))
         }
         Term::Var(i) => {
             if i >= cutoff + amount {
@@ -1516,16 +1527,22 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             constructors,
             ..
         } => {
-            for field in constructors.iter().flatten() {
-                if let DataField::Value(ty) = field {
-                    let kind = infer(ctx, ty)?;
-                    let field_level = expect_universe(&kind)
-                        .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
-                    if !level_eq(&field_level.max_with(level.clone()), level) {
-                        return Err(CheckError::InvalidInductive(
-                            "field exceeds declaration universe".into(),
-                        ));
+            for fields in constructors {
+                let mut local = ctx.clone();
+                for (index, field) in fields.iter().enumerate() {
+                    let domain = field_value_type(field, index)
+                        .unwrap_or_else(|| shift_up(term.clone(), index, 0));
+                    if !matches!(field, DataField::Recursive) {
+                        let kind = infer(&local, &domain)?;
+                        let field_level = expect_universe(&kind)
+                            .ok_or_else(|| CheckError::NotAType(domain.clone()))?;
+                        if !level_eq(&field_level.max_with(level.clone()), level) {
+                            return Err(CheckError::InvalidInductive(
+                                "field exceeds declaration universe".into(),
+                            ));
+                        }
                     }
+                    local = local.extend(domain);
                 }
             }
             Ok(Term::Universe(level.clone().normalize()))
@@ -1550,12 +1567,11 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     "constructor field arity mismatch".into(),
                 ));
             }
-            for (field, argument) in fields.iter().zip(args) {
-                let expected = match field {
-                    DataField::Value(ty) => ty.as_ref(),
-                    DataField::Recursive => &declaration,
-                };
-                check_against(ctx, argument, expected)?;
+            for (index, (field, argument)) in fields.iter().zip(args).enumerate() {
+                let domain = field_value_type(field, index)
+                    .unwrap_or_else(|| shift_up(declaration.clone(), index, 0));
+                let expected = instantiate_fields(domain, &args[..index]);
+                check_against(ctx, argument, &expected)?;
             }
             Ok(declaration)
         }
@@ -1779,6 +1795,24 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
     }
 }
 
+/// View a nonrecursive field type in the frame of all preceding fields.
+fn field_value_type(field: &DataField, preceding: usize) -> Option<Term> {
+    match field {
+        DataField::Value(ty) => Some(shift_up((**ty).clone(), preceding, 0)),
+        DataField::Dependent(ty) => Some((**ty).clone()),
+        DataField::Recursive => None,
+    }
+}
+
+/// Instantiate an ordered telescope with arguments in a common outer frame.
+/// Lift each replacement past the binders still awaiting instantiation.
+fn instantiate_fields(mut term: Term, arguments: &[Term]) -> Term {
+    for (remaining, argument) in arguments.iter().enumerate().rev() {
+        term = subst(term, 0, &shift_up(argument.clone(), remaining, 0));
+    }
+    term
+}
+
 /// Generate a branch telescope from the declaration, preserving every captured
 /// binder and interleaving recursive fields with their dependent hypotheses.
 /// Both algorithms use this syntactic telescope, but infer and reduce it
@@ -1795,6 +1829,16 @@ pub(crate) fn induction_case_type(
         let depth = domains.len();
         let domain = match field {
             DataField::Value(ty) => shift_up((**ty).clone(), depth, 0),
+            DataField::Dependent(ty) => {
+                let references: Vec<_> = positions
+                    .iter()
+                    .map(|position| Term::Var(depth - 1 - position))
+                    .collect();
+                instantiate_fields(
+                    shift_up((**ty).clone(), depth, positions.len()),
+                    &references,
+                )
+            }
             DataField::Recursive => shift_up(data.clone(), depth, 0),
         };
         positions.push(depth);

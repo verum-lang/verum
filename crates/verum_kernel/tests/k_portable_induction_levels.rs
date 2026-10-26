@@ -92,3 +92,32 @@ fn universe_translation_preserves_constructor_ownership_and_induction() {
         assert!(verify_certificate_with_lift(&cert, level).is_ok());
     }
 }
+
+#[test]
+fn universe_translation_preserves_dependent_constructor_telescopes() {
+    let declaration = Term::Data {
+        name: "Package".into(),
+        level: Level::Concrete(1),
+        constructors: vec![vec![
+            DataField::Dependent(Box::new(Term::universe(0))),
+            DataField::Dependent(Box::new(Term::var(0))),
+        ]],
+    };
+    let cert = Certificate {
+        term: declaration,
+        claimed_type: Term::universe(1),
+        metadata: Default::default(),
+    };
+    assert!(verify_certificate_with_lift(&cert, 3).is_ok());
+    let Term::Data { constructors, .. } = shift_universes(&cert.term, 3) else {
+        panic!("declaration lost");
+    };
+    assert_eq!(
+        constructors[0][0],
+        DataField::Dependent(Box::new(Term::universe(3)))
+    );
+    assert_eq!(
+        constructors[0][1],
+        DataField::Dependent(Box::new(Term::var(0)))
+    );
+}

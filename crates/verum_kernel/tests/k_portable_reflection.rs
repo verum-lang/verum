@@ -74,3 +74,26 @@ fn reflection_checks_captured_field_variables_and_local_definition_scope() {
         )));
     }
 }
+
+#[test]
+fn reflected_dependent_fields_own_only_their_preceding_binders() {
+    for (index, expected) in [(0, true), (1, false)] {
+        let term = Term::Data {
+            name: "Package".into(),
+            level: Level::Concrete(1),
+            constructors: vec![vec![
+                DataField::Value(Box::new(Term::universe(0))),
+                DataField::Dependent(Box::new(Term::var(index))),
+            ]],
+        };
+        let reflected = ReflectedTerm::from(&term);
+        assert_eq!(Term::try_from(&reflected).unwrap(), term);
+        assert_eq!(
+            is_reflected_well_formed(&ReflectedJudgment::closed(
+                reflected,
+                ReflectedTerm::from(&Term::universe(1))
+            )),
+            expected
+        );
+    }
+}

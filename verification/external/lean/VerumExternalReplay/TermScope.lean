@@ -77,29 +77,38 @@ termination_by sizeOf terms
 
 theorem scope_mapFields (n m : Nat) (replace : Nat → Nat → Term)
     (law : ∀ depth i, i < n + depth → scopeError (m + depth) (replace depth i) = none)
-    (cutoff : Nat) (fields : List (Option Term)) (good : scopeFields (n + cutoff) fields = none) :
-    scopeFields (m + cutoff) (mapFields replace cutoff fields) = none := by
+    (cutoff : Nat) (fields : List (DataField Term)) (preceding : Nat)
+    (good : scopeFields (n + cutoff) fields preceding = none) :
+    scopeFields (m + cutoff) (mapFields replace cutoff fields preceding) preceding = none := by
   cases fields with
   | nil => simp only [mapFields, scopeFields]
   | cons field rest =>
     cases field with
-    | none =>
+    | recursive =>
       simp only [mapFields, scopeFields] at good ⊢
-      exact scope_mapFields n m replace law cutoff rest good
-    | some term =>
+      exact scope_mapFields n m replace law cutoff rest (preceding + 1) good
+    | value term =>
       simp only [mapFields, scopeFields, Option.or_eq_none_iff] at good ⊢
-      exact ⟨scope_mapVars n m replace law cutoff term good.1, scope_mapFields n m replace law cutoff rest good.2⟩
+      exact ⟨scope_mapVars n m replace law cutoff term good.1,
+        scope_mapFields n m replace law cutoff rest (preceding + 1) good.2⟩
+    | dependent term =>
+      simp only [mapFields, scopeFields, Option.or_eq_none_iff] at good ⊢
+      constructor
+      · have head := scope_mapVars n m replace law (cutoff + preceding) term
+          (by simpa only [Nat.add_assoc] using good.1)
+        simpa only [Nat.add_assoc] using head
+      · exact scope_mapFields n m replace law cutoff rest (preceding + 1) good.2
 termination_by sizeOf fields
 
 theorem scope_mapConstructors (n m : Nat) (replace : Nat → Nat → Term)
     (law : ∀ depth i, i < n + depth → scopeError (m + depth) (replace depth i) = none)
-    (cutoff : Nat) (constructors : List (List (Option Term))) (good : scopeConstructors (n + cutoff) constructors = none) :
+    (cutoff : Nat) (constructors : List (List (DataField Term))) (good : scopeConstructors (n + cutoff) constructors = none) :
     scopeConstructors (m + cutoff) (mapConstructors replace cutoff constructors) = none := by
   cases constructors with
   | nil => simp only [mapConstructors, scopeConstructors]
   | cons fields rest =>
     simp only [mapConstructors, scopeConstructors, Option.or_eq_none_iff] at good ⊢
-    exact ⟨scope_mapFields n m replace law cutoff fields good.1, scope_mapConstructors n m replace law cutoff rest good.2⟩
+    exact ⟨scope_mapFields n m replace law cutoff fields 0 good.1, scope_mapConstructors n m replace law cutoff rest good.2⟩
 termination_by sizeOf constructors
 
 end

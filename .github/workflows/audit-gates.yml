@@ -182,6 +182,13 @@ jobs:
             --lean verification/external/lean/.lake/build/bin/verum_replay_checker \
             --report conservative-refinement-acceptance.json
 
+      - name: Dependent constructor source and certificate replay
+        run: |
+          python3 verification/certificates/check_dependent_constructors.py \
+            --native target/release/verum-proof \
+            --lean verification/external/lean/.lake/build/bin/verum_replay_checker \
+            --report dependent-constructors-acceptance.json
+
       - name: Owned dispatch and observation-envelope contracts
         run: |
           python3 verification/certificates/check_dispatch_contract.py \
@@ -228,6 +235,7 @@ jobs:
             diagnostic-fibres-acceptance.json
             exact-transports-acceptance.json
             typed-programs-acceptance.json
+            dependent-constructors-acceptance.json
           retention-days: 14
 
   # ---------------------------------------------------------------------------

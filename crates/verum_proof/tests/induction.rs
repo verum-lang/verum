@@ -69,3 +69,32 @@ fn admission_counts_constructor_and_recursive_slot_nodes() {
     assert!(!result.accepted);
     assert_eq!(result.diagnostic.unwrap().code, "structural_limit");
 }
+
+#[test]
+fn admission_scopes_dependent_fields_without_admitting_self_references() {
+    use verum_proof::admission::{Judgment, PROFILE, replay};
+    use verum_proof::proof_checker::{DataField, Level};
+    for (index, expected) in [(0, true), (1, false)] {
+        let declaration = Term::Data {
+            name: "Package".into(),
+            level: Level::Concrete(1),
+            constructors: vec![vec![
+                DataField::Value(Box::new(Term::universe(0))),
+                DataField::Dependent(Box::new(Term::var(index))),
+            ]],
+        };
+        let certificate = fixtures::certificate(declaration, Term::universe(1));
+        let report = replay(
+            &serde_json::to_vec(&Judgment {
+                profile: PROFILE.into(),
+                statement: certificate.claimed_type.clone(),
+                certificate,
+            })
+            .unwrap(),
+        );
+        assert_eq!(report.accepted, expected, "{report:?}");
+        if !expected {
+            assert_eq!(report.diagnostic.unwrap().code, "unbound_variable");
+        }
+    }
+}

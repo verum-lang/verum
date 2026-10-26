@@ -56,6 +56,9 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
                             DataField::Value(ty) => {
                                 DataField::Value(Box::new(shift_universes(ty, lift)))
                             }
+                            DataField::Dependent(ty) => {
+                                DataField::Dependent(Box::new(shift_universes(ty, lift)))
+                            }
                             DataField::Recursive => DataField::Recursive,
                         })
                         .collect()
