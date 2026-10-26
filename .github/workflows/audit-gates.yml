@@ -211,6 +211,8 @@ jobs:
             --report observer-lifecycle-acceptance.json
           python3 verification/external/lean/check_common_description_cost.py \
             --report common-description-cost-acceptance.json
+          python3 verification/external/lean/check_observer_retirement.py \
+            --report observer-retirement-acceptance.json
       - name: Frozen observer export correspondence
         run: |
           python3 verification/external/lean/check_observer_export.py \
@@ -293,6 +295,7 @@ jobs:
             finite-code-acceptance.json
             finite-execution-acceptance.json
             observer-lifecycle-acceptance.json
+            observer-retirement-acceptance.json
             observer-export-acceptance.json
             observer-export*.lean
             observer-export-*/
