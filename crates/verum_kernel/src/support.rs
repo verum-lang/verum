@@ -75,8 +75,7 @@ fn subst_binder_body(
     }
     if var_occurs_free(value, binder.as_str()) {
         let fresh = fresh_binder_name(binder.as_str(), value, body, name);
-        let renamed_body =
-            substitute(body, binder.as_str(), &CoreTerm::Var(fresh.clone()));
+        let renamed_body = substitute(body, binder.as_str(), &CoreTerm::Var(fresh.clone()));
         let new_body = substitute(&renamed_body, name, value);
         return (fresh, new_body);
     }
@@ -139,8 +138,7 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             codomain,
         } => {
             let new_dom = substitute(domain, name, value);
-            let (new_binder, new_codom) =
-                subst_binder_body(binder, codomain, name, value);
+            let (new_binder, new_codom) = subst_binder_body(binder, codomain, name, value);
             CoreTerm::Pi {
                 binder: new_binder,
                 domain: Heap::new(new_dom),
@@ -154,8 +152,7 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             body,
         } => {
             let new_dom = substitute(domain, name, value);
-            let (new_binder, new_body) =
-                subst_binder_body(binder, body, name, value);
+            let (new_binder, new_body) = subst_binder_body(binder, body, name, value);
             CoreTerm::Lam {
                 binder: new_binder,
                 domain: Heap::new(new_dom),
@@ -174,8 +171,7 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             snd_ty,
         } => {
             let new_fst = substitute(fst_ty, name, value);
-            let (new_binder, new_snd) =
-                subst_binder_body(binder, snd_ty, name, value);
+            let (new_binder, new_snd) = subst_binder_body(binder, snd_ty, name, value);
             CoreTerm::Sigma {
                 binder: new_binder,
                 fst_ty: Heap::new(new_fst),
@@ -239,8 +235,7 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             predicate,
         } => {
             let new_base = substitute(base, name, value);
-            let (new_binder, new_pred) =
-                subst_binder_body(binder, predicate, name, value);
+            let (new_binder, new_pred) = subst_binder_body(binder, predicate, name, value);
             CoreTerm::Refine {
                 base: Heap::new(new_base),
                 binder: new_binder,
@@ -268,10 +263,12 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             scrutinee,
             motive,
             case,
+            respect,
         } => CoreTerm::QuotElim {
             scrutinee: Heap::new(substitute(scrutinee, name, value)),
             motive: Heap::new(substitute(motive, name, value)),
             case: Heap::new(substitute(case, name, value)),
+            respect: Heap::new(substitute(respect, name, value)),
         },
 
         CoreTerm::Inductive { path, args } => {
@@ -686,6 +683,7 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
             scrutinee,
             motive,
             case,
+            respect,
         } => {
             let scrut_norm = normalize_core(scrutinee, ctx);
             match &scrut_norm {
@@ -699,6 +697,7 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
                     scrutinee: Heap::new(scrut_norm),
                     motive: Heap::new(normalize_core(motive, ctx)),
                     case: Heap::new(normalize_core(case, ctx)),
+                    respect: Heap::new(normalize_core(respect, ctx)),
                 },
             }
         }
@@ -907,7 +906,6 @@ fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
     var_occurs_free(body, binder)
 }
 
-
 /// ε-invariant token (Diakrisis Actic
 /// 12-actic/03-epsilon-invariant.md). The Actic-side dual of
 /// the canonical primitive carries an ordinal-valued
@@ -1000,7 +998,9 @@ pub fn substitute_all(term: &CoreTerm, replacements: &[(Text, CoreTerm)]) -> Cor
         let mut index = 0;
         let fresh = loop {
             let candidate = Text::from(format!("{name}_subst{index}"));
-            if used.insert(candidate.clone()) { break candidate; }
+            if used.insert(candidate.clone()) {
+                break candidate;
+            }
             index += 1;
         };
         result = substitute(&result, name.as_str(), &CoreTerm::Var(fresh.clone()));
@@ -1053,7 +1053,6 @@ pub fn normalize_with_axioms(term: &CoreTerm, axioms: &crate::AxiomRegistry) -> 
     };
     normalize_core(term, &mut ctx)
 }
-
 
 // =============================================================================
 // Inductive-aware normaliser (HIT eliminator β-rule).
@@ -1234,10 +1233,12 @@ pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
             scrutinee,
             motive,
             case,
+            respect,
         } => {
             var_occurs_free(scrutinee, name)
                 || var_occurs_free(motive, name)
                 || var_occurs_free(case, name)
+                || var_occurs_free(respect, name)
         }
 
         // Inductive: qualified path is a global identifier (not a
@@ -1414,10 +1415,12 @@ fn free_vars_rec(
             scrutinee,
             motive,
             case,
+            respect,
         } => {
             free_vars_rec(scrutinee, bound, out);
             free_vars_rec(motive, bound, out);
             free_vars_rec(case, bound, out);
+            free_vars_rec(respect, bound, out);
         }
         CoreTerm::Constructor { params, args, .. } => {
             for t in params.iter().chain(args.iter()) {

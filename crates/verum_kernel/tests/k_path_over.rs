@@ -77,7 +77,8 @@ fn pathover_typing_admits_well_formed() {
         },
     );
     let axioms = AxiomRegistry::new();
-    let ty = infer(&ctx, &term, &axioms).expect("PathOver must type-check");
+    let ty = verum_kernel::infer_with_inductives(&ctx, &term, &axioms, &inds)
+        .expect("PathOver must type-check");
     // Motive Lam(_:Nat, Type_0) has type Pi(Nat, Type_1) — its
     // codomain is `Type_0` whose own type is `Type_1`. So the
     // PathOver inhabits `Type_1`, the codomain's universe level.

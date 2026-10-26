@@ -66,6 +66,7 @@ pub enum SubsingletonRegime {
 #[derive(Debug, Clone, Default)]
 pub struct AxiomRegistry {
     entries: List<RegisteredAxiom>,
+    inductive_dependencies: List<crate::RegisteredInductive>,
 }
 
 /// One entry in the [`AxiomRegistry`].
@@ -113,6 +114,7 @@ impl AxiomRegistry {
     pub fn new() -> Self {
         Self {
             entries: List::new(),
+            inductive_dependencies: List::new(),
         }
     }
 
@@ -229,6 +231,26 @@ impl AxiomRegistry {
         framework: FrameworkId,
         regime: SubsingletonRegime,
     ) -> Result<(), KernelError> {
+        self.register_with_regime_and_inductives(
+            name,
+            ty,
+            framework,
+            regime,
+            &crate::InductiveRegistry::new(),
+        )
+    }
+
+    /// Register an explicit postulate against a checked inductive environment.
+    /// The dependency identities remain fixed for subsequent verification.
+    pub fn register_with_regime_and_inductives(
+        &mut self,
+        name: Text,
+        ty: CoreTerm,
+        framework: FrameworkId,
+        regime: SubsingletonRegime,
+        inductives: &crate::InductiveRegistry,
+    ) -> Result<(), KernelError> {
+        self.validate_inductive_dependencies(Some(inductives))?;
         if self.entries.iter().any(|e| e.name == name) {
             return Err(KernelError::DuplicateAxiom(name));
         }
@@ -272,8 +294,12 @@ impl AxiomRegistry {
                 // result must inhabit a universe — anything else
                 // means the body isn't a type and the axiom is
                 // category-mistaken.
-                let inferred =
-                    crate::infer::infer(&crate::Context::new(), &ty, &AxiomRegistry::new());
+                let inferred = crate::infer::infer_with_inductives(
+                    &crate::Context::new(),
+                    &ty,
+                    self,
+                    inductives,
+                );
                 match inferred {
                     Ok(crate::CoreTerm::Universe(_)) => {
                         // Pass — body is a type at some universe.
@@ -302,6 +328,7 @@ impl AxiomRegistry {
             }
             SubsingletonRegime::UipPermitted | SubsingletonRegime::LegacyUnchecked => {}
         }
+        self.retain_inductive_dependencies(inductives);
         self.entries.push(RegisteredAxiom {
             name,
             ty,
@@ -349,23 +376,9 @@ impl AxiomRegistry {
         Ok(())
     }
 
-    /// register a transparent **definition**: a name
-    /// bound to an explicit body that δ-reduction will unfold.
-    ///
-    /// Equivalent to `register_with_regime(LegacyUnchecked)` but
-    /// stores the body for later use by
-    /// [`crate::support::normalize_with_axioms`]. Definitions
-    /// don't go through the K-FwAx subsingleton/Prop checks
-    /// because they're not postulates — they're closed
-    /// elaborator-emitted let-bindings whose well-formedness was
-    /// already validated by the type-checker that produced the
-    /// body.
-    ///
-    /// Side-condition: `body` should be a closed term that
-    /// inhabits `ty`. The kernel doesn't re-check this here
-    /// (the elaborator's responsibility); the trusted gate is
-    /// the LCF `verify_full(body, ty)` call the elaborator
-    /// performs before invoking `register_definition`.
+    /// Admit a closed transparent definition after checking its declared type
+    /// and body in the existing environment. Forward and recursive references
+    /// cannot use the new name as a postulate during its own verification.
     pub fn register_definition(
         &mut self,
         name: Text,
@@ -373,20 +386,94 @@ impl AxiomRegistry {
         ty: CoreTerm,
         framework: FrameworkId,
     ) -> Result<(), KernelError> {
+        self.register_definition_with_inductives(
+            name,
+            body,
+            ty,
+            framework,
+            &crate::InductiveRegistry::new(),
+        )
+    }
+
+    /// Admit a transparent definition using explicitly registered inductives.
+    /// Failure leaves the environment unchanged; successful definitions can
+    /// depend only on declarations already admitted to these registries.
+    pub fn register_definition_with_inductives(
+        &mut self,
+        name: Text,
+        body: CoreTerm,
+        ty: CoreTerm,
+        framework: FrameworkId,
+        inductives: &crate::InductiveRegistry,
+    ) -> Result<(), KernelError> {
         if self.entries.iter().any(|e| e.name == name) {
             return Err(KernelError::DuplicateAxiom(name));
         }
         if crate::inductive::is_uip_shape(&ty) {
             return Err(KernelError::UipForbidden(name));
         }
+        self.validate_inductive_dependencies(Some(inductives))?;
+        crate::verify_with_inductives(&crate::Context::new(), &body, &ty, self, inductives)?;
+        self.retain_inductive_dependencies(inductives);
+        // Transparent aliases retain the strongest citation requirement of
+        // their type and body; unfolding must not erase framework provenance.
+        let mut coord = None;
+        self.collect_required_coord(&ty, &mut coord);
+        self.collect_required_coord(&body, &mut coord);
         self.entries.push(RegisteredAxiom {
             name,
             ty,
             framework,
-            coord: None,
+            coord,
             body: Some(body),
         });
         Ok(())
+    }
+
+    /// Validate declaration identities used when admitting types and bodies.
+    /// A same-name replacement with a different universe or constructors is
+    /// not the environment in which these entries were checked.
+    pub(crate) fn validate_inductive_dependencies(
+        &self,
+        inductives: Option<&crate::InductiveRegistry>,
+    ) -> Result<(), KernelError> {
+        for dependency in &self.inductive_dependencies {
+            if inductives.and_then(|registry| registry.get(dependency.name.as_str()))
+                != Some(dependency)
+            {
+                return Err(KernelError::InvalidEliminator(Text::from(format!(
+                    "declaration environment changed for {}",
+                    dependency.name,
+                ))));
+            }
+        }
+        Ok(())
+    }
+
+    fn retain_inductive_dependencies(&mut self, inductives: &crate::InductiveRegistry) {
+        for declaration in inductives.all() {
+            if !self
+                .inductive_dependencies
+                .iter()
+                .any(|known| known.name == declaration.name)
+            {
+                self.inductive_dependencies.push(declaration.clone());
+            }
+        }
+    }
+
+    fn collect_required_coord(&self, term: &CoreTerm, required: &mut Option<crate::KernelCoord>) {
+        if let CoreTerm::Axiom { name, .. } = term
+            && let Some(coord) = self
+                .get(name.as_str())
+                .and_then(|entry| entry.coord.as_ref())
+            && required
+                .as_ref()
+                .is_none_or(|current| current.nu.lt(&coord.nu))
+        {
+            *required = Some(coord.clone());
+        }
+        term.visit_children(|child| self.collect_required_coord(child, required));
     }
 
     /// Look up an axiom by name.

@@ -1,325 +1,283 @@
-//! K-Quot-Form / K-Quot-Intro / K-Quot-Elim integration tests for
-//! quotient types.
-//!
-//! Quotient types `T / ~` collapse equivalence classes of T into
-//! single elements. The kernel checks:
-//!  • K-Quot-Form: `Quotient(T, ~)` is a type when T is a type
-//!  and ~ is well-typed; result inhabits T's universe.
-//!  • K-Quot-Intro: `[t]_~ : Quotient(T, ~)` when t : T.
-//!  • K-Quot-Elim: `quot_elim(q, motive, case)` typed as
-//!  `motive(q)` when q : Quotient(T, ~), motive well-typed,
-//!  case well-typed (respect-of-equivalence is V2 deferred).
-//! Plus the β-rule: `quot_elim([t]_~, m, case) ↦ case(t)` via
-//! the normaliser.
+//! Quotient formation and recursion check their actual typing and coherence
+//! premises. Fixtures quantify over ordinary context-carried types: no opaque
+//! unregistered type heads or postulated relation-respect theorem is needed.
+use verum_common::{Heap, Text};
+use verum_kernel::{AxiomRegistry, Context, CoreTerm, UniverseLevel, infer, normalize};
 
-use verum_common::{Heap, List, Text};
-use verum_kernel::{
-    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel, definitional_eq,
-    infer, normalize,
-};
-
-fn empty() -> (Context, AxiomRegistry) {
-    (Context::new(), AxiomRegistry::new())
+fn var(name: &str) -> CoreTerm {
+    CoreTerm::Var(Text::from(name))
 }
-
-fn nat_ty() -> CoreTerm {
-    CoreTerm::Inductive {
-        path: Text::from("Nat"),
-        args: List::new(),
+fn uni(level: u32) -> CoreTerm {
+    CoreTerm::Universe(UniverseLevel::Concrete(level))
+}
+fn pi(name: &str, domain: CoreTerm, codomain: CoreTerm) -> CoreTerm {
+    CoreTerm::Pi {
+        binder: Text::from(name),
+        domain: Heap::new(domain),
+        codomain: Heap::new(codomain),
     }
 }
-
-/// A trivial equivalence relation: `λa.λb. true` (every pair related).
-/// For typing purposes this stands for any well-typed relation; the
-/// kernel doesn't internally verify reflexivity / symmetry /
-/// transitivity (those are framework-axiom-attestable).
-fn trivial_equiv() -> CoreTerm {
+fn lam(name: &str, domain: CoreTerm, body: CoreTerm) -> CoreTerm {
     CoreTerm::Lam {
-        binder: Text::from("a"),
-        domain: Heap::new(nat_ty()),
-        body: Heap::new(CoreTerm::Lam {
-            binder: Text::from("b"),
-            domain: Heap::new(nat_ty()),
-            body: Heap::new(CoreTerm::Universe(UniverseLevel::Prop)),
-        }),
+        binder: Text::from(name),
+        domain: Heap::new(domain),
+        body: Heap::new(body),
+    }
+}
+fn app(f: CoreTerm, x: CoreTerm) -> CoreTerm {
+    CoreTerm::App(Heap::new(f), Heap::new(x))
+}
+fn path(carrier: CoreTerm, lhs: CoreTerm, rhs: CoreTerm) -> CoreTerm {
+    CoreTerm::PathTy {
+        carrier: Heap::new(carrier),
+        lhs: Heap::new(lhs),
+        rhs: Heap::new(rhs),
+    }
+}
+fn quotient() -> CoreTerm {
+    CoreTerm::Quotient {
+        base: Heap::new(var("A")),
+        equiv: Heap::new(var("R")),
+    }
+}
+fn context() -> Context {
+    Context::new()
+        .extend(Text::from("A"), uni(0))
+        .extend(Text::from("B"), uni(0))
+        .extend(Text::from("a"), var("A"))
+        .extend(Text::from("b"), var("B"))
+        .extend(
+            Text::from("R"),
+            pi("x", var("A"), pi("y", var("A"), uni(0))),
+        )
+        .extend(Text::from("q"), quotient())
+}
+fn intro() -> CoreTerm {
+    CoreTerm::QuotIntro {
+        value: Heap::new(var("a")),
+        base: Heap::new(var("A")),
+        equiv: Heap::new(var("R")),
+    }
+}
+fn constant_elim(scrutinee: CoreTerm) -> CoreTerm {
+    CoreTerm::QuotElim {
+        scrutinee: Heap::new(scrutinee),
+        motive: Heap::new(lam("q", quotient(), var("B"))),
+        case: Heap::new(lam("x", var("A"), var("b"))),
+        respect: Heap::new(lam(
+            "x",
+            var("A"),
+            lam(
+                "y",
+                var("A"),
+                lam(
+                    "r",
+                    app(app(var("R"), var("x")), var("y")),
+                    CoreTerm::Refl(Heap::new(var("b"))),
+                ),
+            ),
+        )),
+    }
+}
+fn check(ctx: &Context, term: &CoreTerm) -> Result<CoreTerm, verum_kernel::KernelError> {
+    infer(ctx, term, &AxiomRegistry::new())
+}
+
+#[test]
+fn quotient_formation_checks_both_relation_arguments_and_result() {
+    assert_eq!(check(&context(), &quotient()).unwrap(), uni(0));
+    for relation in [
+        var("a"),
+        lam("x", var("B"), lam("y", var("A"), var("B"))),
+        lam("x", var("A"), lam("y", var("B"), var("B"))),
+        lam("x", var("A"), lam("y", var("A"), var("b"))),
+    ] {
+        let term = CoreTerm::Quotient {
+            base: Heap::new(var("A")),
+            equiv: Heap::new(relation),
+        };
+        assert!(
+            check(&context(), &term).is_err(),
+            "malformed relation accepted: {term:?}"
+        );
     }
 }
 
-// =============================================================================
-// K-Quot-Form
-// =============================================================================
-
 #[test]
-fn quot_form_inhabits_base_universe() {
-    let (ctx, reg) = empty();
-    let q = CoreTerm::Quotient {
-        base: Heap::new(nat_ty()),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    let ty = infer(&ctx, &q, &reg).expect("Quotient well-formed");
-    // Nat's universe is Concrete(0); Quotient inherits.
-    assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
+fn quotient_universe_includes_the_relation_universe() {
+    let ctx = context().extend(
+        Text::from("R"),
+        pi("x", var("A"), pi("y", var("A"), uni(2))),
+    );
+    assert_eq!(check(&ctx, &quotient()).unwrap(), uni(2));
 }
 
 #[test]
-fn quot_form_with_universe_base_inhabits_higher_universe() {
-    let (ctx, reg) = empty();
-    let q = CoreTerm::Quotient {
-        base: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
-        equiv: Heap::new(trivial_equiv()),
+fn quotient_rejects_a_value_as_carrier() {
+    let term = CoreTerm::Quotient {
+        base: Heap::new(var("a")),
+        equiv: Heap::new(var("R")),
     };
-    let ty = infer(&ctx, &q, &reg).expect("Quotient over Type_0");
-    // Type_0 is at Type_1; Quotient inherits.
-    assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(1)));
+    assert!(check(&context(), &term).is_err());
 }
 
 #[test]
-fn quot_form_rejects_ill_typed_base() {
-    let (ctx, reg) = empty();
-    // Base is an unbound variable → infer fails.
-    let q = CoreTerm::Quotient {
-        base: Heap::new(CoreTerm::Var(Text::from("Undefined"))),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    let res = infer(&ctx, &q, &reg);
-    assert!(matches!(res, Err(KernelError::UnboundVariable(_))));
-}
-
-// =============================================================================
-// K-Quot-Intro
-// =============================================================================
-
-#[test]
-fn quot_intro_lifts_value_to_quotient() {
-    let mut reg = AxiomRegistry::new();
-    let fw = FrameworkId {
-        framework: Text::from("test"),
-        citation: Text::from("test"),
-    };
-    reg.register(Text::from("zero"), nat_ty(), fw.clone())
-        .expect("zero axiom");
-    let zero = CoreTerm::Axiom {
-        name: Text::from("zero"),
-        ty: Heap::new(nat_ty()),
-        framework: fw,
-    };
-    let intro = CoreTerm::QuotIntro {
-        value: Heap::new(zero),
-        base: Heap::new(nat_ty()),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    let ty = infer(&Context::new(), &intro, &reg).expect("intro well-formed");
-    let expected = CoreTerm::Quotient {
-        base: Heap::new(nat_ty()),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    assert_eq!(ty, expected);
-}
-
-#[test]
-fn quot_intro_rejects_value_at_wrong_type() {
-    let mut reg = AxiomRegistry::new();
-    let fw = FrameworkId {
-        framework: Text::from("test"),
-        citation: Text::from("test"),
-    };
-    let bool_ty = CoreTerm::Inductive {
-        path: Text::from("Bool"),
-        args: List::new(),
-    };
-    reg.register(Text::from("tt"), bool_ty.clone(), fw.clone())
-        .expect("tt");
-    // Value at Bool, base says Nat — must reject.
-    let intro = CoreTerm::QuotIntro {
-        value: Heap::new(CoreTerm::Axiom {
-            name: Text::from("tt"),
-            ty: Heap::new(bool_ty),
-            framework: fw,
-        }),
-        base: Heap::new(nat_ty()),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    let res = infer(&Context::new(), &intro, &reg);
-    assert!(matches!(res, Err(KernelError::TypeMismatch { .. })));
-}
-
-// =============================================================================
-// K-Quot-Elim
-// =============================================================================
-
-#[test]
-fn quot_elim_typed_as_motive_applied_to_scrutinee() {
-    let mut reg = AxiomRegistry::new();
-    let fw = FrameworkId {
-        framework: Text::from("test"),
-        citation: Text::from("test"),
-    };
-    reg.register(Text::from("zero"), nat_ty(), fw.clone())
-        .expect("zero");
-    let zero = CoreTerm::Axiom {
-        name: Text::from("zero"),
-        ty: Heap::new(nat_ty()),
-        framework: fw,
-    };
-    let q_term = CoreTerm::QuotIntro {
-        value: Heap::new(zero.clone()),
-        base: Heap::new(nat_ty()),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    let motive = CoreTerm::Lam {
-        binder: Text::from("_"),
-        domain: Heap::new(CoreTerm::Quotient {
-            base: Heap::new(nat_ty()),
-            equiv: Heap::new(trivial_equiv()),
-        }),
-        body: Heap::new(nat_ty()),
-    };
-    let case = CoreTerm::Lam {
-        binder: Text::from("t"),
-        domain: Heap::new(nat_ty()),
-        body: Heap::new(zero),
-    };
-    let elim = CoreTerm::QuotElim {
-        scrutinee: Heap::new(q_term.clone()),
-        motive: Heap::new(motive.clone()),
-        case: Heap::new(case),
-    };
-    let ty = infer(&Context::new(), &elim, &reg).expect("elim well-formed");
-    // Result type: motive applied to scrutinee.
-    assert_eq!(ty, CoreTerm::App(Heap::new(motive), Heap::new(q_term)));
-}
-
-#[test]
-fn quot_elim_rejects_non_quotient_scrutinee() {
-    let mut reg = AxiomRegistry::new();
-    let fw = FrameworkId {
-        framework: Text::from("test"),
-        citation: Text::from("test"),
-    };
-    reg.register(Text::from("zero"), nat_ty(), fw.clone())
-        .expect("zero");
-    let zero = CoreTerm::Axiom {
-        name: Text::from("zero"),
-        ty: Heap::new(nat_ty()),
-        framework: fw,
-    };
-    // Scrutinee is a bare Nat value, not a Quotient — must reject.
-    let elim = CoreTerm::QuotElim {
-        scrutinee: Heap::new(zero),
-        motive: Heap::new(CoreTerm::Lam {
-            binder: Text::from("_"),
-            domain: Heap::new(nat_ty()),
-            body: Heap::new(nat_ty()),
-        }),
-        case: Heap::new(CoreTerm::Lam {
-            binder: Text::from("t"),
-            domain: Heap::new(nat_ty()),
-            body: Heap::new(CoreTerm::Var(Text::from("t"))),
-        }),
-    };
-    let res = infer(&Context::new(), &elim, &reg);
-    assert!(matches!(res, Err(KernelError::TypeMismatch { .. })));
-}
-
-// =============================================================================
-// β-rule: quot_elim([t]_~, m, case) ↦ case(t)
-// =============================================================================
-
-#[test]
-fn quot_elim_beta_reduces_to_case_applied_to_value() {
-    // case = λt.t (id on Nat)
-    let case = CoreTerm::Lam {
-        binder: Text::from("t"),
-        domain: Heap::new(nat_ty()),
-        body: Heap::new(CoreTerm::Var(Text::from("t"))),
-    };
-    let value = CoreTerm::Var(Text::from("z"));
-    let intro = CoreTerm::QuotIntro {
-        value: Heap::new(value.clone()),
-        base: Heap::new(nat_ty()),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    let elim = CoreTerm::QuotElim {
-        scrutinee: Heap::new(intro),
-        motive: Heap::new(CoreTerm::Lam {
-            binder: Text::from("_"),
-            domain: Heap::new(nat_ty()),
-            body: Heap::new(nat_ty()),
-        }),
-        case: Heap::new(case.clone()),
-    };
-    let normalised = normalize(&elim);
-    // β: quot_elim([z]_~, _, λt.t) → (λt.t) z → z.
-    assert_eq!(normalised, value);
-}
-
-#[test]
-fn definitional_eq_recognises_quotient_beta() {
-    // quot_elim([z]_~, m, λt.t) ≡_β z.
-    let case = CoreTerm::Lam {
-        binder: Text::from("t"),
-        domain: Heap::new(nat_ty()),
-        body: Heap::new(CoreTerm::Var(Text::from("t"))),
-    };
-    let z = CoreTerm::Var(Text::from("z"));
-    let intro = CoreTerm::QuotIntro {
-        value: Heap::new(z.clone()),
-        base: Heap::new(nat_ty()),
-        equiv: Heap::new(trivial_equiv()),
-    };
-    let elim = CoreTerm::QuotElim {
-        scrutinee: Heap::new(intro),
-        motive: Heap::new(CoreTerm::Lam {
-            binder: Text::from("_"),
-            domain: Heap::new(nat_ty()),
-            body: Heap::new(nat_ty()),
-        }),
-        case: Heap::new(case),
-    };
-    assert!(definitional_eq(&elim, &z));
-    // Symmetric.
-    assert!(definitional_eq(&z, &elim));
-}
-
-// =============================================================================
-// Round-trip: Z = ℕ × ℕ / ~ as the canonical setoid quotient
-// =============================================================================
-
-#[test]
-fn setoid_z_construction_typechecks() {
-    // Z = (Nat × Nat) / ~ where (a,b) ~ (c,d) iff a + d = b + c.
-    // The trivial-equiv stand-in keeps the kernel typing rule's
-    // soundness scope precise: the kernel checks structural
-    // well-formedness, not the equivalence-respect obligation.
-    let reg = AxiomRegistry::new();
-    let fw = FrameworkId {
-        framework: Text::from("test"),
-        citation: Text::from("test"),
-    };
-    let nat2 = CoreTerm::Sigma {
-        binder: Text::from("_"),
-        fst_ty: Heap::new(nat_ty()),
-        snd_ty: Heap::new(nat_ty()),
-    };
-    let z_equiv = CoreTerm::Lam {
-        binder: Text::from("ab"),
-        domain: Heap::new(nat2.clone()),
-        body: Heap::new(CoreTerm::Lam {
-            binder: Text::from("cd"),
-            domain: Heap::new(nat2.clone()),
-            body: Heap::new(CoreTerm::Universe(UniverseLevel::Prop)),
-        }),
-    };
-    let z_ty = CoreTerm::Quotient {
-        base: Heap::new(nat2.clone()),
-        equiv: Heap::new(z_equiv),
-    };
-    let ty = infer(&Context::new(), &z_ty, &reg).expect("Z well-formed");
-    // Result lives in Type_max(0, 0) = Universe(Max(Concrete(0),
-    // Concrete(0))) per Sigma. Just verify it's at a Universe.
-    let _ = (reg, fw);
-    match ty {
-        CoreTerm::Universe(_) => {}
-        other => panic!("expected Universe, got {:?}", other),
+fn quotient_introduction_checks_value_and_relation() {
+    assert_eq!(check(&context(), &intro()).unwrap(), quotient());
+    let mut wrong = intro();
+    if let CoreTerm::QuotIntro { value, .. } = &mut wrong {
+        *value = Heap::new(var("b"));
     }
+    assert!(check(&context(), &wrong).is_err());
+    let mut wrong = intro();
+    if let CoreTerm::QuotIntro { equiv, .. } = &mut wrong {
+        *equiv = Heap::new(var("a"));
+    }
+    assert!(check(&context(), &wrong).is_err());
+}
+
+#[test]
+fn constant_map_has_a_checked_relation_respect_proof() {
+    let term = constant_elim(var("q"));
+    assert_eq!(normalize(&check(&context(), &term).unwrap()), var("B"));
+}
+
+#[test]
+fn identity_map_on_equality_quotient_uses_the_relation_witness() {
+    let relation = lam(
+        "x",
+        var("A"),
+        lam("y", var("A"), path(var("A"), var("x"), var("y"))),
+    );
+    let q = CoreTerm::Quotient {
+        base: Heap::new(var("A")),
+        equiv: Heap::new(relation.clone()),
+    };
+    let ctx = context().extend(Text::from("eq_q"), q.clone());
+    let term = CoreTerm::QuotElim {
+        scrutinee: Heap::new(var("eq_q")),
+        motive: Heap::new(lam("q", q, var("A"))),
+        case: Heap::new(lam("x", var("A"), var("x"))),
+        respect: Heap::new(lam(
+            "x",
+            var("A"),
+            lam(
+                "y",
+                var("A"),
+                lam("r", app(app(relation, var("x")), var("y")), var("r")),
+            ),
+        )),
+    };
+    assert_eq!(normalize(&check(&ctx, &term).unwrap()), var("A"));
+}
+
+#[test]
+fn unrelated_case_cannot_prove_an_arbitrary_goal() {
+    let mut term = constant_elim(var("q"));
+    if let CoreTerm::QuotElim { case, .. } = &mut term {
+        *case = Heap::new(lam("x", var("A"), var("a")));
+    }
+    assert!(check(&context(), &term).is_err());
+}
+
+#[test]
+fn representative_identity_does_not_respect_an_arbitrary_relation() {
+    let mut term = constant_elim(var("q"));
+    if let CoreTerm::QuotElim {
+        motive,
+        case,
+        respect,
+        ..
+    } = &mut term
+    {
+        *motive = Heap::new(lam("q", quotient(), var("A")));
+        *case = Heap::new(lam("x", var("A"), var("x")));
+        *respect = Heap::new(lam(
+            "x",
+            var("A"),
+            lam(
+                "y",
+                var("A"),
+                lam(
+                    "r",
+                    app(app(var("R"), var("x")), var("y")),
+                    CoreTerm::Refl(Heap::new(var("x"))),
+                ),
+            ),
+        ));
+    }
+    assert!(check(&context(), &term).is_err());
+}
+
+#[test]
+fn unrelated_well_typed_evidence_is_not_a_respect_proof() {
+    for evidence in [var("a"), CoreTerm::Refl(Heap::new(var("b"))), uni(0)] {
+        let mut term = constant_elim(var("q"));
+        if let CoreTerm::QuotElim { respect, .. } = &mut term {
+            *respect = Heap::new(evidence);
+        }
+        assert!(check(&context(), &term).is_err());
+    }
+}
+
+#[test]
+fn malformed_motive_and_nonquotient_scrutinee_are_rejected() {
+    assert!(check(&context(), &constant_elim(var("a"))).is_err());
+    for bad in [
+        var("b"),
+        lam("q", var("A"), var("B")),
+        lam("q", quotient(), var("b")),
+    ] {
+        let mut term = constant_elim(var("q"));
+        if let CoreTerm::QuotElim { motive, .. } = &mut term {
+            *motive = Heap::new(bad);
+        }
+        assert!(check(&context(), &term).is_err());
+    }
+}
+
+#[test]
+fn dependent_motive_is_not_treated_as_a_constant_at_one_representative() {
+    let ctx = context().extend(Text::from("P"), pi("q", quotient(), uni(0)));
+    let mut term = constant_elim(intro());
+    if let CoreTerm::QuotElim { motive, .. } = &mut term {
+        *motive = Heap::new(var("P"));
+    }
+    assert!(check(&ctx, &term).is_err());
+}
+
+#[test]
+fn checked_recursor_beta_reduces_and_preserves_type() {
+    let term = constant_elim(intro());
+    let original_type = normalize(&check(&context(), &term).unwrap());
+    let reduced = normalize(&term);
+    assert_eq!(reduced, var("b"));
+    assert_eq!(check(&context(), &reduced).unwrap(), original_type);
+}
+
+#[test]
+fn generated_binders_do_not_capture_ambient_names() {
+    let ctx = context().extend(Text::from("_quot_x_0"), var("B"));
+    let term = verum_kernel::substitute(&constant_elim(var("q")), "b", &var("_quot_x_0"));
+    assert_eq!(normalize(&check(&ctx, &term).unwrap()), var("B"));
+}
+
+#[test]
+fn respect_evidence_is_part_of_serialized_and_structural_term_identity() {
+    let term = constant_elim(var("q"));
+    let mut encoded = serde_json::to_value(&term).unwrap();
+    encoded["QuotElim"]
+        .as_object_mut()
+        .unwrap()
+        .remove("respect");
+    assert!(serde_json::from_value::<CoreTerm>(encoded).is_err());
+    let mut changed = term.clone();
+    if let CoreTerm::QuotElim { respect, .. } = &mut changed {
+        *respect = Heap::new(var("evidence"));
+    }
+    assert!(verum_kernel::free_vars(&changed).contains(&Text::from("evidence")));
+    assert!(!verum_kernel::definitional_eq(&term, &changed));
+    let substituted = verum_kernel::substitute(&changed, "evidence", &var("replacement"));
+    assert!(verum_kernel::free_vars(&substituted).contains(&Text::from("replacement")));
+    assert!(!verum_kernel::free_vars(&substituted).contains(&Text::from("evidence")));
 }

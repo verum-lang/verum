@@ -149,10 +149,7 @@ fn omega_plus_one_theorem_cites_omega_axiom_admitted() {
 fn register_with_coord_attaches_coord_to_entry() {
     let mut reg = AxiomRegistry::new();
     let coord = KernelCoord::canonical(Text::from("test_fw"), OrdinalDepth::finite(2));
-    let ty = verum_kernel::CoreTerm::Inductive {
-        path: Text::from("Unit"),
-        args: verum_common::List::new(),
-    };
+    let ty = verum_kernel::CoreTerm::Universe(verum_kernel::UniverseLevel::Concrete(0));
     reg.register_with_coord(Text::from("a1"), ty, fw("test_fw"), coord.clone())
         .expect("admit");
     use verum_common::Maybe;
@@ -217,10 +214,7 @@ fn register_with_coord_rejects_uip_shape() {
 #[test]
 fn legacy_register_leaves_coord_none() {
     let mut reg = AxiomRegistry::new();
-    let ty = verum_kernel::CoreTerm::Inductive {
-        path: Text::from("Unit"),
-        args: verum_common::List::new(),
-    };
+    let ty = verum_kernel::CoreTerm::Universe(verum_kernel::UniverseLevel::Concrete(0));
     reg.register(Text::from("legacy"), ty, fw("test"))
         .expect("admit");
     use verum_common::Maybe;
@@ -285,14 +279,11 @@ fn pre_v8_axiom_serde_lacks_coord_field() {
 
 mod v2_typing_judgment_integration {
     use super::*;
-    use verum_common::{Heap, List};
+    use verum_common::Heap;
     use verum_kernel::{Context, CoreTerm, InductiveRegistry, infer, infer_with_full_context};
 
     fn unit_ty() -> CoreTerm {
-        CoreTerm::Inductive {
-            path: Text::from("Unit"),
-            args: List::new(),
-        }
+        verum_kernel::CoreTerm::Universe(verum_kernel::UniverseLevel::Concrete(0))
     }
 
     /// Helper: register an axiom with a coord, return a CoreTerm

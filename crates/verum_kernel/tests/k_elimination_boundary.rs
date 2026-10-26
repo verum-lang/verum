@@ -397,26 +397,19 @@ fn invalid_parameter_rosters_and_universe_lowering_are_rejected() {
                 .is_err()
         );
     }
-    registry
-        .register(RegisteredInductive::new(
-            Text::from("Small"),
-            List::new(),
-            List::from_iter([ConstructorSig {
-                name: Text::from("Large"),
-                arg_types: List::from_iter([universe()]),
-            }]),
-        ))
-        .unwrap();
-    let context = Context::new().extend(Text::from("T"), universe());
     assert!(
-        infer_with_inductives(
-            &context,
-            &ctor("Small", "Large", List::from_iter([var("T")])),
-            &AxiomRegistry::new(),
-            &registry
-        )
-        .is_err()
+        registry
+            .register(RegisteredInductive::new(
+                Text::from("Small"),
+                List::new(),
+                List::from_iter([ConstructorSig {
+                    name: Text::from("Large"),
+                    arg_types: List::from_iter([universe()]),
+                }]),
+            ))
+            .is_err()
     );
+    assert!(registry.get("Small").is_none());
 }
 
 #[test]
@@ -573,35 +566,39 @@ fn transparent_definitions_cannot_hide_negative_recursion() {
         framework: Text::from("test"),
         citation: Text::from("test"),
     };
+    let (_, mut registry, _) = natural_induction();
     let mut axioms = AxiomRegistry::new();
+    let body = CoreTerm::Lam {
+        binder: Text::from("T"),
+        domain: Heap::new(universe()),
+        body: Heap::new(pi("value", var("T"), named("Nat"))),
+    };
+    let ty = infer_with_inductives(&Context::new(), &body, &axioms, &registry).unwrap();
     axioms
-        .register_definition(
-            Text::from("HiddenNegative"),
-            pi("bad", named("Bad"), named("Result")),
-            universe(),
+        .register_definition_with_inductives(
+            Text::from("Contravariant"),
+            body,
+            ty.clone(),
             framework.clone(),
+            &registry,
         )
         .unwrap();
     let alias = CoreTerm::Axiom {
-        name: Text::from("HiddenNegative"),
-        ty: Heap::new(universe()),
+        name: Text::from("Contravariant"),
+        ty: Heap::new(ty),
         framework,
     };
-    let mut registry = InductiveRegistry::new();
-    registry
-        .register(RegisteredInductive::new(
-            Text::from("Bad"),
-            List::new(),
-            List::from_iter([ConstructorSig {
-                name: Text::from("Wrap"),
-                arg_types: List::from_iter([alias.clone()]),
-            }]),
-        ))
-        .unwrap();
-    let context = Context::new().extend(Text::from("function"), alias);
-    let proof = ctor("Bad", "Wrap", List::from_iter([var("function")]));
+    let bad = RegisteredInductive::new(
+        Text::from("Bad"),
+        List::new(),
+        List::from_iter([ConstructorSig {
+            name: Text::from("Wrap"),
+            arg_types: List::from_iter([app(alias, named("Bad"))]),
+        }]),
+    );
     assert!(matches!(
-        infer_with_inductives(&context, &proof, &axioms, &registry),
+        registry.register_group(List::from_iter([bad]), &axioms),
         Err(verum_kernel::KernelError::PositivityViolation { .. })
     ));
+    assert!(registry.get("Bad").is_none());
 }

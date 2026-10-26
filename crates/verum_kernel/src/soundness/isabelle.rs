@@ -83,7 +83,7 @@ impl SoundnessBackend for IsabelleBackend {
            | Refine CoreTerm string CoreTerm\n  \
            | Quotient CoreTerm CoreTerm\n  \
            | QuotIntro CoreTerm CoreTerm CoreTerm\n  \
-           | QuotElim CoreTerm CoreTerm CoreTerm\n  \
+           | QuotElim CoreTerm CoreTerm CoreTerm CoreTerm\n  \
            | InductiveT string \"CoreTerm list\"\n  \
            | Elim CoreTerm CoreTerm \"CoreTerm list\"\n  \
            | SmtProof string\n  \
@@ -134,6 +134,9 @@ impl SoundnessBackend for IsabelleBackend {
              type_synonym Ctx = \"(string \\<times> CoreTerm) list\"\n\n\
              (* Capture-avoiding substitution.  Opaque oracle. *)\n\
              consts subst :: \"string \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm\"\n\n\
+             (* Abstract binder hygiene; this schema does not prove Rust checker correspondence. *)\n\
+             definition QuotientFresh :: \"string \\<Rightarrow> CoreTerm list \\<Rightarrow> bool\" where\n\
+               \"QuotientFresh name terms = (\\<forall>term\\<in>set terms. \\<forall>value. subst name value term = term)\"\n\n\
              (* Generic side-condition oracle for K_Pos / K_FwAx. *)\n\
              consts side_conditions_hold :: \"bool\"\n\n",
         );
@@ -752,24 +755,34 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         // Quotient (3)
         "K_Quot_Form" => Some(
-            "lemma K_Quot_Form_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> base : Universe i\"\n  \
-              shows \"\\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n  \
-              using assms by (rule T_quot_form)",
+            r#"lemma K_Quot_Form_sound:
+  assumes "QuotientFresh ''x'' [base]"
+  and "\<Gamma> \<turnstile> base : Universe i"
+  and "\<Gamma> \<turnstile> equivP : Pi ''x'' base (Pi ''y'' base (Universe j))"
+  shows "\<Gamma> \<turnstile> Quotient base equivP : Universe (max i j)"
+  using assms by (rule T_quot_form)"#,
         ),
         "K_Quot_Intro" => Some(
-            "lemma K_Quot_Intro_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> value : base\"\n  \
-              shows \"\\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n  \
-              using assms by (rule T_quot_intro)",
+            r#"lemma K_Quot_Intro_sound:
+  assumes "\<Gamma> \<turnstile> Quotient base equivP : Universe i"
+  and "\<Gamma> \<turnstile> value : base"
+  shows "\<Gamma> \<turnstile> QuotIntro value base equivP : Quotient base equivP"
+  using assms by (rule T_quot_intro)"#,
         ),
         "K_Quot_Elim" => Some(
-            "lemma K_Quot_Elim_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP\"\n  \
-              and \"\\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i)\"\n  \
-              and \"\\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\"\n  \
-              shows \"\\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n  \
-              using assms by (rule T_quot_elim)",
+            r#"lemma K_Quot_Elim_sound:
+  assumes "QuotientFresh ''q'' [result]"
+  and "QuotientFresh ''x'' [base, equivP, result, case_fn]"
+  and "QuotientFresh ''y'' [base, equivP, result, case_fn]"
+  and "QuotientFresh ''r'' [base, equivP, result, case_fn]"
+  and "motive = Lam ''q'' (Quotient base equivP) result"
+  and "\<Gamma> \<turnstile> Quotient base equivP : Universe j"
+  and "\<Gamma> \<turnstile> result : Universe i"
+  and "\<Gamma> \<turnstile> scrutinee : Quotient base equivP"
+  and "\<Gamma> \<turnstile> case_fn : Pi ''x'' base result"
+  and "\<Gamma> \<turnstile> respect : Pi ''x'' base (Pi ''y'' base (Pi ''r'' (App (App equivP (Var ''x'')) (Var ''y'')) (PathTy result (App case_fn (Var ''x'')) (App case_fn (Var ''y'')))))"
+  shows "\<Gamma> \<turnstile> QuotElim scrutinee motive case_fn respect : App motive scrutinee"
+  using assms by (rule T_quot_elim)"#,
         ),
         // Inductive (3)
         "K_Inductive" => Some(
@@ -777,9 +790,9 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
               shows \"\\<Gamma> \\<turnstile> InductiveT path args : Universe i\"\n  \
               by (rule T_inductive)",
         ),
-        "K_Pos" => Some(
-            "lemma K_Pos_sound: \"side_conditions_hold \\<longrightarrow> True\"\n  by simp",
-        ),
+        "K_Pos" => {
+            Some("lemma K_Pos_sound: \"side_conditions_hold \\<longrightarrow> True\"\n  by simp")
+        }
         "K_Elim" => Some(
             "lemma K_Elim_sound:\n  \
               assumes \"\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty\"\n  \
@@ -865,5 +878,7 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
 
 /// Drift-detection helper used by `tests.rs` and the audit gate.
 pub fn every_rule_has_isabelle_signature(rules: &[RuleSpec]) -> bool {
-    rules.iter().all(|r| rule_signature_isabelle(&r.rule_name).is_some())
+    rules
+        .iter()
+        .all(|r| rule_signature_isabelle(&r.rule_name).is_some())
 }

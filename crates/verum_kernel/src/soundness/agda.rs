@@ -122,7 +122,7 @@ impl SoundnessBackend for AgdaBackend {
                Refine       : CoreTerm → String → CoreTerm → CoreTerm\n  \
                Quotient     : CoreTerm → CoreTerm → CoreTerm\n  \
                QuotIntro    : CoreTerm → CoreTerm → CoreTerm → CoreTerm\n  \
-               QuotElim     : CoreTerm → CoreTerm → CoreTerm → CoreTerm\n  \
+               QuotElim     : CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm\n  \
                InductiveT   : String → List CoreTerm → CoreTerm\n  \
                Elim         : CoreTerm → CoreTerm → List CoreTerm → CoreTerm\n  \
                SmtProof     : String → CoreTerm\n  \
@@ -162,7 +162,10 @@ impl SoundnessBackend for AgdaBackend {
              ------------------------------------------------------------\n\
              data KernelRule : Set where\n  ",
         );
-        let names: Vec<String> = rules.iter().map(|r| r.rule_name.replace('_', "-")).collect();
+        let names: Vec<String> = rules
+            .iter()
+            .map(|r| r.rule_name.replace('_', "-"))
+            .collect();
         for (i, n) in names.iter().enumerate() {
             if i > 0 {
                 out.push_str("\n  ");
@@ -199,7 +202,9 @@ impl SoundnessBackend for AgdaBackend {
             rule.has_side_condition,
         );
         let status_comment = match &rule.status {
-            LemmaStatus::Proved { .. } => String::from("-- status: Proved (postulated at this layer)"),
+            LemmaStatus::Proved { .. } => {
+                String::from("-- status: Proved (postulated at this layer)")
+            }
             LemmaStatus::Admitted { reason } => format!("-- status: Admitted — {}", reason),
             LemmaStatus::DischargedByFramework {
                 lemma_path,

@@ -156,7 +156,7 @@ fn direct_non_positive_recursion_rejected() {
     // type Bad = Wrap(Bad -> A)
     //  Wrap — one arg with type Bad → A; Bad appears in the negative
     //  position of an arrow. Strict positivity must reject.
-    let bad_arrow = pi(ind("Bad"), CoreTerm::Var(Text::from("A")));
+    let bad_arrow = pi(ind("Bad"), ind("Bad"));
     match check_strict_positivity("Bad", &bad_arrow, &ctx("Wrap", 0)) {
         Err(KernelError::PositivityViolation {
             type_name,
@@ -212,7 +212,7 @@ fn non_positive_inside_inductive_arg_rejected() {
 fn registry_rejects_non_positive_declaration() {
     // Try to register the Berardi witness; the kernel must refuse.
     let mut reg = InductiveRegistry::new();
-    let bad_arrow = pi(ind("Bad"), CoreTerm::Var(Text::from("A")));
+    let bad_arrow = pi(ind("Bad"), ind("Bad"));
     let result = reg.register(RegisteredInductive::new(
         Text::from("Bad"),
         List::new(),
@@ -290,6 +290,13 @@ fn arrow_in_codomain_position_is_admitted() {
 #[test]
 fn familiar_container_names_do_not_hide_negative_parameter_variance() {
     let mut registry = InductiveRegistry::new();
+    registry
+        .register(RegisteredInductive::new(
+            Text::from("Result"),
+            List::new(),
+            List::new(),
+        ))
+        .unwrap();
     // This declaration is contravariant despite the name "List".
     registry
         .register(RegisteredInductive::new(

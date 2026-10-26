@@ -11,10 +11,13 @@
 //! These tests exercise both the β-aware completeness gain and the
 //! corner cases (depth limits, neutral terms, recursive descent).
 
+mod fixtures;
+use fixtures::*;
+
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
     AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel, definitional_eq,
-    infer, normalize,
+    normalize,
 };
 
 fn empty() -> (Context, AxiomRegistry) {
@@ -205,7 +208,7 @@ fn refl_axiom_at_nat(reg: &mut AxiomRegistry, name: &str) -> CoreTerm {
         framework: Text::from("test"),
         citation: Text::from("test"),
     };
-    let _ = reg.register(Text::from(name), nat_ind(), fw.clone());
+    let _ = reg.register_fixture(Text::from(name), nat_ind(), fw.clone());
     CoreTerm::Axiom {
         name: Text::from(name),
         ty: Heap::new(nat_ind()),
@@ -222,7 +225,7 @@ fn pathty_accepts_byte_identical_carrier_endpoints() {
         lhs: Heap::new(n.clone()),
         rhs: Heap::new(n),
     };
-    let res = infer(&ctx, &path, &reg);
+    let res = infer_fixture(&ctx, &path, &reg);
     assert!(res.is_ok(), "byte-identical types must accept: {:?}", res);
 }
 
@@ -248,7 +251,7 @@ fn v8_pathty_accepts_beta_equivalent_carrier() {
         lhs: Heap::new(n.clone()),
         rhs: Heap::new(n),
     };
-    let res = infer(&ctx, &path, &reg);
+    let res = infer_fixture(&ctx, &path, &reg);
     assert!(res.is_ok(), "V8 β-aware match accepts: {:?}", res,);
 }
 
@@ -284,7 +287,7 @@ fn b221_app_accepts_beta_equivalent_domain() {
         body: Heap::new(CoreTerm::Var(Text::from("u"))),
     };
     let app = CoreTerm::App(Heap::new(f), Heap::new(n));
-    let res = infer(&ctx, &app, &reg);
+    let res = infer_fixture(&ctx, &app, &reg);
     assert!(
         res.is_ok(),
         "V8 β-aware App admits β-equivalent domain: {:?}",
@@ -310,7 +313,7 @@ fn b221_app_rejects_truly_different_domain() {
         body: Heap::new(CoreTerm::Var(Text::from("b"))),
     };
     let app = CoreTerm::App(Heap::new(f), Heap::new(n));
-    let res = infer(&ctx, &app, &reg);
+    let res = infer_fixture(&ctx, &app, &reg);
     assert!(
         matches!(res, Err(KernelError::TypeMismatch { .. })),
         "type-mismatched App must reject: {:?}",
@@ -333,7 +336,7 @@ fn pathty_rejects_endpoint_at_different_type() {
             path: Text::from("Bool"),
             args: List::new(),
         };
-        let _ = reg.register(Text::from("tt_bool"), bool_ind.clone(), fw.clone());
+        let _ = reg.register_fixture(Text::from("tt_bool"), bool_ind.clone(), fw.clone());
         CoreTerm::Axiom {
             name: Text::from("tt_bool"),
             ty: Heap::new(bool_ind),
@@ -345,7 +348,7 @@ fn pathty_rejects_endpoint_at_different_type() {
         lhs: Heap::new(n),
         rhs: Heap::new(bool_axiom),
     };
-    let res = infer(&ctx, &path, &reg);
+    let res = infer_fixture(&ctx, &path, &reg);
     assert!(
         matches!(res, Err(KernelError::TypeMismatch { .. })),
         "type-mismatched endpoint must reject: {:?}",

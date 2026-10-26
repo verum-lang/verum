@@ -224,6 +224,7 @@ impl RegisteredInductive {
 #[derive(Debug, Clone, Default)]
 pub struct InductiveRegistry {
     entries: List<RegisteredInductive>,
+    axiom_dependencies: List<crate::RegisteredAxiom>,
 }
 
 impl InductiveRegistry {
@@ -231,19 +232,96 @@ impl InductiveRegistry {
     pub fn new() -> Self {
         Self {
             entries: List::new(),
+            axiom_dependencies: List::new(),
         }
     }
 
-    /// Register a new inductive declaration. The kernel runs
-    /// strict-positivity validation on every constructor's argument
-    /// types; the first violation found surfaces as
-    /// [`KernelError::PositivityViolation`] and the registration is
-    /// rejected. Duplicate names surface as
-    /// [`KernelError::DuplicateInductive`].
+    /// Admit a declaration using only already registered dependencies and its
+    /// own recursive head. All field types and universe bounds are checked.
     pub fn register(&mut self, decl: RegisteredInductive) -> Result<(), KernelError> {
-        if self.entries.iter().any(|e| e.name == decl.name) {
-            return Err(KernelError::DuplicateInductive(decl.name));
+        self.register_group(List::from_iter([decl]), &crate::AxiomRegistry::new())
+    }
+
+    /// Atomically admit a mutually dependent declaration group. All names are
+    /// visible during validation, but no declaration escapes on failure.
+    /// Positivity is checked against every member, including through aliases.
+    pub fn register_group(
+        &mut self,
+        declarations: List<RegisteredInductive>,
+        axioms: &crate::AxiomRegistry,
+    ) -> Result<(), KernelError> {
+        self.validate_axiom_dependencies(axioms)?;
+        let mut candidate = self.clone();
+        for declaration in &declarations {
+            if candidate.get(declaration.name.as_str()).is_some() {
+                return Err(KernelError::DuplicateInductive(declaration.name.clone()));
+            }
+            Self::validate_shape(declaration)?;
+            candidate.entries.push(declaration.clone());
         }
+        for declaration in &declarations {
+            let mut context = crate::Context::new();
+            for parameter in &declaration.params {
+                context = context.extend(
+                    parameter.clone(),
+                    CoreTerm::Universe(declaration.universe.clone()),
+                );
+            }
+            for constructor in &declaration.constructors {
+                for (index, field) in constructor.arg_types.iter().enumerate() {
+                    let normalized = crate::support::normalize_full(field, axioms, &candidate);
+                    for target in &declarations {
+                        check_positive(
+                            PositiveTarget::Inductive(target.name.as_str()),
+                            &normalized,
+                            &PositivityCtx::root(constructor.name.as_str(), index),
+                            Some(&candidate),
+                            &mut List::new(),
+                        )?;
+                    }
+                    let kind = crate::infer_with_inductives(&context, field, axioms, &candidate)?;
+                    match crate::support::normalize_full(&kind, axioms, &candidate) {
+                        CoreTerm::Universe(level)
+                            if crate::infer::level_at_most(&level, &declaration.universe) => {}
+                        _ => {
+                            return Err(KernelError::InvalidEliminator(Text::from(
+                                "constructor field must be a type within the declaration universe",
+                            )));
+                        }
+                    }
+                }
+            }
+            candidate.validate_paths(declaration, context, axioms)?;
+        }
+        for entry in axioms.all() {
+            if !candidate
+                .axiom_dependencies
+                .iter()
+                .any(|known| known.name == entry.name)
+            {
+                candidate.axiom_dependencies.push(entry.clone());
+            }
+        }
+        *self = candidate;
+        Ok(())
+    }
+
+    pub(crate) fn validate_axiom_dependencies(
+        &self,
+        axioms: &crate::AxiomRegistry,
+    ) -> Result<(), KernelError> {
+        for dependency in &self.axiom_dependencies {
+            if axioms.get(dependency.name.as_str()) != Some(dependency) {
+                return Err(KernelError::InvalidEliminator(Text::from(format!(
+                    "declaration environment changed for {}",
+                    dependency.name,
+                ))));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_shape(decl: &RegisteredInductive) -> Result<(), KernelError> {
         for (i, parameter) in decl.params.iter().enumerate() {
             if decl.params.iter().take(i).any(|other| other == parameter) {
                 return Err(KernelError::DuplicateInductive(parameter.clone()));
@@ -259,16 +337,9 @@ impl InductiveRegistry {
                 return Err(KernelError::DuplicateInductive(constructor.name.clone()));
             }
         }
-        for ctor in decl.constructors.iter() {
-            for (i, arg_ty) in ctor.arg_types.iter().enumerate() {
-                check_positive(
-                    PositiveTarget::Inductive(decl.name.as_str()),
-                    arg_ty,
-                    &PositivityCtx::root(ctor.name.as_str(), i),
-                    Some(self),
-                    &mut List::new(),
-                )?;
-                if crate::free_vars(arg_ty)
+        for ctor in &decl.constructors {
+            for field in &ctor.arg_types {
+                if crate::free_vars(field)
                     .iter()
                     .any(|name| !decl.params.contains(name))
                 {
@@ -308,7 +379,79 @@ impl InductiveRegistry {
             }
             seen_path_names.push(path.name.clone());
         }
-        self.entries.push(decl);
+        Ok(())
+    }
+
+    fn validate_paths(
+        &self,
+        declaration: &RegisteredInductive,
+        mut context: crate::Context,
+        axioms: &crate::AxiomRegistry,
+    ) -> Result<(), KernelError> {
+        let carrier = CoreTerm::Inductive {
+            path: declaration.name.clone(),
+            args: declaration
+                .params
+                .iter()
+                .cloned()
+                .map(CoreTerm::Var)
+                .collect(),
+        };
+        for constructor in &declaration.constructors {
+            let mut ty = carrier.clone();
+            for (index, field) in constructor.arg_types.iter().enumerate().rev() {
+                let mut binder = Text::from(format!("__constructor_arg_{index}"));
+                while declaration.params.contains(&binder) {
+                    binder = Text::from(format!("{binder}_"));
+                }
+                ty = CoreTerm::Pi {
+                    binder,
+                    domain: verum_common::Heap::new(field.clone()),
+                    codomain: verum_common::Heap::new(ty),
+                };
+            }
+            context = context.extend(constructor.name.clone(), ty);
+        }
+        for path in &declaration.path_constructors {
+            if path.dim == 0 {
+                return Err(KernelError::InvalidEliminator(Text::from(
+                    "path constructor dimension must be positive",
+                )));
+            }
+            let left = crate::infer_with_inductives(&context, &path.lhs, axioms, self)?;
+            let right = crate::infer_with_inductives(&context, &path.rhs, axioms, self)?;
+            let left = crate::support::normalize_full(&left, axioms, self);
+            let right = crate::support::normalize_full(&right, axioms, self);
+            if !crate::equivalence::alpha_equivalent(&left, &right) {
+                return Err(KernelError::InvalidEliminator(Text::from(
+                    "path constructor endpoints have different types",
+                )));
+            }
+            let mut boundary = &left;
+            for _ in 1..path.dim {
+                match boundary {
+                    CoreTerm::PathTy { carrier, .. } => boundary = carrier,
+                    _ => {
+                        return Err(KernelError::InvalidEliminator(Text::from(
+                            "path constructor dimension disagrees with its boundary",
+                        )));
+                    }
+                }
+            }
+            if !crate::equivalence::alpha_equivalent(boundary, &carrier) {
+                return Err(KernelError::InvalidEliminator(Text::from(
+                    "path constructor boundary belongs to another type",
+                )));
+            }
+            context = context.extend(
+                path.name.clone(),
+                CoreTerm::PathTy {
+                    carrier: verum_common::Heap::new(left),
+                    lhs: verum_common::Heap::new(path.lhs.clone()),
+                    rhs: verum_common::Heap::new(path.rhs.clone()),
+                },
+            );
+        }
         Ok(())
     }
 

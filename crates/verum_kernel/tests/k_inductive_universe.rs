@@ -33,29 +33,29 @@ fn nat_decl() -> RegisteredInductive {
 }
 
 #[test]
-fn legacy_infer_returns_concrete_zero_for_inductive() {
-    // Sanity: the public infer() shim preserves pre-V8 behaviour
-    // (no inductive registry → fall back to Concrete(0)).
+fn registry_free_inference_rejects_named_types() {
     let term = CoreTerm::Inductive {
         path: Text::from("Nat"),
         args: List::new(),
     };
-    let ty = infer(&empty_ctx(), &term, &empty_axioms()).expect("infer ok");
-    assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
+    assert!(infer(&empty_ctx(), &term, &empty_axioms()).is_err());
 }
 
 #[test]
-fn infer_with_empty_registry_falls_back_to_concrete_zero() {
-    // Empty registry → no entries → universe_for returns None →
-    // infer_with_inductives still falls back to Concrete(0).
+fn empty_registry_rejects_named_types() {
     let term = CoreTerm::Inductive {
         path: Text::from("Nat"),
         args: List::new(),
     };
-    let inductives = InductiveRegistry::new();
-    let ty =
-        infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives).expect("infer ok");
-    assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
+    assert!(
+        infer_with_inductives(
+            &empty_ctx(),
+            &term,
+            &empty_axioms(),
+            &InductiveRegistry::new()
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -112,19 +112,15 @@ fn infer_with_registered_prop_universe_returns_prop() {
 }
 
 #[test]
-fn unregistered_inductive_falls_back_to_concrete_zero_in_either_path() {
-    // When the path isn't in the supplied registry,
-    // universe_for returns None and we fall back to Concrete(0).
-    // This preserves backwards compatibility for any caller that
-    // doesn't pre-populate every inductive used.
-    let term = CoreTerm::Inductive {
-        path: Text::from("UnregisteredNat"),
+fn unrelated_registered_type_does_not_authorize_unknown_names() {
+    let mut registry = InductiveRegistry::new();
+    registry.register(nat_decl()).unwrap();
+    let unknown = CoreTerm::Inductive {
+        path: Text::from("Unknown"),
         args: List::new(),
     };
-    let inductives = InductiveRegistry::new();
-    let ty =
-        infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives).expect("infer ok");
-    assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
+    assert!(infer_with_inductives(&empty_ctx(), &unknown, &empty_axioms(), &registry).is_err());
+    assert!(infer(&empty_ctx(), &unknown, &empty_axioms()).is_err());
 }
 
 #[test]

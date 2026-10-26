@@ -84,10 +84,7 @@ fn leaf_universe_node_records_k_univ() {
 
 #[test]
 fn leaf_var_node_records_k_var_under_extended_ctx() {
-    let nat_ind = CoreTerm::Inductive {
-        path: Text::from("Nat"),
-        args: List::new(),
-    };
+    let nat_ind = CoreTerm::Universe(UniverseLevel::Concrete(0));
     let ctx = Context::new().extend(Text::from("x"), nat_ind.clone());
     let reg = AxiomRegistry::new();
     let term = CoreTerm::Var(Text::from("x"));
@@ -121,10 +118,7 @@ fn pi_node_has_two_premises() {
 #[test]
 fn lam_node_has_two_premises() {
     let (ctx, reg) = empty();
-    let nat = CoreTerm::Inductive {
-        path: Text::from("Nat"),
-        args: List::new(),
-    };
+    let nat = CoreTerm::Universe(UniverseLevel::Concrete(0));
     let lam = CoreTerm::Lam {
         binder: Text::from("x"),
         domain: Heap::new(nat.clone()),
@@ -143,19 +137,13 @@ fn lam_node_has_two_premises() {
         "at least the domain premise: {}",
         node.premises.len()
     );
-    assert_eq!(
-        node.premises.iter().next().unwrap().rule,
-        KernelRule::KInductive
-    );
+    assert_eq!(node.premises.iter().next().unwrap().rule, KernelRule::KUniv);
 }
 
 #[test]
 fn app_node_has_function_and_arg_premises() {
     let (ctx, reg) = empty();
-    let nat = CoreTerm::Inductive {
-        path: Text::from("Nat"),
-        args: List::new(),
-    };
+    let nat = CoreTerm::Universe(UniverseLevel::Concrete(0));
     let id_lam = CoreTerm::Lam {
         binder: Text::from("y"),
         domain: Heap::new(nat.clone()),
@@ -178,26 +166,17 @@ fn app_node_has_function_and_arg_premises() {
 #[test]
 fn refl_node_has_one_premise() {
     let (ctx, reg) = empty();
-    let nat = CoreTerm::Inductive {
-        path: Text::from("Nat"),
-        args: List::new(),
-    };
+    let nat = CoreTerm::Universe(UniverseLevel::Concrete(0));
     let refl = CoreTerm::Refl(Heap::new(nat));
     let node = record_inference(&ctx, &refl, &reg).expect("infer ok");
     assert_eq!(node.rule, KernelRule::KReflIntro);
     assert_eq!(node.premises.len(), 1);
-    assert_eq!(
-        node.premises.iter().next().unwrap().rule,
-        KernelRule::KInductive
-    );
+    assert_eq!(node.premises.iter().next().unwrap().rule, KernelRule::KUniv);
 }
 
 #[test]
 fn axiom_node_carries_citation() {
-    let nat = CoreTerm::Inductive {
-        path: Text::from("Nat"),
-        args: List::new(),
-    };
+    let nat = CoreTerm::Universe(UniverseLevel::Concrete(0));
     let mut reg = AxiomRegistry::new();
     let fw = FrameworkId {
         framework: Text::from("test_corpus"),
@@ -303,10 +282,7 @@ fn record_inference_returns_none_for_ill_typed_term() {
         path: Text::from("Bool"),
         args: List::new(),
     };
-    let nat_ind = CoreTerm::Inductive {
-        path: Text::from("Nat"),
-        args: List::new(),
-    };
+    let nat_ind = CoreTerm::Universe(UniverseLevel::Concrete(0));
     let bool_id = CoreTerm::Lam {
         binder: Text::from("b"),
         domain: Heap::new(bool_ind),

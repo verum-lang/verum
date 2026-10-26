@@ -14,9 +14,12 @@
 //! `KernelError::DepthViolation { binder, base_depth, pred_depth }`
 //! diagnostic.
 
+mod fixtures;
+use fixtures::*;
+
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel, infer, m_depth,
+    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel, m_depth,
 };
 
 fn tvar(name: &str) -> CoreTerm {
@@ -112,7 +115,7 @@ fn k_refine_accepts_trivial_predicate_over_inductive_base() {
     // {n : Int | True} — predicate is a variable reference, depth 0;
     // base Int has depth 1; 0 < 1 + 1 = 2. Valid.
     let t = refine(ind("Int", vec![]), "n", tvar("n"));
-    let result = infer(&Context::new(), &t, &AxiomRegistry::new());
+    let result = infer_fixture(&Context::new(), &t, &AxiomRegistry::new());
     assert!(
         result.is_ok(),
         "expected valid refinement to type-check, got {result:?}"
@@ -124,7 +127,7 @@ fn k_refine_accepts_predicate_equal_to_base_depth() {
     // {l : List<Int> | l} — predicate depth 0 (just the bound var);
     // base List<Int> depth 2; 0 < 2 + 1 = 3. Valid.
     let t = refine(ind("List", vec![ind("Int", vec![])]), "l", tvar("l"));
-    let result = infer(&Context::new(), &t, &AxiomRegistry::new());
+    let result = infer_fixture(&Context::new(), &t, &AxiomRegistry::new());
     assert!(
         result.is_ok(),
         "expected nested-Inductive refinement to type-check, got {result:?}"
@@ -148,7 +151,7 @@ fn k_refine_rejects_schema_referencing_its_own_instantiation() {
     let pred = ind("P", vec![one_up]); // depth 3
     let t = refine(base, "n", pred);
 
-    let result = infer(&Context::new(), &t, &AxiomRegistry::new());
+    let result = infer_fixture(&Context::new(), &t, &AxiomRegistry::new());
     match result {
         Err(KernelError::DepthViolation {
             binder,
@@ -174,7 +177,7 @@ fn k_refine_rejects_predicate_two_strata_deeper_than_base() {
     );
     let t = refine(base, "n", pred);
 
-    match infer(&Context::new(), &t, &AxiomRegistry::new()) {
+    match infer_fixture(&Context::new(), &t, &AxiomRegistry::new()) {
         Err(KernelError::DepthViolation {
             base_depth,
             pred_depth,

@@ -83,7 +83,7 @@
 /// K-Universe-Ascent rule + K-Refine-omega rule shipped
 /// B-series soundness
 /// fixes. Bump on every kernel-rule addition.
-pub const VVA_VERSION: &str = "3.0.0";
+pub const VVA_VERSION: &str = "4.0.0";
 
 pub mod proof_checker;
 pub mod proof_checker_nbe; // NbE-based second algorithmic kernel

@@ -170,7 +170,11 @@ pub fn m_depth(term: &CoreTerm) -> usize {
             scrutinee,
             motive,
             case,
-        } => m_depth(scrutinee).max(m_depth(motive)).max(m_depth(case)),
+            respect,
+        } => m_depth(scrutinee)
+            .max(m_depth(motive))
+            .max(m_depth(case))
+            .max(m_depth(respect)),
     }
 }
 
@@ -408,9 +412,13 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
             scrutinee,
             motive,
             case,
+            respect,
         } => ord_max(
             m_depth_omega(scrutinee),
-            ord_max(m_depth_omega(motive), m_depth_omega(case)),
+            ord_max(
+                m_depth_omega(motive),
+                ord_max(m_depth_omega(case), m_depth_omega(respect)),
+            ),
         ),
         CoreTerm::Inductive { args, .. } => {
             let mut sup = OrdinalDepth::finite(0);

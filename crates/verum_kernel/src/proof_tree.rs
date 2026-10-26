@@ -969,7 +969,6 @@ impl KernelRule {
             KernelRule::KSharp,
         ]
     }
-
 }
 
 impl std::fmt::Display for KernelRule {
@@ -1338,6 +1337,7 @@ fn inference_rule_and_premises(
             scrutinee,
             motive,
             case,
+            respect,
         } => {
             if let Some(p) = record_inference(ctx, scrutinee, axioms) {
                 premises.push(p);
@@ -1346,6 +1346,9 @@ fn inference_rule_and_premises(
                 premises.push(p);
             }
             if let Some(p) = record_inference(ctx, case, axioms) {
+                premises.push(p);
+            }
+            if let Some(p) = record_inference(ctx, respect, axioms) {
                 premises.push(p);
             }
             KernelRule::KQuotElim
@@ -2040,8 +2043,7 @@ mod tests {
         // failure, and the per-rule kernel-soundness corpus drift
         // check catches the count mismatch separately.
         let list = KernelRule::full_list();
-        let mut seen: std::collections::BTreeSet<&KernelRule> =
-            std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<&KernelRule> = std::collections::BTreeSet::new();
         // KernelRule derives PartialEq + Eq + Hash but not Ord; use
         // a HashSet-style uniqueness pin via a Vec sweep instead.
         let mut as_vec: Vec<&KernelRule> = list.iter().collect();

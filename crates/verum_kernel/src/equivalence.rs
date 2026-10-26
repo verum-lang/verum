@@ -167,20 +167,22 @@ fn compare<'a>(
                 base: y,
                 equiv: z,
             },
-        )
-        | (
+        ) => compare(a, x, bound) && compare(b, y, bound) && compare(c, z, bound),
+        (
             QuotElim {
                 scrutinee: a,
                 motive: b,
                 case: c,
+                respect: d,
             },
             QuotElim {
                 scrutinee: x,
                 motive: y,
                 case: z,
+                respect: w,
             },
-        ) => compare(a, x, bound) && compare(b, y, bound) && compare(c, z, bound),
-        (
+        )
+        | (
             PathOver {
                 motive: a,
                 path: b,

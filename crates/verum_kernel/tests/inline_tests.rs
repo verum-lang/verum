@@ -7,6 +7,9 @@
 //! LOC), which now contains only crate-level docs + the module-map
 //! re-exports + per-module sub-mod declarations.
 
+mod fixtures;
+use fixtures::*;
+
 use verum_common::{Heap, List, Maybe, Text};
 use verum_kernel::*;
 
@@ -45,7 +48,7 @@ fn shadow_returns_innermost() {
 fn unbound_variable_is_an_error() {
     let ctx = Context::new();
     let ax = AxiomRegistry::new();
-    let err = check(&ctx, &CoreTerm::Var(Text::from("y")), &ax).unwrap_err();
+    let err = check_fixture(&ctx, &CoreTerm::Var(Text::from("y")), &ax).unwrap_err();
     assert!(matches!(err, KernelError::UnboundVariable(_)));
 }
 
@@ -56,7 +59,7 @@ fn universe_checks_to_universe() {
     // over `infer`) reports the successor level, not the input.
     let ctx = Context::new();
     let ax = AxiomRegistry::new();
-    let ty = check(&ctx, &CoreTerm::Universe(UniverseLevel::Concrete(0)), &ax).unwrap();
+    let ty = check_fixture(&ctx, &CoreTerm::Universe(UniverseLevel::Concrete(0)), &ax).unwrap();
     assert_eq!(ty, CoreType::Universe(UniverseLevel::Concrete(1)));
 }
 
@@ -67,10 +70,10 @@ fn axiom_registry_refuses_duplicate_name() {
         framework: Text::from("lurie_htt"),
         citation: Text::from("HTT 6.2.2.7"),
     };
-    reg.register(Text::from("sheafification"), unit_ty(), fw.clone())
+    reg.register_fixture(Text::from("sheafification"), unit_ty(), fw.clone())
         .unwrap();
     let err = reg
-        .register(Text::from("sheafification"), unit_ty(), fw)
+        .register_fixture(Text::from("sheafification"), unit_ty(), fw)
         .unwrap_err();
     assert!(matches!(err, KernelError::DuplicateAxiom(_)));
 }
@@ -82,7 +85,7 @@ fn axiom_known_to_registry_is_checkable() {
         framework: Text::from("connes_reconstruction"),
         citation: Text::from("Connes 2008 axiom (vii)"),
     };
-    reg.register(Text::from("first_order_condition"), unit_ty(), fw.clone())
+    reg.register_fixture(Text::from("first_order_condition"), unit_ty(), fw.clone())
         .unwrap();
     let term = CoreTerm::Axiom {
         name: Text::from("first_order_condition"),
@@ -90,7 +93,7 @@ fn axiom_known_to_registry_is_checkable() {
         framework: fw,
     };
     let ctx = Context::new();
-    let head = check(&ctx, &term, &reg).unwrap();
+    let head = check_fixture(&ctx, &term, &reg).unwrap();
     // The registered axiom has `Unit` as its type; `infer` returns
     // that type verbatim and `shape_of` projects it to the
     // `Inductive(_)` head.
@@ -281,7 +284,7 @@ fn smtproof_infer_replays_certificate_and_returns_bool_type() {
     let term = CoreTerm::SmtProof(cert);
     let ctx = Context::new();
     let reg = AxiomRegistry::new();
-    let ty = infer(&ctx, &term, &reg).unwrap();
+    let ty = infer_fixture(&ctx, &term, &reg).unwrap();
     assert_eq!(
         ty,
         CoreTerm::Inductive {
@@ -303,7 +306,7 @@ fn smtproof_infer_rejects_malformed_certificate() {
     let term = CoreTerm::SmtProof(cert);
     let ctx = Context::new();
     let reg = AxiomRegistry::new();
-    let err = infer(&ctx, &term, &reg).unwrap_err();
+    let err = infer_fixture(&ctx, &term, &reg).unwrap_err();
     assert!(matches!(err, KernelError::EmptyCertificate));
 }
 
@@ -321,7 +324,7 @@ fn smtproof_infer_rejects_future_schema() {
     let term = CoreTerm::SmtProof(cert);
     let ctx = Context::new();
     let reg = AxiomRegistry::new();
-    let err = infer(&ctx, &term, &reg).unwrap_err();
+    let err = infer_fixture(&ctx, &term, &reg).unwrap_err();
     assert!(matches!(
         err,
         KernelError::UnsupportedCertificateSchema { .. }
@@ -341,7 +344,7 @@ fn smtproof_check_returns_bool_shape() {
     let term = CoreTerm::SmtProof(cert);
     let ctx = Context::new();
     let reg = AxiomRegistry::new();
-    let head = check(&ctx, &term, &reg).unwrap();
+    let head = check_fixture(&ctx, &term, &reg).unwrap();
     assert_eq!(head, CoreType::Inductive(Text::from("Bool")));
 }
 
@@ -457,7 +460,7 @@ fn serde_roundtrip_preserves_all_envelope_fields() {
 fn universe_inhabits_successor() {
     let ctx = Context::new();
     let ax = AxiomRegistry::new();
-    let ty = infer(&ctx, &CoreTerm::Universe(UniverseLevel::Concrete(0)), &ax).unwrap();
+    let ty = infer_fixture(&ctx, &CoreTerm::Universe(UniverseLevel::Concrete(0)), &ax).unwrap();
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(1)));
 }
 
@@ -478,7 +481,7 @@ fn polymorphic_identity_types_correctly() {
             body: Heap::new(CoreTerm::Var(Text::from("x"))),
         }),
     };
-    let ty = infer(&Context::new(), &id_lam, &ax).unwrap();
+    let ty = infer_fixture(&Context::new(), &id_lam, &ax).unwrap();
     // Expect: Pi (A : Type(0)) (Pi (x : A) A)
     assert!(matches!(
         ty,
@@ -507,7 +510,7 @@ fn application_of_identity_substitutes_argument() {
         },
     };
     let mut reg = AxiomRegistry::new();
-    reg.register(
+    reg.register_fixture(
         Text::from("tt"),
         unit_ty(),
         FrameworkId {
@@ -523,7 +526,7 @@ fn application_of_identity_substitutes_argument() {
         body: Heap::new(CoreTerm::Var(Text::from("x"))),
     };
     let applied = CoreTerm::App(Heap::new(id_lam), Heap::new(tt));
-    let ty = infer(&Context::new(), &applied, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &applied, &reg).unwrap();
     assert_eq!(ty, unit_ty());
 }
 
@@ -536,7 +539,7 @@ fn application_with_type_mismatch_rejects() {
         path: Text::from("Nat"),
         args: List::new(),
     };
-    reg.register(
+    reg.register_fixture(
         Text::from("zero"),
         nat_ty.clone(),
         FrameworkId {
@@ -545,7 +548,7 @@ fn application_with_type_mismatch_rejects() {
         },
     )
     .unwrap();
-    reg.register(
+    reg.register_fixture(
         Text::from("tt"),
         unit_ty(),
         FrameworkId {
@@ -571,7 +574,7 @@ fn application_with_type_mismatch_rejects() {
     };
     // (λ (x : Nat). x) tt — tt is Unit, not Nat → must error.
     let applied = CoreTerm::App(Heap::new(id_nat), Heap::new(tt));
-    let err = infer(&Context::new(), &applied, &reg).unwrap_err();
+    let err = infer_fixture(&Context::new(), &applied, &reg).unwrap_err();
     assert!(matches!(err, KernelError::TypeMismatch { .. }));
 }
 
@@ -579,7 +582,7 @@ fn application_with_type_mismatch_rejects() {
 #[test]
 fn application_of_non_function_rejects() {
     let mut reg = AxiomRegistry::new();
-    reg.register(
+    reg.register_fixture(
         Text::from("tt"),
         unit_ty(),
         FrameworkId {
@@ -597,7 +600,7 @@ fn application_of_non_function_rejects() {
         },
     };
     let applied = CoreTerm::App(Heap::new(tt.clone()), Heap::new(tt));
-    let err = infer(&Context::new(), &applied, &reg).unwrap_err();
+    let err = infer_fixture(&Context::new(), &applied, &reg).unwrap_err();
     assert!(matches!(err, KernelError::NotAFunction(_)));
 }
 
@@ -650,7 +653,7 @@ fn verify_full_accepts_matching_type() {
         domain: Heap::new(unit_ty()),
         codomain: Heap::new(unit_ty()),
     };
-    verify_full(&Context::new(), &id_unit, &expected, &ax).unwrap();
+    verify_fixture(&Context::new(), &id_unit, &expected, &ax).unwrap();
 }
 
 #[test]
@@ -662,7 +665,7 @@ fn verify_full_rejects_mismatched_type() {
         body: Heap::new(CoreTerm::Var(Text::from("x"))),
     };
     let wrong = CoreTerm::Universe(UniverseLevel::Concrete(0));
-    let err = verify_full(&Context::new(), &id_unit, &wrong, &ax).unwrap_err();
+    let err = verify_fixture(&Context::new(), &id_unit, &wrong, &ax).unwrap_err();
     assert!(matches!(err, KernelError::TypeMismatch { .. }));
 }
 
@@ -704,7 +707,7 @@ fn verify_full_accepts_beta_equivalent_codomain() {
     };
     // Pre-Sub-2.3 (structural_eq): would Err(TypeMismatch).
     // Post-Sub-2.3 (definitional_eq_with_axioms): Ok.
-    verify_full(&Context::new(), &id_unit, &expected, &ax).unwrap();
+    verify_fixture(&Context::new(), &id_unit, &expected, &ax).unwrap();
 }
 
 // -----------------------------------------------------------------
@@ -716,7 +719,7 @@ fn tt_axiom(reg: &mut AxiomRegistry) -> CoreTerm {
         framework: Text::from("builtin"),
         citation: Text::from("unit-introduction"),
     };
-    let _ = reg.register(Text::from("tt"), unit_ty(), fw.clone());
+    let _ = reg.register_fixture(Text::from("tt"), unit_ty(), fw.clone());
     CoreTerm::Axiom {
         name: Text::from("tt"),
         ty: Heap::new(unit_ty()),
@@ -733,7 +736,7 @@ fn sigma_formation_returns_universe() {
         fst_ty: Heap::new(unit_ty()),
         snd_ty: Heap::new(unit_ty()),
     };
-    let ty = infer(&Context::new(), &sigma, &ax).unwrap();
+    let ty = infer_fixture(&Context::new(), &sigma, &ax).unwrap();
     assert!(matches!(ty, CoreTerm::Universe(_)));
 }
 
@@ -743,7 +746,7 @@ fn pair_introduction_builds_sigma() {
     let mut reg = AxiomRegistry::new();
     let tt = tt_axiom(&mut reg);
     let pair = CoreTerm::Pair(Heap::new(tt.clone()), Heap::new(tt));
-    let ty = infer(&Context::new(), &pair, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &pair, &reg).unwrap();
     match ty {
         CoreTerm::Sigma { fst_ty, snd_ty, .. } => {
             assert_eq!(*fst_ty, unit_ty());
@@ -760,7 +763,7 @@ fn fst_projection_types_to_first_component() {
     let tt = tt_axiom(&mut reg);
     let pair = CoreTerm::Pair(Heap::new(tt.clone()), Heap::new(tt));
     let fst = CoreTerm::Fst(Heap::new(pair));
-    let ty = infer(&Context::new(), &fst, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &fst, &reg).unwrap();
     assert_eq!(ty, unit_ty());
 }
 
@@ -772,7 +775,7 @@ fn snd_projection_types_to_second_component() {
     let tt = tt_axiom(&mut reg);
     let pair = CoreTerm::Pair(Heap::new(tt.clone()), Heap::new(tt));
     let snd = CoreTerm::Snd(Heap::new(pair));
-    let ty = infer(&Context::new(), &snd, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &snd, &reg).unwrap();
     assert_eq!(ty, unit_ty());
 }
 
@@ -782,7 +785,7 @@ fn fst_of_non_pair_rejects() {
     let mut reg = AxiomRegistry::new();
     let tt = tt_axiom(&mut reg);
     let wrong = CoreTerm::Fst(Heap::new(tt));
-    let err = infer(&Context::new(), &wrong, &reg).unwrap_err();
+    let err = infer_fixture(&Context::new(), &wrong, &reg).unwrap_err();
     assert!(matches!(err, KernelError::NotAPair(_)));
 }
 
@@ -800,7 +803,7 @@ fn path_formation_returns_carrier_universe() {
         lhs: Heap::new(tt.clone()),
         rhs: Heap::new(tt),
     };
-    let ty = infer(&Context::new(), &path, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &path, &reg).unwrap();
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 
@@ -810,7 +813,7 @@ fn refl_produces_path_type_with_identical_endpoints() {
     let mut reg = AxiomRegistry::new();
     let tt = tt_axiom(&mut reg);
     let refl = CoreTerm::Refl(Heap::new(tt.clone()));
-    let ty = infer(&Context::new(), &refl, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &refl, &reg).unwrap();
     match ty {
         CoreTerm::PathTy { carrier, lhs, rhs } => {
             assert_eq!(*carrier, unit_ty());
@@ -835,7 +838,7 @@ fn refine_formation_returns_base_universe() {
         binder: Text::from("x"),
         predicate: Heap::new(tt),
     };
-    let ty = infer(&Context::new(), &refined, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &refined, &reg).unwrap();
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 
@@ -854,7 +857,7 @@ fn hcomp_infers_base_type() {
         walls: Heap::new(CoreTerm::Var(Text::from("walls"))),
         base: Heap::new(tt),
     };
-    let ty = infer(&ctx, &hc, &reg).unwrap();
+    let ty = infer_fixture(&ctx, &hc, &reg).unwrap();
     assert_eq!(ty, unit_ty());
 }
 
@@ -869,7 +872,7 @@ fn hcomp_rejects_unbound_phi() {
         walls: Heap::new(tt.clone()),
         base: Heap::new(tt),
     };
-    let err = infer(&Context::new(), &hc, &reg).unwrap_err();
+    let err = infer_fixture(&Context::new(), &hc, &reg).unwrap_err();
     assert!(matches!(err, KernelError::UnboundVariable(_)));
 }
 
@@ -879,17 +882,13 @@ fn transp_returns_path_rhs_type() {
     let mut reg = AxiomRegistry::new();
     let tt = tt_axiom(&mut reg);
     let ctx = Context::new().extend(Text::from("r"), unit_ty());
-    let path = CoreTerm::PathTy {
-        carrier: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
-        lhs: Heap::new(unit_ty()),
-        rhs: Heap::new(unit_ty()),
-    };
+    let path = CoreTerm::Refl(Heap::new(unit_ty()));
     let tr = CoreTerm::Transp {
         path: Heap::new(path),
         regular: Heap::new(CoreTerm::Var(Text::from("r"))),
         value: Heap::new(tt),
     };
-    let ty = infer(&ctx, &tr, &reg).unwrap();
+    let ty = infer_fixture(&ctx, &tr, &reg).unwrap();
     assert_eq!(ty, unit_ty());
 }
 
@@ -908,7 +907,7 @@ fn transp_rejects_unbound_regular() {
         regular: Heap::new(CoreTerm::Var(Text::from("r_unbound"))),
         value: Heap::new(tt),
     };
-    let err = infer(&Context::new(), &tr, &reg).unwrap_err();
+    let err = infer_fixture(&Context::new(), &tr, &reg).unwrap_err();
     assert!(matches!(err, KernelError::UnboundVariable(_)));
 }
 
@@ -926,7 +925,7 @@ fn glue_returns_carrier_universe() {
         fiber: Heap::new(CoreTerm::Var(Text::from("fiber"))),
         equiv: Heap::new(CoreTerm::Var(Text::from("equiv"))),
     };
-    let ty = infer(&ctx, &g, &ax).unwrap();
+    let ty = infer_fixture(&ctx, &g, &ax).unwrap();
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 
@@ -943,7 +942,7 @@ fn glue_rejects_unbound_equiv() {
         fiber: Heap::new(CoreTerm::Var(Text::from("fiber"))),
         equiv: Heap::new(CoreTerm::Var(Text::from("equiv_unbound"))),
     };
-    let err = infer(&ctx, &g, &ax).unwrap_err();
+    let err = infer_fixture(&ctx, &g, &ax).unwrap_err();
     assert!(matches!(err, KernelError::UnboundVariable(_)));
 }
 
@@ -967,27 +966,30 @@ fn glue_rejects_non_universe_carrier() {
         equiv: Heap::new(CoreTerm::Var(Text::from("equiv"))),
     };
     // This should fail because tt's type (Unit) is not a universe.
-    let res = infer(&ctx, &g, &reg);
+    let res = infer_fixture(&ctx, &g, &reg);
     assert!(res.is_err());
 }
 
 #[test]
 fn elim_requires_a_registered_inductive_declaration() {
-    let mut reg = AxiomRegistry::new();
-    let tt = tt_axiom(&mut reg);
-    // motive : Unit → Type(0) — represented as λ(u:Unit). Unit
-    let motive = CoreTerm::Lam {
-        binder: Text::from("u"),
-        domain: Heap::new(unit_ty()),
-        body: Heap::new(unit_ty()),
+    let missing = CoreTerm::Inductive {
+        path: Text::from("Missing"),
+        args: List::new(),
     };
-    let e = CoreTerm::Elim {
-        scrutinee: Heap::new(tt.clone()),
-        motive: Heap::new(motive.clone()),
+    let context = Context::new().extend(Text::from("x"), missing.clone());
+    let term = CoreTerm::Elim {
+        scrutinee: Heap::new(CoreTerm::Var(Text::from("x"))),
+        motive: Heap::new(CoreTerm::Lam {
+            binder: Text::from("u"),
+            domain: Heap::new(missing),
+            body: Heap::new(unit_ty()),
+        }),
         cases: List::new(),
     };
-    assert!(matches!(infer(&Context::new(), &e, &reg),
-        Err(verum_kernel::KernelError::UnknownInductive(_))));
+    assert!(matches!(
+        verum_kernel::infer(&context, &term, &AxiomRegistry::new()),
+        Err(KernelError::UnknownInductive(_))
+    ));
 }
 
 /// V1 — Elim with a non-Π-typed motive must reject. Pre-V1 the
@@ -1003,7 +1005,7 @@ fn elim_rejects_non_function_motive() {
         motive: Heap::new(bad_motive),
         cases: List::new(),
     };
-    let res = infer(&Context::new(), &e, &reg);
+    let res = infer_fixture(&Context::new(), &e, &reg);
     assert!(matches!(
         res,
         Err(verum_kernel::KernelError::NotAFunction(_))
@@ -1028,7 +1030,7 @@ fn elim_rejects_scrutinee_domain_mismatch() {
         motive: Heap::new(motive),
         cases: List::new(),
     };
-    let res = infer(&Context::new(), &e, &reg);
+    let res = infer_fixture(&Context::new(), &e, &reg);
     assert!(matches!(
         res,
         Err(verum_kernel::KernelError::TypeMismatch { .. })
@@ -1047,7 +1049,7 @@ fn path_rejects_endpoint_type_mismatch() {
         path: Text::from("Bool"),
         args: List::new(),
     };
-    reg.register(
+    reg.register_fixture(
         Text::from("true_val"),
         bool_ty.clone(),
         FrameworkId {
@@ -1069,7 +1071,7 @@ fn path_rejects_endpoint_type_mismatch() {
         lhs: Heap::new(tt),
         rhs: Heap::new(true_val),
     };
-    let err = infer(&Context::new(), &bogus, &reg).unwrap_err();
+    let err = infer_fixture(&Context::new(), &bogus, &reg).unwrap_err();
     assert!(matches!(err, KernelError::TypeMismatch { .. }));
 }
 
@@ -1253,7 +1255,7 @@ fn axiom_after_load_is_checkable_by_infer() {
             citation: Text::from("Connes 2008 axiom (vii)"),
         },
     };
-    let ty = infer(&Context::new(), &term, &reg).unwrap();
+    let ty = infer_fixture(&Context::new(), &term, &reg).unwrap();
     assert!(matches!(ty, CoreTerm::Universe(_)));
 }
 
@@ -1307,7 +1309,7 @@ fn uip_statement() -> CoreTerm {
 #[test]
 fn uip_axiom_is_rejected_by_register() {
     let mut reg = AxiomRegistry::new();
-    let result = reg.register(
+    let result = reg.register_fixture(
         Text::from("uip"),
         uip_statement(),
         FrameworkId {
@@ -1329,7 +1331,7 @@ fn non_uip_axiom_is_accepted() {
     // A plain axiom claiming a proposition about a universe
     // is not UIP and must not be rejected by rule 10.
     let mut reg = AxiomRegistry::new();
-    let result = reg.register(
+    let result = reg.register_fixture(
         Text::from("some_axiom"),
         CoreTerm::Universe(UniverseLevel::Concrete(0)),
         FrameworkId {

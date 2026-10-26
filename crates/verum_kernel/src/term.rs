@@ -200,70 +200,45 @@ pub enum CoreTerm {
         predicate: Heap<CoreTerm>,
     },
 
-    /// quotient type: `Quotient(base, equiv)`.
-    ///
-    /// Quotient types: a quotient `Q = T / ~` collapses elements
-    /// of `T` related by the equivalence `~` into a single
-    /// equivalence class. The kernel checks (a) `base` is a
-    /// type, (b) `equiv` is a binary relation on `base`,
-    /// (c) the eliminator's motive respects the equivalence.
-    ///
-    /// Setoid quotients (Z = ℕ²/~ where (a,b)~(c,d) iff a+d =
-    /// b+c) and propositional truncation (||A|| = A / ⊤) both
-    /// fall under this constructor; the difference lies in the
-    /// equiv predicate.
+    /// Quotient of a carrier by a type-valued binary relation. The kernel
+    /// checks `base : Type(u)` and `equiv : base -> base -> Type(v)`;
+    /// the quotient lives in `Type(max(u, v))`. No equivalence-law or
+    /// universe-resizing assumption is implicit in formation.
     Quotient {
-        /// Carrier type T.
+        /// Carrier type.
         base: Heap<CoreTerm>,
-        /// Binary relation `~ : T → T → Prop`. Must be
-        /// reflexive + symmetric + transitive (the kernel
-        /// records but does not internally verify these
-        /// properties — they're framework-axiom-attestable).
+        /// Relation whose related representatives the recursor must respect.
         equiv: Heap<CoreTerm>,
     },
 
-    /// quotient introduction: `[t]_~`. Lifts a
-    /// value `t : T` into the quotient `T / ~` by taking its
-    /// equivalence class. Per `K-Quot-Intro`:
-    ///
-    /// ```text
-    /// Γ ⊢ t : T Γ ⊢ ~ : T → T → Prop
-    /// ──────────────────────────────────
-    /// Γ ⊢ QuotIntro(t) : Quotient(T, ~)
-    /// ```
+    /// Quotient introduction, `[value] : Quotient(base, equiv)`.
     QuotIntro {
-        /// Element to lift.
+        /// Representative, checked against `base`.
         value: Heap<CoreTerm>,
-        /// Carrier type (for round-trip type-checking).
+        /// Carrier type.
         base: Heap<CoreTerm>,
-        /// Equivalence relation (for round-trip).
+        /// Well-formed binary relation.
         equiv: Heap<CoreTerm>,
     },
 
-    /// quotient elimination: `quot_elim(q, motive,
-    /// case)`. Eliminates a quotient by providing a value-level
-    /// case that respects the equivalence:
+    /// Nondependent quotient recursion with explicit relation-respect evidence.
     ///
-    /// ```text
-    /// Γ ⊢ q : Quotient(T, ~)
-    /// Γ ⊢ motive : Quotient(T, ~) → U
-    /// Γ ⊢ case : Π(t: T). motive([t]_~)
-    /// // implicit obligation: ∀ t1 t2: T. t1 ~ t2 → case(t1) ≡ case(t2)
-    /// ─────────────────────────────────────────────
-    /// Γ ⊢ quot_elim(q, motive, case) : motive(q)
-    /// ```
-    ///
-    /// The respect-of-equivalence obligation is discharged by
-    /// the framework-axiom system or `@verify(proof)` — the
-    /// kernel records the obligation but doesn't internally
-    /// derive it.
+    /// For `Q = Quotient(A, R)`, the kernel checks:
+    /// `scrutinee : Q`, `motive : Q -> Type(v)` with a definitionally
+    /// constant result `B`, `case : A -> B`, and
+    /// `respect : (x y : A) -> R x y -> Path<B>(case x, case y)`.
+    /// The result has type `motive(scrutinee)` and computes to `case(value)`
+    /// on an introduction. Genuinely dependent motives require dependent
+    /// transport/coherence and are rejected by this rule.
     QuotElim {
         /// The quotient term being eliminated.
         scrutinee: Heap<CoreTerm>,
-        /// Motive predicate `Quotient(T, ~) → U`.
+        /// Definitionally constant family over the quotient.
         motive: Heap<CoreTerm>,
-        /// The `Π(t: T). motive([t]_~)` case function.
+        /// Representative map, checked against `A -> B`.
         case: Heap<CoreTerm>,
+        /// Checked proof that the representative map respects the relation.
+        respect: Heap<CoreTerm>,
     },
 
     /// Reference to a named inductive / higher-inductive type (from
@@ -444,17 +419,18 @@ impl CoreTerm {
                 value: a,
                 base: b,
                 equiv: c,
-            }
-            | QuotElim {
-                scrutinee: a,
-                motive: b,
-                case: c,
             } => {
                 visit(a);
                 visit(b);
                 visit(c);
             }
-            PathOver {
+            QuotElim {
+                scrutinee: a,
+                motive: b,
+                case: c,
+                respect: d,
+            }
+            | PathOver {
                 motive: a,
                 path: b,
                 lhs: c,

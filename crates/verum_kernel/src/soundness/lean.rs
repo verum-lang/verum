@@ -97,7 +97,7 @@ impl SoundnessBackend for LeanBackend {
                | Refine (base : CoreTerm) (binder : String) (predicate : CoreTerm)\n  \
                | Quotient (base equiv : CoreTerm)\n  \
                | QuotIntro (value base equiv : CoreTerm)\n  \
-               | QuotElim (scrutinee motive case_fn : CoreTerm)\n  \
+               | QuotElim (scrutinee motive case_fn respect : CoreTerm)\n  \
                | Inductive_ (path : String) (args : List CoreTerm)\n  \
                | Elim (scrutinee motive : CoreTerm) (cases : List CoreTerm)\n  \
                | SmtProof (solver_tag : String)\n  \
@@ -151,6 +151,11 @@ impl SoundnessBackend for LeanBackend {
              abbrev Ctx := List (String × CoreTerm)\n\n\
              /-- Capture-avoiding substitution.  Opaque oracle. -/\n\
              opaque subst (x : String) (replacement body : CoreTerm) : CoreTerm\n\n\
+             /-- Explicit binder hygiene for this abstract quotient schema.\n\
+             The rule-closure theorem is not a proof of Rust checker correspondence. -/\n\
+             def QuotientFresh (name : String) (terms : List CoreTerm) : Prop :=\n\
+               ∀ term ∈ terms, ∀ value, subst name value term = term\n\
+\n\
              /-- Generic side-condition oracle for K_Pos / K_FwAx (see below). -/\n\
              opaque side_conditions_hold : Prop\n\n",
         );
@@ -209,15 +214,11 @@ impl SoundnessBackend for LeanBackend {
         let (status_comment, proof_body) = match &rule.status {
             LemmaStatus::Proved { lean_tactics, .. } => match constructor_witness {
                 Some(w) => (String::new(), format!(":=\n  {}", w)),
-                None => (
-                    String::new(),
-                    format!(":= by\n{}", lean_tactics),
-                ),
+                None => (String::new(), format!(":= by\n{}", lean_tactics)),
             },
-            LemmaStatus::Admitted { reason } => (
-                format!("-- reason: {}\n", reason),
-                ":= sorry".to_string(),
-            ),
+            LemmaStatus::Admitted { reason } => {
+                (format!("-- reason: {}\n", reason), ":= sorry".to_string())
+            }
             LemmaStatus::DischargedByFramework {
                 lemma_path,
                 framework,
@@ -263,10 +264,14 @@ impl SoundnessBackend for LeanBackend {
             // match-arm form is most readable that way.  Lean is
             // whitespace-flexible inside Π; collapsing `\n  ` to a
             // single space loses no information.
-            let one_line = body.replace("\n      ", " ").replace("\n    ", " ").replace('\n', " ");
+            let one_line = body
+                .replace("\n      ", " ")
+                .replace("\n    ", " ")
+                .replace('\n', " ");
             out.push_str(&format!(
                 "  | KernelRule.{} => {}\n",
-                r.rule_name, one_line.trim(),
+                r.rule_name,
+                one_line.trim(),
             ));
         }
 
@@ -313,7 +318,6 @@ pub(crate) fn iou_axioms_lean() -> &'static str {
         .get_or_init(crate::soundness::render_iou_axioms_lean)
         .as_str()
 }
-
 
 // ============================================================================
 // The Typing inductive — 38 constructors covering every kernel rule.
@@ -421,21 +425,32 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n        \
         Typing Γ a (CoreTerm.Refine base x predicate)\n  \
   -- ===== Quotient (3) — 2 no-IOU + 1 with-IOU =====\n  \
-  | t_quot_form :\n      \
-      ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat},\n        \
-        Typing Γ base (CoreTerm.Universe i) →\n        \
-        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i)\n  \
-  | t_quot_intro :\n      \
-      ∀ {Γ : Ctx} {value base equiv : CoreTerm},\n        \
-        Typing Γ value base →\n        \
-        Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)\n  \
-  | t_quot_elim :\n      \
-      ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},\n        \
-        Typing Γ scrutinee (CoreTerm.Quotient base equiv) →\n        \
-        Typing Γ motive (CoreTerm.Pi \"x\" base (CoreTerm.Universe i)) →\n        \
-        Typing Γ case_fn (CoreTerm.Pi \"x\" base (CoreTerm.App motive (CoreTerm.Var \"x\"))) →\n        \
-        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee)\n  \
-  -- ===== Inductive (3) — 1 placeholder + 2 with-IOU =====\n  \
+  | t_quot_form :\n\
+      ∀ {Γ : Ctx} {base equiv : CoreTerm} {i j : Nat},\n\
+        QuotientFresh \"x\" [base] →\n\
+        Typing Γ base (CoreTerm.Universe i) →\n\
+        Typing Γ equiv (CoreTerm.Pi \"x\" base (CoreTerm.Pi \"y\" base (CoreTerm.Universe j))) →\n\
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe (max i j))\n\
+  | t_quot_intro :\n\
+      ∀ {Γ : Ctx} {value base equiv : CoreTerm} {i : Nat},\n\
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) →\n\
+        Typing Γ value base →\n\
+        Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)\n\
+  | t_quot_elim :\n\
+      ∀ {Γ : Ctx} {scrutinee motive case_fn respect base equiv result : CoreTerm} {i j : Nat},\n\
+        QuotientFresh \"q\" [result] →\n\
+        QuotientFresh \"x\" [base, equiv, result, case_fn] →\n\
+        QuotientFresh \"y\" [base, equiv, result, case_fn] →\n\
+        QuotientFresh \"r\" [base, equiv, result, case_fn] →\n\
+        motive = CoreTerm.Lam \"q\" (CoreTerm.Quotient base equiv) result →\n\
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe j) →\n\
+        Typing Γ result (CoreTerm.Universe i) →\n\
+        Typing Γ scrutinee (CoreTerm.Quotient base equiv) →\n\
+        Typing Γ case_fn (CoreTerm.Pi \"x\" base result) →\n\
+        Typing Γ respect (CoreTerm.Pi \"x\" base (CoreTerm.Pi \"y\" base (CoreTerm.Pi \"r\"\n\
+          (CoreTerm.App (CoreTerm.App equiv (CoreTerm.Var \"x\")) (CoreTerm.Var \"y\"))\n\
+          (CoreTerm.PathTy result (CoreTerm.App case_fn (CoreTerm.Var \"x\")) (CoreTerm.App case_fn (CoreTerm.Var \"y\")))))) →\n\
+        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn respect) (CoreTerm.App motive scrutinee)\n\
   | t_inductive :\n      \
       ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat},\n        \
         Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i)\n  \
@@ -668,30 +683,48 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         ),
         // ===== Quotient (3) =====
         "K_Quot_Form" => Some(
-            "theorem K_Quot_Form_sound :\n    ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat},\n      \
-              Typing Γ base (CoreTerm.Universe i) →\n      \
-              Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) :=\n  @Typing.t_quot_form",
+            r#"theorem K_Quot_Form_sound :
+    ∀ {Γ : Ctx} {base equiv : CoreTerm} {i j : Nat},
+        QuotientFresh "x" [base] →
+        Typing Γ base (CoreTerm.Universe i) →
+        Typing Γ equiv (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Universe j))) →
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe (max i j)) :=
+  @Typing.t_quot_form"#,
         ),
         "K_Quot_Intro" => Some(
-            "theorem K_Quot_Intro_sound :\n    ∀ {Γ : Ctx} {value base equiv : CoreTerm},\n      \
-              Typing Γ value base →\n      \
-              Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv) :=\n  @Typing.t_quot_intro",
+            r#"theorem K_Quot_Intro_sound :
+    ∀ {Γ : Ctx} {value base equiv : CoreTerm} {i : Nat},
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) →
+        Typing Γ value base →
+        Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv) :=
+  @Typing.t_quot_intro"#,
         ),
         "K_Quot_Elim" => Some(
-            "theorem K_Quot_Elim_sound :\n    ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},\n      \
-              Typing Γ scrutinee (CoreTerm.Quotient base equiv) →\n      \
-              Typing Γ motive (CoreTerm.Pi \"x\" base (CoreTerm.Universe i)) →\n      \
-              Typing Γ case_fn (CoreTerm.Pi \"x\" base (CoreTerm.App motive (CoreTerm.Var \"x\"))) →\n      \
-              Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee) :=\n  @Typing.t_quot_elim",
+            r#"theorem K_Quot_Elim_sound :
+    ∀ {Γ : Ctx} {scrutinee motive case_fn respect base equiv result : CoreTerm} {i j : Nat},
+        QuotientFresh "q" [result] →
+        QuotientFresh "x" [base, equiv, result, case_fn] →
+        QuotientFresh "y" [base, equiv, result, case_fn] →
+        QuotientFresh "r" [base, equiv, result, case_fn] →
+        motive = CoreTerm.Lam "q" (CoreTerm.Quotient base equiv) result →
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe j) →
+        Typing Γ result (CoreTerm.Universe i) →
+        Typing Γ scrutinee (CoreTerm.Quotient base equiv) →
+        Typing Γ case_fn (CoreTerm.Pi "x" base result) →
+        Typing Γ respect (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Pi "r"
+          (CoreTerm.App (CoreTerm.App equiv (CoreTerm.Var "x")) (CoreTerm.Var "y"))
+          (CoreTerm.PathTy result (CoreTerm.App case_fn (CoreTerm.Var "x")) (CoreTerm.App case_fn (CoreTerm.Var "y")))))) →
+        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn respect) (CoreTerm.App motive scrutinee) :=
+  @Typing.t_quot_elim"#,
         ),
         // ===== Inductive (3) =====
         "K_Inductive" => Some(
             "theorem K_Inductive_sound :\n    ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat},\n      \
               Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i) :=\n  @Typing.t_inductive",
         ),
-        "K_Pos" => Some(
-            "theorem K_Pos_sound : side_conditions_hold → True :=\n  by\n  intro _; trivial",
-        ),
+        "K_Pos" => {
+            Some("theorem K_Pos_sound : side_conditions_hold → True :=\n  by\n  intro _; trivial")
+        }
         "K_Elim" => Some(
             "theorem K_Elim_sound :\n    ∀ {Γ : Ctx} {scrutinee motive scrutinee_ty : CoreTerm} {cases : List CoreTerm} {i : Nat},\n      \
               Typing Γ scrutinee scrutinee_ty →\n      \
@@ -773,5 +806,7 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
 /// the 38 entries above (e.g. via a typo when adding a new rule)
 /// fails this check.
 pub fn every_rule_has_lean_signature(rules: &[RuleSpec]) -> bool {
-    rules.iter().all(|r| rule_signature_lean(&r.rule_name).is_some())
+    rules
+        .iter()
+        .all(|r| rule_signature_lean(&r.rule_name).is_some())
 }

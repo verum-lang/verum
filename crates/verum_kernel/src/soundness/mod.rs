@@ -358,10 +358,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // in the export since FV-9; mod.rs status now matches.
             // The interval-object semantics (CCHM De Morgan algebra)
             // is the kernel's input contract.
-            proved(
-                "exact T_path_ty.",
-                "  exact @Typing.t_path_ty _ _ _ _ _",
-            ),
+            proved("exact T_path_ty.", "  exact @Typing.t_path_ty _ _ _ _ _"),
         ),
         spec(
             "K_Path_Over_Form",
@@ -391,10 +388,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // conclusion is `Typing Γ (Refl a) (PathTy A a a)`.
             // Constructor was structural in the export since FV-9.
             // The J-rule's unit law is the kernel's input contract.
-            proved(
-                "exact T_refl.",
-                "  exact @Typing.t_refl _ _ _",
-            ),
+            proved("exact T_refl.", "  exact @Typing.t_refl _ _ _"),
         ),
         spec(
             "K_HComp",
@@ -406,10 +400,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // some universe and base value has type T.  Wall-
             // cofibrancy + Kan-filling regularity remain the
             // kernel's runtime contract (CCHM §3).
-            proved(
-                "exact T_hcomp.",
-                "  exact @Typing.t_hcomp _ _ _ _ _ _ _",
-            ),
+            proved("exact T_hcomp.", "  exact @Typing.t_hcomp _ _ _ _ _ _ _"),
         ),
         spec(
             "K_Transp",
@@ -420,10 +411,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // result type's universe-form.  The transport path's
             // endpoint identity at i=1 (the regularity condition)
             // remains the kernel's runtime contract.
-            proved(
-                "exact T_transp.",
-                "  exact @Typing.t_transp _ _ _ _ _ _",
-            ),
+            proved("exact T_transp.", "  exact @Typing.t_transp _ _ _ _ _ _"),
         ),
         spec(
             "K_Glue",
@@ -435,10 +423,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // the same universe.  The phi/fiber/equiv compositional
             // structure remains the kernel's runtime contract
             // (univalence-via-Glue lemma).
-            proved(
-                "exact T_glue.",
-                "  exact @Typing.t_glue _ _ _ _ _ _ _",
-            ),
+            proved("exact T_glue.", "  exact @Typing.t_glue _ _ _ _ _ _ _"),
         ),
         // ---- Refinement (4) -------------------------------------------------
         spec(
@@ -451,10 +436,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // ("predicates over base types are themselves Bool-valued
             // at Type 0").  Universe(0) is the universe at which
             // Bool-shaped predicates live in CIC.
-            proved(
-                "exact T_refine.",
-                "  exact @Typing.t_refine _ _ _ _ _",
-            ),
+            proved("exact T_refine.", "  exact @Typing.t_refine _ _ _ _ _"),
         ),
         spec(
             "K_Refine_Omega",
@@ -504,53 +486,29 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             ),
         ),
         // ---- Quotient (3) ---------------------------------------------------
+        // These are closure lemmas of an abstract Typing relation, with
+        // explicit universe, hygiene and respect premises. Constructor witnesses
+        // do not prove correspondence to the Rust implementation.
         spec(
             "K_Quot_Form",
             Quotient,
-            2,
+            3,
             true,
-            // Discharged: Quotient formation takes a structural
-            // premise (base well-typed at some Universe); conclusion
-            // types the quotient at the same Universe.  Constructor
-            // was structural in the export since FV-9.  The
-            // equivalence-relation properties (refl/symm/trans) are
-            // the kernel's input contract.
-            proved(
-                "exact T_quot_form.",
-                "  exact @Typing.t_quot_form _ _ _ _",
-            ),
+            proved("exact T_quot_form.", "  exact @Typing.t_quot_form"),
         ),
         spec(
             "K_Quot_Intro",
             Quotient,
-            3,
+            2,
             false,
-            // Discharged: QuotIntro takes a structural premise (the
-            // value well-typed at the base); conclusion types the
-            // intro at the quotient type.  Constructor was structural
-            // in the export since FV-9.
-            proved(
-                "exact T_quot_intro.",
-                "  exact @Typing.t_quot_intro _ _ _ _",
-            ),
+            proved("exact T_quot_intro.", "  exact @Typing.t_quot_intro"),
         ),
         spec(
             "K_Quot_Elim",
             Quotient,
-            3,
+            10,
             true,
-            // Discharged: the rule's IOU axiom was eliminated; the
-            // soundness lemma now follows from the structural premises
-            // (scrutinee at the quotient, motive well-typed, case_fn at
-            // the dependent product) by the corresponding Typing
-            // constructor.  The respect-of-equivalence side condition
-            // remains the kernel's input contract — audited at the
-            // Verum side via `verum audit --proof-honesty`, never
-            // assumed here.
-            proved(
-                "intros; apply T_quot_elim with (base := base) (equiv := equiv) (i := i); assumption.",
-                "  intros; exact (Typing.t_quot_elim ‹_› ‹_› ‹_›)",
-            ),
+            proved("exact T_quot_elim.", "  exact @Typing.t_quot_elim"),
         ),
         // ---- Inductive (3) --------------------------------------------------
         spec(
@@ -566,10 +524,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // discipline.  By the time we have an `Inductive_(...)`
             // term in CoreTerm, the kernel has already verified the
             // strict-positivity invariant for the named inductive.
-            proved(
-                "exact T_inductive.",
-                "  exact @Typing.t_inductive _ _ _ _",
-            ),
+            proved("exact T_inductive.", "  exact @Typing.t_inductive _ _ _ _"),
         ),
         spec(
             "K_Pos",
@@ -616,20 +571,14 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // construction time, `verum_kernel::replay_smt_cert`
             // gates acceptance on the solver's own verdict.  This
             // mirrors K_FwAx's framework-axiom-admission discipline.
-            proved(
-                "exact T_smt.",
-                "  exact @Typing.t_smt _ _ _ _ _",
-            ),
+            proved("exact T_smt.", "  exact @Typing.t_smt _ _ _ _ _"),
         ),
         spec(
             "K_FwAx",
             SmtAxiom,
             0,
             true,
-            proved(
-                "  intros _. trivial.",
-                "  intro _; trivial",
-            ),
+            proved("  intros _. trivial.", "  intro _; trivial"),
         ),
         // ---- Diakrisis (11) -------------------------------------------------
         spec(
@@ -700,10 +649,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // typing — same shape as t_modal_box / t_modal_diamond.
             // The M ⊣ A unit-law content is the kernel's input
             // contract, audited at the Verum side.
-            proved(
-                "exact T_epsilon_of.",
-                "  exact @Typing.t_epsilon_of _ _ _",
-            ),
+            proved("exact T_epsilon_of.", "  exact @Typing.t_epsilon_of _ _ _"),
         ),
         spec(
             "K_Alpha_Of",
@@ -712,10 +658,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             false,
             // Discharged: AlphaOf preserves the enactment's typing
             // — counit-law analogue of K_Epsilon_Of.
-            proved(
-                "exact T_alpha_of.",
-                "  exact @Typing.t_alpha_of _ _ _",
-            ),
+            proved("exact T_alpha_of.", "  exact @Typing.t_alpha_of _ _ _"),
         ),
         spec(
             "K_Modal_Box",
@@ -730,10 +673,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // axiomatized in the export.  Constructor was structural
             // in Lean / Coq / Isabelle since FV-9; mod.rs status now
             // matches.
-            proved(
-                "exact T_modal_box.",
-                "  exact @Typing.t_modal_box _ _ _",
-            ),
+            proved("exact T_modal_box.", "  exact @Typing.t_modal_box _ _ _"),
         ),
         spec(
             "K_Modal_Diamond",
@@ -770,10 +710,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // — same wrap-preserves-typing shape as the modal-box
             // family.  The Schreiber DCCT cohesive triple-adjunction
             // ∫ ⊣ ♭ ⊣ ♯ (DCCT §3.4) is the kernel's input contract.
-            proved(
-                "exact T_shape.",
-                "  exact @Typing.t_shape _ _ _",
-            ),
+            proved("exact T_shape.", "  exact @Typing.t_shape _ _ _"),
         ),
         spec(
             "K_Flat",
@@ -783,10 +720,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // Discharged: Flat preserves the inner term's typing.
             // The discrete-subuniverse localisation lemma (Shulman
             // 2018 §3) is the kernel's input contract.
-            proved(
-                "exact T_flat.",
-                "  exact @Typing.t_flat _ _ _",
-            ),
+            proved("exact T_flat.", "  exact @Typing.t_flat _ _ _"),
         ),
         spec(
             "K_Sharp",
@@ -796,10 +730,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // Discharged: Sharp preserves the inner term's typing.
             // The codiscrete-subuniverse colocalisation lemma
             // (DCCT §3.4) is the kernel's input contract.
-            proved(
-                "exact T_sharp.",
-                "  exact @Typing.t_sharp _ _ _",
-            ),
+            proved("exact T_sharp.", "  exact @Typing.t_sharp _ _ _"),
         ),
     ]
 }
@@ -1381,23 +1312,21 @@ impl SoundnessExporter {
                 RuleCategory::SmtAxiom => "SmtAxiom",
                 RuleCategory::Diakrisis => "Diakrisis",
             };
-            let (status_kind, trust_note, framework_lemma_path, framework_name) =
-                match &rule.status {
-                    LemmaStatus::Proved { .. } => ("proved", None, None, None),
-                    LemmaStatus::Admitted { reason } => {
-                        ("admitted", Some(reason.clone()), None, None)
-                    }
-                    LemmaStatus::DischargedByFramework {
-                        lemma_path,
-                        framework,
-                        citation,
-                    } => (
-                        "discharged-by-framework",
-                        Some(citation.clone()),
-                        Some(lemma_path.clone()),
-                        Some(framework.clone()),
-                    ),
-                };
+            let (status_kind, trust_note, framework_lemma_path, framework_name) = match &rule.status
+            {
+                LemmaStatus::Proved { .. } => ("proved", None, None, None),
+                LemmaStatus::Admitted { reason } => ("admitted", Some(reason.clone()), None, None),
+                LemmaStatus::DischargedByFramework {
+                    lemma_path,
+                    framework,
+                    citation,
+                } => (
+                    "discharged-by-framework",
+                    Some(citation.clone()),
+                    Some(lemma_path.clone()),
+                    Some(framework.clone()),
+                ),
+            };
             entries.push(TrustExtensionEntry {
                 rule_name: rule.rule_name.clone(),
                 lemma_name: rule.lemma_name.clone(),

@@ -7,6 +7,9 @@
 //! per `AxiomRegistry::register_definition`); opaque **postulates**
 //! (no body) remain neutral.
 
+mod fixtures;
+use fixtures::*;
+
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
     AxiomRegistry, CoreTerm, FrameworkId, UniverseLevel, definitional_eq,
@@ -46,7 +49,7 @@ fn register_definition_stores_body() {
         domain: Heap::new(nat_ind()),
         codomain: Heap::new(nat_ind()),
     };
-    let res = reg.register_definition(Text::from("IdNat"), id_lam.clone(), id_ty, fw());
+    let res = reg.register_fixture_definition(Text::from("IdNat"), id_lam.clone(), id_ty, fw());
     assert!(res.is_ok());
     use verum_common::Maybe;
     match reg.get("IdNat") {
@@ -100,7 +103,7 @@ fn register_definition_rejects_uip_shape_typed_body() {
         codomain: Heap::new(pi_a),
     };
     let body = nat_ind(); // arbitrary body — UIP gate fires on ty.
-    let res = reg.register_definition(Text::from("uip_def"), body, uip_ty, fw());
+    let res = reg.register_fixture_definition(Text::from("uip_def"), body, uip_ty, fw());
     assert!(matches!(
         res,
         Err(verum_kernel::KernelError::UipForbidden(_))
@@ -126,7 +129,7 @@ fn normalize_with_axioms_unfolds_transparent_definition() {
         domain: Heap::new(nat_ind()),
         codomain: Heap::new(nat_ind()),
     };
-    reg.register_definition(Text::from("IdNat"), id_lam.clone(), id_ty.clone(), fw())
+    reg.register_fixture_definition(Text::from("IdNat"), id_lam.clone(), id_ty.clone(), fw())
         .expect("register ok");
     // Term: `IdNat` (an Axiom node referencing the definition).
     let term = CoreTerm::Axiom {
@@ -144,7 +147,7 @@ fn normalize_with_axioms_unfolds_transparent_definition() {
 fn normalize_with_axioms_leaves_opaque_postulate_neutral() {
     // Postulates (body = None) remain neutral under δ.
     let mut reg = AxiomRegistry::new();
-    reg.register(Text::from("opaque_pos"), nat_ind(), fw())
+    reg.register_fixture(Text::from("opaque_pos"), nat_ind(), fw())
         .expect("register ok");
     let term = CoreTerm::Axiom {
         name: Text::from("opaque_pos"),
@@ -178,7 +181,7 @@ fn normalize_with_axioms_unfolds_inside_compound_term() {
         domain: Heap::new(nat_ind()),
         codomain: Heap::new(nat_ind()),
     };
-    reg.register_definition(Text::from("IdNat"), id_lam, id_ty.clone(), fw())
+    reg.register_fixture_definition(Text::from("IdNat"), id_lam, id_ty.clone(), fw())
         .expect("register ok");
     let id_axiom = CoreTerm::Axiom {
         name: Text::from("IdNat"),
@@ -226,7 +229,7 @@ fn definitional_eq_with_axioms_handles_delta_equivalence() {
         domain: Heap::new(nat_ind()),
         codomain: Heap::new(nat_ind()),
     };
-    reg.register_definition(Text::from("IdNat"), id_lam, id_ty.clone(), fw())
+    reg.register_fixture_definition(Text::from("IdNat"), id_lam, id_ty.clone(), fw())
         .expect("register ok");
     let id_axiom = CoreTerm::Axiom {
         name: Text::from("IdNat"),
@@ -276,7 +279,7 @@ fn delta_reduces_axiom_referenced_inside_pi() {
         domain: Heap::new(nat_ind()),
         codomain: Heap::new(nat_ind()),
     };
-    reg.register_definition(Text::from("IdNat"), id_lam.clone(), id_ty.clone(), fw())
+    reg.register_fixture_definition(Text::from("IdNat"), id_lam.clone(), id_ty.clone(), fw())
         .expect("register ok");
     let id_axiom = CoreTerm::Axiom {
         name: Text::from("IdNat"),

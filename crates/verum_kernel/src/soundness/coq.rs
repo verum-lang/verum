@@ -80,7 +80,7 @@ impl SoundnessBackend for CoqBackend {
            | Refine (base : CoreTerm) (binder : string) (predicate : CoreTerm)\n  \
            | Quotient (base equiv : CoreTerm)\n  \
            | QuotIntro (value base equiv : CoreTerm)\n  \
-           | QuotElim (scrutinee motive case_fn : CoreTerm)\n  \
+           | QuotElim (scrutinee motive case_fn respect : CoreTerm)\n  \
            | Inductive_ (path : string) (args : list CoreTerm)\n  \
            | Elim (scrutinee motive : CoreTerm) (cases : list CoreTerm)\n  \
            | SmtProof (solver_tag : string)\n  \
@@ -123,6 +123,10 @@ impl SoundnessBackend for CoqBackend {
         out.push_str(
             "Definition Ctx : Type := list (string * CoreTerm).\n\n\
              Parameter subst : string -> CoreTerm -> CoreTerm -> CoreTerm.\n\n\
+             (* Binder hygiene for the abstract schema; not Rust checker correspondence. *)\n\
+             Definition QuotientFresh (name : string) (terms : list CoreTerm) : Prop :=\n\
+               forall term, In term terms -> forall value, subst name value term = term.\n\
+\n\
              Parameter side_conditions_hold : Prop.\n\n",
         );
 
@@ -177,14 +181,8 @@ impl SoundnessBackend for CoqBackend {
         // the table).
         let (status_comment, proof_body) = match &rule.status {
             LemmaStatus::Proved { coq_tactics, .. } => match constructor_witness {
-                Some(w) => (
-                    String::new(),
-                    format!("Proof. exact {}. Qed.", w),
-                ),
-                None => (
-                    String::new(),
-                    format!("Proof.\n{}\nQed.", coq_tactics),
-                ),
+                Some(w) => (String::new(), format!("Proof. exact {}. Qed.", w)),
+                None => (String::new(), format!("Proof.\n{}\nQed.", coq_tactics)),
             },
             LemmaStatus::Admitted { reason } => (
                 format!("(* reason: {} *)\n", reason),
@@ -235,11 +233,11 @@ impl SoundnessBackend for CoqBackend {
             // Reflow body to one line — Coq is whitespace-flexible
             // inside forall.  The inline form keeps the match block
             // dense and readable.
-            let one_line = body.replace("\n    ", " ").replace("\n  ", " ").replace('\n', " ");
-            out.push_str(&format!(
-                "  | {} => {}\n",
-                r.rule_name, one_line.trim(),
-            ));
+            let one_line = body
+                .replace("\n    ", " ")
+                .replace("\n  ", " ")
+                .replace('\n', " ");
+            out.push_str(&format!("  | {} => {}\n", r.rule_name, one_line.trim(),));
         }
         out.push_str("  end.\n");
 
@@ -298,7 +296,6 @@ pub(crate) fn iou_axioms_coq() -> &'static str {
         .get_or_init(crate::soundness::render_iou_axioms_coq)
         .as_str()
 }
-
 
 // ============================================================================
 // The Typing inductive — 38 constructors covering every kernel rule.
@@ -400,21 +397,32 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
         Typing Gamma a (Refine base x predicate)\n  \
   (* ===== Quotient (3) ===== *)\n  \
-  | T_quot_form :\n      \
-      forall (Gamma : Ctx) (base equiv : CoreTerm) (i : nat),\n        \
-        Typing Gamma base (Universe i) ->\n        \
-        Typing Gamma (Quotient base equiv) (Universe i)\n  \
-  | T_quot_intro :\n      \
-      forall (Gamma : Ctx) (value base equiv : CoreTerm),\n        \
-        Typing Gamma value base ->\n        \
-        Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)\n  \
-  | T_quot_elim :\n      \
-      forall (Gamma : Ctx) (scrutinee motive case_fn base equiv : CoreTerm) (i : nat),\n        \
-        Typing Gamma scrutinee (Quotient base equiv) ->\n        \
-        Typing Gamma motive (Pi \"x\" base (Universe i)) ->\n        \
-        Typing Gamma case_fn (Pi \"x\" base (App motive (Var \"x\"))) ->\n        \
-        Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee)\n  \
-  (* ===== Inductive (3) ===== *)\n  \
+  | T_quot_form :\n\
+      forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),\n\
+        QuotientFresh \"x\" [base] ->\n\
+        Typing Gamma base (Universe i) ->\n\
+        Typing Gamma equiv (Pi \"x\" base (Pi \"y\" base (Universe j))) ->\n\
+        Typing Gamma (Quotient base equiv) (Universe (Nat.max i j))\n\
+  | T_quot_intro :\n\
+      forall (Gamma : Ctx) (value base equiv : CoreTerm) (i : nat),\n\
+        Typing Gamma (Quotient base equiv) (Universe i) ->\n\
+        Typing Gamma value base ->\n\
+        Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)\n\
+  | T_quot_elim :\n\
+      forall (Gamma : Ctx) (scrutinee motive case_fn respect base equiv result : CoreTerm) (i j : nat),\n\
+        QuotientFresh \"q\" [result] ->\n\
+        QuotientFresh \"x\" [base; equiv; result; case_fn] ->\n\
+        QuotientFresh \"y\" [base; equiv; result; case_fn] ->\n\
+        QuotientFresh \"r\" [base; equiv; result; case_fn] ->\n\
+        motive = Lam \"q\" (Quotient base equiv) result ->\n\
+        Typing Gamma (Quotient base equiv) (Universe j) ->\n\
+        Typing Gamma result (Universe i) ->\n\
+        Typing Gamma scrutinee (Quotient base equiv) ->\n\
+        Typing Gamma case_fn (Pi \"x\" base result) ->\n\
+        Typing Gamma respect (Pi \"x\" base (Pi \"y\" base (Pi \"r\"\n\
+          (App (App equiv (Var \"x\")) (Var \"y\"))\n\
+          (PathTy result (App case_fn (Var \"x\")) (App case_fn (Var \"y\")))))) ->\n\
+        Typing Gamma (QuotElim scrutinee motive case_fn respect) (App motive scrutinee)\n\
   | T_inductive :\n      \
       forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (i : nat),\n        \
         Typing Gamma (Inductive_ path args) (Universe i)\n  \
@@ -688,26 +696,39 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         ),
         // ===== Quotient (3) =====
         "K_Quot_Form" => Some(
-            "Lemma K_Quot_Form_sound :\n  \
-              forall (Gamma : Ctx) (base equiv : CoreTerm) (i : nat),\n    \
-                Typing Gamma base (Universe i) -> Typing Gamma (Quotient base equiv) (Universe i).\n\
-              Proof. exact T_quot_form. Qed.",
+            r#"Lemma K_Quot_Form_sound :
+  forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),
+        QuotientFresh "x" [base] ->
+        Typing Gamma base (Universe i) ->
+        Typing Gamma equiv (Pi "x" base (Pi "y" base (Universe j))) ->
+        Typing Gamma (Quotient base equiv) (Universe (Nat.max i j)).
+Proof. exact T_quot_form. Qed."#,
         ),
         "K_Quot_Intro" => Some(
-            "Lemma K_Quot_Intro_sound :\n  \
-              forall (Gamma : Ctx) (value base equiv : CoreTerm),\n    \
-                Typing Gamma value base ->\n    \
-                Typing Gamma (QuotIntro value base equiv) (Quotient base equiv).\n\
-              Proof. exact T_quot_intro. Qed.",
+            r#"Lemma K_Quot_Intro_sound :
+  forall (Gamma : Ctx) (value base equiv : CoreTerm) (i : nat),
+        Typing Gamma (Quotient base equiv) (Universe i) ->
+        Typing Gamma value base ->
+        Typing Gamma (QuotIntro value base equiv) (Quotient base equiv).
+Proof. exact T_quot_intro. Qed."#,
         ),
         "K_Quot_Elim" => Some(
-            "Lemma K_Quot_Elim_sound :\n  \
-              forall (Gamma : Ctx) (scrutinee motive case_fn base equiv : CoreTerm) (i : nat),\n    \
-                Typing Gamma scrutinee (Quotient base equiv) ->\n    \
-                Typing Gamma motive (Pi \"x\"%string base (Universe i)) ->\n    \
-                Typing Gamma case_fn (Pi \"x\"%string base (App motive (Var \"x\"%string))) ->\n    \
-                Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee).\n\
-              Proof. intros; apply T_quot_elim with (base := base) (equiv := equiv) (i := i); assumption. Qed.",
+            r#"Lemma K_Quot_Elim_sound :
+  forall (Gamma : Ctx) (scrutinee motive case_fn respect base equiv result : CoreTerm) (i j : nat),
+        QuotientFresh "q" [result] ->
+        QuotientFresh "x" [base; equiv; result; case_fn] ->
+        QuotientFresh "y" [base; equiv; result; case_fn] ->
+        QuotientFresh "r" [base; equiv; result; case_fn] ->
+        motive = Lam "q" (Quotient base equiv) result ->
+        Typing Gamma (Quotient base equiv) (Universe j) ->
+        Typing Gamma result (Universe i) ->
+        Typing Gamma scrutinee (Quotient base equiv) ->
+        Typing Gamma case_fn (Pi "x" base result) ->
+        Typing Gamma respect (Pi "x" base (Pi "y" base (Pi "r"
+          (App (App equiv (Var "x")) (Var "y"))
+          (PathTy result (App case_fn (Var "x")) (App case_fn (Var "y")))))) ->
+        Typing Gamma (QuotElim scrutinee motive case_fn respect) (App motive scrutinee).
+Proof. exact T_quot_elim. Qed."#,
         ),
         // ===== Inductive (3) =====
         "K_Inductive" => Some(
@@ -820,5 +841,7 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
 
 /// Drift-detection helper used by `tests.rs` and the audit gate.
 pub fn every_rule_has_coq_signature(rules: &[RuleSpec]) -> bool {
-    rules.iter().all(|r| rule_signature_coq(&r.rule_name).is_some())
+    rules
+        .iter()
+        .all(|r| rule_signature_coq(&r.rule_name).is_some())
 }
