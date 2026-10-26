@@ -1,39 +1,18 @@
-//! Cubical cofibration calculus — interval subsumption + face-formula algebra
-//! (M-VVA-FU Sub-2.4-cubical, V1 deferred per VVA spec L579).
+//! Canonical algebra of cubical faces. An atomic face fixes a dimension to
+//! one endpoint. Finite joins and meets form a distributive lattice subject
+//! to `(i = 0) ∧ (i = 1) = ⊥`; the two endpoints do not exhaust the interval.
 //!
-//! Pre-this-module the kernel's cubical rules (`HComp`, `Transp`,
-//! `Glue` at `infer.rs:431-510`) treated the face formula `φ` as
-//! "well-typed but not interval-subsumption-checked" — see the
-//! `infer.rs:422-424` deferral comment. This module ships the
-//! decidable cofibration-formula algebra:
+//! Formulas own sorted, minimal disjunctive normal forms. Construction removes
+//! contradictions, duplicate clauses and absorbed clauses, so structural
+//! equality agrees with semantic equivalence in this face algebra.
 //!
-//! * **Carrier:** `FaceFormula` — a finite distributive-lattice
-//!  element over generators `(i = 0)` / `(i = 1)` for interval
-//!  variables `i`.
-//! * **Operations:** ∧ (and), ∨ (or), ⊥ (false / never), ⊤ (true /
-//!  always).
-//! * **Relations:** `(i = 0) ∧ (i = 1) = ⊥` (each variable is at most
-//!  one endpoint), de Morgan, distributivity.
-//! * **Subsumption:** decidable `φ ≤ ψ` via DNF normalisation +
-//!  per-clause containment.
-//!
-//! The CCHM cubical-set semantics requires HComp / Transp / Glue to
-//! satisfy *cofibration coherence*: the wall family must be defined
-//! exactly on `φ`, and the result's restriction to `φ` must agree
-//! with the wall. Pre-Sub-2.4 the kernel admitted any well-typed φ;
-//! the named HComp / Glue rules still need to connect this algebra to
-//! typed interval contexts and boundary agreement checks. This module
-//! alone does not certify those terms.
-//!
-//! References:
-//!  * Cohen, Coquand, Huber, Mörtberg (CCHM), "Cubical Type Theory:
-//!  a constructive interpretation of the univalence axiom" (2015).
-//!  * Angiuli, Brunerie, Coquand, Hou (Favonia), Harper, Licata,
-//!  "Cartesian Cubical Type Theory" (2017).
+//! This algebra does not certify cubical terms: typed dimension contexts,
+//! partial elements, boundary agreement and gluing equivalences remain distinct
+//! obligations. Named HComp and Glue are refused until those judgments exist.
 
 use std::collections::BTreeSet;
 
-use verum_common::Text;
+use verum_common::{List, Text};
 
 /// Atomic face-formula generator: an interval variable equals 0 or 1.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -71,10 +50,10 @@ impl FaceLit {
 /// A *clause* in the cofibration DNF: a conjunction of literals.
 /// Stored as a BTreeSet for deterministic ordering + O(log n) lookup.
 /// The empty clause represents `⊤` (no constraints, always-true).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Clause {
     /// Conjunction of face literals. Empty set ≡ `⊤`.
-    pub lits: BTreeSet<FaceLit>,
+    lits: BTreeSet<FaceLit>,
 }
 
 impl Clause {
@@ -96,29 +75,27 @@ impl Clause {
     pub fn and(&self, other: &Clause) -> Option<Clause> {
         let mut merged = self.lits.clone();
         for lit in &other.lits {
-            // Detect contradiction with any existing literal.
-            for existing in &merged {
-                if lit.contradicts(existing) {
-                    return None; // ⊥
-                }
+            let opposite = FaceLit {
+                var: lit.var.clone(),
+                end: !lit.end,
+            };
+            if merged.contains(&opposite) {
+                return None;
             }
             merged.insert(lit.clone());
         }
         Some(Clause { lits: merged })
     }
 
-    /// True iff `self ⊆ other` as literal sets — i.e. every
-    /// constraint of `self` is also a constraint of `other`. By
-    /// the lattice law for clauses, `self ⊆ other` (literal-wise)
-    /// implies `other ⇒ self` (logically: if all of `other`'s
-    /// literals hold, all of `self`'s do too).
+    /// Logical implication: every assignment satisfying this conjunction
+    /// also satisfies `other`. Stronger clauses have more constraints.
     pub fn implies(&self, other: &Clause) -> bool {
-        // self ⊆ other means: every literal in self is in other.
-        // Note: this is *literal-set inclusion* — when self has
-        // FEWER constraints, it's WEAKER (easier to satisfy), so
-        // `other ⇒ self`. Caller computes the relation per the
-        // direction needed.
-        self.lits.is_subset(&other.lits)
+        other.lits.is_subset(&self.lits)
+    }
+
+    /// Read-only access to this consistent conjunction's literals.
+    pub fn literals(&self) -> &BTreeSet<FaceLit> {
+        &self.lits
     }
 }
 
@@ -131,28 +108,28 @@ impl Clause {
 pub struct FaceFormula {
     /// Disjunction of conjunctive clauses. Canonical DNF — no
     /// clause subsumes another.
-    pub clauses: Vec<Clause>,
+    clauses: List<Clause>,
 }
 
 impl FaceFormula {
     /// Always-false (never-true): `⊥`. Empty disjunction.
     pub fn bottom() -> Self {
         FaceFormula {
-            clauses: Vec::new(),
+            clauses: List::new(),
         }
     }
 
     /// Always-true: `⊤`. Single empty clause.
     pub fn top() -> Self {
         FaceFormula {
-            clauses: vec![Clause::empty()],
+            clauses: [Clause::empty()].into_iter().collect(),
         }
     }
 
     /// Atomic literal as a one-clause-one-literal formula.
     pub fn lit(l: FaceLit) -> Self {
         FaceFormula {
-            clauses: vec![Clause::singleton(l)],
+            clauses: [Clause::singleton(l)].into_iter().collect(),
         }
     }
 
@@ -176,60 +153,63 @@ impl FaceFormula {
         self.clauses.iter().any(|c| c.lits.is_empty())
     }
 
-    /// Logical OR via clause-set union. Subsumed clauses are dropped
-    /// to maintain canonical / minimal DNF form.
-    pub fn or(&self, other: &FaceFormula) -> FaceFormula {
-        let mut all: Vec<Clause> = self
-            .clauses
-            .iter()
-            .chain(other.clauses.iter())
-            .cloned()
-            .collect();
-        // Remove subsumed clauses: if clause A's literals ⊆ clause B's,
-        // then A ⇒ B in DNF (the larger constraint subsumes the smaller),
-        // so B is redundant.
-        // NOTE: clause containment direction is reversed for DNF —
-        // a SMALLER literal-set means LESS constraint = MORE general
-        // = subsumes the larger.
-        let mut keep: Vec<bool> = vec![true; all.len()];
-        for i in 0..all.len() {
-            if !keep[i] {
+    /// Build the unique minimal DNF from consistent clauses. Absorption is
+    /// applied while streaming clauses, avoiding a retained Cartesian-product
+    /// buffer when conjunction generates redundant products.
+    pub fn from_clauses(clauses: impl IntoIterator<Item = Clause>) -> Self {
+        let mut minimal: List<Clause> = List::new();
+        for clause in clauses {
+            if minimal.iter().any(|existing| clause.implies(existing)) {
                 continue;
             }
-            for j in 0..all.len() {
-                if i == j || !keep[j] {
-                    continue;
-                }
-                // If all[j] is properly contained in all[i] (smaller
-                // literal-set), then all[i] is subsumed by all[j].
-                if all[j].lits.is_subset(&all[i].lits) && all[j].lits != all[i].lits {
-                    keep[i] = false;
-                    break;
-                }
-            }
+            minimal.retain(|existing| !existing.implies(&clause));
+            minimal.push(clause);
         }
-        let mut filtered = Vec::new();
-        for (i, clause) in all.drain(..).enumerate() {
-            if keep[i] {
-                filtered.push(clause);
-            }
-        }
-        FaceFormula { clauses: filtered }
+        minimal.sort_unstable();
+        Self { clauses: minimal }
     }
 
-    /// Logical AND via Cartesian product of clauses. Contradictory
-    /// products (clauses containing both `(i=0)` and `(i=1)` for some
-    /// `i`) are dropped per Clause::and's None case.
+    /// Read-only access to the sorted, minimal clauses.
+    pub fn clauses(&self) -> &[Clause] {
+        &self.clauses
+    }
+
+    /// Join, with duplicate and absorbed clauses removed.
+    pub fn or(&self, other: &FaceFormula) -> FaceFormula {
+        Self::from_clauses(self.clauses.iter().chain(other.clauses.iter()).cloned())
+    }
+
+    /// Meet. Contradictory products disappear; the remaining products are
+    /// absorbed into the canonical antichain as they are generated.
     pub fn and(&self, other: &FaceFormula) -> FaceFormula {
-        let mut clauses = Vec::new();
-        for c1 in &self.clauses {
-            for c2 in &other.clauses {
-                if let Some(prod) = c1.and(c2) {
-                    clauses.push(prod);
-                }
+        Self::from_clauses(self.clauses.iter().flat_map(|left| {
+            other
+                .clauses
+                .iter()
+                .filter_map(move |right| left.and(right))
+        }))
+    }
+
+    /// Restrict one dimension to an endpoint (`false` = zero, `true` = one).
+    /// Conflicting clauses disappear; matching literals become true.
+    pub fn restrict(&self, variable: &str, endpoint: bool) -> Self {
+        Self::from_clauses(self.clauses.iter().filter_map(|clause| {
+            if clause
+                .lits
+                .iter()
+                .any(|lit| lit.var.as_str() == variable && lit.end != endpoint)
+            {
+                return None;
             }
-        }
-        FaceFormula { clauses }
+            Some(Clause {
+                lits: clause
+                    .lits
+                    .iter()
+                    .filter(|lit| lit.var.as_str() != variable)
+                    .cloned()
+                    .collect(),
+            })
+        }))
     }
 
     /// **Subsumption decision: `self ⇒ other`.**
@@ -240,8 +220,8 @@ impl FaceFormula {
     /// clause with FEWER literals is more general).
     ///
     /// For HComp / Transp / Glue cofibration coherence:
-    /// `walls.support ⇒ φ` means the wall family covers exactly the
-    /// face φ requires — interval-subsumption verified.
+    /// `φ ⇒ walls.support` expresses coverage of φ by the wall support.
+    /// It does not establish agreement of wall values on overlaps.
     pub fn implies(&self, other: &FaceFormula) -> bool {
         // ⊥ ⇒ anything.
         if self.is_bottom() {
@@ -257,7 +237,7 @@ impl FaceFormula {
         for c1 in &self.clauses {
             let mut found = false;
             for c2 in &other.clauses {
-                if c2.lits.is_subset(&c1.lits) {
+                if c1.implies(c2) {
                     found = true;
                     break;
                 }
@@ -271,7 +251,7 @@ impl FaceFormula {
 
     /// Mutual implication: `self ⇔ other`.
     pub fn equivalent_to(&self, other: &FaceFormula) -> bool {
-        self.implies(other) && other.implies(self)
+        self == other
     }
 }
 

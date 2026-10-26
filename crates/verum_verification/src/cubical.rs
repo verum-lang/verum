@@ -250,27 +250,11 @@ pub struct CubicalRule {
     pub rationale: Text,
 }
 
-/// Subset of canonical-rule names that the kernel actually applies
-/// during `verum_kernel::normalize`. ships seven structural
-/// reductions on the cubical face / interval markers; the rest are
-/// documented but their evaluators are V1 work (J-on-refl, ap-trans,
-/// equiv composition, ua-id / ua-trans / ua-sym, …).
-///
-/// Used by:
-///
-///  * The `cubical rules --kernel` CLI subcommand to mark which
-///  rules the kernel performs vs. which are documentation-only.
-///  * The CI gate that verifies every kernel-side reduction has a
-///  matching catalogue entry (single-source-of-truth invariant).
-pub const KERNEL_APPLIED_RULES: &[&str] = &[
-    "hcomp-id-when-empty-system",
-    "hcomp-id-when-φ-equals-1",
-    "transp-fill",
-    "transp-on-refl",
-    "transp-const",
-    "glue-on-false-face",
-    "glue-on-true-face",
-];
+/// Generalized cubical catalogue rules implemented by the named kernel.
+/// None are enabled until typed interval and partial-element judgments exist.
+/// Ordinary `CoreTerm::Transport` has a separate identity-elimination rule;
+/// it does not implement generalized cubical `transp` regularity.
+pub const KERNEL_APPLIED_RULES: &[&str] = &[];
 
 /// True iff `rule_name` is one of the kernel-applied subset.
 pub fn rule_is_kernel_applied(rule_name: &str) -> bool {
@@ -698,6 +682,36 @@ pub enum FaceEnd {
 }
 
 impl FaceFormula {
+    /// Check the supplied dimension scope before lowering syntax into the
+    /// kernel's canonical face algebra. Even variables erased by contradiction
+    /// or absorption must be declared. This checks faces, not cubical terms.
+    pub fn lower_scoped(
+        &self,
+        dimensions: &BTreeSet<Text>,
+    ) -> Result<verum_kernel::FaceFormula, Text> {
+        for variable in self.free_variables() {
+            if !dimensions.contains(&variable) {
+                return Err(Text::from(format!(
+                    "undeclared interval dimension: {variable}"
+                )));
+            }
+        }
+        fn lower(face: &FaceFormula) -> verum_kernel::FaceFormula {
+            use verum_kernel::FaceFormula as CanonicalFace;
+            match face {
+                FaceFormula::Top => CanonicalFace::top(),
+                FaceFormula::Bot => CanonicalFace::bottom(),
+                FaceFormula::EndPoint { variable, end } => match end {
+                    FaceEnd::Zero => CanonicalFace::at_zero(variable.clone()),
+                    FaceEnd::One => CanonicalFace::at_one(variable.clone()),
+                },
+                FaceFormula::And(a, b) => lower(a).and(&lower(b)),
+                FaceFormula::Or(a, b) => lower(a).or(&lower(b)),
+            }
+        }
+        Ok(lower(self))
+    }
+
     /// Free interval variables in the formula.
     pub fn free_variables(&self) -> BTreeSet<Text> {
         let mut out = BTreeSet::new();
@@ -1349,12 +1363,8 @@ mod tests {
     }
 
     #[test]
-    fn task_98_kernel_applied_rules_cover_face_marker_class() {
-        // Pin: the seven face-/interval-marker reductions wired
-        // into `verum_kernel::normalize` are surfaced through the
-        // `KERNEL_APPLIED_RULES` constant so consumers (CLI,
-        // docs-generator, CI gate) can distinguish "documented"
-        // from "kernel-applied".
+    fn unsupported_face_rules_are_not_reported_as_applied() {
+        // The catalogue describes mathematics, not native proof authority.
         for required in [
             "hcomp-id-when-empty-system",
             "hcomp-id-when-φ-equals-1",
@@ -1365,8 +1375,8 @@ mod tests {
             "glue-on-true-face",
         ] {
             assert!(
-                rule_is_kernel_applied(required),
-                "rule `{}` must be marked kernel-applied",
+                !rule_is_kernel_applied(required),
+                "rule `{}` must not be marked kernel-applied",
                 required
             );
         }

@@ -5,6 +5,13 @@
 > two-level type theory** with integrated SMT-backed gradual
 > verification and model-theoretic protocol discharge.
 
+This document describes the target architecture, not a blanket implementation
+claim. The named proof kernel currently refuses cubical composition, gluing and
+higher inductive elimination where the required interval, partial-element or
+coherence judgments are absent. Its canonical face algebra is a shared
+foundation, not evidence that those typing rules are implemented. Current
+acceptance boundaries are documented in the website verification pipeline.
+
 ## Thesis
 
 Every value in Verum is classified by four orthogonal coordinates:

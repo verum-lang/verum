@@ -41,7 +41,10 @@ pub enum KernelError {
     #[error(
         "{operation} requires checked interval contexts, partial elements and cubical coherence; this named operation is not supported"
     )]
-    UnsupportedCubical { operation: Text },
+    UnsupportedCubical {
+        /// Unsupported named cubical constructor.
+        operation: Text,
+    },
 
     /// Type-mismatch between checked term and expected type.
     #[error("type mismatch: expected {expected:?}, got {actual:?}")]
