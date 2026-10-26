@@ -226,6 +226,11 @@ jobs:
             --sha256 d81cc445752ee9e95a59fbd8915d02802211a810d6ce182b80025ab482260199 \
             --provenance verification/external/lean/fixtures/observer-lifecycle-v1.provenance.json \
             --output observer-lifecycle-export.lean --report observer-lifecycle-export-acceptance.json
+          python3 verification/external/lean/check_lifecycle_export.py \
+            --export verification/external/lean/fixtures/observer-lifecycle-v2.json \
+            --sha256 2f4715560e732e75fc664ac9d405445654aca07c5f18cf1e87ca4c316d448829 \
+            --provenance verification/external/lean/fixtures/observer-lifecycle-v2.provenance.json \
+            --output observer-lifecycle-v2-export.lean --report observer-lifecycle-v2-export-acceptance.json
 
       - name: Indexed family source and certificate replay
         run: |
