@@ -9,3 +9,4 @@
 import VerumExternalReplay.KernelSoundness
 import VerumExternalReplay.ReferenceChecker
 import VerumExternalReplay.ConservativeRefinement
+import VerumExternalReplay.ReceiptCredit
