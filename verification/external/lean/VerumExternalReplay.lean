@@ -11,3 +11,4 @@ import VerumExternalReplay.ReferenceChecker
 import VerumExternalReplay.TermOperations
 import VerumExternalReplay.ConservativeRefinement
 import VerumExternalReplay.ReceiptCredit
+import VerumExternalReplay.DiagnosticFactorization

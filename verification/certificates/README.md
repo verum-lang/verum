@@ -15,7 +15,7 @@ python3 verification/certificates/check_dispatch_contract.py \
 ```
 
 The report binds verdicts to exact judgments, checker identities, executable
-hashes and producer sources. CI runs the dispatch, candidate-locality and finite-refinement
+hashes and producer sources. CI runs the dispatch, candidate-locality, diagnostic-fibre and finite-refinement
 batteries. Rejection controls change the policy or evidence while retaining
 the property being checked; admission-limit rejection is not a passing control.
 
@@ -91,3 +91,23 @@ exchanging time/event evidence, confusing support with membership, or comparing
 identity scores without using domain equality. Both native algorithms and
 independent replay must reject the altered proof itself; resource-limit
 rejection does not qualify.
+
+## Diagnostic fibres and impossible reconstruction
+
+`check_diagnostic_fibres.py` checks three general laws and six altered-evidence
+controls. If two histories have the same projected diagnostic, every total
+decoder agreeing with the desired query at both histories forces their answers
+to be equal. A supplied inequality therefore rules out any such decoder and,
+a fortiori, a decoder correct for every history. All controls retain the exact
+claimed type while corrupting collision, endpoint or agreement evidence.
+
+`VerumExternalReplay/DiagnosticFactorization.lean` proves the same mathematical
+principle directly in Lean, for arbitrary types and functions. Its axiom audits
+are build assertions. This is distinct from executing the reference checker on
+portable certificates; neither route proves the Rust checker sound.
+
+To apply this to a retention or merge implementation, independently establish
+that the complete retained representation is equal and the intended historical
+query differs. Omitting a field from the projection does not prove information
+loss for the full representation. The theorem makes no claim about the correctness
+of SYNARC's concrete histories, eviction/merge operations or causal-rank oracle.
