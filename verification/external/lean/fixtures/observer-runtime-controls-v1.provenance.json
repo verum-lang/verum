@@ -1,0 +1,17 @@
+{
+  "scope": "Actual finite Rust observer runtime boundary export; hashes identify the frozen sources/binary, not authenticated physical provenance or universal implementation proof.",
+  "export_sha256": "24a0ebd25a431ea20b4a691c8793525d47af9f8fe136f30dd48a0e66914100b5",
+  "head": "d7b0830299a51b753b961c72e2995509fdb76252",
+  "source_map_sha256": "47257bdec10703378b74a44a05e0b45f7c9ef6283035bcd07823aecf92dd1a9b",
+  "source_sha256": {
+    "rust/crates/synarc-kan/src/program.rs": "62a543cfa620376eaafca07466da532d05eb19aa822415069caba80861adb6af",
+    "rust/crates/synarc-kan/src/program/observer.rs": "286ed8b7348d54364a76761740b184cb40b1ac46ee208537a102f30728a359d9",
+    "rust/crates/synarc-kan/src/organism/observer_program.rs": "f73a43af8a3aac16675e93e72abb6dae6ecc779a80a7ddca4b2270f675097e4c",
+    "rust/crates/synarc-kan/src/organism/observer_program/courts.rs": "8aed223ed343dda76e395ffc3cb5328a6c97202739bf3fd411b35a049d90f3d0"
+  },
+  "rust_binary_sha256": "eb5ffc7ab0c3098cb34ebeb00bdd28e977bb1ba735c72fd7c9ec51cb4ed69403",
+  "binary_format": "Mach-O 64-bit",
+  "word_bits": 64,
+  "meter": "ExportWork: bounded structural work, refusal leaves used unchanged",
+  "court_log_sha256": "a2fa44b662a7be8c933cb2a94dff704ef0e4f15b7777814f8c5f758d9843df64"
+}

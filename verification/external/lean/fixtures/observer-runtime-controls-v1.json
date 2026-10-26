@@ -1,0 +1,5388 @@
+{
+  "controls": {
+    "machine": [
+      {
+        "code": {
+          "library": [
+            {
+              "library": [
+                {
+                  "library": [],
+                  "output": 0,
+                  "steps": [
+                    {
+                      "arguments": [
+                        {
+                          "Literal": {
+                            "Nat": 2
+                          }
+                        },
+                        {
+                          "Literal": {
+                            "Nat": 3
+                          }
+                        }
+                      ],
+                      "operation": {
+                        "Primitive": "CheckedAdd"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "output": null,
+              "steps": [
+                {
+                  "arguments": [],
+                  "operation": {
+                    "Call": 0
+                  }
+                }
+              ]
+            },
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Literal": {
+                        "Nat": 40
+                      }
+                    },
+                    {
+                      "Literal": {
+                        "Nat": 2
+                      }
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "CheckedAdd"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [],
+              "operation": {
+                "Call": 0
+              }
+            }
+          ]
+        },
+        "dispatch_limit": {
+          "Dispatches": 8
+        },
+        "execution": {
+          "call_attempts": 2,
+          "dispatch_attempts": 3,
+          "expanded_attempts": 1,
+          "halt": null,
+          "registers": [
+            {
+              "Nat": 5
+            }
+          ],
+          "stop": "Complete"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "lexical-shadowing",
+        "root": {
+          "status": "Selected",
+          "value": {
+            "Nat": 5
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 13
+      },
+      {
+        "code": {
+          "library": [],
+          "output": 0,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 2
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 7
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 4
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 2,
+          "expanded_attempts": 2,
+          "halt": null,
+          "registers": [
+            {
+              "Nat": 5
+            },
+            {
+              "Nat": 11
+            }
+          ],
+          "stop": "Complete"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "explicit-root-output",
+        "root": {
+          "status": "Selected",
+          "value": {
+            "Nat": 5
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 9
+      },
+      {
+        "code": {
+          "library": [],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 2
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 7
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 4
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 2,
+          "expanded_attempts": 2,
+          "halt": null,
+          "registers": [
+            {
+              "Nat": 5
+            },
+            {
+              "Nat": 11
+            }
+          ],
+          "stop": "Complete"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "default-root-output",
+        "root": {
+          "status": "Selected",
+          "value": {
+            "Nat": 11
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 9
+      },
+      {
+        "code": {
+          "library": [],
+          "output": null,
+          "steps": []
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 0,
+          "expanded_attempts": 0,
+          "halt": null,
+          "registers": [],
+          "stop": "Complete"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "empty-root-output",
+        "root": {
+          "status": "Missing"
+        },
+        "work_limit": 1000,
+        "work_used": 1
+      },
+      {
+        "code": {
+          "library": [],
+          "output": 9,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 2
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 1,
+          "halt": null,
+          "registers": [
+            {
+              "Nat": 5
+            }
+          ],
+          "stop": "Complete"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "missing-root-output",
+        "root": {
+          "status": "Missing"
+        },
+        "work_limit": 1000,
+        "work_used": 5
+      },
+      {
+        "code": {
+          "library": [],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 9
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 1,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "argument": 0,
+              "index": 9,
+              "kind": "MissingInput"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "missing-input",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 5
+      },
+      {
+        "code": {
+          "library": [],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 1,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "argument": 0,
+              "index": 0,
+              "kind": "MissingRegister"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "forward-register",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 5
+      },
+      {
+        "code": {
+          "library": [],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [],
+              "operation": {
+                "Call": 9
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 0,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "kind": "MissingCallee"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "missing-callee",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 5
+      },
+      {
+        "code": {
+          "library": [],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 99
+                }
+              ],
+              "operation": {
+                "Call": 9
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 0,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "argument": 0,
+              "index": 99,
+              "kind": "MissingInput"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "missing-argument-before-callee",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 6
+      },
+      {
+        "code": {
+          "library": [
+            {
+              "library": [],
+              "output": null,
+              "steps": []
+            }
+          ],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [],
+              "operation": {
+                "Call": 0
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 0,
+          "halt": {
+            "path": [
+              0,
+              0
+            ],
+            "reason": {
+              "kind": "MissingCalleeOutput"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "missing-callee-output",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 5
+      },
+      {
+        "code": {
+          "library": [
+            {
+              "library": [],
+              "output": null,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Literal": {
+                        "Bool": true
+                      }
+                    },
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Literal": {
+                        "Nat": 0
+                      }
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "Select"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": null,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 41
+                  }
+                },
+                {
+                  "Input": 99
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 0,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "argument": 1,
+              "index": 99,
+              "kind": "MissingInput"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "missing-unused-callee-argument",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 7
+      },
+      {
+        "code": {
+          "library": [],
+          "output": 0,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 2
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Rem"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 2,
+          "expanded_attempts": 2,
+          "halt": {
+            "path": [
+              1
+            ],
+            "reason": {
+              "error": {
+                "kind": "ZeroDivisor"
+              },
+              "kind": "Primitive"
+            }
+          },
+          "registers": [
+            {
+              "Nat": 5
+            }
+          ],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "unused-failing-step",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 9
+      },
+      {
+        "code": {
+          "library": [],
+          "output": 0,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 18446744073709551615
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": {
+          "Dispatches": 1
+        },
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 1,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "error": {
+                "kind": "Overflow"
+              },
+              "kind": "Primitive"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "semantic-refusal",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 5
+      },
+      {
+        "code": {
+          "library": [],
+          "output": 0,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 18446744073709551615
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": {
+          "Dispatches": 0
+        },
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 0,
+          "expanded_attempts": 0,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "kind": "Allowance"
+            }
+          },
+          "registers": [],
+          "stop": "Budget"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "dispatch-budget",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 1
+      },
+      {
+        "code": {
+          "library": [],
+          "output": 0,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Literal": {
+                    "Nat": 18446744073709551615
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "CheckedAdd"
+              }
+            }
+          ]
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 0,
+          "expanded_attempts": 0,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "kind": "Allowance"
+            }
+          },
+          "registers": [],
+          "stop": "Budget"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": {
+          "limit": 0,
+          "requested": 1,
+          "used": 0
+        },
+        "name": "meter-budget",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 0,
+        "work_used": 0
+      },
+      {
+        "code": {
+          "declared_arity": 2,
+          "program": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Literal": {
+                      "Nat": 1
+                    }
+                  }
+                ],
+                "operation": {
+                  "Primitive": "CheckedAdd"
+                }
+              }
+            ]
+          },
+          "view": "declared-arity-operand-hole"
+        },
+        "dispatch_limit": "Unlimited",
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 1,
+          "expanded_attempts": 1,
+          "halt": {
+            "path": [
+              0
+            ],
+            "reason": {
+              "argument": 1,
+              "kind": "MissingOperand"
+            }
+          },
+          "registers": [],
+          "stop": "Undefined"
+        },
+        "inputs": [],
+        "kind": "machine",
+        "meter_error": null,
+        "name": "missing-declared-operand",
+        "root": {
+          "status": "Unattempted"
+        },
+        "work_limit": 1000,
+        "work_used": 5
+      }
+    ],
+    "observer": [
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": {
+          "Dispatches": 1
+        },
+        "dispatches": 1,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "ordered-binding",
+        "read": {
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": null,
+            "registers": [
+              {
+                "Nat": 258
+              }
+            ],
+            "stop": "Complete"
+          },
+          "value": {
+            "Nat": 258
+          }
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "counter_capacity": false,
+          "kind": "Execution",
+          "meter_error": null,
+          "phase": "Update",
+          "report": {
+            "call_attempts": 0,
+            "dispatch_attempts": 0,
+            "expanded_attempts": 0,
+            "halt": {
+              "path": [
+                0
+              ],
+              "reason": {
+                "kind": "Allowance"
+              }
+            },
+            "registers": [],
+            "stop": "Budget"
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 17
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 1
+              },
+              {
+                "External": 0
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 1
+              },
+              {
+                "External": 0
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": {
+          "Dispatches": 1
+        },
+        "dispatches": 1,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "reordered-binding",
+        "read": {
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": null,
+            "registers": [
+              {
+                "Nat": 513
+              }
+            ],
+            "stop": "Complete"
+          },
+          "value": {
+            "Nat": 513
+          }
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "counter_capacity": false,
+          "kind": "Execution",
+          "meter_error": null,
+          "phase": "Update",
+          "report": {
+            "call_attempts": 0,
+            "dispatch_attempts": 0,
+            "expanded_attempts": 0,
+            "halt": {
+              "path": [
+                0
+              ],
+              "reason": {
+                "kind": "Allowance"
+              }
+            },
+            "registers": [],
+            "stop": "Budget"
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 17
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 0
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 0
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": {
+          "Dispatches": 1
+        },
+        "dispatches": 1,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "duplicate-binding",
+        "read": {
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": null,
+            "registers": [
+              {
+                "Nat": 257
+              }
+            ],
+            "stop": "Complete"
+          },
+          "value": {
+            "Nat": 257
+          }
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "counter_capacity": false,
+          "kind": "Execution",
+          "meter_error": null,
+          "phase": "Update",
+          "report": {
+            "call_attempts": 0,
+            "dispatch_attempts": 0,
+            "expanded_attempts": 0,
+            "halt": {
+              "path": [
+                0
+              ],
+              "reason": {
+                "kind": "Allowance"
+              }
+            },
+            "registers": [],
+            "stop": "Budget"
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 17
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": "Unlimited",
+        "dispatches": 0,
+        "inputs": [
+          {
+            "Nat": 1
+          }
+        ],
+        "kind": "observer",
+        "name": "width-refusal",
+        "read_refusal": {
+          "kind": "Binding",
+          "phase": "Read",
+          "reason": {
+            "actual": 1,
+            "expected": 2,
+            "kind": "Width"
+          }
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "kind": "Binding",
+          "phase": "Update",
+          "reason": {
+            "actual": 1,
+            "expected": 2,
+            "kind": "Width"
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 10
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": "Unlimited",
+        "dispatches": 0,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "interface-refusal",
+        "read_refusal": {
+          "kind": "Binding",
+          "phase": "Read",
+          "reason": {
+            "kind": "Interface"
+          }
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "LifeAge",
+            "Key"
+          ]
+        },
+        "update_refusal": {
+          "kind": "Binding",
+          "phase": "Update",
+          "reason": {
+            "kind": "Interface"
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 10
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": "Unlimited",
+        "dispatches": 2,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 256
+          }
+        ],
+        "kind": "observer",
+        "name": "observer-semantic-refusal",
+        "read_refusal": {
+          "counter_capacity": false,
+          "kind": "Execution",
+          "meter_error": null,
+          "phase": "Read",
+          "report": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": {
+              "path": [
+                0
+              ],
+              "reason": {
+                "error": {
+                  "kind": "ByteOverflow",
+                  "value": 256
+                },
+                "kind": "Primitive"
+              }
+            },
+            "registers": [],
+            "stop": "Undefined"
+          }
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "counter_capacity": false,
+          "kind": "Execution",
+          "meter_error": null,
+          "phase": "Update",
+          "report": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": {
+              "path": [
+                0
+              ],
+              "reason": {
+                "error": {
+                  "kind": "ByteOverflow",
+                  "value": 256
+                },
+                "kind": "Primitive"
+              }
+            },
+            "registers": [],
+            "stop": "Undefined"
+          }
+        },
+        "work_limit": 1000,
+        "work_used": 20
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": "Unlimited",
+        "dispatches": 0,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "observer-meter-refusal",
+        "read_refusal": {
+          "error": {
+            "limit": 0,
+            "requested": 5,
+            "used": 0
+          },
+          "execution": null,
+          "kind": "Work",
+          "phase": "Read",
+          "point": "InputBinding"
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "error": {
+            "limit": 0,
+            "requested": 5,
+            "used": 0
+          },
+          "execution": null,
+          "kind": "Work",
+          "phase": "Update",
+          "point": "InputBinding"
+        },
+        "work_limit": 0,
+        "work_used": 0
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": 9,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": 9,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": "Unlimited",
+        "dispatches": 2,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "observer-missing-root",
+        "read_refusal": {
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": null,
+            "registers": [
+              {
+                "Nat": 258
+              }
+            ],
+            "stop": "Complete"
+          },
+          "kind": "MissingRootOutput",
+          "phase": "Read"
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": null,
+            "registers": [
+              {
+                "Nat": 258
+              }
+            ],
+            "stop": "Complete"
+          },
+          "kind": "MissingRootOutput",
+          "phase": "Update"
+        },
+        "work_limit": 1000,
+        "work_used": 22
+      },
+      {
+        "after": {
+          "Nat": 0
+        },
+        "before": {
+          "Nat": 0
+        },
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": []
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": []
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": "Unlimited",
+        "dispatches": 0,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "observer-empty-root",
+        "read_refusal": {
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 0,
+            "expanded_attempts": 0,
+            "halt": null,
+            "registers": [],
+            "stop": "Complete"
+          },
+          "kind": "MissingRootOutput",
+          "phase": "Read"
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "update_refusal": {
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 0,
+            "expanded_attempts": 0,
+            "halt": null,
+            "registers": [],
+            "stop": "Complete"
+          },
+          "kind": "MissingRootOutput",
+          "phase": "Update"
+        },
+        "work_limit": 1000,
+        "work_used": 14
+      },
+      {
+        "description": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "initial": {
+            "Nat": 0
+          },
+          "read": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "read_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          },
+          "schema_version": 1,
+          "semantics": "CheckedPairsV1",
+          "update": {
+            "library": [],
+            "output": null,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "PackByte"
+                }
+              }
+            ]
+          },
+          "update_binding": {
+            "descriptor": {
+              "age_mod": 2,
+              "axes": [
+                false,
+                false,
+                false
+              ],
+              "events_mod": 3,
+              "input_epoch": 17,
+              "support": [
+                7
+              ]
+            },
+            "ports": [
+              "Key",
+              "LifeAge"
+            ],
+            "slots": [
+              {
+                "External": 0
+              },
+              {
+                "External": 1
+              }
+            ],
+            "width": 2
+          }
+        },
+        "dispatch_limit": "Unlimited",
+        "dispatches": 1,
+        "inputs": [
+          {
+            "Nat": 1
+          },
+          {
+            "Nat": 2
+          }
+        ],
+        "kind": "observer",
+        "name": "root-output-meter-refusal",
+        "reference": {
+          "dispatch_limit": "Unlimited",
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": null,
+            "registers": [
+              {
+                "Nat": 258
+              }
+            ],
+            "stop": "Complete"
+          },
+          "value": {
+            "Nat": 258
+          },
+          "work_limit": 1000,
+          "work_used": 11
+        },
+        "refusal": {
+          "error": {
+            "limit": 10,
+            "requested": 1,
+            "used": 10
+          },
+          "execution": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": null,
+            "registers": [
+              {
+                "Nat": 258
+              }
+            ],
+            "stop": "Complete"
+          },
+          "kind": "Work",
+          "phase": "Read",
+          "point": "RootOutput"
+        },
+        "state": {
+          "Nat": 0
+        },
+        "supplied_interface": {
+          "descriptor": {
+            "age_mod": 2,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge"
+          ]
+        },
+        "work_limit": 10,
+        "work_used": 10
+      },
+      {
+        "kind": "binding-construction",
+        "name": "invalid-binding-slot",
+        "refusal": {
+          "input": 2,
+          "kind": "InvalidSlot",
+          "slot": 0,
+          "width": 2
+        },
+        "slots": [
+          {
+            "External": 2
+          }
+        ],
+        "width": 2
+      }
+    ]
+  },
+  "controls_schema": "synarc-observer-execution-controls-v1",
+  "metered_work": 2050,
+  "primitives": [
+    {
+      "arguments": [
+        {
+          "Nat": 7
+        },
+        {
+          "Nat": 5
+        }
+      ],
+      "error": null,
+      "operation": "CheckedAdd",
+      "result": {
+        "Nat": 12
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 18446744073709551615
+        },
+        {
+          "Nat": 1
+        }
+      ],
+      "error": "Overflow",
+      "operation": "CheckedAdd",
+      "result": null
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 17
+        },
+        {
+          "Nat": 5
+        }
+      ],
+      "error": null,
+      "operation": "Rem",
+      "result": {
+        "Nat": 2
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 17
+        },
+        {
+          "Nat": 0
+        }
+      ],
+      "error": "ZeroDivisor",
+      "operation": "Rem",
+      "result": null
+    },
+    {
+      "arguments": [
+        {
+          "Bool": true
+        },
+        {
+          "Bool": false
+        },
+        {
+          "Nat": 99
+        }
+      ],
+      "error": null,
+      "operation": "Select",
+      "result": {
+        "Bool": false
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 1
+        },
+        {
+          "Bool": false
+        },
+        {
+          "Nat": 99
+        }
+      ],
+      "error": "Sort { operation: Select, argument: 0 }",
+      "operation": "Select",
+      "result": null
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 18446744073709551615
+        },
+        {
+          "Nat": 255
+        }
+      ],
+      "error": null,
+      "operation": "PackByte",
+      "result": {
+        "Nat": 18446744073709551615
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 1
+        },
+        {
+          "Nat": 256
+        }
+      ],
+      "error": "ByteOverflow { value: 256 }",
+      "operation": "PackByte",
+      "result": null
+    },
+    {
+      "arguments": [
+        {
+          "Pair": [
+            {
+              "Bool": true
+            },
+            {
+              "Nat": 7
+            }
+          ]
+        }
+      ],
+      "error": null,
+      "operation": "First",
+      "result": {
+        "Bool": true
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 7
+        }
+      ],
+      "error": "Sort { operation: First, argument: 0 }",
+      "operation": "First",
+      "result": null
+    },
+    {
+      "arguments": [
+        {
+          "Pair": [
+            {
+              "Bool": true
+            },
+            {
+              "Nat": 7
+            }
+          ]
+        }
+      ],
+      "error": null,
+      "operation": "Second",
+      "result": {
+        "Nat": 7
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Bool": true
+        },
+        {
+          "Nat": 7
+        }
+      ],
+      "error": null,
+      "operation": "Pair",
+      "result": {
+        "Pair": [
+          {
+            "Bool": true
+          },
+          {
+            "Nat": 7
+          }
+        ]
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Bool": true
+        },
+        {
+          "Nat": 1
+        }
+      ],
+      "error": null,
+      "operation": "Equal",
+      "result": {
+        "Bool": false
+      }
+    },
+    {
+      "arguments": [
+        {
+          "Nat": 7
+        }
+      ],
+      "error": "Arity { operation: CheckedAdd, expected: 2, actual: 1 }",
+      "operation": "CheckedAdd",
+      "result": null
+    }
+  ],
+  "programs": [
+    {
+      "description": {
+        "descriptor": {
+          "age_mod": 5,
+          "axes": [
+            false,
+            false,
+            false
+          ],
+          "events_mod": 3,
+          "input_epoch": 17,
+          "support": [
+            7
+          ]
+        },
+        "initial": {
+          "Pair": [
+            {
+              "Nat": 7
+            },
+            {
+              "Nat": 2
+            }
+          ]
+        },
+        "read": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "Rem"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 7,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 2
+                },
+                {
+                  "Literal": {
+                    "Nat": 5
+                  }
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 3
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 2
+                },
+                {
+                  "Register": 3
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 5
+                },
+                {
+                  "Register": 6
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "read_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge",
+            "UnderClock",
+            "Pose"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            },
+            {
+              "External": 1
+            },
+            {
+              "External": 2
+            },
+            {
+              "External": 3
+            }
+          ],
+          "width": 4
+        },
+        "schema_version": 1,
+        "semantics": "CheckedPairsV1",
+        "update": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "CheckedAdd"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 7,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Register": 1
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 5
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 3
+                },
+                {
+                  "Register": 6
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "update_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              false,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Carrier"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            }
+          ],
+          "width": 1
+        }
+      },
+      "executions": [
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          },
+          "query": [
+            9,
+            0,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 589825
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 0
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            1,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590081
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 1
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          },
+          "query": [
+            9,
+            2,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590338
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 2
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          },
+          "query": [
+            9,
+            3,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590594
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 3
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 9
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            4,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590850
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 4
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "description": {
+        "descriptor": {
+          "age_mod": 5,
+          "axes": [
+            true,
+            false,
+            false
+          ],
+          "events_mod": 3,
+          "input_epoch": 17,
+          "support": [
+            7
+          ]
+        },
+        "initial": {
+          "Pair": [
+            {
+              "Nat": 7
+            },
+            {
+              "Nat": 2
+            }
+          ]
+        },
+        "read": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "Rem"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 7,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 3
+                },
+                {
+                  "Literal": {
+                    "Nat": 5
+                  }
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 3
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 2
+                },
+                {
+                  "Register": 3
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 5
+                },
+                {
+                  "Register": 6
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "read_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              true,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge",
+            "UnderClock",
+            "Pose"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            },
+            {
+              "External": 1
+            },
+            {
+              "External": 2
+            },
+            {
+              "External": 3
+            }
+          ],
+          "width": 4
+        },
+        "schema_version": 1,
+        "semantics": "CheckedPairsV1",
+        "update": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "CheckedAdd"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 7,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Register": 1
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 5
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 3
+                },
+                {
+                  "Register": 6
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "update_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              true,
+              false,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Carrier"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            }
+          ],
+          "width": 1
+        }
+      },
+      "executions": [
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          },
+          "query": [
+            9,
+            0,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590593
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 3
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            1,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590593
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 3
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          },
+          "query": [
+            9,
+            2,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590594
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 3
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          },
+          "query": [
+            9,
+            3,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590594
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 3
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 9
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            4,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590594
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 3
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "description": {
+        "descriptor": {
+          "age_mod": 5,
+          "axes": [
+            false,
+            true,
+            false
+          ],
+          "events_mod": 3,
+          "input_epoch": 17,
+          "support": [
+            7
+          ]
+        },
+        "initial": {
+          "Pair": [
+            {
+              "Nat": 7
+            },
+            {
+              "Nat": 2
+            }
+          ]
+        },
+        "read": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "Rem"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 7,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 5
+                  }
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 3
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 2
+                },
+                {
+                  "Register": 3
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 5
+                },
+                {
+                  "Register": 6
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "read_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              false,
+              true,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge",
+            "UnderClock",
+            "Pose"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            },
+            {
+              "External": 1
+            },
+            {
+              "External": 2
+            },
+            {
+              "External": 3
+            }
+          ],
+          "width": 4
+        },
+        "schema_version": 1,
+        "semantics": "CheckedPairsV1",
+        "update": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "CheckedAdd"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 7,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Register": 1
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 5
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 3
+                },
+                {
+                  "Register": 6
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "update_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              false,
+              true,
+              false
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Carrier"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            }
+          ],
+          "width": 1
+        }
+      },
+      "executions": [
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          },
+          "query": [
+            9,
+            0,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590337
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 2
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            1,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590593
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 3
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          },
+          "query": [
+            9,
+            2,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 589826
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 0
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          },
+          "query": [
+            9,
+            3,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590082
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 1
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 9
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            4,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 590338
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 2
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "description": {
+        "descriptor": {
+          "age_mod": 5,
+          "axes": [
+            false,
+            false,
+            true
+          ],
+          "events_mod": 3,
+          "input_epoch": 17,
+          "support": [
+            7
+          ]
+        },
+        "initial": {
+          "Pair": [
+            {
+              "Nat": 7
+            },
+            {
+              "Nat": 2
+            }
+          ]
+        },
+        "read": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "Rem"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 6,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Literal": {
+                    "Nat": 3
+                  }
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Input": 4
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 3
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Primitive": "PackByte"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 4
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 5
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "read_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              false,
+              false,
+              true
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Key",
+            "LifeAge",
+            "UnderClock",
+            "Pose"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            },
+            {
+              "External": 1
+            },
+            {
+              "External": 2
+            },
+            {
+              "External": 3
+            }
+          ],
+          "width": 4
+        },
+        "schema_version": 1,
+        "semantics": "CheckedPairsV1",
+        "update": {
+          "library": [
+            {
+              "library": [],
+              "output": 0,
+              "steps": [
+                {
+                  "arguments": [
+                    {
+                      "Input": 0
+                    },
+                    {
+                      "Input": 1
+                    }
+                  ],
+                  "operation": {
+                    "Primitive": "CheckedAdd"
+                  }
+                }
+              ]
+            }
+          ],
+          "output": 7,
+          "steps": [
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "First"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 0
+                }
+              ],
+              "operation": {
+                "Primitive": "Second"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 0
+                },
+                {
+                  "Register": 2
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Register": 1
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Input": 1
+                },
+                {
+                  "Literal": {
+                    "Nat": 0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Nat": 1
+                  }
+                }
+              ],
+              "operation": {
+                "Primitive": "Select"
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 4
+                },
+                {
+                  "Register": 5
+                }
+              ],
+              "operation": {
+                "Call": 0
+              }
+            },
+            {
+              "arguments": [
+                {
+                  "Register": 3
+                },
+                {
+                  "Register": 6
+                }
+              ],
+              "operation": {
+                "Primitive": "Pair"
+              }
+            }
+          ]
+        },
+        "update_binding": {
+          "descriptor": {
+            "age_mod": 5,
+            "axes": [
+              false,
+              false,
+              true
+            ],
+            "events_mod": 3,
+            "input_epoch": 17,
+            "support": [
+              7
+            ]
+          },
+          "ports": [
+            "Carrier"
+          ],
+          "slots": [
+            "State",
+            {
+              "External": 0
+            }
+          ],
+          "width": 1
+        }
+      },
+      "executions": [
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          },
+          "query": [
+            9,
+            0,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 654081
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 251
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            1,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 654081
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 251
+                  },
+                  {
+                    "Nat": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 7
+              },
+              {
+                "Nat": 3
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          },
+          "query": [
+            9,
+            2,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 654082
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 251
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            false
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          },
+          "query": [
+            9,
+            3,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 654082
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 251
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 1
+              }
+            ]
+          }
+        },
+        {
+          "event": [
+            true
+          ],
+          "next_state": {
+            "Pair": [
+              {
+                "Nat": 9
+              },
+              {
+                "Nat": 0
+              }
+            ]
+          },
+          "query": [
+            9,
+            4,
+            13,
+            251
+          ],
+          "read": {
+            "Pair": [
+              {
+                "Nat": 654082
+              },
+              {
+                "Pair": [
+                  {
+                    "Nat": 251
+                  },
+                  {
+                    "Nat": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "state": {
+            "Pair": [
+              {
+                "Nat": 8
+              },
+              {
+                "Nat": 2
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "schema": "synarc-observer-rust-boundary-v1"
+}
