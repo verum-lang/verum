@@ -17,3 +17,4 @@ import VerumExternalReplay.ReceiptCredit
 import VerumExternalReplay.DiagnosticFactorization
 import VerumExternalReplay.ExactTransports
 import VerumExternalReplay.TypedPrograms
+import VerumExternalReplay.TypedProgramControls
