@@ -246,6 +246,21 @@ jobs:
             --provenance verification/external/lean/fixtures/observer-joint-v1.provenance.json \
             --output observer-joint-export.lean --report observer-joint-export-acceptance.json
 
+      - name: Frozen physical observer reads and commits
+        run: |
+          gzip -dc verification/external/lean/fixtures/observer-physical-successors-v1.json.gz > observer-physical-successors.json
+          python3 verification/external/lean/check_physical_read_export.py \
+            --export observer-physical-successors.json \
+            --sha256 739a228c61bb59ec844177144bc6374f6f5e1285bbaab01644623eb15274b213 \
+            --provenance verification/external/lean/fixtures/observer-physical-successors-v1.provenance.json \
+            --output observer-physical-successors.lean --report observer-physical-successors-acceptance.json
+          gzip -dc verification/external/lean/fixtures/observer-physical-terminal-v1.json.gz > observer-physical-terminal.json
+          python3 verification/external/lean/check_physical_read_export.py \
+            --export observer-physical-terminal.json \
+            --sha256 0ab6003362b785dde3de2a5b2db0bae571b9cce80e76b3ba48492327375f4f97 \
+            --provenance verification/external/lean/fixtures/observer-physical-terminal-v1.provenance.json \
+            --output observer-physical-terminal.lean --report observer-physical-terminal-acceptance.json
+
       - name: Indexed family source and certificate replay
         run: |
           python3 verification/certificates/check_indexed_induction.py \
@@ -315,6 +330,9 @@ jobs:
             observer-joint-export-acceptance.json
             observer-joint-export.lean
             observer-joint-export-*/
+            observer-physical-*-acceptance.json
+            observer-physical-*.lean
+            observer-physical-*-*/
             observer-export*.lean
             observer-export-*/
           retention-days: 14
