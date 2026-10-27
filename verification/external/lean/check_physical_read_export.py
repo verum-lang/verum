@@ -153,7 +153,7 @@ def emit(data):
                 new_table = f'keys_{i}_{j+1}'
                 pair = f'({natural(view["input"])}, {lifecycle.value(expected_value)})'
                 interning = f'ExactNames.intern (min {capacity} (2^56)) {table_name} {pair}'
-                naming_proof = '(simp only [ExactNames.intern_head, ' + ', '.join(key_definitions) + ']) <;> rfl'
+                naming_proof = "(simp only [" + ", ".join(key_definitions) + "]) <;> (repeat' rw [ExactNames.intern_head]) <;> rfl"
                 claim(f'({interning}).2 = some {natural(observation["name"])}', naming_proof)
                 lines.append(f'def {new_table} := ({interning}).1'); table_name = new_table
                 key_definitions.append(new_table)
@@ -161,7 +161,7 @@ def emit(data):
         observed(pre_reads, before['physical'], table['source'])
         same_cut(current, after['cut'])
         claim(f'{table_name} = ({lifecycle.namespace(after["namespace"])} : List (Nat × Value))',
-              '(simp only [ExactNames.intern_head, ' + ', '.join(key_definitions) + ']) <;> rfl')
+              "(simp only [" + ", ".join(key_definitions) + "]) <;> (repeat' rw [ExactNames.intern_head]) <;> rfl")
         lifecycle.value(case['outcome'])
         require(case['outcome']['kind'] == 'Outcome', 'Expected typed physical outcome')
         outcome = case['outcome']['value']

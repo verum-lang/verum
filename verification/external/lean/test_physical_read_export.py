@@ -101,7 +101,8 @@ class PhysicalReadTests(unittest.TestCase):
             observation['execution']['registers'][0]['value'] = pose
             observation['name'] = name
         change_query(probe, 99, 9, 1)
-        row['native'].insert(1, probe)
+        # Begin with a new key, so naming cannot rely on a matching head entry.
+        row['native'].insert(0, probe)
         row['native'][-1]['name'] = 2
         row['table']['successor'] = 2
         row['after']['namespace']['entries'].insert(1, dict(input=99, value=copy.deepcopy(probe['value'])))
