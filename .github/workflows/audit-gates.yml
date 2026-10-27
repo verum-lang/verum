@@ -239,6 +239,7 @@ jobs:
             --output observer-retirement-export.lean --report observer-retirement-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_lifecycle_export.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_names.py
+          python3 -m unittest discover -s verification/external/lean -p test_retained_execution.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_names_export.py
           gzip -dc verification/external/lean/fixtures/retained-names-v1.json.gz > retained-names-v1.json
           python3 verification/external/lean/check_retained_names_export.py \
