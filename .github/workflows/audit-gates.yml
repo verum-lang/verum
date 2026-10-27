@@ -248,17 +248,23 @@ jobs:
 
       - name: Frozen physical observer reads and commits
         run: |
-          gzip -dc verification/external/lean/fixtures/observer-physical-successors-v1.json.gz > observer-physical-successors.json
+          gzip -dc verification/external/lean/fixtures/observer-lifecycle-v3.json.gz > observer-lifecycle-v3.json
+          python3 verification/external/lean/check_lifecycle_export.py \
+            --export observer-lifecycle-v3.json \
+            --sha256 acef1434f816eb0bf539fe3f6228c1c30fd649b313df7bb6a185186a298d1b05 \
+            --provenance verification/external/lean/fixtures/observer-lifecycle-v3.provenance.json \
+            --output observer-lifecycle-v3.lean --report observer-lifecycle-v3-acceptance.json
+          gzip -dc verification/external/lean/fixtures/observer-physical-successors-v2.json.gz > observer-physical-successors.json
           python3 verification/external/lean/check_physical_read_export.py \
             --export observer-physical-successors.json \
-            --sha256 739a228c61bb59ec844177144bc6374f6f5e1285bbaab01644623eb15274b213 \
-            --provenance verification/external/lean/fixtures/observer-physical-successors-v1.provenance.json \
+            --sha256 733968a3921c4d43636b4521f570c5db3dd52dbfad06f8774fa7f7154d43eaa5 \
+            --provenance verification/external/lean/fixtures/observer-physical-successors-v2.provenance.json \
             --output observer-physical-successors.lean --report observer-physical-successors-acceptance.json
-          gzip -dc verification/external/lean/fixtures/observer-physical-terminal-v1.json.gz > observer-physical-terminal.json
+          gzip -dc verification/external/lean/fixtures/observer-physical-terminal-v2.json.gz > observer-physical-terminal.json
           python3 verification/external/lean/check_physical_read_export.py \
             --export observer-physical-terminal.json \
-            --sha256 0ab6003362b785dde3de2a5b2db0bae571b9cce80e76b3ba48492327375f4f97 \
-            --provenance verification/external/lean/fixtures/observer-physical-terminal-v1.provenance.json \
+            --sha256 44a2447c5e43c6948d80577e4c789b433b2a705cb78f0b550148ab7f4c0607cf \
+            --provenance verification/external/lean/fixtures/observer-physical-terminal-v2.provenance.json \
             --output observer-physical-terminal.lean --report observer-physical-terminal-acceptance.json
 
       - name: Indexed family source and certificate replay
@@ -333,6 +339,9 @@ jobs:
             observer-physical-*-acceptance.json
             observer-physical-*.lean
             observer-physical-*-*/
+            observer-lifecycle-v3-acceptance.json
+            observer-lifecycle-v3.lean
+            observer-lifecycle-v3-*/
             observer-export*.lean
             observer-export-*/
           retention-days: 14
