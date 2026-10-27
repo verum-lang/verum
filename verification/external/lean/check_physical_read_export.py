@@ -2,6 +2,7 @@
 """Replay retained native reads/commits at observed physical boundaries, not arbitrary executions."""
 from pathlib import Path
 import check_lifecycle_export as lifecycle
+import observer_trace_proofs
 from observer_export_replay import array, fields, natural, require, sequence, main as replay_main
 
 
@@ -68,6 +69,7 @@ def emit(data):
               f'{lifecycle.wide(after["namespace"]["epoch"])}')
         keys = lifecycle.namespace(before['namespace'])
         table_name = f'keys_{i}_0'
+        key_definitions = [table_name]
         lines.append(f'def {table_name} : List (Nat × Value) := {keys}')
         claim(f'{table_name}.Nodup', 'decide')
         capacity = natural(before['namespace']['capacity'])
@@ -144,38 +146,45 @@ def emit(data):
                 f'{source_row} {values} ⟨none, 2^64-1, 0, 0, false⟩')
             claim(f'observe {invocation} = .ok ({lifecycle.value(expected_value)}, '
                   f'{lifecycle.report(observation["execution"])})',
-                  f'unfold {invocation} {prefix}_{phase} {prefix}_{phase}_binding\n  reduce_admission')
+                  f'unfold {invocation} {prefix}_{phase} {prefix}_{phase}_binding\n  (conv => lhs; cbv) <;> rfl')
             if phase == 'update':
                 current = observation['receipt']['after']; commit_count += 1
             else:
                 new_table = f'keys_{i}_{j+1}'
                 pair = f'({natural(view["input"])}, {lifecycle.value(expected_value)})'
                 interning = f'ExactNames.intern (min {capacity} (2^56)) {table_name} {pair}'
-                claim(f'({interning}).2 = some {natural(observation["name"])}')
+                naming_proof = '(simp only [ExactNames.intern_head, ' + ', '.join(key_definitions) + ']) <;> rfl'
+                claim(f'({interning}).2 = some {natural(observation["name"])}', naming_proof)
                 lines.append(f'def {new_table} := ({interning}).1'); table_name = new_table
+                key_definitions.append(new_table)
         require(commit_count == 1 and pre_reads, 'Missing actual commit or prior read')
         observed(pre_reads, before['physical'], table['source'])
         same_cut(current, after['cut'])
-        claim(f'{table_name} = ({lifecycle.namespace(after["namespace"])} : List (Nat × Value))')
+        claim(f'{table_name} = ({lifecycle.namespace(after["namespace"])} : List (Nat × Value))',
+              '(simp only [ExactNames.intern_head, ' + ', '.join(key_definitions) + ']) <;> rfl')
         lifecycle.value(case['outcome'])
         require(case['outcome']['kind'] == 'Outcome', 'Expected typed physical outcome')
         outcome = case['outcome']['value']
         if outcome['kind'] == 'Next':
             require(post_reads, 'Missing actual successor read')
             observed(post_reads, after['physical'], table['successor'])
-            same(outcome['key'], table['successor'])
+            # The corpus retains the raw world outcome. The transition table
+            # separately stores the acquired reader's name for that outcome.
+            same(outcome['key'], after['physical']['raw'])
         else:
             require(outcome['kind'] == 'End', 'Unsupported physical refusal case')
             require(table['successor'] is None, 'Terminal outcome was stored as Next')
             terminals += 1
     lines += ['#print axioms ' + name for name in names] + ['end FrozenObserverExport']
-    return '\n\n'.join(lines) + '\n', dict(cases=len(rows), reads=reads, commits=commits,
-                                          terminals=terminals, claims=len(names))
+    source, trace_claims = observer_trace_proofs.share_traces(data, '\n\n'.join(lines) + '\n')
+    return source, dict(cases=len(rows), reads=reads, commits=commits,
+                        terminals=terminals, trace_claims=trace_claims, claims=len(names)+trace_claims)
 
 
 def main():
-    replay_main(emit=emit, modules=lifecycle.MODELS,
-        producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve()], description=__doc__,
+    replay_main(emit=emit, modules=lifecycle.MODELS + ['TraceReduction'],
+        producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve(),
+                   Path(observer_trace_proofs.__file__).resolve()], description=__doc__,
         scope='Finite retained successful Read/Committed objects, exact query/update/report replay, '
               'owner/state continuity, physical prior/successor ports, exact namespace and terminal table boundary. '
               'Not original work-budget admission, lower-prefix projection fidelity, arbitrary Habitat fidelity, statistical acquisition, '

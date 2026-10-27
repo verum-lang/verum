@@ -17,6 +17,14 @@ def intern (capacity : Nat) (keys : List K) (key : K) : List K × Option Nat :=
   else if keys.length < capacity then (keys ++ [key], some keys.length)
   else (keys, none)
 
+-- Avoid evaluating structural equality through an arbitrarily large payload
+-- when the retained first key is already exactly the requested key.
+theorem intern_head (capacity : Nat) (key : K) (tail : List K) :
+    intern capacity (key :: tail) key = (key :: tail, some 0) := by
+  unfold intern
+  have present : key ∈ key :: tail := List.Mem.head tail
+  rw [ite_eq_left present, List.idxOf_cons_self]
+
 theorem existing (capacity : Nat) (keys : List K) (key : K) (present : key ∈ keys) :
     intern capacity keys key = (keys, some (keys.idxOf key)) := by
   simp [intern, present]

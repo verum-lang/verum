@@ -62,17 +62,23 @@ def load(path):
 def batches(source, size=8):
     """Bound each kernel invocation without weakening its acceptance deadline.
 
-    Claims are closed equalities, independent of other claims. Every batch
-    retains all code definitions and audits every included theorem's axioms.
+    Claims are closed equalities. Shared trace lemmas are checked in every
+    batch and have separate bounded axiom audits; no fact is assumed.
     """
     blocks = source.strip().split('\n\n')
     header = [b for b in blocks if b.startswith(('import ', 'open ', 'set_option ', 'namespace '))]
-    definitions = [b for b in blocks if b.startswith('def ')]
+    shared = [b for b in blocks if b.startswith('@[cbv_eval]\ntheorem ')]
+    definitions = [b for b in blocks if b.startswith(('def ', '@[cbv_eval]\ntheorem '))]
+    attributes = [b for b in blocks if b.startswith('attribute [cbv_opaque] ')]
     claims = [b for b in blocks if b.startswith('theorem ')]
     for start in range(0, len(claims), size):
         group = claims[start:start + size]
         names = [b.split()[1] for b in group]
-        yield ('\n\n'.join(header + definitions + group +
+        yield ('\n\n'.join(header + definitions + attributes + group +
+               ['#print axioms ' + n for n in names] + ['end FrozenObserverExport']) + '\n', names)
+    for start in range(0, len(shared), size):
+        names = [b.split()[2] for b in shared[start:start + size]]
+        yield ('\n\n'.join(header + definitions + attributes +
                ['#print axioms ' + n for n in names] + ['end FrozenObserverExport']) + '\n', names)
 
 
