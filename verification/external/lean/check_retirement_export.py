@@ -154,7 +154,7 @@ def emit(data):
         # Exact native instance/state ownership is checked separately below.
         physical = literal([s['physical'], s['history'], s['highest_epoch']])
         return f'({{ owner := {life.lineage(s["history"]["lineage"])}, cut := {len(s["journal"])}, language := {life.wide(s["epoch"])}, layers := {layers}, physical := {physical}, work := {natural(s["work"])}, receipts := {journal}, capacity := {natural(s["limit"])} }} : ObserverRetirement.State Lineage Nat String String)'
-    committed = refused = 0
+    committed = refused = before_act = after_act = surviving_prefix = 0
     rows = sequence(data['cases']); require(rows, 'No retirement boundaries')
     seen = set()
     for i, row in enumerate(rows):
@@ -203,18 +203,31 @@ def emit(data):
             same(r['actual']['cut']['lineage'], before['history']['lineage'])
             matches = [x for g in before['corpus'] for x in g['rows'] if x['cut'] == r['actual']['cut'] and x['outcome'] == r['actual']['outcome']]
             require(len(matches) == 1, 'Actual outcome must have one exact retained corpus witness')
+            if r['actual']['outcome']['value']['kind'] in ('Next', 'Refused'):
+                eq(r['actual']['outcome']['value']['key'], before['physical']['raw'])
         fault = r['fault']; refusal = life.refusal(fault['refusal'])
         claim(f'classification {refusal} = .undefined')
         definition = definitions[fault['cut']['definition']]; prefix = 'd' + natural(definition['identity'])
         phase = 'read' if fault['refusal']['phase'] == 'Read' else 'update'
         supplied, values = life.input_row(fault['input']); invocation = f'fault_{i}'
+        ports = fault['input']['values']
+        require(len(ports) == 1 and ports[0]['kind'] == ('Query' if phase == 'read' else 'Event'),
+                'Expected complete physical fault ports')
+        ports = ports[0]['value']
+        for key in ('raw', 'episode', 'life_age', 'pose'): same(ports[key], before['physical'][key])
+        if phase == 'read': require(ports['action'] is None, 'A query cannot contain a delivered action')
+        if ports['owner'] is not None: same(ports['owner'], before['history']['lineage'])
         lines.append(f'def {invocation} := ObserverAdmission.evaluate (apply {natural(definition["semantics"]["max_trace"])}) .{phase} {prefix}_{phase} {prefix}_{phase}_binding {life.value(fault["cut"]["value"])} {supplied} {values} ⟨none, 2^64-1, 0, 0, false⟩')
         claim(f'observe {invocation} = .error {refusal}', f'unfold {invocation} {prefix}_{phase} {prefix}_{phase}_binding\n  (conv => lhs; cbv) <;> rfl')
         claim(f'ObserverRetirement.retire {model(before)} {model_receipt(r, len(after["journal"])-1)} = some {model(after)}')
         committed += 1
+        before_act += r['boundary'] == 'BeforeAct'; after_act += r['boundary'] == 'AfterAct'
+        surviving_prefix += index > 0
     lines += ['#print axioms ' + n for n in names] + ['end FrozenObserverExport']
     source, trace_claims = observer_trace_proofs.share_traces(data, '\n\n'.join(lines) + '\n')
-    return source, dict(cases=len(rows), committed=committed, refused=refused, trace_claims=trace_claims, claims=len(names)+trace_claims)
+    return source, dict(cases=len(rows), committed=committed, refused=refused, before_act=before_act,
+                        after_act=after_act, surviving_prefix=surviving_prefix,
+                        trace_claims=trace_claims, claims=len(names)+trace_claims)
 
 
 if __name__ == '__main__':

@@ -76,7 +76,7 @@ class RetirementExportTests(unittest.TestCase):
 
     def test_corrupt_boundary(self):
         for mutation in ('current_state', 'owner', 'output_epoch', 'work_reset', 'work_charge', 'history',
-                         'actual_action', 'retired_suffix', 'journal_used', 'receipt_work'):
+                         'actual_action', 'retired_suffix', 'journal_used', 'receipt_work', 'fault_ports'):
             data = fixture(); c = data['cases'][0]; a = c['after']; r = a['journal'][0]
             if mutation == 'current_state': a['floors'][0]['cut']['value']['value']['value'] = 11
             elif mutation == 'owner': r['fault']['cut']['owner'] = 8
@@ -87,8 +87,30 @@ class RetirementExportTests(unittest.TestCase):
             elif mutation == 'actual_action': a['physical']['attempts'] += 1
             elif mutation == 'retired_suffix': r['retired_floors'] = []
             elif mutation == 'journal_used': a['used'] = 4
-            else: r['work_after'] = 14
+            elif mutation == 'receipt_work': r['work_after'] = 14
+            else:
+                for value in (c['attempt']['pending'], c['precommit']['pending'], r):
+                    value['fault']['input']['values'][0]['value']['raw'] = 99
             with self.subTest(mutation=mutation): self.replay(data, True)
+
+    def test_actual_after_act_outcome(self):
+        data = fixture(); c = data['cases'][0]; r = c['after']['journal'][0]
+        cut = dict(lineage=dict(authority=0,birth=0), ordinal=0, epoch='1', raw_space='1',
+            raw=6,situation=6,action=0,episode=2,life_age=2,pose=1,inputs=[['1',6]])
+        actual = dict(cut=cut,outcome=dict(kind='Outcome',value=dict(kind='Next',key=7)))
+        history = dict(lineage=dict(authority=0,birth=0),length=1,events=[cut])
+        corpus = [dict(key=6,rows=[dict(tick=dict(key=6,age=2,events=0,obs=True,tower=0,theta=1),
+            cut=cut,outcome=actual['outcome'],ordinal=0,raw_top=6)])]
+        for s in (c['attempt'],c['precommit'],c['after']): s['history']=copy.deepcopy(history)
+        for p in (c['attempt']['pending'],c['precommit']['pending'],r):
+            p.update(boundary='AfterAct',actual=copy.deepcopy(actual))
+        for s in (c['attempt'],c['precommit'],r):s['corpus']=copy.deepcopy(corpus)
+        r.update(history=copy.deepcopy(history),ordinal=1,journal_slots=4,work_after=14)
+        c['precommit']['work']=16;c['after'].update(used=4,work=14)
+        self.replay(data)
+        for p in (c['attempt']['pending'],c['precommit']['pending'],r):p['actual']['outcome']['value']['key']=8
+        for s in (c['attempt'],c['precommit'],r):s['corpus'][0]['rows'][0]['outcome']['value']['key']=8
+        self.replay(data,True)
 
     def test_missing_independent_snapshot(self):
         data = fixture(); data['cases'][0]['precommit'] = None
