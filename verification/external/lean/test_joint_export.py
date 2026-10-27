@@ -60,7 +60,7 @@ class JointExtractionTests(unittest.TestCase):
     def setUpClass(cls):
         require_success(run('lake', 'build', 'VerumExternalReplay.AcquiredObserver',
                             'VerumExternalReplay.ObserverInstallation', 'VerumExternalReplay.ObserverOwnership',
-                            'VerumExternalReplay.ExactNames'))
+                            'VerumExternalReplay.ExactNames', 'VerumExternalReplay.StructuralNames'))
 
     def replay(self, data, rejection=None):
         source, counts = emit(data); self.assertGreater(counts['claims'], 0)

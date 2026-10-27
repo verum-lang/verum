@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import re
 import check_lifecycle_export as lifecycle
+import structural_export
 from observer_export_replay import array, fields, natural, require, sequence, main as replay_main
 
 
@@ -46,7 +47,8 @@ def receipt(item, modern=False):
 
 def emit(data):
     fields(data, 'schema definition candidate definition_receipt initialization transition history replay')
-    require(data['schema'] == 'synarc-joint-observer-v1', 'Unknown joint export schema')
+    require(data['schema'] in ('synarc-joint-observer-v1', 'synarc-joint-observer-v2'), 'Unknown joint export schema')
+    witnessed = data['schema'] == 'synarc-joint-observer-v2'
     definition = data['definition']
     require(lifecycle.validate_adapter({'definitions': [definition], 'joint': data}) == 'AcquiredV2',
             'Joint production replay requires explicit AcquiredV2')
@@ -54,7 +56,7 @@ def emit(data):
                 ownership=[], naming=[], installation=[], refusals=[])
     source, counts = lifecycle.emit(base)
     require(counts['claims'] == 0, 'Unexpected base observations')
-    lines = [source.removesuffix('end FrozenObserverExport\n')]
+    lines = ['import VerumExternalReplay.StructuralNames', source.removesuffix('end FrozenObserverExport\n')]
     names = []
     def claim(equation, proof='rfl'):
         name = 'j' + str(len(names)); names.append(name)
@@ -65,8 +67,9 @@ def emit(data):
     candidate = data['candidate']
     require(type(candidate) is dict, 'Expected candidate')
     modern = 'structural_code_words' in candidate
+    require(not witnessed or modern, 'Structural schema requires current exact naming metadata')
     fields(candidate, 'owner definition grammar index syntax_indices family_count evidence_look comparison_count provenance' +
-           (' structural_code_words' if modern else ''))
+           (' structural_code_words' if modern else '') + (' structural_witnesses' if witnessed else ''))
     natural(candidate['owner'])  # Nominal token; no semantic-equivalence inference.
     same(candidate['definition'], definition['identity'])
     grammar = candidate['grammar']
@@ -100,8 +103,8 @@ def emit(data):
             require(sequence(word), 'Empty structural code word')
             for bit in word: natural(bit, 1)
         encoded = array(array('true' if bit else 'false' for bit in word) for word in words)
-        # Retain the full words. No invented grammar or word-to-Program witness:
-        # this export does not include the catalogues needed for that proof.
+        # V1 retains words without a grammar witness; V2 checks actual frozen
+        # catalogues, original addresses, decoding and materialization below.
         lines.append(f'def joint_structural_words : List (List Bool) := {encoded}')
         claim('joint_structural_words.length = 3')
     else:
@@ -152,6 +155,8 @@ def emit(data):
     claim(f'FiniteCode.run (fun op args => (apply {cap} op args).toOption) joint_initial [] = some {prefix}_initial',
           f'unfold joint_initial {prefix}_initial\n  reduce_finite_code')
 
+    structural_bindings = structural_export.emit_witnesses(data, lines, claim) if witnessed else 0
+
     transition = data['transition']; fields(transition, 'input before fork_before fork_after live_after')
     register, _, _ = lifecycle.cut_registry({definition['identity']: definition}, claim)
     before, fork_before, fork_after, live, replay = (
@@ -200,15 +205,16 @@ def emit(data):
     claim(f'({lifecycle.value(live["value"])} : Value) = {lifecycle.value(replay["value"])}')
     lines += ['#print axioms ' + name for name in names] + ['end FrozenObserverExport']
     return '\n\n'.join(lines) + '\n', {'joint_producers': 1, 'history_events': len(rows), 'structural_words': len(words),
-        'structural_program_bindings': 0, 'claims': len(names)}
+        'structural_program_bindings': structural_bindings, 'claims': len(names)}
 
 
 def main():
-    replay_main(emit=emit, modules=lifecycle.MODELS,
-        producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve()], description=__doc__,
+    replay_main(emit=emit, modules=lifecycle.MODELS + ['StructuralNames'],
+        producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve(), Path(structural_export.__file__).resolve()], description=__doc__,
         scope='Finite joint initializer/report and before/fork/live/receiver replay; retained nominal receipt '
-              'consistency, exact Uniform/Kraft charge arithmetic and retained structural words. Not structural-word '
-              'decoding/materialization or syntax-index-to-program enumeration, admission statistics, default enrollment, floating-point '
+              'consistency, exact Uniform/Kraft charge arithmetic and retained structural words. V2 additionally checks '
+              'actual owned grammar/address, bit decoding/encoding and full Program materialization. Not syntax-index '
+              'enumeration, grammar cardinality/Kraft summability, exact audit-meter costs, admission statistics, default enrollment, floating-point '
               'fees, physical provenance or universal native ownership. Original work budgets are not exported.')
 
 

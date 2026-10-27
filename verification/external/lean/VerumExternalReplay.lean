@@ -32,3 +32,4 @@ import VerumExternalReplay.CategoricalPrediction
 import VerumExternalReplay.FiniteAdmission
 import VerumExternalReplay.TraceReduction
 import VerumExternalReplay.AcquisitionScheduling
+import VerumExternalReplay.StructuralNames

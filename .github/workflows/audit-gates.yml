@@ -239,6 +239,7 @@ jobs:
             --output observer-retirement-export.lean --report observer-retirement-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_lifecycle_export.py
           python3 -m unittest discover -s verification/external/lean -p test_joint_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_structural_export.py
           python3 verification/external/lean/check_lifecycle_export.py \
             --export verification/external/lean/fixtures/observer-lifecycle-v1.json \
             --sha256 d81cc445752ee9e95a59fbd8915d02802211a810d6ce182b80025ab482260199 \
@@ -260,6 +261,12 @@ jobs:
             --sha256 ea2ca04dde2d4f83a7ac75c03dd992d0490b33dedec7baa85c668b9b4a56f710 \
             --provenance verification/external/lean/fixtures/observer-joint-v2.provenance.json \
             --output observer-joint-v2.lean --report observer-joint-v2-acceptance.json
+          gzip -dc verification/external/lean/fixtures/observer-joint-v3.json.gz > observer-joint-v3.json
+          python3 verification/external/lean/check_joint_export.py \
+            --export observer-joint-v3.json \
+            --sha256 3a956d81dcdb004bfee0d43652f95cc12881e54a5e31c184a2ef312b5074c106 \
+            --provenance verification/external/lean/fixtures/observer-joint-v3.provenance.json \
+            --output observer-joint-v3.lean --report observer-joint-v3-acceptance.json
 
       - name: Frozen physical observer reads and commits
         run: |
@@ -354,6 +361,7 @@ jobs:
             observer-joint-export.lean
             observer-joint-export-*/
             observer-joint-v2*
+            observer-joint-v3*
             observer-physical-*-acceptance.json
             observer-physical-*.lean
             observer-physical-*-*/
