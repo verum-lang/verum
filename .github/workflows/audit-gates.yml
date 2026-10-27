@@ -248,6 +248,12 @@ jobs:
             --sha256 0b361f8c7ab1fdf7405fc29a8170fbe14740a224adf7a6fcc98e40531054b58e \
             --provenance verification/external/lean/fixtures/observer-joint-v1.provenance.json \
             --output observer-joint-export.lean --report observer-joint-export-acceptance.json
+          gzip -dc verification/external/lean/fixtures/observer-joint-v2.json.gz > observer-joint-v2.json
+          python3 verification/external/lean/check_joint_export.py \
+            --export observer-joint-v2.json \
+            --sha256 ea2ca04dde2d4f83a7ac75c03dd992d0490b33dedec7baa85c668b9b4a56f710 \
+            --provenance verification/external/lean/fixtures/observer-joint-v2.provenance.json \
+            --output observer-joint-v2.lean --report observer-joint-v2-acceptance.json
 
       - name: Frozen physical observer reads and commits
         run: |
@@ -340,6 +346,7 @@ jobs:
             observer-joint-export-acceptance.json
             observer-joint-export.lean
             observer-joint-export-*/
+            observer-joint-v2*
             observer-physical-*-acceptance.json
             observer-physical-*.lean
             observer-physical-*-*/

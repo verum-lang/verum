@@ -3,7 +3,7 @@ import copy
 from pathlib import Path
 import tempfile
 import unittest
-from check_joint_export import emit
+from check_joint_export import emit, exact_integer
 from observer_export_replay import batches
 from check_typed_programs import check, require_success, run
 from test_lifecycle_export import model_fixture, event_value
@@ -34,6 +34,27 @@ def joint_fixture():
             fork_after=cut(1, 1, 6), live_after=cut(0, 2, 6)), history=history, replay=cut(2, 3, 6))
 
 
+def structural_fixture(*, kraft=False, large=False):
+    data = joint_fixture(); candidate = data['candidate']
+    exact = lambda n: n if n <= 2**53 else {'exact_decimal': str(n)}
+    count = None if kraft else (2**90 + 7 if large else 6)
+    look = 2**70 + 3 if large else 2
+    ordinal = 2**80 + 1 if large else 0
+    words = [[1], [1, 0], [1, 1]]
+    denominator = 2**sum(map(len, words)) if kraft else count
+    comparison = denominator * (look + 1) * (look + 2)
+    prior = 'KraftProgramV1 { bits: 5 }' if kraft else f'Uniform {{ original_cardinality: {count} }}'
+    origin = dict(owner=0, authority=0, count=None if kraft else exact(count),
+                  index=exact(ordinal), look=exact(look), comparison_count=exact(comparison), name_prior=prior)
+    candidate.update(index=exact(ordinal), family_count=None if kraft else exact(count),
+                     evidence_look=exact(look), comparison_count=exact(comparison),
+                     structural_code_words=words, provenance=origin)
+    candidate['grammar'].update(count=candidate['family_count'], component_counts=[None]*3,
+        source_order='structural-odometer-v1', admission_profile='ExactPredictiveV1 { risk: Mass { denominator: 20 } }')
+    data['definition_receipt'] = copy.deepcopy(origin)
+    return data
+
+
 class JointExtractionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -52,6 +73,52 @@ class JointExtractionTests(unittest.TestCase):
 
     def test_joint_model_replays(self):
         self.replay(joint_fixture())
+
+    def test_current_uniform_and_kraft_naming(self):
+        for kraft, large in ((False, False), (False, True), (True, True)):
+            with self.subTest(kraft=kraft, large=large):
+                self.replay(structural_fixture(kraft=kraft, large=large))
+
+    def test_exact_integer_wire_format(self):
+        for value in (True, 1.5, 2**53+1, {'exact_decimal': '01'}, {'exact_decimal': '-1'},
+                      {'exact_decimal': '1'}, {'exact_decimal': '9007199254740993', 'trusted': True}):
+            with self.subTest(value=value), self.assertRaises(ValueError): exact_integer(value)
+        self.assertEqual(exact_integer({'exact_decimal': str(2**128+1)}), str(2**128+1))
+
+    def test_current_naming_mutations(self):
+        for change in ('paid', 'prior', 'risk', 'look', 'kraft_length', 'kraft_word', 'large_receipt'):
+            data = structural_fixture(kraft=change.startswith('kraft'), large=change=='large_receipt')
+            c = data['candidate']
+            if change == 'paid': c['comparison_count'] += 1
+            elif change == 'prior': data['definition_receipt']['name_prior'] = 'Uniform { original_cardinality: 7 }'
+            elif change == 'risk': c['grammar']['admission_profile'] = 'ExactPredictiveV1 { risk: Mass { denominator: 0 } }'
+            elif change == 'look': c['evidence_look'] += 1
+            elif change == 'kraft_length':
+                c['provenance']['name_prior'] = data['definition_receipt']['name_prior'] = 'KraftProgramV1 { bits: 4 }'
+            elif change == 'kraft_word': c['structural_code_words'][0].append(0)
+            else:
+                d = data['definition_receipt']['index']['exact_decimal']
+                data['definition_receipt']['index']['exact_decimal'] = str(int(d)+1)
+            with self.subTest(change=change):
+                self.replay(data, 'Tactic `decide` proved that the proposition' if change=='risk' else 'Tactic `rfl` failed:')
+
+    def test_current_naming_schema_is_strict(self):
+        for change in ('order', 'profile', 'prior', 'bit', 'word', 'count', 'indexed_words', 'missing'):
+            data = structural_fixture(); c = data['candidate']
+            if change == 'order': c['grammar']['source_order'] = 'unknown'
+            elif change == 'profile': c['grammar']['admission_profile'] = 'trusted'
+            elif change == 'prior': c['provenance']['name_prior'] = 'Uniform { original_cardinality: 06 }'
+            elif change == 'bit': c['structural_code_words'][0][0] = 2
+            elif change == 'word': c['structural_code_words'][0] = []
+            elif change == 'count': c['grammar']['component_counts'] = [1, 2, 3]
+            elif change == 'indexed_words': c['grammar']['source_order'] = 'legacy-indexed-v1'
+            else: del c['provenance']['name_prior']
+            with self.subTest(change=change), self.assertRaises(ValueError): emit(data)
+
+    def test_structural_words_are_retained_without_claiming_decode(self):
+        data = structural_fixture(); source, counts = emit(data)
+        self.assertIn('def joint_structural_words : List (List Bool) := [[true], [true, false], [true, true]]', source)
+        self.assertEqual(counts['structural_program_bindings'], 0)
 
     def test_long_history_composes_every_transition(self):
         data = joint_fixture()

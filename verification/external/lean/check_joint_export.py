@@ -1,13 +1,46 @@
 #!/usr/bin/env python3
 """Replay actual joint initialization and transitions; acquisition admission is separate."""
 from pathlib import Path
+import json
+import re
 import check_lifecycle_export as lifecycle
 from observer_export_replay import array, fields, natural, require, sequence, main as replay_main
 
 
-def receipt(item):
-    fields(item, 'owner authority count index look comparison_count')
-    for number in item.values(): natural(number)
+def decimal(value):
+    require(type(value) is str and re.fullmatch(r'0|[1-9][0-9]*', value) is not None,
+            'Expected canonical exact decimal')
+    return value
+
+
+def exact_integer(value):
+    # Match the native serializer: small JSON integers, otherwise canonical
+    # decimal objects. Never pass through float or a machine-sized rank.
+    if type(value) is int:
+        return natural(value, 2**53)
+    fields(value, 'exact_decimal')
+    result = decimal(value['exact_decimal'])
+    require(int(result) > 2**53, 'Noncanonical small exact-decimal object')
+    return result
+
+
+def name_prior(value):
+    require(type(value) is str, 'Expected explicit native naming prior')
+    uniform = re.fullmatch(r'Uniform \{ original_cardinality: (0|[1-9][0-9]*) \}', value)
+    if uniform:
+        return 'Uniform', uniform[1]
+    kraft = re.fullmatch(r'KraftProgramV1 \{ bits: (0|[1-9][0-9]*) \}', value)
+    require(kraft is not None, 'Unknown naming prior')
+    return 'KraftProgramV1', natural(int(kraft[1]))
+
+
+def receipt(item, modern=False):
+    fields(item, 'owner authority count index look comparison_count' + (' name_prior' if modern else ''))
+    for key in ('owner', 'authority'): natural(item[key])
+    integer = exact_integer if modern else natural
+    for key in ('index', 'look', 'comparison_count'): integer(item[key])
+    if item['count'] is not None or not modern: integer(item['count'])
+    if modern: name_prior(item['name_prior'])
     return item
 
 
@@ -30,28 +63,84 @@ def emit(data):
     def distinct(a, b): claim(f'({natural(a)} : Nat) ≠ {natural(b)}', 'decide')
 
     candidate = data['candidate']
-    fields(candidate, 'owner definition grammar index syntax_indices family_count evidence_look comparison_count provenance')
+    require(type(candidate) is dict, 'Expected candidate')
+    modern = 'structural_code_words' in candidate
+    fields(candidate, 'owner definition grammar index syntax_indices family_count evidence_look comparison_count provenance' +
+           (' structural_code_words' if modern else ''))
     natural(candidate['owner'])  # Nominal token; no semantic-equivalence inference.
     same(candidate['definition'], definition['identity'])
-    grammar = candidate['grammar']; fields(grammar, 'owner authority count component_counts')
-    natural(grammar['owner'])
-    origin = receipt(candidate['provenance']); sealed = receipt(data['definition_receipt'])
-    for field in origin: same(origin[field], sealed[field])
+    grammar = candidate['grammar']
+    fields(grammar, 'owner authority count component_counts' + (' source_order admission_profile' if modern else ''))
+    natural(grammar['owner']); natural(grammar['authority'])
+    origin = receipt(candidate['provenance'], modern); sealed = receipt(data['definition_receipt'], modern)
+    integer = exact_integer if modern else natural
+    def equal_integer(a, b):
+        claim(f'({integer(a)} : Nat) = {integer(b)}')
+    def equal_count(a, b):
+        if a is None or b is None:
+            require(modern and a is None and b is None, 'Inconsistent unbounded family')
+        else: equal_integer(a, b)
+    same(origin['owner'], sealed['owner']); same(origin['authority'], sealed['authority'])
+    equal_count(origin['count'], sealed['count'])
+    for key in ('index', 'look', 'comparison_count'): equal_integer(origin[key], sealed[key])
     same(origin['authority'], grammar['authority'])
-    same(origin['count'], grammar['count']); same(candidate['family_count'], grammar['count'])
+    equal_count(origin['count'], grammar['count']); equal_count(candidate['family_count'], grammar['count'])
     for field, supplied in [('index', 'index'), ('look', 'evidence_look'), ('comparison_count', 'comparison_count')]:
-        same(origin[field], candidate[supplied])
+        equal_integer(origin[field], candidate[supplied])
     sizes = sequence(grammar['component_counts']); indices = sequence(candidate['syntax_indices'])
     require(len(sizes) == len(indices) == 3, 'Joint syntax requires three component names')
-    for size, index in zip(sizes, indices):
-        claim(f'({natural(index)} : Nat) < {natural(size)}', 'decide')
-    product = ' * '.join(natural(n) for n in sizes)
-    count, index, look, comparisons = (natural(candidate[k]) for k in
-        ('family_count', 'index', 'evidence_look', 'comparison_count'))
-    claim(f'({product} : Nat) = {count}')
-    claim(f'({index} : Nat) < {count} ∧ {count} ≤ 2^53', 'decide')
-    claim(f'({comparisons} : Nat) = {count} * ({look} + 1) * ({look} + 2)')
-    claim(f'({comparisons} : Nat) ≤ 2^53', 'decide')
+    for i in indices: natural(i)
+    structural = modern and grammar['source_order'] == 'structural-odometer-v1'
+    words = []
+    if structural:
+        require(sizes == [None, None, None], 'Structural catalogues do not export component cardinalities')
+        words = sequence(candidate['structural_code_words'])
+        require(len(words) == 3, 'Expected all three structural code words')
+        for word in words:
+            require(sequence(word), 'Empty structural code word')
+            for bit in word: natural(bit, 1)
+        encoded = array(array('true' if bit else 'false' for bit in word) for word in words)
+        # Retain the full words. No invented grammar or word-to-Program witness:
+        # this export does not include the catalogues needed for that proof.
+        lines.append(f'def joint_structural_words : List (List Bool) := {encoded}')
+        claim('joint_structural_words.length = 3')
+    else:
+        if modern:
+            require(grammar['source_order'] == 'legacy-indexed-v1', 'Unknown joint source order')
+            require(candidate['structural_code_words'] is None, 'Indexed source cannot carry structural words')
+        for size, i in zip(sizes, indices):
+            claim(f'({natural(i)} : Nat) < {natural(size)}', 'decide')
+        product = ' * '.join(natural(n) for n in sizes)
+        claim(f'({product} : Nat) = {integer(candidate["family_count"])}')
+    index, look, comparisons = (integer(candidate[k]) for k in ('index', 'evidence_look', 'comparison_count'))
+    count = None if candidate['family_count'] is None else integer(candidate['family_count'])
+    if modern:
+        prior, parameter = name_prior(origin['name_prior'])
+        name_prior(sealed['name_prior'])
+        claim(f'({json.dumps(origin["name_prior"])} : String) = {json.dumps(sealed["name_prior"])}')
+        profile = grammar['admission_profile']
+        require(type(profile) is str, 'Expected explicit admission profile')
+        if profile != 'LegacyChi2V1':
+            risk = re.fullmatch(r'ExactPredictiveV1 \{ risk: Mass \{ denominator: (0|[1-9][0-9]*) \} \}', profile)
+            require(risk is not None, 'Unknown admission profile')
+            claim(f'(0 : Nat) < {risk[1]}', 'decide')
+        lines.append(f'def joint_admission_profile : String := {json.dumps(profile)}')
+        if prior == 'Uniform':
+            require(count is not None, 'Uniform naming requires its original cardinality')
+            claim(f'({parameter} : Nat) = {count}')
+            denominator = count
+        else:
+            require(structural and count is None, 'Kraft naming requires structural words and no uniform count')
+            lengths = ' + '.join(str(len(word)) for word in words)
+            claim(f'({parameter} : Nat) = {lengths}')
+            denominator = f'(2 ^ ({lengths}))'
+    else:
+        require(count is not None, 'Legacy source requires finite cardinality')
+        denominator = count
+        claim(f'({count} : Nat) ≤ 2^53', 'decide')
+        claim(f'({comparisons} : Nat) ≤ 2^53', 'decide')
+    if count is not None: claim(f'({index} : Nat) < {count}', 'decide')
+    claim(f'({comparisons} : Nat) = {denominator} * ({look} + 1) * ({look} + 2)')
 
     prefix = 'd' + natural(definition['identity']); cap = natural(definition['semantics']['max_trace'])
     initialization = data['initialization']; fields(initialization, 'program report observation')
@@ -110,15 +199,16 @@ def emit(data):
     claim(f'({lifecycle.value(fork_after["value"])} : Value) = {lifecycle.value(live["value"])}')
     claim(f'({lifecycle.value(live["value"])} : Value) = {lifecycle.value(replay["value"])}')
     lines += ['#print axioms ' + name for name in names] + ['end FrozenObserverExport']
-    return '\n\n'.join(lines) + '\n', {'joint_producers': 1, 'history_events': len(rows), 'claims': len(names)}
+    return '\n\n'.join(lines) + '\n', {'joint_producers': 1, 'history_events': len(rows), 'structural_words': len(words),
+        'structural_program_bindings': 0, 'claims': len(names)}
 
 
 def main():
     replay_main(emit=emit, modules=lifecycle.MODELS,
         producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve()], description=__doc__,
         scope='Finite joint initializer/report and before/fork/live/receiver replay; retained nominal receipt '
-              'consistency, count/index bounds and paid-look arithmetic. Not syntax-index-to-program '
-              'enumeration, admission statistics, default enrollment for arbitrary histories, floating-point '
+              'consistency, exact Uniform/Kraft charge arithmetic and retained structural words. Not structural-word '
+              'decoding/materialization or syntax-index-to-program enumeration, admission statistics, default enrollment, floating-point '
               'fees, physical provenance or universal native ownership. Original work budgets are not exported.')
 
 
