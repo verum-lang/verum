@@ -78,6 +78,33 @@ class PhysicalReadTests(unittest.TestCase):
         self.replay(fixture())
         self.replay(fixture(True))
 
+    def test_explicit_empty_lower_prefix(self):
+        data = fixture(); data['schema'] = 'synarc-physical-observer-read-v2'
+        data['cases'][0]['before']['lower_prefix'] = dict(observed_floor=0, lower_floor_count=0,
+            floor_count=1, base_input_epoch='1', floor_input_epoch='1', tier_present=False)
+        self.replay(data)
+        for field, value in [('floor_count', 0), ('base_input_epoch', '2'), ('floor_input_epoch', '2')]:
+            wrong = copy.deepcopy(data)
+            wrong['cases'][0]['before']['lower_prefix'][field] = value
+            with self.subTest(field=field): self.replay(wrong, rejected=True)
+        # Coherent VM execution and naming still cannot justify a fabricated
+        # raw/input projection when the observed lower prefix is empty.
+        wrong = copy.deepcopy(data); row = wrong['cases'][0]
+        row['native'][0]['view']['input'] = 42
+        row['native'][0]['query']['values'][0]['value']['input'] = 42
+        row['before']['namespace']['entries'][0]['input'] = 42
+        row['after']['namespace']['entries'][0]['input'] = 42
+        self.replay(wrong, rejected=True)
+        for field, value in [('observed_floor', 1), ('lower_floor_count', 1), ('tier_present', True),
+                             ('tier_present', 0)]:
+            wrong = copy.deepcopy(data)
+            wrong['cases'][0]['before']['lower_prefix'][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError): emit(wrong)
+        legacy = copy.deepcopy(data); legacy['schema'] = 'synarc-physical-observer-read-v1'
+        with self.assertRaises(ValueError): emit(legacy)
+        del data['cases'][0]['before']['lower_prefix']
+        with self.assertRaises(ValueError): emit(data)
+
     def test_long_retained_state_is_checked_without_recursive_simplification(self):
         data = fixture(); row = data['cases'][0]
         event = row['native'][1]['input']['values'][0]['value']

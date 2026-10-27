@@ -3,7 +3,7 @@
 from pathlib import Path
 import check_lifecycle_export as lifecycle
 import observer_trace_proofs
-from observer_export_replay import array, fields, natural, require, sequence, main as replay_main
+from observer_export_replay import array, boolean, fields, natural, require, sequence, main as replay_main
 
 
 def physical(item):
@@ -16,7 +16,9 @@ def physical(item):
 
 def emit(data):
     fields(data, 'schema definitions cases')
-    require(data['schema'] == 'synarc-physical-observer-read-v1', 'Unknown physical read schema')
+    require(data['schema'] in ('synarc-physical-observer-read-v1',
+                              'synarc-physical-observer-read-v2'), 'Unknown physical read schema')
+    has_prefix = data['schema'] == 'synarc-physical-observer-read-v2'
     require(lifecycle.validate_adapter(data) == 'AcquiredV2', 'Physical read replay requires AcquiredV2')
     base = dict(schema='synarc-observer-lifecycle-v1', definitions=data['definitions'],
                 ownership=[], naming=[], installation=[], refusals=[])
@@ -51,12 +53,26 @@ def emit(data):
         before, after = case['before'], case['after']
         retained_before = set(states)
         retained_before.add(before['cut']['state'])
-        for snapshot in (before, after):
-            fields(snapshot, 'physical cut namespace attempts ordinal')
+        for phase, snapshot in (('before', before), ('after', after)):
+            fields(snapshot, 'physical cut namespace attempts ordinal' +
+                   (' lower_prefix' if has_prefix and phase == 'before' else ''))
             p = physical(snapshot['physical']); register(snapshot['cut'])
             lifecycle.namespace(snapshot['namespace'])
             natural(snapshot['attempts']); natural(snapshot['ordinal'])
             same(p['runtime_raw'], p['raw']); optional(p['runtime_pose'], p['pose'])
+        prefix_epoch = None
+        if has_prefix:
+            lower = before['lower_prefix']
+            fields(lower, 'observed_floor lower_floor_count floor_count base_input_epoch floor_input_epoch tier_present')
+            for key in ('observed_floor', 'lower_floor_count', 'floor_count'): natural(lower[key])
+            boolean(lower['tier_present'])
+            # A general lower stack needs its own retained projection trace.
+            # Only an explicitly observed empty prefix permits input = raw.
+            require(lower['observed_floor'] == 0 and lower['lower_floor_count'] == 0 and
+                    not lower['tier_present'], 'Unsupported nonempty lower-prefix projection')
+            claim(f'decide ((0 : Nat) < {natural(lower["floor_count"])}) = true')
+            prefix_epoch = lower['floor_input_epoch']
+            claim(f'({lifecycle.wide(prefix_epoch)} : Nat) = {lifecycle.wide(lower["base_input_epoch"])}')
         same(after['attempts'], before['attempts'] + 1)
         same(after['ordinal'], before['ordinal'] + 1)
         if previous is not None:
@@ -127,6 +143,9 @@ def emit(data):
             require(len(supplied['values']) == 1 and supplied['values'][0].get('kind') ==
                     ('Query' if phase == 'read' else 'Event'), 'Expected one complete native port row')
             row = supplied['values'][0]['value']
+            if has_prefix:
+                claim(f'({lifecycle.wide(row["epoch"])} : Nat) = {lifecycle.wide(prefix_epoch)}')
+                same(row['input'], row['raw'])
             row_source = {k: row[k] for k in ('epoch', 'raw_space', 'owner')}
             row_source['shape'] = 'Query' if phase == 'read' else 'Event'
             claim(f'({source_row} : Source) = {lifecycle.source(row_source)}')
@@ -177,7 +196,7 @@ def emit(data):
             terminals += 1
     lines += ['#print axioms ' + name for name in names] + ['end FrozenObserverExport']
     source, trace_claims = observer_trace_proofs.share_traces(data, '\n\n'.join(lines) + '\n')
-    return source, dict(cases=len(rows), reads=reads, commits=commits,
+    return source, dict(cases=len(rows), prefix_cases=len(rows) if has_prefix else 0, reads=reads, commits=commits,
                         terminals=terminals, trace_claims=trace_claims, claims=len(names)+trace_claims)
 
 
@@ -187,7 +206,8 @@ def main():
                    Path(observer_trace_proofs.__file__).resolve()], description=__doc__,
         scope='Finite retained successful Read/Committed objects, exact query/update/report replay, '
               'owner/state continuity, physical prior/successor ports, exact namespace and terminal table boundary. '
-              'Not original work-budget admission, lower-prefix projection fidelity, arbitrary Habitat fidelity, statistical acquisition, '
+              'V2 additionally checks explicitly empty lower-prefix projection. '
+              'Not original work-budget admission, general lower-prefix projection fidelity, arbitrary Habitat fidelity, statistical acquisition, '
               'retirement, allocator universality or infinite executions.')
 
 
