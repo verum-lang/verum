@@ -9,6 +9,7 @@ OPS = ('Append At Last Length EventInput EventRaw EventAction EventAge QueryInpu
        'QueryRaw QueryAge QueryAction Pair First Second Equal Select Add Rem Next Refused').split()
 POSE_OPS = 'Unit Zero EmptyTrace Identity EventPose QueryPose'.split()
 ERRORS = 'Arity Sort Missing Overflow TraceCapacity Allocation'.split()
+SUSPEND_REASONS = 'Work GrantDispatch OriginalDispatch CounterCapacity'.split()
 MODELS = ['TypedPrograms', 'FiniteCode', 'FiniteExecution', 'FiniteExecutionProjection',
           'ObserverAdmission', 'AcquiredObserver', 'ObserverOwnership', 'ExactNames',
           'ConservativeRefinement', 'ExactTransports', 'PartialObservers', 'ObserverInstallation']
@@ -191,11 +192,22 @@ def report(item):
         natural(item['expanded_attempts']), natural(item['call_attempts']), option(item['halt'], halt)]) + '⟩'
 
 
+def suspension(reason, dispatches, meter_error):
+    """Decode observable progress only; no retained VM state is present here."""
+    return '⟨' + ', '.join((tag(reason, SUSPEND_REASONS), natural(dispatches),
+                           boolean(meter_error))) + '⟩'
+
+
 def refusal(item):
     require(type(item) is dict and 'kind' in item, 'Expected observer refusal')
     kind = item['kind']; phase = tag(item['phase'], ['Update', 'Read'])
     tag(item['classification'], ['Undefined', 'Resource', 'Poisoned'])
     base = 'kind phase classification'
+    if kind == 'Suspended':
+        fields(item, base + ' reason dispatches meter_error')
+        encoded = suspension(item['reason'], item['dispatches'], item['meter_error'])
+        require(item['meter_error'] is (item['reason'] == 'Work'), 'Incoherent suspension meter presence')
+        return f'(.suspended {phase} {encoded})'
     if kind == 'Execution':
         fields(item, base + ' report meter_error counter_capacity primitive_refusal')
         return f'(.execution {phase} {report(item["report"])} {boolean(item["meter_error"])} ' + \
@@ -495,7 +507,8 @@ def emit_installation(rows, definitions, register, lines, claim, named):
 def emit_classification(rows, claim, named):
     for row in sequence(rows):
         named(row)
-        fields(row, 'name kind domain reason_kind stop meter_error counter_capacity primitive_error primitive_refusal classification budget_before budget_after')
+        keys = 'name kind domain reason_kind stop meter_error counter_capacity primitive_error primitive_refusal classification budget_before budget_after'
+        fields(row, keys + (' suspension' if row.get('reason_kind') == 'Suspended' else ''))
         require(row['kind'] == 'classification' and row['domain'] in ('canonical', 'acquired'), 'Unknown classification source')
         budget(row['budget_before']); budget(row['budget_after'])
         require(row['budget_before']['dispatch_limit'] == row['budget_after']['dispatch_limit'], 'Dispatch limit changed')
@@ -505,7 +518,21 @@ def emit_classification(rows, claim, named):
         claim(f'({natural(row["budget_after"]["work_remaining"])} : Nat) ≤ {natural(row["budget_before"]["work_remaining"])}', 'decide')
         claim(f'({natural(row["budget_before"]["dispatches"])} : Nat) ≤ {natural(row["budget_after"]["dispatches"])}', 'decide')
         kind = row['reason_kind']; observed = tag(row['classification'], ['Undefined', 'Resource', 'Poisoned'])
-        if kind == 'Execution':
+        if kind == 'Suspended':
+            require(row['stop'] is None and row['primitive_error'] is None and row['primitive_refusal'] is None,
+                    'Suspension is not an execution report')
+            s = row['suspension']; fields(s, 'phase reason dispatches')
+            phase = tag(s['phase'], ['Update', 'Read'])
+            encoded = suspension(s['reason'], s['dispatches'], row['meter_error'])
+            claim(f'Suspension.coherent ({encoded} : Suspension) = true')
+            # Cumulative invocation usage can include earlier service calls.
+            # Only this budget's delta can be bounded by that cumulative count.
+            claim(f'({natural(row["budget_after"]["dispatches"])} : Nat) - '
+                  f'{natural(row["budget_before"]["dispatches"])} ≤ {natural(s["dispatches"])}', 'decide')
+            require(not row['budget_before']['poisoned'] and not row['budget_after']['poisoned'],
+                    'Poisoned invocation cannot suspend')
+            expression = f'classification (.suspended {phase} {encoded})'
+        elif kind == 'Execution':
             expression = 'executionClass ' + tag(row['stop'], ['Complete', 'Undefined', 'Budget']) + ' ' + \
                 boolean(row['meter_error']) + ' ' + option(row['primitive_refusal'], lambda x: tag(x, ['Undefined', 'Resource']))
             if row['primitive_error'] is not None:
@@ -529,6 +556,8 @@ def main():
         scope='Finite supplied lifecycle observations checked against ownership, acquired-program, '
               'installation and exact naming models for the explicitly declared 64-bit '
               'AcquiredV1 legacy or AcquiredV2 pose adapter. '
+              'Suspension rows check typed classification and observable accounting only; '
+              'they contain no retained continuation state or resume authority. '
               'Not universal Rust ownership/memory correctness, '
               'authenticated provenance, learning correctness or default enrollment.')
 

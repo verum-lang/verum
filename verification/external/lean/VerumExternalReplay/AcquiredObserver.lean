@@ -145,6 +145,21 @@ def primitiveClass : Error → RefusalClass
 
 abbrev Observation := FiniteExecution.Observation Value Error
 
+inductive SuspendReason where
+  | work | grantDispatch | originalDispatch | counterCapacity
+  deriving DecidableEq
+
+/-- Cumulative progress metadata, not an execution report or a resume authority.
+    The retained native invocation owns the continuation; this view does not. -/
+structure Suspension where
+  reason : SuspendReason
+  dispatches : Nat
+  meterError : Bool
+  deriving DecidableEq
+
+def Suspension.coherent (s : Suspension) : Bool :=
+  s.meterError == decide (s.reason = .work)
+
 def primitiveRefusal (report : Observation) : Option RefusalClass :=
   report.halt.bind fun halt => match halt.reason with
     | .primitive error => some (primitiveClass error)
@@ -154,6 +169,7 @@ def primitiveRefusal (report : Observation) : Option RefusalClass :=
 -- counter contents. Preserve the exact observable shape and derive the class.
 inductive Refusal where
   | poisoned : ObserverAdmission.Phase → Refusal
+  | suspended : ObserverAdmission.Phase → Suspension → Refusal
   | binding : ObserverAdmission.Phase → ObserverAdmission.BindingRefusal → Refusal
   | work : ObserverAdmission.Phase → ObserverAdmission.WorkPoint → Option Observation → Refusal
   | capacity : ObserverAdmission.Phase → ObserverAdmission.WorkPoint → Refusal
@@ -176,10 +192,20 @@ def executionClass (stop : FiniteExecution.Stop) (meter : Bool)
 
 def classification : Refusal → RefusalClass
   | .poisoned _ => .poisoned
-  | .work .. | .capacity .. => .resource
+  | .work .. | .capacity .. | .suspended .. => .resource
   | .execution _ report meter _ primitive =>
       executionClass report.stop meter primitive
   | _ => .undefined
+
+theorem suspended_resource (phase : ObserverAdmission.Phase) (s : Suspension) :
+    classification (.suspended phase s) = .resource := rfl
+
+theorem suspended_not_execution (phase other : ObserverAdmission.Phase)
+    (s : Suspension) (report : Observation) (meter counter : Bool)
+    (primitive : Option RefusalClass) :
+    Refusal.suspended phase s ≠ .execution other report meter counter primitive := by
+  intro h
+  cases h
 
 def observe (result : ObserverAdmission.Result Value Error) : Except Refusal (Value × Observation) :=
   result.observation.mapError refusalView

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from check_lifecycle_export import emit, value
+from check_lifecycle_export import emit, value, refusal, SUSPEND_REASONS
 from observer_export_replay import batches
 from check_typed_programs import check, require_success, run
 
@@ -156,6 +156,68 @@ class LifecycleExtractionTests(unittest.TestCase):
             wrong = copy.deepcopy(data)
             next(row for row in wrong['refusals'] if row['name'] == name)['classification'] = 'Undefined'
             with self.subTest(refusal=name): self.replay(wrong, True)
+
+    def test_suspension_classification(self):
+        data = model_fixture()
+        for key in ('ownership', 'naming', 'installation'): data[key] = []
+        template = data['refusals'][0]; data['refusals'] = []
+        for domain in ('canonical', 'acquired'):
+            for phase in ('Update', 'Read'):
+                for reason in SUSPEND_REASONS:
+                    row = copy.deepcopy(template)
+                    row.update(name=f'{domain}-{phase}-{reason}', domain=domain, reason_kind='Suspended',
+                        meter_error=reason == 'Work', suspension=dict(phase=phase, reason=reason, dispatches=9))
+                    # Fresh grants need not include the invocation's prior usage.
+                    row['budget_before']['dispatches'] = 2
+                    row['budget_after']['dispatches'] = 3
+                    data['refusals'].append(row)
+        self.replay(data)
+        for change in ('class', 'meter', 'cumulative', 'dispatch_regression', 'work_increase'):
+            wrong = copy.deepcopy(data); row = wrong['refusals'][0]
+            wrong['refusals'] = [row]
+            if change == 'class': row['classification'] = 'Undefined'
+            elif change == 'meter': row['meter_error'] = False
+            elif change == 'cumulative': row['suspension']['dispatches'] = 0
+            elif change == 'dispatch_regression': row['budget_after']['dispatches'] = 1
+            else: row['budget_after']['work_remaining'] = 1
+            source, _ = emit(wrong)
+            with self.subTest(change=change), tempfile.TemporaryDirectory(prefix='verum-suspension-') as directory:
+                p = Path(directory) / 'wrong.lean'; p.write_text(source)
+                # Both definitional equalities and decidable bounds must fail.
+                check(p, 'Tactic `rfl` failed:' if change in ('class', 'meter')
+                      else 'Tactic `decide` proved that the proposition')
+
+    def test_suspension_schema_rejects_fabricated_or_lossy_reports(self):
+        data = model_fixture(); row = data['refusals'][0]
+        row.update(reason_kind='Suspended', suspension=dict(phase='Read', reason='Work', dispatches=0))
+        changes = [dict(stop='Complete'), dict(stop='Budget'), dict(meter_error=None),
+                   dict(meter_error=1), dict(primitive_error='Allocation', primitive_refusal='Resource'),
+                   dict(counter_capacity=True), dict(suspension=dict(phase='Body', reason='Work', dispatches=0)),
+                   dict(suspension=dict(phase='Read', reason='Unknown', dispatches=0)),
+                   dict(suspension=dict(phase='Read', reason='Work', dispatches=2**64)),
+                   dict(suspension=dict(phase='Read', reason='Work', dispatches=True)),
+                   dict(suspension=dict(phase='Read', reason='Work', dispatches=0, report={})),
+                   dict(reason_kind='Work')]
+        for change in changes:
+            wrong = copy.deepcopy(data); wrong['refusals'][0].update(change)
+            with self.subTest(change=change), self.assertRaises(ValueError): emit(wrong)
+        for side in ('budget_before', 'budget_after'):
+            wrong = copy.deepcopy(data); wrong['refusals'][0][side]['poisoned'] = True
+            with self.subTest(side=side), self.assertRaises(ValueError): emit(wrong)
+
+    def test_full_suspension_preserves_meter_presence(self):
+        for reason in SUSPEND_REASONS:
+            row = dict(kind='Suspended', phase='Read', classification='Resource', reason=reason,
+                       dispatches=2**64 - 1, meter_error=reason == 'Work')
+            encoded = refusal(row)
+            with tempfile.TemporaryDirectory(prefix='verum-full-suspension-') as directory:
+                p = Path(directory) / 'suspension.lean'
+                p.write_text('import VerumExternalReplay.AcquiredObserver\nopen AcquiredObserver\n' +
+                             f'example : classification {encoded} = .resource := rfl\n')
+                check(p)
+            for meter in (None, [], {}, int(reason == 'Work'), reason != 'Work'):
+                with self.subTest(reason=reason, meter=meter), self.assertRaises(ValueError):
+                    refusal({**row, 'meter_error': meter})
 
     def test_model_corruptions_rejected(self):
         # Independent observations are changed; expected model behavior is not.
