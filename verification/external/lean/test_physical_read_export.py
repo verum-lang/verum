@@ -71,6 +71,27 @@ class PhysicalReadTests(unittest.TestCase):
         self.replay(fixture())
         self.replay(fixture(True))
 
+    def test_hypothetical_queries_do_not_substitute_for_physical_evidence(self):
+        data = fixture(); row = data['cases'][0]
+        probe = copy.deepcopy(row['native'][0])
+        def change_query(observation, raw, pose, name):
+            observation['view'].update(raw=raw, input=raw, pose=pose)
+            observation['query']['values'][0]['value'].update(raw=raw, input=raw, pose=pose)
+            observation['value']['second']['value'] = pose
+            observation['execution']['registers'][0]['value'] = pose
+            observation['name'] = name
+        change_query(probe, 99, 9, 1)
+        row['native'].insert(1, probe)
+        row['native'][-1]['name'] = 2
+        row['table']['successor'] = row['outcome']['value']['key'] = 2
+        row['after']['namespace']['entries'].insert(1, dict(input=99, value=copy.deepcopy(probe['value'])))
+        self.replay(data)
+        # A coherent VM/name report about hypothetical ports still cannot prove
+        # the actual successor world was read.
+        change_query(row['native'][-1], 88, 9, 2)
+        row['after']['namespace']['entries'][-1] = dict(input=88, value=copy.deepcopy(row['native'][-1]['value']))
+        self.replay(data, rejected=True)
+
     def test_port_and_receipt_corruption(self):
         for corruption in ('witness', 'runtime', 'query', 'view', 'report', 'state', 'name', 'table', 'input'):
             data = fixture(); row = data['cases'][0]

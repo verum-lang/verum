@@ -34,6 +34,12 @@ def emit(data):
     def ports(actual, expected):
         for key in ('raw', 'episode', 'life_age'): same(actual[key], expected[key])
         optional(actual['pose'], expected['pose'])
+    def observation_key(view, name):
+        return '(' + ', '.join([natural(view[k]) for k in ('raw', 'episode', 'life_age')] +
+            [lifecycle.option(view['pose'], natural), natural(name)]) + ')'
+    def observed(candidates, view, name):
+        claim(f'({array(candidates)} : List (Nat × Nat × Nat × Option Nat × Nat)).contains '
+              f'{observation_key(view, name)} = true')
     definitions = {d['identity']: d for d in data['definitions']}
     register, _, states = lifecycle.cut_registry(definitions, claim)
     rows = sequence(data['cases']); require(rows, 'No physical observations')
@@ -82,7 +88,8 @@ def emit(data):
             lifecycle.wide(entry[0]); natural(entry[1])
             require(entry[0] not in inputs, 'Duplicate layer input epoch')
             inputs[entry[0]] = entry[1]
-        current = before['cut']; commit_count = pre_reads = post_reads = 0
+        current = before['cut']; commit_count = 0
+        pre_reads, post_reads = [], []
         for j, observation in enumerate(sequence(case['native'])):
             require(type(observation) is dict, 'Expected native observation')
             kind = observation.get('kind')
@@ -93,12 +100,11 @@ def emit(data):
                 lifecycle.option(view['under'], natural); natural(view['input'])
                 supplied = observation['query']; phase = 'read'
                 same_cut(observation['cut'], current)
-                expected_ports = before['physical'] if commit_count == 0 else after['physical']
-                ports(view, expected_ports)
-                if commit_count == 0:
-                    pre_reads += 1; same(observation['name'], table['source'])
-                else:
-                    post_reads += 1
+                # Root/heartbeat probes are legitimate hypothetical queries.
+                # Only the explicit full-port/name membership proof below ties
+                # a retained observation to the independently measured world.
+                (pre_reads if commit_count == 0 else post_reads).append(
+                    observation_key(view, observation['name']))
                 expected_value = observation['value']; reads += 1
             else:
                 fields(observation, 'kind input receipt execution')
@@ -147,18 +153,16 @@ def emit(data):
                 interning = f'ExactNames.intern (min {capacity} (2^56)) {table_name} {pair}'
                 claim(f'({interning}).2 = some {natural(observation["name"])}')
                 lines.append(f'def {new_table} := ({interning}).1'); table_name = new_table
-                if commit_count:
-                    outcome = case['outcome']; lifecycle.value(outcome)
-                    require(outcome['kind'] == 'Outcome', 'Expected actual typed outcome')
-                    if outcome['value']['kind'] == 'Next': same(observation['name'], table['successor'])
-        require(commit_count == 1 and pre_reads > 0, 'Missing actual commit or prior read')
+        require(commit_count == 1 and pre_reads, 'Missing actual commit or prior read')
+        observed(pre_reads, before['physical'], table['source'])
         same_cut(current, after['cut'])
         claim(f'{table_name} = ({lifecycle.namespace(after["namespace"])} : List (Nat × Value))')
         lifecycle.value(case['outcome'])
         require(case['outcome']['kind'] == 'Outcome', 'Expected typed physical outcome')
         outcome = case['outcome']['value']
         if outcome['kind'] == 'Next':
-            require(post_reads > 0, 'Missing actual successor read')
+            require(post_reads, 'Missing actual successor read')
+            observed(post_reads, after['physical'], table['successor'])
             same(outcome['key'], table['successor'])
         else:
             require(outcome['kind'] == 'End', 'Unsupported physical refusal case')
