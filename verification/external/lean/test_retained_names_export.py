@@ -1,5 +1,8 @@
 """Synthetic strict-decoder controls, separate from actual frozen native evidence."""
 import copy
+import gzip
+import hashlib
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -21,6 +24,7 @@ def fixture():
                 episode=3, life_age=4, pose=None, action=None))])
         return dict(owner=owner, input_owner=owner, namespace=namespace(keys, capacity),
             expected_namespace=namespace(keys, capacity), same_namespace=True, query=q,
+            call_input=copy.deepcopy(q), same_input_owner=True,
             cut=dict(definition=0, owner=int(fork), state=0, value=nat(7)), input=input_, value=nat(1),
             scanned=scanned, finished=finished, poisoned=False)
     def case(name, before, after, result, grant=1):
@@ -65,6 +69,8 @@ class RetainedExportTests(unittest.TestCase):
             'skip_new_entry': lambda d: d['cases'][2]['before'].update(scanned=2),
             'replace_input_owner': lambda d: d['cases'][2]['after'].update(input_owner=99),
             'wrong_namespace': lambda d: d['cases'][1]['before'].update(same_namespace=False),
+            'foreign_call_input': lambda d: d['cases'][1]['before'].update(same_input_owner=False),
+            'changed_call_input': lambda d: d['cases'][1]['before']['call_input']['values'][0]['value'].update(raw=99),
             'wrong_name': lambda d: d['cases'][2]['result'].update(name=0),
             'work_refunded': lambda d: d['cases'][1].update(remaining=1),
             'early_finish': lambda d: d['cases'][1]['after'].update(finished=True),
@@ -99,10 +105,29 @@ class RetainedExportTests(unittest.TestCase):
             'missing_cursor': lambda d: d['sibling_append']['target_cursor'].update(owner=99),
             'overwide_name': lambda d: d['cases'][2]['result'].update(name=2**56),
             'missing_pose': lambda d: d['cases'][0]['before']['query']['values'][0]['value'].pop('pose'),
+            'missing_call_input': lambda d: d['cases'][0]['before'].pop('call_input'),
         }
         for name, mutate in mutations.items():
             data = fixture(); mutate(data)
             with self.subTest(name=name), self.assertRaises(ValueError): emit(data)
+
+    def test_frozen_native_corruptions(self):
+        path = Path(__file__).resolve().parent / 'fixtures/retained-names-v1.json.gz'
+        original = gzip.decompress(path.read_bytes())
+        self.assertEqual(hashlib.sha256(original).hexdigest(),
+                         '8ce302562db6409ebe259669fb9d5663985f3fea2ad812cb21080ded0f5387e5')
+        data = json.loads(original)
+        self.assertEqual(emit(data)[1], dict(cases=7, claims=42, sibling_appends=1, capacity_grants=2, cursors=3))
+        mutations = {
+            'native_call_owner': lambda d: d['cases'][0]['before'].update(same_input_owner=False),
+            'native_prefix': lambda d: d['cases'][2]['after'].update(scanned=2),
+            'native_sibling_result': lambda d: d['sibling_append']['sibling_cursor'].update(value=dict(kind='Unit')),
+            'native_shared_table': lambda d: d['cases'][4]['after']['namespace']['entries'][-1].update(input=99),
+            'native_capacity': lambda d: d['capacity_grants'][1]['after'].update(capacity=99),
+        }
+        for name, mutate in mutations.items():
+            wrong = copy.deepcopy(data); mutate(wrong)
+            with self.subTest(name=name): self.replay(wrong, 'Tactic `rfl` failed:')
 
 
 if __name__ == '__main__': unittest.main()

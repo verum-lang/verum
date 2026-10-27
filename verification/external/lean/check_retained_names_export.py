@@ -86,12 +86,14 @@ def emit(data):
         for field in ('finished', 'poisoned'): eq(boolean(a[field]), boolean(b[field]), 'Bool')
 
     def snapshot(s):
-        fields(s, 'owner input_owner namespace expected_namespace same_namespace query cut input value scanned finished poisoned')
+        fields(s, 'owner input_owner namespace expected_namespace same_namespace query call_input same_input_owner cut input value scanned finished poisoned')
         for field in ('owner', 'input_owner', 'input', 'scanned'): natural(s[field])
         for field in ('finished', 'poisoned'): boolean(s[field])
         eq(boolean(s['same_namespace']), 'true', 'Bool')
         same_namespace(s['namespace'], s['expected_namespace'])
         life.cut(s['cut']); query(s['query']); value(s['value'])
+        eq(boolean(s['same_input_owner']), 'true', 'Bool')
+        eq(query(s['query']), query(s['call_input']), 'Source × List Value')
         supplied = s['query']['values']
         require(len(supplied) == 1 and supplied[0].get('kind') == 'Query', 'Expected actual acquired query row')
         q = supplied[0]['value']

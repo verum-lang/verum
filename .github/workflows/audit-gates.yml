@@ -240,6 +240,12 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_lifecycle_export.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_names.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_names_export.py
+          gzip -dc verification/external/lean/fixtures/retained-names-v1.json.gz > retained-names-v1.json
+          python3 verification/external/lean/check_retained_names_export.py \
+            --export retained-names-v1.json \
+            --sha256 8ce302562db6409ebe259669fb9d5663985f3fea2ad812cb21080ded0f5387e5 \
+            --provenance verification/external/lean/fixtures/retained-names-v1.provenance.json \
+            --output retained-names-export.lean --report retained-names-export-acceptance.json
           gzip -dc verification/external/lean/fixtures/observer-lifecycle-v4.json.gz > observer-lifecycle-v4.json
           python3 verification/external/lean/check_lifecycle_export.py \
             --export observer-lifecycle-v4.json \
@@ -379,6 +385,9 @@ jobs:
             observer-lifecycle-v4-export-acceptance.json
             observer-lifecycle-v4-export.lean
             observer-lifecycle-v4-export-*/
+            retained-names-export-acceptance.json
+            retained-names-export.lean
+            retained-names-export-*/
             observer-export*.lean
             observer-export-*/
           retention-days: 14
