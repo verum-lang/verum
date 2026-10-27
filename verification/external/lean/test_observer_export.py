@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import shutil
 import tempfile
 import unittest
 from check_observer_export import ROOT, batches, emit, load, unique_object, value
 from check_typed_programs import check, sha256
+from observer_export_replay import declarations
 
 FIXTURE = ROOT / 'fixtures/observer-rust-boundary-v1.json'
 
@@ -128,6 +130,48 @@ class ExtractionTests(unittest.TestCase):
             names.extend(group)
         self.assertEqual(len(names), counts['claims'])
         self.assertEqual(len(set(names)), counts['claims'])
+
+    def test_shared_declarations_are_checked_and_audited(self):
+        source = '''import Lean
+
+namespace FrozenObserverExport
+
+def retained : Nat := 7
+
+@[cbv_eval]
+theorem retained_exact : retained = 7 := by rfl
+
+attribute [cbv_opaque] retained
+
+theorem result : retained + 1 = 8 := by cbv
+
+end FrozenObserverExport
+'''
+        parts = list(batches(source, shared_module='FrozenObserverDeclarations'))
+        self.assertEqual([name for _, names in parts for name in names], ['result', 'retained_exact'])
+        self.assertTrue(all(len(names) <= 8 for _, names in parts))
+        with tempfile.TemporaryDirectory(prefix='observer-shared-declarations-') as tmp:
+            tmp = Path(tmp)
+            for name in ('lakefile.toml', 'lean-toolchain'):
+                shutil.copyfile(ROOT / name, tmp / name)
+            shared = tmp / 'FrozenObserverDeclarations.lean'
+            shared.write_text(declarations(source))
+            compiled = tmp / '.lake/build/lib/lean/FrozenObserverDeclarations.olean'
+            compiled.parent.mkdir(parents=True)
+            result = subprocess.run(['lake', 'env', 'lean', '-o', str(compiled), str(shared)],
+                cwd=tmp, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for i, (part, names) in enumerate(parts):
+                path = tmp / f'part{i}.lean'; path.write_text(part)
+                audit = check(path, cwd=tmp)
+                rosters = [d['data'] for d in audit['diagnostics'] if d['severity'] == 'information']
+                self.assertEqual(len(rosters), len(names))
+                for roster in rosters:
+                    self.assertTrue(roster.endswith(('does not depend on any axioms',
+                        'depends on axioms: [propext]', 'depends on axioms: [propext, Quot.sound]')))
+            wrong = tmp / 'wrong.lean'
+            wrong.write_text(parts[0][0].replace('retained + 1 = 8', 'retained + 1 = 9'))
+            check(wrong, 'unsolved goals', cwd=tmp)
 
     def test_ambiguous_numbers_and_values_are_refused(self):
         for obj in [{'Nat': True}, {'Nat': -1}, {'Nat': 2**64}, {'Nat': 1.0},

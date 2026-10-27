@@ -59,26 +59,36 @@ def load(path):
     return json.loads(path.read_text(), object_pairs_hook=unique_object)
 
 
-def batches(source, size=8):
+def declarations(source):
+    """The exact common prelude, compiled once within the private snapshot."""
+    blocks = source.strip().split('\n\n')
+    retained = [b for b in blocks if b.startswith(('import ', 'open ', 'set_option ',
+        'namespace ', 'def ', '@[cbv_eval]\ntheorem ', 'attribute [cbv_opaque] '))]
+    return '\n\n'.join(retained + ['end FrozenObserverExport']) + '\n'
+
+
+def batches(source, size=8, shared_module=None):
     """Bound each kernel invocation without weakening its acceptance deadline.
 
-    Claims are closed equalities. Shared trace lemmas are checked in every
-    batch and have separate bounded axiom audits; no fact is assumed.
+    Claims are closed equalities. Shared trace lemmas are checked in the
+    prelude (once when imported) and audited in bounded groups; no fact is assumed.
     """
     blocks = source.strip().split('\n\n')
     header = [b for b in blocks if b.startswith(('import ', 'open ', 'set_option ', 'namespace '))]
     shared = [b for b in blocks if b.startswith('@[cbv_eval]\ntheorem ')]
     definitions = [b for b in blocks if b.startswith(('def ', '@[cbv_eval]\ntheorem '))]
     attributes = [b for b in blocks if b.startswith('attribute [cbv_opaque] ')]
+    prelude = header + definitions + attributes if shared_module is None else [
+        'import ' + shared_module, *header]
     claims = [b for b in blocks if b.startswith('theorem ')]
     for start in range(0, len(claims), size):
         group = claims[start:start + size]
         names = [b.split()[1] for b in group]
-        yield ('\n\n'.join(header + definitions + attributes + group +
+        yield ('\n\n'.join(prelude + group +
                ['#print axioms ' + n for n in names] + ['end FrozenObserverExport']) + '\n', names)
     for start in range(0, len(shared), size):
         names = [b.split()[2] for b in shared[start:start + size]]
-        yield ('\n\n'.join(header + definitions + attributes +
+        yield ('\n\n'.join(prelude +
                ['#print axioms ' + n for n in names] + ['end FrozenObserverExport']) + '\n', names)
 
 
@@ -134,8 +144,17 @@ def verify(args, *, emit, modules, producers, scope):
             if p.is_file() and p.suffix in {'.dylib', '.so', '.dll'})
         checker_hashes = {str(p.relative_to(prefix)): sha256(p) for p in binaries}
         require_success(run('lake', 'build', *('VerumExternalReplay.' + m for m in modules), cwd=snapshot))
+        shared_module = 'FrozenObserverDeclarations'
+        shared_text = declarations(text)
+        shared_source = snapshot / (shared_module + '.lean')
+        shared_source.write_text(shared_text)
+        retained_shared = artifacts / 'shared-declarations.lean'
+        retained_shared.write_text(shared_text)
+        compiled_shared = snapshot / '.lake/build/lib/lean' / (shared_module + '.olean')
+        require_success(run('lake', 'env', 'lean', '-o', str(compiled_shared), str(shared_source), cwd=snapshot))
+        shared_hash = sha256(compiled_shared)
         results = []
-        for index, (part, names) in enumerate(batches(text)):
+        for index, (part, names) in enumerate(batches(text, shared_module=shared_module)):
             path = artifacts / f'part{index}.lean'
             require(path.resolve() not in {p.resolve() for p in
                     [args.output, args.export, args.report, args.provenance]}, 'Batch path collision')
@@ -149,6 +168,8 @@ def verify(args, *, emit, modules, producers, scope):
                         roster.endswith('does not depend on any axioms'), 'Unexpected theorem axioms')
             results.append({'path': str(path), 'claims': names, **result})
             print(f'Checked proof batch {index + 1}: {len(names)} claims', flush=True)
+        require(sha256(compiled_shared) == shared_hash and shared_source.read_text() == shared_text,
+                'Shared declarations changed during verification')
         require(checker_hashes == {str(p.relative_to(prefix)): sha256(p) for p in binaries},
                 'Checker files changed during verification')
     require(sum(len(r['claims']) for r in results) == counts['claims'], 'Incomplete claim replay')
@@ -161,6 +182,8 @@ def verify(args, *, emit, modules, producers, scope):
               'provenance_sha256': provenance_hash, 'reported_rust_provenance': provenance,
               'aggregate_source_sha256': sha256(aggregate),
               'aggregate_source': str(aggregate), 'model_sources': str(artifacts / 'model'),
+              'shared_declarations': {'source': str(retained_shared), 'source_sha256': sha256(retained_shared),
+                                      'compiled_sha256': shared_hash},
               'model_build': 'private immutable source snapshot',
               'checkout_changed_since_snapshot': [name for name in before if before[name] != live[name]],
               'lean_version': version,
