@@ -231,6 +231,12 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_observer_export.py
           python3 -m unittest discover -s verification/external/lean -p test_physical_read_export.py
           python3 -m unittest discover -s verification/external/lean -p test_retirement_export.py
+          gzip -dc verification/external/lean/fixtures/observer-retirement-v1.json.gz > observer-retirement.json
+          python3 verification/external/lean/check_retirement_export.py \
+            --export observer-retirement.json \
+            --sha256 bc7c8f9253365b4a9c97cd12f73af730192c29ed6560f6238145fc61f46ddf67 \
+            --provenance verification/external/lean/fixtures/observer-retirement-v1.provenance.json \
+            --output observer-retirement-export.lean --report observer-retirement-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_lifecycle_export.py
           python3 -m unittest discover -s verification/external/lean -p test_joint_export.py
           python3 verification/external/lean/check_lifecycle_export.py \
@@ -338,6 +344,7 @@ jobs:
             finite-execution-acceptance.json
             observer-lifecycle-acceptance.json
             observer-retirement-acceptance.json
+            observer-retirement-export*
             enumerable-mass-acceptance.json
             categorical-prediction-acceptance.json
             finite-admission-acceptance.json
