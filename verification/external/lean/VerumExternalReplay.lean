@@ -31,3 +31,4 @@ import VerumExternalReplay.EnumerableMass
 import VerumExternalReplay.CategoricalPrediction
 import VerumExternalReplay.FiniteAdmission
 import VerumExternalReplay.TraceReduction
+import VerumExternalReplay.AcquisitionScheduling
