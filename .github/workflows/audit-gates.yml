@@ -239,6 +239,12 @@ jobs:
             --output observer-retirement-export.lean --report observer-retirement-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_lifecycle_export.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_names.py
+          gzip -dc verification/external/lean/fixtures/observer-lifecycle-v4.json.gz > observer-lifecycle-v4.json
+          python3 verification/external/lean/check_lifecycle_export.py \
+            --export observer-lifecycle-v4.json \
+            --sha256 9f2b44c23331a51324775367fcf97ffb440f283a22b21f9774afc9cf047c4ea1 \
+            --provenance verification/external/lean/fixtures/observer-lifecycle-v4.provenance.json \
+            --output observer-lifecycle-v4-export.lean --report observer-lifecycle-v4-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_joint_export.py
           python3 -m unittest discover -s verification/external/lean -p test_structural_export.py
           python3 verification/external/lean/check_lifecycle_export.py \
@@ -369,6 +375,9 @@ jobs:
             observer-lifecycle-v3-acceptance.json
             observer-lifecycle-v3.lean
             observer-lifecycle-v3-*/
+            observer-lifecycle-v4-export-acceptance.json
+            observer-lifecycle-v4-export.lean
+            observer-lifecycle-v4-export-*/
             observer-export*.lean
             observer-export-*/
           retention-days: 14
