@@ -26,7 +26,8 @@ class RetainedExecutionTests(unittest.TestCase):
             next_preserves_authority next_monotone terminal_stopped poisoned_cannot_resume
             tick_refines trace_monotone split_accounting tick_trace run_trace
             tick_accounting run_accounting trace_authority services_trace
-            completed_services_unique'''.split()
+            completed_services_unique next_partition trace_partition gate_charge_bounded
+            tick_dispatch_bounded run_dispatch_bounded run_counters_bounded'''.split()
         with tempfile.TemporaryDirectory(prefix='verum-retained-vm-axioms-') as directory:
             p = Path(directory) / 'audit.lean'
             p.write_text(HEADER + '\n'.join('#print axioms RetainedExecution.' + n for n in names))
@@ -51,6 +52,8 @@ class RetainedExecutionTests(unittest.TestCase):
             'frame_inputs_kept': 'sixth.state.control.frames = [⟨[0], .call, [], []⟩, ⟨[], .root, [5], []⟩]',
             'no_parent_register_before_return': 'sixth.state.control.frames = [⟨[0], .call, [5], []⟩, ⟨[], .root, [5], [5]⟩]',
             'counter_gate_before_work': '(tick code apply .phased fullCounter ⟨0, 1⟩).status = .paused .work',
+            'counter_overflow_not_charged': '(tick code apply .phased fullCounter ⟨1, 1⟩).grant.work = 0',
+            'atomic_cost_cannot_wrap': 'gate start ⟨FiniteExecution.capacity, 1⟩ ⟨.start, some FiniteExecution.capacity, some false, true⟩ = none',
             'original_bound_retained': '(run code apply .phased 40 (initial [5] (some 1)) ⟨100, 100⟩).state.control.terminal.isSome = true',
             'failed_operand_is_not_success': 'observation (finish (single ⟨.primitive true, [.input 1], none⟩)) = some ⟨.complete, [5], 1, 1, 0, none⟩',
             'atomic_prepaid_work_not_refunded': '(finish (single ⟨.primitive true, [.input 1], none⟩) .atomic).usage.work = 3',

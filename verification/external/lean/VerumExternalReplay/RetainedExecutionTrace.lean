@@ -70,6 +70,20 @@ theorem gate_dispatch_sufficient (s : State V E) (g : Grant) (d : Demand)
   split at admitted <;> try contradiction
   split <;> simp_all <;> omega
 
+theorem gate_charge_bounded (s : State V E) (g : Grant) (d : Demand)
+    (bounded : s.usage.dispatch < FiniteExecution.capacity)
+    (admitted : gate s g d = none) :
+    (charge s.usage d).dispatch < FiniteExecution.capacity := by
+  cases hd : d.dispatch with
+  | none => simpa [charge, hd] using bounded
+  | some call =>
+      simp only [gate, hd, Option.isSome_some, Bool.true_and] at admitted
+      split at admitted <;> try contradiction
+      split at admitted <;> try contradiction
+      split at admitted <;> try contradiction
+      simp [charge, hd]
+      simp_all
+
 theorem admitted_accounting (s : State V E) (g : Grant) (d : Demand)
     (admitted : gate s g d = none) :
     g.work = (spend g d).work + ((charge s.usage d).work - s.usage.work) ∧
@@ -99,6 +113,18 @@ theorem next_monotone (source : FiniteCode.Code O V) (apply : O → List V → E
   cases he : perform source apply d.action s.control <;> simp [he] at step
   obtain ⟨rfl, _⟩ := step
   simp [charge]
+
+theorem next_partition (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+    (policy : Policy) (s t : State V E) (events : List (Event V E))
+    (step : next source apply policy s = some (t, events))
+    (partition : s.usage.expanded + s.usage.calls = s.usage.dispatch) :
+    t.usage.expanded + t.usage.calls = t.usage.dispatch := by
+  unfold next at step
+  cases hd : demand policy s.control <;> simp [hd] at step
+  rename_i d
+  cases he : perform source apply d.action s.control <;> simp [he] at step
+  obtain ⟨rfl, _⟩ := step
+  exact charge_partition s.usage d partition
 
 theorem terminal_stopped (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (terminal : s.control.terminal.isSome = true) :
@@ -213,12 +239,68 @@ theorem run_accounting (source : FiniteCode.Code O V) (apply : O → List V → 
         exact ⟨rest.1.trans first.1, rest.2.trans first.2⟩
       · exact first
 
+theorem tick_dispatch_bounded (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+    (policy : Policy) (s : State V E) (g : Grant)
+    (bounded : s.usage.dispatch < FiniteExecution.capacity) :
+    (tick source apply policy s g).state.usage.dispatch < FiniteExecution.capacity := by
+  unfold tick
+  split
+  · exact bounded
+  · split
+    · exact bounded
+    · cases hd : demand policy s.control with
+      | none => exact bounded
+      | some d =>
+        cases hg : gate s g d with
+        | some why => simpa [hg] using bounded
+        | none =>
+          cases he : perform source apply d.action s.control with
+          | none => simpa [hg, he] using bounded
+          | some effect => simpa [hg, he] using gate_charge_bounded s g d bounded hg
+
+theorem run_dispatch_bounded (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+    (policy : Policy) (n : Nat) (s : State V E) (g : Grant)
+    (bounded : s.usage.dispatch < FiniteExecution.capacity) :
+    (run source apply policy n s g).state.usage.dispatch < FiniteExecution.capacity := by
+  induction n generalizing s g with
+  | zero => exact bounded
+  | succ n ih =>
+      have first := tick_dispatch_bounded source apply policy s g bounded
+      simp only [run]
+      split
+      · exact ih _ _ first
+      · exact first
+
 theorem trace_authority (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
     (policy : Policy) (trace : Trace (next source apply policy) s events t) :
     t.originalLimit = s.originalLimit := by
   induction trace with
   | nil => rfl
   | cons step _ ih => exact ih.trans (next_preserves_authority source apply policy _ _ _ step)
+
+theorem trace_partition (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+    (policy : Policy) (trace : Trace (next source apply policy) s events t)
+    (partition : s.usage.expanded + s.usage.calls = s.usage.dispatch) :
+    t.usage.expanded + t.usage.calls = t.usage.dispatch := by
+  induction trace with
+  | nil => exact partition
+  | cons step _ ih => exact ih (next_partition source apply policy _ _ _ step partition)
+
+/-- The partition invariant also bounds the independently incremented call and
+primitive counters, so all three native u64 counters have a justified bound. -/
+theorem run_counters_bounded (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+    (policy : Policy) (n : Nat) (s : State V E) (g : Grant)
+    (bounded : s.usage.dispatch < FiniteExecution.capacity)
+    (partition : s.usage.expanded + s.usage.calls = s.usage.dispatch) :
+    let usage := (run source apply policy n s g).state.usage
+    usage.dispatch < FiniteExecution.capacity ∧ usage.expanded < FiniteExecution.capacity ∧
+      usage.calls < FiniteExecution.capacity := by
+  have bound := run_dispatch_bounded source apply policy n s g bounded
+  have split := trace_partition source apply policy (run_trace source apply policy n s g) partition
+  dsimp
+  refine ⟨bound, Nat.lt_of_le_of_lt ?_ bound, Nat.lt_of_le_of_lt ?_ bound⟩
+  · rw [← split]; exact Nat.le_add_right _ _
+  · rw [← split]; exact Nat.le_add_left _ _
 
 /-- Arbitrary services may supply fresh grants; each begins with the exact state
 left by its predecessor. Neither a new input nor a new original bound is allowed. -/

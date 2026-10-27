@@ -60,6 +60,12 @@ example : sixth.state.usage = ⟨6, 1, 0, 1⟩ := by decide
 example : (tick code apply .phased fullCounter ⟨0, 1⟩).status = .paused .counterCapacity := by decide
 example : gate fullCounter ⟨0, 0⟩ fullDemand = some .grantDispatch := by decide
 example : gate { fullCounter with originalLimit := some 0 } ⟨0, 0⟩ fullDemand = some .originalDispatch := by decide
+example : (tick code apply .phased
+    { fullCounter with usage := ⟨1, FiniteExecution.capacity - 2, FiniteExecution.capacity - 2, 0⟩ }
+    ⟨1, 1⟩).state.usage = ⟨2, FiniteExecution.capacity - 1, FiniteExecution.capacity - 2, 1⟩ := by decide
+example : gate start ⟨FiniteExecution.capacity, 1⟩
+    ⟨.start, some FiniteExecution.capacity, some false, true⟩ = some .counterCapacity := by decide
+example : (tick code apply .phased fullCounter ⟨1, 1⟩).state = fullCounter := by decide
 example : (run code apply .phased 40 (initial [5] (some 1)) ⟨100, 100⟩).state.usage = ⟨6, 1, 0, 1⟩ := by decide
 example : observation (finish (single ⟨.primitive false, [.input 0], none⟩)) =
     some ⟨.undefined, [], 1, 1, 0, some ⟨[0], .primitive 7⟩⟩ := by decide
