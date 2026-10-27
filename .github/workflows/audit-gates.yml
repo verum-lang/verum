@@ -217,6 +217,8 @@ jobs:
             --report enumerable-mass-acceptance.json
           python3 verification/external/lean/check_categorical_prediction.py \
             --report categorical-prediction-acceptance.json
+          python3 verification/external/lean/check_finite_admission.py \
+            --report finite-admission-acceptance.json
       - name: Frozen observer export correspondence
         run: |
           python3 verification/external/lean/check_observer_export.py \
@@ -307,6 +309,7 @@ jobs:
             observer-retirement-acceptance.json
             enumerable-mass-acceptance.json
             categorical-prediction-acceptance.json
+            finite-admission-acceptance.json
             observer-export-acceptance.json
             observer-joint-export-acceptance.json
             observer-joint-export.lean

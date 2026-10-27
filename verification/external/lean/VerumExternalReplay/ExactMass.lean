@@ -35,6 +35,7 @@ theorem eq_le {a b : Fraction} (h : Equal a b) : AtMost a b := Nat.le_of_eq h
 theorem le_antisymm {a b : Fraction} (h : AtMost a b) (k : AtMost b a) : Equal a b :=
   Nat.le_antisymm h k
 theorem zero_le (a : Fraction) : AtMost zero a := by simp [AtMost, zero]
+theorem less_le {a b : Fraction} (h : Less a b) : AtMost a b := Nat.le_of_lt h
 
 theorem le_trans {a b c : Fraction} (h : AtMost a b) (k : AtMost b c) : AtMost a c := by
   apply Nat.le_of_mul_le_mul_right (c := b.denominator) _ b.positive
@@ -91,6 +92,9 @@ theorem mul_congr_right (c : Fraction) {a b : Fraction} (h : Equal a b) : Equal 
 theorem mul_congr_left (c : Fraction) {a b : Fraction} (h : Equal a b) : Equal (mul c a) (mul c b) :=
   eq_trans (mul_comm c a) (eq_trans (mul_congr_right c h) (mul_comm b c))
 
+theorem mul_mono_left (c : Fraction) {a b : Fraction} (h : AtMost a b) : AtMost (mul c a) (mul c b) :=
+  le_trans (eq_le (mul_comm c a)) (le_trans (mul_mono_right c h) (eq_le (mul_comm b c)))
+
 def sum : List Fraction → Fraction
   | [] => zero
   | a :: tail => add a (sum tail)
@@ -102,6 +106,33 @@ theorem sum_congr (xs : List α) (f g : α → Fraction) (h : ∀ x ∈ xs, Equa
   | cons x xs ih =>
     exact eq_trans (add_congr_right _ (h x (by simp)))
       (add_congr_left _ (ih (fun y hy => h y (by simp [hy]))))
+
+theorem sum_mono (xs : List α) (f g : α → Fraction) (h : ∀ x ∈ xs, AtMost (f x) (g x)) :
+    AtMost (sum (xs.map f)) (sum (xs.map g)) := by
+  induction xs with
+  | nil => exact le_refl _
+  | cons x xs ih =>
+    exact le_trans (add_mono_right _ (h x (by simp)))
+      (add_mono_left _ (ih (fun y hy => h y (by simp [hy]))))
+
+theorem sum_scale (xs : List α) (f : α → Fraction) (c : Fraction) :
+    Equal (sum (xs.map (fun x => mul c (f x)))) (mul c (sum (xs.map f))) := by
+  induction xs with
+  | nil => exact eq_symm (mul_zero _)
+  | cons x xs ih => exact eq_trans (add_congr_left _ ih) (eq_symm (mul_add _ _ _))
+
+theorem sum_add (xs : List α) (f g : α → Fraction) :
+    Equal (sum (xs.map (fun x => add (f x) (g x))))
+      (add (sum (xs.map f)) (sum (xs.map g))) := by
+  induction xs with
+  | nil => exact eq_symm (add_zero _)
+  | cons x xs ih =>
+    apply eq_trans (add_congr_left _ ih)
+    apply eq_trans (add_assoc _ _ _)
+    apply eq_trans (add_congr_left _ (eq_symm (add_assoc _ _ _)))
+    apply eq_trans (add_congr_left _ (add_congr_right _ (add_comm _ _)))
+    apply eq_trans (add_congr_left _ (add_assoc _ _ _))
+    exact eq_symm (add_assoc _ _ _)
 
 theorem sum_common_denominator (ns : List Nat) (d : Nat) (hd : 0 < d) :
     Equal (sum (ns.map (fun n => ⟨n, d, hd⟩))) ⟨ns.sum, d, hd⟩ := by
