@@ -28,3 +28,4 @@ import VerumExternalReplay.AcquiredObserverControls
 import VerumExternalReplay.CommonDescriptionCost
 import VerumExternalReplay.ObserverRetirementControls
 import VerumExternalReplay.EnumerableMass
+import VerumExternalReplay.CategoricalPrediction

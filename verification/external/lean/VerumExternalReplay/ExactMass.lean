@@ -18,8 +18,10 @@ def unit (denominator : Nat) (positive : 0 < denominator) : Fraction :=
   ⟨1, denominator, positive⟩
 def Equal (a b : Fraction) : Prop := a.numerator * b.denominator = b.numerator * a.denominator
 def AtMost (a b : Fraction) : Prop := a.numerator * b.denominator ≤ b.numerator * a.denominator
+def Less (a b : Fraction) : Prop := a.numerator * b.denominator < b.numerator * a.denominator
 instance (a b : Fraction) : Decidable (Equal a b) := inferInstanceAs (Decidable (_ = _))
 instance (a b : Fraction) : Decidable (AtMost a b) := inferInstanceAs (Decidable (_ ≤ _))
+instance (a b : Fraction) : Decidable (Less a b) := inferInstanceAs (Decidable (_ < _))
 def add (a b : Fraction) : Fraction :=
   ⟨a.numerator * b.denominator + b.numerator * a.denominator,
     a.denominator * b.denominator, Nat.mul_pos a.positive b.positive⟩
@@ -72,6 +74,8 @@ theorem le_add (a b : Fraction) : AtMost a (add a b) :=
 
 theorem mul_comm (a b : Fraction) : Equal (mul a b) (mul b a) := by simp [Equal, mul, Nat.mul_comm]
 theorem mul_one (a : Fraction) : Equal (mul a one) a := by simp [Equal, mul, one]
+theorem mul_assoc_exact (a b c : Fraction) : mul (mul a b) c = mul a (mul b c) := by
+  simp [mul, Nat.mul_assoc]
 theorem mul_zero (a : Fraction) : Equal (mul a zero) zero := by simp [Equal, mul, zero]
 
 theorem mul_add (a b c : Fraction) : Equal (mul a (add b c)) (add (mul a b) (mul a c)) := by
@@ -83,5 +87,40 @@ theorem mul_mono_right (c : Fraction) {a b : Fraction} (h : AtMost a b) : AtMost
 
 theorem mul_congr_right (c : Fraction) {a b : Fraction} (h : Equal a b) : Equal (mul a c) (mul b c) :=
   le_antisymm (mul_mono_right c (eq_le h)) (mul_mono_right c (eq_le (eq_symm h)))
+
+theorem mul_congr_left (c : Fraction) {a b : Fraction} (h : Equal a b) : Equal (mul c a) (mul c b) :=
+  eq_trans (mul_comm c a) (eq_trans (mul_congr_right c h) (mul_comm b c))
+
+def sum : List Fraction → Fraction
+  | [] => zero
+  | a :: tail => add a (sum tail)
+
+theorem sum_congr (xs : List α) (f g : α → Fraction) (h : ∀ x ∈ xs, Equal (f x) (g x)) :
+    Equal (sum (xs.map f)) (sum (xs.map g)) := by
+  induction xs with
+  | nil => exact eq_refl _
+  | cons x xs ih =>
+    exact eq_trans (add_congr_right _ (h x (by simp)))
+      (add_congr_left _ (ih (fun y hy => h y (by simp [hy]))))
+
+theorem sum_common_denominator (ns : List Nat) (d : Nat) (hd : 0 < d) :
+    Equal (sum (ns.map (fun n => ⟨n, d, hd⟩))) ⟨ns.sum, d, hd⟩ := by
+  induction ns with
+  | nil => simp [sum, Equal, zero]
+  | cons n ns ih =>
+    apply eq_trans (add_congr_left _ ih)
+    simp [Equal, add, Nat.add_mul, Nat.mul_assoc]
+
+def divide (a b : Fraction) (hb : 0 < b.numerator) : Fraction :=
+  ⟨a.numerator * b.denominator, a.denominator * b.numerator, Nat.mul_pos a.positive hb⟩
+
+-- Exact threshold comparison: no division, logarithm or floating point needed.
+theorem ratio_threshold (q p weight : Fraction) (hp : 0 < p.numerator)
+    (hw : 0 < weight.numerator) :
+    Less (divide one weight hw) (divide q p hp) ↔ Less p (mul weight q) := by
+  simp only [Less, divide, one, mul, Nat.one_mul]
+  constructor <;> intro h
+  · simpa only [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] using h
+  · simpa only [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] using h
 
 end ExactMass
