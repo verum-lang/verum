@@ -1,11 +1,14 @@
 """Synthetic controls; native evidence is retained separately with provenance."""
 import copy
+import gzip
+import hashlib
+import json
 from pathlib import Path
 import shutil
 import tempfile
 import unittest
 
-from check_predictive_transactions import emit, SEMANTICS, FORECAST_LAW
+from check_predictive_transactions import emit, Replay, SEMANTICS, FORECAST_LAW
 from check_typed_programs import ROOT, check, require_success, run
 from observer_export_replay import batches, declarations
 from predictive_cursor_proofs import cursor_trace
@@ -139,6 +142,17 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(counts['retained_forecasts'],1)
         self.assertEqual(sum(len(names) for _,names in batches(source)),counts['claims'])
 
+    def test_frozen_native_input_and_receipt_identities(self):
+        root = ROOT/'fixtures'
+        provenance = json.loads((root/'predictive-transactions-v1.provenance.json').read_text())
+        raw = gzip.decompress((root/'predictive-transactions-v1.jsonl.gz').read_bytes())
+        receipt = gzip.decompress((root/provenance['native_receipt_file']).read_bytes())
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),provenance['export_sha256'])
+        self.assertEqual(hashlib.sha256(receipt).hexdigest(),provenance['native_receipt_sha256'])
+        packets = [json.loads(line) for line in raw.splitlines()]
+        self.assertEqual(len(packets),2)
+        self.assertEqual(sum(len(p['events']) for p in packets),1096)
+
     def test_numeric_and_semantic_forgery_fails_in_kernel(self):
         for change in ('ratio','program','target_codec'):
             data = fixture(); packet = data['packets'][0]
@@ -170,15 +184,27 @@ class TransactionTests(unittest.TestCase):
 
     def test_shared_cursor_witnesses_are_checked(self):
         base = fixture()['packets'][0]['scores'][0]['frontier']
+        base.update(samples=48,bits=3840,lengths=dict(total=48,counts={'10':48}),
+            ratio=dict(numerator=str(2**2048),denominator=str(3**1024)),
+            reference=[[48,0] for _ in range(80)],
+            residual=[dict(context=[],counts=[[48,0] for _ in range(80)])])
+        replay = Replay(); name = replay.bank(base)
         blocks,count = cursor_trace('hint',base,[],[],[])
         self.assertEqual(count,2)
-        source = 'import VerumExternalReplay.ResidualContinuation\n'+ '\n\n'.join(blocks)
-        needle = '⟨⟨1, 0, ⟨1, 1, by decide⟩'
+        source = '\n\n'.join(replay.lines+blocks)+f'''
+theorem bind_start : ResidualContinuation.begin {name} ⟨[],[]⟩ [] = hint_0 := by decide_cbv
+theorem observed_start : banksAgree
+    (privateBank (ResidualContinuation.run 0 (ResidualContinuation.begin {name} ⟨[],[]⟩ []))) {name} = true := by
+  rw [bind_start,hint_step_0]
+  decide_cbv
+end FrozenObserverExport
+'''
+        needle = '⟨⟨49, 3840,'
         self.assertEqual(source.count(needle),1)
         with tempfile.TemporaryDirectory(prefix='verum-cursor-witness-') as directory:
             path = Path(directory)/'control.lean'; path.write_text(source)
             check(path)
-            path.write_text(source.replace(needle,'⟨⟨2, 0, ⟨1, 1, by decide⟩'))
+            path.write_text(source.replace(needle,'⟨⟨50, 3840,'))
             result = check(path,FALSE)
             errors = [d for d in result['diagnostics'] if d['severity']=='error']
             self.assertEqual(len(errors),1)

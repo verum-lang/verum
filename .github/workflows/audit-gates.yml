@@ -239,6 +239,12 @@ jobs:
             --report acquisition-scheduling-acceptance.json
       - name: Frozen observer export correspondence
         run: |
+          python3 -c 'import gzip; from pathlib import Path; Path("predictive-transactions-native.jsonl").write_bytes(gzip.decompress(Path("verification/external/lean/fixtures/predictive-transactions-v1.jsonl.gz").read_bytes()))'
+          python3 verification/external/lean/check_predictive_transactions.py \
+            --export predictive-transactions-native.jsonl \
+            --sha256 ea19933135f22c51838bc29b7ca23f1ddf1d040bf6e996f4166d065dd92db32f \
+            --provenance verification/external/lean/fixtures/predictive-transactions-v1.provenance.json \
+            --output predictive-transactions-native.lean --report predictive-transactions-acceptance.json
           python3 verification/external/lean/check_action_capture_export.py \
             --export verification/external/lean/fixtures/action-capture-v2.json \
             --sha256 a690da1c4e6b382b5807ace7f18560d68a264028cb56cc42954eeed57d63fa57 \

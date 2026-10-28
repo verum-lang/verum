@@ -99,14 +99,14 @@ class Replay:
         self.claims = 0
         self.memo = set()
         self.banks = {}
-        self.traces = set()
+        self.traces = {}
         self.trace_claims = 0
         self.counts = Counter()
 
-    def claim(self, proposition):
+    def claim(self, proposition, proof='decide_cbv'):
         if proposition not in self.memo:
             self.memo.add(proposition)
-            self.lines.append(f'theorem c{self.claims} : {proposition} := by decide_cbv')
+            self.lines.append(f'theorem c{self.claims} : {proposition} := by\n  {proof}')
             self.claims += 1
 
     def bank(self, item):
@@ -300,13 +300,19 @@ class Replay:
             require(int(natural(pending['bits'])) == 8*len(target) and position <= 8*len(target),
                     'Invalid pending bit frontier')
         base = self.scores[ticket['previous_score']][0]
+        start = f'(ResidualContinuation.begin {base} ⟨{ns(c)}, {ns(m)}⟩ {ns(target)})'
         trace_key = (base,c,m,target)
         if trace_key not in self.traces:
             prefix = f'cursor_{len(self.traces)}'
             hints,count = cursor_trace(prefix,self.scores[ticket['previous_score']][1],c,m,target)
-            self.lines.extend(hints); self.trace_claims += count; self.traces.add(trace_key)
-        start = f'(ResidualContinuation.begin {base} ⟨{ns(c)}, {ns(m)}⟩ {ns(target)})'
-        self.claim(f'banksAgree (privateBank (ResidualContinuation.run {position} {start})) {snapshot} = true')
+            self.lines.extend(hints)
+            self.lines.append(f'@[cbv_eval]\ntheorem {prefix}_start : {start} = {prefix}_0 := by decide_cbv')
+            self.trace_claims += count+1; self.traces[trace_key] = prefix
+        # Apply the named, already checked prefix theorem directly. Automatic
+        # CBV pattern matching on a whole large rational/counter bank can recurse
+        # excessively even for run 0; explicit composition avoids that search.
+        self.claim(f'banksAgree (privateBank (ResidualContinuation.run {position} {start})) {snapshot} = true',
+                   f'rw [{self.traces[trace_key]}_start, {self.traces[trace_key]}_step_{position}]\n  decide_cbv')
         return position
 
     def learning_snapshot(self, item, ticket):

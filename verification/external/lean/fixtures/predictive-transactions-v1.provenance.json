@@ -1,0 +1,54 @@
+{
+  "export_sha256": "ea19933135f22c51838bc29b7ca23f1ddf1d040bf6e996f4166d065dd92db32f",
+  "format": "synarc-residual-transactions-v1",
+  "native_source_commit": "a9c4d8fc6388cc5aeb0c438698e270fe01cc0331",
+  "native_receipt_file": "predictive-transactions-v1.receipt.json.gz",
+  "native_receipt_sha256": "1372ce5cb265091771ddc602885f25f9889a76dd7993d8668a9aa14a5790374d",
+  "native_binary_sha256": "97eb6c5bfb460c65a1fbb13d8d43aafb6fd700eef4eab3700bd5a0e8ade4d601",
+  "native_producer_sha256": "eeae656f1e0358f75fbd6d131d9da0ee1c8fe5af4f1770b32adaddf98508277f",
+  "independently_matched_source_files": 1466,
+  "key_sources": {
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual.rs": "37b099e4a5f9f49874a4f3e46b26124b2001a5dc7cbce94561b3edf8cd29c731",
+    "rust/crates/synarc-kan/src/program/observer/acquisition/installation/predictive.rs": "635ebed6e02bb1e1ea7b2f440855e54d196dadc4747d43f7a69b119508780101",
+    "rust/crates/synarc-kan/src/program/observer/acquisition/installation/predictive/transaction_export.rs": "2cc3a78268ee4d79e4fd31185860548e34c7e014e2909b49071c9323fe0b2fcb",
+    "rust/crates/synarc-kan/src/program/observer/acquisition/residual_courts.rs": "1573581d73c8957a39858b356695eadb1f73defdba8be22948c676cce7a9951b",
+    "rust/crates/synarc-kan/src/program/observer/lifecycle_export.rs": "16f268b4a11a2202dc28ad5b55511255afe5db2ff1c35d640863433ec71aa1d1"
+  },
+  "stages": [
+    {
+      "name": "build",
+      "status": "passed",
+      "returncode": 0
+    },
+    {
+      "name": "native-transactions",
+      "status": "passed",
+      "returncode": 0,
+      "counts": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 1798
+      }
+    },
+    {
+      "name": "residual-law",
+      "status": "passed",
+      "returncode": 0,
+      "counts": {
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 1795
+      }
+    },
+    {
+      "name": "typecheck-no-serde",
+      "status": "passed",
+      "returncode": 0
+    }
+  ],
+  "scope": "Finite measured transaction ownership, completed VM values and private scorer states. Initial score frontiers and declared callback semantics are premises; native VM continuation interiors, error classifications, allocation/overflow/poison paths and physical causality remain separate."
+}

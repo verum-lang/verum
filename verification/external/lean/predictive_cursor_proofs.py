@@ -33,7 +33,7 @@ def cursor_trace(prefix, base, context, mask, target):
 
     start = cursor(0)
     blocks = [f'def {prefix}_0 : ResidualContinuation.Cursor := {start}',
-        f'@[cbv_eval]\ntheorem {prefix}_step_0 : ResidualContinuation.run 0 ({start}) = {prefix}_0 := rfl']
+        f'@[cbv_eval]\ntheorem {prefix}_step_0 : ResidualContinuation.run 0 {prefix}_0 = {prefix}_0 := rfl']
     for position in range(len(target_bits)+1):
         if position == len(target_bits):
             samples += 1; bits += len(target_bits); lengths.insert(0,(len(target),1))
@@ -48,9 +48,9 @@ def cursor_trace(prefix, base, context, mask, target):
         n = position+1
         blocks.append(f'def {prefix}_{n} : ResidualContinuation.Cursor := {cursor(n)}')
         blocks.append(f'@[cbv_eval]\ntheorem {prefix}_step_{n} : '
-            f'ResidualContinuation.run {n} ({start}) = {prefix}_{n} := by\n'
+            f'ResidualContinuation.run {n} {prefix}_0 = {prefix}_{n} := by\n'
             f'  calc\n'
-            f'    _ = ResidualContinuation.run 1 (ResidualContinuation.run {position} ({start})) :=\n'
+            f'    _ = ResidualContinuation.run 1 (ResidualContinuation.run {position} {prefix}_0) :=\n'
             f'      ResidualContinuation.run_add {position} 1 _\n'
             f'    _ = ResidualContinuation.run 1 {prefix}_{position} :=\n'
             f'      congrArg (ResidualContinuation.run 1) {prefix}_step_{position}\n'
