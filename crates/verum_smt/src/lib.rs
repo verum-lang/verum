@@ -235,7 +235,7 @@ pub mod pattern_quantifiers;
 
 // Contract literal support (P0-3)
 pub mod contract;
-mod loop_transition;
+mod scalar_transition;
 pub mod postcondition;
 pub mod precondition;
 pub mod rsl_parser;
@@ -372,6 +372,7 @@ pub use z3_backend::{
 pub use contract::{
     ContractError, ContractResult, extract_contract_from_expr, merge_contracts,
     parse_contract_literal, validate_contract, verify_contract, verify_frame_condition,
+    verify_frame_condition_with_precondition,
     verify_loop_invariant, verify_loop_invariant_with_precondition, verify_termination,
     verify_termination_in_domain,
 };

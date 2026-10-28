@@ -210,7 +210,7 @@ fn test_frame_condition_no_modifies() {
 
     let result = verify_frame_condition(&context, modifies_vars, all_vars, &function_body);
 
-    // Should succeed (simplified implementation always succeeds)
+    // A pure constant expression preserves all supplied state.
     assert!(result.is_ok());
 }
 
@@ -256,7 +256,7 @@ fn test_frame_condition_modifies_all() {
 
     let result = verify_frame_condition(&context, modifies_vars, all_vars, &function_body);
 
-    // Should succeed (no unmodified variables to verify)
+    // The body remains checked even when every variable may change.
     assert!(result.is_ok());
 }
 
@@ -309,7 +309,6 @@ fn test_frame_condition_cost_tracking() {
 
     let result = verify_frame_condition(&context, modifies_vars, all_vars, &function_body);
 
-    if let Ok(cost) = result {
-        assert_eq!(cost.category.as_str(), "frame_condition");
-    }
+    let cost = result.expect("a pure constant must preserve the frame");
+    assert_eq!(cost.category.as_str(), "frame_condition");
 }

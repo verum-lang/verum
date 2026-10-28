@@ -414,3 +414,100 @@ fn unsupported_effects_and_ill_typed_terms_fail_before_solver_success() {
         Err(ContractError::InvalidContract(_))
     ));
 }
+
+#[test]
+fn frame_checks_nested_blocks_and_every_branch() {
+    use verum_smt::verify_frame_condition;
+    let vars = variables(&["n", "x"]);
+    let body = seq([branch(
+        ncmp(BinOp::Gt, 0),
+        seq([write(BinOp::Assign, 0)]),
+        None,
+    )]);
+    for allowed in [List::new(), List::from(vec![Text::from("x")])] {
+        refuted(
+            verify_frame_condition(&Context::new(), &allowed, &vars, &body).map(|_| ()),
+            "'n' changes outside the modifies clause",
+        );
+    }
+    assert!(verify_frame_condition(&Context::new(), &[Text::from("n")], &vars, &body).is_ok());
+}
+
+#[test]
+fn frame_uses_final_values_and_lexical_slots() {
+    use verum_smt::verify_frame_condition;
+    let saved = Expr::new(
+        ExprKind::Block(Block::new(
+            List::from(vec![
+                local("saved", var("n")),
+                Stmt::expr(write(BinOp::Assign, 0), true),
+                Stmt::expr(bin(BinOp::Assign, var("n"), var("saved")), true),
+            ]),
+            None,
+            Span::dummy(),
+        )),
+        Span::dummy(),
+    );
+    assert!(verify_frame_condition(&Context::new(), &[], &variables(&["n"]), &saved).is_ok());
+    let vars = [(Text::from("p"), Type::new(TypeKind::Bool, Span::dummy()))];
+    refuted(
+        verify_frame_condition(
+            &Context::new(),
+            &[],
+            &vars,
+            &seq([bin(BinOp::Assign, var("p"), boolean(true))]),
+        )
+        .map(|_| ()),
+        "'p' changes outside the modifies clause",
+    );
+}
+
+#[test]
+fn all_modifiable_does_not_hide_unknown_effects_or_bad_names() {
+    use verum_smt::verify_frame_condition;
+    let call = Expr::new(
+        ExprKind::Call {
+            func: Heap::new(var("opaque")),
+            args: List::new(),
+            type_args: List::new(),
+        },
+        Span::dummy(),
+    );
+    for allowed in [List::new(), List::from(vec![Text::from("n")])] {
+        assert!(matches!(
+            verify_frame_condition(&Context::new(), &allowed, &variables(&["n"]), &call),
+            Err(ContractError::InvalidContract(_))
+        ));
+    }
+    assert!(matches!(
+        verify_frame_condition(
+            &Context::new(),
+            &[Text::from("typo")],
+            &variables(&["n"]),
+            &int(0)
+        ),
+        Err(ContractError::InvalidContract(_))
+    ));
+}
+
+#[test]
+fn frame_entry_constraints_prove_arithmetic_safety() {
+    use verum_smt::{verify_frame_condition, verify_frame_condition_with_precondition};
+    let vars = variables(&["n", "x"]);
+    let allowed = [Text::from("n")];
+    let body = write(BinOp::AddAssign, 1);
+    refuted(
+        verify_frame_condition(&Context::new(), &allowed, &vars, &body).map(|_| ()),
+        "overflow",
+    );
+    assert!(
+        verify_frame_condition_with_precondition(
+            &Context::new(),
+            &ncmp(BinOp::Lt, i64::MAX),
+            &allowed,
+            &vars,
+            &body
+        )
+        .is_ok()
+    );
+}

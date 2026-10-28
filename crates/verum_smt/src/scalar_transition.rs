@@ -1,4 +1,4 @@
-//! Checked scalar loop lowering. Branches join with typed `ite` expressions;
+//! Checked scalar source lowering. Branches join with typed `ite` expressions;
 //! assignments read the current environment, never a flattened pre-state.
 use crate::contract::{ContractError, ContractResult};
 use verum_ast::{BinOp, Block, Expr, ExprKind, LiteralKind, PatternKind, Type, TypeKind, UnOp};
@@ -29,14 +29,14 @@ impl ScalarState {
         };
         for (name, ty) in variables {
             if state.names.contains_key(name) {
-                return Err(unsupported("duplicate loop state variable"));
+                return Err(unsupported("duplicate scalar state variable"));
             }
             let value = match ty.kind {
                 TypeKind::Int => Int::fresh_const(name.as_str()).into(),
                 TypeKind::Bool => Bool::fresh_const(name.as_str()).into(),
                 _ => {
                     return Err(unsupported(
-                        "loop lowering supports Int and Bool state only",
+                        "scalar lowering supports Int and Bool state only",
                     ));
                 }
             };
@@ -60,7 +60,7 @@ impl ScalarState {
             }
         }
         Err(unsupported(
-            "loop expression requires a declared scalar variable",
+            "scalar expression requires a declared scalar variable",
         ))
     }
 
@@ -83,7 +83,7 @@ impl ScalarState {
     pub fn predicate(&self, expr: &Expr) -> ContractResult<Bool> {
         self.term(expr)?
             .as_bool()
-            .ok_or_else(|| unsupported("loop predicate must be boolean"))
+            .ok_or_else(|| unsupported("scalar predicate must be boolean"))
     }
 
     pub fn condition(&self, expr: &Expr) -> ContractResult<(Bool, Bool)> {
@@ -91,7 +91,7 @@ impl ScalarState {
         let value = encoder
             .value(self, expr, &Bool::from_bool(true))?
             .as_bool()
-            .ok_or_else(|| unsupported("loop exit condition must be boolean"))?;
+            .ok_or_else(|| unsupported("scalar exit condition must be boolean"))?;
         Ok((value, Bool::and(&encoder.obligations)))
     }
 
@@ -122,10 +122,10 @@ impl Encoder {
                 LiteralKind::Bool(value) => Bool::from_bool(*value).into(),
                 LiteralKind::Int(value) if value.suffix.is_none() => {
                     let value = i64::try_from(value.value)
-                        .map_err(|_| unsupported("loop integer literal exceeds Int range"))?;
+                        .map_err(|_| unsupported("scalar integer literal exceeds Int range"))?;
                     Int::from_i64(value).into()
                 }
-                _ => return Err(unsupported("unsupported loop literal")),
+                _ => return Err(unsupported("unsupported scalar literal")),
             },
             ExprKind::Path(_) => state.values[state.slot(expr)?].clone(),
             ExprKind::Paren(inner) => return self.value(state, inner, path),
@@ -144,7 +144,7 @@ impl Encoder {
                         .into(),
                     _ => {
                         return Err(unsupported(
-                            "loop references and bitwise unary operations are unsupported",
+                            "scalar references and bitwise unary operations are unsupported",
                         ));
                     }
                 }
@@ -174,7 +174,7 @@ impl Encoder {
             }
             _ => {
                 return Err(unsupported(
-                    "unsupported effect or expression in scalar loop",
+                    "unsupported effect or expression in scalar scalar",
                 ));
             }
         };
@@ -189,7 +189,7 @@ impl Encoder {
 
     fn binary(&self, op: BinOp, left: Dynamic, right: Dynamic) -> ContractResult<Dynamic> {
         if left.get_sort() != right.get_sort() {
-            return Err(unsupported("loop operands have different scalar types"));
+            return Err(unsupported("scalar operands have different scalar types"));
         }
         if matches!(op, BinOp::Eq | BinOp::Ne) {
             let eq = left.eq(&right);
@@ -204,7 +204,7 @@ impl Encoder {
                 BinOp::Le => l.le(&r).into(),
                 BinOp::Gt => l.gt(&r).into(),
                 BinOp::Ge => l.ge(&r).into(),
-                _ => return Err(unsupported("unsupported loop integer operation")),
+                _ => return Err(unsupported("unsupported scalar integer operation")),
             });
         }
         if let (Some(l), Some(r)) = (left.as_bool(), right.as_bool()) {
@@ -213,10 +213,10 @@ impl Encoder {
                 BinOp::Or => Bool::or(&[l, r]).into(),
                 BinOp::Imply if !self.checked => l.implies(r).into(),
                 BinOp::Iff if !self.checked => l.iff(r).into(),
-                _ => return Err(unsupported("unsupported loop Boolean operation")),
+                _ => return Err(unsupported("unsupported scalar Boolean operation")),
             });
         }
-        Err(unsupported("unsupported loop operand types"))
+        Err(unsupported("unsupported scalar operand types"))
     }
 
     fn execute(&mut self, state: &mut ScalarState, expr: &Expr, path: &Bool) -> ContractResult<()> {
@@ -224,7 +224,7 @@ impl Encoder {
             ExprKind::Binary { op, left, right } if op.is_assignment() => {
                 let slot = state.slot(left)?;
                 if !state.mutable[slot] {
-                    return Err(unsupported("assignment to immutable loop local"));
+                    return Err(unsupported("assignment to immutable scalar local"));
                 }
                 let rhs = self.value(state, right, path)?;
                 let value = match op {
@@ -232,10 +232,10 @@ impl Encoder {
                     BinOp::AddAssign => self.binary(BinOp::Add, state.values[slot].clone(), rhs)?,
                     BinOp::SubAssign => self.binary(BinOp::Sub, state.values[slot].clone(), rhs)?,
                     BinOp::MulAssign => self.binary(BinOp::Mul, state.values[slot].clone(), rhs)?,
-                    _ => return Err(unsupported("unsupported compound loop assignment")),
+                    _ => return Err(unsupported("unsupported compound scalar assignment")),
                 };
                 if value.get_sort() != state.values[slot].get_sort() {
-                    return Err(unsupported("loop assignment changes scalar type"));
+                    return Err(unsupported("scalar assignment changes scalar type"));
                 }
                 if let Some(integer) = value.as_int() {
                     self.obligations
@@ -261,11 +261,11 @@ impl Encoder {
                     let value = self
                         .value(state, condition, &current_path)?
                         .as_bool()
-                        .ok_or_else(|| unsupported("loop branch condition must be boolean"))?;
+                        .ok_or_else(|| unsupported("scalar branch condition must be boolean"))?;
                     guard = Bool::and(&[guard, value]);
                 }
                 if condition.conditions.is_empty() {
-                    return Err(unsupported("missing loop branch condition"));
+                    return Err(unsupported("missing scalar branch condition"));
                 }
                 let mut then_state = state.clone();
                 let mut else_state = state.clone();
@@ -290,7 +290,7 @@ impl Encoder {
         for stmt in &block.stmts {
             if !stmt.attributes.is_empty() {
                 return Err(unsupported(
-                    "statement attributes require explicit loop semantics",
+                    "statement attributes require explicit scalar semantics",
                 ));
             }
             match &stmt.kind {
@@ -307,7 +307,7 @@ impl Encoder {
                             (TypeKind::Int, Some(_), _) | (TypeKind::Bool, _, Some(_))
                         ) {
                             return Err(unsupported(
-                                "loop local annotation must match its scalar value",
+                                "scalar local annotation must match its scalar value",
                             ));
                         }
                     }
@@ -319,11 +319,13 @@ impl Encoder {
                             subpattern: None,
                         } => state.bind(Text::from(name.as_str()), value, *mutable),
                         PatternKind::Wildcard => {}
-                        _ => return Err(unsupported("loop locals require plain scalar bindings")),
+                        _ => {
+                            return Err(unsupported("scalar locals require plain scalar bindings"));
+                        }
                     }
                 }
                 verum_ast::StmtKind::Empty => {}
-                _ => return Err(unsupported("unsupported loop statement")),
+                _ => return Err(unsupported("unsupported scalar statement")),
             }
         }
         if let Some(tail) = &block.expr {

@@ -1,9 +1,9 @@
-//! Loop obligations over a checked, ordered source transition.
+//! Loop and frame obligations over a checked, ordered source transition.
 use super::{ContractError, ContractResult};
 use crate::context::Context;
 use crate::cost::{CostMeasurement, VerificationCost};
-use crate::loop_transition::ScalarState;
 use crate::ranking::{RankingFunction, RankingTransition};
+use crate::scalar_transition::ScalarState;
 use verum_ast::{Expr, Literal, Span, Type};
 use verum_common::{List, Text};
 use z3::{
@@ -153,6 +153,58 @@ pub fn verify_termination_in_domain(
         return Err(failure(
             "loop rank is negative, fails to decrease, or leaves its domain".into(),
         ));
+    }
+    Ok(measurement.finish(true))
+}
+
+/// Prove that all state outside `modifies_vars` is unchanged on return, with
+/// no entry assumptions beyond the declared scalar types.
+pub fn verify_frame_condition(
+    context: &Context,
+    modifies_vars: &[Text],
+    all_vars: &[(Text, Type)],
+    function_body: &Expr,
+) -> ContractResult<VerificationCost> {
+    verify_frame_condition_with_precondition(
+        context,
+        &truth(true),
+        modifies_vars,
+        all_vars,
+        function_body,
+    )
+}
+
+/// Check a scalar frame against the complete ordered body under an explicit
+/// entry predicate. Intermediate overflow and unsupported effects are refused
+/// even if every supplied state variable appears in the modifies clause.
+pub fn verify_frame_condition_with_precondition(
+    context: &Context,
+    precondition: &Expr,
+    modifies_vars: &[Text],
+    all_vars: &[(Text, Type)],
+    function_body: &Expr,
+) -> ContractResult<VerificationCost> {
+    let measurement = CostMeasurement::start("frame_condition");
+    if modifies_vars
+        .iter()
+        .any(|name| !all_vars.iter().any(|(declared, _)| name == declared))
+    {
+        return Err(ContractError::InvalidContract(
+            "modifies clause names an undeclared state variable".into(),
+        ));
+    }
+    let before = ScalarState::new(all_vars)?;
+    let domain = Bool::and(&[before.bounds(), before.predicate(precondition)?]);
+    let (after, safe) = before.execute(function_body)?;
+    prove(context, domain.implies(safe), "frame body can overflow")?;
+    for (index, (name, _)) in all_vars.iter().enumerate() {
+        if !modifies_vars.contains(name) {
+            prove(
+                context,
+                domain.implies(before.values[index].eq(&after.values[index])),
+                &format!("variable '{name}' changes outside the modifies clause"),
+            )?;
+        }
     }
     Ok(measurement.finish(true))
 }
