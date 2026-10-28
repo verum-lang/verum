@@ -6,7 +6,7 @@
 //!
 //! Uses the upstream Z3 fixedpoint API and its ownership rules.
 //! Recursive refinement types (e.g., sorted lists, balanced trees) require fixed-point
-//! reasoning. Z3's muZ engine computes least/greatest fixed points for recursive
+//! reasoning. Z3's muZ engine computes least fixed points for recursive
 //! predicates, enabling verification of inductive properties like `is_sorted(list)`
 //! or `is_balanced(tree)` that reference themselves in their definitions.
 
@@ -23,13 +23,15 @@ use verum_common::{List, Map, Maybe, Set, Shared, Text};
 /// Recursive predicate definition
 #[derive(Debug, Clone)]
 pub struct RecursivePredicate {
+    /// Universally bound constants shared by the definition's clauses.
+    pub vars: List<(Text, Sort)>,
     /// Predicate name
     pub name: Text,
     /// Parameter sorts
     pub params: List<Sort>,
     /// Body of the predicate (as a rule)
     pub body: PredicateBody,
-    /// Whether this is well-founded
+    /// Caller metadata; never used as evidence of termination or productivity.
     pub well_founded: bool,
 }
 
@@ -66,6 +68,8 @@ pub struct RecursiveCall {
 /// Datalog-style rule
 #[derive(Debug, Clone)]
 pub struct DatalogRule {
+    /// Universally bound constants; undeclared symbolic constants are refused.
+    pub vars: List<(Text, Sort)>,
     /// Head predicate
     pub head: Atom,
     /// Body atoms (conjunction)
@@ -455,46 +459,77 @@ impl FixedPointEngine {
         Text::from(self.fp.to_string())
     }
 
-    /// Register a recursive predicate
+    /// Register a recursive definition atomically after validating every clause.
     pub fn register_predicate(&mut self, pred: RecursivePredicate) -> Result<(), Text> {
-        // Create function declaration for the predicate
+        CString::new(pred.name.as_str()).map_err(|_| Text::from("Invalid predicate name"))?;
+        if self.predicates.contains_key(&pred.name) {
+            return Err(Text::from(format!(
+                "Relation already registered: {}",
+                pred.name
+            )));
+        }
         let param_refs: List<&Sort> = pred.params.iter().collect();
-        let bool_sort = Sort::bool();
+        let decl = Shared::new(FuncDecl::new(
+            pred.name.as_str(),
+            &param_refs,
+            &Sort::bool(),
+        ));
+        self.check_relation(&decl, None)?;
 
-        let decl = FuncDecl::new(pred.name.to_string(), &param_refs, &bool_sort);
-
-        // Register with Z3
-        self.register_relation(decl)?;
-
-        // Add rules based on predicate body
-        self.add_predicate_rules(pred)?;
-
+        // Make self-recursion resolvable during lowering, without changing Z3.
+        self.predicates.insert(pred.name.clone(), decl.clone());
+        let rules = self.compile_predicate_body(&pred);
+        if rules.is_err() {
+            self.predicates.remove(&pred.name);
+        }
+        let rules = rules?;
+        self.fp.register_relation(&decl);
+        for rule in rules {
+            self.add_rule(&rule, Some(pred.name.as_str()))?;
+        }
         Ok(())
     }
 
-    /// Add rules for a predicate based on its body
-    fn add_predicate_rules(&mut self, pred: RecursivePredicate) -> Result<(), Text> {
-        match pred.body {
-            PredicateBody::Base(formula) => {
-                // Simple base case - add as rule
-                self.add_rule(&formula, Some(pred.name.as_str()))?;
+    fn compile_predicate_body(&self, pred: &RecursivePredicate) -> Result<List<Bool>, Text> {
+        let compile = |guard: Option<&Bool>, calls: &[RecursiveCall], head: &Bool| {
+            if head.kind() != z3::AstKind::App || head.decl().name() != pred.name.as_str() {
+                return Err(Text::from(
+                    "A predicate clause must conclude its declared relation",
+                ));
             }
+            let mut premises = List::new();
+            if let Some(guard) = guard {
+                premises.push(guard.clone());
+            }
+            for call in calls {
+                premises.push(self.atom_to_formula(&Atom {
+                    predicate: call.predicate.clone(),
+                    args: call.args.clone(),
+                })?);
+            }
+            self.compile_horn_rule(&pred.vars, &premises, head)
+        };
+        let mut rules = List::new();
+        match &pred.body {
+            PredicateBody::Base(head) => rules.push(compile(None, &[], head)?),
             PredicateBody::Recursive {
-                guard, conclusion, ..
+                guard,
+                recursive_calls,
+                conclusion,
             } => {
-                // Recursive case: guard => conclusion
-                let rule = guard.implies(&conclusion);
-                self.add_rule(&rule, Some(pred.name.as_str()))?;
+                rules.push(compile(Some(guard), recursive_calls, conclusion)?);
             }
             PredicateBody::Cases(cases) => {
-                // Multiple cases - add each as separate rule
-                for (i, case) in cases.iter().enumerate() {
-                    let rule_name = format!("{}_{}", pred.name, i);
-                    self.add_rule(&case.body, Some(&rule_name))?;
+                for case in cases {
+                    rules.push(compile(
+                        case.guard.as_ref(),
+                        &case.recursive_calls,
+                        &case.body,
+                    )?);
                 }
             }
         }
-        Ok(())
+        Ok(rules)
     }
 
     /// Add a Datalog rule
@@ -513,6 +548,7 @@ impl FixedPointEngine {
     ///
     /// // Define rule: path(X,Z) :- edge(X,Y), path(Y,Z)
     /// let rule = DatalogRule {
+    ///  vars: List::new(),
     ///  head: Atom {
     ///  predicate: Text::from("path"),
     ///  args: List::new(),
@@ -523,105 +559,120 @@ impl FixedPointEngine {
     /// engine.add_datalog_rule(rule).unwrap();
     /// ```
     pub fn add_datalog_rule(&mut self, rule: DatalogRule) -> Result<(), Text> {
-        // Convert atoms to Z3 formulas
-        let head_formula = self.atom_to_formula(&rule.head)?;
-
-        if rule.body.is_empty() && rule.constraints.is_empty() {
-            // An unconditional ground rule has neither premises nor guards.
-            self.add_rule(&head_formula, Some(rule.head.predicate.as_str()))?;
-        } else {
-            // Build body conjunction
-            let mut body_formulas = List::new();
-
-            // Add body atoms
-            for atom in rule.body.iter() {
-                body_formulas.push(self.atom_to_formula(atom)?);
-            }
-
-            // Add constraints
-            for constraint in rule.constraints.iter() {
-                body_formulas.push(constraint.clone());
-            }
-
-            // Create implication: body => head
-            let body_refs: List<&Bool> = body_formulas.iter().collect();
-            let body_conj = Bool::and(&body_refs);
-            let implication = body_conj.implies(&head_formula);
-
-            self.add_rule(&implication, Some(rule.head.predicate.as_str()))?;
-        }
-
-        Ok(())
+        self.add_chc(CHC {
+            vars: rule.vars,
+            hypothesis: rule.body,
+            constraints: rule.constraints,
+            conclusion: rule.head,
+        })
     }
 
-    /// Add a CHC (Constrained Horn Clause)
-    ///
-    /// CHCs are the most general form of Horn clauses with constraints.
-    /// Format: ∀vars. (H₁ ∧ ... ∧ Hₙ ∧ C₁ ∧ ... ∧ Cₘ) ⇒ conclusion
-    ///
-    /// # Examples
-    /// ```ignore
-    /// use verum_smt::{FixedPointEngine, CHC, Atom};
-    /// use verum_common::{List, Text};
-    /// use z3::{Context, Sort};
-    ///
-    /// let ctx = Context::thread_local();
-    /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
-    ///
-    /// let chc = CHC {
-    ///  vars: List::new(),
-    ///  hypothesis: List::new(),
-    ///  constraints: List::new(),
-    ///  conclusion: Atom {
-    ///  predicate: Text::from("safe"),
-    ///  args: List::new(),
-    ///  },
-    /// };
-    /// engine.add_chc(chc).unwrap();
-    /// ```
+    /// Add ∀vars. (hypotheses ∧ constraints) ⇒ conclusion.
     pub fn add_chc(&mut self, chc: CHC) -> Result<(), Text> {
-        // Convert hypothesis atoms to formulas
-        let mut hypothesis_formulas = List::new();
-        for atom in chc.hypothesis.iter() {
-            hypothesis_formulas.push(self.atom_to_formula(atom)?);
+        let mut premises = chc.constraints;
+        for atom in &chc.hypothesis {
+            premises.push(self.atom_to_formula(atom)?);
         }
+        let conclusion = self.atom_to_formula(&chc.conclusion)?;
+        let rule = self.compile_horn_rule(&chc.vars, &premises, &conclusion)?;
+        self.add_rule(&rule, Some(chc.conclusion.predicate.as_str()))
+    }
 
-        // Add constraints to hypothesis
-        for constraint in chc.constraints.iter() {
-            hypothesis_formulas.push(constraint.clone());
+    /// One lowering path for recursive definitions, Datalog and CHCs.
+    /// Validate before constructing a quantified formula or mutating the solver.
+    fn compile_horn_rule(
+        &self,
+        vars: &[(Text, Sort)],
+        premises: &[Bool],
+        conclusion: &Bool,
+    ) -> Result<Bool, Text> {
+        if conclusion.get_ctx() != &self.ctx || premises.iter().any(|p| p.get_ctx() != &self.ctx) {
+            return Err(Text::from("Horn clause belongs to another Z3 context"));
         }
-
-        // Convert conclusion
-        let conclusion_formula = self.atom_to_formula(&chc.conclusion)?;
-
-        // Build the CHC
-        let rule = if hypothesis_formulas.is_empty() {
-            // No hypothesis: just the conclusion (fact)
-            conclusion_formula
-        } else {
-            // Build conjunction of hypothesis
-            let hyp_refs: List<&Bool> = hypothesis_formulas.iter().collect();
-            let hypothesis = Bool::and(&hyp_refs);
-
-            // Create implication
-            hypothesis.implies(&conclusion_formula)
+        if conclusion.kind() != z3::AstKind::App
+            || conclusion.decl().kind() != z3::DeclKind::Uninterpreted
+        {
+            return Err(Text::from(
+                "Horn clause head must be a registered relation application",
+            ));
+        }
+        let head = Atom {
+            predicate: conclusion.decl().name().into(),
+            args: conclusion.children().into_iter().collect(),
         };
-
-        // CHC variables are explicit binders, not uninterpreted constants.
-        let variables: List<Dynamic> = chc
-            .vars
+        if self.atom_to_formula(&head)?.get_z3_ast() != conclusion.get_z3_ast() {
+            return Err(Text::from(
+                "Horn clause head does not match its registered declaration",
+            ));
+        }
+        let mut variables = List::new();
+        let mut bound = Set::new();
+        for (name, sort) in vars {
+            CString::new(name.as_str()).map_err(|_| Text::from("Invalid Horn variable name"))?;
+            if Dynamic::fresh_const("scope", sort).get_ctx() != &self.ctx {
+                return Err(Text::from("Horn variable belongs to another Z3 context"));
+            }
+            let variable = Dynamic::new_const(name.as_str(), sort);
+            if !bound.insert(variable.clone()) {
+                return Err(Text::from("Duplicate Horn variable"));
+            }
+            if self
+                .predicates
+                .get(name)
+                .is_some_and(|decl| decl.arity() == 0)
+            {
+                return Err(Text::from("Horn variable shadows a zero-argument relation"));
+            }
+            variables.push(variable);
+        }
+        let mut pending: List<Dynamic> = premises
             .iter()
-            .map(|(name, sort)| Dynamic::new_const(name.as_str(), sort))
+            .map(|term| Dynamic::from_ast(term))
             .collect();
-        let bound: List<&dyn Ast> = variables.iter().map(|v| v as &dyn Ast).collect();
-        let rule = if bound.is_empty() {
+        pending.push(Dynamic::from_ast(conclusion));
+        let mut visited = Set::new();
+        while let Some(term) = pending.pop() {
+            if !visited.insert(term.clone()) {
+                continue;
+            }
+            match term.kind() {
+                z3::AstKind::Quantifier | z3::AstKind::Var => {
+                    return Err(Text::from(
+                        "Use explicit Horn variables instead of nested quantifiers",
+                    ));
+                }
+                z3::AstKind::App => {
+                    if term.num_children() == 0
+                        && term.decl().kind() == z3::DeclKind::Uninterpreted
+                        && !bound.contains(&term)
+                    {
+                        let registered = self
+                            .predicates
+                            .get(&Text::from(term.decl().name()))
+                            .is_some_and(|decl| {
+                                decl.arity() == 0
+                                    && decl.apply(&[]).get_z3_ast() == term.get_z3_ast()
+                            });
+                        if !registered {
+                            return Err(Text::from(format!("Unbound Horn variable: {term}")));
+                        }
+                    }
+                    pending.extend(term.children());
+                }
+                _ => {}
+            }
+        }
+        let rule = if premises.is_empty() {
+            conclusion.clone()
+        } else {
+            Bool::and(premises).implies(conclusion)
+        };
+        let refs: List<&dyn Ast> = variables.iter().map(|v| v as &dyn Ast).collect();
+        Ok(if refs.is_empty() {
             rule
         } else {
-            z3::ast::forall_const(&bound, &[], &rule)
-        };
-        self.add_rule(&rule, Some(chc.conclusion.predicate.as_str()))?;
-
-        Ok(())
+            z3::ast::forall_const(&refs, &[], &rule)
+        })
     }
 
     /// Check exact domains before the upstream infallible application API.
@@ -811,6 +862,7 @@ pub mod patterns {
             let int_sort = Sort::int();
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("list_length"),
                 params: List::from(vec![list_sort, int_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -842,6 +894,7 @@ pub mod patterns {
             let list_sort = Sort::uninterpreted(Symbol::String("List".to_string()));
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("list_contains"),
                 params: List::from(vec![elem_sort, list_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -871,6 +924,7 @@ pub mod patterns {
             let int_sort = Sort::int();
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("list_sum"),
                 params: List::from(vec![list_sort, int_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -907,6 +961,7 @@ pub mod patterns {
             let int_sort = Sort::int();
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("tree_height"),
                 params: List::from(vec![tree_sort, int_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -944,6 +999,7 @@ pub mod patterns {
             let tree_sort = Sort::uninterpreted(Symbol::String("Tree".to_string()));
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("tree_search"),
                 params: List::from(vec![elem_sort, tree_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -985,6 +1041,7 @@ pub mod patterns {
             let int_sort = Sort::int();
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("tree_size"),
                 params: List::from(vec![tree_sort, int_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -1026,6 +1083,7 @@ pub mod patterns {
             let node_sort = Sort::int();
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("reachable"),
                 params: List::from(vec![node_sort.clone(), node_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -1056,6 +1114,7 @@ pub mod patterns {
             let node_sort = Sort::int();
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("has_cycle"),
                 params: List::from(vec![node_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -1085,6 +1144,7 @@ pub mod patterns {
             let int_sort = Sort::int();
 
             RecursivePredicate {
+                vars: Default::default(),
                 name: Text::from("path_length"),
                 params: List::from(vec![node_sort.clone(), node_sort, int_sort]),
                 body: PredicateBody::Cases(List::from(vec![
@@ -1215,6 +1275,7 @@ impl InductiveDatatypeBuilder {
         let int_sort = Sort::int();
 
         let size_pred = RecursivePredicate {
+            vars: Default::default(),
             name: Text::from("list_size"),
             params: List::from(vec![list_sort, int_sort]),
             body: PredicateBody::Base(Bool::from_bool(true)),
@@ -1230,6 +1291,7 @@ impl InductiveDatatypeBuilder {
         let int_sort = Sort::int();
 
         let height_pred = RecursivePredicate {
+            vars: Default::default(),
             name: Text::from("tree_height"),
             params: List::from(vec![tree_sort, int_sort]),
             body: PredicateBody::Base(Bool::from_bool(true)),
@@ -1261,6 +1323,7 @@ impl RecursiveProgramVerifier {
     ) -> Result<VerificationResult, Text> {
         // Register precondition predicate
         self.engine.register_predicate(RecursivePredicate {
+            vars: Default::default(),
             name: Text::from(format!("{}_pre", func.name)),
             params: func.param_sorts.clone(),
             body: PredicateBody::Base(func.precondition.clone()),
@@ -1269,6 +1332,7 @@ impl RecursiveProgramVerifier {
 
         // Register postcondition predicate
         self.engine.register_predicate(RecursivePredicate {
+            vars: Default::default(),
             name: Text::from(format!("{}_post", func.name)),
             params: func.param_sorts.clone(),
             body: PredicateBody::Base(func.postcondition.clone()),
@@ -1457,17 +1521,16 @@ impl DatalogSolver {
     /// solver.register_relation("node", &[Sort::int()]).unwrap();
     /// ```
     pub fn register_relation(&mut self, name: &str, param_sorts: &[Sort]) -> Result<(), Text> {
-        self.engine.register_predicate(RecursivePredicate {
-            name: Text::from(name),
-            params: param_sorts.iter().cloned().collect(),
-            body: PredicateBody::Base(Bool::from_bool(true)),
-            well_founded: false,
-        })
+        let params: List<&Sort> = param_sorts.iter().collect();
+        self.engine
+            .register_relation(FuncDecl::new(name, &params, &Sort::bool()))?;
+        Ok(())
     }
 
     /// Add fact (rule with empty body)
     pub fn add_fact(&mut self, atom: Atom) -> Result<(), Text> {
         self.engine.add_datalog_rule(DatalogRule {
+            vars: Default::default(),
             head: atom,
             body: List::new(),
             constraints: List::new(),

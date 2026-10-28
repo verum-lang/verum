@@ -37,6 +37,7 @@ fn test_simple_datalog_rule() {
     };
 
     let rule = DatalogRule {
+        vars: Default::default(),
         head: even_pred,
         body: vec![].into_iter().collect(),
         constraints: vec![x.gt(0)].into_iter().collect(),
@@ -49,6 +50,7 @@ fn test_simple_datalog_rule() {
 fn test_recursive_datalog_rules() {
     // Base case
     let base_rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("reachable"),
             args: vec![].into_iter().collect(),
@@ -59,6 +61,7 @@ fn test_recursive_datalog_rules() {
 
     // Recursive case
     let recursive_rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("reachable"),
             args: vec![].into_iter().collect(),
@@ -87,6 +90,7 @@ fn test_datalog_with_constraints() {
     let x = Int::new_const("x");
 
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("positive"),
             args: vec![].into_iter().collect(),
@@ -105,6 +109,7 @@ fn test_simple_recursive_predicate() {
     let x = Int::new_const("x");
 
     let base_pred = RecursivePredicate {
+        vars: Default::default(),
         name: Text::from("factorial"),
         params: vec![].into_iter().collect(),
         body: PredicateBody::Base(x.gt(0)),
@@ -132,6 +137,7 @@ fn test_recursive_predicate_with_cases() {
     };
 
     let pred = RecursivePredicate {
+        vars: Default::default(),
         name: Text::from("fact"),
         params: vec![].into_iter().collect(),
         body: PredicateBody::Cases(vec![case1, case2].into_iter().collect()),
@@ -165,6 +171,7 @@ fn test_simple_horn_clause() {
     let x = Int::new_const("x");
 
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("positive"),
             args: vec![].into_iter().collect(),
@@ -182,6 +189,7 @@ fn test_complex_horn_clause() {
     let y = Int::new_const("y");
 
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("Q"),
             args: vec![].into_iter().collect(),
@@ -210,6 +218,7 @@ fn test_complex_horn_clause() {
 #[test]
 fn test_datalog_rule_head_and_body() {
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("parent"),
             args: vec![].into_iter().collect(),
@@ -235,6 +244,7 @@ fn test_fixedpoint_workflow_basic() {
     let y = Int::new_const("y");
 
     let edge_rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("edge"),
             args: vec![].into_iter().collect(),
@@ -251,6 +261,7 @@ fn test_mutual_recursion_support() {
     let _x = Int::new_const("x");
 
     let even_rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("even"),
             args: vec![].into_iter().collect(),
@@ -265,6 +276,7 @@ fn test_mutual_recursion_support() {
     };
 
     let odd_rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("odd"),
             args: vec![].into_iter().collect(),
@@ -287,6 +299,7 @@ fn test_well_founded_check() {
     let x = Int::new_const("x");
 
     let pred_base = RecursivePredicate {
+        vars: Default::default(),
         name: Text::from("fact"),
         params: vec![].into_iter().collect(),
         body: PredicateBody::Base(x.gt(0)),
@@ -296,6 +309,7 @@ fn test_well_founded_check() {
     assert!(pred_base.well_founded);
 
     let pred_circular = RecursivePredicate {
+        vars: Default::default(),
         name: Text::from("circular"),
         params: vec![].into_iter().collect(),
         body: PredicateBody::Base(Bool::from_bool(true)),
@@ -322,6 +336,7 @@ fn test_datalog_rule_construction() {
     // assertions do. A genuine performance guard belongs in benches/, where
     // criterion handles variance, not in a unit test.
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("test"),
             args: vec![].into_iter().collect(),
@@ -344,6 +359,7 @@ fn test_multiple_rule_compilation() {
 
     for i in 0..10 {
         let rule = DatalogRule {
+            vars: Default::default(),
             head: Atom {
                 predicate: Text::from(format!("pred{}", i)),
                 args: vec![].into_iter().collect(),
@@ -362,6 +378,7 @@ fn test_multiple_rule_compilation() {
 #[test]
 fn test_empty_body_rules() {
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("edge"),
             args: vec![].into_iter().collect(),
@@ -377,6 +394,7 @@ fn test_empty_body_rules() {
 #[test]
 fn test_single_atom_body() {
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("pred_a"),
             args: vec![].into_iter().collect(),

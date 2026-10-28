@@ -95,9 +95,12 @@ fn named_domains_survive_registration_and_rule_construction() {
     let domain = Sort::uninterpreted(Symbol::String("OwnedObject".into()));
     let relation = FuncDecl::new("owns_object", &[&domain], &Sort::bool());
     engine.register_relation(relation).unwrap();
-    let object = Dynamic::fresh_const("object", &domain);
+    let object = Dynamic::new_const("object", &domain);
     engine
         .add_datalog_rule(DatalogRule {
+            vars: [(Text::from("object"), domain.clone())]
+                .into_iter()
+                .collect(),
             head: Atom {
                 predicate: "owns_object".into(),
                 args: [object].into_iter().collect(),
@@ -174,6 +177,7 @@ fn a_ground_rule_cannot_drop_its_constraint() {
     engine.register_relation(relation).unwrap();
     engine
         .add_datalog_rule(DatalogRule {
+            vars: Default::default(),
             head: Atom {
                 predicate: "guarded".into(),
                 args: [Int::from_i64(1).into()].into_iter().collect(),
@@ -338,6 +342,7 @@ fn distinct_named_sorts_cannot_be_interchanged() {
     assert!(
         engine
             .add_datalog_rule(DatalogRule {
+                vars: Default::default(),
                 head: Atom {
                     predicate: "owns".into(),
                     args: [Dynamic::fresh_const("other", &other)]

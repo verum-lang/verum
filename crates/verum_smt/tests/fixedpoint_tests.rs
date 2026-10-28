@@ -404,6 +404,7 @@ fn test_datalog_fact_conversion() {
 
     // Create a DatalogRule (fact)
     let rule = DatalogRule {
+        vars: Default::default(),
         head: Atom {
             predicate: Text::from("node"),
             args: List::from(vec![Dynamic::from(Int::from_i64(1))]),

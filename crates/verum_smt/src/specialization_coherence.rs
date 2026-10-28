@@ -48,7 +48,7 @@ use verum_common::{List, Map, Maybe, Set, Text};
 use verum_protocol_types::protocol_base::{Protocol, ProtocolImpl};
 use verum_protocol_types::specialization::SpecializationLattice;
 
-use z3::ast::{Bool, Int};
+use z3::ast::Int;
 use z3::{Context, Sort};
 
 use crate::fixedpoint::{Atom, CHC, FixedPointEngine};
@@ -418,30 +418,14 @@ impl SpecializationVerifier {
     /// Returns Ok if CHC predicates were registered successfully.
     /// Returns Err if registration failed.
     fn register_chc_predicates(&mut self) -> Result<(), Text> {
-        use crate::fixedpoint::PredicateBody;
-        use crate::fixedpoint::RecursivePredicate;
-
-        // Use Int sort for implementation indices
         let int_sort = Sort::int();
-
-        // Register more_specific(Int, Int) -> Bool predicate
-        // where Int represents implementation index
-        let more_specific_pred = RecursivePredicate {
-            name: Text::from("more_specific"),
-            params: List::from(vec![int_sort.clone(), int_sort.clone()]),
-            body: PredicateBody::Base(Bool::from_bool(true)),
-            well_founded: true,
-        };
-        self.fixedpoint.register_predicate(more_specific_pred)?;
-
-        // Register error() -> Bool predicate (for antisymmetry violation)
-        let error_pred = RecursivePredicate {
-            name: Text::from("false"),
-            params: List::new(),
-            body: PredicateBody::Base(Bool::from_bool(false)),
-            well_founded: true,
-        };
-        self.fixedpoint.register_predicate(error_pred)?;
+        self.fixedpoint.register_relation(z3::FuncDecl::new(
+            "more_specific",
+            &[&int_sort, &int_sort],
+            &Sort::bool(),
+        ))?;
+        self.fixedpoint
+            .register_relation(z3::FuncDecl::new("false", &[], &Sort::bool()))?;
 
         Ok(())
     }
