@@ -8,6 +8,7 @@ from check_typed_programs import ROOT, check, require_success, run
 
 HEADER = '''import VerumExternalReplay.AtomicPublication
 import VerumExternalReplay.PredictiveReplay
+import VerumExternalReplay.ResidualContinuation
 set_option warningAsError true
 
 def owner : AtomicPublication.Frontier Nat Nat Nat Nat := ⟨⟨11,21,31⟩,41⟩
@@ -27,7 +28,8 @@ class PredictivePublicationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         require_success(run('lake','build','VerumExternalReplay.AtomicPublication',
-                            'VerumExternalReplay.PredictiveReplay'))
+                            'VerumExternalReplay.PredictiveReplay',
+                            'VerumExternalReplay.ResidualContinuation'))
 
     def prove(self, source, expected=None):
         with tempfile.TemporaryDirectory(prefix='verum-predictive-publication-') as directory:
@@ -41,7 +43,7 @@ class PredictivePublicationTests(unittest.TestCase):
 
     def test_axiom_roster(self):
         names = []
-        for module in ('AtomicPublication','PredictiveReplay'):
+        for module in ('AtomicPublication','PredictiveReplay','ResidualContinuation'):
             names += [module+'.'+name for name in re.findall(r'^theorem (\w+)',
                 (ROOT/f'VerumExternalReplay/{module}.lean').read_text(),re.M)]
         result = self.prove('\n'.join('#print axioms '+name for name in names))
@@ -104,6 +106,37 @@ example : step readVM (fun _ _ => none) start first = none := by decide_cbv
 def forged : AtomicPublication.Update Nat Nat Nat Nat (List Nat) :=
   ⟨owner.cut, ⟨⟨11,22,31⟩,32⟩,41,42,[9],by decide_cbv⟩
 ''', FALSE)
+
+    def test_private_cursor_requires_row_end_and_preserves_pauses(self):
+        self.prove('''
+open ResidualContinuation PredictiveReplay
+def prediction : Prediction := ⟨[8],[2]⟩
+def cursor := begin initial prediction [2]
+example : finish (run 8 cursor) = none := by decide_cbv
+example : finish (run 9 cursor) = some (learn initial prediction [2]) := by decide_cbv
+example : finish (run 12 cursor) = finish (run 9 cursor) := by decide_cbv
+example : finish (begin initial prediction []) = none := by decide_cbv
+example : finish (run 1 (begin initial prediction [])) = some (learn initial prediction []) := by decide_cbv
+example : (match run 8 cursor with
+  | .pending frame _ => rowFrontier frame.bank
+  | .ready bank => rowFrontier bank) = rowFrontier initial := by decide_cbv
+example : finish (drive [true,false,true,true,false,true,true,true,false,true,true] cursor) = none := by decide_cbv
+example : finish (drive [true,false,true,true,false,true,true,true,false,true,true,true] cursor) =
+  some (learn initial prediction [2]) := by decide_cbv
+example : run (4+5) cursor = run 5 (run 4 cursor) := run_add 4 5 cursor
+''')
+
+    def test_early_publication_and_double_count_controls(self):
+        claims = [
+            'finish (run 8 (begin initial ⟨[8],[2]⟩ [2])) = some (learn initial ⟨[8],[2]⟩ [2])',
+            'finish (begin initial ⟨[],[]⟩ []) = some initial',
+            'finish (drive [false,false] (begin initial ⟨[],[]⟩ [])) = some (learn initial ⟨[],[]⟩ [])',
+            'finish (run 10 (begin initial ⟨[8],[2]⟩ [2])) = some (learn (learn initial ⟨[8],[2]⟩ [2]) ⟨[8],[2]⟩ [2])',
+        ]
+        for claim in claims:
+            with self.subTest(claim=claim):
+                self.prove('open ResidualContinuation PredictiveReplay\n'
+                           f'example : {claim} := by decide_cbv', FALSE)
 
 
 if __name__ == '__main__': unittest.main()
