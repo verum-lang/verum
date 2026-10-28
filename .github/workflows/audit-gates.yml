@@ -220,6 +220,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_causal_coding.py
           python3 -m unittest discover -s verification/external/lean -p test_finite_wire.py
           python3 -m unittest discover -s verification/external/lean -p test_binary_prediction.py
+          python3 -m unittest discover -s verification/external/lean -p test_kt_merge.py
           python3 -m unittest discover -s verification/external/lean -p test_residual_prediction.py
           python3 -m unittest discover -s verification/external/lean -p test_sensory_port.py
           python3 -m unittest discover -s verification/external/lean -p test_action_capture.py
