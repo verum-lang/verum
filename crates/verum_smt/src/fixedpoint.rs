@@ -4,120 +4,19 @@
 //! using Z3's μZ engine, enabling verification of recursive data structures and
 //! inductive properties.
 //!
-//! Based on experiments/z3.rs documentation and z3-sys FFI bindings.
+//! Uses the upstream Z3 fixedpoint API and its ownership rules.
 //! Recursive refinement types (e.g., sorted lists, balanced trees) require fixed-point
 //! reasoning. Z3's muZ engine computes least/greatest fixed points for recursive
 //! predicates, enabling verification of inductive properties like `is_sorted(list)`
 //! or `is_balanced(tree)` that reference themselves in their definitions.
 
-use std::ffi::{CStr, CString};
-use std::sync::Arc;
+use std::ffi::CString;
 use std::time::Instant;
 
 use z3::ast::{Ast, Bool, Dynamic, Int};
-use z3::{Context, FuncDecl, SatResult, Sort, Symbol};
-use z3_sys::{AstKind, DeclKind, *};
+use z3::{Context, Fixedpoint, FuncDecl, SatResult, Sort, Symbol};
 
-use verum_common::{List, Map, Maybe, Set, Text};
-
-// ==================== FFI Helper Functions ====================
-//
-
-// WARNING: These functions rely on the internal memory layout of the `z3` crate
-// (pinned at =0.19.7 in Cargo.toml). If the z3 crate is updated, these layout
-// assumptions MUST be re-verified against the new source. The z3 crate does NOT
-// guarantee layout stability in its public API.
-
-/// Get raw Z3_context from high-level Context
-///
-/// # Safety
-/// The Context must be valid and its internal layout must match ContextRepr.
-/// This is only guaranteed for z3 =0.19.7.
-unsafe fn get_z3_context(ctx: &Context) -> Z3_context {
-    #[repr(C)]
-    struct ContextRepr {
-        z3_ctx: std::rc::Rc<ContextInternalRepr>,
-    }
-
-    #[repr(C)]
-    struct ContextInternalRepr(Z3_context);
-
-    // SAFETY: Relies on z3 =0.19.7 internal layout where Context contains
-    // an Rc<ContextInternal> as its first (and only) field, and ContextInternal
-    // wraps a raw Z3_context pointer. Pinned version prevents silent breakage.
-    let ctx_repr = unsafe { &*(ctx as *const Context as *const ContextRepr) };
-    ctx_repr.z3_ctx.0
-}
-
-/// Get raw Z3_func_decl from FuncDecl
-///
-/// # Safety
-/// The FuncDecl must be valid and its internal layout must match FuncDeclRepr.
-/// This is only guaranteed for z3 =0.19.7.
-unsafe fn get_z3_func_decl(decl: &FuncDecl) -> Z3_func_decl {
-    #[repr(C)]
-    struct FuncDeclRepr {
-        ctx: Context,
-        z3_func_decl: Z3_func_decl,
-    }
-
-    // SAFETY: Relies on z3 =0.19.7 internal layout where FuncDecl is
-    // { ctx: Context, z3_func_decl: Z3_func_decl }. Pinned version prevents
-    // silent breakage on crate update.
-    let decl_repr = unsafe { &*(decl as *const FuncDecl as *const FuncDeclRepr) };
-    decl_repr.z3_func_decl
-}
-
-/// Get raw Z3_ast from AST types
-///
-/// # Safety
-/// The AST type T must have layout { ctx: Context, z3_ast: Z3_ast }.
-/// This is only guaranteed for z3 =0.19.7 AST wrapper types (Bool, Int, etc.).
-unsafe fn get_z3_ast<T>(ast: &T) -> Z3_ast {
-    #[repr(C)]
-    struct AstRepr {
-        ctx: Context,
-        z3_ast: Z3_ast,
-    }
-
-    // SAFETY: Relies on z3 =0.19.7 internal layout where all AST wrapper types
-    // (Bool, Int, Real, BV, etc.) share layout { ctx: Context, z3_ast: Z3_ast }.
-    // The generic T is unconstrained — callers must only pass z3 AST types.
-    let ast_repr = unsafe { &*(ast as *const T as *const AstRepr) };
-    ast_repr.z3_ast
-}
-
-/// Get raw Z3_params from Params
-///
-/// # Safety
-/// The Params must be valid and its internal layout must match ParamsRepr.
-/// This is only guaranteed for z3 =0.19.7.
-unsafe fn get_z3_params(params: &z3::Params) -> Z3_params {
-    #[repr(C)]
-    struct ParamsRepr {
-        ctx: Context,
-        z3_params: Z3_params,
-    }
-
-    // SAFETY: Relies on z3 =0.19.7 internal layout where Params is
-    // { ctx: Context, z3_params: Z3_params }. Pinned version prevents
-    // silent breakage on crate update.
-    let params_repr = unsafe { &*(params as *const z3::Params as *const ParamsRepr) };
-    params_repr.z3_params
-}
-
-// Compile-time layout assertions: if z3 crate changes its struct sizes,
-// these will fail at compile time, catching layout drift before UB occurs.
-const _: () = {
-    assert!(
-        std::mem::size_of::<Context>() > 0,
-        "Context must not be ZST"
-    );
-    assert!(
-        std::mem::size_of::<FuncDecl>() > std::mem::size_of::<Context>(),
-        "FuncDecl must be larger than Context (ctx + z3_func_decl)"
-    );
-};
+use verum_common::{List, Map, Maybe, Set, Shared, Text};
 
 // ==================== Core Types ====================
 
@@ -204,8 +103,6 @@ pub struct FixedPointQuery {
     pub predicate: Text,
     /// Arguments
     pub args: List<Dynamic>,
-    /// Bound on unfolding depth
-    pub max_depth: Maybe<usize>,
 }
 
 /// Fixed-point result
@@ -252,52 +149,6 @@ pub struct FixedPointStats {
     pub num_predicates: usize,
 }
 
-// ==================== Z3 Fixedpoint FFI Wrapper ====================
-
-/// Internal wrapper around Z3_fixedpoint that manages reference counting
-struct FixedPointInternal {
-    z3_fp: Z3_fixedpoint,
-    z3_ctx: Z3_context,
-}
-
-impl FixedPointInternal {
-    /// Create new fixedpoint engine
-    ///
-    /// # Safety
-    /// - z3_ctx must be a valid Z3_context
-    unsafe fn new(z3_ctx: Z3_context) -> Result<Self, Text> {
-        // SAFETY: z3_ctx is a valid Z3_context
-        let z3_fp = unsafe { Z3_mk_fixedpoint(z3_ctx) }
-            .ok_or_else(|| Text::from("Failed to create Z3 fixedpoint engine"))?;
-
-        // Increment reference count
-        // SAFETY: z3_fp is a valid Z3_fixedpoint
-        unsafe { Z3_fixedpoint_inc_ref(z3_ctx, z3_fp) };
-
-        Ok(Self { z3_fp, z3_ctx })
-    }
-
-    /// Get raw Z3_fixedpoint pointer
-    fn as_ptr(&self) -> Z3_fixedpoint {
-        self.z3_fp
-    }
-
-    /// Get raw Z3_context pointer
-    fn ctx_ptr(&self) -> Z3_context {
-        self.z3_ctx
-    }
-}
-
-impl Drop for FixedPointInternal {
-    fn drop(&mut self) {
-        // SAFETY: Both z3_ctx and z3_fp are valid when created
-        // and we manage the reference count properly
-        unsafe {
-            Z3_fixedpoint_dec_ref(self.z3_ctx, self.z3_fp);
-        }
-    }
-}
-
 // ==================== Fixed-Point Engine ====================
 
 /// Z3 Fixed-point engine wrapper
@@ -309,12 +160,12 @@ impl Drop for FixedPointInternal {
 /// - SPACER/PDR engines for program verification
 /// - Recursive predicate solving
 pub struct FixedPointEngine {
-    /// Internal Z3 fixedpoint wrapper
-    fp: Arc<FixedPointInternal>,
+    /// Upstream RAII owner; no assumptions about private Z3 Rust layouts.
+    fp: Fixedpoint,
     /// Z3 context (high-level wrapper)
     ctx: Context,
     /// Registered predicates
-    predicates: Map<Text, FuncDecl>,
+    predicates: Map<Text, Shared<FuncDecl>>,
     /// Rules count
     rules_count: usize,
     /// Start time for stats
@@ -333,8 +184,12 @@ impl FixedPointEngine {
     /// let engine = FixedPointEngine::new(ctx).expect("Failed to create engine");
     /// ```
     pub fn new(ctx: Context) -> Result<Self, Text> {
-        // SAFETY: Context::z3_ctx() returns valid Z3_context
-        let fp = unsafe { Arc::new(FixedPointInternal::new(get_z3_context(&ctx))?) };
+        if ctx != Context::thread_local() {
+            return Err(Text::from(
+                "Fixedpoint engine requires the active Z3 context",
+            ));
+        }
+        let fp = Fixedpoint::new();
 
         Ok(Self {
             fp,
@@ -347,6 +202,7 @@ impl FixedPointEngine {
 
     /// Register a relation (predicate) with the fixedpoint engine
     ///
+    /// Takes ownership and returns a shared handle to the exact declaration.
     /// Relations must be registered before they can be used in rules.
     ///
     /// # Examples
@@ -365,45 +221,20 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-    /// engine.register_relation(&edge);
+    /// let edge = engine.register_relation(edge).unwrap();
     /// ```
-    pub fn register_relation(&mut self, decl: &FuncDecl) -> Result<(), Text> {
-        // SAFETY: Both pointers are valid and alive
-        unsafe {
-            Z3_fixedpoint_register_relation(
-                self.fp.ctx_ptr(),
-                self.fp.as_ptr(),
-                get_z3_func_decl(decl),
-            );
+    pub fn register_relation(&mut self, decl: FuncDecl) -> Result<Shared<FuncDecl>, Text> {
+        self.check_relation(&decl, None)?;
+        let name = Text::from(decl.name());
+        if self.predicates.contains_key(&name) {
+            return Err(Text::from(format!("Relation already registered: {name}")));
         }
-
-        // Extract the predicate name and create a new FuncDecl for storage
-        // We need to recreate because FuncDecl doesn't implement Clone
-        let name = decl.name();
-        let arity = decl.arity();
-
-        // Create domain sorts from the function declaration
-        let mut domain_sorts = List::new();
-        for i in 0..arity {
-            if let Some(sort_kind) = decl.domain(i) {
-                // Convert SortKind to Sort by creating a new one
-                let sort = match sort_kind {
-                    z3::SortKind::Int => Sort::int(),
-                    z3::SortKind::Bool => Sort::bool(),
-                    z3::SortKind::Real => Sort::real(),
-                    z3::SortKind::Bv => Sort::bitvector(32), // Default BV size
-                    _ => Sort::int(),                        // Default fallback
-                };
-                domain_sorts.push(sort);
-            }
-        }
-
-        let domain_refs: List<&Sort> = domain_sorts.iter().collect();
-        let range = Sort::bool(); // Relations always have bool range
-        let new_decl = FuncDecl::new(name.clone(), &domain_refs, &range);
-        self.predicates.insert(Text::from(name), new_decl);
-
-        Ok(())
+        // Own the original declaration. Reconstructing from SortKind loses
+        // BV widths and named sorts; translation is for different contexts.
+        let owned = Shared::new(decl);
+        self.fp.register_relation(&owned);
+        self.predicates.insert(name, owned.clone());
+        Ok(owned)
     }
 
     /// Add a Horn clause rule
@@ -428,7 +259,7 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-    /// engine.register_relation(&edge).unwrap();
+    /// let edge = engine.register_relation(edge).unwrap();
     ///
     /// // Add fact: edge(1, 2)
     /// let x = Int::from_i64(1);
@@ -439,35 +270,13 @@ impl FixedPointEngine {
     /// engine.add_rule(&fact, Some("edge_1_2")).unwrap();
     /// ```
     pub fn add_rule(&mut self, rule: &Bool, name: Option<&str>) -> Result<(), Text> {
-        let symbol = if let Some(n) = name {
-            let cname =
-                CString::new(n).map_err(|e| Text::from(format!("Invalid rule name: {}", e)))?;
-            // SAFETY: Z3 FFI call
-            // - Precondition 1: Z3 context pointer is valid
-            // - Precondition 2: All Z3 API parameters are properly formatted
-            // - Precondition 3: Z3 library is properly initialized
-            // - Proof: Z3 context lifecycle managed by wrapper, API contract enforced
-            unsafe { Z3_mk_string_symbol(self.fp.ctx_ptr(), cname.as_ptr()) }
-        } else {
-            // SAFETY: Z3 FFI call
-            // - Precondition 1: Z3 context pointer is valid
-            // - Precondition 2: All Z3 API parameters are properly formatted
-            // - Precondition 3: Z3 library is properly initialized
-            // - Proof: Z3 context lifecycle managed by wrapper, API contract enforced
-            unsafe { Z3_mk_int_symbol(self.fp.ctx_ptr(), self.rules_count as i32) }
+        if rule.get_ctx() != &self.ctx {
+            return Err(Text::from("Rule belongs to another Z3 context"));
         }
-        .ok_or_else(|| Text::from("Failed to create symbol"))?;
-
-        // SAFETY: All pointers are valid
-        unsafe {
-            Z3_fixedpoint_add_rule(
-                self.fp.ctx_ptr(),
-                self.fp.as_ptr(),
-                get_z3_ast(rule),
-                Some(symbol),
-            );
+        if let Some(name) = name {
+            CString::new(name).map_err(|e| Text::from(format!("Invalid rule name: {e}")))?;
         }
-
+        self.fp.add_rule(rule, name);
         self.rules_count += 1;
         Ok(())
     }
@@ -492,7 +301,7 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-    /// engine.register_relation(&node).unwrap();
+    /// let node = engine.register_relation(node).unwrap();
     ///
     /// // Add facts: node(1), node(2), node(3)
     /// for i in 1..=3 {
@@ -501,158 +310,23 @@ impl FixedPointEngine {
     /// }
     /// ```
     pub fn add_fact(&mut self, decl: &FuncDecl, args: &[Dynamic]) -> Result<(), Text> {
-        // Extract numeric values from Dynamic arguments
-        // Supports Int, BV (bitvector), and Bool constants
-        let mut arg_values: List<u32> = List::with_capacity(args.len());
-
-        for (i, arg) in args.iter().enumerate() {
-            let value = self.extract_constant_value(arg).map_err(|e| {
-                Text::from(format!("Failed to extract value for argument {}: {}", i, e))
-            })?;
-            arg_values.push(value);
-        }
-
-        // SAFETY: All pointers are valid and arg_values contains proper constants
-        unsafe {
-            Z3_fixedpoint_add_fact(
-                self.fp.ctx_ptr(),
-                self.fp.as_ptr(),
-                get_z3_func_decl(decl),
-                arg_values.len() as u32,
-                arg_values.as_ptr() as *mut u32,
-            );
-        }
-
-        self.rules_count += 1;
-        Ok(())
-    }
-
-    /// Extract a constant value from a Dynamic AST node
-    ///
-    /// Supports:
-    /// - Integer constants (Int)
-    /// - Boolean constants (Bool)
-    /// - Bitvector constants (BV)
-    ///
-    /// For non-constant expressions, returns an error.
-    fn extract_constant_value(&self, ast: &Dynamic) -> Result<u32, Text> {
-        // SAFETY: Get raw Z3_ast pointer
-        let z3_ast = unsafe { get_z3_ast(ast) };
-        let ctx = self.fp.ctx_ptr();
-
-        // SAFETY: Check the AST kind to determine how to extract the value
-        let kind = unsafe { Z3_get_ast_kind(ctx, z3_ast) };
-
-        // AstKind is the high-level enum returned by Z3_get_ast_kind
-        match kind {
-            AstKind::Numeral => {
-                // This is a numeral - extract its value
-                self.extract_numeral_value(ctx, z3_ast)
-            }
-            AstKind::App => {
-                // This might be a boolean constant (true/false) or an application
-                self.extract_app_value(ctx, z3_ast)
-            }
-            _ => {
-                // Not a constant - return error
-                Err(Text::from(format!(
-                    "Expected constant value, got AST kind {:?}",
-                    kind
-                )))
+        // Encode an exact ground rule. Z3's compact add_fact API accepts
+        // u32 table indices, not arbitrary source integers or bitvectors.
+        // Converting through that API truncated wide values and lost signs.
+        self.check_relation(decl, Some(args))?;
+        for arg in args {
+            let scalar_literal = arg.kind() == z3::AstKind::Numeral
+                || arg.as_bool().is_some_and(|b| b.as_bool().is_some());
+            if !scalar_literal {
+                return Err(Text::from("A fact requires scalar literal arguments"));
             }
         }
-    }
-
-    /// Extract numeric value from a numeral AST
-    fn extract_numeral_value(&self, ctx: Z3_context, ast: Z3_ast) -> Result<u32, Text> {
-        // SAFETY: Try to get the value as a u64 first
-        let mut value: u64 = 0;
-        let success = unsafe { Z3_get_numeral_uint64(ctx, ast, &mut value) };
-
-        if success {
-            // Successfully extracted u64 value
-            if value > u32::MAX as u64 {
-                // Value too large for u32, but we'll truncate for Z3_fixedpoint_add_fact
-                // which expects unsigned int array
-                Ok((value & 0xFFFFFFFF) as u32)
-            } else {
-                Ok(value as u32)
-            }
-        } else {
-            // Try to get as string and parse
-            // SAFETY: Get numeral as string
-            let str_ptr = unsafe { Z3_get_numeral_string(ctx, ast) };
-            if str_ptr.is_null() {
-                return Err(Text::from("Failed to get numeral value"));
-            }
-
-            // SAFETY: Convert C string to Rust string
-            let c_str = unsafe { CStr::from_ptr(str_ptr) };
-            let num_str = c_str.to_string_lossy();
-
-            // Parse the string as a number
-            // Handle negative numbers by converting to u32 representation
-            if let Ok(val) = num_str.parse::<i64>() {
-                if val < 0 {
-                    // Convert negative to u32 (two's complement-like for indexing)
-                    Ok((val.unsigned_abs() & 0xFFFFFFFF) as u32)
-                } else {
-                    Ok((val as u64 & 0xFFFFFFFF) as u32)
-                }
-            } else if let Ok(val) = num_str.parse::<u64>() {
-                Ok((val & 0xFFFFFFFF) as u32)
-            } else {
-                Err(Text::from(format!(
-                    "Failed to parse numeral string: {}",
-                    num_str
-                )))
-            }
-        }
-    }
-
-    /// Extract value from an application AST (e.g., true/false)
-    fn extract_app_value(&self, ctx: Z3_context, ast: Z3_ast) -> Result<u32, Text> {
-        // SAFETY: Convert Z3_ast to Z3_app using the proper API
-        let app = unsafe {
-            Z3_to_app(ctx, ast).ok_or_else(|| Text::from("Failed to convert AST to app"))?
-        };
-
-        // SAFETY: Get the function declaration for this application
-        let decl = unsafe {
-            Z3_get_app_decl(ctx, app).ok_or_else(|| Text::from("Failed to get app decl"))?
-        };
-
-        // Get the declaration kind
-        let kind = unsafe { Z3_get_decl_kind(ctx, decl) };
-
-        // DeclKind is the high-level enum returned by Z3_get_decl_kind
-        match kind {
-            DeclKind::True => Ok(1),
-            DeclKind::False => Ok(0),
-            DeclKind::Bnum => {
-                // Bitvector numeral - extract value
-                self.extract_numeral_value(ctx, ast)
-            }
-            _ => {
-                // Check if it's still a numeral (some numerals are represented as apps).
-                // SAFETY: FFI call to Z3. Both `ctx` and `ast` are
-                // live pointers passed in from the caller — `ctx`
-                // is the borrowed Z3_context the caller owns, and
-                // `ast` was just extracted from the parent AST
-                // walk in the surrounding match. `Z3_is_numeral_ast`
-                // takes `(Z3_context, Z3_ast)` and returns a bool;
-                // does not mutate state.
-                let is_numeral = unsafe { Z3_is_numeral_ast(ctx, ast) };
-                if is_numeral {
-                    self.extract_numeral_value(ctx, ast)
-                } else {
-                    Err(Text::from(format!(
-                        "Expected constant value, got decl kind {:?}",
-                        kind
-                    )))
-                }
-            }
-        }
+        let arguments: List<&dyn Ast> = args.iter().map(|a| a as &dyn Ast).collect();
+        let fact = decl
+            .apply(&arguments)
+            .as_bool()
+            .ok_or_else(|| Text::from("Fact is not Boolean"))?;
+        self.add_rule(&fact, None)
     }
 
     /// Assert a constraint (background axiom)
@@ -660,10 +334,10 @@ impl FixedPointEngine {
     /// Constraints are used as background axioms when using PDR mode.
     /// They are ignored in standard Datalog mode.
     pub fn assert(&mut self, axiom: &Bool) -> Result<(), Text> {
-        // SAFETY: All pointers are valid
-        unsafe {
-            Z3_fixedpoint_assert(self.fp.ctx_ptr(), self.fp.as_ptr(), get_z3_ast(axiom));
+        if axiom.get_ctx() != &self.ctx {
+            return Err(Text::from("Axiom belongs to another Z3 context"));
         }
+        self.fp.assert(axiom);
         Ok(())
     }
 
@@ -690,7 +364,7 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-    /// engine.register_relation(&edge).unwrap();
+    /// let edge = engine.register_relation(edge).unwrap();
     ///
     /// // Add some edges
     /// let x = Int::from_i64(1);
@@ -704,18 +378,10 @@ impl FixedPointEngine {
     /// assert_eq!(result, SatResult::Sat);
     /// ```
     pub fn query(&mut self, query: &Bool) -> Result<SatResult, Text> {
-        // SAFETY: All pointers are valid
-        let lbool =
-            unsafe { Z3_fixedpoint_query(self.fp.ctx_ptr(), self.fp.as_ptr(), get_z3_ast(query)) };
-
-        let result = match lbool {
-            Z3_L_TRUE => SatResult::Sat,
-            Z3_L_FALSE => SatResult::Unsat,
-            Z3_L_UNDEF => SatResult::Unknown,
-            _ => return Err(Text::from("Invalid Z3_lbool value")),
-        };
-
-        Ok(result)
+        if query.get_ctx() != &self.ctx {
+            return Err(Text::from("Query belongs to another Z3 context"));
+        }
+        Ok(self.fp.query(query))
     }
 
     /// Query multiple relations simultaneously
@@ -723,33 +389,10 @@ impl FixedPointEngine {
     /// More efficient than multiple single queries when you want to check
     /// multiple predicates at once.
     pub fn query_relations(&mut self, relations: &[&FuncDecl]) -> Result<SatResult, Text> {
-        // SAFETY: `get_z3_func_decl` is a thin extractor that
-        // unwraps the `Z3_func_decl` pointer from the high-level
-        // `FuncDecl` wrapper. The wrapper is borrow-checked, so
-        // every `decl` here is alive for the duration of this
-        // function — the resulting pointers are valid until
-        // `query_relations` returns.
-        let decl_ptrs: List<Z3_func_decl> = relations
-            .iter()
-            .map(|decl| unsafe { get_z3_func_decl(decl) })
-            .collect();
-
-        // SAFETY: All pointers are valid
-        let lbool = unsafe {
-            Z3_fixedpoint_query_relations(
-                self.fp.ctx_ptr(),
-                self.fp.as_ptr(),
-                decl_ptrs.len() as u32,
-                decl_ptrs.as_ptr(),
-            )
-        };
-
-        match lbool {
-            Z3_L_TRUE => Ok(SatResult::Sat),
-            Z3_L_FALSE => Ok(SatResult::Unsat),
-            Z3_L_UNDEF => Ok(SatResult::Unknown),
-            _ => Err(Text::from("Invalid Z3_lbool value")),
+        for relation in relations {
+            self.check_relation(relation, None)?;
         }
+        Ok(self.fp.query_relations(relations))
     }
 
     /// Get the answer (solution) from the last query
@@ -760,32 +403,16 @@ impl FixedPointEngine {
     /// In Datalog mode: returns disjunction of all derivations
     /// In PDR mode: returns a single conjunction
     pub fn get_answer(&self) -> Result<Bool, Text> {
-        // SAFETY: All pointers are valid
-        let ast = unsafe {
-            Z3_fixedpoint_get_answer(self.fp.ctx_ptr(), self.fp.as_ptr())
-                .ok_or_else(|| Text::from("No answer available"))?
-        };
-
-        // Convert Z3_ast to Bool
-        // SAFETY: We know the context and AST are valid
-        let bool_ast = unsafe { Bool::wrap(&self.ctx, ast) };
-
-        Ok(bool_ast)
+        self.fp
+            .get_answer()
+            .ok_or_else(|| Text::from("No answer available"))
     }
 
     /// Get reason for unknown result
     ///
     /// Returns a string describing why the query returned Unknown.
     pub fn get_reason_unknown(&self) -> Text {
-        // SAFETY: Pointers are valid
-        unsafe {
-            let reason_ptr = Z3_fixedpoint_get_reason_unknown(self.fp.ctx_ptr(), self.fp.as_ptr());
-            if reason_ptr.is_null() {
-                return Text::from("Unknown reason");
-            }
-            let c_str = CStr::from_ptr(reason_ptr);
-            Text::from(c_str.to_string_lossy().as_ref())
-        }
+        Text::from(self.fp.get_reason_unknown())
     }
 
     /// Set parameters for the fixedpoint engine
@@ -804,33 +431,12 @@ impl FixedPointEngine {
     /// engine.set_params(&params);
     /// ```
     pub fn set_params(&mut self, params: &z3::Params) {
-        // SAFETY: All pointers are valid
-        unsafe {
-            Z3_fixedpoint_set_params(self.fp.ctx_ptr(), self.fp.as_ptr(), get_z3_params(params));
-        }
-    }
-
-    /// Get parameter descriptions
-    pub fn get_param_descrs(&self) -> Result<(), Text> {
-        // SAFETY: Pointers are valid
-        unsafe {
-            Z3_fixedpoint_get_param_descrs(self.fp.ctx_ptr(), self.fp.as_ptr())
-                .ok_or_else(|| Text::from("Failed to get param descriptions"))?;
-        }
-        Ok(())
+        self.fp.set_params(params);
     }
 
     /// Get help string for available parameters
     pub fn get_help(&self) -> Text {
-        // SAFETY: Pointers are valid
-        unsafe {
-            let help_ptr = Z3_fixedpoint_get_help(self.fp.ctx_ptr(), self.fp.as_ptr());
-            if help_ptr.is_null() {
-                return Text::from("No help available");
-            }
-            let c_str = CStr::from_ptr(help_ptr);
-            Text::from(c_str.to_string_lossy().as_ref())
-        }
+        Text::from(self.fp.get_help())
     }
 
     /// Get statistics from the last query
@@ -844,29 +450,9 @@ impl FixedPointEngine {
         }
     }
 
-    /// Convert fixedpoint state to SMT-LIB string
-    pub fn to_string(&self, queries: &[&Bool]) -> Text {
-        // SAFETY: `get_z3_ast` is a thin extractor that unwraps the
-        // raw `Z3_ast` from the high-level `Bool` wrapper. Each
-        // `b` is a borrow that's live for the duration of this
-        // function; the extracted pointer remains valid until
-        // `to_string` returns.
-        let query_asts: List<Z3_ast> = queries.iter().map(|b| unsafe { get_z3_ast(b) }).collect();
-
-        // SAFETY: All pointers are valid
-        unsafe {
-            let str_ptr = Z3_fixedpoint_to_string(
-                self.fp.ctx_ptr(),
-                self.fp.as_ptr(),
-                query_asts.len() as u32,
-                query_asts.as_ptr() as *mut Z3_ast,
-            );
-            if str_ptr.is_null() {
-                return Text::from("");
-            }
-            let c_str = CStr::from_ptr(str_ptr);
-            Text::from(c_str.to_string_lossy().as_ref())
-        }
+    /// Serialize the registered declarations and rules with the upstream printer.
+    pub fn to_smtlib(&self) -> Text {
+        Text::from(self.fp.to_string())
     }
 
     /// Register a recursive predicate
@@ -878,10 +464,7 @@ impl FixedPointEngine {
         let decl = FuncDecl::new(pred.name.to_string(), &param_refs, &bool_sort);
 
         // Register with Z3
-        self.register_relation(&decl)?;
-
-        // Store for later use
-        self.predicates.insert(pred.name.clone(), decl);
+        self.register_relation(decl)?;
 
         // Add rules based on predicate body
         self.add_predicate_rules(pred)?;
@@ -943,8 +526,8 @@ impl FixedPointEngine {
         // Convert atoms to Z3 formulas
         let head_formula = self.atom_to_formula(&rule.head)?;
 
-        if rule.body.is_empty() {
-            // Fact: just the head
+        if rule.body.is_empty() && rule.constraints.is_empty() {
+            // An unconditional ground rule has neither premises nor guards.
             self.add_rule(&head_formula, Some(rule.head.predicate.as_str()))?;
         } else {
             // Build body conjunction
@@ -1024,10 +607,69 @@ impl FixedPointEngine {
             hypothesis.implies(&conclusion_formula)
         };
 
-        // If there are variables, we need to quantify them
-        // For now, we add the rule directly (Z3 will handle free variables)
+        // CHC variables are explicit binders, not uninterpreted constants.
+        let variables: List<Dynamic> = chc
+            .vars
+            .iter()
+            .map(|(name, sort)| Dynamic::new_const(name.as_str(), sort))
+            .collect();
+        let bound: List<&dyn Ast> = variables.iter().map(|v| v as &dyn Ast).collect();
+        let rule = if bound.is_empty() {
+            rule
+        } else {
+            z3::ast::forall_const(&bound, &[], &rule)
+        };
         self.add_rule(&rule, Some(chc.conclusion.predicate.as_str()))?;
 
+        Ok(())
+    }
+
+    /// Check exact domains before the upstream infallible application API.
+    /// A declaration's public array view exposes its context and native domains
+    /// without inspecting private Rust layouts or reconstructing sorts.
+    fn check_relation(&self, decl: &FuncDecl, args: Option<&[Dynamic]>) -> Result<(), Text> {
+        if decl.range() != z3::SortKind::Bool {
+            return Err(Text::from("A fixedpoint relation must return Bool"));
+        }
+        let view = if decl.arity() == 0 {
+            decl.apply(&[])
+        } else {
+            Dynamic::from_ast(&decl.as_array())
+        };
+        if view.get_ctx() != &self.ctx {
+            return Err(Text::from("Relation belongs to another Z3 context"));
+        }
+        let Some(args) = args else { return Ok(()) };
+        if decl.arity() != args.len() {
+            return Err(Text::from(
+                "Relation argument count does not match its declaration",
+            ));
+        }
+        if args.is_empty() {
+            return Ok(());
+        }
+        let ctx = self.ctx.get_z3_context();
+        // SAFETY: view is a live as-array AST in ctx, retaining decl. Every
+        // domain index is below the checked arity. Each argument's context is
+        // checked before its sort handle is passed to the same native context.
+        unsafe {
+            let raw_decl = z3_sys::Z3_get_as_array_func_decl(ctx, view.get_z3_ast())
+                .ok_or_else(|| Text::from("Relation declaration is unavailable"))?;
+            for (index, arg) in args.iter().enumerate() {
+                if arg.get_ctx() != &self.ctx {
+                    return Err(Text::from(
+                        "Relation argument belongs to another Z3 context",
+                    ));
+                }
+                let expected = z3_sys::Z3_get_domain(ctx, raw_decl, index as u32)
+                    .ok_or_else(|| Text::from("Relation domain is unavailable"))?;
+                if !z3_sys::Z3_is_eq_sort(ctx, expected, arg.get_sort().get_z3_sort()) {
+                    return Err(Text::from(format!(
+                        "Relation argument {index} has the wrong sort"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1044,6 +686,7 @@ impl FixedPointEngine {
             }
         };
 
+        self.check_relation(decl, Some(&atom.args))?;
         // Convert args to AST references
         let arg_refs: List<&dyn z3::ast::Ast> =
             atom.args.iter().map(|a| a as &dyn z3::ast::Ast).collect();
@@ -1064,24 +707,10 @@ impl FixedPointEngine {
     ) -> std::result::Result<FixedPointResult, Text> {
         let start = Instant::now();
 
-        // Get the predicate declaration
-        let decl = match self.predicates.get(&query.predicate) {
-            Maybe::Some(d) => d,
-            Maybe::None => {
-                return Err(Text::from(format!(
-                    "Predicate not found: {}",
-                    query.predicate
-                )));
-            }
-        };
-
-        // Convert args to AST and create query formula
-        let arg_refs: List<&dyn z3::ast::Ast> =
-            query.args.iter().map(|a| a as &dyn z3::ast::Ast).collect();
-        let query_ast = decl
-            .apply(&arg_refs)
-            .as_bool()
-            .ok_or_else(|| Text::from("Failed to convert query to Bool"))?;
+        let query_ast = self.atom_to_formula(&Atom {
+            predicate: query.predicate,
+            args: query.args,
+        })?;
 
         // Execute query
         let status = self.query(&query_ast)?;
@@ -1531,7 +1160,6 @@ pub fn solve_recursive_predicate(
     let query = FixedPointQuery {
         predicate: pred_name,
         args: query_args,
-        max_depth: Maybe::Some(1000),
     };
 
     // Solve
@@ -1651,7 +1279,6 @@ impl RecursiveProgramVerifier {
         let query = FixedPointQuery {
             predicate: Text::from(format!("{}_post", func.name)),
             args: List::new(),
-            max_depth: Maybe::Some(100),
         };
 
         let result = self.engine.query_predicate(query)?;

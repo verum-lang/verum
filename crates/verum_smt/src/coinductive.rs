@@ -1070,7 +1070,7 @@ impl CoinductiveChecker {
             &Sort::bool(),
         );
 
-        engine.register_relation(&bisim_decl).map_err(|e| {
+        let bisim_decl = engine.register_relation(bisim_decl).map_err(|e| {
             VerificationError::SolverError(
                 format!("Failed to register bisimulation relation: {}", e).into(),
             )

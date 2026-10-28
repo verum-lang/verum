@@ -68,7 +68,7 @@ fn test_register_relation() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    let result = engine.register_relation(&edge);
+    let result = engine.register_relation(edge);
     assert!(result.is_ok(), "Failed to register relation");
 }
 
@@ -83,7 +83,7 @@ fn test_simple_fact() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     // Add fact: edge(1, 2)
     let x = Int::from_i64(1);
@@ -112,7 +112,7 @@ fn test_multiple_facts() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     // Add multiple facts
     let facts = [(1, 2), (2, 3), (3, 4)];
@@ -148,7 +148,7 @@ fn test_negative_query() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     // Add fact: edge(1, 2)
     let x = Int::from_i64(1);
@@ -187,8 +187,8 @@ fn test_transitive_closure_basic() {
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
     let path = FuncDecl::new("path", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
-    engine.register_relation(&path).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
+    let path = engine.register_relation(path).unwrap();
 
     // Add facts: edge(1,2), edge(2,3)
     let v1 = Int::from_i64(1);
@@ -266,8 +266,8 @@ fn test_transitive_closure_long_chain() {
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
     let path = FuncDecl::new("path", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
-    engine.register_relation(&path).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
+    let path = engine.register_relation(path).unwrap();
 
     // Create chain: 1->2->3->4->5
     for i in 1..5 {
@@ -341,7 +341,7 @@ fn test_get_answer_after_sat() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     let x = Int::from_i64(1);
     let y = Int::from_i64(2);
@@ -376,7 +376,7 @@ fn test_statistics_tracking() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     let x = Int::from_i64(1);
     let y = Int::from_i64(2);
@@ -400,7 +400,7 @@ fn test_datalog_fact_conversion() {
     let int_sort = Sort::int();
     let node = FuncDecl::new("node", &[&int_sort], &Sort::bool());
 
-    engine.register_relation(&node).unwrap();
+    let node = engine.register_relation(node).unwrap();
 
     // Create a DatalogRule (fact)
     let rule = DatalogRule {
@@ -554,7 +554,7 @@ fn test_simple_chc() {
     let int_sort = Sort::int();
     let safe = FuncDecl::new("safe", &[&int_sort], &Sort::bool());
 
-    engine.register_relation(&safe).unwrap();
+    let safe = engine.register_relation(safe).unwrap();
 
     let x = Int::new_const("x");
 
@@ -582,7 +582,7 @@ fn test_large_fact_database() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     // Add 100 facts
     for i in 0..100 {
@@ -603,14 +603,13 @@ fn test_large_fact_database() {
 
 #[test]
 fn test_query_performance() {
-
     let ctx = Context::thread_local();
     let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
 
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     let x = Int::from_i64(1);
     let y = Int::from_i64(2);
@@ -647,7 +646,7 @@ fn test_query_before_facts() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     // Query without any facts
     let x = Int::from_i64(1);
@@ -669,7 +668,7 @@ fn test_self_loop() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("edge", &[&int_sort, &int_sort], &Sort::bool());
 
-    engine.register_relation(&edge).unwrap();
+    let edge = engine.register_relation(edge).unwrap();
 
     // Add self-loop: edge(1, 1)
     let x = Int::from_i64(1);
@@ -698,6 +697,6 @@ fn test_create_and_solve_context() {
     let int_sort = Sort::int();
     let edge = FuncDecl::new("test", &[&int_sort, &int_sort], &Sort::bool());
 
-    let result = engine.register_relation(&edge);
+    let result = engine.register_relation(edge);
     assert!(result.is_ok());
 }
