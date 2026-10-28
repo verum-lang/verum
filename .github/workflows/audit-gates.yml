@@ -270,6 +270,11 @@ jobs:
             --output observer-lifecycle-v5-export.lean --report observer-lifecycle-v5-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_joint_export.py
           python3 -m unittest discover -s verification/external/lean -p test_structural_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_refinement_feasibility.py
+          python3 -m unittest discover -s verification/external/lean -p test_capacity_products.py
+          python3 -m unittest discover -s verification/external/lean -p test_refinement_capacity.py
+          python3 -m unittest discover -s verification/external/lean -p test_categorical_score.py
+          python3 -m unittest discover -s verification/external/lean -p test_retained_transfer_codec.py
           python3 verification/external/lean/check_lifecycle_export.py \
             --export verification/external/lean/fixtures/observer-lifecycle-v1.json \
             --sha256 d81cc445752ee9e95a59fbd8915d02802211a810d6ce182b80025ab482260199 \

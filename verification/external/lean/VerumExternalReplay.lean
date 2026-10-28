@@ -40,3 +40,4 @@ import VerumExternalReplay.RetainedExecutionControls
 import VerumExternalReplay.AffineService
 import VerumExternalReplay.RefinementFeasibility
 import VerumExternalReplay.CapacityRecurrence
+import VerumExternalReplay.CategoricalScore
