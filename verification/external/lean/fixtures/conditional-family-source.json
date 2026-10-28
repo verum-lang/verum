@@ -1,0 +1,14 @@
+{
+  "native_commit": "8543378c0b6e73ee4b3b53ff4eb83af51bca65b1",
+  "source": "rust/crates/synarc-kan/src/exhaust/outcome_code/residual.rs",
+  "source_sha256": "37b099e4a5f9f49874a4f3e46b26124b2001a5dc7cbce94561b3edf8cd29c731",
+  "scope": "one fixed-model, fixed-context, fixed-mask, fixed-length conditional family",
+  "reviewed_correspondence": [
+    "Model::factors uses target XOR fixed mask bit, context and position; it does not consume the target prefix.",
+    "Forecast retains an immutable model; Likelihood multiplies the same fixed-bank factors.",
+    "Score learning updates each position once per row, so updates to earlier positions do not alter later factors.",
+    "The shared length mass and unchanged other-bit factors do not supply within-body dependencies."
+  ],
+  "proof_boundary": "Manual source correspondence review, not a machine-checked Rust translation. No restriction is inferred for mixtures, other contexts or model families. Normalization and ownership laws remain valid.",
+  "extension": "Existing CausalCoding.Kernel admits target-prefix state. Exact kernel transport and a normalized strictly positive correlated witness prove semantic inclusion and strictness, not learnability, efficiency or a native implementation."
+}
