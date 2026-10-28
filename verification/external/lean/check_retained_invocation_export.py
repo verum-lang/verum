@@ -2,8 +2,9 @@
 """Bind original invocation observations to binding, machine and output models.
 
 Correspondence is not a certificate that the observed API contract is desirable.
-Non-poisoned terminal retries are counted explicitly as a known native contract
-defect, not silently reclassified or reexecuted.
+Version 1 non-poisoned terminal retries remain counted as native contract
+defects. Version 3 preserves consumed-result classifications and binds normal
+returns and guards to the reusable affine service model.
 """
 from pathlib import Path
 from observer_export_replay import fields, require, sequence, main as replay_main
@@ -13,16 +14,19 @@ import retained_execution_protocol as machine
 import retained_invocation_protocol as wrapper
 from check_retained_execution_export import MODELS as MACHINE_MODELS
 
-MODELS = [*MACHINE_MODELS, 'ObserverAdmission']
+MODELS = [*MACHINE_MODELS, 'ObserverAdmission', 'AffineService']
 
 
 def emit(data):
     wrapper.validate_scalars(data)
     fields(data, 'schema scope fixtures associations cases')
-    require(data['schema'] == 'synarc-shared-vm-native-v1' and data['scope'] == 'invocation', 'Unsupported invocation schema/scope')
+    require(data['schema'] in ('synarc-shared-vm-native-v1', 'synarc-shared-vm-native-v3')
+            and data['scope'] == 'invocation', 'Unsupported invocation schema/scope')
+    lifecycle = data['schema'] == 'synarc-shared-vm-native-v3'
     claims = machine.Claims(); claims.lines.insert(1, 'import VerumExternalReplay.ObserverAdmission')
+    if lifecycle: claims.lines.insert(2, 'import VerumExternalReplay.AffineService')
     fixtures, owners, cases = {}, {}, {}
-    total_events, services, false_poison = 0, 0, 0
+    total_events, services, false_poison, consumed = 0, 0, 0, 0
 
     def owner(key, kind, payload, fresh=False):
         schema.nat(key)
@@ -45,7 +49,8 @@ def emit(data):
         fields(c, 'id phase association initial services final')
         require(type(c['id']) is str and bool(c['id']) and c['id'] not in cases, 'Duplicate wrapper case')
         require(c['phase'] in ('read', 'update'), 'Invalid wrapper phase')
-        initial = c['initial']; fields(initial, 'owner phase poisoned finished originalLimit inspected bound cut definition input invocation')
+        initial = c['initial']; fields(initial, 'owner phase poisoned finished originalLimit inspected bound cut definition input invocation'
+                                     + (' terminalClass' if lifecycle else ''))
         cut = initial['cut']; fields(cut, 'definition instance state value')
         require(cut['definition'] in fixtures, 'Unbound native Cut definition')
         fixture = fixtures[cut['definition']]
@@ -56,17 +61,20 @@ def emit(data):
         owner(initial['owner'], 'call', c['id'], fresh=True)
         expected_definition = {'updateCode': fixture['updateCodeOwner'], 'readCode': fixture['readCodeOwner'],
             'semantics': fixture['semanticsOwner'], 'updateBinding': fixture['updateBinding'], 'readBinding': fixture['readBinding']}
-        require(initial == {'owner': initial['owner'], 'phase': c['phase'], 'poisoned': False, 'finished': False,
+        expected_initial = {'owner': initial['owner'], 'phase': c['phase'], 'poisoned': False, 'finished': False,
             'originalLimit': None, 'inspected': None, 'bound': [], 'cut': cut, 'definition': expected_definition,
-            'input': external, 'invocation': None}, 'Invalid initial retained call')
+            'input': external, 'invocation': None}
+        if lifecycle: expected_initial['terminalClass'] = 'Undefined'
+        require(initial == expected_initial, 'Invalid initial retained call')
         source = schema.program(fixture[c['phase']]); code_name = f'wrapper_program_{index}'
         claims.lines.append(f'def {code_name} : FiniteCode.Code Primitive Nat := {lean.code(source)}')
-        runner = wrapper.Wrapper(c, fixture, source, code_name, claims, owner)
+        runner = wrapper.Wrapper(c, fixture, source, code_name, claims, owner, lifecycle=lifecycle)
         rows = sequence(c['services']); require(bool(rows), 'No wrapper services')
         for n, s in enumerate(rows):
             require(s['id'] == str(n), 'Wrapper service order changed')
             owner(s['budgetOwner'], 'budget', (c['id'], n), fresh=True)
             result = runner.service_run(s)
+            if result.get('refusal', {}).get('raw', {}).get('kind') == 'consumed': consumed += 1
             if result.get('refusal', {}).get('classification') == 'Poisoned':
                 before = s['before']; inv = before['invocation']
                 poisoned = before['poisoned'] or s['budgetBefore']['poisoned'] or (inv is not None and inv['poisoned'])
@@ -85,8 +93,10 @@ def emit(data):
         require(ac == bc, 'Original wrapper callback streams differ')
         require(a['services'][-1]['returned'] == b['services'][-1]['returned'] and a['services'][-1]['returned']['kind'] == 'complete',
                 'Wrapper pair lacks equal completed readings/preparations')
-    return claims.text(), {'cases': len(cases), 'associations': len(data['associations']), 'services': services,
+    counts = {'cases': len(cases), 'associations': len(data['associations']), 'services': services,
         'native_events': total_events, 'claims': claims.count, 'nonpoisoned_terminal_retries': false_poison}
+    if lifecycle: counts['consumed_retries'] = consumed
+    return claims.text(), counts
 
 
 def main():
@@ -95,8 +105,11 @@ def main():
         Path(__file__).with_name('check_retained_execution_export.py')], description=__doc__,
         scope='Finite original wrapper observations: actual Cut/input/code/semantics owners, paid binding prefixes, '
         'nested machine replay, body retention, root selection, original allowance and per-service dispatch billing. '
-        'Nonpoisoned terminal retries are separately reported native contract defects; correspondence does not certify '
-        'their resumability, arbitrary callbacks, allocation, unobserved lifecycle operations or universal Rust correctness.')
+        'Version 1 nonpoisoned terminal retries are separately reported native contract defects. Version 3 checks '
+        'poison precedence and consumed-result preservation with no repeated native work or callbacks on observed retries. '
+        'Call retries do not exercise the direct Invocation terminal guard. Correspondence does not certify '
+        'progress, unobserved classification projections, arbitrary callbacks, allocation, unobserved lifecycle '
+        'operations or universal Rust correctness.')
 
 
 if __name__ == '__main__': main()

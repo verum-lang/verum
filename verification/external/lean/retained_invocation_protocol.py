@@ -4,6 +4,7 @@ Binding values and selected outputs generate Lean obligations. Nominal allocatio
 classes and every intermediate wrapper snapshot remain strict extraction checks.
 """
 import copy
+import json
 from observer_export_replay import fields, require, sequence
 from retained_execution_protocol import Service, check_report
 import retained_execution_snapshot as schema
@@ -41,12 +42,53 @@ def binding_term(data):
     return lean.array('.state' if 'state' in s else f'(.external {schema.nat(s["external"])})' for s in data['slots'])
 
 
+def terminal_term(classification):
+    require(classification in ('Undefined', 'Resource', 'Poisoned', 'AlreadyReturned'),
+            'Unknown terminal classification')
+    return '.returned' if classification == 'AlreadyReturned' else f'(.failed {json.dumps(classification)})'
+
+
+def lifecycle_term(state):
+    terminal = terminal_term(state['terminalClass'])
+    require(type(state['finished']) is bool and type(state['poisoned']) is bool, 'Invalid lifecycle guards')
+    prior = f'(some {terminal})' if state['finished'] else 'none'
+    return f'(⟨{str(state["poisoned"]).lower()}, {prior}⟩ : AffineService.State String)'
+
+
 class Wrapper:
-    def __init__(self, case, fixture, source, code_name, claims, owner):
+    def __init__(self, case, fixture, source, code_name, claims, owner, *, lifecycle=False):
         self.case, self.fixture, self.source, self.code_name, self.claims, self.owner = case, fixture, source, code_name, claims, owner
         self.current = copy.deepcopy(case['initial']); self.phase = case['phase']; self.work = 0; self.callbacks = []
         self.bind = fixture[self.phase + 'Binding']
         self.bound_owner = None
+        self.lifecycle = lifecycle
+
+    def guard(self, state):
+        if state['poisoned'] or self.budget['poisoned'] or (state['finished'] and not self.lifecycle):
+            result = self.refusal('Poisoned', 'poisoned'); gate = '.poisoned'
+        elif state['finished']:
+            result = self.refusal(state['terminalClass'], 'consumed', priorClassification=state['terminalClass'])
+            gate = f'(.consumed {terminal_term(state["terminalClass"])})'
+        else:
+            result = None; gate = '.enter'
+        if self.lifecycle:
+            self.claims.claim(f'AffineService.gate {lifecycle_term(state)} '
+                f'{str(self.budget["poisoned"]).lower()} = {gate}')
+        return result
+
+    def normal_return(self, result):
+        if not self.lifecycle: return
+        # Refusal class is not a lifecycle discriminator. In particular an
+        # original-limit suspension still retains its owner despite no future
+        # dispatch grant being able to make progress.
+        if result['kind'] == 'complete': outcome = '.returned'
+        elif result['refusal']['raw']['kind'] in ('work', 'suspended'): outcome = '.retained'
+        else:
+            require(result['refusal']['raw']['kind'] in ('binding', 'execution', 'missing_root_output'),
+                    'Unexpected normal terminal refusal')
+            outcome = f'(.failed {json.dumps(result["refusal"]["classification"])})'
+        # RHS comes from the original native service_leave, not our transition.
+        self.claims.claim(f'AffineService.settle {outcome} = {lifecycle_term(self.peek()["state"])}')
 
     def expect(self, kind, event, state):
         require(self.pos < len(self.trace), 'Missing wrapper observation')
@@ -101,7 +143,8 @@ class Wrapper:
                 f'{lean.values(c["input"]["values"])} ({binding_term(self.bind)}.take {len(actual)}) 0 = Except.ok {lean.values(actual)}')
             self.mark('call', 'slot_bound', c)
         actual = self.peek()['state']['invocation']
-        fields(actual, 'owner phase programOwner semanticsOwner inputs retainedInput originalLimit body paused finished poisoned machine')
+        fields(actual, 'owner phase programOwner semanticsOwner inputs retainedInput originalLimit body paused finished poisoned machine'
+               + (' terminalClass' if self.lifecycle else ''))
         bound = actual['inputs']; fields(bound, 'owner values')
         require(bound['values'] == c['bound'], 'Invocation did not receive actual bound inputs')
         self.owner(actual['owner'], 'invocation', (self.case['id'],), fresh=True)
@@ -111,6 +154,7 @@ class Wrapper:
             'programOwner': self.fixture[self.phase + 'CodeOwner'], 'semanticsOwner': self.fixture['semanticsOwner'],
             'inputs': bound, 'retainedInput': bound, 'originalLimit': c['originalLimit'],
             'body': None, 'paused': None, 'finished': False, 'poisoned': False, 'machine': None}
+        if self.lifecycle: c['invocation']['terminalClass'] = 'Undefined'
         c['bound'] = []; self.mark('call', 'invocation_bound', c)
         return None
 
@@ -168,13 +212,14 @@ class Wrapper:
             error = reason['error']; classification = 'Resource' if error['kind'] == 'resource' else 'Undefined'
             self.expect('invocation', {'kind': 'classification_request', 'error': error}, invocation)
             self.expect('invocation', {'kind': 'classification_result', 'error': error, 'classification': classification}, invocation)
+        if self.lifecycle: invocation['terminalClass'] = classification or 'Undefined'
         return self.refusal(classification or 'Undefined', 'execution', execution=report,
             meterError=False, counterCapacity=False, primitiveClassification=classification)
 
     def invoke(self, remaining):
         i = self.current['invocation']; self.mark('invocation', 'service_enter', i)
-        if i['poisoned'] or i['finished'] or self.budget['poisoned']:
-            return self.refusal('Poisoned', 'poisoned')
+        refused = self.guard(i)
+        if refused is not None: return refused
         i['poisoned'] = True; self.budget['poisoned'] = True; self.mark('invocation', 'service_active', i)
         result = None
         if i['body'] is None:
@@ -202,7 +247,9 @@ class Wrapper:
                 result = self.refusal('Undefined', 'missing_root_output', execution=report) if value is None else {
                     'kind': 'complete', 'result': {'kind': 'reading' if self.phase == 'read' else 'prepared',
                         'value': value, 'execution': report, 'sameCut': True}}
+                if self.lifecycle and value is not None: i['terminalClass'] = 'AlreadyReturned'
         i['poisoned'] = False; self.budget['poisoned'] = False
+        self.normal_return(result)
         self.mark('invocation', 'service_leave', i)
         return result
 
@@ -217,16 +264,24 @@ class Wrapper:
         dispatch_before = schema.nat(self.budget['dispatches']); require(dispatch_before <= maximum, 'Budget dispatch count exceeds allowance')
         remaining = maximum - dispatch_before
         self.mark('call', 'service_enter', self.current)
-        if self.current['poisoned'] or self.current['finished'] or self.budget['poisoned']:
-            result = self.refusal('Poisoned', 'poisoned')
-        else:
+        result = self.guard(self.current)
+        if result is None:
             if self.current['originalLimit'] is None: self.current['originalLimit'] = {'kind': 'dispatches', 'max': str(remaining)}
             self.current['poisoned'] = True; self.mark('call', 'service_active', self.current)
             result = None if self.current['invocation'] is not None else self.bind_input()
             if result is None: result = self.invoke(remaining)
             if result['kind'] != 'unwind':
                 self.current['poisoned'] = False
-                if result['kind'] == 'complete' or result['refusal']['classification'] == 'Undefined': self.current['finished'] = True
+                if self.lifecycle:
+                    invocation = self.current['invocation']
+                    consumed = (invocation['finished'] if invocation is not None else
+                                result['kind'] == 'refused' and result['refusal']['raw']['kind'] == 'binding')
+                    if result['kind'] == 'complete' or consumed:
+                        self.current['finished'] = True
+                        self.current['terminalClass'] = ('AlreadyReturned' if result['kind'] == 'complete'
+                                                        else result['refusal']['classification'])
+                    self.normal_return(result)
+                elif result['kind'] == 'complete' or result['refusal']['classification'] == 'Undefined': self.current['finished'] = True
                 self.mark('call', 'service_leave', self.current)
         require(self.pos == len(self.trace), 'Unconsumed wrapper observations')
         require(service['after'] == self.current, 'Wrapper external snapshot differs from actual transition')
