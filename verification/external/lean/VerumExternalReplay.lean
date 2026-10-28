@@ -19,6 +19,7 @@ import VerumExternalReplay.ExactTransports
 import VerumExternalReplay.TypedPrograms
 import VerumExternalReplay.AcquiredBytes
 import VerumExternalReplay.ConditionalExpressiveness
+import VerumExternalReplay.FrozenTraining
 import VerumExternalReplay.TypedProgramControls
 import VerumExternalReplay.PartialObservers
 import VerumExternalReplay.PartialObserverControls
