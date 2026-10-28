@@ -37,3 +37,4 @@ import VerumExternalReplay.RetainedNames
 import VerumExternalReplay.RetainedExecutionTrace
 import VerumExternalReplay.RetainedNative
 import VerumExternalReplay.RetainedExecutionControls
+import VerumExternalReplay.AffineService
