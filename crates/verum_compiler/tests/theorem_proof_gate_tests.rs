@@ -197,7 +197,11 @@ fn true_theorem_verifies_without_diagnostics() {
         fn main() { }
     "#;
     let (ok, errors, warnings) = check(source);
-    assert!(ok, "a true, proven theorem must compile; errors: {:?}", errors);
+    assert!(
+        ok,
+        "a true, proven theorem must compile; errors: {:?}",
+        errors
+    );
     assert!(
         !errors.iter().any(|c| c == "E0319"),
         "no E0319 expected: {:?}",
@@ -248,5 +252,97 @@ fn false_lemma_fails_compilation() {
         errors.iter().any(|c| c == "E0319"),
         "expected E0319 for lemma, got: {:?}",
         errors
+    );
+}
+
+/// Finite KT ratios are compared by exact cross multiplication, never by
+/// integer division or rounded floating point. Their identification with the
+/// predictor is separately proved by VerumExternalReplay.KTMerge in Lean.
+#[test]
+fn finite_kt_comparisons_discharge_and_reversed_comparisons_fail() {
+    for (truth, falsehood) in [
+        (
+            "0 < 62142696120150 && 315208830571481 > 3 * 62142696120150",
+            "0 < 62142696120150 && 315208830571481 <= 3 * 62142696120150",
+        ),
+        (
+            "0 < 601080390 && 1 < 601080390",
+            "0 < 601080390 && 1 >= 601080390",
+        ),
+    ] {
+        let source = format!("theorem finite_claim() : {truth} proof by omega;");
+        let (ok, errors, warnings) = check(&source);
+        assert!(
+            ok && errors.is_empty() && warnings.is_empty(),
+            "{errors:?} {warnings:?}"
+        );
+        let source = format!("theorem finite_claim() : {falsehood} proof by omega;");
+        let (ok, errors, warnings) = check(&source);
+        assert!(!ok, "false finite comparison was accepted");
+        assert_eq!(errors, ["E0319"], "must reach the actual proof gate");
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+}
+
+/// An explicit external-module gate for closed arithmetic theorem modules.
+/// The whole supplied source goes through the current check-only compiler;
+/// each theorem is also discharged without registering sibling assumptions.
+#[test]
+#[ignore = "requires VERUM_CLOSED_THEOREM_MODULE pointing to an external .vr source"]
+fn external_closed_theorem_module() {
+    use verum_ast::ItemKind;
+    use verum_common::span::FileId;
+    use verum_compiler::phases::proof_verification::{
+        ProofEvidence, ProofVerificationResult, verify_proof_body_with_aliases_and_graph,
+    };
+    use verum_fast_parser::FastParser;
+    use verum_smt::{Context, proof_search::ProofSearchEngine};
+
+    let path = std::env::var_os("VERUM_CLOSED_THEOREM_MODULE").expect("explicit source path");
+    let source = std::fs::read_to_string(&path).expect("read actual external module");
+    let module = FastParser::new()
+        .parse_module_str(&source, FileId::new(0))
+        .expect("external module parses");
+    let mut count = 0;
+    for item in &module.items {
+        assert!(
+            !matches!(item.kind, ItemKind::Axiom(_)),
+            "module contains an axiom"
+        );
+        let Some(theorem) = item.kind.as_theorem_decl() else {
+            continue;
+        };
+        let result = verify_proof_body_with_aliases_and_graph(
+            &mut ProofSearchEngine::new(),
+            &Context::new(),
+            theorem,
+            &Default::default(),
+            None,
+            Some(&module),
+        );
+        let ProofVerificationResult::Verified(summary) = result else {
+            panic!("{result:?}")
+        };
+        assert_eq!(summary.evidence, ProofEvidence::TacticDischarge);
+        assert!(!summary.has_incomplete_steps());
+        assert!(
+            summary.goal.hypotheses.is_empty(),
+            "closed claim has premises"
+        );
+        count += 1;
+    }
+    assert!(count > 0, "module contains no checked theorems");
+    let (ok, errors, warnings) = check(&source);
+    assert!(
+        ok && errors.is_empty() && warnings.is_empty(),
+        "{errors:?} {warnings:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        source,
+        "source changed during verification"
+    );
+    eprintln!(
+        "Verified {count} closed theorem bodies from {path:?}; tactic metadata is not a kernel certificate."
     );
 }
