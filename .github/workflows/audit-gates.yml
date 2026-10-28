@@ -217,6 +217,7 @@ jobs:
             --report enumerable-mass-acceptance.json
           python3 verification/external/lean/check_categorical_prediction.py \
             --report categorical-prediction-acceptance.json
+          python3 -m unittest discover -s verification/external/lean -p test_causal_coding.py
           python3 verification/external/lean/check_finite_admission.py \
             --report finite-admission-acceptance.json
           python3 verification/external/lean/check_acquisition_scheduling.py \
