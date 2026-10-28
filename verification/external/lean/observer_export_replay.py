@@ -75,7 +75,10 @@ def unique_object(pairs):
 
 def load(path):
     require(path.stat().st_size <= 16 * 1024 * 1024, 'Export exceeds 16 MiB limit')
-    return json.loads(path.read_text(), object_pairs_hook=unique_object)
+    def reject_constant(value):
+        raise ValueError(f'Non-JSON constant: {value}')
+    return json.loads(path.read_text(), object_pairs_hook=unique_object,
+                      parse_constant=reject_constant)
 
 
 def declarations(source):

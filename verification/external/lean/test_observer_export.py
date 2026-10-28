@@ -202,6 +202,18 @@ end FrozenObserverExport
         with self.assertRaises(ValueError):
             json.loads('{"Nat":1,"Nat":2}', object_pairs_hook=unique_object)
 
+    def test_json_ingress_rejects_nonfinite_metadata(self):
+        with tempfile.TemporaryDirectory(prefix='verum-export-json-') as directory:
+            path=Path(directory)/'export.json'
+            for token in ('NaN','Infinity','-Infinity'):
+                path.write_text('{"metadata":{"unprojected":['+token+']}}')
+                with self.subTest(token=token),self.assertRaisesRegex(ValueError,'Non-JSON constant'):
+                    load(path)
+            path.write_text('{"metadata":{"value":1,"value":2}}')
+            with self.assertRaisesRegex(ValueError,'Duplicate JSON key'):load(path)
+            path.write_text('{"metadata":{"value":null,"description":"NaN","count":24}}')
+            self.assertEqual(load(path),{'metadata':{'value':None,'description':'NaN','count':24}})
+
     def test_unknown_semantics_and_fields_are_refused(self):
         for name, val in [('semantics', 'FutureVersion'), ('schema_version', True),
                           ('schema_version', 2), ('unmodeled_effect', 'write')]:
