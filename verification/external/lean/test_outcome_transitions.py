@@ -72,6 +72,13 @@ example : AtomicPublication.admissible (AtomicPublication.fork (origin 42) 7)
 example : AtomicPublication.admissible
     (AtomicPublication.commit (origin 42) (publication origin ready 5 6)).current
     (publication origin ready 5 6) = false := by decide_cbv
+def shared := FrozenTraining.ktRule (fun _ : Nat => 0) (fun n _ => n+1)
+def joint := fromFrozen shared (fun (_ : List Bool) _ (_ : Unit) => some 0)
+  (fun state _ outcome => some (state++outcome))
+def jointTicket : Frozen Nat (List Bool) (FrozenTraining.Counts Nat) Unit Nat :=
+  ⟨42,[],fun _ _ => 0,(),0⟩
+example : (complete joint jointTicket ⟨42,[false,false]⟩).map (fun r => (r.state,r.bank 0 false)) =
+  some ([false,false],2) := by decide_cbv
 ''')
 
     def test_wrong_authority_or_outcome_is_rejected(self):

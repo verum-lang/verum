@@ -1,5 +1,6 @@
 import VerumExternalReplay.AtomicPublication
 import VerumExternalReplay.PartialObservers
+import VerumExternalReplay.FrozenTraining
 
 /-! One causal update contract for live execution and retained-history replay.
 An anchor denotes a retained dispatch identity, not merely equal action bytes.
@@ -111,6 +112,27 @@ def replay (protocol : Protocol S B E F Y) (rows : List (Row E Y)) (state : S ×
 theorem replay_append (protocol : Protocol S B E F Y) (first second : List (Row E Y)) (state : S × B) :
     replay protocol (first++second) state = (replay protocol first state).bind (replay protocol second) :=
   PartialObservers.fold_append _ _ _ _
+
+/-- Compose outcome-dependent state learning with the shared frozen-row
+scorer. The same complete target drives the transition and training delta. -/
+def fromFrozen (rule : FrozenTraining.Rule B F Delta)
+    (predict : S → B → E → Option F) (update : S → E → List Bool → Option S) :
+    Protocol S B E F (List Bool) where
+  predict := predict
+  update := update
+  learn bank path outcome := some
+    (FrozenTraining.result rule (FrozenTraining.feed rule (FrozenTraining.begin rule bank path) outcome)).bank
+
+theorem frozen_completion_exact [DecidableEq A] (rule : FrozenTraining.Rule B F Delta)
+    (predict : S → B → E → Option F) (update : S → E → List Bool → Option S)
+    (ticket : Frozen A S B E F) (capture : Capture A (List Bool)) (ready : Ready A S B E F (List Bool))
+    (h : complete (fromFrozen rule predict update) ticket capture = some ready) :
+    let frame := FrozenTraining.feed rule (FrozenTraining.begin rule ticket.bank ticket.forecast) capture.outcome
+    ready.bank = (FrozenTraining.result rule frame).bank ∧
+    ExactMass.Equal frame.mass (CausalCoding.likelihood (rule.forecast ticket.bank) ticket.forecast capture.outcome) := by
+  obtain ⟨_,state,bank,_,learn,rfl⟩ := (completion_exact _ ticket capture ready).mp h
+  cases Option.some.inj learn
+  exact ⟨rfl,FrozenTraining.score_matches_forecast rule ticket.bank ticket.forecast capture.outcome⟩
 
 /-- Reuse the existing nominal publication guard. Allocation decoding is a
 separate, explicit correspondence premise below. -/
