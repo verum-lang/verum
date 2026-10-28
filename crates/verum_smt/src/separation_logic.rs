@@ -1698,9 +1698,7 @@ impl SepLogicEncoder {
     ) -> Bool {
         match assertion {
             SepAssertion::Emp => {
-                // Empty heap: forall addr. NOT allocated[addr]
-                // Approximation: true (checked by disjointness)
-                Bool::from_bool(true)
+                allocated.eq(&Array::const_array(&self.model.addr_sort, &Bool::from_bool(false)))
             }
 
             SepAssertion::Pure(expr) => {
@@ -1709,42 +1707,36 @@ impl SepLogicEncoder {
             }
 
             SepAssertion::PointsTo { location, value } => {
-                // x |-> v: heap[x] == v AND allocated[x]
+                // Exact singleton ownership, not membership in a larger heap.
                 let addr = self.encode_expr_as_addr(location);
                 let val = self.encode_expr_as_value(value);
-
                 let heap_lookup = heap.select(&addr);
-                let is_allocated = allocated.select(&addr);
-
                 let val_eq = heap_lookup.eq(&val);
-                let is_alloc_bool = is_allocated
-                    .as_bool()
-                    .unwrap_or_else(|| Bool::from_bool(true));
-
-                Bool::and(&[&val_eq, &is_alloc_bool])
+                let singleton = Array::const_array(&self.model.addr_sort, &Bool::from_bool(false))
+                    .store(&addr, &Bool::from_bool(true));
+                Bool::and(&[&val_eq, &allocated.eq(&singleton)])
             }
 
             SepAssertion::Sep { left, right } => {
-                // P * Q: P(h1) AND Q(h2) AND disjoint(dom(h1), dom(h2))
-                // AND h = h1 + h2
-
-                // Create fresh heaps for left and right
-                let h1 = self.model.fresh_heap("h1");
+                // Split only the domain. Both subheaps restrict the same value
+                // array, so no additional value-array witnesses are needed.
+                // Bind witnesses inside the assertion: free arrays would turn
+                // a negated conclusion into a test of one arbitrary partition.
                 let a1 = self.model.fresh_allocated("a1");
-                let h2 = self.model.fresh_heap("h2");
                 let a2 = self.model.fresh_allocated("a2");
-
-                // Encode sub-assertions
-                let left_encoded = self.encode_assertion(left, &h1, &a1);
-                let right_encoded = self.encode_assertion(right, &h2, &a2);
-
-                // Disjointness: forall addr. NOT (a1[addr] AND a2[addr])
-                let disjoint = self.encode_disjointness(&a1, &a2);
-
-                // Heap composition: heap = h1 + h2 (where a1 and a2 determine which to use)
-                let composition = self.encode_heap_composition(heap, allocated, &h1, &a1, &h2, &a2);
-
-                Bool::and(&[&left_encoded, &right_encoded, &disjoint, &composition])
+                let left_encoded = self.encode_assertion(left, heap, &a1);
+                let right_encoded = self.encode_assertion(right, heap, &a2);
+                let address = self.model.fresh_addr("partition");
+                let left_owned = a1.select(&address).as_bool().expect("Boolean allocation map");
+                let right_owned = a2.select(&address).as_bool().expect("Boolean allocation map");
+                let union = Bool::or(&[&left_owned, &right_owned]);
+                let partition = Bool::and(&[
+                    &allocated.select(&address).eq(&union),
+                    &Bool::and(&[&left_owned, &right_owned]).not(),
+                ]);
+                let partition = z3::ast::forall_const(&[&address], &[], &partition);
+                let body = Bool::and(&[&left_encoded, &right_encoded, &partition]);
+                z3::ast::exists_const(&[&a1, &a2], &[], &body)
             }
 
             SepAssertion::Wand { left, right } => {
@@ -1815,22 +1807,22 @@ impl SepLogicEncoder {
             SepAssertion::Exists { var, body } => {
                 // Existential: create fresh variable and encode body
                 let fresh_var = self.model.fresh_value(var.as_str());
-                self.bindings
+                let previous = self.bindings
                     .borrow_mut()
                     .insert(var.clone(), fresh_var.clone());
                 let result = self.encode_assertion(body, heap, allocated);
-                self.bindings.borrow_mut().remove(var);
-                result
+                self.restore_binding(var, previous);
+                z3::ast::exists_const(&[&fresh_var], &[], &result)
             }
 
             SepAssertion::Forall { var, body } => {
                 // Universal: create bound variable
                 let bound_var = self.model.fresh_value(var.as_str());
-                self.bindings
+                let previous = self.bindings
                     .borrow_mut()
                     .insert(var.clone(), bound_var.clone());
                 let body_encoded = self.encode_assertion(body, heap, allocated);
-                self.bindings.borrow_mut().remove(var);
+                self.restore_binding(var, previous);
 
                 // Create universal quantifier
                 z3::ast::forall_const(&[&bound_var], &[], &body_encoded)
@@ -1917,6 +1909,13 @@ impl SepLogicEncoder {
     }
 
     // ==================== Quantifier Elimination ====================
+
+    fn restore_binding(&self, name: &Text, previous: Maybe<Dynamic>) {
+        match previous {
+            Maybe::Some(value) => { self.bindings.borrow_mut().insert(name.clone(), value); }
+            Maybe::None => { self.bindings.borrow_mut().remove(name); }
+        }
+    }
 
     /// Apply quantifier elimination for decidable fragments of separation logic
     ///
