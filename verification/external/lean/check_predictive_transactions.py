@@ -143,7 +143,8 @@ class Replay:
         self.claim(f'AdaptiveLength.total {name}.lengths = {natural(item["lengths"]["total"])}')
         return name
 
-    def packet(self, data, index):
+    def metadata(self, data, index):
+        """Decode shared source/identity tables without inventing lifecycle events."""
         fields(data, 'format case scope semantics wire_protocol definitions inputs scores models protocols events')
         require(data['format'] == 'synarc-residual-transactions-v1', 'Unknown transaction format')
         text(data['case']); text(data['scope'])
@@ -196,6 +197,8 @@ class Replay:
             natural(entry['interface'],255)
             for v in sequence(entry['values']): natural(v)
             self.inputs[identity] = entry
+    def packet(self, data, index):
+        self.metadata(data, index)
         events = sequence(data['events']); require(events, 'Empty transaction trace')
         for event in events:
             self.event(event)

@@ -1,0 +1,69 @@
+{
+  "export_sha256": "769c3eb404275391c6d72db97dac0055a74380e0f84b867226c5268b833a31eb",
+  "native_source_commit": "fdcaf3670d8f828e999f7ff8b08ab940c0bef758",
+  "native_binary_sha256": "403fc9cddcdf192582fe079d12c491015c9f2148cca1daff4c2b271e1976af4e",
+  "native_producer_sha256": "fd997d696583accba2ac1c2ac02e976b3670f6465772087f78bf467223b36ec1",
+  "independently_verified_artifacts": 1494,
+  "independently_verified_sources": 1470,
+  "retained_files": [
+    {
+      "file": "expressiveness-native-v1.receipt.json.gz",
+      "sha256": "11b8118144869038efb4a07cf8a02f69c593d3f811e8ab2af0b02046498a468d",
+      "bytes": 444897
+    },
+    {
+      "file": "expressiveness-native-v1.source.patch.gz",
+      "sha256": "bdf234fe6d6a13ef169a95074c51e649d550c0fe09055f0aa46c664ff1eecffd",
+      "bytes": 146671
+    },
+    {
+      "file": "expressiveness-native-v1.acquisition.log.gz",
+      "sha256": "5944d1d16c7a72a15886014a55d293c0bcff78874fe02955ff775c22088970f8",
+      "bytes": 19905
+    },
+    {
+      "file": "expressiveness-native-v1.residual-law.log.gz",
+      "sha256": "73f0da38821177b3bfe640b35ebc809307aac58380be7d48de2c1ce362fa9790",
+      "bytes": 5496
+    },
+    {
+      "file": "expressiveness-native-v1.source-0.rs.gz",
+      "sha256": "86d16ba6c319ebc5e3cafb85334fc4ca31d54b7eb7fee21a27faef3c97729758",
+      "bytes": 21083,
+      "source_path": "rust/crates/synarc-kan/src/exhaust/outcome_code/residual.rs"
+    },
+    {
+      "file": "expressiveness-native-v1.source-1.rs.gz",
+      "sha256": "42504d945ac3930cf856ce29ef081f56f64dca44ceb7e34f30b2809dedce3c03",
+      "bytes": 20209,
+      "source_path": "rust/crates/synarc-kan/src/exhaust/outcome_code/residual/courts.rs"
+    },
+    {
+      "file": "expressiveness-native-v1.source-2.rs.gz",
+      "sha256": "c9a6de65fcc76efaec0fc6036604bcd68823f2579a7b11a3f3248b89c8873b9b",
+      "bytes": 44896,
+      "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/residual_courts.rs"
+    },
+    {
+      "file": "expressiveness-native-v1.source-3.rs.gz",
+      "sha256": "40f09eda5583c55e274d75c0f3b7e856f6b9c820a8b5d5e120b8fbe86c46bb20",
+      "bytes": 12708,
+      "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/installation/predictive.rs"
+    },
+    {
+      "file": "expressiveness-native-v1.source-4.rs.gz",
+      "sha256": "587e1fe519ee54669bba27d61f8fb068da0b370e3258da21192b08946b293711",
+      "bytes": 10024,
+      "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/installation/predictive/transaction_export.rs"
+    }
+  ],
+  "extraction": {
+    "marker": "SYNARC_BOUNDARY=",
+    "ordered_logs": [
+      "expressiveness-native-v1.acquisition.log.gz",
+      "expressiveness-native-v1.residual-law.log.gz"
+    ],
+    "packets": 4
+  },
+  "scope": "Legacy pre-event outcome-order boundary and explicit positional conditional queries from one frozen native build. Seed bank and callback encodings are premises. This does not replay the new causal lifecycle or internal VM continuations."
+}
