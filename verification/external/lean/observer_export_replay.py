@@ -3,12 +3,31 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import uuid
 from check_typed_programs import ROOT, check, require_success, run, sha256
 
 MAX64 = 2**64 - 1
+
+
+def module_closure(roots):
+    """Retain the complete local import graph used by an immutable replay."""
+    ordered, active, visited = [], set(), set()
+    def visit(name):
+        require(re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*',name), 'Invalid local module name')
+        require(name not in active, 'Cyclic local model imports')
+        if name in visited: return
+        active.add(name)
+        source = (ROOT/'VerumExternalReplay'/(name+'.lean')).read_text()
+        for line in re.findall(r'^import\s+([^\n]+)',source,re.M):
+            for module in line.split('--',1)[0].split():
+                if module.startswith('VerumExternalReplay.'):
+                    visit(module.removeprefix('VerumExternalReplay.'))
+        active.remove(name); visited.add(name); ordered.append(name)
+    for root in roots: visit(root)
+    return ordered
 
 
 def require(condition, message):

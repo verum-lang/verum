@@ -340,13 +340,14 @@ class Replay:
         if item['prepared'] is not None: self.prepared(item['prepared'],item['reading'],ticket['event'])
         return self.accumulator(item['accumulator'],ticket,item['target'])
 
-    def update(self, item, ticket=None):
+    def update(self, item, ticket=None, *, completed_event=None):
         fields(item,'reading prepared retained_sources previous_score next_score target')
         self.reading(item['reading'])
         require(item['reading']['retained_sources'] == item['retained_sources'], 'Update sources differ')
         sources = self.source(item['retained_sources'])
         require(len({e for _,e in sources}) == 1, 'Ambiguous prepared input')
-        prep = self.prepared(item['prepared'],item['reading'],sources[0][1])
+        prep = self.prepared(item['prepared'],item['reading'],
+                             sources[0][1] if completed_event is None else completed_event)
         for k in ('previous_score','next_score'):
             require(int(natural(item[k])) in self.scores, 'Unknown update score')
         self.claim(f'({item["next_score"]} : Nat) ≠ {item["previous_score"]}')
@@ -453,35 +454,7 @@ class Replay:
             self.claim(f'({self.learning_snapshot(learning,ticket)} : Nat) = 0')
             self.learning = (ticket,learning); return
         if kind == 'commit':
-            fields(row,'kind before incoming_update result after')
-            before = self.runtime(row['before']); update = row['incoming_update']
-            require(self.updates[key(update)] > 0, 'Commit used an unobserved or consumed update')
-            self.updates[key(update)] -= 1
-            name = f'{self.prefix}_update_{self.counts["commits"]}'
-            self.lines.append(f'def {name} : AtomicPublication.Update Nat Nat Nat Nat (List Nat) := {self.update(update)}')
-            after = self.runtime(row['after'],observe=False); result = row['result']
-            require(row['after']['protocol'] == row['before']['protocol'], 'Commit changed protocol')
-            if result.get('kind') == 'refused':
-                fields(result,'kind returned_update')
-                require(result['returned_update'] == update, 'Refusal lost or changed retained update')
-                self.updates[key(update)] += 1
-                self.claim(f'AtomicPublication.admissible {before} {name} = false')
-                self.counts['refused_commits'] += 1
-            else:
-                fields(result,'kind receipt'); require(result['kind']=='accepted','Unknown commit result')
-                receipt = result['receipt']; fields(receipt,'reading committed retained_sources target previous_score next_score')
-                fields(receipt['reading'],'cut value'); fields(receipt['committed'],'before after')
-                require(receipt['reading'] == {k:update['reading'][k] for k in ('cut','value')} and
-                    all(receipt[k] == update[k] for k in ('retained_sources','target','previous_score','next_score')),
-                    'Receipt changed transaction data')
-                a,b = self.cut(receipt['committed']['before']),self.cut(receipt['committed']['after'])
-                self.claim(f'AtomicPublication.admissible {before} {name} = true')
-                self.claim(f'(match (AtomicPublication.commit {before} {name}).receipt with '
-                    f'| .ok r => some (r.committed.before,r.committed.after) | .error _ => none) = some ({a},{b})')
-                self.counts['accepted_commits'] += 1
-            self.claim(f'(AtomicPublication.commit {before} {name}).current = {after}')
-            self.live[row['before']['cut']['owner']] = row['after']
-            self.counts['commits'] += 1; return
+            self.commit(row); return
         if kind == 'frozen_forecast':
             fields(row,'kind label frontier'); label = text(row['label'])
             stem,sep,phase = label.rpartition('-')
@@ -499,6 +472,37 @@ class Replay:
                 self.counts['retained_forecasts'] += 1
             return
         raise ValueError('Unknown transaction event')
+
+    def commit(self, row, *, completed_event=None):
+        fields(row,'kind before incoming_update result after')
+        before = self.runtime(row['before']); update = row['incoming_update']
+        require(self.updates[key(update)] > 0, 'Commit used an unobserved or consumed update')
+        self.updates[key(update)] -= 1
+        name = f'{self.prefix}_update_{self.counts["commits"]}'
+        self.lines.append(f'def {name} : AtomicPublication.Update Nat Nat Nat Nat (List Nat) := {self.update(update, completed_event=completed_event)}')
+        after = self.runtime(row['after'],observe=False); result = row['result']
+        require(row['after']['protocol'] == row['before']['protocol'], 'Commit changed protocol')
+        if result.get('kind') == 'refused':
+            fields(result,'kind returned_update')
+            require(result['returned_update'] == update, 'Refusal lost or changed retained update')
+            self.updates[key(update)] += 1
+            self.claim(f'AtomicPublication.admissible {before} {name} = false')
+            self.counts['refused_commits'] += 1
+        else:
+            fields(result,'kind receipt'); require(result['kind']=='accepted','Unknown commit result')
+            receipt = result['receipt']; fields(receipt,'reading committed retained_sources target previous_score next_score')
+            fields(receipt['reading'],'cut value'); fields(receipt['committed'],'before after')
+            require(receipt['reading'] == {k:update['reading'][k] for k in ('cut','value')} and
+                all(receipt[k] == update[k] for k in ('retained_sources','target','previous_score','next_score')),
+                'Receipt changed transaction data')
+            a,b = self.cut(receipt['committed']['before']),self.cut(receipt['committed']['after'])
+            self.claim(f'AtomicPublication.admissible {before} {name} = true')
+            self.claim(f'(match (AtomicPublication.commit {before} {name}).receipt with '
+                f'| .ok r => some (r.committed.before,r.committed.after) | .error _ => none) = some ({a},{b})')
+            self.counts['accepted_commits'] += 1
+        self.claim(f'(AtomicPublication.commit {before} {name}).current = {after}')
+        self.live[row['before']['cut']['owner']] = row['after']
+        self.counts['commits'] += 1; return
 
 
 def emit(data):

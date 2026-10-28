@@ -1,0 +1,50 @@
+{
+  "export_sha256": "172663fe5750751ed909b2ca0d6a411bdd02f3168260d9bc5b1ec64f79b364b4",
+  "native_source_commit": "fdcaf3670d8f828e999f7ff8b08ab940c0bef758",
+  "native_binary_sha256": "cab94aa64bea2afbdd4aaf77501c1131a12416ab827cff4286900fcc1385db72",
+  "retained_files": [
+    {
+      "file": "causal-outcome-native-v1.receipt.json.gz",
+      "sha256": "f7990b260cedcee722f0fd55fa8076a4f71a439657b414a129a5e64966fa4e5d",
+      "bytes": 448252
+    },
+    {
+      "file": "causal-outcome-native-v1.corrected-receipt.json.gz",
+      "sha256": "4bd82b2d3f2eb7705933f3eb2c42e21eb0990bbd23e07d36dd0770c8609b21ed",
+      "bytes": 427389
+    },
+    {
+      "file": "causal-outcome-native-v1.source.patch.gz",
+      "sha256": "f90023cab48fc4a175501912db41abe617e115384df157a029c9a6a404ad3a1a",
+      "bytes": 152140
+    },
+    {
+      "file": "causal-outcome-native-v1.source-0.rs.gz",
+      "sha256": "ceb201d27edf1eb5ebc0a4c4518a4b05eea74f01d245992c89082ed79d418ccf",
+      "bytes": 22202,
+      "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/causal_update_courts.rs"
+    },
+    {
+      "file": "causal-outcome-native-v1.source-1.rs.gz",
+      "sha256": "40f09eda5583c55e274d75c0f3b7e856f6b9c820a8b5d5e120b8fbe86c46bb20",
+      "bytes": 12708,
+      "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/installation/predictive.rs"
+    },
+    {
+      "file": "causal-outcome-native-v1.source-2.rs.gz",
+      "sha256": "587e1fe519ee54669bba27d61f8fb068da0b370e3258da21192b08946b293711",
+      "bytes": 10024,
+      "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/installation/predictive/transaction_export.rs"
+    },
+    {
+      "file": "causal-outcome-native-v1.source-3.rs.gz",
+      "sha256": "86d16ba6c319ebc5e3cafb85334fc4ca31d54b7eb7fee21a27faef3c97729758",
+      "bytes": 21083,
+      "source_path": "rust/crates/synarc-kan/src/exhaust/outcome_code/residual.rs"
+    }
+  ],
+  "independently_verified_artifacts": 1498,
+  "original_runner_status": "failed",
+  "corrected_runner_status": "passed",
+  "scope": "Outcome-aware scalar VM snapshots, complete exported histories and commit observations. Source association and callback semantics are declared premises; physical journal, interface pointer identity, internal VM continuations and acquisition acceptance are not certified."
+}

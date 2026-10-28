@@ -7,9 +7,10 @@ import sys
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from check_observer_export import ROOT, batches, emit, load, unique_object, value
 from check_typed_programs import check, sha256
-from observer_export_replay import declarations
+from observer_export_replay import declarations, module_closure
 
 FIXTURE = ROOT / 'fixtures/observer-rust-boundary-v1.json'
 
@@ -80,6 +81,26 @@ def control_source(data):
 class ExtractionTests(unittest.TestCase):
     def setUp(self):
         self.data = load(FIXTURE)
+
+    def test_import_snapshot_retains_transitive_modules_and_refuses_invalid_graphs(self):
+        with tempfile.TemporaryDirectory(prefix='observer-import-closure-') as tmp:
+            root = Path(tmp)
+            modules = root / 'VerumExternalReplay'
+            modules.mkdir()
+            (modules/'Root.lean').write_text('import Std\nimport VerumExternalReplay.Left VerumExternalReplay.Right -- shared leaf\n')
+            (modules/'Left.lean').write_text('import VerumExternalReplay.Leaf\n')
+            (modules/'Right.lean').write_text('import VerumExternalReplay.Leaf\n')
+            (modules/'Leaf.lean').write_text('import Std\n')
+            with patch('observer_export_replay.ROOT', root):
+                self.assertEqual(module_closure(['Root','Leaf']), ['Leaf','Left','Right','Root'])
+                with self.assertRaisesRegex(ValueError, 'Invalid local module name'):
+                    module_closure(['../escape'])
+                (modules/'Leaf.lean').write_text('import VerumExternalReplay.Root\n')
+                with self.assertRaisesRegex(ValueError, 'Cyclic local model imports'):
+                    module_closure(['Root'])
+                (modules/'Leaf.lean').unlink()
+                with self.assertRaises(FileNotFoundError):
+                    module_closure(['Root'])
 
     def test_primitive_classification_is_checked_not_dropped(self):
         data = load(ROOT / 'fixtures/observer-runtime-controls-v1.json')
