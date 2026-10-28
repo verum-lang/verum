@@ -1,0 +1,50 @@
+{
+  "status": "verified",
+  "native_source_commit": "1f68af3705e9368635a8801cf5673ed87f18f98b",
+  "native_source_files": 1476,
+  "receipt_sha256": "103ed6481c098d3fee6749df9127a2c9536af3371f391f5fde9be0df8c2aa11c",
+  "native_binary_sha256": "6c4f3e0f29d725ce3d6cfc8a67151569cc489a2a41c3189dd79d61f49ffdfe62",
+  "export_sha256": "ea67494cc6461a009c297991ed10998fdbcac783bf52d666577a386480f2a383",
+  "independently_verified_artifacts": 1497,
+  "retained_files": [
+    {
+      "file": "compositional-census-native-v2.jsonl.gz",
+      "bytes": 3099,
+      "sha256": "ea67494cc6461a009c297991ed10998fdbcac783bf52d666577a386480f2a383"
+    },
+    {
+      "file": "compositional-census-native-v2.receipt.json.gz",
+      "bytes": 442342,
+      "sha256": "103ed6481c098d3fee6749df9127a2c9536af3371f391f5fde9be0df8c2aa11c"
+    },
+    {
+      "file": "compositional-census-native-v2.producer.py.gz",
+      "bytes": 8826,
+      "sha256": "0bbdac47471e4da84e3775a72b8ce1a3992877eb13004494df452848207249ce"
+    },
+    {
+      "file": "compositional-census-native-v2.source.patch.gz",
+      "bytes": 38719,
+      "sha256": "f0414207874f24a0c069234a742271887ff9718229cce717d2ebf92dd13a4efb"
+    },
+    {
+      "file": "compositional-census-native-v2.source-0.rs.gz",
+      "bytes": 11057,
+      "sha256": "87381268abc912d023ed85e8ca94f6c05a84ed8d5c4affd69b2a0547825407f8",
+      "source_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/composition.rs"
+    },
+    {
+      "file": "compositional-census-native-v2.source-1.rs.gz",
+      "bytes": 5191,
+      "sha256": "76282b45651bab1f6f09bd92001cca2401de847ea3902f82dbc6a9a22241d9c8",
+      "source_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/lifecycle_export.rs"
+    },
+    {
+      "file": "compositional-census-native-v2.source-2.rs.gz",
+      "bytes": 7914,
+      "sha256": "98e2354874836140595b86dea80a8725ede6243b09c7778043da02360ca211d6",
+      "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/joint/compositional_courts.rs"
+    }
+  ],
+  "scope": "Finite declared family census and Uniform paid-look denominator only; not code codec, VM execution or native resource refinement"
+}
