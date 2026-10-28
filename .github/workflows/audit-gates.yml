@@ -230,6 +230,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_acquired_bytes.py
           python3 -m unittest discover -s verification/external/lean -p test_conditional_expressiveness.py
           python3 -m unittest discover -s verification/external/lean -p test_frozen_training.py
+          python3 -m unittest discover -s verification/external/lean -p test_outcome_transitions.py
           python3 -m unittest discover -s verification/external/lean -p test_checker_process.py
           python3 -m unittest discover -s verification/external/lean -p test_sensory_port.py
           python3 -m unittest discover -s verification/external/lean -p test_action_capture.py
