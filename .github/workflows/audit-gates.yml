@@ -220,12 +220,18 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_causal_coding.py
           python3 -m unittest discover -s verification/external/lean -p test_finite_wire.py
           python3 -m unittest discover -s verification/external/lean -p test_binary_prediction.py
+          python3 -m unittest discover -s verification/external/lean -p test_residual_prediction.py
           python3 verification/external/lean/check_finite_admission.py \
             --report finite-admission-acceptance.json
           python3 verification/external/lean/check_acquisition_scheduling.py \
             --report acquisition-scheduling-acceptance.json
       - name: Frozen observer export correspondence
         run: |
+          python3 verification/external/lean/check_residual_export.py \
+            --export verification/external/lean/fixtures/residual-native-v1.json \
+            --sha256 87a25e61eb67968695e3c0988417824bdfce1877aeea8ce5e30a0c2350fedde6 \
+            --provenance verification/external/lean/fixtures/residual-native-v1.provenance.json \
+            --output residual-native-export.lean --report residual-native-export-acceptance.json
           python3 verification/external/lean/check_observer_export.py \
             --export verification/external/lean/fixtures/observer-runtime-controls-v1.json \
             --sha256 9925524cd22fbae2cbbb6f32fb522a90b3ea6c0c6c5f86c428ada980052898a6 \

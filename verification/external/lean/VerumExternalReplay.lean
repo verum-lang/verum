@@ -44,3 +44,5 @@ import VerumExternalReplay.CategoricalScore
 import VerumExternalReplay.CausalCoding
 import VerumExternalReplay.FiniteWire
 import VerumExternalReplay.BinaryPrediction
+import VerumExternalReplay.PositionPrediction
+import VerumExternalReplay.ResidualPrediction
