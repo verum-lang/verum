@@ -1,0 +1,16 @@
+{
+  "export_sha256": "41894f2f38e48e876473e79fd92246914b9e4e7f1fd48701f27d082dc854e31e",
+  "native_commit": "48a0950763e2df2ec5b4f5d491ca29f987281624",
+  "native_receipt_sha256": "7bf1e2ba9aa888bb8778ea76b2188fd797787f447f31d197541a47b07128cb3e",
+  "native_binary_sha256": "db6fa402a19ded0486a253aa82667f0116f4719807679abf89bb8979fe4f6e24",
+  "native_source_sha256": {
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual.rs": "d78a1667022dcabe304b9383221466871533bed04916ce647d9544a8ee5878be",
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual/courts.rs": "036b2ff6ee384f482e38ed2115af4ea73a771938b82d265949afb696ca0efb21"
+  },
+  "native_stage_log_sha256": {
+    "build": "3137756184a2037a2ac0f1dfd29985d631892ed06a3ee12e2bede2d0b2a8c631",
+    "native-boundary": "c1cc48b42a791beb2a8671e7b9a7801f93c3a559cb1a547eeddcc9b9f5f4dc90"
+  },
+  "independent_source_files_checked": 1464,
+  "scope": "Captured native empty, partial, work-refused, last-bit and row-end states and frozen probability calls. Finite cases, not universal lifecycle or overflow correctness."
+}

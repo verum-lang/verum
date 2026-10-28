@@ -1,0 +1,951 @@
+{
+  "committed": {
+    "bits": 8,
+    "forecast_law": "shared-dirichlet-length-residual-kt-v2",
+    "lengths": {
+      "counts": {
+        "0": 1,
+        "1": 1
+      },
+      "total": 2
+    },
+    "ratio": {
+      "denominator": "1",
+      "numerator": "1"
+    },
+    "reference": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        0
+      ]
+    ],
+    "residual": [
+      {
+        "context": [
+          115,
+          104,
+          97,
+          114,
+          101,
+          100
+        ],
+        "counts": [
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      }
+    ],
+    "samples": 2
+  },
+  "format": "synarc-residual-boundaries-v2",
+  "partial": {
+    "after_last_bit": {
+      "forecast_law": "shared-dirichlet-length-residual-kt-v2",
+      "lengths": {
+        "counts": {
+          "0": 1
+        },
+        "total": 1
+      },
+      "prediction": {
+        "context": [
+          115,
+          104,
+          97,
+          114,
+          101,
+          100
+        ],
+        "mask": [
+          5
+        ]
+      },
+      "reference": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "residual": [
+        {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "counts": [
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      ]
+    },
+    "after_refusal": {
+      "forecast_law": "shared-dirichlet-length-residual-kt-v2",
+      "lengths": {
+        "counts": {
+          "0": 1
+        },
+        "total": 1
+      },
+      "prediction": {
+        "context": [
+          115,
+          104,
+          97,
+          114,
+          101,
+          100
+        ],
+        "mask": [
+          5
+        ]
+      },
+      "reference": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "residual": [
+        {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "counts": [
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      ]
+    },
+    "before_refusal": {
+      "forecast_law": "shared-dirichlet-length-residual-kt-v2",
+      "lengths": {
+        "counts": {
+          "0": 1
+        },
+        "total": 1
+      },
+      "prediction": {
+        "context": [
+          115,
+          104,
+          97,
+          114,
+          101,
+          100
+        ],
+        "mask": [
+          5
+        ]
+      },
+      "reference": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "residual": [
+        {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "counts": [
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      ]
+    },
+    "empty_finish_refused": true,
+    "empty_zero_work_refused": true,
+    "last_bit_finish_refused": true,
+    "length_total": 1,
+    "length_totals": [
+      1,
+      1,
+      1
+    ],
+    "partial_finish_refused": true,
+    "positions": [
+      7,
+      7,
+      8
+    ],
+    "zero_work_refused": true
+  },
+  "queries": [
+    {
+      "forecast": {
+        "forecast_law": "shared-dirichlet-length-residual-kt-v2",
+        "lengths": {
+          "counts": {},
+          "total": 0
+        },
+        "prediction": {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "mask": [
+            5
+          ]
+        },
+        "reference": [],
+        "residual": []
+      },
+      "format": "synarc-residual-queries-v2",
+      "phase": "initial",
+      "queries": [
+        {
+          "candidate": {
+            "denominator": "2",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "2",
+            "numerator": "1"
+          },
+          "target": []
+        },
+        {
+          "candidate": {
+            "denominator": "1",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "1",
+            "numerator": "1"
+          },
+          "target": []
+        },
+        {
+          "candidate": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "target": [
+            5
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "512",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "512",
+            "numerator": "1"
+          },
+          "target": [
+            5
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "target": [
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "512",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "512",
+            "numerator": "1"
+          },
+          "target": [
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "524288",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "524288",
+            "numerator": "1"
+          },
+          "target": [
+            5,
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "262144",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "262144",
+            "numerator": "1"
+          },
+          "target": [
+            5,
+            0
+          ]
+        }
+      ],
+      "rows": []
+    },
+    {
+      "forecast": {
+        "forecast_law": "shared-dirichlet-length-residual-kt-v2",
+        "lengths": {
+          "counts": {
+            "0": 1
+          },
+          "total": 1
+        },
+        "prediction": {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "mask": [
+            5
+          ]
+        },
+        "reference": [],
+        "residual": []
+      },
+      "format": "synarc-residual-queries-v2",
+      "phase": "empty-row",
+      "queries": [
+        {
+          "candidate": {
+            "denominator": "4",
+            "numerator": "3"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "4",
+            "numerator": "3"
+          },
+          "target": []
+        },
+        {
+          "candidate": {
+            "denominator": "1",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "1",
+            "numerator": "1"
+          },
+          "target": []
+        },
+        {
+          "candidate": {
+            "denominator": "2048",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "2048",
+            "numerator": "1"
+          },
+          "target": [
+            5
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "target": [
+            5
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "2048",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "2048",
+            "numerator": "1"
+          },
+          "target": [
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "1024",
+            "numerator": "1"
+          },
+          "target": [
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "1048576",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "1048576",
+            "numerator": "1"
+          },
+          "target": [
+            5,
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "524288",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "524288",
+            "numerator": "1"
+          },
+          "target": [
+            5,
+            0
+          ]
+        }
+      ],
+      "rows": [
+        {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "mask": [],
+          "target": []
+        }
+      ]
+    },
+    {
+      "forecast": {
+        "forecast_law": "shared-dirichlet-length-residual-kt-v2",
+        "lengths": {
+          "counts": {
+            "0": 1,
+            "1": 1
+          },
+          "total": 2
+        },
+        "prediction": {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "mask": [
+            5
+          ]
+        },
+        "reference": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        "residual": [
+          {
+            "context": [
+              115,
+              104,
+              97,
+              114,
+              101,
+              100
+            ],
+            "counts": [
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "format": "synarc-residual-queries-v2",
+      "phase": "complete-row",
+      "queries": [
+        {
+          "candidate": {
+            "denominator": "2",
+            "numerator": "1"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "2",
+            "numerator": "1"
+          },
+          "target": []
+        },
+        {
+          "candidate": {
+            "denominator": "1",
+            "numerator": "1"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "1",
+            "numerator": "1"
+          },
+          "target": []
+        },
+        {
+          "candidate": {
+            "denominator": "262144",
+            "numerator": "10935"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "262144",
+            "numerator": "10935"
+          },
+          "target": [
+            5
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "131072",
+            "numerator": "6561"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "131072",
+            "numerator": "6561"
+          },
+          "target": [
+            5
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "262144",
+            "numerator": "1215"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "262144",
+            "numerator": "1215"
+          },
+          "target": [
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "131072",
+            "numerator": "729"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "131072",
+            "numerator": "729"
+          },
+          "target": [
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "134217728",
+            "numerator": "2187"
+          },
+          "prefix": false,
+          "reference": {
+            "denominator": "134217728",
+            "numerator": "2187"
+          },
+          "target": [
+            5,
+            0
+          ]
+        },
+        {
+          "candidate": {
+            "denominator": "67108864",
+            "numerator": "2187"
+          },
+          "prefix": true,
+          "reference": {
+            "denominator": "67108864",
+            "numerator": "2187"
+          },
+          "target": [
+            5,
+            0
+          ]
+        }
+      ],
+      "rows": [
+        {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "mask": [],
+          "target": []
+        },
+        {
+          "context": [
+            115,
+            104,
+            97,
+            114,
+            101,
+            100
+          ],
+          "mask": [
+            5
+          ],
+          "target": [
+            5
+          ]
+        }
+      ]
+    }
+  ]
+}

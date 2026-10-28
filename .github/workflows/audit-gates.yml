@@ -224,6 +224,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_kt_merge.py
           python3 -m unittest discover -s verification/external/lean -p test_residual_prediction.py
           python3 -m unittest discover -s verification/external/lean -p test_residual_queries.py
+          python3 -m unittest discover -s verification/external/lean -p test_residual_boundaries.py
           python3 -m unittest discover -s verification/external/lean -p test_sensory_port.py
           python3 -m unittest discover -s verification/external/lean -p test_action_capture.py
           python3 -m unittest discover -s verification/external/lean -p test_action_target_wire.py
@@ -250,6 +251,11 @@ jobs:
             --sha256 87a25e61eb67968695e3c0988417824bdfce1877aeea8ce5e30a0c2350fedde6 \
             --provenance verification/external/lean/fixtures/residual-native-v1.provenance.json \
             --output residual-native-export.lean --report residual-native-export-acceptance.json
+          python3 verification/external/lean/check_residual_boundaries.py \
+            --export verification/external/lean/fixtures/residual-boundaries-v2.json \
+            --sha256 41894f2f38e48e876473e79fd92246914b9e4e7f1fd48701f27d082dc854e31e \
+            --provenance verification/external/lean/fixtures/residual-boundaries-v2.provenance.json \
+            --output residual-boundaries-export.lean --report residual-boundaries-acceptance.json
           python3 verification/external/lean/check_observer_export.py \
             --export verification/external/lean/fixtures/observer-runtime-controls-v1.json \
             --sha256 9925524cd22fbae2cbbb6f32fb522a90b3ea6c0c6c5f86c428ada980052898a6 \

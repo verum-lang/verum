@@ -1,0 +1,13 @@
+{
+  "export_sha256": "0f30a8bbb6a6c9842712c0e8224eb97b8dbbf7f85fc176e87eca9297a0291dd3",
+  "native_commit": "ab87fd96bfed0d3c78082167bb22ac0d6f375708",
+  "native_receipt_sha256": "746fd79f40a874eb43f4adb12b871a5674ac4f8698571d1bd11c0a1bac50e622",
+  "native_binary_sha256": "195fc0cb9584094ea19037470ab2fc9ffb3cd53e6d79e54375c2fdb9669a4ad6",
+  "native_source_sha256": {
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual.rs": "d78a1667022dcabe304b9383221466871533bed04916ce647d9544a8ee5878be",
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual/courts.rs": "e7cd8c85ce10bd4642f602cbcf4a0eb2a4049b934bf00e63a7fb629abe2fd1fc",
+    "rust/crates/synarc-kan/src/program/observer/acquisition/residual_courts.rs": "345609f6ad55351406bde0e4b01e607d8c14b7ea9a50635f293a7099c01d58b5"
+  },
+  "independent_source_files_checked": 1464,
+  "scope": "Frozen native completed-row or exact probability evidence; no universal native lifecycle, physical causality or allocator claim."
+}
