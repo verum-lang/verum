@@ -226,6 +226,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_residual_queries.py
           python3 -m unittest discover -s verification/external/lean -p test_residual_boundaries.py
           python3 -m unittest discover -s verification/external/lean -p test_predictive_publication.py
+          python3 -m unittest discover -s verification/external/lean -p test_checker_process.py
           python3 -m unittest discover -s verification/external/lean -p test_sensory_port.py
           python3 -m unittest discover -s verification/external/lean -p test_action_capture.py
           python3 -m unittest discover -s verification/external/lean -p test_action_target_wire.py

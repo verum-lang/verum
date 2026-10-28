@@ -7,7 +7,9 @@ tool, import, parser, resource or elaboration failures never count as controls.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import tempfile
 
@@ -25,7 +27,21 @@ def sha256(path):
 
 
 def run(*args, timeout=180, cwd=ROOT):
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    # lake starts Lean as a child. Killing only lake on a timeout leaves that
+    # checker running, retaining memory and its inherited output pipes.
+    with subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          text=True, start_new_session=os.name == 'posix') as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException:
+            try:
+                if os.name == 'posix': os.killpg(process.pid, signal.SIGKILL)
+                else: process.kill()
+            except ProcessLookupError:
+                pass
+            process.communicate()
+            raise
+        return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
 
 def require_success(result):
