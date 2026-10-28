@@ -3,7 +3,7 @@ import check_lifecycle_export as lifecycle
 from observer_export_replay import array
 
 
-def share_traces(data, source):
+def share_traces(data, source, *, decoder=lifecycle.LEGACY):
     traces = {}
     pending = [data]
     while pending:
@@ -13,7 +13,7 @@ def share_traces(data, source):
         elif type(node) is dict:
             if node.get('kind') == 'Trace':
                 # The enclosing strict decoder has already checked each value.
-                events = tuple(lifecycle.event(e) for e in node['events'])
+                events = tuple(decoder.event(e) for e in node['events'])
                 traces.setdefault(events, 'retained_trace_' + str(len(traces)))
             else:
                 pending.extend(node.values())

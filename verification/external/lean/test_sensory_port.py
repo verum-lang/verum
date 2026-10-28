@@ -94,7 +94,7 @@ example : PartialObservers.fold remember [captured, later] [] =
         for claim in claims:
             with self.subTest(claim=claim): self.prove(f'example : {claim} := by decide_cbv', FALSE)
 
-    def test_unfrozen_native_extensions_are_not_silently_accepted(self):
+    def test_legacy_adapter_refuses_sensory_extensions(self):
         data = model_fixture()
         data['definitions'][0]['semantics']['kind'] = 'AcquiredV3'
         with self.assertRaisesRegex(ValueError, 'Unsupported semantic adapter'): lifecycle.emit(data)

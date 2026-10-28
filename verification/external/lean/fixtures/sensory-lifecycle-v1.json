@@ -1,0 +1,4651 @@
+{
+  "definitions": [
+    {
+      "identity": 0,
+      "initial": {
+        "events": [],
+        "kind": "Trace"
+      },
+      "read": {
+        "library": [],
+        "output": 3,
+        "steps": [
+          {
+            "arguments": [
+              {
+                "Input": 1
+              }
+            ],
+            "operation": {
+              "Primitive": "QuerySensory"
+            }
+          },
+          {
+            "arguments": [
+              {
+                "Register": 0
+              }
+            ],
+            "operation": {
+              "Primitive": "Second"
+            }
+          },
+          {
+            "arguments": [
+              {
+                "Register": 1
+              },
+              {
+                "Literal": {
+                  "kind": "Nat",
+                  "value": 0
+                }
+              }
+            ],
+            "operation": {
+              "Primitive": "At"
+            }
+          },
+          {
+            "arguments": [
+              {
+                "Register": 2
+              }
+            ],
+            "operation": {
+              "Primitive": "Next"
+            }
+          }
+        ]
+      },
+      "read_binding": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Query"
+        },
+        "slots": [
+          "State",
+          {
+            "External": 0
+          }
+        ],
+        "width": 1
+      },
+      "semantics": {
+        "kind": "AcquiredV3",
+        "max_trace": 16
+      },
+      "update": {
+        "library": [
+          {
+            "library": [],
+            "output": 0,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "Append"
+                }
+              }
+            ]
+          }
+        ],
+        "output": 0,
+        "steps": [
+          {
+            "arguments": [
+              {
+                "Input": 0
+              },
+              {
+                "Input": 1
+              }
+            ],
+            "operation": {
+              "Call": 0
+            }
+          }
+        ]
+      },
+      "update_binding": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Event"
+        },
+        "slots": [
+          "State",
+          {
+            "External": 0
+          }
+        ],
+        "width": 1
+      }
+    }
+  ],
+  "installation": [
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "cut": 1,
+      "history": {
+        "events": [
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "sensory": true,
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 196,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 0
+      },
+      "installed": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "success",
+      "known_histories": [],
+      "name": "installed_sensory_receiver",
+      "replay": {
+        "definition": 0,
+        "owner": 1,
+        "state": 1,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      }
+    },
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "cut": 1,
+      "history": {
+        "events": [
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "sensory": true,
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      4,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      255
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 4,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 1
+      },
+      "incomplete": true,
+      "kind": "failure",
+      "known_histories": [
+        {
+          "history": {
+            "events": [
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "sensory": true,
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 0,
+                      "life_age": 0,
+                      "owner": null,
+                      "pose": null,
+                      "raw": 0,
+                      "raw_space": "1",
+                      "sensory": {
+                        "body": [
+                          7,
+                          4,
+                          0,
+                          255
+                        ],
+                        "schema": [
+                          97,
+                          114,
+                          98,
+                          105,
+                          116,
+                          114,
+                          97,
+                          114,
+                          121,
+                          45,
+                          98,
+                          121,
+                          116,
+                          101,
+                          45,
+                          115,
+                          101,
+                          110,
+                          115,
+                          111,
+                          114,
+                          47,
+                          118,
+                          49
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "origin": {
+              "epoch": "1",
+              "lineage": {
+                "authority": 4,
+                "birth": 0
+              },
+              "ordinal": 0
+            },
+            "owner": 2
+          },
+          "phase": "training"
+        }
+      ],
+      "name": "install_changed_schema",
+      "reason": {
+        "event": 0,
+        "kind": "HistoryChanged"
+      },
+      "request": {
+        "admission": {
+          "definition": 0,
+          "kind": "Validated",
+          "owner": 0
+        },
+        "cut": 1,
+        "history": {
+          "events": [
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "sensory": true,
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 0,
+                    "life_age": 0,
+                    "owner": null,
+                    "pose": null,
+                    "raw": 0,
+                    "raw_space": "1",
+                    "sensory": {
+                      "body": [
+                        7,
+                        4,
+                        0,
+                        255
+                      ],
+                      "schema": [
+                        255
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "origin": {
+            "epoch": "1",
+            "lineage": {
+              "authority": 4,
+              "birth": 0
+            },
+            "ordinal": 0
+          },
+          "owner": 1
+        },
+        "known_histories": [
+          {
+            "history": {
+              "events": [
+                {
+                  "interface": {
+                    "epoch": "1",
+                    "owner": null,
+                    "raw_space": "1",
+                    "sensory": true,
+                    "shape": "Event"
+                  },
+                  "values": [
+                    {
+                      "kind": "Event",
+                      "value": {
+                        "action": 0,
+                        "episode": 0,
+                        "epoch": "1",
+                        "input": 0,
+                        "life_age": 0,
+                        "owner": null,
+                        "pose": null,
+                        "raw": 0,
+                        "raw_space": "1",
+                        "sensory": {
+                          "body": [
+                            7,
+                            4,
+                            0,
+                            255
+                          ],
+                          "schema": [
+                            97,
+                            114,
+                            98,
+                            105,
+                            116,
+                            114,
+                            97,
+                            114,
+                            121,
+                            45,
+                            98,
+                            121,
+                            116,
+                            101,
+                            45,
+                            115,
+                            101,
+                            110,
+                            115,
+                            111,
+                            114,
+                            47,
+                            118,
+                            49
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "origin": {
+                "epoch": "1",
+                "lineage": {
+                  "authority": 4,
+                  "birth": 0
+                },
+                "ordinal": 0
+              },
+              "owner": 2
+            },
+            "phase": "training"
+          }
+        ]
+      }
+    },
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "cut": 1,
+      "history": {
+        "events": [
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "sensory": true,
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 4,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 3
+      },
+      "incomplete": true,
+      "kind": "failure",
+      "known_histories": [
+        {
+          "history": {
+            "events": [
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "sensory": true,
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 0,
+                      "life_age": 0,
+                      "owner": null,
+                      "pose": null,
+                      "raw": 0,
+                      "raw_space": "1",
+                      "sensory": {
+                        "body": [
+                          7,
+                          4,
+                          0,
+                          255
+                        ],
+                        "schema": [
+                          97,
+                          114,
+                          98,
+                          105,
+                          116,
+                          114,
+                          97,
+                          114,
+                          121,
+                          45,
+                          98,
+                          121,
+                          116,
+                          101,
+                          45,
+                          115,
+                          101,
+                          110,
+                          115,
+                          111,
+                          114,
+                          47,
+                          118,
+                          49
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "origin": {
+              "epoch": "1",
+              "lineage": {
+                "authority": 4,
+                "birth": 0
+              },
+              "ordinal": 0
+            },
+            "owner": 2
+          },
+          "phase": "training"
+        }
+      ],
+      "name": "install_changed_body",
+      "reason": {
+        "event": 0,
+        "kind": "HistoryChanged"
+      },
+      "request": {
+        "admission": {
+          "definition": 0,
+          "kind": "Validated",
+          "owner": 0
+        },
+        "cut": 1,
+        "history": {
+          "events": [
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "sensory": true,
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 0,
+                    "life_age": 0,
+                    "owner": null,
+                    "pose": null,
+                    "raw": 0,
+                    "raw_space": "1",
+                    "sensory": {
+                      "body": [],
+                      "schema": [
+                        97,
+                        114,
+                        98,
+                        105,
+                        116,
+                        114,
+                        97,
+                        114,
+                        121,
+                        45,
+                        98,
+                        121,
+                        116,
+                        101,
+                        45,
+                        115,
+                        101,
+                        110,
+                        115,
+                        111,
+                        114,
+                        47,
+                        118,
+                        49
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "origin": {
+            "epoch": "1",
+            "lineage": {
+              "authority": 4,
+              "birth": 0
+            },
+            "ordinal": 0
+          },
+          "owner": 3
+        },
+        "known_histories": [
+          {
+            "history": {
+              "events": [
+                {
+                  "interface": {
+                    "epoch": "1",
+                    "owner": null,
+                    "raw_space": "1",
+                    "sensory": true,
+                    "shape": "Event"
+                  },
+                  "values": [
+                    {
+                      "kind": "Event",
+                      "value": {
+                        "action": 0,
+                        "episode": 0,
+                        "epoch": "1",
+                        "input": 0,
+                        "life_age": 0,
+                        "owner": null,
+                        "pose": null,
+                        "raw": 0,
+                        "raw_space": "1",
+                        "sensory": {
+                          "body": [
+                            7,
+                            4,
+                            0,
+                            255
+                          ],
+                          "schema": [
+                            97,
+                            114,
+                            98,
+                            105,
+                            116,
+                            114,
+                            97,
+                            114,
+                            121,
+                            45,
+                            98,
+                            121,
+                            116,
+                            101,
+                            45,
+                            115,
+                            101,
+                            110,
+                            115,
+                            111,
+                            114,
+                            47,
+                            118,
+                            49
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "origin": {
+                "epoch": "1",
+                "lineage": {
+                  "authority": 4,
+                  "birth": 0
+                },
+                "ordinal": 0
+              },
+              "owner": 2
+            },
+            "phase": "training"
+          }
+        ]
+      }
+    },
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "cut": 1,
+      "history": {
+        "events": [
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 4,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 4
+      },
+      "incomplete": true,
+      "kind": "failure",
+      "known_histories": [
+        {
+          "history": {
+            "events": [
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "sensory": true,
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 0,
+                      "life_age": 0,
+                      "owner": null,
+                      "pose": null,
+                      "raw": 0,
+                      "raw_space": "1",
+                      "sensory": {
+                        "body": [
+                          7,
+                          4,
+                          0,
+                          255
+                        ],
+                        "schema": [
+                          97,
+                          114,
+                          98,
+                          105,
+                          116,
+                          114,
+                          97,
+                          114,
+                          121,
+                          45,
+                          98,
+                          121,
+                          116,
+                          101,
+                          45,
+                          115,
+                          101,
+                          110,
+                          115,
+                          111,
+                          114,
+                          47,
+                          118,
+                          49
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "origin": {
+              "epoch": "1",
+              "lineage": {
+                "authority": 4,
+                "birth": 0
+              },
+              "ordinal": 0
+            },
+            "owner": 2
+          },
+          "phase": "training"
+        }
+      ],
+      "name": "install_changed_presence",
+      "reason": {
+        "event": 0,
+        "kind": "HistoryChanged"
+      },
+      "request": {
+        "admission": {
+          "definition": 0,
+          "kind": "Validated",
+          "owner": 0
+        },
+        "cut": 1,
+        "history": {
+          "events": [
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 0,
+                    "life_age": 0,
+                    "owner": null,
+                    "pose": null,
+                    "raw": 0,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            }
+          ],
+          "origin": {
+            "epoch": "1",
+            "lineage": {
+              "authority": 4,
+              "birth": 0
+            },
+            "ordinal": 0
+          },
+          "owner": 4
+        },
+        "known_histories": [
+          {
+            "history": {
+              "events": [
+                {
+                  "interface": {
+                    "epoch": "1",
+                    "owner": null,
+                    "raw_space": "1",
+                    "sensory": true,
+                    "shape": "Event"
+                  },
+                  "values": [
+                    {
+                      "kind": "Event",
+                      "value": {
+                        "action": 0,
+                        "episode": 0,
+                        "epoch": "1",
+                        "input": 0,
+                        "life_age": 0,
+                        "owner": null,
+                        "pose": null,
+                        "raw": 0,
+                        "raw_space": "1",
+                        "sensory": {
+                          "body": [
+                            7,
+                            4,
+                            0,
+                            255
+                          ],
+                          "schema": [
+                            97,
+                            114,
+                            98,
+                            105,
+                            116,
+                            114,
+                            97,
+                            114,
+                            121,
+                            45,
+                            98,
+                            121,
+                            116,
+                            101,
+                            45,
+                            115,
+                            101,
+                            110,
+                            115,
+                            111,
+                            114,
+                            47,
+                            118,
+                            49
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "origin": {
+                "epoch": "1",
+                "lineage": {
+                  "authority": 4,
+                  "birth": 0
+                },
+                "ordinal": 0
+              },
+              "owner": 2
+            },
+            "phase": "training"
+          }
+        ]
+      }
+    }
+  ],
+  "naming": [],
+  "ownership": [
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 6,
+        "poisoned": false,
+        "work_remaining": 99993905
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 2,
+        "poisoned": false,
+        "work_remaining": 99993924
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Query"
+        },
+        "values": [
+          {
+            "kind": "Query",
+            "value": {
+              "action": null,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "pose": null,
+              "raw": 7,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  9,
+                  254,
+                  1,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "kind": "read",
+      "name": "read_captured_sensory",
+      "result": {
+        "cut": {
+          "definition": 0,
+          "owner": 0,
+          "state": 0,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 4,
+          "expanded_attempts": 4,
+          "halt": null,
+          "registers": [
+            {
+              "first": {
+                "kind": "Bytes",
+                "value": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              },
+              "kind": "Pair",
+              "second": {
+                "kind": "Bytes",
+                "value": [
+                  9,
+                  254,
+                  1,
+                  255
+                ]
+              }
+            },
+            {
+              "kind": "Bytes",
+              "value": [
+                9,
+                254,
+                1,
+                255
+              ]
+            },
+            {
+              "kind": "Nat",
+              "value": 9
+            },
+            {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "value": {
+          "kind": "Outcome",
+          "value": {
+            "key": 9,
+            "kind": "Next"
+          }
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 6,
+        "poisoned": false,
+        "work_remaining": 99993901
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 6,
+        "poisoned": false,
+        "work_remaining": 99993905
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Query"
+        },
+        "values": [
+          {
+            "kind": "Query",
+            "value": {
+              "action": null,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "pose": null,
+              "raw": 7,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "read",
+      "name": "read_missing_port_binding",
+      "result": {
+        "kind": "Err",
+        "reason": {
+          "classification": "Undefined",
+          "kind": "Binding",
+          "phase": "Read",
+          "reason": {
+            "kind": "Interface"
+          }
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 7,
+        "poisoned": false,
+        "work_remaining": 99993893
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 6,
+        "poisoned": false,
+        "work_remaining": 99993901
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Query"
+        },
+        "values": [
+          {
+            "kind": "Query",
+            "value": {
+              "action": null,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "pose": null,
+              "raw": 7,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "read",
+      "name": "read_forged_presence",
+      "result": {
+        "kind": "Err",
+        "reason": {
+          "classification": "Undefined",
+          "counter_capacity": false,
+          "kind": "Execution",
+          "meter_error": false,
+          "phase": "Read",
+          "primitive_refusal": "Undefined",
+          "report": {
+            "call_attempts": 0,
+            "dispatch_attempts": 1,
+            "expanded_attempts": 1,
+            "halt": {
+              "path": [
+                0
+              ],
+              "reason": {
+                "error": "Missing",
+                "kind": "Primitive"
+              }
+            },
+            "registers": [],
+            "stop": "Undefined"
+          }
+        }
+      }
+    },
+    {
+      "after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "fork",
+      "name": "fork_sensory"
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 9,
+        "poisoned": false,
+        "work_remaining": 99993877
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 7,
+        "poisoned": false,
+        "work_remaining": 99993893
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Event"
+        },
+        "values": [
+          {
+            "kind": "Event",
+            "value": {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "kind": "prepare",
+      "name": "prepare_captured_sensory",
+      "result": {
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 2,
+          "expanded_attempts": 1,
+          "halt": null,
+          "registers": [
+            {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "prepared": {
+          "after": {
+            "state": 2,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 11,
+        "poisoned": false,
+        "work_remaining": 99993861
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 9,
+        "poisoned": false,
+        "work_remaining": 99993877
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Event"
+        },
+        "values": [
+          {
+            "kind": "Event",
+            "value": {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "kind": "prepare",
+      "name": "prepare_sensory_sibling",
+      "result": {
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 2,
+          "expanded_attempts": 1,
+          "halt": null,
+          "registers": [
+            {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "prepared": {
+          "after": {
+            "state": 3,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        }
+      }
+    },
+    {
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "commit",
+      "name": "commit_captured_sensory",
+      "prepared": {
+        "after": {
+          "state": 2,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "before": {
+          "definition": 0,
+          "owner": 2,
+          "state": 0,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              }
+            ],
+            "kind": "Trace"
+          }
+        }
+      },
+      "result": {
+        "kind": "Ok",
+        "receipt": {
+          "after": {
+            "definition": 0,
+            "owner": 2,
+            "state": 2,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        }
+      }
+    },
+    {
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "commit",
+      "name": "commit_sensory_stale",
+      "prepared": {
+        "after": {
+          "state": 3,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "before": {
+          "definition": 0,
+          "owner": 2,
+          "state": 0,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              }
+            ],
+            "kind": "Trace"
+          }
+        }
+      },
+      "result": {
+        "kind": "Err",
+        "prepared": {
+          "after": {
+            "state": 3,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 0,
+                  "owner": null,
+                  "pose": null,
+                  "raw": 0,
+                  "raw_space": "1",
+                  "sensory": {
+                    "body": [
+                      7,
+                      254,
+                      0,
+                      255
+                    ],
+                    "schema": [
+                      97,
+                      114,
+                      98,
+                      105,
+                      116,
+                      114,
+                      97,
+                      114,
+                      121,
+                      45,
+                      98,
+                      121,
+                      116,
+                      101,
+                      45,
+                      115,
+                      101,
+                      110,
+                      115,
+                      111,
+                      114,
+                      47,
+                      118,
+                      49
+                    ]
+                  }
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        },
+        "reason": "StaleState"
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 15,
+        "poisoned": false,
+        "work_remaining": 99993842
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 11,
+        "poisoned": false,
+        "work_remaining": 99993861
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Query"
+        },
+        "values": [
+          {
+            "kind": "Query",
+            "value": {
+              "action": null,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "pose": null,
+              "raw": 7,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  9,
+                  254,
+                  1,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "kind": "read",
+      "name": "read_after_captured_update",
+      "result": {
+        "cut": {
+          "definition": 0,
+          "owner": 2,
+          "state": 2,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 0,
+                "owner": null,
+                "pose": null,
+                "raw": 0,
+                "raw_space": "1",
+                "sensory": {
+                  "body": [
+                    7,
+                    254,
+                    0,
+                    255
+                  ],
+                  "schema": [
+                    97,
+                    114,
+                    98,
+                    105,
+                    116,
+                    114,
+                    97,
+                    114,
+                    121,
+                    45,
+                    98,
+                    121,
+                    116,
+                    101,
+                    45,
+                    115,
+                    101,
+                    110,
+                    115,
+                    111,
+                    114,
+                    47,
+                    118,
+                    49
+                  ]
+                }
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 4,
+          "expanded_attempts": 4,
+          "halt": null,
+          "registers": [
+            {
+              "first": {
+                "kind": "Bytes",
+                "value": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              },
+              "kind": "Pair",
+              "second": {
+                "kind": "Bytes",
+                "value": [
+                  9,
+                  254,
+                  1,
+                  255
+                ]
+              }
+            },
+            {
+              "kind": "Bytes",
+              "value": [
+                9,
+                254,
+                1,
+                255
+              ]
+            },
+            {
+              "kind": "Nat",
+              "value": 9
+            },
+            {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "value": {
+          "kind": "Outcome",
+          "value": {
+            "key": 9,
+            "kind": "Next"
+          }
+        }
+      }
+    }
+  ],
+  "physical_replay": {
+    "events": [
+      {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Event"
+        },
+        "values": [
+          {
+            "kind": "Event",
+            "value": {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 0,
+              "owner": null,
+              "pose": null,
+              "raw": 0,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  7,
+                  254,
+                  0,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "sensory": true,
+          "shape": "Event"
+        },
+        "values": [
+          {
+            "kind": "Event",
+            "value": {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "pose": null,
+              "raw": 7,
+              "raw_space": "1",
+              "sensory": {
+                "body": [
+                  9,
+                  12,
+                  1,
+                  255
+                ],
+                "schema": [
+                  97,
+                  114,
+                  98,
+                  105,
+                  116,
+                  114,
+                  97,
+                  114,
+                  121,
+                  45,
+                  98,
+                  121,
+                  116,
+                  101,
+                  45,
+                  115,
+                  101,
+                  110,
+                  115,
+                  111,
+                  114,
+                  47,
+                  118,
+                  49
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "installed_before": {
+      "events": [
+        {
+          "action": 0,
+          "episode": 0,
+          "epoch": "1",
+          "input": 0,
+          "life_age": 0,
+          "owner": null,
+          "pose": null,
+          "raw": 0,
+          "raw_space": "1",
+          "sensory": {
+            "body": [
+              7,
+              254,
+              0,
+              255
+            ],
+            "schema": [
+              97,
+              114,
+              98,
+              105,
+              116,
+              114,
+              97,
+              114,
+              121,
+              45,
+              98,
+              121,
+              116,
+              101,
+              45,
+              115,
+              101,
+              110,
+              115,
+              111,
+              114,
+              47,
+              118,
+              49
+            ]
+          }
+        }
+      ],
+      "kind": "Trace"
+    },
+    "live_after": {
+      "events": [
+        {
+          "action": 0,
+          "episode": 0,
+          "epoch": "1",
+          "input": 0,
+          "life_age": 0,
+          "owner": null,
+          "pose": null,
+          "raw": 0,
+          "raw_space": "1",
+          "sensory": {
+            "body": [
+              7,
+              254,
+              0,
+              255
+            ],
+            "schema": [
+              97,
+              114,
+              98,
+              105,
+              116,
+              114,
+              97,
+              114,
+              121,
+              45,
+              98,
+              121,
+              116,
+              101,
+              45,
+              115,
+              101,
+              110,
+              115,
+              111,
+              114,
+              47,
+              118,
+              49
+            ]
+          }
+        },
+        {
+          "action": 0,
+          "episode": 0,
+          "epoch": "1",
+          "input": 7,
+          "life_age": 1,
+          "owner": null,
+          "pose": null,
+          "raw": 7,
+          "raw_space": "1",
+          "sensory": {
+            "body": [
+              9,
+              12,
+              1,
+              255
+            ],
+            "schema": [
+              97,
+              114,
+              98,
+              105,
+              116,
+              114,
+              97,
+              114,
+              121,
+              45,
+              98,
+              121,
+              116,
+              101,
+              45,
+              115,
+              101,
+              110,
+              115,
+              111,
+              114,
+              47,
+              118,
+              49
+            ]
+          }
+        }
+      ],
+      "kind": "Trace"
+    },
+    "replay_after": {
+      "events": [
+        {
+          "action": 0,
+          "episode": 0,
+          "epoch": "1",
+          "input": 0,
+          "life_age": 0,
+          "owner": null,
+          "pose": null,
+          "raw": 0,
+          "raw_space": "1",
+          "sensory": {
+            "body": [
+              7,
+              254,
+              0,
+              255
+            ],
+            "schema": [
+              97,
+              114,
+              98,
+              105,
+              116,
+              114,
+              97,
+              114,
+              121,
+              45,
+              98,
+              121,
+              116,
+              101,
+              45,
+              115,
+              101,
+              110,
+              115,
+              111,
+              114,
+              47,
+              118,
+              49
+            ]
+          }
+        },
+        {
+          "action": 0,
+          "episode": 0,
+          "epoch": "1",
+          "input": 7,
+          "life_age": 1,
+          "owner": null,
+          "pose": null,
+          "raw": 7,
+          "raw_space": "1",
+          "sensory": {
+            "body": [
+              9,
+              12,
+              1,
+              255
+            ],
+            "schema": [
+              97,
+              114,
+              98,
+              105,
+              116,
+              114,
+              97,
+              114,
+              121,
+              45,
+              98,
+              121,
+              116,
+              101,
+              45,
+              115,
+              101,
+              110,
+              115,
+              111,
+              114,
+              47,
+              118,
+              49
+            ]
+          }
+        }
+      ],
+      "kind": "Trace"
+    }
+  },
+  "refusals": [],
+  "schema": "synarc-acquired-sensory-lifecycle-v1"
+}

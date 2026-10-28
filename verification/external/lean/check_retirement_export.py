@@ -232,5 +232,5 @@ def emit(data):
 
 if __name__ == '__main__':
     replay_main(emit=emit, modules=life.MODELS + ['ObserverRetirement', 'TraceReduction'],
-        producers=[Path(__file__).resolve(), Path(life.__file__).resolve(), Path(observer_trace_proofs.__file__).resolve()],
+        producers=[Path(__file__).resolve(), *life.PRODUCERS, Path(observer_trace_proofs.__file__).resolve()],
         description=__doc__, scope='Finite independent retirement snapshots, exact owned Undefined replay, current prefix preservation, weighted journal admission, observed work, actual outcome conservation and append-only receipts. Not exporter authenticity, arbitrary Rust/Habitat semantics, allocation universality or original observer-failure work admission.')

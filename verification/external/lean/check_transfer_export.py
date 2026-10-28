@@ -227,7 +227,7 @@ def emit(data):
 
 def main():
     replay_main(emit=emit, modules=lifecycle.MODELS+['CategoricalScore'],
-        producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve(),
+        producers=[Path(__file__).resolve(), *lifecycle.PRODUCERS,
                    Path(__file__).with_name('check_joint_export.py'), Path(__file__).with_name('retained_transfer_codec.py'),
                    Path(transfer_publication.__file__).resolve()],
         description=__doc__, scope='Original v2/v3/v4 transfer: retained portable code and correlated family, nominal lineage separation, '

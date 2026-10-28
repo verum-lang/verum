@@ -202,7 +202,7 @@ def emit(data):
 
 
 def main():
-    replay_main(emit=emit, modules=MODELS, producers=[Path(__file__).resolve(), Path(life.__file__)],
+    replay_main(emit=emit, modules=MODELS, producers=[Path(__file__).resolve(), *life.PRODUCERS],
         description=__doc__, scope='Finite body-ready naming cursors under zero/one-unit grants, '
         'actual retained nominal identities, exact keys, shared table chronology and sibling append. '
         'Not VM evaluation, authenticated pointer provenance, arbitrary meters, allocator failures, '

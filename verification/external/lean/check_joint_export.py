@@ -210,7 +210,7 @@ def emit(data):
 
 def main():
     replay_main(emit=emit, modules=lifecycle.MODELS + ['StructuralNames'],
-        producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve(), Path(structural_export.__file__).resolve()], description=__doc__,
+        producers=[Path(__file__).resolve(), *lifecycle.PRODUCERS, Path(structural_export.__file__).resolve()], description=__doc__,
         scope='Finite joint initializer/report and before/fork/live/receiver replay; retained nominal receipt '
               'consistency, exact Uniform/Kraft charge arithmetic and retained structural words. V2 additionally checks '
               'actual owned grammar/address, bit decoding/encoding and full Program materialization. Not syntax-index '

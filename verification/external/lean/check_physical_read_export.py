@@ -202,7 +202,7 @@ def emit(data):
 
 def main():
     replay_main(emit=emit, modules=lifecycle.MODELS + ['TraceReduction'],
-        producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve(),
+        producers=[Path(__file__).resolve(), *lifecycle.PRODUCERS,
                    Path(observer_trace_proofs.__file__).resolve()], description=__doc__,
         scope='Finite retained successful Read/Committed objects, exact query/update/report replay, '
               'owner/state continuity, physical prior/successor ports, exact namespace and terminal table boundary. '
