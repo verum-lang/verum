@@ -64,6 +64,12 @@ example : Equal (sum ((words 2).map (fun b => likelihood persistent false (resid
 example : residual [true] [false, true, false] = [true, true, false] := by decide_cbv
 example : residual [true, false, true] [false] = [true] := by decide_cbv
 example (n : Nat) : (words n).Nodup := words_nodup n
+example (past future mask : List Bool) : residual mask (past ++ future) =
+    residual mask past ++ residual (mask.drop past.length) future := residual_append mask past future
+example (n : Nat) : Equal (sum ((words n).map (fun b =>
+    likelihood persistent false (residual [true, false] ([false] ++ b)))))
+    (likelihood persistent false (residual [true, false] [false])) :=
+  prefix_marginal persistent false [true, false] [false] n
 ''')
 
     def test_lossless_encoding_and_exact_missing_mass(self):
@@ -93,6 +99,9 @@ example (n : Nat) : AtMost (selectedMass persistent false [true] n (canonical si
                 'Equal (selectedMass persistent false [true] 1 (canonical singleton)) one',
             'empty_body_mass_not_omitted': 'Equal (likelihood persistent false []) zero',
             'mask_truncates_to_body_length': '(residual [true, true] [false]).length = 2',
+            'length_dependent_kernel_breaks_prefix_consistency':
+                'Equal (sum ((words 1).map (fun b => likelihood persistent true ([false] ++ b)))) '
+                '(likelihood persistent false [false])',
         }
         for name, claim in claims.items():
             with self.subTest(name=name):

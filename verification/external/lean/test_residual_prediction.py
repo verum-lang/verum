@@ -5,7 +5,7 @@ import re
 import tempfile
 import unittest
 
-from check_residual_export import emit
+from check_residual_export import emit, FORECAST_LAW
 from check_typed_programs import ROOT, check, require_success, run
 from observer_export_replay import batches, load
 
@@ -38,10 +38,24 @@ def fixture():
                                                   dict(context=[2], counts=[[0, 1]]+[[1, 0]]*7)])])
 
 
+def adaptive_fixture():
+    """Synthetic learned-bank stream including an empty completed training row."""
+    data = fixture()
+    data.update(format='synarc-residual-native-v2', forecast_law=FORECAST_LAW,
+                length_law='(count(n)+2^-(n+1))/(N+1)')
+    data['rows'].insert(0, dict(context=[99], mask=[255], target=[], native_read=0,
+                               native_state=0, ordinal=0, origin=8, phase='training'))
+    for f in data['frontiers']:
+        n = f['samples']
+        f.update(samples=n+1, forecast_law=FORECAST_LAW,
+                 lengths=dict(total=n+1, counts={'0': 1, '1': n}))
+    return data
+
+
 class ResidualPredictionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        require_success(run('lake', 'build', 'VerumExternalReplay.ResidualPrediction'))
+        require_success(run('lake', 'build', 'VerumExternalReplay.AdaptiveResidual'))
 
     def prove(self, source, expected=None):
         with tempfile.TemporaryDirectory(prefix='verum-residual-') as directory:
@@ -51,10 +65,11 @@ class ResidualPredictionTests(unittest.TestCase):
 
     def test_model_axioms(self):
         names = []
-        for module in ('PositionPrediction', 'ResidualPrediction'):
+        for module in ('PositionPrediction', 'ResidualPrediction', 'AdaptiveResidual'):
             names += [module+'.'+name for name in re.findall(r'^theorem (\w+)',
                 (ROOT / f'VerumExternalReplay/{module}.lean').read_text(), re.M)]
-        result = self.prove(HEADER + '\n'.join('#print axioms '+n for n in names))
+        result = self.prove('import VerumExternalReplay.AdaptiveResidual\n' + HEADER +
+                            '\n'.join('#print axioms '+n for n in names))
         rows = [r['data'] for r in result['diagnostics'] if r['severity'] == 'information']
         self.assertEqual(len(rows), len(names))
         for row in rows:
@@ -118,6 +133,36 @@ example : byteBits 1 = [true, false, false, false, false, false, false, false] :
         changed = source.replace('def state_1 : State := ⟨1, 8,', 'def state_1 : State := ⟨1, 7,')
         self.assertNotEqual(source, changed)
         self.prove(changed, FALSE)
+
+    def test_adaptive_completed_histograms(self):
+        data = adaptive_fixture()
+        source, counts = emit(data)
+        self.assertEqual(counts['length_frontiers'], 3)
+        self.assertEqual(counts['claims'], 8)
+        self.prove(source)
+        for change in ('count', 'ignored_empty', 'swapped_counts'):
+            data = adaptive_fixture()
+            cell = data['frontiers'][-1]['lengths']['counts']
+            if change == 'count': cell['1'] = 4
+            elif change == 'ignored_empty': cell['0'] = 2
+            else: cell.update({'0': 3, '1': 1})
+            with self.subTest(change=change):
+                result = self.prove(emit(data)[0], FALSE)
+                self.assertEqual(sum(d['severity'] == 'error' for d in result['diagnostics']), 1)
+
+    def test_adaptive_schema_refuses_ambiguous_lengths(self):
+        for change in ('total', 'missing_empty', 'extra', 'zero', 'key', 'law', 'frontier_law', 'unit'):
+            data = adaptive_fixture()
+            cell = data['frontiers'][-1]['lengths']['counts']
+            if change == 'total': data['frontiers'][-1]['lengths']['total'] = 3
+            elif change == 'missing_empty': del cell['0']
+            elif change == 'extra': cell['8'] = 1
+            elif change == 'zero': cell['0'] = 0
+            elif change == 'key': cell['01'] = cell.pop('1')
+            elif change == 'law': data['forecast_law'] = 'geometric'
+            elif change == 'frontier_law': data['frontiers'][-1]['forecast_law'] = 'geometric'
+            else: data['length_unit'] = 'bit'
+            with self.subTest(change=change), self.assertRaises(ValueError): emit(data)
 
     def test_storage_order_does_not_change_context_identity(self):
         data = fixture()

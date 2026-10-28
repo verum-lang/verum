@@ -52,6 +52,17 @@ theorem residual_length (prediction body : List Bool) :
   | nil => rfl
   | cons p ps ih => cases body <;> simp [residual, ih]
 
+theorem residual_append (prediction past future : List Bool) :
+    residual prediction (past ++ future) =
+      residual prediction past ++ residual (prediction.drop past.length) future := by
+  induction past generalizing prediction with
+  | nil => cases prediction <;> simp [residual]
+  | cons bit rest ih =>
+    cases prediction with
+    | nil => simp [residual]
+    | cons p ps => simpa only [List.cons_append, residual, List.length_cons,
+        List.drop_succ_cons] using congrArg (Bool.xor p bit :: ·) (ih ps)
+
 theorem residual_involution (prediction body : List Bool) :
     residual prediction (residual prediction body) = body := by
   induction prediction generalizing body with
@@ -133,11 +144,31 @@ theorem residual_normalized (kernel : Kernel State) (state : State) (prediction 
         apply eq_trans (add_congr_right _ (sum_scale _ _ _))
         apply eq_trans (add_congr_left _ (sum_scale _ _ _))
         exact branches_normalized kernel state _ _ (ih _ ps) (ih _ ps)
+
       · apply eq_trans (sum_append _ _)
         apply eq_trans (add_congr_right _ (sum_scale _ _ _))
         apply eq_trans (add_congr_left _ (sum_scale _ _ _))
         apply eq_trans (add_comm _ _)
         exact branches_normalized kernel state _ _ (ih _ ps) (ih _ ps)
+
+/-- A common causal kernel and fixed mask give the same prefix marginal for
+every suffix length. This is stronger than normalization separately by length. -/
+theorem prefix_marginal (kernel : Kernel State) (state : State)
+    (prediction past : List Bool) (n : Nat) :
+    Equal (sum ((words n).map (fun future =>
+      likelihood kernel state (residual prediction (past ++ future)))))
+      (likelihood kernel state (residual prediction past)) := by
+  have paths (future : List Bool) :
+      Equal (likelihood kernel state (residual prediction (past ++ future)))
+        (mul (likelihood kernel state (residual prediction past))
+          (likelihood kernel (advance kernel state (residual prediction past))
+            (residual (prediction.drop past.length) future))) := by
+    rw [residual_append]
+    exact likelihood_append kernel state _ _
+  apply eq_trans (sum_congr (words n) _ _ (fun future _ => paths future))
+  apply eq_trans (sum_scale _ _ _)
+  apply eq_trans (mul_congr_left _ (residual_normalized kernel _ _ n))
+  exact mul_one _
 
 structure Codec (Value : Type) where
   encode : Value → List Bool

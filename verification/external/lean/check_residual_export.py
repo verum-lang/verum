@@ -19,11 +19,36 @@ def pair(value):
     return [natural(x) for x in value]
 
 
+FORECAST_LAW = 'shared-dirichlet-length-residual-kt-v2'
+
+
+def encode_lengths(value, cut, targets):
+    """Strict native histogram shape; count values are proved against the rows."""
+    fields(value, 'total counts')
+    require(int(natural(value['total'])) == cut, 'Length total differs from completed rows')
+    require(type(value['counts']) is dict, 'Expected length count map')
+    counts = {}
+    for key, count in value['counts'].items():
+        n = int(decimal(key))
+        natural(n)
+        require(int(natural(count)) > 0, 'Zero allocated length count')
+        counts[n] = count
+    require(set(counts) == {len(target) for target in targets}, 'Missing or extra length cells')
+    return array(f'({n}, {counts[n]})' for n in sorted(counts))
+
+
 def emit(data):
-    fields(data, 'format bit_order length_law length_unit rows frontiers')
-    require(data['format'] == 'synarc-residual-native-v1', 'Unsupported residual export')
+    require(type(data) is dict, 'Expected residual export')
+    require(data.get('format') in ('synarc-residual-native-v1', 'synarc-residual-native-v2'),
+            'Unsupported residual export')
+    adaptive = data['format'] == 'synarc-residual-native-v2'
+    fields(data, 'format bit_order length_law length_unit rows frontiers' +
+           (' forecast_law' if adaptive else ''))
+    if adaptive:
+        require(data['forecast_law'] == FORECAST_LAW, 'Wrong forecast law')
     require(data['bit_order'] == 'lsb0' and data['length_unit'] == 'byte' and
-            data['length_law'] == '2^-(n+1)', 'Wrong wire probability convention')
+            data['length_law'] == ('(count(n)+2^-(n+1))/(N+1)' if adaptive else '2^-(n+1)'),
+            'Wrong wire probability convention')
     rows = sequence(data['rows'])
     require(rows, 'Empty native stream')
     phases = {'training': 0, 'fresh': 1, 'runtime': 2}
@@ -44,12 +69,18 @@ def emit(data):
         encoded_rows.append(f'⟨{ns(context)}, {ns(mask)}, {ns(target)}⟩')
     require(set(seen_phases) == {0, 1, 2}, 'Training, fresh and runtime observations required')
     frontiers = sequence(data['frontiers'])
-    encoded_frontiers, cuts = [], []
+    encoded_frontiers, cuts, length_claims = [], [], []
     for frontier in frontiers:
-        fields(frontier, 'samples bits ratio reference residual')
+        fields(frontier, 'samples bits ratio reference residual' +
+               (' forecast_law lengths' if adaptive else ''))
         cut = int(natural(frontier['samples']))
         require(cut <= len(rows) and (not cuts or cut >= cuts[-1]), 'Invalid frontier prefix')
         cuts.append(cut)
+        if adaptive:
+            require(frontier['forecast_law'] == FORECAST_LAW, 'Wrong frontier forecast law')
+            lengths = encode_lengths(frontier['lengths'], cut, [t for _, t in parsed[:cut]])
+            length_claims.append(f'theorem length_frontier_{len(cuts)-1} : '
+                f'AdaptiveResidual.histogramAgrees (native_rows.take {cut}) {lengths} = true := by decide_cbv')
         bits = natural(frontier['bits'])
         fields(frontier['ratio'], 'numerator denominator')
         numerator, denominator = (decimal(frontier['ratio'][k]) for k in ('numerator', 'denominator'))
@@ -82,7 +113,7 @@ def emit(data):
     boundaries = {seen_phases.count(0), seen_phases.count(0)+seen_phases.count(1), len(rows)}
     require(boundaries <= set(cuts) and cuts[-1] == len(rows), 'Missing phase frontier or incomplete stream')
     blocks = [
-        'import VerumExternalReplay.ResidualPrediction',
+        'import VerumExternalReplay.' + ('AdaptiveResidual' if adaptive else 'ResidualPrediction'),
         'open ResidualPrediction',
         'set_option warningAsError true',
         'set_option maxRecDepth 65536',
@@ -93,17 +124,20 @@ def emit(data):
         'def native_rows : List Row := ' + array(encoded_rows),
         'def native_frontiers : List Snapshot := ' + array(encoded_frontiers),
         'theorem complete_stream : replay native_rows initial native_frontiers = true := by decide_cbv',
+        *length_claims,
         'end FrozenObserverExport',
     ]
-    return '\n\n'.join(blocks) + '\n', {'rows': len(rows), 'frontiers': len(cuts), 'claims': len(rows)+1,
+    return '\n\n'.join(blocks) + '\n', {'rows': len(rows), 'frontiers': len(cuts),
+        'claims': len(rows)+1+len(length_claims), 'length_frontiers': len(length_claims),
         'training_rows': seen_phases.count(0), 'fresh_rows': seen_phases.count(1), 'runtime_rows': seen_phases.count(2)}
 
 
 if __name__ == '__main__':
     replay_main(emit=emit,
         modules=['ExactMass','CausalCoding','CategoricalPrediction','BinaryPrediction',
-                 'PositionPrediction','ResidualPrediction'],
+                 'PositionPrediction','ResidualPrediction','EnumerableMass','FiniteWire',
+                 'AdaptiveLength','AdaptiveResidual'],
         producers=[Path(__file__).resolve(), Path(__file__).with_name('check_joint_export.py'),
                    Path(__file__).with_name('residual_trace_proofs.py')],
-        scope='Complete finite residual/raw KT row fold and all count/ratio frontiers. Native VM, physical causality, overflow/refusal behavior, resource charging and statistical null/stopping guarantees are separate.',
+        scope='Complete finite residual/raw KT row fold and all count/ratio frontiers; v2 also checks the shared completed-row length histogram. Absolute forecast calls, native VM, physical causality, overflow/refusal behavior, resource charging and statistical null/stopping guarantees are separate.',
         description=__doc__)
