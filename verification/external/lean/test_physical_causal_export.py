@@ -23,8 +23,10 @@ class PhysicalCausalTests(ReplayAssertions,unittest.TestCase):
 
     def test_complete_frozen_boundary(self):
         counts=self.prove(fixture())
-        for k,v in dict(cases=11,guards=41,preparation_visits=28,published=6,refused=5).items():
+        for k,v in dict(cases=11,guards=41,preparation_visits=28,
+                       captured_publications=6,legacy_publications=1,refused=5).items():
             self.assertEqual(counts[k],v)
+        self.assertNotIn('published',counts)
 
     def test_receipts_and_source_identity(self):
         root=ROOT/'fixtures';manifest=json.loads((root/(STEM+'.provenance.json')).read_text())

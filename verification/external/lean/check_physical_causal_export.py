@@ -37,7 +37,8 @@ class PhysicalReplay:
         self.encoder=Encoder(2**16-1)
         self.definitions=[];self.claims=[];self.captures={};self.slots={};self.propositions=set()
         self.allocations=set()
-        self.counts=dict(cases=0,capture_views=0,guards=0,preparation_visits=0,published=0,refused=0)
+        self.counts=dict(cases=0,capture_views=0,guards=0,preparation_visits=0,
+                         captured_publications=0,legacy_publications=0,refused=0)
 
     def claim(self,proposition,proof='decide_cbv'):
         # Repeated snapshots reuse exactly the same proposition, never a claim
@@ -174,7 +175,7 @@ class PhysicalReplay:
         self.claim(f'{self.history(r["unpublished_history"])} = {prior}++[({payload},none)]')
         self.claim(f'({natural(pending["owner"]["ordinal"])} : Nat) = {natural(r["before"]["ordinal"])}')
         self.claim(f'({origin(pending["owner"]["lineage"])} : Nat × Nat) = {origin(r["before"]["lineage"])}')
-        c=self.capture(value['capture']);name=f'invocation_{self.counts["published"]+self.counts["refused"]}'
+        c=self.capture(value['capture']);name=f'invocation_{self.counts["captured_publications"]+self.counts["refused"]}'
         self.definitions.append(f'def {name} : CausalJournal.Invocation Unit Nat (List Nat) Nat (List UInt8 × List UInt8 × List UInt8) := '
             f'⟨⟨⟨(),false,{prior}⟩,⟨(),(),{r["slot"]},{payload},{value["requested"]}⟩⟩,{c}⟩')
         if accepted:
@@ -183,7 +184,7 @@ class PhysicalReplay:
             self.claim(f'({natural(after["ordinal"])} : Nat) = {natural(r["next_ordinal"])}')
             self.claim(f'({origin(after["lineage"])} : Nat × Nat) = {origin(r["before"]["lineage"])}')
             self.claim(f'{opaque(after)} = {opaque({**pending["owner"],"complete":True,"history":after["history"],"ordinal":r["next_ordinal"]})}')
-            self.counts['published']+=1
+            self.counts['captured_publications']+=1
         else:
             self.claim(f'(CausalJournal.observe {name}).toOption.isNone = true')
             self.claim(f'{opaque(after)} = {opaque(pending["owner"])}')
@@ -302,6 +303,7 @@ class PhysicalReplay:
                 self.claim(f'{boolean(c["after"]["complete"])} = true')
                 self.claim(f'({natural(c["after"]["ordinal"])} : Nat) = {natural(r["next_ordinal"])}')
                 self.claim(f'{opaque(c["returned_cut"])} = {opaque(r["before"])}')
+                self.counts['legacy_publications']+=1
             else:
                 fields(c,'after before callback_actions invocation kind reservation result same_root slot_filled')
                 result=c['result'];require(type(result) is dict and len(result)==1 and set(result)<= {'Ok','Err'},'Invalid completion result')
