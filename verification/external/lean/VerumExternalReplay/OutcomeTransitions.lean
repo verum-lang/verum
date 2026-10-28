@@ -1,6 +1,7 @@
 import VerumExternalReplay.AtomicPublication
 import VerumExternalReplay.PartialObservers
 import VerumExternalReplay.FrozenTraining
+import VerumExternalReplay.PredictiveReplay
 
 /-! One causal update contract for live execution and retained-history replay.
 An anchor denotes a retained dispatch identity, not merely equal action bytes.
@@ -112,6 +113,39 @@ def replay (protocol : Protocol S B E F Y) (rows : List (Row E Y)) (state : S ×
 theorem replay_append (protocol : Protocol S B E F Y) (first second : List (Row E Y)) (state : S × B) :
     replay protocol (first++second) state = (replay protocol first state).bind (replay protocol second) :=
   PartialObservers.fold_append _ _ _ _
+
+/-- The earlier predictive protocol is an exact subcase of this contract,
+including unavailable reads/updates and the complete learned bank. -/
+def fromPredictive (read : S → Q → Option PredictiveReplay.Prediction)
+    (update : S → E → Option S) :
+    Protocol S PredictiveReplay.Bank (Q × E) PredictiveReplay.Prediction (List Nat) where
+  predict state _ input := read state input.1
+  update state input _ := update state input.2
+  learn bank prediction target := some (PredictiveReplay.learn bank prediction target)
+
+def predictiveRow (row : PredictiveReplay.Record Q E) : Row (Q × E) (List Nat) :=
+  ⟨(row.query,row.event),row.target⟩
+
+theorem predictive_step (read : S → Q → Option PredictiveReplay.Prediction)
+    (update : S → E → Option S) (state : PredictiveReplay.State S) (row : PredictiveReplay.Record Q E) :
+    step (fromPredictive read update) (state.vm,state.bank) (predictiveRow row) =
+    (PredictiveReplay.step read update state row).map (fun next => (next.vm,next.bank)) := by
+  cases hr : read state.vm row.query <;> cases hu : update state.vm row.event <;>
+    simp [step,freeze,complete,fromPredictive,predictiveRow,PredictiveReplay.step,hr,hu]
+
+theorem predictive_replay (read : S → Q → Option PredictiveReplay.Prediction)
+    (update : S → E → Option S) (rows : List (PredictiveReplay.Record Q E))
+    (state : PredictiveReplay.State S) :
+    replay (fromPredictive read update) (rows.map predictiveRow) (state.vm,state.bank) =
+    (PredictiveReplay.replay read update rows state).map (fun next => (next.vm,next.bank)) := by
+  induction rows generalizing state with
+  | nil => rfl
+  | cons row rows ih =>
+      simp only [replay,PredictiveReplay.replay,PartialObservers.fold,List.map_cons]
+      rw [predictive_step]
+      cases h : PredictiveReplay.step read update state row with
+      | none => rfl
+      | some next => exact ih next
 
 /-- Compose outcome-dependent state learning with the shared frozen-row
 scorer. The same complete target drives the transition and training delta. -/

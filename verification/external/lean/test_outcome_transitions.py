@@ -81,6 +81,26 @@ example : (complete joint jointTicket ⟨42,[false,false]⟩).map (fun r => (r.s
   some ([false,false],2) := by decide_cbv
 ''')
 
+    def test_existing_predictive_replay_embeds_with_failures(self):
+        self.prove('''
+def oldRead (state : Nat) (_ : Unit) : Option PredictiveReplay.Prediction :=
+  if state = 99 then none else some ⟨[],[]⟩
+def oldUpdate (state : Nat) (_ : Unit) : Option Nat :=
+  if state = 100 then none else some (state+1)
+def oldRows : List (PredictiveReplay.Record Unit Unit) := [⟨(),(),[]⟩,⟨(),(),[0]⟩]
+example (rows : List (PredictiveReplay.Record Unit Unit)) (state : PredictiveReplay.State Nat) :
+    replay (fromPredictive oldRead oldUpdate) (rows.map predictiveRow) (state.vm,state.bank) =
+    (PredictiveReplay.replay oldRead oldUpdate rows state).map (fun s => (s.vm,s.bank)) :=
+  predictive_replay oldRead oldUpdate rows state
+example : replay (fromPredictive oldRead oldUpdate) (oldRows.map predictiveRow)
+    (99,PredictiveReplay.initial) = none := by decide_cbv
+example : replay (fromPredictive oldRead oldUpdate) (oldRows.map predictiveRow)
+    (100,PredictiveReplay.initial) = none := by decide_cbv
+example : (replay (fromPredictive oldRead oldUpdate) (oldRows.map predictiveRow)
+    (0,PredictiveReplay.initial)).map (fun s => (s.1,s.2.body.samples,s.2.body.bits)) =
+    some (2,2,8) := by decide_cbv
+''')
+
     def test_wrong_authority_or_outcome_is_rejected(self):
         for claim in [
             '(complete protocol ticket ⟨43,true⟩).isSome = true',
