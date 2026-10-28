@@ -223,6 +223,8 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_residual_prediction.py
           python3 -m unittest discover -s verification/external/lean -p test_sensory_port.py
           python3 -m unittest discover -s verification/external/lean -p test_action_capture.py
+          python3 -m unittest discover -s verification/external/lean -p test_action_target_wire.py
+          python3 -m unittest discover -s verification/external/lean -p test_action_capture_export.py
           python3 -m unittest discover -s verification/external/lean -p test_sensory_export.py
           python3 verification/external/lean/check_finite_admission.py \
             --report finite-admission-acceptance.json
@@ -230,6 +232,11 @@ jobs:
             --report acquisition-scheduling-acceptance.json
       - name: Frozen observer export correspondence
         run: |
+          python3 verification/external/lean/check_action_capture_export.py \
+            --export verification/external/lean/fixtures/action-capture-v2.json \
+            --sha256 a690da1c4e6b382b5807ace7f18560d68a264028cb56cc42954eeed57d63fa57 \
+            --provenance verification/external/lean/fixtures/action-capture-v2.provenance.json \
+            --output action-capture-native-export.lean --report action-capture-native-export-acceptance.json
           python3 verification/external/lean/check_sensory_export.py \
             --export verification/external/lean/fixtures/sensory-lifecycle-v1.json \
             --sha256 e54db1fa1acb3e14a1122e5ff6bb65a85b36c37237e5676c2ea2a85b779cc01e \
