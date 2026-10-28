@@ -77,6 +77,26 @@ structure Row (Input Outcome : Type) where
   outcome : Outcome
   deriving DecidableEq
 
+/-- Complete the retained external input using one declared outcome decoder.
+The decoder supplies a value, never a replacement interface or input prefix. -/
+def appendOutcome (decode : Y → Option V) (event : I × List V) (outcome : Y) :
+    Option (I × List V) :=
+  (decode outcome).map (fun value => (event.1,event.2++[value]))
+
+theorem append_outcome_exact (decode : Y → Option V) (event : I × List V)
+    (outcome : Y) (completed : I × List V) :
+    appendOutcome decode event outcome = some completed ↔
+      ∃ value, decode outcome = some value ∧ completed = (event.1,event.2++[value]) := by
+  cases h : decode outcome <;> simp [appendOutcome,h,eq_comm]
+
+theorem append_outcome_retains_input (decode : Y → Option V) (event : I × List V)
+    (outcome : Y) (completed : I × List V)
+    (success : appendOutcome decode event outcome = some completed) :
+    completed.1 = event.1 ∧ completed.2.take event.2.length = event.2 ∧
+      completed.2.length = event.2.length+1 := by
+  obtain ⟨value,_,rfl⟩ := (append_outcome_exact decode event outcome completed).mp success
+  simp
+
 def evolve (update : S → E → Y → Option S) (rows : List (Row E Y)) (state : S) : Option S :=
   PartialObservers.fold (fun state row => update state row.input row.outcome) rows state
 

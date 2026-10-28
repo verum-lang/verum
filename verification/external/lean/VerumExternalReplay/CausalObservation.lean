@@ -22,15 +22,16 @@ def decode (target : List Nat) : Option Nat :=
   else none
 
 def appendOutcome (event : External) (target : List Nat) : Option External :=
-  (decode target).map (fun value => (event.1,event.2++[value]))
+  OutcomeTransitions.appendOutcome decode event target
 
 theorem append_exact (event : External) (target : List Nat) (completed : External) :
     appendOutcome event target = some completed ↔
     ∃ value, decode target = some value ∧ completed = (event.1,event.2++[value]) := by
-  cases h : decode target <;> simp [appendOutcome,h,eq_comm]
+  exact OutcomeTransitions.append_outcome_exact decode event target completed
 
 theorem wrong_width_refused (event : External) (target : List Nat) (h : target.length ≠ 8) :
-    appendOutcome event target = none := by simp [appendOutcome,decode,h]
+    appendOutcome event target = none := by
+  simp [appendOutcome,OutcomeTransitions.appendOutcome,decode,h]
 
 def update (code : FiniteCode.Code RetainedNative.Primitive Nat)
     (binding : ObserverAdmission.Binding Nat) (state : Nat) (event : External)

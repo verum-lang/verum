@@ -233,6 +233,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_outcome_transitions.py
           python3 -m unittest discover -s verification/external/lean -p test_expressiveness_export.py
           python3 -m unittest discover -s verification/external/lean -p test_causal_observation.py
+          python3 -m unittest discover -s verification/external/lean -p test_acquired_causal_observation.py
           python3 -m unittest discover -s verification/external/lean -p test_causal_journal.py
           python3 -m unittest discover -s verification/external/lean -p test_physical_causal_export.py
           python3 -m unittest discover -s verification/external/lean -p test_causal_snapshot.py
