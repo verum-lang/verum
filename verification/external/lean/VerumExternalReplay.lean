@@ -43,3 +43,4 @@ import VerumExternalReplay.CapacityRecurrence
 import VerumExternalReplay.CategoricalScore
 import VerumExternalReplay.CausalCoding
 import VerumExternalReplay.FiniteWire
+import VerumExternalReplay.BinaryPrediction

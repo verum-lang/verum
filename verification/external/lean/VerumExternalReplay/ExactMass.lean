@@ -145,6 +145,13 @@ theorem sum_common_denominator (ns : List Nat) (d : Nat) (hd : 0 < d) :
 def divide (a b : Fraction) (hb : 0 < b.numerator) : Fraction :=
   ⟨a.numerator * b.denominator, a.denominator * b.numerator, Nat.mul_pos a.positive hb⟩
 
+/-- A shared positive mass factor can be cancelled before constructing a ratio.
+For wire models this avoids allocating the identical geometric length factor. -/
+theorem divide_common_scale (q p scale : Fraction) (hp : 0 < p.numerator)
+    (hs : 0 < scale.numerator) :
+    Equal (divide (mul scale q) (mul scale p) (Nat.mul_pos hs hp)) (divide q p hp) := by
+  simp only [Equal, divide, mul, Nat.mul_comm, Nat.mul_left_comm]
+
 -- Exact threshold comparison: no division, logarithm or floating point needed.
 theorem ratio_threshold (q p weight : Fraction) (hp : 0 < p.numerator)
     (hw : 0 < weight.numerator) :
