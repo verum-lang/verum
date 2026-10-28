@@ -20,9 +20,13 @@ def score(value):
 
 
 def emit(data):
+    require(type(data) is dict and data.get('schema') in
+            ('synarc-recipient-code-transfer-v2', 'synarc-recipient-code-transfer-v3'),
+            'Support-complete v2 or v3 export required')
+    current = data['schema'] == 'synarc-recipient-code-transfer-v3'
     fields(data, 'schema phase letter donor_definition recipient_definition initial_program candidate '
-        'definition_receipt training validation joint_exact_score confirmed confirmation_rule installation_history installed_cut')
-    require(data['schema'] == 'synarc-recipient-code-transfer-v2', 'Support-complete v2 export required')
+        'definition_receipt training validation joint_exact_score confirmed confirmation_rule installation_history ' +
+        ('installation_origin_cut installation_cut current_history current_cut' if current else 'installed_cut'))
     natural(data['phase'])
     require(data['confirmation_rule'] == 'joint_compression_strictly_above_training_then_joint_family_decide_v1',
         'Unknown confirmation rule')
@@ -116,6 +120,9 @@ def emit(data):
     histories = [history(p['history']) for p in (training, fresh)]
     installed_history = history(data['installation_history'])
     all_histories = [training['history'], fresh['history'], data['installation_history']]
+    if current:
+        current_history = history(data['current_history'])
+        all_histories.append(data['current_history'])
     for old, new in zip(all_histories, all_histories[1:]):
         require(old['origin'] == new['origin'] and new['events'][:len(old['events'])] == old['events'],
                 'History origin or immutable prefix changed')
@@ -181,24 +188,43 @@ def emit(data):
     lines.append('def joint_score : CategoricalScore.Score := ' + score(data['joint_exact_score']))
     claim('CategoricalScore.agrees joint_contexts joint_score = true', 'decide')
     claim(f'CategoricalScore.confirmed training_score joint_score {selection} {risk} = {boolean(data["confirmed"])}', 'decide')
-    cut = data['installed_cut']; lifecycle.cut(cut)
-    same(cut['definition'], recipient['identity'])
-    # Instance ownership is an observed nominal token, not the family owner.
-    natural(cut['owner']); natural(candidate['owner'])
-    claim(f'transfer_fold {array(installed_history)} = some {lifecycle.value(cut["value"])}', '(conv => lhs; cbv) <;> rfl')
+    if current:
+        n = int(natural(data['installation_origin_cut']))
+        require(max(cuts[1]) <= n <= len(installed_history), 'Installation cut excludes evidence or exceeds history')
+        snapshots = [(data['installation_cut'], installed_history[:n]), (data['current_cut'], current_history)]
+    else:
+        # V2 cannot silently acquire an inferred later event. Its original
+        # mismatched snapshot is retained as a failing kernel obligation.
+        snapshots = [(data['installed_cut'], installed_history)]
+    for cut, entries in snapshots:
+        lifecycle.cut(cut); same(cut['definition'], recipient['identity'])
+        # Instance ownership is an observed nominal token, not the family owner.
+        natural(cut['owner']); natural(candidate['owner'])
+        claim(f'transfer_fold {array(entries)} = some {lifecycle.value(cut["value"])}', '(conv => lhs; cbv) <;> rfl')
+    if current:
+        installed, live = data['installation_cut'], data['current_cut']
+        # The receiver publishes General::new(installed.fork(), ...). Its live
+        # owner must therefore differ from the retained installation owner.
+        # Endpoints do not supply the missing native fork/commit trace.
+        claim(f'({natural(installed["owner"])} : Nat) ≠ {natural(live["owner"])}', 'decide')
+        relation = '≠' if len(current_history) > n else '='
+        claim(f'({natural(installed["state"])} : Nat) {relation} {natural(live["state"])}', 'decide')
     lines.extend(['#print axioms ' + n for n in names] + ['end FrozenObserverExport'])
     return '\n\n'.join(lines)+'\n', {'claims':len(names), 'reading_replays':sum(map(len,cuts)),
-        'history_events':len(installed_history), 'exact_scores':3, 'portable_programs':3}
+        'history_events':len(installed_history), 'exact_scores':3, 'portable_programs':3,
+        'snapshot_replays':len(snapshots), 'native_owner_transition_witnesses':0}
 
 
 def main():
     replay_main(emit=emit, modules=lifecycle.MODELS+['CategoricalScore'],
         producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve(),
                    Path(__file__).with_name('check_joint_export.py'), Path(__file__).with_name('retained_transfer_codec.py')],
-        description=__doc__, scope='Original v2 transfer: retained portable code and correlated family, nominal lineage separation, '
-        'initialization, immutable history prefixes, fresh ordered cuts, observed reads and installed value, exact KT/ML scores '
+        description=__doc__, scope='Original v2/v3 transfer: retained portable code and correlated family, nominal lineage separation, '
+        'initialization, immutable history prefixes, fresh ordered cuts, observed reads and installed value; v3 separately checks '
+        'installation-prefix and current-history replay plus published receiver owner/state separation. Exact KT/ML scores '
         'with frozen support and strict paid-family decisions. Exported contexts/outcomes are inputs; their environment provenance, '
-        'physical ownership allocation, audit/resource accounting, native terminal guards, ingress parser, universal native refinement '
+        'actual publication fork/commit transition witnesses, physical ownership allocation, audit/resource accounting, '
+        'native terminal guards, ingress parser, universal native refinement '
         'and statistical optional-stopping validity are not certified.')
 
 if __name__ == '__main__': main()

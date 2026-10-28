@@ -276,6 +276,18 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_categorical_score.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_transfer_codec.py
           python3 -m unittest discover -s verification/external/lean -p test_transfer_export.py
+          gzip -dc verification/external/lean/fixtures/recipient-transfer-v3-0.json.gz > recipient-transfer-0.json
+          python3 verification/external/lean/check_transfer_export.py \
+            --export recipient-transfer-0.json \
+            --sha256 a024e586e000b038430a4fead05727e8825c6df511ac640ca3cf76b3045218a6 \
+            --provenance verification/external/lean/fixtures/recipient-transfer-v3-0.provenance.json \
+            --output recipient-transfer-0.lean --report recipient-transfer-0-acceptance.json
+          gzip -dc verification/external/lean/fixtures/recipient-transfer-v3-3.json.gz > recipient-transfer-3.json
+          python3 verification/external/lean/check_transfer_export.py \
+            --export recipient-transfer-3.json \
+            --sha256 87dbc14f34aaac522af75db730ba39a9c69fccd6593cd2ccf7b15e896a21374e \
+            --provenance verification/external/lean/fixtures/recipient-transfer-v3-3.provenance.json \
+            --output recipient-transfer-3.lean --report recipient-transfer-3-acceptance.json
           python3 verification/external/lean/check_lifecycle_export.py \
             --export verification/external/lean/fixtures/observer-lifecycle-v1.json \
             --sha256 d81cc445752ee9e95a59fbd8915d02802211a810d6ce182b80025ab482260199 \
@@ -414,6 +426,10 @@ jobs:
             observer-lifecycle-v5-export.lean
             observer-lifecycle-v5-export-*/
             retained-names-export-acceptance.json
+            recipient-transfer-*-acceptance.json
+            recipient-transfer-*.lean
+            recipient-transfer-0-*/
+            recipient-transfer-3-*/
             retained-names-export.lean
             retained-names-export-*/
             observer-export*.lean

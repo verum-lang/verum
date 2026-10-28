@@ -11,9 +11,9 @@ from check_typed_programs import check, require_success, run
 
 FIXTURES=ROOT/'fixtures'
 
-def original(phase=0):
-    raw=gzip.decompress((FIXTURES/f'recipient-transfer-v2-{phase}.json.gz').read_bytes())
-    provenance=json.loads((FIXTURES/f'recipient-transfer-v2-{phase}.provenance.json').read_text())
+def original(phase=0, version=2):
+    raw=gzip.decompress((FIXTURES/f'recipient-transfer-v{version}-{phase}.json.gz').read_bytes())
+    provenance=json.loads((FIXTURES/f'recipient-transfer-v{version}-{phase}.provenance.json').read_text())
     if hashlib.sha256(raw).hexdigest()!=provenance['export_sha256']:raise AssertionError('Changed original fixture')
     return json.loads(raw)
 
@@ -67,6 +67,33 @@ class TransferExportTests(unittest.TestCase):
         for edit in edits:
             data=original();edit(data)
             with self.subTest(edit=edits.index(edit)),self.assertRaises(ValueError):emit(data)
+
+    def test_v3_both_original_boundaries_replay(self):
+        for phase in (0,3):
+            source,counts=emit(original(phase,3))
+            self.assertEqual(counts['claims'],72)
+            with tempfile.TemporaryDirectory() as d:
+                p=Path(d)/'original_v3.lean';p.write_text(source);check(p)
+
+    def test_v3_wrong_cut_missing_tail_and_owner_rejected(self):
+        mutations=[
+            (lambda d:d.update(installation_origin_cut=35), 'transfer_fold', 'Tactic `rfl` failed:'),
+            (lambda d:d['current_history']['events'].pop(), 'transfer_fold', 'Tactic `rfl` failed:'),
+            (lambda d:d.update(installation_cut=d['current_cut']), 'transfer_fold', 'Tactic `rfl` failed:'),
+            (lambda d:d['current_cut'].update(owner=d['installation_cut']['owner']), ': Nat) ≠', 'Tactic `decide` proved that the proposition'),
+            (lambda d:d['current_cut'].update(state=d['installation_cut']['state']), ': Nat) ≠', 'Tactic `decide` proved that the proposition'),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for i,(edit,target,error) in enumerate(mutations):
+                data=original(version=3);edit(data);source,_=emit(data)
+                # The two boundary folds and owner/revision observations follow
+                # the current definition equality; preserve their causal order.
+                blocks=source.strip().split('\n\n')
+                prelude=[b for b in blocks if b.startswith(('import ','open ','namespace ','set_option ','def '))]
+                claims=[b for b in blocks if b.startswith('theorem ')][-6:]
+                p=Path(directory)/f'boundary{i}.lean'
+                p.write_text('\n\n'.join(prelude+claims+['end FrozenObserverExport']))
+                with self.subTest(mutation=i):check(p,error)
 
     def test_kernel_refuses_wrong_reading_score_decision_and_state(self):
         mutations=[
