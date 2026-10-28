@@ -118,7 +118,7 @@ fn test_loop_invariant_with_condition() {
     let zero = int_literal(0);
     let invariant = binary_expr(i_var.clone(), BinOp::Ge, zero.clone());
 
-    // Initial state: i = 0
+    // A type declaration alone does not establish i = 0.
     let init_state: &[(Text, Type)] = &[(Text::from("i"), int_type())];
 
     // Loop body (simplified)
@@ -140,9 +140,10 @@ fn test_loop_invariant_with_condition() {
         &postcondition,
     );
 
-    // May succeed or fail depending on SMT solver
-    // Just verify it doesn't panic
-    let _ = result;
+    assert!(
+        matches!(result, Err(verum_smt::ContractError::VerificationFailed { message, .. })
+        if message.contains("initially"))
+    );
 }
 
 #[test]
@@ -160,9 +161,11 @@ fn test_termination_simple() {
 
     let result = verify_termination(&context, &ranking_function, loop_vars, &loop_body);
 
-    // May succeed or fail depending on constraints
-    // Just verify it doesn't panic
-    let _ = result;
+    // No nonnegative domain or decreasing transition has been supplied.
+    assert!(matches!(
+        result,
+        Err(verum_smt::ContractError::VerificationFailed { .. })
+    ));
 }
 
 #[test]
@@ -276,11 +279,8 @@ fn test_loop_invariant_cost_tracking() {
         &postcondition,
     );
 
-    if let Ok(cost) = result {
-        // Should have measured some time
-        assert!(cost.duration.as_nanos() > 0 || cost.duration.as_nanos() == 0);
-        assert_eq!(cost.category.as_str(), "loop_invariant");
-    }
+    let cost = result.expect("the trivial invariant must be verified");
+    assert_eq!(cost.category.as_str(), "loop_invariant");
 }
 
 #[test]
@@ -293,9 +293,10 @@ fn test_termination_cost_tracking() {
 
     let result = verify_termination(&context, &ranking_function, loop_vars, &loop_body);
 
-    if let Ok(cost) = result {
-        assert_eq!(cost.category.as_str(), "termination_check");
-    }
+    assert!(matches!(
+        result,
+        Err(verum_smt::ContractError::VerificationFailed { .. })
+    ));
 }
 
 #[test]
