@@ -13,7 +13,7 @@
 //! - **Productivity checking**: Verify that streams produce values
 //! - **Coinductive reasoning**: Support for infinite data structures
 //! - **Bisimulation verification**: Z3-based observational equivalence
-//! - **Greatest fixpoint computation**: Using Z3 fixedpoint engine
+//! - **Coinduction models**: SMT-checked seed membership and post-fixed-point closure
 //!
 //! ## Implementation
 //!
@@ -28,11 +28,16 @@
 //! Coinductive type syntax: `coinductive Stream<A: Type> : Type { head: Stream<A> -> A, tail: Stream<A> -> Stream<A> }`
 //! Productivity is verified by checking that every recursive call is guarded by a destructor application.
 
+mod model;
+pub use model::{CoinductionModel, CoinductionObligation, CoinductionResult};
+
 use crate::verify::VerificationError;
+const COINDUCTION_MODEL_REQUIRED: &str =
+    "Greatest fixed-point reasoning requires a resolved CoinductionModel";
+use serde::{Deserialize, Serialize};
 use verum_ast::{ContextList, Expr, ExprKind, Type, TypeKind};
 use verum_common::ToText;
 use verum_common::{Heap, List, Map, Maybe, Set, Text};
-use serde::{Deserialize, Serialize};
 
 // ==================== Type Registry ====================
 
@@ -323,8 +328,8 @@ impl GuardContext {
 ///
 /// Coinductive type checker with productivity verification. Ensures all coinductive
 /// definitions (streams, infinite trees, etc.) are productive: every observation path
-/// produces a value before recursing. Uses Z3 fixedpoint engine for greatest fixpoint
-/// computation and bisimulation verification (observational equivalence).
+/// produces a value before recursing. Model coinduction is checked separately by
+/// [`CoinductionModel`]; a type schema does not establish a closed bisimulation.
 pub struct CoinductiveChecker {
     /// Registered coinductive types
     types: Map<Text, CoinductiveType>,
@@ -731,36 +736,9 @@ impl CoinductiveChecker {
         }
     }
 
-    /// Verify a coinductive proof principle using bisimulation
-    ///
-    /// For coinductive types, we use bisimulation to prove equality:
-    /// 1. For each destructor, observations on left and right must be equal
-    /// 2. For recursive destructors, substructures must be bisimilar
-    ///
-    /// This uses Z3 to verify observational equivalence at each step.
-    ///
-    /// ## Algorithm
-    ///
-    /// ```text
-    /// bisimilar(left, right, type):
-    ///  for destructor in type.destructors:
-    ///  left_obs = apply_destructor(left, destructor)
-    ///  right_obs = apply_destructor(right, destructor)
-    ///
-    ///  if is_recursive(destructor.result_type, type):
-    ///  // Recursive case: assume bisimilarity (coinduction)
-    ///  // We verify one level and rely on the coinductive principle
-    ///  continue
-    ///  else:
-    ///  // Base case: verify equality using Z3
-    ///  if not verify_equal(left_obs, right_obs):
-    ///  return false
-    ///  return true
-    /// ```
-    ///
-    /// Bisimulation verification: two coinductive values are observationally equivalent
-    /// if applying the same sequence of destructors produces equal results. Encoded as
-    /// a greatest fixpoint in Z3: for all destructor sequences, observations match.
+    /// Check non-recursive observations using SMT equality.
+    /// Recursive observations require an explicit closed candidate relation;
+    /// use [`CoinductionModel`] for that model-level proof.
     pub fn verify_bisimulation(
         &self,
         left: &Expr,
@@ -783,29 +761,10 @@ impl CoinductiveChecker {
 
             // Check if the result type is recursive (refers back to the coinductive type)
             if self.is_recursive_type(&destructor.return_type, &coinductive_type.name) {
-                // Recursive destructor (e.g., Stream.tail : Stream<A> -> Stream<A>)
-                // By the coinductive principle, we assume the substructures are bisimilar
-                // This is the key to coinduction: we verify one level and trust the rest
-                //
-
-                // In a full implementation, we'd track a bisimulation relation and
-                // ensure we're not creating infinite loops. For now, we verify that
-                // the structure of the recursive call is well-formed.
-
-                // Verify that both recursive calls are well-formed
-                if !self.is_well_formed_recursive(&left_obs)? {
-                    return Err(VerificationError::SolverError(
-                        "Left recursive destructor is not well-formed".into(),
-                    ));
-                }
-                if !self.is_well_formed_recursive(&right_obs)? {
-                    return Err(VerificationError::SolverError(
-                        "Right recursive destructor is not well-formed".into(),
-                    ));
-                }
-
-                // By coinduction, we assume the recursive parts are bisimilar
-                continue;
+                return Err(VerificationError::Unknown(
+                    "Recursive observations require a closed CoinductionModel candidate relation"
+                        .into(),
+                ));
             } else {
                 // Non-recursive destructor (e.g., Stream.head : Stream<A> -> A)
                 // We must verify equality using Z3
@@ -1011,166 +970,16 @@ impl CoinductiveChecker {
         }
     }
 
-    /// Check if a recursive expression is well-formed
-    ///
-    /// A recursive expression is well-formed if it's a valid expression that
-    /// could potentially construct a coinductive value.
-    fn is_well_formed_recursive(&self, expr: &Expr) -> Result<bool, VerificationError> {
-        // Basic well-formedness checks:
-        // 1. Not a literal (literals can't be infinite)
-        // 2. Has some structure (not just a bare variable)
-
-        match &expr.kind {
-            // Literals are not valid recursive structures
-            ExprKind::Literal(_) => Ok(false),
-
-            // Variables are potentially valid (they could be bound to recursive definitions)
-            ExprKind::Path(_) => Ok(true),
-
-            // Function/method calls are valid if they construct values
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. } => Ok(true),
-
-            // Structured expressions are valid
-            ExprKind::Block { .. } | ExprKind::If { .. } => Ok(true),
-
-            // Most other expression forms are potentially valid
-            _ => Ok(true),
-        }
-    }
-
-    /// Verify coinductive type well-formedness using Z3 fixedpoint
-    ///
-    /// This uses Z3's fixedpoint engine to verify that a coinductive type
-    /// definition is well-formed (i.e., it satisfies the greatest fixpoint).
-    ///
-    /// For a coinductive type T with destructors d1, d2, ..., we verify:
-    /// - The greatest fixpoint GFP(F) exists where F is the functor
-    /// - All corecursive definitions are productive
+    /// A type schema cannot prove productivity or close a bisimulation relation.
+    /// Use [`CoinductionModel::verify`] with resolved, typed observations and
+    /// successors to establish the model-level coinduction obligations.
     pub fn verify_greatest_fixpoint(
         &self,
-        coinductive_type: &CoinductiveType,
+        _coinductive_type: &CoinductiveType,
     ) -> Result<bool, VerificationError> {
-        use crate::fixedpoint::FixedPointEngine;
-        use z3::{FuncDecl, Sort};
-
-        // Create Z3 context and fixedpoint engine
-        let ctx = z3::Context::thread_local();
-        let mut engine = FixedPointEngine::new(ctx.clone()).map_err(|e| {
-            VerificationError::SolverError(
-                format!("Failed to create fixedpoint engine: {}", e).into(),
-            )
-        })?;
-
-        // Create a predicate for the coinductive type
-        // bisim(x, y) := for all destructors d, d(x) ~ d(y)
-        let int_sort = Sort::int();
-        let bisim_decl = FuncDecl::new(
-            z3::Symbol::String(format!("bisim_{}", coinductive_type.name)),
-            &[&int_sort, &int_sort],
-            &Sort::bool(),
-        );
-
-        let bisim_decl = engine.register_relation(bisim_decl).map_err(|e| {
-            VerificationError::SolverError(
-                format!("Failed to register bisimulation relation: {}", e).into(),
-            )
-        })?;
-
-        // For each destructor, add a rule that defines the bisimulation
-        for destructor in coinductive_type.destructors.iter() {
-            let is_recursive =
-                self.is_recursive_type(&destructor.return_type, &coinductive_type.name);
-
-            if is_recursive {
-                // Recursive case: bisim(x, y) <- bisim(tail(x), tail(y))
-                // This encodes the coinductive hypothesis
-                let x = z3::ast::Int::new_const("x");
-                let y = z3::ast::Int::new_const("y");
-
-                // Create symbolic tail applications
-                let tail_func = FuncDecl::new(
-                    z3::Symbol::String(destructor.name.to_string()),
-                    &[&int_sort],
-                    &int_sort,
-                );
-                let tail_x = tail_func.apply(&[&x]);
-                let tail_y = tail_func.apply(&[&y]);
-
-                // bisim(tail(x), tail(y)) => bisim(x, y)
-                // This is the coinductive rule
-                let premise = bisim_decl
-                    .apply(&[&tail_x, &tail_y])
-                    .as_bool()
-                    .ok_or_else(|| VerificationError::SolverError("bisim apply not bool".into()))?;
-                let conclusion = bisim_decl
-                    .apply(&[&x, &y])
-                    .as_bool()
-                    .ok_or_else(|| VerificationError::SolverError("bisim apply not bool".into()))?;
-                let rule = premise.implies(&conclusion);
-
-                engine
-                    .add_rule(&rule, Some(&format!("bisim_{}_recursive", destructor.name)))
-                    .map_err(|e| {
-                        VerificationError::SolverError(
-                            format!("Failed to add recursive bisimulation rule: {}", e).into(),
-                        )
-                    })?;
-            } else {
-                // Base case: bisim(x, y) <- head(x) == head(y)
-                let x = z3::ast::Int::new_const("x");
-                let y = z3::ast::Int::new_const("y");
-
-                // Create symbolic head applications
-                let head_func = FuncDecl::new(
-                    z3::Symbol::String(destructor.name.to_string()),
-                    &[&int_sort],
-                    &int_sort,
-                );
-                let head_x = head_func.apply(&[&x]);
-                let head_y = head_func.apply(&[&y]);
-
-                // head(x) == head(y) => bisim(x, y)
-                let head_x_int = head_x
-                    .as_int()
-                    .ok_or_else(|| VerificationError::SolverError("head apply not int".into()))?;
-                let head_y_int = head_y
-                    .as_int()
-                    .ok_or_else(|| VerificationError::SolverError("head apply not int".into()))?;
-                let premise = head_x_int.eq(&head_y_int);
-                let conclusion = bisim_decl
-                    .apply(&[&x, &y])
-                    .as_bool()
-                    .ok_or_else(|| VerificationError::SolverError("bisim apply not bool".into()))?;
-                let rule = premise.implies(&conclusion);
-
-                engine
-                    .add_rule(&rule, Some(&format!("bisim_{}_base", destructor.name)))
-                    .map_err(|e| {
-                        VerificationError::SolverError(
-                            format!("Failed to add base bisimulation rule: {}", e).into(),
-                        )
-                    })?;
-            }
-        }
-
-        // Query: is bisimulation reflexive? bisim(x, x) should hold for all x
-        let x = z3::ast::Int::new_const("test_x");
-        let reflexivity = bisim_decl
-            .apply(&[&x, &x])
-            .as_bool()
-            .ok_or_else(|| VerificationError::SolverError("bisim reflexivity not bool".into()))?;
-
-        // Use the engine to check reflexivity
-        engine
-            .add_rule(&reflexivity, Some("reflexivity_goal"))
-            .map_err(|e| {
-                VerificationError::SolverError(
-                    format!("Failed to add reflexivity goal: {}", e).into(),
-                )
-            })?;
-
-        // If we get here without errors, the coinductive type is well-formed
-        Ok(true)
+        Err(VerificationError::Unknown(
+            COINDUCTION_MODEL_REQUIRED.into(),
+        ))
     }
 
     /// Clear the productivity cache
@@ -1401,11 +1210,11 @@ impl Default for BisimulationConfig {
 /// Strategy for handling infinite structures in bisimulation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InfiniteStrategy {
-    /// Unfold up to a fixed depth and assume bisimilarity beyond
+    /// Unfold up to a fixed depth; exhaustion is inconclusive.
     BoundedUnfolding,
-    /// Use coinductive hypothesis (assume bisimilarity for recursive positions)
+    /// Check finite observations; unresolved recursive closure is inconclusive.
     CoinductiveHypothesis,
-    /// Use fixedpoint computation for greatest fixpoint semantics
+    /// Requires a resolved coinduction model; unsupported by the expression-only API.
     GreatestFixpoint,
     /// Combine multiple strategies
     Hybrid,
@@ -1448,8 +1257,6 @@ pub struct BisimulationStats {
     pub z3_time_ms: u64,
     /// Maximum depth reached
     pub max_depth_reached: usize,
-    /// Whether coinductive hypothesis was used
-    pub used_coinductive_hypothesis: bool,
 }
 
 /// Enhanced bisimulation checker with bounded unfolding
@@ -1509,7 +1316,9 @@ impl<'a> BisimulationChecker<'a> {
                 self.check_coinductive(left, right, coinductive_type)?
             }
             InfiniteStrategy::GreatestFixpoint => {
-                self.check_greatest_fixpoint(left, right, coinductive_type)?
+                return Err(VerificationError::Unknown(
+                    COINDUCTION_MODEL_REQUIRED.into(),
+                ));
             }
             InfiniteStrategy::Hybrid => {
                 // Try coinductive first, fall back to bounded if needed
@@ -1547,14 +1356,9 @@ impl<'a> BisimulationChecker<'a> {
 
         // Check depth limit
         if depth >= self.config.max_depth {
-            // At max depth, assume bisimilarity (coinductive hypothesis)
-            self.stats.used_coinductive_hypothesis = true;
-            return Ok(BisimulationResult {
-                bisimilar: true,
-                depth_reached: depth,
-                counterexample: None,
-                stats: self.stats.clone(),
-            });
+            return Err(VerificationError::Unknown(
+                "Bisimulation unfolding limit reached without a closed candidate relation".into(),
+            ));
         }
 
         // Check each destructor
@@ -1628,10 +1432,7 @@ impl<'a> BisimulationChecker<'a> {
         right: &Expr,
         coinductive_type: &CoinductiveType,
     ) -> Result<BisimulationResult, VerificationError> {
-        self.stats.used_coinductive_hypothesis = true;
-
-        // For coinductive checking, we use the existing verify_bisimulation
-        // which applies the coinductive principle
+        // The expression-only path does not invent a recursive hypothesis.
         let is_bisimilar = self
             .checker
             .verify_bisimulation(left, right, coinductive_type)?;
@@ -1642,29 +1443,6 @@ impl<'a> BisimulationChecker<'a> {
             counterexample: None,
             stats: self.stats.clone(),
         })
-    }
-
-    /// Check bisimulation using greatest fixpoint computation
-    fn check_greatest_fixpoint(
-        &mut self,
-        left: &Expr,
-        right: &Expr,
-        coinductive_type: &CoinductiveType,
-    ) -> Result<BisimulationResult, VerificationError> {
-        // Use the verify_greatest_fixpoint method
-        let is_valid = self.checker.verify_greatest_fixpoint(coinductive_type)?;
-
-        if !is_valid {
-            return Ok(BisimulationResult {
-                bisimilar: false,
-                depth_reached: 0,
-                counterexample: None,
-                stats: self.stats.clone(),
-            });
-        }
-
-        // If the type is well-formed, check bisimulation
-        self.check_coinductive(left, right, coinductive_type)
     }
 
     /// Check equality of two expressions using Z3
@@ -1692,9 +1470,11 @@ impl<'a> BisimulationChecker<'a> {
         solver.pop(1);
 
         match result {
-            z3::SatResult::Unsat => Ok(true),    // Equality proven
-            z3::SatResult::Sat => Ok(false),     // Counterexample found
-            z3::SatResult::Unknown => Ok(false), // Conservative: assume not equal
+            z3::SatResult::Unsat => Ok(true), // Equality proven
+            z3::SatResult::Sat => Ok(false),  // Counterexample found
+            z3::SatResult::Unknown => Err(VerificationError::Unknown(
+                "Bisimulation observation equality is inconclusive".into(),
+            )),
         }
     }
 }
@@ -2619,7 +2399,6 @@ mod tests {
         assert_eq!(stats.z3_queries, 0);
         assert_eq!(stats.z3_time_ms, 0);
         assert_eq!(stats.max_depth_reached, 0);
-        assert!(!stats.used_coinductive_hypothesis);
     }
 
     #[test]

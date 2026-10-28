@@ -391,7 +391,8 @@ pub use wp_calculus::{
 // Re-export dependent types and proof search (v2.0+ features)
 // All compilation errors have been fixed!
 pub use coinductive::{
-    CoinductiveChecker, CoinductiveType as CoinductiveCheckerType, StreamDef, stream_type,
+    CoinductionModel, CoinductionObligation, CoinductionResult, CoinductiveChecker,
+    CoinductiveType as CoinductiveCheckerType, StreamDef, stream_type,
 };
 
 // Re-export dependent type structures (full implementation for v2.0+)
