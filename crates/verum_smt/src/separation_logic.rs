@@ -1,43 +1,18 @@
-//! Separation Logic for Heap Verification
+//! Separation assertions over partial heaps with word64 addresses and values.
 //!
-//! Implements separation logic for verifying heap-manipulating programs using Z3 SMT solver.
+//! `SepLogicEncoder::verify_entailment` checks P and not Q for satisfiability.
+//! Emp owns no cells, points-to owns exactly one cell, and separating
+//! conjunction existentially partitions the owned domain. Pure propositions
+//! do not constrain the heap. Named predicates are opaque relations of the
+//! owned heap and all arguments; they do not acquire definitions by name.
 //!
-//! Separation logic assertions model disjoint heap ownership:
-//! - Separating conjunction (P * Q): heap splits into disjoint regions satisfying P and Q
-//! - Magic wand (P -* Q): separating implication for frame reasoning
-//! - Points-to (x |-> v): single heap cell at location x contains value v
-//! - Frame rule: {P} c {Q} implies {P * R} c {Q * R} (frame preservation)
-//! - List segments lseg(x, y, xs) and tree predicates tree(x, t)
+//! The encoder rejects unsupported scalar syntax and spatial shapes without
+//! an exact layout/domain definition. Bounded unfolding never substitutes
+//! true for an unfinished proof. A solver result is not a kernel certificate.
 //!
-//! SMT encoding uses Z3 array theory: heap as Array<Int, Int>, disjointness via
-//! quantified constraints over array domains.
-//!
-//! ## Features
-//!
-//! - **Separating Conjunction (P * Q)**: Disjoint heap regions encoded via Z3 array theory
-//! - **Magic Wand (P -* Q)**: Separating implication for frame reasoning
-//! - **Points-To Assertions (x |-> v)**: Single heap cell ownership
-//! - **List Segments (lseg(x, y, xs))**: Recursive list segment predicates
-//! - **Tree Predicates (tree(x, t))**: Binary tree shape predicates
-//! - **Frame Rule**: {P} c {Q} => {P * R} c {Q * R}
-//! - **Heap Entailment**: P |- Q verification via SMT
-//! - **Weakest Precondition**: wp(c, Q) computation
-//!
-//! ## Z3 Encoding
-//!
-//! Heaps are encoded as arrays from addresses to values:
-//! ```text
-//! Heap = Array(Address, Value)
-//! Points-to(x, v) = heap[x] == v AND allocated(x)
-//! Sep(P, Q) = P(h1) AND Q(h2) AND disjoint(dom(h1), dom(h2))
-//! ```
-//!
-//! ## Performance Targets
-//!
-//! - Assertion checking: < 10ms
-//! - Frame rule application: < 5ms
-//! - WP computation: < 20ms
-//! - Heap entailment: < 50ms
+//! This module also contains symbolic execution and footprint helpers.
+//! Their presence does not establish complete layout-aware frame inference
+//! or correspondence with execution of a source-language function body.
 
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
@@ -54,6 +29,8 @@ use verum_common::{Heap, List, Map, Maybe, Set, Text};
 use crate::context::Context as VerumContext;
 use crate::proof_search::{ProofError, ProofGoal, ProofSearchEngine, ProofTerm};
 use serde::{Deserialize, Serialize};
+
+mod encoding;
 
 // ==================== Configuration ====================
 
@@ -1283,12 +1260,9 @@ impl SymbolicHeap {
 
 /// Encodes separation logic assertions as Z3 formulas
 ///
-/// This encoder implements production-grade features:
-/// - Biheap model with stack/heap separation
-/// - CBGR generation tracking for memory safety
-/// - Bounded unfolding for recursive predicates
-/// - Frame inference for modular verification
-/// - Symbolic execution for complex entailments
+/// Exact entailment for the supported spatial and scalar fragment.
+/// Unsupported syntax or missing layout semantics returns an encoding error.
+/// Solver acceptance is distinct from a kernel-replayed proof certificate.
 pub struct SepLogicEncoder {
     /// Heap model with stack/heap separation
     model: Z3HeapModel,
@@ -1296,8 +1270,6 @@ pub struct SepLogicEncoder {
     solver: Solver,
     /// Configuration
     config: SepLogicConfig,
-    /// Fresh variable counter
-    fresh_counter: RefCell<usize>,
     /// Variable bindings (name -> Z3 expression)
     bindings: RefCell<Map<Text, Dynamic>>,
     /// Unfolding state for recursive predicates
@@ -1347,7 +1319,6 @@ impl SepLogicEncoder {
             model,
             solver,
             config: config.clone(),
-            fresh_counter: RefCell::new(0),
             bindings: RefCell::new(Map::new()),
             unfolding_state: RefCell::new(UnfoldingState::new(UnfoldingConfig {
                 max_lseg_depth: config.max_unfolding_depth,
@@ -1357,13 +1328,6 @@ impl SepLogicEncoder {
             })),
             encoding_cache: RefCell::new(Map::new()),
         }
-    }
-
-    /// Get fresh variable counter
-    fn fresh_counter(&self) -> usize {
-        let current = *self.fresh_counter.borrow();
-        *self.fresh_counter.borrow_mut() += 1;
-        current
     }
 
     /// Reset the solver and clear caches
@@ -1508,161 +1472,6 @@ impl SepLogicEncoder {
         format!("{:?}", left) == format!("{:?}", right)
     }
 
-    /// Encode with bounded unfolding for recursive predicates
-    pub fn encode_with_unfolding(
-        &self,
-        assertion: &SepAssertion,
-        heap: &Array,
-        allocated: &Array,
-        depth: usize,
-    ) -> Bool {
-        if depth == 0 {
-            // At depth limit, use approximation
-            return Bool::from_bool(true);
-        }
-
-        match assertion {
-            SepAssertion::ListSegment { from, to, elements } => {
-                // Bounded unfolding of list segment
-                self.encode_list_segment_bounded(from, to, elements, heap, allocated, depth)
-            }
-
-            SepAssertion::Tree {
-                root,
-                left_child,
-                right_child,
-            } => {
-                // Bounded unfolding of tree
-                self.encode_tree_bounded(root, left_child, right_child, heap, allocated, depth)
-            }
-
-            // For other assertions, delegate to the standard encoding
-            _ => self.encode_assertion(assertion, heap, allocated),
-        }
-    }
-
-    /// Encode list segment with bounded unfolding
-    fn encode_list_segment_bounded(
-        &self,
-        from: &Expr,
-        to: &Expr,
-        elements: &[Expr],
-        heap: &Array,
-        allocated: &Array,
-        depth: usize,
-    ) -> Bool {
-        let from_addr = self.encode_expr_as_addr(from);
-        let to_addr = self.encode_expr_as_addr(to);
-
-        if elements.is_empty() {
-            // Empty list segment: from == to
-            return from_addr.eq(&to_addr);
-        }
-
-        if depth == 0 {
-            // At depth limit, just check from != to (non-empty list)
-            return from_addr.eq(&to_addr).not();
-        }
-
-        // Unfold one step: from |-> (head, next) * lseg(next, to, tail)
-        let head = self.encode_expr_as_value(&elements[0]);
-
-        // from points to head
-        let heap_at_from = heap.select(&from_addr);
-        let head_eq = heap_at_from.eq(&head);
-
-        // from is allocated
-        let from_alloc = allocated.select(&from_addr);
-        let is_alloc = from_alloc
-            .as_bool()
-            .unwrap_or_else(|| Bool::from_bool(true));
-
-        // Next pointer
-        let eight = z3::ast::BV::from_i64(8, 64);
-        let next_addr = if let Some(from_bv) = from_addr.as_bv() {
-            Dynamic::from_ast(&from_bv.bvadd(&eight))
-        } else {
-            self.model.fresh_addr("next")
-        };
-
-        if elements.len() == 1 {
-            // Last element: next == to
-            let next_eq_to = next_addr.eq(&to_addr);
-            Bool::and(&[&head_eq, &is_alloc, &next_eq_to])
-        } else {
-            // Recursive case with bounded depth
-            let tail: Vec<Expr> = elements[1..].to_vec();
-            let next_expr = self.create_addr_expr(&next_addr);
-            let rest =
-                self.encode_list_segment_bounded(&next_expr, to, &tail, heap, allocated, depth - 1);
-            Bool::and(&[&head_eq, &is_alloc, &rest])
-        }
-    }
-
-    /// Create an expression from a Z3 address
-    fn create_addr_expr(&self, addr: &Dynamic) -> Expr {
-        use verum_ast::span::Span;
-
-        // Try to extract the concrete value
-        if let Some(bv) = addr.as_bv() {
-            if let Some(val) = bv.as_i64() {
-                return Expr::new(
-                    ExprKind::Literal(Literal::new(
-                        LiteralKind::Int(IntLit::new(val as i128)),
-                        Span::dummy(),
-                    )),
-                    Span::dummy(),
-                );
-            }
-        }
-
-        // Create a fresh variable
-        Expr::new(
-            ExprKind::Path(Path::from_ident(Ident::new(
-                format!("__addr_{}", self.fresh_counter()),
-                Span::dummy(),
-            ))),
-            Span::dummy(),
-        )
-    }
-
-    /// Encode tree with bounded unfolding
-    fn encode_tree_bounded(
-        &self,
-        root: &Expr,
-        left_child: &Maybe<Heap<SepAssertion>>,
-        right_child: &Maybe<Heap<SepAssertion>>,
-        heap: &Array,
-        allocated: &Array,
-        depth: usize,
-    ) -> Bool {
-        let root_addr = self.encode_expr_as_addr(root);
-
-        // Root is allocated
-        let root_alloc = allocated.select(&root_addr);
-        let is_alloc = root_alloc
-            .as_bool()
-            .unwrap_or_else(|| Bool::from_bool(true));
-
-        if depth == 0 {
-            // At depth limit, just check root is allocated
-            return is_alloc;
-        }
-
-        // Encode children with reduced depth
-        let left_encoded = match left_child {
-            Maybe::Some(left) => self.encode_with_unfolding(left, heap, allocated, depth - 1),
-            Maybe::None => Bool::from_bool(true),
-        };
-
-        let right_encoded = match right_child {
-            Maybe::Some(right) => self.encode_with_unfolding(right, heap, allocated, depth - 1),
-            Maybe::None => Bool::from_bool(true),
-        };
-
-        Bool::and(&[&is_alloc, &left_encoded, &right_encoded])
-    }
-
     /// Encode CBGR generation check
     pub fn encode_cbgr_check(
         &self,
@@ -1684,236 +1493,16 @@ impl SepLogicEncoder {
         }
     }
 
-    /// Encode a separation logic assertion as a Z3 formula
-    ///
-    /// The encoding uses the theory of arrays to model heaps:
-    /// - Heap is an array from addresses to values
-    /// - Allocated bitmap tracks which addresses are valid
-    /// - Separating conjunction requires disjoint domains
-    pub fn encode_assertion(
-        &self,
-        assertion: &SepAssertion,
-        heap: &Array,
-        allocated: &Array,
-    ) -> Bool {
-        match assertion {
-            SepAssertion::Emp => {
-                allocated.eq(&Array::const_array(&self.model.addr_sort, &Bool::from_bool(false)))
-            }
-
-            SepAssertion::Pure(expr) => {
-                // Pure assertion: encode the expression
-                self.encode_pure_expr(expr)
-            }
-
-            SepAssertion::PointsTo { location, value } => {
-                // Exact singleton ownership, not membership in a larger heap.
-                let addr = self.encode_expr_as_addr(location);
-                let val = self.encode_expr_as_value(value);
-                let heap_lookup = heap.select(&addr);
-                let val_eq = heap_lookup.eq(&val);
-                let singleton = Array::const_array(&self.model.addr_sort, &Bool::from_bool(false))
-                    .store(&addr, &Bool::from_bool(true));
-                Bool::and(&[&val_eq, &allocated.eq(&singleton)])
-            }
-
-            SepAssertion::Sep { left, right } => {
-                // Split only the domain. Both subheaps restrict the same value
-                // array, so no additional value-array witnesses are needed.
-                // Bind witnesses inside the assertion: free arrays would turn
-                // a negated conclusion into a test of one arbitrary partition.
-                let a1 = self.model.fresh_allocated("a1");
-                let a2 = self.model.fresh_allocated("a2");
-                let left_encoded = self.encode_assertion(left, heap, &a1);
-                let right_encoded = self.encode_assertion(right, heap, &a2);
-                let address = self.model.fresh_addr("partition");
-                let left_owned = a1.select(&address).as_bool().expect("Boolean allocation map");
-                let right_owned = a2.select(&address).as_bool().expect("Boolean allocation map");
-                let union = Bool::or(&[&left_owned, &right_owned]);
-                let partition = Bool::and(&[
-                    &allocated.select(&address).eq(&union),
-                    &Bool::and(&[&left_owned, &right_owned]).not(),
-                ]);
-                let partition = z3::ast::forall_const(&[&address], &[], &partition);
-                let body = Bool::and(&[&left_encoded, &right_encoded, &partition]);
-                z3::ast::exists_const(&[&a1, &a2], &[], &body)
-            }
-
-            SepAssertion::Wand { left, right } => {
-                // **Magic wand `P -* Q` semantic encoding** (Reynolds 2002 §5):
-                //   `(P -* Q) holds at heap h` iff
-                //   `∀ frame_heap. (P(frame_heap) ∧ disjoint(h, frame_heap))
-                //                  → Q(h ∪ frame_heap)`.
-                //
-                // The frame heap is universally quantified — for any
-                // P-satisfying disjoint extension, the combined heap
-                // must satisfy Q.  This is the dual of separating
-                // conjunction: where `*` provides a disjoint heap
-                // and asserts Q on the combined; `-*` quantifies
-                // over disjoint frames and asserts the implication.
-                //
-                // Pre-fix the encoder built `Bool::and(...)` over
-                // fresh frame variables, which encodes ∃ rather
-                // than ∀ — wrong direction.  Post-fix the
-                // antecedent → consequent implication is wrapped
-                // in `forall_const` over the frame heap + frame
-                // allocation arrays.
-                let frame_heap = self.model.fresh_heap("wand_frame");
-                let frame_alloc = self.model.fresh_allocated("wand_frame_alloc");
-
-                let left_encoded = self.encode_assertion(left, &frame_heap, &frame_alloc);
-
-                let combined_heap = self.model.fresh_heap("wand_combined");
-                let combined_alloc = self.model.fresh_allocated("wand_combined_alloc");
-
-                let disjoint = self.encode_disjointness(allocated, &frame_alloc);
-                let composition = self.encode_heap_composition(
-                    &combined_heap,
-                    &combined_alloc,
-                    heap,
-                    allocated,
-                    &frame_heap,
-                    &frame_alloc,
-                );
-
-                let right_encoded = self.encode_assertion(right, &combined_heap, &combined_alloc);
-
-                let antecedent = Bool::and(&[&left_encoded, &disjoint, &composition]);
-                let body = antecedent.implies(&right_encoded);
-
-                // Universally quantify over the frame heap +
-                // frame allocation arrays.  For every disjoint
-                // frame satisfying P, the combined heap must
-                // satisfy Q.
-                z3::ast::forall_const(
-                    &[&frame_heap, &frame_alloc, &combined_heap, &combined_alloc],
-                    &[],
-                    &body,
-                )
-            }
-
-            SepAssertion::And { left, right } => {
-                let left_encoded = self.encode_assertion(left, heap, allocated);
-                let right_encoded = self.encode_assertion(right, heap, allocated);
-                Bool::and(&[&left_encoded, &right_encoded])
-            }
-
-            SepAssertion::Or { left, right } => {
-                let left_encoded = self.encode_assertion(left, heap, allocated);
-                let right_encoded = self.encode_assertion(right, heap, allocated);
-                Bool::or(&[&left_encoded, &right_encoded])
-            }
-
-            SepAssertion::Exists { var, body } => {
-                // Existential: create fresh variable and encode body
-                let fresh_var = self.model.fresh_value(var.as_str());
-                let previous = self.bindings
-                    .borrow_mut()
-                    .insert(var.clone(), fresh_var.clone());
-                let result = self.encode_assertion(body, heap, allocated);
-                self.restore_binding(var, previous);
-                z3::ast::exists_const(&[&fresh_var], &[], &result)
-            }
-
-            SepAssertion::Forall { var, body } => {
-                // Universal: create bound variable
-                let bound_var = self.model.fresh_value(var.as_str());
-                let previous = self.bindings
-                    .borrow_mut()
-                    .insert(var.clone(), bound_var.clone());
-                let body_encoded = self.encode_assertion(body, heap, allocated);
-                self.restore_binding(var, previous);
-
-                // Create universal quantifier
-                z3::ast::forall_const(&[&bound_var], &[], &body_encoded)
-            }
-
-            SepAssertion::ListSegment { from, to, elements } => {
-                // lseg(from, to, []) = from == to AND emp
-                // lseg(from, to, x::xs) = exists next. from |-> (x, next) * lseg(next, to, xs)
-                //
-
-                // Route through `encode_with_unfolding` whenever
-                // `UnfoldingConfig.lazy_unfolding` is enabled (the
-                // documented default) so the depth cap from
-                // `max_lseg_depth` actually constrains the formula
-                // size. Pre-fix the encode_assertion path always
-                // called the unbounded `encode_list_segment` directly,
-                // making `lazy_unfolding`, `max_lseg_depth`, and
-                // `max_tree_depth` inert at the production entry —
-                // every caller setting them via `UnfoldingConfig`
-                // (constructed by `SepLogicEncoder::new` from
-                // `SepLogicConfig.max_unfolding_depth`) had no
-                // observable effect because the gate they parameterise
-                // was bypassed. Closes the inert-defense pattern at
-                // the only top-level dispatch site for ListSegment +
-                // Tree assertions.
-                let unfolding = self.unfolding_state.borrow();
-                if unfolding.lazy_unfolding_enabled() {
-                    let depth = unfolding.config.max_lseg_depth;
-                    drop(unfolding);
-                    self.encode_with_unfolding(assertion, heap, allocated, depth)
-                } else {
-                    drop(unfolding);
-                    self.encode_list_segment(from, to, elements, heap, allocated)
-                }
-            }
-
-            SepAssertion::Tree {
-                root,
-                left_child,
-                right_child,
-            } => {
-                // Sibling routing for tree predicates: when
-                // `lazy_unfolding` is enabled, cap the unfolding at
-                // `max_tree_depth`; otherwise use the unbounded
-                // encoding. See ListSegment arm for the inert-
-                // defense rationale.
-                let unfolding = self.unfolding_state.borrow();
-                if unfolding.lazy_unfolding_enabled() {
-                    let depth = unfolding.config.max_tree_depth;
-                    drop(unfolding);
-                    self.encode_with_unfolding(assertion, heap, allocated, depth)
-                } else {
-                    drop(unfolding);
-                    self.encode_tree(root, left_child, right_child, heap, allocated)
-                }
-            }
-
-            SepAssertion::Block { base, size } => {
-                // block(base, size): forall i in [0, size). allocated[base + i]
-                self.encode_block(base, size, heap, allocated)
-            }
-
-            SepAssertion::ArraySegment {
-                base,
-                offset,
-                length,
-                elements,
-            } => self.encode_array_segment(base, offset, length, elements, heap, allocated),
-
-            SepAssertion::Named { .. } => {
-                // User-defined named predicates are encoded as
-                // opaque true at the SMT boundary: Z3 has no
-                // information about their semantics without
-                // elaborator-supplied unfolding.  The separation-
-                // logic recogniser still surfaces the predicate
-                // name for diagnostic purposes (per
-                // sep_assertion_to_smtlib's `(sep_named NAME ...)`
-                // rendering), but the entailment dispatcher treats
-                // it conservatively — pre-elaborator-integration
-                // we cannot prove much about it.
-                Bool::from_bool(true)
-            }
-        }
-    }
-
     // ==================== Quantifier Elimination ====================
 
     fn restore_binding(&self, name: &Text, previous: Maybe<Dynamic>) {
         match previous {
-            Maybe::Some(value) => { self.bindings.borrow_mut().insert(name.clone(), value); }
-            Maybe::None => { self.bindings.borrow_mut().remove(name); }
+            Maybe::Some(value) => {
+                self.bindings.borrow_mut().insert(name.clone(), value);
+            }
+            Maybe::None => {
+                self.bindings.borrow_mut().remove(name);
+            }
         }
     }
 
@@ -2348,12 +1937,10 @@ impl SepLogicEncoder {
         let a1_at_addr = a1.select(&addr);
         let a2_at_addr = a2.select(&addr);
 
-        let both_allocated =
-            if let (Some(b1), Some(b2)) = (a1_at_addr.as_bool(), a2_at_addr.as_bool()) {
-                Bool::and(&[&b1, &b2])
-            } else {
-                Bool::from_bool(false)
-            };
+        let both_allocated = Bool::and(&[
+            &a1_at_addr.as_bool().expect("validated allocation map"),
+            &a2_at_addr.as_bool().expect("validated allocation map"),
+        ]);
 
         let not_both = both_allocated.not();
         z3::ast::forall_const(&[&addr], &[], &not_both)
@@ -2380,12 +1967,9 @@ impl SepLogicEncoder {
         let a2_at = a2.select(&addr);
         let result_a_at = result_alloc.select(&addr);
 
-        // Convert to Bool if possible
-        let (a1_bool, a2_bool, result_a_bool) =
-            match (a1_at.as_bool(), a2_at.as_bool(), result_a_at.as_bool()) {
-                (Some(b1), Some(b2), Some(br)) => (b1, b2, br),
-                _ => return Bool::from_bool(true),
-            };
+        let a1_bool = a1_at.as_bool().expect("validated allocation map");
+        let a2_bool = a2_at.as_bool().expect("validated allocation map");
+        let result_a_bool = result_a_at.as_bool().expect("validated allocation map");
 
         // result_alloc[addr] = a1[addr] OR a2[addr]
         let alloc_union = Bool::or(&[&a1_bool, &a2_bool]);
@@ -2403,335 +1987,9 @@ impl SepLogicEncoder {
         z3::ast::forall_const(&[&addr], &[], &body)
     }
 
-    /// Encode list segment predicate
-    fn encode_list_segment(
-        &self,
-        from: &Expr,
-        to: &Expr,
-        elements: &[Expr],
-        heap: &Array,
-        allocated: &Array,
-    ) -> Bool {
-        let from_addr = self.encode_expr_as_addr(from);
-        let to_addr = self.encode_expr_as_addr(to);
-
-        if elements.is_empty() {
-            // Empty list segment: from == to
-            from_addr.eq(&to_addr)
-        } else {
-            // Non-empty: from |-> (elements[0], next) * lseg(next, to, elements[1..])
-            let first_elem = self.encode_expr_as_value(&elements[0]);
-
-            // from points to first element
-            let heap_at_from = heap.select(&from_addr);
-            let elem_eq = heap_at_from.eq(&first_elem);
-
-            // from is allocated
-            let from_alloc = allocated.select(&from_addr);
-            let is_alloc = from_alloc
-                .as_bool()
-                .unwrap_or_else(|| Bool::from_bool(true));
-
-            // Next pointer (from + 8 for 64-bit systems)
-            let eight = z3::ast::BV::from_i64(8, 64);
-            let next_addr = if let Some(from_bv) = from_addr.as_bv() {
-                Dynamic::from_ast(&from_bv.bvadd(&eight))
-            } else {
-                self.model.fresh_addr("next")
-            };
-
-            if elements.len() == 1 {
-                // Last element: next == to
-                let next_eq_to = next_addr.eq(&to_addr);
-                Bool::and(&[&elem_eq, &is_alloc, &next_eq_to])
-            } else {
-                // Recursive case
-                let rest: List<Expr> = elements[1..].to_vec().into();
-                // Create expression for next address
-                let next_expr = Expr::new(
-                    ExprKind::Path(Path::from_ident(Ident::new(
-                        format!("__next_{}", self.fresh_counter()),
-                        verum_ast::span::Span::dummy(),
-                    ))),
-                    verum_ast::span::Span::dummy(),
-                );
-
-                // This is a recursive encoding - for practical use we'd need bounded unfolding
-                let rest_encoded = self.encode_list_segment(&next_expr, to, &rest, heap, allocated);
-                Bool::and(&[&elem_eq, &is_alloc, &rest_encoded])
-            }
-        }
-    }
-
-    /// Encode tree predicate
-    fn encode_tree(
-        &self,
-        root: &Expr,
-        left_child: &Maybe<Heap<SepAssertion>>,
-        right_child: &Maybe<Heap<SepAssertion>>,
-        heap: &Array,
-        allocated: &Array,
-    ) -> Bool {
-        let root_addr = self.encode_expr_as_addr(root);
-
-        // Root is allocated
-        let root_alloc = allocated.select(&root_addr);
-        let is_alloc = root_alloc
-            .as_bool()
-            .unwrap_or_else(|| Bool::from_bool(true));
-
-        // Encode children
-        let left_encoded = match left_child {
-            Maybe::Some(left) => self.encode_assertion(left, heap, allocated),
-            Maybe::None => Bool::from_bool(true),
-        };
-
-        let right_encoded = match right_child {
-            Maybe::Some(right) => self.encode_assertion(right, heap, allocated),
-            Maybe::None => Bool::from_bool(true),
-        };
-
-        Bool::and(&[&is_alloc, &left_encoded, &right_encoded])
-    }
-
-    /// Encode block predicate
-    fn encode_block(&self, base: &Expr, size: &Expr, _heap: &Array, allocated: &Array) -> Bool {
-        let base_addr = self.encode_expr_as_addr(base);
-        let size_val = self.encode_expr_as_value(size);
-
-        // forall i in [0, size). allocated[base + i]
-        let i = self.model.fresh_value("block_i");
-
-        // i >= 0 AND i < size
-        let zero = z3::ast::BV::from_i64(0, 64);
-
-        if let (Some(i_bv), Some(base_bv), Some(size_bv)) =
-            (i.as_bv(), base_addr.as_bv(), size_val.as_bv())
-        {
-            let i_ge_zero = i_bv.bvsge(&zero);
-            let i_lt_size = i_bv.bvslt(&size_bv);
-            let range = Bool::and(&[&i_ge_zero, &i_lt_size]);
-
-            // base + i is allocated
-            let addr_i = base_bv.bvadd(&i_bv);
-            let alloc_at_i = allocated.select(&Dynamic::from_ast(&addr_i));
-            let is_alloc = alloc_at_i
-                .as_bool()
-                .unwrap_or_else(|| Bool::from_bool(true));
-
-            let body = range.implies(&is_alloc);
-            z3::ast::forall_const(&[&i], &[], &body)
-        } else {
-            Bool::from_bool(true)
-        }
-    }
-
-    /// Encode array segment
-    fn encode_array_segment(
-        &self,
-        base: &Expr,
-        offset: &Expr,
-        length: &Expr,
-        elements: &[Expr],
-        heap: &Array,
-        allocated: &Array,
-    ) -> Bool {
-        let base_addr = self.encode_expr_as_addr(base);
-        let offset_val = self.encode_expr_as_value(offset);
-        let _length_val = self.encode_expr_as_value(length);
-
-        let mut constraints: Vec<Bool> = Vec::new();
-
-        // For each element, encode: heap[base + offset + i*8] == elements[i]
-        // AND allocated[base + offset + i*8]
-        for (i, elem) in elements.iter().enumerate() {
-            let elem_val = self.encode_expr_as_value(elem);
-            let i_offset = z3::ast::BV::from_i64((i * 8) as i64, 64);
-
-            if let (Some(base_bv), Some(offset_bv)) = (base_addr.as_bv(), offset_val.as_bv()) {
-                let addr_i = base_bv.bvadd(&offset_bv).bvadd(&i_offset);
-                let addr_dyn = Dynamic::from_ast(&addr_i);
-
-                let heap_at_i = heap.select(&addr_dyn);
-                let elem_eq = heap_at_i.eq(&elem_val);
-
-                let alloc_at_i = allocated.select(&addr_dyn);
-                let is_alloc = alloc_at_i
-                    .as_bool()
-                    .unwrap_or_else(|| Bool::from_bool(true));
-
-                constraints.push(elem_eq);
-                constraints.push(is_alloc);
-            }
-        }
-
-        if constraints.is_empty() {
-            Bool::from_bool(true)
-        } else {
-            let refs: Vec<&Bool> = constraints.iter().collect();
-            Bool::and(&refs)
-        }
-    }
-
-    /// Encode a pure expression as Z3 Bool
-    fn encode_pure_expr(&self, expr: &Expr) -> Bool {
-        match &expr.kind {
-            ExprKind::Literal(lit) => match &lit.kind {
-                LiteralKind::Bool(b) => Bool::from_bool(*b),
-                _ => Bool::from_bool(true),
-            },
-
-            ExprKind::Binary { op, left, right } => {
-                let left_encoded = self.encode_pure_expr(left);
-                let right_encoded = self.encode_pure_expr(right);
-
-                match op {
-                    BinOp::And => Bool::and(&[&left_encoded, &right_encoded]),
-                    BinOp::Or => Bool::or(&[&left_encoded, &right_encoded]),
-                    BinOp::Imply => left_encoded.implies(&right_encoded),
-                    BinOp::Eq => {
-                        // Try integer comparison
-                        let left_int = self.encode_expr_as_value(left);
-                        let right_int = self.encode_expr_as_value(right);
-                        left_int.eq(&right_int)
-                    }
-                    BinOp::Ne => {
-                        let left_int = self.encode_expr_as_value(left);
-                        let right_int = self.encode_expr_as_value(right);
-                        left_int.eq(&right_int).not()
-                    }
-                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                        let left_val = self.encode_expr_as_value(left);
-                        let right_val = self.encode_expr_as_value(right);
-                        if let (Some(l_bv), Some(r_bv)) = (left_val.as_bv(), right_val.as_bv()) {
-                            match op {
-                                BinOp::Lt => l_bv.bvslt(&r_bv),
-                                BinOp::Le => l_bv.bvsle(&r_bv),
-                                BinOp::Gt => l_bv.bvsgt(&r_bv),
-                                BinOp::Ge => l_bv.bvsge(&r_bv),
-                                _ => Bool::from_bool(true),
-                            }
-                        } else {
-                            Bool::from_bool(true)
-                        }
-                    }
-                    _ => Bool::from_bool(true),
-                }
-            }
-
-            ExprKind::Unary { op, expr: inner } => {
-                let inner_encoded = self.encode_pure_expr(inner);
-                match op {
-                    verum_ast::UnOp::Not => inner_encoded.not(),
-                    _ => Bool::from_bool(true),
-                }
-            }
-
-            ExprKind::Path(path) => {
-                // Variable reference - look up in bindings
-                if let Some(ident) = path.as_ident() {
-                    let name = Text::from(ident.name.as_str());
-                    if let Maybe::Some(binding) = self.bindings.borrow().get(&name) {
-                        if let Some(b) = binding.as_bool() {
-                            return b;
-                        }
-                    }
-                }
-                // Default to true for unknown
-                Bool::from_bool(true)
-            }
-
-            _ => Bool::from_bool(true),
-        }
-    }
-
-    /// Encode expression as address (bitvector)
-    fn encode_expr_as_addr(&self, expr: &Expr) -> Dynamic {
-        match &expr.kind {
-            ExprKind::Literal(lit) => {
-                if let LiteralKind::Int(int_lit) = &lit.kind {
-                    return self.model.addr_const(int_lit.value as i64);
-                }
-                self.model.fresh_addr("unknown_addr")
-            }
-
-            ExprKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    let name = Text::from(ident.name.as_str());
-                    if let Maybe::Some(binding) = self.bindings.borrow().get(&name) {
-                        return binding.clone();
-                    }
-                    // Create fresh variable
-                    self.model.fresh_addr(ident.name.as_str())
-                } else {
-                    self.model.fresh_addr("path_addr")
-                }
-            }
-
-            ExprKind::Binary { op, left, right } => {
-                let left_val = self.encode_expr_as_addr(left);
-                let right_val = self.encode_expr_as_addr(right);
-
-                if let (Some(l_bv), Some(r_bv)) = (left_val.as_bv(), right_val.as_bv()) {
-                    match op {
-                        BinOp::Add => Dynamic::from_ast(&l_bv.bvadd(&r_bv)),
-                        BinOp::Sub => Dynamic::from_ast(&l_bv.bvsub(&r_bv)),
-                        _ => self.model.fresh_addr("binary_addr"),
-                    }
-                } else {
-                    self.model.fresh_addr("binary_addr")
-                }
-            }
-
-            _ => self.model.fresh_addr("expr_addr"),
-        }
-    }
-
-    /// Encode expression as value (bitvector)
-    fn encode_expr_as_value(&self, expr: &Expr) -> Dynamic {
-        match &expr.kind {
-            ExprKind::Literal(lit) => {
-                if let LiteralKind::Int(int_lit) = &lit.kind {
-                    return self.model.value_const(int_lit.value as i64);
-                }
-                self.model.fresh_value("unknown_val")
-            }
-
-            ExprKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    let name = Text::from(ident.name.as_str());
-                    if let Maybe::Some(binding) = self.bindings.borrow().get(&name) {
-                        return binding.clone();
-                    }
-                    self.model.fresh_value(ident.name.as_str())
-                } else {
-                    self.model.fresh_value("path_val")
-                }
-            }
-
-            ExprKind::Binary { op, left, right } => {
-                let left_val = self.encode_expr_as_value(left);
-                let right_val = self.encode_expr_as_value(right);
-
-                if let (Some(l_bv), Some(r_bv)) = (left_val.as_bv(), right_val.as_bv()) {
-                    match op {
-                        BinOp::Add => Dynamic::from_ast(&l_bv.bvadd(&r_bv)),
-                        BinOp::Sub => Dynamic::from_ast(&l_bv.bvsub(&r_bv)),
-                        BinOp::Mul => Dynamic::from_ast(&l_bv.bvmul(&r_bv)),
-                        _ => self.model.fresh_value("binary_val"),
-                    }
-                } else {
-                    self.model.fresh_value("binary_val")
-                }
-            }
-
-            _ => self.model.fresh_value("expr_val"),
-        }
-    }
-
     /// Verify heap entailment: P |- Q
     ///
-    /// Returns Ok(true) if P entails Q, Ok(false) if not, Err on error
+    /// Returns a solver verdict, or an error for unsupported semantics.
     pub fn verify_entailment(
         &self,
         antecedent: &SepAssertion,
@@ -2739,17 +1997,17 @@ impl SepLogicEncoder {
     ) -> Result<EntailmentResult, SepLogicError> {
         let start = Instant::now();
 
-        self.solver.reset();
+        self.reset();
 
         let heap = self.model.fresh_heap("ent_heap");
         let alloc = self.model.fresh_allocated("ent_alloc");
 
         // Encode antecedent
-        let p_encoded = self.encode_assertion(antecedent, &heap, &alloc);
+        let p_encoded = self.encode_assertion(antecedent, &heap, &alloc)?;
         self.solver.assert(&p_encoded);
 
         // Check if NOT(consequent) is satisfiable
-        let q_encoded = self.encode_assertion(consequent, &heap, &alloc);
+        let q_encoded = self.encode_assertion(consequent, &heap, &alloc)?;
         self.solver.assert(q_encoded.not());
 
         let result = match self.solver.check() {
@@ -2976,7 +2234,7 @@ impl SepLogicEncoder {
         // Check syntactic disjointness
         let disjoint = self.are_footprints_disjoint(&pre_footprint, &frame_footprint);
 
-        Ok(disjoint)
+        disjoint
     }
 
     /// Check if two footprints are disjoint using SMT-based verification
@@ -2991,10 +2249,10 @@ impl SepLogicEncoder {
     /// - Address aliasing (e.g., `x` and `y` could be equal)
     /// - Arithmetic expressions (e.g., `x + 1` and `y` could be equal if `y = x + 1`)
     /// - Symbolic addresses with constraints from the context
-    fn are_footprints_disjoint(&self, fp1: &[Expr], fp2: &[Expr]) -> bool {
+    fn are_footprints_disjoint(&self, fp1: &[Expr], fp2: &[Expr]) -> Result<bool, SepLogicError> {
         // Empty footprints are trivially disjoint
         if fp1.is_empty() || fp2.is_empty() {
-            return true;
+            return Ok(true);
         }
 
         // Create a fresh solver for disjointness checking
@@ -3012,8 +2270,8 @@ impl SepLogicEncoder {
         for e1 in fp1 {
             for e2 in fp2 {
                 // Encode both expressions as addresses
-                let addr1 = self.encode_expr_as_addr(e1);
-                let addr2 = self.encode_expr_as_addr(e2);
+                let addr1 = self.encode_expr_as_addr(e1)?;
+                let addr2 = self.encode_expr_as_addr(e2)?;
 
                 // Create equality constraint: addr1 == addr2
                 // If this is SAT, the addresses could be equal (potential overlap)
@@ -3027,7 +2285,7 @@ impl SepLogicEncoder {
                     SatResult::Sat => {
                         // Found a satisfying assignment where addr1 == addr2
                         // This means the footprints could overlap - not disjoint
-                        return false;
+                        return Ok(false);
                     }
                     SatResult::Unsat => {
                         // This pair is provably different, check next pair
@@ -3036,14 +2294,14 @@ impl SepLogicEncoder {
                     SatResult::Unknown => {
                         // Conservative: if we can't prove disjointness, assume not disjoint
                         // This is sound but may reject valid programs
-                        return false;
+                        return Ok(false);
                     }
                 }
             }
         }
 
         // All pairs are provably different
-        true
+        Ok(true)
     }
 }
 
@@ -3860,10 +3118,7 @@ impl SeparationLogic {
             SepAssertion::Named { name, args } => Expr::new(
                 ExprKind::Call {
                     func: Heap::new(Expr::new(
-                        ExprKind::Path(Path::from_ident(Ident::new(
-                            name.as_str(),
-                            Span::dummy(),
-                        ))),
+                        ExprKind::Path(Path::from_ident(Ident::new(name.as_str(), Span::dummy()))),
                         Span::dummy(),
                     )),
                     type_args: List::new(),
