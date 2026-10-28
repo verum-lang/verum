@@ -9,6 +9,7 @@ from check_typed_programs import ROOT, check, require_success, run
 HEADER = '''import VerumExternalReplay.AtomicPublication
 import VerumExternalReplay.PredictiveReplay
 import VerumExternalReplay.ResidualContinuation
+import VerumExternalReplay.PredictiveObservation
 set_option warningAsError true
 
 def owner : AtomicPublication.Frontier Nat Nat Nat Nat := ⟨⟨11,21,31⟩,41⟩
@@ -29,7 +30,8 @@ class PredictivePublicationTests(unittest.TestCase):
     def setUpClass(cls):
         require_success(run('lake','build','VerumExternalReplay.AtomicPublication',
                             'VerumExternalReplay.PredictiveReplay',
-                            'VerumExternalReplay.ResidualContinuation'))
+                            'VerumExternalReplay.ResidualContinuation',
+                            'VerumExternalReplay.PredictiveObservation'))
 
     def prove(self, source, expected=None):
         with tempfile.TemporaryDirectory(prefix='verum-predictive-publication-') as directory:
@@ -43,7 +45,7 @@ class PredictivePublicationTests(unittest.TestCase):
 
     def test_axiom_roster(self):
         names = []
-        for module in ('AtomicPublication','PredictiveReplay','ResidualContinuation'):
+        for module in ('AtomicPublication','PredictiveReplay','ResidualContinuation','PredictiveObservation'):
             names += [module+'.'+name for name in re.findall(r'^theorem (\w+)',
                 (ROOT/f'VerumExternalReplay/{module}.lean').read_text(),re.M)]
         result = self.prove('\n'.join('#print axioms '+name for name in names))

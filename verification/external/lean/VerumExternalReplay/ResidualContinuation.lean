@@ -14,10 +14,12 @@ structure Frame where
   mask : List Bool
   position : Nat
   bytes : Nat
+  deriving DecidableEq
 
 inductive Cursor where
   | pending (frame : Frame) (remaining : List Bool)
   | ready (bank : Bank)
+  deriving DecidableEq
 
 def begin (bank : Bank) (prediction : Prediction) (target : List Nat) : Cursor :=
   .pending ⟨bank, prediction.context, wireBits prediction.mask, 0, target.length⟩
