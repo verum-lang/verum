@@ -1,4 +1,4 @@
-"""Immutable capture laws and strict refusal controls; no native sensory receipt yet."""
+"""Immutable sensory laws and strict controls; native replay has its own adapter."""
 from pathlib import Path
 import re
 import tempfile
