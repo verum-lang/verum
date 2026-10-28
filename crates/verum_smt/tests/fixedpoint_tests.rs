@@ -532,7 +532,7 @@ fn test_extract_invariants_with_data() {
         PredicateInterpretation {
             predicate: Text::from("pred1"),
             formula: inv1.clone(),
-            is_inductive: true,
+            parameters: List::new(),
         },
     );
 

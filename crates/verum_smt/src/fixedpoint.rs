@@ -12,6 +12,8 @@
 
 pub use crate::ranking::{RankingFunction, RankingTransition};
 
+mod solution;
+
 use std::ffi::CString;
 use std::time::Instant;
 
@@ -116,18 +118,20 @@ pub struct FixedPointQuery {
 pub struct FixedPointResult {
     /// Satisfiability status
     pub status: SatResult,
-    /// Solution (if SAT)
+    /// Raw solver answer; neither an inductive interpretation nor a certificate.
+    pub answer: Maybe<Bool>,
+    /// Complete candidate interpretations, when available. Raw answers are not parsed into these.
     pub solution: Maybe<FixedPointSolution>,
     /// Statistics
     pub stats: FixedPointStats,
 }
 
-/// Fixed-point solution
+/// Proposed inductive interpretations and properties; not validated evidence.
 #[derive(Debug)]
 pub struct FixedPointSolution {
     /// Predicate interpretations
     pub interpretations: Map<Text, PredicateInterpretation>,
-    /// Invariants discovered
+    /// Candidate global properties to check under the relation interpretations.
     pub invariants: List<Bool>,
 }
 
@@ -136,10 +140,11 @@ pub struct FixedPointSolution {
 pub struct PredicateInterpretation {
     /// The predicate
     pub predicate: Text,
-    /// Its interpretation as a formula
+    /// Distinct symbolic parameters in the registered relation's argument order.
+    pub parameters: List<Dynamic>,
+    /// Quantifier-free theory formula over those parameters.
+    /// Inductiveness is checked against the rules, never supplied as metadata.
     pub formula: Bool,
-    /// Whether it's inductive
-    pub is_inductive: bool,
 }
 
 /// Fixed-point statistics
@@ -172,8 +177,9 @@ pub struct FixedPointEngine {
     ctx: Context,
     /// Registered predicates
     predicates: Map<Text, Shared<FuncDecl>>,
-    /// Rules count
-    rules_count: usize,
+    /// Original assertions retained independently of fixedpoint preprocessing.
+    rules: List<Bool>,
+    axioms: List<Bool>,
     /// Start time for stats
     start_time: Instant,
 }
@@ -201,7 +207,8 @@ impl FixedPointEngine {
             fp,
             ctx,
             predicates: Map::new(),
-            rules_count: 0,
+            rules: List::new(),
+            axioms: List::new(),
             start_time: Instant::now(),
         })
     }
@@ -283,7 +290,7 @@ impl FixedPointEngine {
             CString::new(name).map_err(|e| Text::from(format!("Invalid rule name: {e}")))?;
         }
         self.fp.add_rule(rule, name);
-        self.rules_count += 1;
+        self.rules.push(rule.clone());
         Ok(())
     }
 
@@ -344,6 +351,7 @@ impl FixedPointEngine {
             return Err(Text::from("Axiom belongs to another Z3 context"));
         }
         self.fp.assert(axiom);
+        self.axioms.push(axiom.clone());
         Ok(())
     }
 
@@ -403,8 +411,8 @@ impl FixedPointEngine {
 
     /// Get the answer (solution) from the last query
     ///
-    /// Only valid after a SAT query result. Returns the formula that
-    /// encodes the satisfying answers.
+    /// Available after a completed query when the backend provides an answer.
+    /// The returned formula is raw solver data, not a validated interpretation.
     ///
     /// In Datalog mode: returns disjunction of all derivations
     /// In PDR mode: returns a single conjunction
@@ -451,7 +459,7 @@ impl FixedPointEngine {
         FixedPointStats {
             iterations: 0, // Would extract from Z3_stats
             time_ms: elapsed.as_millis() as u64,
-            num_rules: self.rules_count,
+            num_rules: self.rules.len(),
             num_predicates: self.predicates.len(),
         }
     }
@@ -768,35 +776,25 @@ impl FixedPointEngine {
         // Execute query
         let status = self.query(&query_ast)?;
 
-        // Extract solution if SAT
-        let solution = if status == SatResult::Sat {
-            Maybe::Some(self.extract_solution()?)
-        } else {
-            Maybe::None
+        // Reachability answers are not parsed inductive interpretations.
+        let answer = match status {
+            SatResult::Sat | SatResult::Unsat => self.fp.get_answer(),
+            SatResult::Unknown => None,
         };
 
         let elapsed = start.elapsed();
         let stats = FixedPointStats {
             iterations: 0,
             time_ms: elapsed.as_millis() as u64,
-            num_rules: self.rules_count,
+            num_rules: self.rules.len(),
             num_predicates: self.predicates.len(),
         };
 
         Ok(FixedPointResult {
             status,
-            solution,
+            answer,
+            solution: Maybe::None,
             stats,
-        })
-    }
-
-    /// Extract solution from SAT result
-    fn extract_solution(&self) -> Result<FixedPointSolution, Text> {
-        let answer = self.get_answer()?;
-
-        Ok(FixedPointSolution {
-            interpretations: Map::new(), // Would parse answer formula
-            invariants: List::from(vec![answer]),
         })
     }
 
@@ -807,42 +805,14 @@ impl FixedPointEngine {
         Maybe::None
     }
 
-    /// Get invariants discovered during solving
-    ///
-    /// Extracts inductive invariants from the fixedpoint engine after a successful query.
-    /// These invariants can be used to understand the solution structure.
+    /// Return the raw fixedpoint answer for inspection, without claiming it is
+    /// a closed or inductive invariant. Validation requires explicit interpretations.
     pub fn get_invariants(&self) -> List<Bool> {
         // Extract invariants from the answer
         match self.get_answer() {
             Ok(answer) => List::from(vec![answer]),
             Err(_) => List::new(),
         }
-    }
-
-    /// Validate a solution against the original rules
-    ///
-    /// Checks that the proposed solution is indeed inductive and satisfies all rules.
-    pub fn validate_solution(&mut self, solution: &FixedPointSolution) -> Result<bool, Text> {
-        // For each predicate interpretation, check if it satisfies all rules
-        for (pred_name, interp) in solution.interpretations.iter() {
-            // Get the predicate declaration
-            let decl = match self.predicates.get(pred_name) {
-                Maybe::Some(d) => d,
-                Maybe::None => continue,
-            };
-
-            // Create a query for the interpretation
-            // This is a simplified validation - full version would check all instances
-            let query = interp.formula.clone();
-            match self.query(&query) {
-                Ok(SatResult::Sat) => continue,
-                Ok(SatResult::Unsat) => return Ok(false),
-                Ok(SatResult::Unknown) => return Ok(false),
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(true)
     }
 }
 
@@ -1228,29 +1198,15 @@ pub fn solve_recursive_predicate(
     engine.query_predicate(query)
 }
 
-/// Extract invariants from a fixedpoint solution
-///
-/// Analyzes the solution to extract meaningful invariants that can be
-/// used in subsequent verification steps.
+/// Return the candidate global properties supplied with a solution.
+/// This does not validate them. A predicate body over formal parameters is not
+/// an unconditional invariant and is never exported as one by this helper.
 pub fn extract_invariants(solution: &FixedPointSolution) -> List<Bool> {
-    let mut invariants = solution.invariants.clone();
-
-    // Add interpretations as additional invariants
-    for (_, interp) in solution.interpretations.iter() {
-        if interp.is_inductive {
-            invariants.push(interp.formula.clone());
-        }
-    }
-
-    invariants
+    solution.invariants.clone()
 }
 
-/// Validate that a solution is correct
-///
-/// Performs extensive validation to ensure the solution:
-/// 1. Satisfies all rules
-/// 2. Is inductive
-/// 3. Is minimal (for Datalog)
+/// Check candidate interpretations against every original rule and assertion.
+/// This establishes closure, not minimality, reachability or kernel certification.
 pub fn validate_solution(
     engine: &mut FixedPointEngine,
     solution: &FixedPointSolution,
