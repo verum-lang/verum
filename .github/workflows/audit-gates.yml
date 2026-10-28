@@ -248,6 +248,13 @@ jobs:
             --sha256 dea7339bde7e9846e7ece4402281f69ee30609dc1a41a3c3a8ae2d43bfc52d6b \
             --provenance verification/external/lean/fixtures/shared-vm-native-v1.provenance.json \
             --output shared-vm-native-export.lean --report shared-vm-native-export-acceptance.json
+          python3 -m unittest discover -s verification/external/lean -p test_retained_invocation_export.py
+          gzip -dc verification/external/lean/fixtures/shared-invocation-native-v1.json.gz > shared-invocation-native-v1.json
+          python3 verification/external/lean/check_retained_invocation_export.py \
+            --export shared-invocation-native-v1.json \
+            --sha256 d49b308ef399adf57ad61cd0a955c8ca50b8689789ed193431e3c6424a2dba1e \
+            --provenance verification/external/lean/fixtures/shared-invocation-native-v1.provenance.json \
+            --output shared-invocation-native-export.lean --report shared-invocation-native-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_retained_names_export.py
           gzip -dc verification/external/lean/fixtures/retained-names-v1.json.gz > retained-names-v1.json
           python3 verification/external/lean/check_retained_names_export.py \
@@ -395,6 +402,9 @@ jobs:
             shared-vm-native-export-acceptance.json
             shared-vm-native-export.lean
             shared-vm-native-export-*/
+            shared-invocation-native-export-acceptance.json
+            shared-invocation-native-export.lean
+            shared-invocation-native-export-*/
             observer-lifecycle-v4-export.lean
             observer-lifecycle-v4-export-*/
             retained-names-export-acceptance.json
