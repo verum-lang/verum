@@ -221,6 +221,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_finite_wire.py
           python3 -m unittest discover -s verification/external/lean -p test_binary_prediction.py
           python3 -m unittest discover -s verification/external/lean -p test_residual_prediction.py
+          python3 -m unittest discover -s verification/external/lean -p test_sensory_port.py
           python3 verification/external/lean/check_finite_admission.py \
             --report finite-admission-acceptance.json
           python3 verification/external/lean/check_acquisition_scheduling.py \

@@ -46,3 +46,4 @@ import VerumExternalReplay.FiniteWire
 import VerumExternalReplay.BinaryPrediction
 import VerumExternalReplay.PositionPrediction
 import VerumExternalReplay.ResidualPrediction
+import VerumExternalReplay.SensoryPort

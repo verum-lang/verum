@@ -22,6 +22,14 @@ structure Source where
   rawSpace : Nat
   owner : Option Lineage
   shape : Shape
+  sensory : Bool
+  deriving DecidableEq
+
+/-- Exact opaque bytes captured before the action, with no interpreted schema
+or reconstruction from a compact raw key. Presence differs from empty bytes. -/
+structure Sensory where
+  schema : List UInt8
+  body : List UInt8
   deriving DecidableEq
 
 structure Event where
@@ -34,6 +42,7 @@ structure Event where
   episode : UInt64
   lifeAge : UInt64
   pose : Option UInt8
+  sensory : Option Sensory
   deriving DecidableEq
 
 structure Query where
@@ -46,6 +55,7 @@ structure Query where
   lifeAge : UInt64
   pose : Option UInt8
   action : Option UInt8
+  sensory : Option Sensory
   deriving DecidableEq
 
 inductive Terminal where
@@ -68,6 +78,7 @@ inductive Value where
   | pair : Value → Value → Value
   | trace : List Event → Value
   | outcome : Outcome → Value
+  | bytes : List UInt8 → Value
   deriving DecidableEq
 
 inductive Op where
@@ -75,6 +86,7 @@ inductive Op where
   | append | at | last | length | eventInput | eventRaw | eventAction | eventAge
   | eventPose | queryInput | queryRaw | queryAge | queryAction | queryPose
   | pair | first | second | equal | select | add | rem | next | refused
+  | eventSensory | querySensory
   deriving DecidableEq
 
 inductive Error where
@@ -86,6 +98,8 @@ def arity : Op → Nat
   | .append | .at | .pair | .equal | .add | .rem => 2
   | .select => 3
   | _ => 1
+
+def sensoryValue (s : Sensory) : Value := .pair (.bytes s.schema) (.bytes s.body)
 
 def apply (maxTrace : Nat) (op : Op) (args : List Value) : Except Error Value :=
   if args.length ≠ arity op then .error .arity else
@@ -102,11 +116,23 @@ def apply (maxTrace : Nat) (op : Op) (args : List Value) : Except Error Value :=
       match events[index.toNat]? with
       | some event => .ok (.event event)
       | none => .error .missing
+  | .at, [.bytes bytes, .nat index] =>
+      match bytes[index.toNat]? with
+      | some byte => .ok (.nat (UInt64.ofNat byte.toNat))
+      | none => .error .missing
   | .last, [.trace events] => match events.getLast? with
       | some event => .ok (.event event)
       | none => .error .missing
   | .length, [.trace events] =>
       if events.length < 2^64 then .ok (.nat (UInt64.ofNat events.length)) else .error .overflow
+  | .length, [.bytes bytes] =>
+      if bytes.length < 2^64 then .ok (.nat (UInt64.ofNat bytes.length)) else .error .overflow
+  | .eventSensory, [.event e] => match e.sensory with
+      | some s => .ok (sensoryValue s)
+      | none => .error .missing
+  | .querySensory, [.query q] => match q.sensory with
+      | some s => .ok (sensoryValue s)
+      | none => .error .missing
   | .eventInput, [.event e] => .ok (.nat e.input)
   | .eventRaw, [.event e] => .ok (.nat e.raw)
   | .eventAction, [.event e] => .ok (.action e.action)

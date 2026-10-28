@@ -6,9 +6,9 @@ namespace AcquiredObserverControls
 open AcquiredObserver
 set_option warningAsError true
 
-def first : Event := ⟨1, 2, some ⟨3, 4⟩, 5, 6, 7, 8, 9, some 255⟩
-def last : Event := ⟨1, 2, some ⟨3, 4⟩, 10, 11, 12, 13, 14, none⟩
-def query : Query := ⟨1, 2, some ⟨3, 4⟩, 15, 16, 17, 18, some 19, some 20⟩
+def first : Event := ⟨1, 2, some ⟨3, 4⟩, 5, 6, 7, 8, 9, some 255, none⟩
+def last : Event := ⟨1, 2, some ⟨3, 4⟩, 10, 11, 12, 13, 14, none, none⟩
+def query : Query := ⟨1, 2, some ⟨3, 4⟩, 15, 16, 17, 18, some 19, some 20, none⟩
 
 theorem initializer_primitives :
     apply 0 .unit [] = .ok .unit ∧

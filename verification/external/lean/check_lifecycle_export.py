@@ -72,7 +72,7 @@ def lineage(item):
 def source(item):
     fields(item, 'epoch raw_space owner shape')
     return '⟨' + ', '.join((wide(item['epoch']), wide(item['raw_space']),
-        option(item['owner'], lineage), tag(item['shape'], ['Event', 'Query']))) + '⟩'
+        option(item['owner'], lineage), tag(item['shape'], ['Event', 'Query']), 'false')) + '⟩'
 
 
 def event(item, query=False):
@@ -87,7 +87,9 @@ def event(item, query=False):
     else:
         suffix = [byte(item['action']), natural(item['episode']), natural(item['life_age']),
                   option(item.get('pose'), byte)]
-    return '⟨' + ', '.join(prefix + suffix) + '⟩'
+    # Legacy adapters explicitly embed an absent sensory port. New native
+    # fields/operations remain refused until their versioned schema is frozen.
+    return '⟨' + ', '.join(prefix + suffix + ['none']) + '⟩'
 
 
 def value(item, depth=0):
