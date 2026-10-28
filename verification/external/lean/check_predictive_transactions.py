@@ -157,6 +157,7 @@ class Replay:
         self.prefix = f'p{index}'
         self.definitions, self.inputs, self.scores = {}, {}, {}
         self.owners, self.states, self.live = {}, {}, {}
+        self.seen_scores, self.seen_models = set(), set()
         self.sources, self.tickets, self.updates, self.frozen = set(), [], Counter(), {}
         self.predicting = self.learning = None
         self.context, self.mask_mod, self.target_mod = context, mask_mod, target_mod
@@ -220,7 +221,13 @@ class Replay:
         owner = item['cut']['owner']
         if observe:
             require(self.live.setdefault(owner,item) == item, 'Published runtime changed without commit')
+        self.seen_scores.add(item['score'])
+        self.seen_models.add(self.scores[item['score']][2])
         return f'(⟨{c}, {item["score"]}⟩ : AtomicPublication.Frontier Nat Nat Nat Nat)'
+
+    def fresh(self, identities, identity, kind):
+        self.claim(f'({ns(sorted(identities))} : List Nat).contains {natural(identity)} = false')
+        self.counts['fresh_'+kind+'_allocations'] += 1
 
     def input(self, identity):
         require(int(natural(identity)) in self.inputs, 'Unknown retained input owner')
@@ -342,6 +349,10 @@ class Replay:
         self.claim(f'({item["next_score"]} : Nat) ≠ {item["previous_score"]}')
         self.claim(f'({self.scores[item["next_score"]][2]} : Nat) ≠ {self.scores[item["previous_score"]][2]}')
         if ticket is not None:
+            self.fresh(self.seen_scores,item['next_score'],'score')
+            self.fresh(self.seen_models,self.scores[item['next_score']][2],'model')
+            self.seen_scores.add(item['next_score'])
+            self.seen_models.add(self.scores[item['next_score']][2])
             require(item['reading'] == ticket['reading'] and item['previous_score'] == ticket['previous_score'],
                     'Update changed retained authority')
             prediction = ticket['forecast']['prediction']
@@ -400,11 +411,15 @@ class Replay:
             require(self.learning is not None, 'Learning without observed ticket consumption')
             ticket,last = self.learning
             require(before == last, 'Learning snapshot chain changed')
-            a = self.learning_snapshot(before,ticket); b = self.learning_snapshot(after,ticket)
+            a = self.learning_snapshot(before,ticket)
+            retained_states = set(self.states)
+            b = self.learning_snapshot(after,ticket)
             require(after['target'] == before['target'], 'Learning changed complete target')
             if before['prepared'] is None:
                 require(result_kind in ('pending','native') and not after['done'], 'Unexpected preparation outcome')
                 require(before['accumulator'] == after['accumulator'], 'Preparation changed scoring cursor')
+                if after['prepared'] is not None:
+                    self.fresh(retained_states,after['prepared']['after']['state'],'state')
             elif before['accumulator']['pending'] is not None:
                 require(after['prepared'] == before['prepared'] and not after['done'], 'Scoring changed prepared owner')
                 if result_kind == 'work':

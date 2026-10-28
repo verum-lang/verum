@@ -3,6 +3,7 @@ import copy
 import gzip
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -152,6 +153,39 @@ class TransactionTests(unittest.TestCase):
         packets = [json.loads(line) for line in raw.splitlines()]
         self.assertEqual(len(packets),2)
         self.assertEqual(sum(len(p['events']) for p in packets),1096)
+
+    def test_equal_payload_does_not_allow_reused_revision_identity(self):
+        raw = gzip.decompress((ROOT/'fixtures/predictive-transactions-v1.jsonl.gz').read_bytes())
+        packet = json.loads(raw.splitlines()[1])
+        completed = [e['result']['value'] for e in packet['events']
+                     if e['kind']=='learning_advance' and e['result']['kind']=='update']
+        first,second = [u['prepared']['after'] for u in completed]
+        self.assertEqual(first['value'],second['value'])
+        self.assertNotEqual(first['state'],second['state'])
+        replaced,replacement = second['state'],first['state']
+        def reuse(node):
+            if isinstance(node,dict):
+                if 'state' in node and 'value' in node and node['state']==replaced:
+                    node['state']=replacement
+                for v in node.values(): reuse(v)
+            elif isinstance(node,list):
+                for v in node: reuse(v)
+        reuse(packet)
+        source,_ = emit(dict(packets=[packet]))
+        false_claims = []
+        for block in source.split('\n\n'):
+            if not block.startswith('theorem '): continue
+            m = re.search(r'\(\[([\d, ]*)\] : List Nat\)\.contains (\d+) = false',block)
+            if m and int(m[2]) in [int(v) for v in m[1].split(',') if v.strip()]:
+                false_claims.append(block)
+        self.assertTrue(false_claims,'reused allocation was not checked')
+        with tempfile.TemporaryDirectory(prefix='verum-reused-revision-') as directory:
+            path = Path(directory)/'control.lean'
+            path.write_text('import VerumExternalReplay.PredictiveObservation\n'+false_claims[0])
+            result = check(path,FALSE)
+            errors = [d for d in result['diagnostics'] if d['severity']=='error']
+            self.assertEqual(len(errors),1)
+            self.assertTrue(errors[0]['data'].startswith(FALSE))
 
     def test_numeric_and_semantic_forgery_fails_in_kernel(self):
         for change in ('ratio','program','target_codec'):
