@@ -101,7 +101,8 @@ class ResidualQueryTests(unittest.TestCase):
         source, counts, _ = self.prove(data)
         self.assertEqual(counts['rows'], 8)
         self.assertEqual(counts['queries'], 30)
-        self.assertEqual(counts['claims'], 77)
+        self.assertEqual(counts['claims'], 73)
+        self.assertEqual(counts['checked_transitions'], 4)
         self.assertEqual(sum(len(names) for _, names in batches(source)), counts['claims'])
         names = re.findall(r'^theorem (\w+)', source, re.M)
         self.assertEqual(len(names), counts['claims'])
@@ -144,16 +145,30 @@ class ResidualQueryTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.prove(dict(packets=[packet]), FALSE)
 
+    def test_shared_histories_keep_divergent_outcomes_separate(self):
+        first = fixture()
+        changed = copy.deepcopy(first['rows'])
+        changed[-1]['target'][0] ^= 1
+        second = fixture(changed)
+        data = dict(packets=[first, second])
+        _, counts, _ = self.prove(data)
+        self.assertEqual(counts['rows'], 8)
+        self.assertEqual(counts['checked_transitions'], 5)
+        self.assertEqual(counts['claims'], 51)
+        # Sharing the first three transitions must not hide the final outcome.
+        second['forecast'] = copy.deepcopy(first['forecast'])
+        self.prove(data, FALSE)
+
     def test_trace_hint_cannot_change_the_supplied_row_fold(self):
         source, _ = emit(dict(packets=[fixture()]))
         # Isolate the first transition: a rejected hint must not be reused in
         # later opaque folds, where it would also cause unrelated stuck terms.
         blocks = source.strip().split('\n\n')
         first = next(i for i, block in enumerate(blocks)
-                     if block.startswith('@[cbv_eval]\ntheorem packet_0_transition_0'))
+                     if block.startswith('@[cbv_eval]\ntheorem trace_transition_0'))
         source = '\n\n'.join(blocks[:first + 1] + ['end FrozenObserverExport']) + '\n'
-        forged = source.replace('def packet_0_state_1 : State := ⟨1, 0,',
-                                'def packet_0_state_1 : State := ⟨1, 1,')
+        forged = source.replace('def trace_state_0 : State := ⟨1, 0,',
+                                'def trace_state_0 : State := ⟨1, 1,')
         self.assertNotEqual(source, forged)
         with tempfile.TemporaryDirectory(prefix='verum-query-forged-') as directory:
             path = Path(directory) / 'check.lean'

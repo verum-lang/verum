@@ -57,9 +57,10 @@ def emit(data):
         'set_option cbv.maxSteps 10000000',
         'namespace FrozenObserverExport',
     ]
-    # All row hints are checked before making row opaque. Packet histories may
-    # overlap, but each supplied packet gets its own complete checked fold.
+    # Identical history prefixes reuse a kernel-checked transition, never a
+    # native assertion. Each packet still gets its own complete fold theorem.
     declarations, claims = [], []
+    checked_prefixes = {}
     row_count = query_count = 0
     phases = []
     for index, packet in enumerate(packets):
@@ -75,12 +76,19 @@ def emit(data):
             context, mask, target = (wire(item[k]) for k in ('context', 'mask', 'target'))
             parsed.append((context, target))
             encoded_rows.append(f'⟨{ns(context)}, {ns(mask)}, {ns(target)}⟩')
-        for block in trace(rows, encoded_rows):
-            if block.startswith('attribute '):
-                continue
-            blocks.append(re.sub(r'\b(state|transition)_(\d+)\b',
-                                 lambda m: f'{prefix}_{m[1]}_{m[2]}', block))
-        state = f'{prefix}_state_{len(rows)}' if rows else 'initial'
+        hints = trace(rows, encoded_rows)
+        history = ()
+        state = 'initial'
+        for row_index, row in enumerate(rows):
+            history += (tuple(tuple(row[key]) for key in ('context', 'mask', 'target')),)
+            if history not in checked_prefixes:
+                identity = len(checked_prefixes)
+                state = f'trace_state_{identity}'
+                checked_prefixes[history] = state
+                for block in hints[2*row_index:2*row_index+2]:
+                    blocks.append(re.sub(r'\b(state|transition)_(\d+)\b',
+                        lambda m: f'trace_{m[1]}_{identity}', block))
+            state = checked_prefixes[history]
         forecast = packet['forecast']
         fields(forecast, 'forecast_law prediction lengths reference residual')
         require(forecast['forecast_law'] == FORECAST_LAW, 'Wrong forecast probability law')
@@ -120,7 +128,8 @@ def emit(data):
                    *claims, 'end FrozenObserverExport'])
     return '\n\n'.join(blocks) + '\n', {
         'packets': len(packets), 'rows': row_count, 'queries': query_count,
-        'claims': row_count + len(claims), 'phases': phases,
+        'claims': len(checked_prefixes) + len(claims),
+        'checked_transitions': len(checked_prefixes), 'phases': phases,
     }
 
 
