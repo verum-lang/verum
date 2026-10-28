@@ -241,6 +241,13 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_retained_names.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_execution.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_execution_snapshot.py
+          python3 -m unittest discover -s verification/external/lean -p test_retained_execution_export.py
+          gzip -dc verification/external/lean/fixtures/shared-vm-native-v1.json.gz > shared-vm-native-v1.json
+          python3 verification/external/lean/check_retained_execution_export.py \
+            --export shared-vm-native-v1.json \
+            --sha256 dea7339bde7e9846e7ece4402281f69ee30609dc1a41a3c3a8ae2d43bfc52d6b \
+            --provenance verification/external/lean/fixtures/shared-vm-native-v1.provenance.json \
+            --output shared-vm-native-export.lean --report shared-vm-native-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_retained_names_export.py
           gzip -dc verification/external/lean/fixtures/retained-names-v1.json.gz > retained-names-v1.json
           python3 verification/external/lean/check_retained_names_export.py \
@@ -385,6 +392,9 @@ jobs:
             observer-lifecycle-v3.lean
             observer-lifecycle-v3-*/
             observer-lifecycle-v4-export-acceptance.json
+            shared-vm-native-export-acceptance.json
+            shared-vm-native-export.lean
+            shared-vm-native-export-*/
             observer-lifecycle-v4-export.lean
             observer-lifecycle-v4-export-*/
             retained-names-export-acceptance.json

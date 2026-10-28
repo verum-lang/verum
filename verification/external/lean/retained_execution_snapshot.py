@@ -44,6 +44,11 @@ def operand(value):
 class Instruction:
     operation: tuple
     arguments: tuple
+    declared_arity: int | None = None
+
+    @property
+    def arity(self):
+        return len(self.arguments) if self.declared_arity is None else self.declared_arity
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,15 @@ def program(value, depth=0):
         steps.append(Instruction(decoded, tuple(operand(a) for a in sequence(step['arguments']))))
     return Program(tuple(steps), None if value['output'] is None else nat(value['output']),
                    tuple(program(p, depth + 1) for p in sequence(value['library'])))
+
+
+def custom_program(value):
+    """The separately named missing-operands adapter; never inferred from shape."""
+    fields(value, 'arity operation operandResult instructionCount output')
+    require(value['operation'] == 'identity' and value['operandResult'] is None
+            and value['instructionCount'] == '1' and value['output'] == 'last_register',
+            'Unsupported custom Code descriptor')
+    return Program((Instruction(('primitive', 'identity'), (), nat(value['arity'])),), None, ())
 
 
 def code_at(source, scope):
@@ -122,11 +136,14 @@ def snapshot(value, source, *, policy, original_limit, context):
     require(expanded + calls == dispatch, 'Counter partition changed')
     terminal = value['terminal']
     if terminal is not None:
-        fields(terminal, 'stop reason')
+        fields(terminal, 'stop reason haltPath')
         require(terminal['stop'] in ('complete', 'undefined'), 'Budget is a pause, not a machine terminal')
         require((terminal['reason'] is None) == (terminal['stop'] == 'complete'), 'Invalid terminal reason')
         if terminal['reason'] is not None:
             failure(terminal['reason'])
+            vector(terminal['haltPath'])
+        else:
+            require(terminal['haltPath'] is None, 'Successful terminal has a halt path')
     frames = []
     for index, frame in enumerate(sequence(value['frames'])):
         fields(frame, 'scope inputs registers pc')
@@ -148,6 +165,9 @@ def snapshot(value, source, *, policy, original_limit, context):
             require(ins == tuple(resolve(a, parent_ins, parent_regs) for a in call.arguments),
                     'Callee inputs differ from resolved caller arguments')
         frames.append((scope, ins, regs, owned))
+    if terminal is not None and terminal['reason'] is not None:
+        require(vector(terminal['haltPath']) == tuple(len(f[2]) for f in frames),
+                'Terminal halt path differs from actual frame PCs')
     root = value['rootInputs']
     if frames:
         require(root is None, 'Entered root still owns pending root inputs')
@@ -166,7 +186,7 @@ def snapshot(value, source, *, policy, original_limit, context):
     require(len(regs) < len(owned.instructions), 'Pending instruction absent from source')
     step = owned.instructions[len(regs)]
     decoded = pending['decoded']; fields(decoded, 'arity operation')
-    require(nat(decoded['arity']) == len(step.arguments), 'Owned instruction arity changed')
+    require(nat(decoded['arity']) == step.arity, 'Source instruction arity changed')
     op = decoded['operation']
     if step.operation[0] == 'primitive':
         fields(op, 'primitive'); handle = op['primitive']; fields(handle, 'scope pc operation')
@@ -179,12 +199,13 @@ def snapshot(value, source, *, policy, original_limit, context):
         require(target == expected, 'Captured callee identity changed')
     args = vector(pending['arguments']); part = pending['part']
     require(type(part) is str and part in PARTS, 'Unknown pending phase')
-    require(len(args) <= len(step.arguments), 'Argument prefix exceeds arity')
+    require(len(args) <= step.arity, 'Argument prefix exceeds arity')
+    require(len(args) <= len(step.arguments), 'Resolved prefix contains a missing operand')
     require(args == tuple(resolve(a, ins, regs) for a in step.arguments[:len(args)]), 'Resolved argument prefix changed')
     if part == 'start':
         require(not args, 'Unstarted instruction has resolved arguments')
     elif part != 'arguments':
-        require(len(args) == len(step.arguments), 'Instruction advanced before all arguments resolved')
+        require(len(args) == step.arity, 'Instruction advanced before all arguments resolved')
         require((part == 'primitive') == (step.operation[0] == 'primitive'), 'Phase disagrees with decoded operation')
     require(terminal is None or terminal['stop'] == 'undefined', 'Completed machine retains pending instruction')
     if terminal is not None:

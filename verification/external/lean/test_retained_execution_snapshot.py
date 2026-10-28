@@ -36,7 +36,7 @@ class SnapshotTests(unittest.TestCase):
         failed = copy.deepcopy(BASE)
         failed['pending']['part'] = 'primitive'
         failed['pending']['arguments'] = ['5', '2']
-        failed['terminal'] = {'stop': 'undefined', 'reason': {'kind': 'primitive',
+        failed['terminal'] = {'stop': 'undefined', 'haltPath': ['0', '0'], 'reason': {'kind': 'primitive',
             'error': {'kind': 'resource', 'declaredClassification': 'resource'}}}
         self.assertIs(validate(failed), failed)
 
@@ -64,9 +64,10 @@ class SnapshotTests(unittest.TestCase):
             (['pending', 'arguments'], ['5', '2', '9'], 'prefix exceeds'),
             (['pending', 'part'], 'primitive', 'before all arguments'),
             (['pending', 'part'], 'start', 'Unstarted instruction'),
-            (['terminal'], {'stop': 'budget', 'reason': {'kind': 'allowance'}}, 'pause, not a machine terminal'),
-            (['terminal'], {'stop': 'complete', 'reason': None}, 'retains pending instruction'),
-            (['terminal'], {'stop': 'undefined', 'reason': None}, 'Invalid terminal reason'),
+            (['terminal'], {'stop': 'budget', 'reason': {'kind': 'allowance'}, 'haltPath': ['0', '0']}, 'pause, not a machine terminal'),
+            (['terminal'], {'stop': 'complete', 'reason': None, 'haltPath': None}, 'retains pending instruction'),
+            (['terminal'], {'stop': 'undefined', 'reason': None, 'haltPath': ['0', '0']}, 'Invalid terminal reason'),
+            (['terminal'], {'stop': 'undefined', 'reason': {'kind': 'missing_callee_output'}, 'haltPath': ['0']}, 'halt path differs'),
         ]
         for path, replacement, error in controls:
             with self.subTest(path=path):

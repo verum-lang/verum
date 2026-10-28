@@ -35,4 +35,5 @@ import VerumExternalReplay.AcquisitionScheduling
 import VerumExternalReplay.StructuralNames
 import VerumExternalReplay.RetainedNames
 import VerumExternalReplay.RetainedExecutionTrace
+import VerumExternalReplay.RetainedNative
 import VerumExternalReplay.RetainedExecutionControls
