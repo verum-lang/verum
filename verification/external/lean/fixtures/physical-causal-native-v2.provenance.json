@@ -1,0 +1,68 @@
+{
+  "status": "verified",
+  "export_sha256": "bc239626dd4b005e6f45ffcdc297619e341a50e41b305eaf9b447d066ccfd2b4",
+  "native_source_commit": "47a9b937514ab25af17cde9dfb52fde0a785e5c6",
+  "receipt_sha256": "21202638f54a77afc8974a135793042347e17a285caf3face50866186c9146f9",
+  "native_binary_sha256": "b814f62b9d4c658e8939bd716e92a1952942ef27bc68dc2afcd68b52196251cd",
+  "source_artifacts": 1473,
+  "independently_verified_artifacts": 1488,
+  "native_tests": 38,
+  "scope": "Finite physical capture, journal publication and observed ownership guard correspondence. Pointer/root comparisons are supplied native observations; internal AVL cursors, affine typing and physical adapter truth remain outside the proof.",
+  "retained_files": [
+    {
+      "file": "physical-causal-native-v2.jsonl.gz",
+      "bytes": 108826,
+      "sha256": "bc239626dd4b005e6f45ffcdc297619e341a50e41b305eaf9b447d066ccfd2b4"
+    },
+    {
+      "file": "physical-causal-native-v2.receipt.json.gz",
+      "bytes": 430472,
+      "sha256": "21202638f54a77afc8974a135793042347e17a285caf3face50866186c9146f9"
+    },
+    {
+      "file": "physical-causal-native-v2.prior-receipt.json.gz",
+      "bytes": 436561,
+      "sha256": "40777fd0f3548ed076d2e9ea8e0e401c6a381cceb6d5d8e1fc2ca8e063de33a4"
+    },
+    {
+      "file": "physical-causal-native-v2.source.patch.gz",
+      "bytes": 36383,
+      "sha256": "b5def273537cfbd4a3283bfa56af4e96398c265f7ff656fb332f9a82dcec045a"
+    },
+    {
+      "file": "physical-causal-native-v2.producer.py.gz",
+      "bytes": 8499,
+      "sha256": "b4b148a95b72fff15f83882a0b942f5e90423a108e7a21856e716dbd0d85a49e"
+    },
+    {
+      "file": "physical-causal-native-v2.source-0.rs.gz",
+      "bytes": 79191,
+      "sha256": "e6c7949d2e2f36886cbd7aac2815b20ee9dbe1b53c445e16d4e01e1c3ff089a4",
+      "source_path": "rust/crates/synarc-kan/src/organism/causal_coordinates.rs"
+    },
+    {
+      "file": "physical-causal-native-v2.source-1.rs.gz",
+      "bytes": 8923,
+      "sha256": "d6723cfbec922eaa36af9e60de10858edbaf5e2a6b09011bcc49a8fd7ca7619a",
+      "source_path": "rust/crates/synarc-kan/src/organism/causal_coordinates/reservation.rs"
+    },
+    {
+      "file": "physical-causal-native-v2.source-2.rs.gz",
+      "bytes": 18321,
+      "sha256": "ede91be9c0f47a4339be5099662d13143959aad21378939ad773514d00964330",
+      "source_path": "rust/crates/synarc-kan/src/organism/causal_coordinates/reservation/courts/lifecycle_export.rs"
+    },
+    {
+      "file": "physical-causal-native-v2.source-3.rs.gz",
+      "bytes": 9144,
+      "sha256": "ad802e25bd04936a55402fdd70a4ce030bb0b94ea7e35513a49a6106f08dd35b",
+      "source_path": "rust/crates/synarc-kan/src/organism/action_capture.rs"
+    },
+    {
+      "file": "physical-causal-native-v2.source-4.rs.gz",
+      "bytes": 10377,
+      "sha256": "3555c77906b38c0fa6b34226aa3f4355dc155ff97197b082f5d419298db7436f",
+      "source_path": "rust/crates/synarc-kan/src/organism/action.rs"
+    }
+  ]
+}

@@ -11,9 +11,10 @@ TYPE = 'Capture UInt8 (List UInt8 × List UInt8 × List UInt8)'
 
 
 class Encoder:
-    def __init__(self):
+    def __init__(self, action_maximum=255):
         self.definitions = []
         self.bytes = {}
+        self.action_maximum = action_maximum
 
     def wire(self, value):
         encoded = SENSORY.bytes(value)  # Strict integers, never Boolean/float byte aliases.
@@ -50,7 +51,7 @@ class Encoder:
         require(type(operation) is dict and 'kind' in operation, 'Missing failure operation')
         if operation['kind'] == 'Act':
             fields(operation, 'kind action')
-            operation = '(.act ' + natural(operation['action'], 255) + ')'
+            operation = '(.act ' + natural(operation['action'], self.action_maximum) + ')'
         else:
             fields(operation, 'kind')
             operation = tag(operation['kind'], ['Begin', 'Checkpoint', 'Restore'])
@@ -62,7 +63,7 @@ class Encoder:
 
     def capture(self, value, full=False):
         fields(value, 'action result observation resumed' + (' target target_error' if full else ''))
-        return '⟨' + ', '.join((natural(value['action'], 255), self.result(value['result']),
+        return '⟨' + ', '.join((natural(value['action'], self.action_maximum), self.result(value['result']),
             option(value['observation'], self.sensory), option(value['resumed'], self.sensory))) + '⟩'
 
     def target_result(self, value):
