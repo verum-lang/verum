@@ -119,6 +119,7 @@
 // Note: dead_code is intentionally allowed as many items are for future use
 
 pub mod context;
+pub mod ranking;
 pub mod cost;
 pub mod counterexample;
 pub mod domains; // Phase D.3: sheaf + epistemic domain encodings
@@ -529,10 +530,9 @@ pub use array_model::{ArrayModel, ArrayModelStats, ArraySort, ArrayUpdate, Memor
 pub use fixedpoint::{
     Atom, CHC, DatalogModel, DatalogRule, DatalogSolver, FixedPointEngine, FixedPointQuery,
     FixedPointResult, FixedPointSolution, FixedPointStats, InductiveDatatypeBuilder, PredicateBody,
-    PredicateCase, PredicateInterpretation, RankingFunction, RecursiveFunction, RecursivePredicate,
-    RecursiveProgramVerifier, VerificationResult as FixedPointVerificationResult,
-    create_fixedpoint_context, extract_invariants, patterns, solve_recursive_predicate,
-    validate_solution,
+    PredicateCase, PredicateInterpretation, RankingFunction, RankingTransition, RecursiveFunction,
+    RecursivePredicate, RecursiveProgramVerifier, VerificationResult as FixedPointVerificationResult,
+    create_fixedpoint_context, extract_invariants, patterns, solve_recursive_predicate, validate_solution,
 };
 pub use goal_analysis::{
     AnalysisStats, ComplexityMetrics, ComplexityThresholds, FastPathResult, GoalAnalyzer,

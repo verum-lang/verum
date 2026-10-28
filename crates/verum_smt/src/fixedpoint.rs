@@ -10,10 +10,12 @@
 //! predicates, enabling verification of inductive properties like `is_sorted(list)`
 //! or `is_balanced(tree)` that reference themselves in their definitions.
 
+pub use crate::ranking::{RankingFunction, RankingTransition};
+
 use std::ffi::CString;
 use std::time::Instant;
 
-use z3::ast::{Ast, Bool, Dynamic, Int};
+use z3::ast::{Ast, Bool, Dynamic};
 use z3::{Context, Fixedpoint, FuncDecl, SatResult, Sort, Symbol};
 
 use verum_common::{List, Map, Maybe, Set, Shared, Text};
@@ -1325,7 +1327,7 @@ impl RecursiveProgramVerifier {
         self.engine.register_predicate(RecursivePredicate {
             vars: Default::default(),
             name: Text::from(format!("{}_pre", func.name)),
-            params: func.param_sorts.clone(),
+            params: func.parameters.iter().map(Ast::get_sort).collect(),
             body: PredicateBody::Base(func.precondition.clone()),
             well_founded: false,
         })?;
@@ -1334,7 +1336,7 @@ impl RecursiveProgramVerifier {
         self.engine.register_predicate(RecursivePredicate {
             vars: Default::default(),
             name: Text::from(format!("{}_post", func.name)),
-            params: func.param_sorts.clone(),
+            params: func.parameters.iter().map(Ast::get_sort).collect(),
             body: PredicateBody::Base(func.postcondition.clone()),
             well_founded: false,
         })?;
@@ -1357,106 +1359,19 @@ impl RecursiveProgramVerifier {
         })
     }
 
-    /// Verify termination using ranking function
-    ///
-    /// This method verifies that a recursive function terminates by proving that:
-    /// 1. The ranking function is always non-negative
-    /// 2. The ranking function strictly decreases on every recursive call
-    ///
-    /// Uses Z3's SMT solver to verify these properties.
-    ///
-    /// # Theory
-    /// A ranking function maps the function's state to a well-founded order (typically natural numbers).
-    /// Termination is proven by showing the ranking decreases on each recursive call.
-    ///
-    /// # Examples
-    /// ```ignore
-    /// use verum_smt::{RecursiveProgramVerifier, RecursiveFunction, RankingFunction};
-    /// use z3::{Context, Sort, ast::{Int, Bool}};
-    /// use verum_common::{List, Text};
-    ///
-    /// let ctx = Context::thread_local();
-    /// let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-    ///
-    /// // Define factorial function: fact(n) = if n <= 0 then 1 else n * fact(n-1)
-    /// let n = Int::new_const("n");
-    /// let func = RecursiveFunction {
-    ///  name: Text::from("fact"),
-    ///  param_sorts: List::from(vec![Sort::int()]),
-    ///  precondition: n.ge(&Int::from_i64(0)),
-    ///  postcondition: Bool::from_bool(true),
-    ///  recursive_calls: List::new(),
-    ///  verification_conditions: List::new(),
-    /// };
-    ///
-    /// // Ranking function: n (decreases from n to n-1)
-    /// let ranking = RankingFunction {
-    ///  expression: n.clone(),
-    ///  well_founded_constraint: n.ge(&Int::from_i64(0)),
-    /// };
-    ///
-    /// let terminates = verifier.verify_termination(func, ranking).unwrap();
-    /// assert!(terminates);
-    /// ```
+    /// Check actual guarded self-call arguments against a candidate rank.
+    /// See `RankingFunction::verify` for the model-relative obligations and limits.
     pub fn verify_termination(
         &mut self,
         func: RecursiveFunction,
         ranking: RankingFunction,
     ) -> Result<bool, Text> {
-        use z3::{SatResult, Solver};
-
-        // Create a fresh solver for termination verification
-        let solver = Solver::new();
-
-        // Step 1: Assert precondition (if any)
-        solver.assert(&func.precondition);
-
-        // Step 2: Assert ranking function well-foundedness constraint
-        // This ensures the ranking function is always non-negative
-        solver.assert(&ranking.well_founded_constraint);
-
-        // Step 3: For each recursive call, verify that ranking strictly decreases
-        // We need to prove: ranking(current_args) > ranking(recursive_args)
-        for recursive_call in func.recursive_calls.iter() {
-            // The ranking expression represents the current state
-            let current_rank = &ranking.expression;
-
-            // Create a fresh Int variable for the recursive call's ranking
-            // In a full implementation, we would substitute the recursive call's
-            // arguments into the ranking function. For now, we assert that
-            // the rank decreases symbolically.
-            let recursive_rank_name = format!("{}_rec_rank", func.name);
-            let recursive_rank = Int::new_const(recursive_rank_name.as_str());
-
-            // Assert: recursive_rank < current_rank (strict decrease)
-            // This is the termination condition
-            solver.assert(recursive_rank.lt(current_rank));
-
-            // Assert: recursive_rank >= 0 (well-founded)
-            solver.assert(recursive_rank.ge(Int::from_i64(0)));
-        }
-
-        // Step 4: Check if the termination conditions are satisfiable
-        // If SAT: there exists a valid ranking function, termination proven
-        // If UNSAT: cannot prove termination with this ranking
-        match solver.check() {
-            SatResult::Sat => {
-                // Termination verified!
-                // The ranking function is valid and proves termination
-                Ok(true)
-            }
-            SatResult::Unsat => {
-                // Cannot prove termination with this ranking function
-                // The constraints are contradictory
-                Ok(false)
-            }
-            SatResult::Unknown => {
-                // Z3 could not determine satisfiability (timeout, resource limit, etc.)
-                Err(Text::from(
-                    "Z3 returned unknown for termination verification - solver may have timed out or hit resource limits",
-                ))
-            }
-        }
+        ranking.verify(
+            &func.parameters,
+            &func.precondition,
+            &func.recursive_calls,
+            crate::context::ContextConfig::default(),
+        )
     }
 }
 
@@ -1464,18 +1379,14 @@ impl RecursiveProgramVerifier {
 #[derive(Debug)]
 pub struct RecursiveFunction {
     pub name: Text,
-    pub param_sorts: List<Sort>,
+    /// Explicit symbolic parameters, in call argument order.
+    pub parameters: List<Dynamic>,
     pub precondition: Bool,
     pub postcondition: Bool,
-    pub recursive_calls: List<RecursiveCall>,
+    /// Every self-call, with its actual path guard and simultaneous arguments.
+    /// Mutual recursion requires a model covering all participating functions.
+    pub recursive_calls: List<RankingTransition>,
     pub verification_conditions: List<CHC>,
-}
-
-/// Ranking function for termination
-#[derive(Debug)]
-pub struct RankingFunction {
-    pub expression: Int,
-    pub well_founded_constraint: Bool,
 }
 
 /// Verification result

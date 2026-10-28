@@ -1,355 +1,279 @@
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unused_must_use,
-    unused_unsafe,
-    deprecated,
-    unexpected_cfgs,
-    unused_comparisons,
-    forgetting_copy_types,
-    useless_ptr_null_checks,
-    unused_assignments
-)]
-//! Termination Verification Tests using Z3 Fixed-Point Engine
-//!
-//! These tests verify that recursive functions terminate using ranking functions.
-//! Tests cover various patterns: simple recursion, mutual recursion, and complex cases.
-
+//! Strict controls for actual guarded transitions, not existential rank witnesses.
 use verum_common::{List, Text};
-use verum_smt::fixedpoint::{
-    RankingFunction, RecursiveCall, RecursiveFunction, RecursiveProgramVerifier,
-};
+use verum_smt::ranking::{RankingFunction, RankingTransition};
+use verum_smt::{ContextConfig, RecursiveFunction, RecursiveProgramVerifier};
 use z3::{
-    Context, Sort,
-    ast::{Bool, Int},
+    Context,
+    ast::{Bool, Dynamic, Int},
 };
+
+fn transition(guard: Bool, arguments: Vec<Dynamic>) -> RankingTransition {
+    RankingTransition {
+        guard,
+        arguments: List::from(arguments),
+    }
+}
+fn verify(
+    parameters: Vec<Dynamic>,
+    domain: Bool,
+    rank: Int,
+    transitions: Vec<RankingTransition>,
+) -> bool {
+    RankingFunction {
+        expression: rank,
+        well_founded_constraint: Bool::from_bool(true),
+    }
+    .verify(&parameters, &domain, &transitions, ContextConfig::default())
+    .unwrap()
+}
 
 #[test]
-fn test_termination_factorial() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define factorial function: fact(n) = if n <= 0 then 1 else n * fact(n-1)
-    // Ranking function: n
+fn factorial_and_fibonacci_use_actual_guarded_arguments() {
     let n = Int::new_const("n");
-
+    for decrement in [1, 2] {
+        assert!(verify(
+            vec![n.clone().into()],
+            n.ge(0),
+            n.clone(),
+            vec![transition(n.ge(decrement), vec![(&n - decrement).into()])]
+        ));
+    }
     let func = RecursiveFunction {
-        name: Text::from("fact"),
-        param_sorts: List::from(vec![Sort::int()]),
-        precondition: n.ge(Int::from_i64(0)), // n >= 0
+        name: Text::from("fib"),
+        parameters: List::from(vec![n.clone().into()]),
+        precondition: n.ge(0),
         postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![RecursiveCall {
-            predicate: Text::from("fact"),
-            args: List::new(),
-        }]),
+        recursive_calls: List::from(vec![
+            transition(n.gt(1), vec![(&n - 1).into()]),
+            transition(n.gt(1), vec![(&n - 2).into()]),
+        ]),
         verification_conditions: List::new(),
     };
-
-    // Ranking function: n (strictly decreases from n to n-1)
-    let ranking = RankingFunction {
-        expression: n.clone(),
-        well_founded_constraint: n.ge(Int::from_i64(0)), // n >= 0
-    };
-
-    let result = verifier.verify_termination(func, ranking);
-    assert!(result.is_ok(), "Termination verification should succeed");
     assert!(
-        result.unwrap(),
-        "Factorial should terminate with ranking function n"
+        RecursiveProgramVerifier::new(Context::thread_local())
+            .unwrap()
+            .verify_termination(
+                func,
+                RankingFunction {
+                    expression: n.clone(),
+                    well_founded_constraint: n.ge(0),
+                }
+            )
+            .unwrap()
     );
 }
 
 #[test]
-fn test_termination_countdown() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define countdown function: countdown(n) = if n > 0 then countdown(n-1) else done
+fn unchanged_increasing_and_bad_second_call_refute_candidate() {
     let n = Int::new_const("n");
-
-    let func = RecursiveFunction {
-        name: Text::from("countdown"),
-        param_sorts: List::from(vec![Sort::int()]),
-        precondition: n.ge(Int::from_i64(0)),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![RecursiveCall {
-            predicate: Text::from("countdown"),
-            args: List::new(),
-        }]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
-        expression: n.clone(),
-        well_founded_constraint: n.ge(Int::from_i64(0)),
-    };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "Countdown should terminate");
+    for next in [n.clone(), &n + 1] {
+        assert!(!verify(
+            vec![n.clone().into()],
+            n.ge(0),
+            n.clone(),
+            vec![transition(n.gt(0), vec![next.into()])]
+        ));
+    }
+    assert!(!verify(
+        vec![n.clone().into()],
+        n.ge(0),
+        n.clone(),
+        vec![
+            transition(n.gt(0), vec![(&n - 1).into()]),
+            transition(n.gt(0), vec![n.clone().into()]),
+        ]
+    ));
 }
 
 #[test]
-fn test_termination_fibonacci() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define fibonacci: fib(n) = if n <= 1 then n else fib(n-1) + fib(n-2)
+fn domain_and_nonnegativity_are_proved_not_assumed() {
     let n = Int::new_const("n");
-
-    let func = RecursiveFunction {
-        name: Text::from("fib"),
-        param_sorts: List::from(vec![Sort::int()]),
-        precondition: n.ge(Int::from_i64(0)),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![
-            RecursiveCall {
-                predicate: Text::from("fib"),
-                args: List::new(),
-            },
-            RecursiveCall {
-                predicate: Text::from("fib"),
-                args: List::new(),
-            },
-        ]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
+    assert!(!verify(
+        vec![n.clone().into()],
+        Bool::from_bool(true),
+        n.clone(),
+        vec![]
+    ));
+    assert!(!verify(
+        vec![n.clone().into()],
+        n.ge(0),
+        n.clone(),
+        vec![transition(Bool::from_bool(true), vec![(&n - 1).into()])]
+    ));
+    // Decrease remains positive, but the successor escapes the supplied invariant.
+    assert!(!verify(
+        vec![n.clone().into()],
+        n.ge(10),
+        n.clone(),
+        vec![transition(n.ge(10), vec![(&n - 1).into()])]
+    ));
+    let rank = RankingFunction {
         expression: n.clone(),
-        well_founded_constraint: n.ge(Int::from_i64(0)),
+        well_founded_constraint: n.gt(100),
     };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "Fibonacci should terminate");
+    assert!(
+        !rank
+            .verify(&[n.clone().into()], &n.ge(0), &[], ContextConfig::default())
+            .unwrap()
+    );
+    let contradiction = RankingFunction {
+        expression: n.clone(),
+        well_founded_constraint: Bool::from_bool(false),
+    };
+    assert!(
+        !contradiction
+            .verify(&[n.clone().into()], &n.ge(0), &[], ContextConfig::default())
+            .unwrap()
+    );
 }
 
 #[test]
-fn test_termination_gcd() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
+fn unreachable_calls_are_excluded_only_by_their_guards() {
+    let n = Int::new_const("n");
+    assert!(verify(
+        vec![n.clone().into()],
+        n.ge(0),
+        n.clone(),
+        vec![transition(n.lt(0), vec![(&n + 1).into()])]
+    ));
+}
 
-    // Define GCD: gcd(a, b) = if b == 0 then a else gcd(b, a mod b)
-    // Ranking function: b (strictly decreases)
+#[test]
+fn simultaneous_substitution_handles_permutation_and_compound_ranks() {
     let a = Int::new_const("a");
     let b = Int::new_const("b");
-
-    let func = RecursiveFunction {
-        name: Text::from("gcd"),
-        param_sorts: List::from(vec![Sort::int(), Sort::int()]),
-        precondition: Bool::and(&[&a.ge(Int::from_i64(0)), &b.ge(Int::from_i64(0))]),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![RecursiveCall {
-            predicate: Text::from("gcd"),
-            args: List::new(),
-        }]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
-        expression: b.clone(),
-        well_founded_constraint: b.ge(Int::from_i64(0)),
-    };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "GCD should terminate with ranking function b");
+    let domain = Bool::and(&[&a.ge(0), &b.ge(0)]);
+    // A swap preserves the sum. Sequential replacement would corrupt this check.
+    assert!(!verify(
+        vec![a.clone().into(), b.clone().into()],
+        domain.clone(),
+        &a + &b,
+        vec![transition(
+            a.gt(&b),
+            vec![b.clone().into(), a.clone().into()]
+        )]
+    ));
+    assert!(verify(
+        vec![a.clone().into(), b.clone().into()],
+        domain.clone(),
+        &a + &b,
+        vec![transition(a.gt(0), vec![b.clone().into(), (&a - 1).into()])]
+    ));
+    // Euclid: b is the rank, and actual arguments are (b, a mod b).
+    assert!(verify(
+        vec![a.clone().into(), b.clone().into()],
+        domain,
+        b.clone(),
+        vec![transition(
+            b.gt(0),
+            vec![b.clone().into(), a.modulo(&b).into()]
+        )]
+    ));
 }
 
 #[test]
-fn test_termination_list_length() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define length: length(list) = if empty then 0 else 1 + length(tail)
-    // Ranking function: size of list (strictly decreases)
-    let list_size = Int::new_const("list_size");
-
-    let func = RecursiveFunction {
-        name: Text::from("length"),
-        param_sorts: List::from(vec![Sort::int()]), // Simplified: size as Int
-        precondition: list_size.ge(Int::from_i64(0)),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![RecursiveCall {
-            predicate: Text::from("length"),
-            args: List::new(),
-        }]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
-        expression: list_size.clone(),
-        well_founded_constraint: list_size.ge(Int::from_i64(0)),
-    };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "List length should terminate");
-}
-
-#[test]
-fn test_termination_tree_height() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define height: height(tree) = if leaf then 0 else 1 + max(height(left), height(right))
-    let tree_size = Int::new_const("tree_size");
-
-    let func = RecursiveFunction {
-        name: Text::from("height"),
-        param_sorts: List::from(vec![Sort::int()]),
-        precondition: tree_size.ge(Int::from_i64(0)),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![
-            RecursiveCall {
-                predicate: Text::from("height"),
-                args: List::new(),
-            },
-            RecursiveCall {
-                predicate: Text::from("height"),
-                args: List::new(),
-            },
-        ]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
-        expression: tree_size.clone(),
-        well_founded_constraint: tree_size.ge(Int::from_i64(0)),
-    };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "Tree height should terminate");
-}
-
-#[test]
-fn test_termination_power() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define power: pow(x, n) = if n == 0 then 1 else x * pow(x, n-1)
+fn binary_search_and_split_recursion_decrease_actual_sizes() {
+    let lo = Int::new_const("lo");
+    let hi = Int::new_const("hi");
+    let mid = (&lo + &hi).div(2);
+    assert!(verify(
+        vec![lo.clone().into(), hi.clone().into()],
+        lo.le(&hi),
+        &hi - &lo,
+        vec![transition(lo.lt(&hi), vec![lo.clone().into(), mid.into()])]
+    ));
     let n = Int::new_const("n");
-
-    let func = RecursiveFunction {
-        name: Text::from("pow"),
-        param_sorts: List::from(vec![Sort::int(), Sort::int()]),
-        precondition: n.ge(Int::from_i64(0)),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![RecursiveCall {
-            predicate: Text::from("pow"),
-            args: List::new(),
-        }]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
-        expression: n.clone(),
-        well_founded_constraint: n.ge(Int::from_i64(0)),
-    };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "Power function should terminate");
+    assert!(verify(
+        vec![n.clone().into()],
+        n.ge(0),
+        n.clone(),
+        vec![
+            transition(n.gt(1), vec![n.div(2).into()]),
+            transition(n.gt(1), vec![(&n - n.div(2)).into()]),
+        ]
+    ));
 }
 
 #[test]
-fn test_termination_binary_search() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define binary_search: search(low, high) = ...
-    // Ranking function: high - low (strictly decreases)
-    let low = Int::new_const("low");
-    let high = Int::new_const("high");
-    let range = Int::sub(&[&high, &low]);
-
-    let func = RecursiveFunction {
-        name: Text::from("binary_search"),
-        param_sorts: List::from(vec![Sort::int(), Sort::int()]),
-        precondition: low.le(&high),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![RecursiveCall {
-            predicate: Text::from("binary_search"),
-            args: List::new(),
-        }]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
-        expression: range.clone(),
-        well_founded_constraint: range.ge(Int::from_i64(0)),
-    };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "Binary search should terminate");
-}
-
-#[test]
-fn test_termination_merge_sort_split() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Define merge_sort: sort(list) = if len <= 1 then list else merge(sort(left), sort(right))
-    // Ranking function: length of list
-    let len = Int::new_const("len");
-
-    let func = RecursiveFunction {
-        name: Text::from("merge_sort"),
-        param_sorts: List::from(vec![Sort::int()]),
-        precondition: len.ge(Int::from_i64(0)),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![
-            RecursiveCall {
-                predicate: Text::from("merge_sort"),
-                args: List::new(),
-            },
-            RecursiveCall {
-                predicate: Text::from("merge_sort"),
-                args: List::new(),
-            },
-        ]),
-        verification_conditions: List::new(),
-    };
-
-    let ranking = RankingFunction {
-        expression: len.clone(),
-        well_founded_constraint: len.ge(Int::from_i64(0)),
-    };
-
-    let result = verifier.verify_termination(func, ranking).unwrap();
-    assert!(result, "Merge sort should terminate");
-}
-
-#[test]
-fn test_termination_collatz_conjecture() {
-    let ctx = Context::thread_local();
-    let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
-
-    // Collatz: collatz(n) = if n == 1 then 1 else if even(n) then collatz(n/2) else collatz(3n+1)
-    // Note: Termination is unproven in general! This test demonstrates the API.
+fn collatz_rank_is_refuted_without_claiming_nontermination() {
     let n = Int::new_const("n");
+    assert!(!verify(
+        vec![n.clone().into()],
+        n.gt(0),
+        n.clone(),
+        vec![
+            transition(
+                Bool::and(&[&n.gt(1), &n.modulo(2).eq(0)]),
+                vec![n.div(2).into()]
+            ),
+            transition(
+                Bool::and(&[&n.gt(1), &n.modulo(2).eq(1)]),
+                vec![(&n * 3 + 1).into()]
+            ),
+        ]
+    ));
+}
 
-    let func = RecursiveFunction {
-        name: Text::from("collatz"),
-        param_sorts: List::from(vec![Sort::int()]),
-        precondition: n.gt(Int::from_i64(0)),
-        postcondition: Bool::from_bool(true),
-        recursive_calls: List::from(vec![RecursiveCall {
-            predicate: Text::from("collatz"),
-            args: List::new(),
-        }]),
-        verification_conditions: List::new(),
-    };
-
-    // Try with n as ranking function (won't work for Collatz in general)
-    let ranking = RankingFunction {
+#[test]
+fn malformed_transitions_are_errors_even_on_an_unreachable_domain() {
+    let n = Int::new_const("n");
+    let b = Bool::new_const("b");
+    let rank = RankingFunction {
         expression: n.clone(),
-        well_founded_constraint: n.gt(Int::from_i64(0)),
+        well_founded_constraint: n.ge(0),
     };
+    for parameters in [
+        vec![n.clone().into(), n.clone().into()],
+        vec![(&n + 1).into()],
+        vec![Int::from_i64(0).into()],
+    ] {
+        assert!(
+            rank.verify(
+                &parameters,
+                &Bool::from_bool(false),
+                &[],
+                ContextConfig::default()
+            )
+            .is_err()
+        );
+    }
+    for args in [
+        vec![],
+        vec![b.clone().into()],
+        vec![n.clone().into(), n.clone().into()],
+    ] {
+        assert!(
+            rank.verify(
+                &[n.clone().into()],
+                &Bool::from_bool(false),
+                &[transition(Bool::from_bool(false), args)],
+                ContextConfig::default()
+            )
+            .is_err()
+        );
+    }
+}
 
-    // This may or may not verify depending on Z3's analysis
-    let result = verifier.verify_termination(func, ranking);
-    // We don't assert success because Collatz is unproven
+#[test]
+fn foreign_context_is_rejected_before_any_ast_operation() {
+    use std::cell::RefCell;
+    thread_local! { static FOREIGN: RefCell<Option<Dynamic>> = const { RefCell::new(None) }; }
+    z3::with_z3_config(&z3::Config::new(), || {
+        FOREIGN.with(|slot| *slot.borrow_mut() = Some(Int::from_i64(2).into()));
+    });
+    let n = Int::new_const("n");
+    let rank = RankingFunction {
+        expression: n.clone(),
+        well_founded_constraint: n.ge(0),
+    };
+    let foreign = FOREIGN.with(|slot| slot.borrow_mut().take().unwrap());
     assert!(
-        result.is_ok(),
-        "Verification should complete (even if it returns false)"
+        rank.verify(
+            &[n.clone().into()],
+            &n.ge(0),
+            &[transition(n.gt(0), vec![foreign])],
+            ContextConfig::default()
+        )
+        .is_err()
     );
 }
