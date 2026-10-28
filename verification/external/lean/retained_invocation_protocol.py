@@ -10,6 +10,24 @@ import retained_execution_snapshot as schema
 import retained_execution_encoding as lean
 
 
+def validate_scalars(data):
+    """Native integers are decimal strings; JSON numbers are never Booleans.
+
+    Python's structural equality accepts 0 == False and 1 == True. Reject all
+    numeric literals before comparing snapshots so guard/callback checks retain
+    their exact JSON types. Field-specific decoders still validate each string.
+    """
+    pending = [data]
+    while pending:
+        value = pending.pop()
+        if type(value) is dict:
+            require(all(type(k) is str for k in value), 'Invalid native field name')
+            pending.extend(value.values())
+        elif type(value) is list: pending.extend(value)
+        else: require(value is None or type(value) in (str, bool),
+                      'Native scalar must be a string, Boolean or null')
+
+
 def binding(data):
     fields(data, 'interface width slots'); schema.nat(data['interface']); width = schema.nat(data['width'])
     for slot in sequence(data['slots']):

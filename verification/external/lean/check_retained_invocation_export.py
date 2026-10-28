@@ -17,6 +17,7 @@ MODELS = [*MACHINE_MODELS, 'ObserverAdmission']
 
 
 def emit(data):
+    wrapper.validate_scalars(data)
     fields(data, 'schema scope fixtures associations cases')
     require(data['schema'] == 'synarc-shared-vm-native-v1' and data['scope'] == 'invocation', 'Unsupported invocation schema/scope')
     claims = machine.Claims(); claims.lines.insert(1, 'import VerumExternalReplay.ObserverAdmission')

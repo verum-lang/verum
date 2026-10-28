@@ -43,6 +43,16 @@ class NativeInvocationTests(unittest.TestCase):
         data, _ = self.case('root_output_work')
         self.proof(data)
 
+    def test_numeric_literals_cannot_impersonate_booleans(self):
+        for number in (0, 0.0):
+            with self.subTest(number=number):
+                data, case = self.case('read_whole')
+                case['services'][0]['budgetAfter']['poisoned'] = number
+                with self.assertRaisesRegex(ValueError, 'Native scalar'): emit(data)
+        data, case = self.case('read_whole')
+        case['services'][0]['returned']['result']['sameCut'] = 1
+        with self.assertRaisesRegex(ValueError, 'Native scalar'): emit(data)
+
     def test_owned_state_corruptions_rejected(self):
         edits = [
             ('call', 'service_active', ['cut', 'state'], '999999'),
