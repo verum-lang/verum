@@ -6,9 +6,9 @@ import Lean
 log-concavity of `(1/2)_m / m^m`, for every positive natural `m`. Its proof
 uses a cubic Bonferroni bound over exact rationals, with no analytic axiom.
 
-This module does not yet prove the sharp balanced-histogram bound: the
-rising-factorial bridge, finite balancing argument, zero-event probability,
-and correspondence to the native per-context scorer remain separate obligations.
+`RefinementCapacity` derives the sharp balanced-histogram bound, including
+the partition reduction and zero-event case. `CapacityRecurrence` proves its
+exact incremental formula. Native execution correspondence remains separate.
 No theorem here authorizes admission or substitutes for the scorer's premises.
 
 Core `Rat` arithmetic has transitive standard dependencies on `propext`,
