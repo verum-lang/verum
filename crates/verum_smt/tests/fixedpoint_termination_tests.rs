@@ -42,12 +42,10 @@ fn factorial_and_fibonacci_use_actual_guarded_arguments() {
         name: Text::from("fib"),
         parameters: List::from(vec![n.clone().into()]),
         precondition: n.ge(0),
-        postcondition: Bool::from_bool(true),
         recursive_calls: List::from(vec![
             transition(n.gt(1), vec![(&n - 1).into()]),
             transition(n.gt(1), vec![(&n - 2).into()]),
         ]),
-        verification_conditions: List::new(),
     };
     assert!(
         RecursiveProgramVerifier::new(Context::thread_local())

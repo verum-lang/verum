@@ -531,7 +531,8 @@ pub use fixedpoint::{
     Atom, CHC, DatalogModel, DatalogRule, DatalogSolver, FixedPointEngine, FixedPointQuery,
     FixedPointResult, FixedPointSolution, FixedPointStats, InductiveDatatypeBuilder, PredicateBody,
     PredicateCase, PredicateInterpretation, RankingFunction, RankingTransition, RecursiveFunction,
-    RecursivePredicate, RecursiveProgramVerifier, VerificationResult as FixedPointVerificationResult,
+    RecursivePredicate, RecursiveProgram, RecursiveProgramVerifier, VerificationCondition,
+    VerificationResult as FixedPointVerificationResult,
     create_fixedpoint_context, extract_invariants, patterns, solve_recursive_predicate, validate_solution,
 };
 pub use goal_analysis::{

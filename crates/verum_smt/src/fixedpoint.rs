@@ -12,7 +12,12 @@
 
 pub use crate::ranking::{RankingFunction, RankingTransition};
 
+mod program;
 mod solution;
+pub use program::{
+    RecursiveFunction, RecursiveProgram, RecursiveProgramVerifier, VerificationCondition,
+    VerificationResult,
+};
 
 use std::ffi::CString;
 use std::time::Instant;
@@ -1258,99 +1263,6 @@ impl InductiveDatatypeBuilder {
 
         self.engine.register_predicate(height_pred)
     }
-}
-
-// ==================== Program Verification ====================
-
-/// Verifier for recursive programs
-pub struct RecursiveProgramVerifier {
-    engine: FixedPointEngine,
-}
-
-impl RecursiveProgramVerifier {
-    pub fn new(ctx: Context) -> Result<Self, Text> {
-        Ok(Self {
-            engine: FixedPointEngine::new(ctx)?,
-        })
-    }
-
-    /// Verify recursive function with specification
-    pub fn verify_recursive_function(
-        &mut self,
-        func: RecursiveFunction,
-    ) -> Result<VerificationResult, Text> {
-        // Register precondition predicate
-        self.engine.register_predicate(RecursivePredicate {
-            vars: Default::default(),
-            name: Text::from(format!("{}_pre", func.name)),
-            params: func.parameters.iter().map(Ast::get_sort).collect(),
-            body: PredicateBody::Base(func.precondition.clone()),
-            well_founded: false,
-        })?;
-
-        // Register postcondition predicate
-        self.engine.register_predicate(RecursivePredicate {
-            vars: Default::default(),
-            name: Text::from(format!("{}_post", func.name)),
-            params: func.parameters.iter().map(Ast::get_sort).collect(),
-            body: PredicateBody::Base(func.postcondition.clone()),
-            well_founded: false,
-        })?;
-
-        // Query postcondition
-        let query = FixedPointQuery {
-            predicate: Text::from(format!("{}_post", func.name)),
-            args: List::new(),
-        };
-
-        let result = self.engine.query_predicate(query)?;
-
-        Ok(VerificationResult {
-            verified: result.status == SatResult::Sat,
-            invariants: result
-                .solution
-                .and_then(|s| Maybe::Some(s.invariants))
-                .unwrap_or_else(List::new),
-            counterexample: Maybe::None,
-        })
-    }
-
-    /// Check actual guarded self-call arguments against a candidate rank.
-    /// See `RankingFunction::verify` for the model-relative obligations and limits.
-    pub fn verify_termination(
-        &mut self,
-        func: RecursiveFunction,
-        ranking: RankingFunction,
-    ) -> Result<bool, Text> {
-        ranking.verify(
-            &func.parameters,
-            &func.precondition,
-            &func.recursive_calls,
-            crate::context::ContextConfig::default(),
-        )
-    }
-}
-
-/// Recursive function specification
-#[derive(Debug)]
-pub struct RecursiveFunction {
-    pub name: Text,
-    /// Explicit symbolic parameters, in call argument order.
-    pub parameters: List<Dynamic>,
-    pub precondition: Bool,
-    pub postcondition: Bool,
-    /// Every self-call, with its actual path guard and simultaneous arguments.
-    /// Mutual recursion requires a model covering all participating functions.
-    pub recursive_calls: List<RankingTransition>,
-    pub verification_conditions: List<CHC>,
-}
-
-/// Verification result
-#[derive(Debug)]
-pub struct VerificationResult {
-    pub verified: bool,
-    pub invariants: List<Bool>,
-    pub counterexample: Maybe<Text>,
 }
 
 // ==================== Datalog Solver ====================
