@@ -37,6 +37,34 @@ def encode_lengths(value, cut, targets):
     return array(f'({n}, {counts[n]})' for n in sorted(counts))
 
 
+def encode_banks(snapshot, parsed):
+    # Reorder only storage: every supplied key/count pair must occur exactly once.
+    expected, used = [], set()
+    for context, target in parsed:
+        for position in range(8 * len(target)):
+            key = (context, position)
+            if key not in used:
+                used.add(key); expected.append(key)
+    provided, contexts = {}, []
+    for entry in sequence(snapshot['residual']):
+        fields(entry, 'context counts')
+        context = wire(entry['context'])
+        require(context not in contexts, 'Duplicate residual context')
+        contexts.append(context)
+        counts = sequence(entry['counts'])
+        require(counts, 'Empty allocated residual context')
+        for position, counts_pair in enumerate(counts):
+            provided[(context, position)] = pair(counts_pair)
+    require(contexts == sorted(contexts), 'Noncanonical native context order')
+    require(set(provided) == used, 'Missing or extra residual cells')
+    residual = array(f'(({ns(c)}, {p}), {array(provided[(c,p)])})' for c,p in expected)
+    reference = sequence(snapshot['reference'])
+    require(len(reference) == max((8*len(target) for _,target in parsed), default=0),
+            'Missing or extra raw-reference cells')
+    reference = array(f'({p}, {array(pair(counts))})' for p,counts in enumerate(reference))
+    return residual, reference
+
+
 def emit(data):
     require(type(data) is dict, 'Expected residual export')
     require(data.get('format') in ('synarc-residual-native-v1', 'synarc-residual-native-v2'),
@@ -85,30 +113,7 @@ def emit(data):
         fields(frontier['ratio'], 'numerator denominator')
         numerator, denominator = (decimal(frontier['ratio'][k]) for k in ('numerator', 'denominator'))
         require(denominator != '0', 'Zero ratio denominator')
-        # Reorder only storage: every supplied key/count pair must occur exactly once.
-        expected, used = [], set()
-        for context, target in parsed[:cut]:
-            for position in range(8 * len(target)):
-                key = (context, position)
-                if key not in used:
-                    used.add(key); expected.append(key)
-        provided, contexts = {}, []
-        for entry in sequence(frontier['residual']):
-            fields(entry, 'context counts')
-            context = wire(entry['context'])
-            require(context not in contexts, 'Duplicate residual context')
-            contexts.append(context)
-            counts = sequence(entry['counts'])
-            require(counts, 'Empty allocated residual context')
-            for position, counts_pair in enumerate(counts):
-                provided[(context, position)] = pair(counts_pair)
-        require(contexts == sorted(contexts), 'Noncanonical native context order')
-        require(set(provided) == used, 'Missing or extra residual cells')
-        residual = array(f'(({ns(c)}, {p}), {array(provided[(c,p)])})' for c,p in expected)
-        reference = sequence(frontier['reference'])
-        require(len(reference) == max((8*len(target) for _,target in parsed[:cut]), default=0),
-                'Missing or extra raw-reference cells')
-        reference = array(f'({p}, {array(pair(counts))})' for p,counts in enumerate(reference))
+        residual, reference = encode_banks(frontier, parsed[:cut])
         encoded_frontiers.append(f'⟨{cut}, {bits}, ⟨{numerator}, {denominator}, by decide⟩, {residual}, {reference}⟩')
     boundaries = {seen_phases.count(0), seen_phases.count(0)+seen_phases.count(1), len(rows)}
     require(boundaries <= set(cuts) and cuts[-1] == len(rows), 'Missing phase frontier or incomplete stream')

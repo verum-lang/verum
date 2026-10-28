@@ -105,7 +105,7 @@ def atomic_report(path, data):
         temporary.unlink(missing_ok=True)
 
 
-def verify(args, *, emit, modules, producers, scope):
+def verify(args, *, emit, modules, producers, scope, export_loader=load):
     require(sha256(args.export) == args.sha256, 'Frozen export hash mismatch')
     require(len({p.resolve() for p in [args.output, args.export, args.report, args.provenance]}) == 4,
             'Output paths must be distinct')
@@ -120,7 +120,7 @@ def verify(args, *, emit, modules, producers, scope):
               for p, content in captured.items()}
     require(before == {str(p.relative_to(ROOT)): sha256(p) for p in sources},
             'Sources changed while capturing verification snapshot')
-    text, counts = emit(load(args.export))
+    text, counts = emit(export_loader(args.export))
     args.output = args.output.resolve()
     args.output.write_text(text)
     artifacts = Path(tempfile.mkdtemp(prefix=args.output.stem + '-', dir=args.output.parent))
@@ -192,7 +192,7 @@ def verify(args, *, emit, modules, producers, scope):
     return report
 
 
-def main(*, emit, modules, producers, scope, description):
+def main(*, emit, modules, producers, scope, description, export_loader=load):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('--export', type=Path, required=True)
     parser.add_argument('--sha256', required=True, help='Expected hash from the export owner')
@@ -206,7 +206,8 @@ def main(*, emit, modules, producers, scope, description):
     invocation = {'run_id': uuid.uuid4().hex, 'requested_export_sha256': args.sha256}
     atomic_report(args.report, {**invocation, 'status': 'running'})
     try:
-        report = verify(args, emit=emit, modules=modules, producers=producers, scope=scope)
+        report = verify(args, emit=emit, modules=modules, producers=producers, scope=scope,
+                        export_loader=export_loader)
     except Exception as error:
         atomic_report(args.report, {**invocation, 'status': 'failed',
                                    'error': f'{type(error).__name__}: {error}'[:8192]})
