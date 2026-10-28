@@ -722,6 +722,8 @@ jobs:
           --test checked_count_file_owners
           --test stdlib_cache_identity
           --test stdlib_cache_alias_archive
+          --test theorem_statement_authority
+          --test theorem_proof_gate_tests
 
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection

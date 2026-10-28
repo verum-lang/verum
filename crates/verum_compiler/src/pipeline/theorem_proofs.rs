@@ -270,12 +270,12 @@ impl<'s> CompilationPipeline<'s> {
                                 cert.steps.len(),
                                 cert.total_duration.as_secs_f64() * 1000.0
                             );
-                            if cert.has_incomplete_steps {
+                            if cert.has_incomplete_steps() {
                                 self.emit_admitted_proof_warning(thm, kind_name);
                             }
                             CachedVerdict::Ok {
                                 elapsed_ms: elapsed,
-                                admitted: cert.has_incomplete_steps,
+                                admitted: cert.has_incomplete_steps(),
                             }
                         }
                         ProofVerificationResult::Failed { unproved, .. } => {
@@ -347,7 +347,7 @@ impl<'s> CompilationPipeline<'s> {
                                 cert.steps.len(),
                                 cert.total_duration.as_secs_f64() * 1000.0
                             );
-                            if cert.has_incomplete_steps {
+                            if cert.has_incomplete_steps() {
                                 self.emit_admitted_proof_warning(thm, kind_name);
                             }
                         }

@@ -57,18 +57,38 @@ pub struct VerifiedStep {
     pub duration: Duration,
 }
 
-/// Certificate produced on successful proof verification, summarising the
-/// evidence chain.
+/// Evidence produced by this tactic/SMT verifier. None of these variants
+/// carries a kernel-replayed proof of the proposition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProofEvidence {
+    /// A declaration without a proof body is an explicit assumption.
+    Assumed,
+    /// The tactic engine discharged the goal, possibly using SMT.
+    TacticDischarge,
+    /// The written proof contains an explicit admit/sorry escape hatch.
+    Admitted,
+}
+
+/// Verification metadata, not a replayable kernel certificate.
 #[derive(Debug, Clone)]
-pub struct ProofCertificate {
+pub struct ProofSummary {
     /// Theorem name that was verified.
     pub theorem_name: Text,
-    /// Ordered list of verified steps (empty for single-tactic / term proofs).
+    /// Ordered list of steps accepted by the tactic engine.
     pub steps: List<VerifiedStep>,
     /// Total wall-clock time for the entire proof.
     pub total_duration: Duration,
-    /// Whether any step used `admit` or `sorry`.
-    pub has_incomplete_steps: bool,
+    /// Exact elaborated proposition and initial hypotheses checked or assumed.
+    pub goal: ProofGoal,
+    /// How this result was accepted; never inferred from an empty step list.
+    pub evidence: ProofEvidence,
+}
+
+impl ProofSummary {
+    /// Whether the source proof explicitly admits an unresolved obligation.
+    pub fn has_incomplete_steps(&self) -> bool {
+        self.evidence == ProofEvidence::Admitted
+    }
 }
 
 /// An unresolved subgoal that the proof failed to close.
@@ -85,8 +105,8 @@ pub struct UnprovedSubgoal {
 /// Outcome of proof verification.
 #[derive(Debug)]
 pub enum ProofVerificationResult {
-    /// All goals discharged.
-    Verified(ProofCertificate),
+    /// The goal was accepted under the evidence recorded in the summary.
+    Verified(ProofSummary),
     /// One or more goals remain open.
     Failed {
         /// Steps that *were* verified before the failure.
@@ -1660,11 +1680,15 @@ pub fn verify_proof_body_with_aliases_and_graph(
         Maybe::Some(body) => body,
         Maybe::None => {
             // No proof body — treat as axiom, nothing to verify here
-            return ProofVerificationResult::Verified(ProofCertificate {
+            return ProofVerificationResult::Verified(ProofSummary {
                 theorem_name,
                 steps: List::new(),
                 total_duration: proof_start.elapsed(),
-                has_incomplete_steps: false,
+                goal: ProofGoal::with_hypotheses(
+                    theorem.proposition.as_ref().clone(),
+                    theorem.requires.clone(),
+                ),
+                evidence: ProofEvidence::Assumed,
             });
         }
     };
@@ -1752,166 +1776,10 @@ pub fn verify_proof_body_with_aliases_and_graph(
         };
     }
 
-    // ----------------------------------------------------------------
-    // Separation-logic fast path
-    // ----------------------------------------------------------------
-    //
-    // Before falling into the generic SMT engine, attempt to route
-    // the obligation through the separation-logic encoder when the
-    // theorem's `requires`/`ensures` clauses are syntactic
-    // separation predicates (calls to `core/logic/separation.vr`
-    // smart constructors).
-    //
-    // Routing rules:
-    //   * Walk every `requires` clause; recognise each as a
-    //     separation predicate; combine via `sep_conj` (associative,
-    //     emp-identity).  Same for every `ensures` clause.
-    //   * Empty side defaults to `emp` (the identity element).
-    //   * If EVERY clause recognises, route through
-    //     `SepLogicEncoder::verify_entailment`.
-    //   * Any unrecognised clause → fall through to the descent
-    //     splitter below.
-    //
-    // **Architectural rationale**: separation-logic obligations are
-    // a natural fit for the encoder's array-theory-backed Z3 setup
-    // (`SepLogicEncoder::verify_entailment`). Routing through the
-    // generic SMT path treats `sep_conj`/`points_to` as opaque UF,
-    // which Z3's CEGAR loop almost always falsifies. The fast path
-    // gives the encoder its native input.
-    //
-    // **Performance**: the recogniser is O(n) AST walk over each
-    // clause; on non-separation theorems it returns
-    // `NotSeparationGoal` after detecting the first unrecognised
-    // clause and the cost is bounded.
-    {
-        let pre_clauses: Vec<&Expr> = theorem.requires.iter().collect();
-        let post_clauses: Vec<&Expr> = theorem.ensures.iter().collect();
-        // Only attempt the fast path when at least one clause is
-        // present — a theorem with NO requires AND NO ensures has
-        // no Hoare-shape obligation worth routing.
-        if !pre_clauses.is_empty() || !post_clauses.is_empty() {
-            // Homogeneous-separation fast path. When every clause
-            // is a syntactic separation predicate, route the entire
-            // obligation through the SepLogicEncoder.
-            match verum_smt::separation_recognizer::verify_separation_obligation_multi(
-                &pre_clauses,
-                &post_clauses,
-            ) {
-                verum_smt::separation_recognizer::SepObligationOutcome::Valid => {
-                    return ProofVerificationResult::Verified(ProofCertificate {
-                        theorem_name: theorem_name.clone(),
-                        steps: List::new(),
-                        total_duration: proof_start.elapsed(),
-                        has_incomplete_steps: false,
-                    });
-                }
-                verum_smt::separation_recognizer::SepObligationOutcome::Invalid {
-                    counterexample_summary,
-                } => {
-                    let mut suggestions = List::new();
-                    suggestions.push(Text::from(format!(
-                        "separation-logic counterexample: {}",
-                        counterexample_summary,
-                    )));
-                    let mut unproved = List::new();
-                    unproved.push(UnprovedSubgoal {
-                        goal: Text::from(format!(
-                            "separation-logic Hoare obligation {{P}} c {{Q}} \
-                             REJECTED by SepLogicEncoder",
-                        )),
-                        hypotheses: List::new(),
-                        suggestions,
-                    });
-                    return ProofVerificationResult::Failed {
-                        verified_steps: List::new(),
-                        unproved,
-                    };
-                }
-                // Unknown / NotSeparationGoal → not a homogeneous
-                // separation goal.  Try the conjunction-descent
-                // splitter below before falling through to generic
-                // SMT.
-                _ => {}
-            }
-
-            // Conjunction-descent splitter. The clauses aren't all
-            // separation predicates, but SOME of them might be —
-            // possibly buried inside `&&` chains within a single
-            // clause.  Flatten each clause's `&&` chain and classify
-            // each atom independently before partition.  This
-            // handles theorem shapes like
-            //   `requires points_to(a, av) && x > 0`
-            // where the whole-clause classifier sees `Binary{And}`
-            // and misses the separation predicate inside.
-            //
-            // Soundness: the descent rests on the standard
-            // pure-conjunction lemma
-            //   `Sep_a && Pure_b ≡ Sep_a * Pure_b`
-            // (Reynolds 2002 §2.4) for sep+pure conjuncts, and
-            // heap-stable conjunction `heap_and(Sep_a, Sep_b)` for
-            // multiple separation atoms in the same `&&` chain
-            // (NOT `sep_conj`, which would require disjoint
-            // subheaps).
-            //
-            // The combined obligation
-            //   `(P_sep ∗ P_pure) ⊢ (Q_sep ∗ Q_pure)`
-            // proves separately as `P_sep ⊢ Q_sep` AND
-            // `P_pure ⊢ Q_pure`. The encoder discharges the first;
-            // the generic SMT path discharges the second.
-            match verum_smt::separation_recognizer::split_separation_obligation_with_descent(
-                &pre_clauses,
-                &post_clauses,
-            ) {
-                verum_smt::separation_recognizer::SeparationSplitOutcome::Split {
-                    separation_outcome,
-                    pure_pre: _,
-                    pure_post: _,
-                } => match separation_outcome {
-                    verum_smt::separation_recognizer::SepObligationOutcome::Invalid {
-                        counterexample_summary,
-                    } => {
-                        // Separation portion is unsound — whole
-                        // obligation fails. The pure portion's
-                        // truth is irrelevant because the
-                        // conjunction is false.
-                        let mut suggestions = List::new();
-                        suggestions.push(Text::from(format!(
-                            "separation-logic portion REJECTED — counterexample: {}",
-                            counterexample_summary,
-                        )));
-                        let mut unproved = List::new();
-                        unproved.push(UnprovedSubgoal {
-                            goal: Text::from(format!(
-                                "separation-logic portion of mixed obligation \
-                                 REJECTED by SepLogicEncoder",
-                            )),
-                            hypotheses: List::new(),
-                            suggestions,
-                        });
-                        return ProofVerificationResult::Failed {
-                            verified_steps: List::new(),
-                            unproved,
-                        };
-                    }
-                    // Valid / Unknown → fall through to generic SMT
-                    // for the pure portion.  When Valid, the
-                    // separation portion is discharged; when
-                    // Unknown, generic SMT may decide via Z3's
-                    // general tactics.  Either way, the existing
-                    // setup picks up theorem.requires/ensures
-                    // (which include the separation clauses as UF
-                    // — harmless once their semantic content is
-                    // already discharged or under generic
-                    // verification).
-                    _ => {}
-                },
-                verum_smt::separation_recognizer::SeparationSplitOutcome::NotSeparationGoal => {
-                    // No separation clauses at all — pure-only
-                    // obligation; generic SMT handles it.
-                }
-            }
-        }
-    }
+    // Source calls keep their declared meanings. A spelling such as `emp`
+    // or `points_to` is not authority to interpret a call as a spatial atom.
+    // Explicit SepAssertion entailment belongs to the SMT API; this entry
+    // verifies the actual proposition using the supplied proof body.
 
     // Build the primary goal from the theorem's proposition and requires clauses.
     //
@@ -2052,11 +1920,12 @@ pub fn verify_proof_body_with_aliases_and_graph(
                         tactic_used: Text::from("exact/auto"),
                         duration: step_start.elapsed(),
                     });
-                    ProofVerificationResult::Verified(ProofCertificate {
+                    ProofVerificationResult::Verified(ProofSummary {
                         theorem_name,
                         steps,
                         total_duration: proof_start.elapsed(),
-                        has_incomplete_steps: false,
+                        goal: primary_goal.clone(),
+                        evidence: ProofEvidence::TacticDischarge,
                     })
                 }
                 Err(e) => {
@@ -2104,11 +1973,16 @@ pub fn verify_proof_body_with_aliases_and_graph(
                         tactic_used: format!("{:?}", tactic_expr).into(),
                         duration: step_start.elapsed(),
                     });
-                    ProofVerificationResult::Verified(ProofCertificate {
+                    ProofVerificationResult::Verified(ProofSummary {
                         theorem_name,
                         steps,
                         total_duration: proof_start.elapsed(),
-                        has_incomplete_steps: has_incomplete,
+                        goal: primary_goal.clone(),
+                evidence: if has_incomplete {
+                    ProofEvidence::Admitted
+                } else {
+                    ProofEvidence::TacticDischarge
+                },
                     })
                 }
                 Err(e) => {
@@ -2156,11 +2030,16 @@ pub fn verify_proof_body_with_aliases_and_graph(
                     // string-matched lowercase "admit" against a Debug
                     // render that produces "Admit" and never fired.
                     let has_incomplete = method.contains_unsafe();
-                    ProofVerificationResult::Verified(ProofCertificate {
+                    ProofVerificationResult::Verified(ProofSummary {
                         theorem_name,
                         steps,
                         total_duration: proof_start.elapsed(),
-                        has_incomplete_steps: has_incomplete,
+                        goal: primary_goal.clone(),
+                evidence: if has_incomplete {
+                    ProofEvidence::Admitted
+                } else {
+                    ProofEvidence::TacticDischarge
+                },
                     })
                 }
                 Err(e) => {
@@ -2311,11 +2190,16 @@ fn verify_structured_proof(
             // chains, and the conclusion tactic.
             let has_incomplete = structure.contains_unsafe();
 
-            ProofVerificationResult::Verified(ProofCertificate {
+            ProofVerificationResult::Verified(ProofSummary {
                 theorem_name: theorem_name.clone(),
                 steps: verified_steps,
                 total_duration: proof_start.elapsed(),
-                has_incomplete_steps: has_incomplete,
+                goal: primary_goal.clone(),
+                evidence: if has_incomplete {
+                    ProofEvidence::Admitted
+                } else {
+                    ProofEvidence::TacticDischarge
+                },
             })
         }
         Err(e) => {

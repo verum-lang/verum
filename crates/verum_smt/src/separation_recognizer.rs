@@ -1,82 +1,14 @@
-//! AST-recognizer for separation-logic predicates (#161 V2).
+//! Explicit syntactic interpretation of an AST as separation assertions.
 //!
-//! ## Architectural role
+//! These APIs implement a selected spatial vocabulary; they do not resolve
+//! source declarations or authorize interpreting arbitrary program calls as
+//! spatial predicates. Compiler theorem verification and generic SMT-LIB
+//! translation must retain the declared meaning of each source function.
 //!
-//! Pre-this-module, when a user wrote
-//! ```text
-//! @verify(formal)
-//! fn swap(a: &mut Cell, b: &mut Cell)
-//!     requires sep_conj(points_to(a, av), points_to(b, bv))
-//!     ensures  sep_conj(points_to(a, bv), points_to(b, av))
-//! { ... }
-//! ```
-//! the verifier's [`crate::expr_to_smtlib`] translated each call as
-//! an opaque uninterpreted function:
-//! ```text
-//! (sep_conj (points_to a av) (points_to b bv))
-//! ```
-//! Z3 has no built-in semantics for `sep_conj` or `points_to` — they
-//! were just predicate symbols. The proof obligation reduced to
-//! "can Z3 prove uninterpreted (sep_conj …) ⇒ (sep_conj …)" — almost
-//! always falsifiable by Z3's CEGAR loop because the symbols had no
-//! semantic content.
-//!
-//! ## What this module delivers
-//!
-//! [`try_recognize_sep_assertion`] walks an AST `Expr` and returns
-//! a [`crate::separation_logic::SepAssertion`] **whenever the
-//! expression is a syntactic call to one of the separation-logic
-//! smart constructors declared in `core/logic/separation.vr`**. The
-//! recognised constructors:
-//!
-//! | Verum source                           | SepAssertion                   |
-//! |----------------------------------------|--------------------------------|
-//! | `emp()`                                | `Emp`                          |
-//! | `points_to(addr, value)`               | `PointsTo { location, value }` |
-//! | `sep_conj(p, q)` / `p * q`             | `Sep { left, right }`          |
-//! | `heap_and(p, q)`                       | `And { left, right }`          |
-//! | `pure(prop)`                           | `Pure(expr)`                   |
-//! | `named(name, args)`                    | (custom — not yet wired)       |
-//!
-//! ## Soundness
-//!
-//! Recognition is **syntax-driven, no name resolution**. The
-//! recogniser pattern-matches on the bare-name path of the call's
-//! function. This is sound because `core/logic/separation.vr`'s
-//! smart constructors are the canonical entry points for
-//! separation-logic predicate construction; any user code that
-//! shadows these names is either (a) knowingly playing with the
-//! separation-logic surface (acceptable) or (b) writing code the
-//! separation-logic verifier shouldn't see anyway.
-//!
-//! Returning `None` on an unrecognised shape is always sound —
-//! the caller falls back to the opaque uninterpreted-function
-//! translation, which is the pre-V2 behaviour.
-//!
-//! ## Performance
-//!
-//! Pure recursive AST walk — O(n) in expression size. Predicates
-//! are typically small (< 30 nodes); per-call cost < 1µs.
-//!
-//! ## Architectural pattern
-//!
-//! Mirrors the established `recognise + translate` pattern:
-//!   * [`super::separation_kernel_bridge`] (#161 V1) translates
-//!     between kernel `HeapPredicate<Term>` and SMT `SepAssertion<Expr>`
-//!     at the type-data layer.
-//!   * THIS module (#161 V2) translates from user `Expr` (AST) to
-//!     SMT `SepAssertion<Expr>` at the recognition layer.
-//!   * Together: user `requires sep_conj(points_to(a, av), ...)` →
-//!     `SepAssertion::Sep { left: PointsTo { ... }, ... }` →
-//!     `SepLogicEncoder` Z3 emission.
-//!
-//! ## Reuse
-//!
-//! Every recognised constructor matches the smart-constructor names
-//! defined in `core/logic/separation.vr`. Adding a new public
-//! constructor there requires extending the recogniser here — but
-//! the alternative (no recogniser) is the pre-V2 status quo where
-//! the entire separation-logic surface is opaque-functions-only.
+//! Embedders that intentionally select this interpretation can construct a
+//! `SepAssertion` directly or use these helpers. An entailment verdict is SMT
+//! evidence about that interpretation, not a proof of a source program or a
+//! kernel-replayed certificate.
 
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::{LiteralKind, StringLit};

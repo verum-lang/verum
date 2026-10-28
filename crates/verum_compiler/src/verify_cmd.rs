@@ -979,7 +979,7 @@ impl<'s> VerifyCommand<'s> {
             alias_map,
         ) {
             ProofVerificationResult::Verified(cert) => {
-                let has_incomplete = cert.has_incomplete_steps;
+                let has_incomplete = cert.has_incomplete_steps();
                 info!(
                     "{} '{}' verified ({} steps, {:.1}ms){}",
                     kind_name,
