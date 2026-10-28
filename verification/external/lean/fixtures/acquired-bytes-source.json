@@ -1,0 +1,49 @@
+{
+  "native_commit": "a9c4d8fc6388cc5aeb0c438698e270fe01cc0331",
+  "source": "rust/crates/synarc-kan/src/organism/observer_acquired.rs",
+  "source_sha256": "8d5b3e278f678337a20f453c5f811e12144b81cb9c7fa0ef4024316118b367e3",
+  "primitive_roster": [
+    "Unit",
+    "Zero",
+    "EmptyTrace",
+    "Identity",
+    "Append",
+    "At",
+    "Last",
+    "Length",
+    "EventInput",
+    "EventRaw",
+    "EventAction",
+    "EventAge",
+    "EventPose",
+    "QueryInput",
+    "QueryRaw",
+    "QueryAge",
+    "QueryAction",
+    "QueryPose",
+    "Pair",
+    "First",
+    "Second",
+    "Equal",
+    "Select",
+    "Add",
+    "Rem",
+    "Next",
+    "Refused",
+    "EventSensory",
+    "QuerySensory"
+  ],
+  "correspondence": "Manual review of all successful Meaning.apply arms and sensory_value; operation roster and exact source bytes pinned. This is not a machine-checked Rust-to-Lean translation.",
+  "premises": [
+    "Pure lawful primitive implementations; equality-preserving metadata/action abstraction; immutable finite acyclic Value DAGs.",
+    "Resource/overflow refusals remove successes from the unbounded success model; resource behavior is not equated.",
+    "Program literals and every input/history sensory leaf are included in support.",
+    "Exact Pair(Bytes context, Bytes mask) decoder only; arbitrary external callbacks excluded."
+  ],
+  "source_findings": [
+    "No primitive constructs fresh Bytes. At(Bytes,index) returns Nat.",
+    "Sensory extraction clones retained schema/body; trace and pair operations only select or retain leaves.",
+    "joint_source sets literals to Vec::new() and uses a subset of Op; no Bytes-producing constructor in the initial grammar."
+  ],
+  "extension_scope": "Generic exact primitive embedding plus semantic strictness witness. Sequence singleton/concat is a model instance, not a production patch or proof of universality, learnability, efficiency, or continuation correctness."
+}
