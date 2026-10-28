@@ -21,6 +21,7 @@ import VerumExternalReplay.AcquiredBytes
 import VerumExternalReplay.ConditionalExpressiveness
 import VerumExternalReplay.FrozenTraining
 import VerumExternalReplay.OutcomeTransitions
+import VerumExternalReplay.CausalObservation
 import VerumExternalReplay.TypedProgramControls
 import VerumExternalReplay.PartialObservers
 import VerumExternalReplay.PartialObserverControls

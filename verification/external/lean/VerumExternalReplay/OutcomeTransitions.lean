@@ -75,6 +75,7 @@ theorem completion_retains_evidence [DecidableEq A] (protocol : Protocol S B E F
 structure Row (Input Outcome : Type) where
   input : Input
   outcome : Outcome
+  deriving DecidableEq
 
 def evolve (update : S → E → Y → Option S) (rows : List (Row E Y)) (state : S) : Option S :=
   PartialObservers.fold (fun state row => update state row.input row.outcome) rows state
