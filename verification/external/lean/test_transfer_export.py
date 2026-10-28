@@ -63,6 +63,8 @@ class TransferExportTests(unittest.TestCase):
             lambda d:d['training']['alphabets'][0]['symbols'].pop(),
             lambda d:d['validation']['profile'].update(risk_denominator='21'),
             lambda d:d.update(confirmation_rule='fresh_purchased'),
+            lambda d:d['training'].update(purchased=False),
+            lambda d:d.update(confirmed=False),
         ]
         for edit in edits:
             data=original();edit(data)
@@ -74,6 +76,10 @@ class TransferExportTests(unittest.TestCase):
             self.assertEqual(counts['claims'],72)
             with tempfile.TemporaryDirectory() as d:
                 p=Path(d)/'original_v3.lean';p.write_text(source);check(p)
+
+    def test_original_v4_missing_receiver_commit_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'Missing native commits for current history tail'):
+            emit(original(version='4-incomplete'))
 
     def test_v3_wrong_cut_missing_tail_and_owner_rejected(self):
         mutations=[
@@ -100,7 +106,6 @@ class TransferExportTests(unittest.TestCase):
             (lambda d:d['training']['rows'][0].update(reading={'kind':'Nat','value':123456789}), 'some (.nat 123456789)', 'Tactic `rfl` failed:'),
             (lambda d:d['joint_exact_score']['predictive'].update(numerator='1'), 'CategoricalScore.agrees joint_contexts', 'Tactic `decide` proved that the proposition'),
             (lambda d:d['validation'].update(purchased=True), 'CategoricalScore.purchased fresh_score', 'Tactic `decide` proved that the proposition'),
-            (lambda d:d.update(confirmed=False), 'CategoricalScore.confirmed training_score', 'Tactic `decide` proved that the proposition'),
             (lambda d:d['installed_cut'].update(value={'kind':'Nat','value':123456789}), '= some (.nat 123456789)', 'Tactic `rfl` failed:'),
         ]
         with tempfile.TemporaryDirectory() as directory:

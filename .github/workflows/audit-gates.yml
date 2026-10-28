@@ -276,6 +276,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_categorical_score.py
           python3 -m unittest discover -s verification/external/lean -p test_retained_transfer_codec.py
           python3 -m unittest discover -s verification/external/lean -p test_transfer_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_transfer_publication.py
           gzip -dc verification/external/lean/fixtures/recipient-transfer-v3-0.json.gz > recipient-transfer-0.json
           python3 verification/external/lean/check_transfer_export.py \
             --export recipient-transfer-0.json \
@@ -288,6 +289,18 @@ jobs:
             --sha256 87dbc14f34aaac522af75db730ba39a9c69fccd6593cd2ccf7b15e896a21374e \
             --provenance verification/external/lean/fixtures/recipient-transfer-v3-3.provenance.json \
             --output recipient-transfer-3.lean --report recipient-transfer-3-acceptance.json
+          gzip -dc verification/external/lean/fixtures/recipient-transfer-v4-0.json.gz > recipient-transfer-v4-0.json
+          python3 verification/external/lean/check_transfer_export.py \
+            --export recipient-transfer-v4-0.json \
+            --sha256 f602831924ee15752796fe3d762a7544e63634173c85cbd2d3339707cc0d7f60 \
+            --provenance verification/external/lean/fixtures/recipient-transfer-v4-0.provenance.json \
+            --output recipient-transfer-v4-0.lean --report recipient-transfer-v4-0-acceptance.json
+          gzip -dc verification/external/lean/fixtures/recipient-transfer-v4-3.json.gz > recipient-transfer-v4-3.json
+          python3 verification/external/lean/check_transfer_export.py \
+            --export recipient-transfer-v4-3.json \
+            --sha256 5a498f54aab8392c68da7c56cfbd7357088d857554b3dde093792378de54edfc \
+            --provenance verification/external/lean/fixtures/recipient-transfer-v4-3.provenance.json \
+            --output recipient-transfer-v4-3.lean --report recipient-transfer-v4-3-acceptance.json
           python3 verification/external/lean/check_lifecycle_export.py \
             --export verification/external/lean/fixtures/observer-lifecycle-v1.json \
             --sha256 d81cc445752ee9e95a59fbd8915d02802211a810d6ce182b80025ab482260199 \
@@ -430,6 +443,7 @@ jobs:
             recipient-transfer-*.lean
             recipient-transfer-0-*/
             recipient-transfer-3-*/
+            recipient-transfer-v4-*/
             retained-names-export.lean
             retained-names-export-*/
             observer-export*.lean

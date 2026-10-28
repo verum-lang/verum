@@ -5,6 +5,7 @@ import check_lifecycle_export as lifecycle
 from check_joint_export import decimal, exact_integer, receipt
 from observer_export_replay import array, boolean, fields, natural, require, sequence, main as replay_main
 from retained_transfer_codec import decode_letter
+import transfer_publication
 
 
 def ratio(value):
@@ -21,12 +22,14 @@ def score(value):
 
 def emit(data):
     require(type(data) is dict and data.get('schema') in
-            ('synarc-recipient-code-transfer-v2', 'synarc-recipient-code-transfer-v3'),
-            'Support-complete v2 or v3 export required')
-    current = data['schema'] == 'synarc-recipient-code-transfer-v3'
+            ('synarc-recipient-code-transfer-v2', 'synarc-recipient-code-transfer-v3',
+             'synarc-recipient-code-transfer-v4'), 'Support-complete v2, v3 or v4 export required')
+    publication = data['schema'] == 'synarc-recipient-code-transfer-v4'
+    current = data['schema'] != 'synarc-recipient-code-transfer-v2'
     fields(data, 'schema phase letter donor_definition recipient_definition initial_program candidate '
         'definition_receipt training validation joint_exact_score confirmed confirmation_rule installation_history ' +
-        ('installation_origin_cut installation_cut current_history current_cut' if current else 'installed_cut'))
+        ('installation_origin_cut installation_cut current_history current_cut' if current else 'installed_cut') +
+        (' publication_events' if publication else ''))
     natural(data['phase'])
     require(data['confirmation_rule'] == 'joint_compression_strictly_above_training_then_joint_family_decide_v1',
         'Unknown confirmation rule')
@@ -117,6 +120,10 @@ def emit(data):
     training, fresh = data['training'], data['validation']
     for part in (training, fresh):
         fields(part, 'alphabets exact_score history named_mass_denominator naming profile purchased rows selection_mass_denominator')
+    # This schema exports an installed Validated receiver, not an arbitrary
+    # assessment. Correctly recomputing a negative decision cannot authorize it.
+    require(training['purchased'] is True, 'Installation requires purchased training')
+    require(data['confirmed'] is True, 'Installation requires confirmed joint validation')
     histories = [history(p['history']) for p in (training, fresh)]
     installed_history = history(data['installation_history'])
     all_histories = [training['history'], fresh['history'], data['installation_history']]
@@ -209,21 +216,27 @@ def emit(data):
         claim(f'({natural(installed["owner"])} : Nat) ≠ {natural(live["owner"])}', 'decide')
         relation = '≠' if len(current_history) > n else '='
         claim(f'({natural(installed["state"])} : Nat) {relation} {natural(live["state"])}', 'decide')
+    transition_counts = {'native_owner_transition_witnesses': 0}
+    if publication:
+        transition_counts = transfer_publication.emit(data, recipient, prefix, cap, claim)
     lines.extend(['#print axioms ' + n for n in names] + ['end FrozenObserverExport'])
     return '\n\n'.join(lines)+'\n', {'claims':len(names), 'reading_replays':sum(map(len,cuts)),
         'history_events':len(installed_history), 'exact_scores':3, 'portable_programs':3,
-        'snapshot_replays':len(snapshots), 'native_owner_transition_witnesses':0}
+        'snapshot_replays':len(snapshots), **transition_counts}
 
 
 def main():
     replay_main(emit=emit, modules=lifecycle.MODELS+['CategoricalScore'],
         producers=[Path(__file__).resolve(), Path(lifecycle.__file__).resolve(),
-                   Path(__file__).with_name('check_joint_export.py'), Path(__file__).with_name('retained_transfer_codec.py')],
-        description=__doc__, scope='Original v2/v3 transfer: retained portable code and correlated family, nominal lineage separation, '
+                   Path(__file__).with_name('check_joint_export.py'), Path(__file__).with_name('retained_transfer_codec.py'),
+                   Path(transfer_publication.__file__).resolve()],
+        description=__doc__, scope='Original v2/v3/v4 transfer: retained portable code and correlated family, nominal lineage separation, '
         'initialization, immutable history prefixes, fresh ordered cuts, observed reads and installed value; v3 separately checks '
         'installation-prefix and current-history replay plus published receiver owner/state separation. Exact KT/ML scores '
-        'with frozen support and strict paid-family decisions. Exported contexts/outcomes are inputs; their environment provenance, '
-        'actual publication fork/commit transition witnesses, physical ownership allocation, audit/resource accounting, '
+        'with frozen support and strict paid-family decisions. V4 adds the original publication fork, reads, successful commit '
+        'receipts, complete exposed body reports and exact current-history tail. V2/v3 have no such transition witnesses. '
+        'Exported contexts/outcomes are inputs; their environment provenance, physical ownership allocation, native work budgets, '
+        'refused/unobserved publication transitions, audit/resource accounting, '
         'native terminal guards, ingress parser, universal native refinement '
         'and statistical optional-stopping validity are not certified.')
 
