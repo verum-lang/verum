@@ -1,6 +1,7 @@
 //! Exact spatial encoding. An unsupported expression is an error, never `true`
 //! or a fresh value unrelated to the source expression.
 use super::*;
+use crate::partial_heap::PartialHeap;
 use z3::ast::{Ast, BV};
 
 impl SepLogicEncoder {
@@ -20,42 +21,21 @@ impl SepLogicEncoder {
                 "separation heaps require word64 addresses and values with a Boolean allocation map",
             )));
         }
+        let spatial = PartialHeap::new(heap.clone(), allocated.clone(), self.model.value_const(0))
+            .map_err(SepLogicError::EncodingError)?;
         Ok(match assertion {
-            SepAssertion::Emp => allocated.eq(&Array::const_array(
-                &self.model.addr_sort,
-                &Bool::from_bool(false),
-            )),
+            SepAssertion::Emp => spatial.empty(),
             SepAssertion::Pure(expr) => self.encode_pure_expr(expr)?,
-            SepAssertion::PointsTo { location, value } => {
-                let address = self.encode_expr_as_addr(location)?;
-                let value = self.encode_expr_as_value(value)?;
-                let singleton = Array::const_array(&self.model.addr_sort, &Bool::from_bool(false))
-                    .store(&address, &Bool::from_bool(true));
-                Bool::and(&[&allocated.eq(&singleton), &heap.select(&address).eq(&value)])
-            }
-            SepAssertion::Sep { left, right } => {
-                // Subheaps share values and split only the owned domain.
-                let a = self.model.fresh_allocated("left_domain");
-                let b = self.model.fresh_allocated("right_domain");
-                let left = self.encode_assertion(left, heap, &a)?;
-                let right = self.encode_assertion(right, heap, &b)?;
-                let address = self.model.fresh_addr("partition");
-                let av = a
-                    .select(&address)
-                    .as_bool()
-                    .expect("Boolean allocation map");
-                let bv = b
-                    .select(&address)
-                    .as_bool()
-                    .expect("Boolean allocation map");
-                let partition = Bool::and(&[
-                    &allocated.select(&address).eq(&Bool::or(&[&av, &bv])),
-                    &Bool::and(&[&av, &bv]).not(),
-                ]);
-                let partition = z3::ast::forall_const(&[&address], &[], &partition);
-                let body = Bool::and(&[&left, &right, &partition]);
-                z3::ast::exists_const(&[&a, &b], &[], &body)
-            }
+            SepAssertion::PointsTo { location, value } => spatial
+                .points_to(
+                    &self.encode_expr_as_addr(location)?,
+                    &self.encode_expr_as_value(value)?,
+                )
+                .map_err(SepLogicError::EncodingError)?,
+            SepAssertion::Sep { left, right } => spatial.separate(
+                |h| self.encode_assertion(left, h.values(), h.owned()),
+                |h| self.encode_assertion(right, h.values(), h.owned()),
+            )?,
             SepAssertion::And { left, right } | SepAssertion::Or { left, right } => {
                 let left = self.encode_assertion(left, heap, allocated)?;
                 let right = self.encode_assertion(right, heap, allocated)?;
@@ -81,48 +61,16 @@ impl SepLogicEncoder {
                     z3::ast::forall_const(&[&variable], &[], &body)
                 }
             }
-            SepAssertion::Wand { left, right } => {
-                let frame_heap = self.model.fresh_heap("wand_frame");
-                let frame_domain = self.model.fresh_allocated("wand_frame_domain");
-                let combined_heap = self.model.fresh_heap("wand_union");
-                let combined_domain = self.model.fresh_allocated("wand_union_domain");
-                let left = self.encode_assertion(left, &frame_heap, &frame_domain)?;
-                let right = self.encode_assertion(right, &combined_heap, &combined_domain)?;
-                let disjoint = self.encode_disjointness(allocated, &frame_domain);
-                let union = self.encode_heap_composition(
-                    &combined_heap,
-                    &combined_domain,
-                    heap,
-                    allocated,
-                    &frame_heap,
-                    &frame_domain,
-                );
-                let body = Bool::and(&[&left, &disjoint, &union]).implies(&right);
-                z3::ast::forall_const(
-                    &[&frame_heap, &frame_domain, &combined_heap, &combined_domain],
-                    &[],
-                    &body,
-                )
-            }
+            SepAssertion::Wand { left, right } => spatial.wand(
+                |h| self.encode_assertion(left, h.values(), h.owned()),
+                |h| self.encode_assertion(right, h.values(), h.owned()),
+            )?,
             SepAssertion::Named { name, args } => {
-                // A predicate of a partial heap cannot observe values outside
-                // its owned domain. Canonicalize those values before passing
-                // the heap to the opaque relation.
-                let restricted = self.canonical_heap(heap, allocated);
-                let mut values = [Dynamic::from_ast(&restricted), Dynamic::from_ast(allocated)]
-                    .into_iter()
-                    .collect::<List<_>>();
-                for arg in args {
-                    values.push(self.encode_expr_as_value(arg)?);
-                }
-                let sorts: List<Sort> = values.iter().map(Ast::get_sort).collect();
-                let sort_refs: List<&Sort> = sorts.iter().collect();
-                let arguments: List<&dyn Ast> = values.iter().map(|a| a as &dyn Ast).collect();
-                let symbol = format!("spatial:{}:{}:{}", name.len(), name, args.len());
-                z3::FuncDecl::new(symbol, &sort_refs, &Sort::bool())
-                    .apply(&arguments)
-                    .as_bool()
-                    .expect("Boolean predicate")
+                let args: Result<List<_>, _> = args
+                    .iter()
+                    .map(|arg| self.encode_expr_as_value(arg))
+                    .collect();
+                spatial.relation(name.as_str(), &args?)
             }
             SepAssertion::ListSegment { from, to, elements } if elements.is_empty() => {
                 let equal = self
@@ -142,36 +90,6 @@ impl SepLogicEncoder {
                 )));
             }
         })
-    }
-
-    /// Restrict a total value array to its owned domain. Z3's array-map
-    /// operation preserves extensionality without introducing lambda arguments
-    /// or quantified witnesses into opaque predicate applications.
-    fn canonical_heap(&self, heap: &Array, allocated: &Array) -> Array {
-        let zero = self.model.value_const(0);
-        let zeros = Array::const_array(&self.model.addr_sort, &zero);
-        let condition = Bool::fresh_const("mask_condition");
-        let value = self.model.fresh_value("mask_value");
-        let choice = condition.ite(&value, &zero);
-        let context = heap.get_ctx();
-        let arrays = [
-            allocated.get_z3_ast(),
-            heap.get_z3_ast(),
-            zeros.get_z3_ast(),
-        ];
-        // SAFETY: all nodes are live in the same Z3 context. The public entry
-        // validates word64 -> Bool/word64 array sorts; the extracted built-in
-        // ite declaration has signature (Bool, word64, word64) -> word64.
-        // Mapping it over these arrays yields another word64 -> word64 array.
-        // No z3 crate layout assumptions or transmutations are used.
-        unsafe {
-            let ctx = context.get_z3_context();
-            let app = z3_sys::Z3_to_app(ctx, choice.get_z3_ast()).expect("ite application");
-            let declaration = z3_sys::Z3_get_app_decl(ctx, app).expect("ite declaration");
-            let mapped = z3_sys::Z3_mk_map(ctx, declaration, 3, arrays.as_ptr())
-                .expect("well-sorted heap restriction");
-            Array::wrap(context, mapped)
-        }
     }
 
     /// A work bound never authorizes replacing an unfinished predicate by true.

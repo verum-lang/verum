@@ -1500,31 +1500,7 @@ impl CbgrSepLogic {
 /// * `Ok(false)` if the triple is invalid (counterexample found)
 /// * `Err(Text)` if verification fails (timeout, error, etc.)
 pub fn verify_triple(pre: &SepProp, cmd: &HeapCommand, post: &SepProp) -> Result<bool, Text> {
-    // Compute weakest precondition using WP calculus
-    let wp = wp_heap(cmd, post.clone());
-
-    // Check if pre ⊢ wp (pre implies wp)
-    let encoder = SepLogicEncoder::new();
-    let heap = Heap::fresh("h");
-
-    let pre_formula = encoder.encode(pre, &heap);
-    let wp_formula = encoder.encode(&wp, &heap);
-
-    let implication = Formula::Implies(Box::new(pre_formula), Box::new(wp_formula));
-
-    // Use Z3 to verify the implication via HoareZ3Verifier
-    use crate::integration::HoareZ3Verifier;
-    use verum_smt::context::Context as SmtContext;
-
-    // Create Z3 context and verifier
-    let smt_context = SmtContext::new();
-    let verifier = HoareZ3Verifier::new(&smt_context).with_timeout(30000); // 30 second timeout
-
-    // Verify the formula
-    match verifier.verify_formula(&implication) {
-        Ok(result) => Ok(result.valid),
-        Err(e) => Err(Text::from(format!("Verification error: {}", e))),
-    }
+    verify_triple_z3(pre, cmd, post).map(|result| result.valid)
 }
 
 /// Verify a Hoare triple with full Z3 separation logic encoding

@@ -218,8 +218,8 @@ impl CodegenIntegration {
 // =============================================================================
 
 use crate::hoare_logic::{HoareTriple, WPError};
-use crate::vcgen::{Formula, SmtBinOp, SmtExpr, SmtUnOp};
-use verum_common::{Map, Text};
+use crate::vcgen::{Formula, SmtBinOp, SmtExpr, SmtUnOp, Variable};
+use verum_common::{List, Map, Set, Text};
 use verum_smt::context::Context as SmtContext;
 
 /// Hoare logic verification using Z3 SMT solver
@@ -379,8 +379,7 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
                     collect_labeled_subformulas(formula, &mut labeled);
                     for (id, subformula) in labeled {
                         if let Ok(z3_sub) = self.translate_formula(subformula, &var_decls)
-                            && let Some(value) =
-                                model.eval(&z3_sub, true).and_then(|v| v.as_bool())
+                            && let Some(value) = model.eval(&z3_sub, true).and_then(|v| v.as_bool())
                             && !value
                         {
                             failed_labels.push(id);
@@ -1105,7 +1104,7 @@ impl HoareVerificationResult {
 // Separation Logic Z3 Integration
 // =============================================================================
 
-use crate::separation_logic::{Address, HeapCommand, SepProp, Value};
+use crate::separation_logic::{HeapCommand, SepProp, Value};
 
 /// Separation logic verification using Z3 with array theory
 ///
@@ -1133,357 +1132,256 @@ impl<'ctx> SeparationLogicZ3Verifier<'ctx> {
         self
     }
 
-    /// Verify a separation logic triple using Z3
-    ///
-    /// Uses array theory to model the heap and verifies:
-    /// {pre} cmd {post}
+    /// Check a mathematical-integer heap command using the shared exact
+    /// partial-heap algebra. Memory safety is a proof obligation, not an
+    /// assumption that can make an invalid access disappear.
     pub fn verify_triple(
         &self,
         pre: &SepProp,
         cmd: &HeapCommand,
         post: &SepProp,
     ) -> Result<SepLogicVerificationResult, WPError> {
+        use verum_smt::partial_heap::PartialHeap;
+        use z3::ast::{Array, Bool, Dynamic, Int};
         let solver = self.context.solver();
-
-        // Apply timeout
         let mut params = z3::Params::new();
         params.set_u32("timeout", self.timeout_ms);
         solver.set_params(&params);
-
-        // Model heap as array from Int (address) to Int (value)
-        let _heap_sort = z3::Sort::array(&z3::Sort::int(), &z3::Sort::int());
-        let heap_pre = z3::ast::Array::new_const("heap_pre", &z3::Sort::int(), &z3::Sort::int());
-        let heap_post = z3::ast::Array::new_const("heap_post", &z3::Sort::int(), &z3::Sort::int());
-
-        // Domain tracking for separation (which addresses are valid)
-        let domain_pre =
-            z3::ast::Array::new_const("domain_pre", &z3::Sort::int(), &z3::Sort::bool());
-        let domain_post =
-            z3::ast::Array::new_const("domain_post", &z3::Sort::int(), &z3::Sort::bool());
-
-        // Encode precondition
-        let pre_formula = self.encode_sep_prop(pre, &heap_pre, &domain_pre)?;
-        solver.assert(&pre_formula);
-
-        // Encode command semantics
-        let (heap_after_cmd, domain_after_cmd) =
-            self.encode_command(cmd, &heap_pre, &domain_pre)?;
-
-        // Heap and domain after command equal post heap/domain
-        solver.assert(heap_post.eq(&heap_after_cmd));
-        solver.assert(domain_post.eq(&domain_after_cmd));
-
-        // Encode postcondition negation (we want to prove post holds)
-        let post_formula = self.encode_sep_prop(post, &heap_post, &domain_post)?;
-        solver.assert(post_formula.not());
-
-        // Check if UNSAT (meaning postcondition always holds)
+        let before = PartialHeap::new(
+            Array::fresh_const("heap_pre", &z3::Sort::int(), &z3::Sort::int()),
+            Array::fresh_const("domain_pre", &z3::Sort::int(), &z3::Sort::bool()),
+            Int::from_i64(0).into(),
+        )
+        .map_err(WPError::TypeError)?;
+        let mut bindings = Map::new();
+        let pre_formula = self.encode_sep_prop(pre, &before, &bindings)?;
+        let (after, safe, admissible) = match cmd {
+            HeapCommand::Store(address, value) => {
+                let address = self.encode_heap_int(&address.0, &bindings)?;
+                let value = self.encode_heap_value(value, &bindings)?;
+                (
+                    before.store(&address, &value).map_err(WPError::TypeError)?,
+                    before.owns(&address).map_err(WPError::TypeError)?,
+                    Bool::from_bool(true),
+                )
+            }
+            HeapCommand::Free(address) => {
+                let address = self.encode_heap_int(&address.0, &bindings)?;
+                (
+                    before
+                        .set_owned(&address, false)
+                        .map_err(WPError::TypeError)?,
+                    before.owns(&address).map_err(WPError::TypeError)?,
+                    Bool::from_bool(true),
+                )
+            }
+            HeapCommand::Load(variable, address) => {
+                Self::check_heap_variable(variable)?;
+                let address = self.encode_heap_int(&address.0, &bindings)?;
+                bindings.insert(
+                    variable.smtlib_name(),
+                    before.load(&address).map_err(WPError::TypeError)?,
+                );
+                (
+                    before.clone(),
+                    before.owns(&address).map_err(WPError::TypeError)?,
+                    Bool::from_bool(true),
+                )
+            }
+            HeapCommand::Alloc(variable, value) => {
+                Self::check_heap_variable(variable)?;
+                let value = self.encode_heap_value(value, &bindings)?;
+                let address: Dynamic = Int::fresh_const("allocated_address").into();
+                let available = before.owns(&address).map_err(WPError::TypeError)?.not();
+                // Existence is necessary for safety; every fresh choice must
+                // satisfy the postcondition. An exhausted heap is not success.
+                let safe = z3::ast::exists_const(&[&address], &[], &available);
+                let after = before
+                    .store(&address, &value)
+                    .and_then(|h| h.set_owned(&address, true))
+                    .map_err(WPError::TypeError)?;
+                bindings.insert(variable.smtlib_name(), address);
+                (after, safe, available)
+            }
+        };
+        let post_formula = self.encode_sep_prop(post, &after, &bindings)?;
+        solver.assert(pre_formula);
+        solver.assert(Bool::or(&[
+            safe.not(),
+            Bool::and(&[admissible, post_formula.not()]),
+        ]));
         match solver.check() {
             z3::SatResult::Unsat => Ok(SepLogicVerificationResult::valid()),
-            z3::SatResult::Sat => {
-                if let Some(model) = solver.get_model() {
-                    let counterexample =
-                        self.extract_heap_counterexample(&model, &heap_pre, &heap_post);
-                    Ok(SepLogicVerificationResult::invalid(counterexample))
-                } else {
-                    Ok(SepLogicVerificationResult::invalid(
-                        HeapCounterexample::default(),
-                    ))
-                }
-            }
-            z3::SatResult::Unknown => {
-                let reason = solver
+            z3::SatResult::Sat => Ok(SepLogicVerificationResult::invalid(
+                solver
+                    .get_model()
+                    .map(|m| self.extract_heap_counterexample(&m, before.values(), after.values()))
+                    .unwrap_or_default(),
+            )),
+            z3::SatResult::Unknown => Err(WPError::Unknown {
+                reason: solver
                     .get_reason_unknown()
-                    .map(|s| Text::from(s.to_string()))
-                    .unwrap_or_else(|| Text::from("unknown"));
-                Err(WPError::Unknown {
-                    reason,
-                    location: None,
-                })
-            }
+                    .unwrap_or_else(|| "unknown".into())
+                    .into(),
+                location: None,
+            }),
         }
     }
 
-    /// Encode separation logic proposition as Z3 formula
     fn encode_sep_prop(
         &self,
         prop: &SepProp,
-        heap: &z3::ast::Array,
-        domain: &z3::ast::Array,
+        heap: &verum_smt::partial_heap::PartialHeap,
+        bindings: &Map<Text, z3::ast::Dynamic>,
     ) -> Result<z3::ast::Bool, WPError> {
+        use z3::ast::{Ast, Dynamic, Int};
         match prop {
-            SepProp::Emp => {
-                // Empty heap: domain is all false
-                let addr = z3::ast::Int::new_const("_addr");
-                let domain_at_addr = domain.select(&addr);
-                let is_false = domain_at_addr
-                    .as_bool()
-                    .ok_or_else(|| WPError::TypeError(Text::from("Domain should be boolean")))?;
-                Ok(z3::ast::forall_const(
-                    &[&z3::ast::Dynamic::from(addr.clone())],
-                    &[],
-                    &is_false.not().not(), // forall addr. !domain[addr]
-                ))
-            }
-            SepProp::PointsTo(addr, val) => {
-                // addr |-> val: heap[addr] = val and domain[addr] = true
-                let z3_addr = self.encode_address(addr)?;
-                let z3_val = self.encode_value(val)?;
-
-                let heap_val = heap.select(&z3_addr);
-                let domain_val = domain.select(&z3_addr);
-
-                let heap_eq = heap_val.eq(z3::ast::Dynamic::from(z3_val));
-                let in_domain = domain_val
-                    .as_bool()
-                    .ok_or_else(|| WPError::TypeError(Text::from("Domain should be boolean")))?;
-
-                Ok(z3::ast::Bool::and(&[&heap_eq, &in_domain]))
-            }
-            SepProp::SeparatingConj(p, q) => {
-                // p * q: separating conjunction - disjoint heaps that merge to parent
-                //
-
-                // Separation logic: P * Q means heap splits into disjoint parts
-                // satisfying P and Q respectively. The frame rule {P} c {Q}
-                // implies {P * R} c {Q * R} when c doesn't touch R.
-                //
-
-                // Semantics: (P * Q)(h) iff exists h1, h2.
-                //  - h = h1 + h2 (heap merge/disjoint union)
-                //  - dom(h1) ∩ dom(h2) = {} (disjointness)
-                //  - P(h1) and Q(h2)
-                //
-
-                // We encode this by:
-                // 1. Creating fresh sub-heaps h1, h2 with domains d1, d2
-                // 2. Asserting P holds on h1/d1 and Q holds on h2/d2
-                // 3. Asserting domains are disjoint: forall addr. !(d1[addr] && d2[addr])
-                // 4. Asserting combined domain equals parent: forall addr. domain[addr] <=> (d1[addr] || d2[addr])
-                // 5. Asserting heap merge: forall addr. (d1[addr] => heap[addr] = h1[addr]) &&
-                //  (d2[addr] => heap[addr] = h2[addr])
-
-                // Generate unique names using a counter to avoid name conflicts in nested separating conjunctions
-                static SEP_COUNTER: std::sync::atomic::AtomicU64 =
-                    std::sync::atomic::AtomicU64::new(0);
-                let counter = SEP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-                let heap1 = z3::ast::Array::new_const(
-                    format!("_heap1_{}", counter).as_str(),
-                    &z3::Sort::int(),
-                    &z3::Sort::int(),
-                );
-                let heap2 = z3::ast::Array::new_const(
-                    format!("_heap2_{}", counter).as_str(),
-                    &z3::Sort::int(),
-                    &z3::Sort::int(),
-                );
-                let domain1 = z3::ast::Array::new_const(
-                    format!("_domain1_{}", counter).as_str(),
-                    &z3::Sort::int(),
-                    &z3::Sort::bool(),
-                );
-                let domain2 = z3::ast::Array::new_const(
-                    format!("_domain2_{}", counter).as_str(),
-                    &z3::Sort::int(),
-                    &z3::Sort::bool(),
-                );
-
-                // Sub-propositions hold on their respective heaps
-                let p_holds = self.encode_sep_prop(p, &heap1, &domain1)?;
-                let q_holds = self.encode_sep_prop(q, &heap2, &domain2)?;
-
-                // Create a fresh address variable for quantified assertions
-                let addr = z3::ast::Int::new_const(format!("_sep_addr_{}", counter).as_str());
-
-                // Domain lookup for sub-heaps
-                let d1_at_addr = domain1
-                    .select(&addr)
-                    .as_bool()
-                    .ok_or_else(|| WPError::TypeError(Text::from("Domain1 should be boolean")))?;
-                let d2_at_addr = domain2
-                    .select(&addr)
-                    .as_bool()
-                    .ok_or_else(|| WPError::TypeError(Text::from("Domain2 should be boolean")))?;
-                let parent_domain_at_addr = domain.select(&addr).as_bool().ok_or_else(|| {
-                    WPError::TypeError(Text::from("Parent domain should be boolean"))
-                })?;
-
-                // Constraint 1: Domains are disjoint - forall addr. !(d1[addr] && d2[addr])
-                let disjoint_constraint = z3::ast::Bool::and(&[&d1_at_addr, &d2_at_addr]).not();
-                let all_disjoint = z3::ast::forall_const(
-                    &[&z3::ast::Dynamic::from(addr.clone())],
-                    &[],
-                    &disjoint_constraint,
-                );
-
-                // Constraint 2: Combined domain equals parent - forall addr. parent_domain[addr] <=> (d1[addr] || d2[addr])
-                let combined_domain = z3::ast::Bool::or(&[&d1_at_addr, &d2_at_addr]);
-                let domain_merge = parent_domain_at_addr.iff(&combined_domain);
-                let all_domain_merge = z3::ast::forall_const(
-                    &[&z3::ast::Dynamic::from(addr.clone())],
-                    &[],
-                    &domain_merge,
-                );
-
-                // Constraint 3: Heap merge - values from sub-heaps propagate to parent
-                // forall addr. (d1[addr] => heap[addr] = h1[addr]) && (d2[addr] => heap[addr] = h2[addr])
-                let h1_at_addr = heap1.select(&addr);
-                let h2_at_addr = heap2.select(&addr);
-                let parent_heap_at_addr = heap.select(&addr);
-
-                let heap1_merge = d1_at_addr.implies(&parent_heap_at_addr.eq(h1_at_addr));
-                let heap2_merge = d2_at_addr.implies(&parent_heap_at_addr.eq(h2_at_addr));
-                let heap_merge_constraint = z3::ast::Bool::and(&[&heap1_merge, &heap2_merge]);
-                let all_heap_merge = z3::ast::forall_const(
-                    &[&z3::ast::Dynamic::from(addr)],
-                    &[],
-                    &heap_merge_constraint,
-                );
-
-                // Combine all constraints: P(h1) && Q(h2) && disjoint && domain_merge && heap_merge
-                Ok(z3::ast::Bool::and(&[
-                    &p_holds,
-                    &q_holds,
-                    &all_disjoint,
-                    &all_domain_merge,
-                    &all_heap_merge,
-                ]))
-            }
+            SepProp::Emp => Ok(heap.empty()),
+            SepProp::PointsTo(address, value) => heap
+                .points_to(
+                    &self.encode_heap_int(&address.0, bindings)?,
+                    &self.encode_heap_value(value, bindings)?,
+                )
+                .map_err(WPError::TypeError),
+            SepProp::SeparatingConj(left, right) => heap.separate(
+                |h| self.encode_sep_prop(left, h, bindings),
+                |h| self.encode_sep_prop(right, h, bindings),
+            ),
+            SepProp::MagicWand(left, right) => heap.wand(
+                |h| self.encode_sep_prop(left, h, bindings),
+                |h| self.encode_sep_prop(right, h, bindings),
+            ),
             SepProp::Pure(formula) => {
-                // Pure formula doesn't constrain heap
-                let hoare_verifier = HoareZ3Verifier::new(self.context);
-                hoare_verifier.translate_formula(formula, &Map::new())
-            }
-            SepProp::MagicWand(p, q) => {
-                // p -* q: if we add p to current heap, we get q
-                // Encode as: forall h'. (current * p)(h') => q(h')
-                let p_formula = self.encode_sep_prop(p, heap, domain)?;
-                let q_formula = self.encode_sep_prop(q, heap, domain)?;
-                Ok(p_formula.implies(&q_formula))
-            }
-            SepProp::Exists(vars, body) => {
-                let mut bounds: Vec<z3::ast::Dynamic> = Vec::new();
-                for var in vars.iter() {
-                    bounds.push(z3::ast::Int::new_const(var.smtlib_name().as_str()).into());
-                }
-                let body_formula = self.encode_sep_prop(body, heap, domain)?;
-                let bound_refs: Vec<&dyn z3::ast::Ast> =
-                    bounds.iter().map(|b| b as &dyn z3::ast::Ast).collect();
-                Ok(z3::ast::exists_const(&bound_refs, &[], &body_formula))
-            }
-            SepProp::Forall(vars, body) => {
-                let mut bounds: Vec<z3::ast::Dynamic> = Vec::new();
-                for var in vars.iter() {
-                    bounds.push(z3::ast::Int::new_const(var.smtlib_name().as_str()).into());
-                }
-                let body_formula = self.encode_sep_prop(body, heap, domain)?;
-                let bound_refs: Vec<&dyn z3::ast::Ast> =
-                    bounds.iter().map(|b| b as &dyn z3::ast::Ast).collect();
-                Ok(z3::ast::forall_const(&bound_refs, &[], &body_formula))
+                Self::check_heap_formula(formula)?;
+                HoareZ3Verifier::new(self.context).translate_formula(formula, bindings)
             }
             SepProp::Predicate(name, args) => {
-                // Custom predicate - encode as uninterpreted function
-                let hoare_verifier = HoareZ3Verifier::new(self.context);
-                let z3_args: Result<Vec<_>, _> = args
+                let args: Result<List<_>, _> = args
                     .iter()
-                    .map(|expr| hoare_verifier.translate_expr(expr, &Map::new()))
+                    .map(|a| self.encode_heap_int(a, bindings))
                     .collect();
-                let z3_args = z3_args?;
-
-                let arg_sorts: Vec<_> = args.iter().map(|_| z3::Sort::int()).collect();
-                let arg_sort_refs: Vec<_> = arg_sorts.iter().collect();
-                let pred_decl = z3::FuncDecl::new(name.as_str(), &arg_sort_refs, &z3::Sort::bool());
-
-                let arg_refs: Vec<_> = z3_args.iter().map(|a| a as &dyn z3::ast::Ast).collect();
-                pred_decl.apply(&arg_refs).as_bool().ok_or_else(|| {
-                    WPError::TypeError(Text::from("Predicate should return boolean"))
-                })
+                Ok(heap.relation(name.as_str(), &args?))
             }
-            SepProp::FieldPointsTo(addr, _field, val) => {
-                // addr.field |-> val: similar to PointsTo but for specific field
-                let z3_addr = self.encode_address(addr)?;
-                let z3_val = self.encode_value(val)?;
-
-                let heap_val = heap.select(&z3_addr);
-                let domain_val = domain.select(&z3_addr);
-
-                let heap_eq = heap_val.eq(z3::ast::Dynamic::from(z3_val));
-                let in_domain = domain_val
-                    .as_bool()
-                    .ok_or_else(|| WPError::TypeError(Text::from("Domain should be boolean")))?;
-
-                Ok(z3::ast::Bool::and(&[&heap_eq, &in_domain]))
-            }
-        }
-    }
-
-    /// Encode heap command semantics
-    fn encode_command(
-        &self,
-        cmd: &HeapCommand,
-        heap: &z3::ast::Array,
-        domain: &z3::ast::Array,
-    ) -> Result<(z3::ast::Array, z3::ast::Array), WPError> {
-        match cmd {
-            HeapCommand::Alloc(var, val) => {
-                // Allocate: choose fresh address, store value
-                let addr = z3::ast::Int::new_const(var.smtlib_name().as_str());
-                let z3_val = self.encode_value(val)?;
-
-                let new_heap = heap.store(&addr, &z3_val);
-                let new_domain = domain.store(&addr, &z3::ast::Bool::from_bool(true));
-
-                Ok((new_heap, new_domain))
-            }
-            HeapCommand::Free(addr) => {
-                // Free: remove from domain
-                let z3_addr = self.encode_address(addr)?;
-                let new_domain = domain.store(&z3_addr, &z3::ast::Bool::from_bool(false));
-                Ok((heap.clone(), new_domain))
-            }
-            HeapCommand::Load(_var, _addr) => {
-                // Load doesn't modify heap
-                Ok((heap.clone(), domain.clone()))
-            }
-            HeapCommand::Store(addr, val) => {
-                // Store: update heap value
-                let z3_addr = self.encode_address(addr)?;
-                let z3_val = self.encode_value(val)?;
-                let new_heap = heap.store(&z3_addr, &z3_val);
-                Ok((new_heap, domain.clone()))
-            }
-        }
-    }
-
-    /// Encode address to Z3
-    fn encode_address(&self, addr: &Address) -> Result<z3::ast::Int, WPError> {
-        let hoare_verifier = HoareZ3Verifier::new(self.context);
-        hoare_verifier.translate_expr_as_int(&addr.0, &Map::new())
-    }
-
-    /// Encode value to Z3
-    fn encode_value(&self, val: &Value) -> Result<z3::ast::Int, WPError> {
-        match val {
-            Value::Int(expr) => {
-                let hoare_verifier = HoareZ3Verifier::new(self.context);
-                hoare_verifier.translate_expr_as_int(expr, &Map::new())
-            }
-            Value::Bool(expr) => {
-                // Encode boolean as int expression
-                let hoare_verifier = HoareZ3Verifier::new(self.context);
-                hoare_verifier.translate_expr_as_int(expr, &Map::new())
-            }
-            Value::Symbolic(var) => Ok(z3::ast::Int::new_const(var.smtlib_name().as_str())),
-            Value::Addr(addr) => self.encode_address(addr),
-            Value::Struct(_, values) => {
-                // For now, encode first field or 0
-                if let Some(first) = values.first() {
-                    self.encode_value(first)
+            SepProp::Exists(variables, body) | SepProp::Forall(variables, body) => {
+                let mut scoped = bindings.clone();
+                let mut bounds = List::<Dynamic>::new();
+                let mut names = Set::new();
+                for variable in variables {
+                    Self::check_heap_variable(variable)?;
+                    let value: Dynamic = Int::fresh_const("heap_bound").into();
+                    if !names.insert(variable.smtlib_name()) {
+                        return Err(WPError::TypeError(Text::from(
+                            "duplicate heap quantifier binder",
+                        )));
+                    }
+                    scoped.insert(variable.smtlib_name(), value.clone());
+                    bounds.push(value);
+                }
+                let body = self.encode_sep_prop(body, heap, &scoped)?;
+                let refs: List<&dyn Ast> = bounds.iter().map(|v| v as &dyn Ast).collect();
+                if matches!(prop, SepProp::Exists(..)) {
+                    Ok(z3::ast::exists_const(&refs, &[], &body))
                 } else {
-                    Ok(z3::ast::Int::from_i64(0))
+                    Ok(z3::ast::forall_const(&refs, &[], &body))
                 }
             }
+            SepProp::FieldPointsTo(..) => Err(WPError::TypeError(Text::from(
+                "field points-to requires a declared layout; field names cannot be ignored or hashed into offsets",
+            ))),
+        }
+    }
+
+    fn check_heap_variable(variable: &Variable) -> Result<(), WPError> {
+        if variable
+            .ty
+            .as_ref()
+            .is_none_or(|ty| matches!(ty, crate::vcgen::VarType::Int))
+        {
+            Ok(())
+        } else {
+            Err(WPError::TypeError(Text::from(
+                "mathematical-integer heap requires integer scalar bindings",
+            )))
+        }
+    }
+
+    /// This compatibility frontend has mathematical integer semantics. It
+    /// accepts only terms whose existing scalar translation is exact; source
+    /// word arithmetic is handled by verum_smt's separate typed frontend.
+    fn check_heap_term(expr: &SmtExpr) -> Result<(), WPError> {
+        match expr {
+            SmtExpr::IntConst(_) => Ok(()),
+            SmtExpr::Var(variable) => Self::check_heap_variable(variable),
+            SmtExpr::BinOp(SmtBinOp::Add | SmtBinOp::Sub | SmtBinOp::Mul, left, right) => {
+                Self::check_heap_term(left)?;
+                Self::check_heap_term(right)
+            }
+            SmtExpr::UnOp(SmtUnOp::Neg | SmtUnOp::Abs, value) => Self::check_heap_term(value),
+            SmtExpr::Ite(condition, left, right) => {
+                Self::check_heap_formula(condition)?;
+                Self::check_heap_term(left)?;
+                Self::check_heap_term(right)
+            }
+            _ => Err(WPError::TypeError(Text::from(
+                "unsupported mathematical-integer heap term",
+            ))),
+        }
+    }
+
+    fn check_heap_formula(formula: &Formula) -> Result<(), WPError> {
+        match formula {
+            Formula::True | Formula::False => Ok(()),
+            Formula::Not(body) | Formula::Labeled(_, body) => Self::check_heap_formula(body),
+            Formula::And(items) | Formula::Or(items) => {
+                for item in items {
+                    Self::check_heap_formula(item)?;
+                }
+                Ok(())
+            }
+            Formula::Implies(left, right) | Formula::Iff(left, right) => {
+                Self::check_heap_formula(left)?;
+                Self::check_heap_formula(right)
+            }
+            Formula::Eq(left, right)
+            | Formula::Ne(left, right)
+            | Formula::Lt(left, right)
+            | Formula::Le(left, right)
+            | Formula::Gt(left, right)
+            | Formula::Ge(left, right) => {
+                Self::check_heap_term(left)?;
+                Self::check_heap_term(right)
+            }
+            _ => Err(WPError::TypeError(Text::from(
+                "unsupported pure mathematical-integer heap formula",
+            ))),
+        }
+    }
+
+    fn encode_heap_int(
+        &self,
+        expr: &SmtExpr,
+        bindings: &Map<Text, z3::ast::Dynamic>,
+    ) -> Result<z3::ast::Dynamic, WPError> {
+        Self::check_heap_term(expr)?;
+        Ok(HoareZ3Verifier::new(self.context)
+            .translate_expr_as_int(expr, bindings)?
+            .into())
+    }
+
+    fn encode_heap_value(
+        &self,
+        value: &Value,
+        bindings: &Map<Text, z3::ast::Dynamic>,
+    ) -> Result<z3::ast::Dynamic, WPError> {
+        match value {
+            Value::Int(expr) => self.encode_heap_int(expr, bindings),
+            Value::Addr(address) => self.encode_heap_int(&address.0, bindings),
+            Value::Symbolic(variable) => {
+                self.encode_heap_int(&SmtExpr::Var(variable.clone()), bindings)
+            }
+            Value::Bool(_) | Value::Struct(..) => Err(WPError::TypeError(Text::from(
+                "structured or Boolean heap values require an explicit value representation",
+            ))),
         }
     }
 

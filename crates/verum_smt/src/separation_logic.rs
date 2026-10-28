@@ -1930,63 +1930,6 @@ impl SepLogicEncoder {
         }
     }
 
-    /// Encode disjointness of two allocation maps
-    fn encode_disjointness(&self, a1: &Array, a2: &Array) -> Bool {
-        // forall addr. NOT (a1[addr] AND a2[addr])
-        let addr = self.model.fresh_addr("disjoint_addr");
-        let a1_at_addr = a1.select(&addr);
-        let a2_at_addr = a2.select(&addr);
-
-        let both_allocated = Bool::and(&[
-            &a1_at_addr.as_bool().expect("validated allocation map"),
-            &a2_at_addr.as_bool().expect("validated allocation map"),
-        ]);
-
-        let not_both = both_allocated.not();
-        z3::ast::forall_const(&[&addr], &[], &not_both)
-    }
-
-    /// Encode heap composition: result = h1 + h2
-    fn encode_heap_composition(
-        &self,
-        result_heap: &Array,
-        result_alloc: &Array,
-        h1: &Array,
-        a1: &Array,
-        h2: &Array,
-        a2: &Array,
-    ) -> Bool {
-        // forall addr.
-        //  result_alloc[addr] = a1[addr] OR a2[addr]
-        //  AND (a1[addr] => result_heap[addr] == h1[addr])
-        //  AND (a2[addr] => result_heap[addr] == h2[addr])
-
-        let addr = self.model.fresh_addr("compose_addr");
-
-        let a1_at = a1.select(&addr);
-        let a2_at = a2.select(&addr);
-        let result_a_at = result_alloc.select(&addr);
-
-        let a1_bool = a1_at.as_bool().expect("validated allocation map");
-        let a2_bool = a2_at.as_bool().expect("validated allocation map");
-        let result_a_bool = result_a_at.as_bool().expect("validated allocation map");
-
-        // result_alloc[addr] = a1[addr] OR a2[addr]
-        let alloc_union = Bool::or(&[&a1_bool, &a2_bool]);
-        let alloc_eq = result_a_bool.eq(&alloc_union);
-
-        // Value composition
-        let h1_at = h1.select(&addr);
-        let h2_at = h2.select(&addr);
-        let result_h_at = result_heap.select(&addr);
-
-        let from_h1 = a1_bool.implies(result_h_at.eq(&h1_at));
-        let from_h2 = a2_bool.implies(result_h_at.eq(&h2_at));
-
-        let body = Bool::and(&[&alloc_eq, &from_h1, &from_h2]);
-        z3::ast::forall_const(&[&addr], &[], &body)
-    }
-
     /// Verify heap entailment: P |- Q
     ///
     /// Returns a solver verdict, or an error for unsupported semantics.
