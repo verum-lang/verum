@@ -2868,9 +2868,13 @@ proof_justification = 'by' , ( tactic_expr | identifier ) ;
    and the Lean-style list form (comma-separated branches).
 *)
 tactic_expr =
-    tactic_name , [ type_args ] , [ '(' , [ argument_list ] , ')' ]
+    rewrite_tactic
+    | intro_tactic
+    | 'exact' , expression
+    | tactic_name , [ type_args ] , [ '(' , [ argument_list ] , ')' ]
     | tactic_expr , ';' , tactic_expr
     | '(' , tactic_expr , ')'
+    | '{' , { tactic_expr , [ ';' ] } , '}'
     (* Tactic combinators — Phase D.1 + T1-O reference-grade DSL *)
     | 'try' , '{' , tactic_expr , '}' , [ 'else' , '{' , tactic_expr , '}' ]
     | 'repeat' , [ '(' , integer_lit , ')' ] , '{' , tactic_expr , '}'
@@ -2878,6 +2882,14 @@ tactic_expr =
     | 'first' , '[' , tactic_expr , { ',' , tactic_expr } , ']'
     | 'all_goals' , '{' , tactic_expr , '}'
     | 'focus' , '(' , integer_lit , ')' , '{' , tactic_expr , '}' ;
+
+(* A parenthesized rewrite/exact operand is an ordinary grouped expression.
+   The parser accepts '<' before a rewrite operand for reverse direction.
+   Support for these forms is specific to the selected proof backend. *)
+rewrite_tactic = ( 'rewrite' | 'rw' ) , [ '<' ] , expression ,
+                  [ 'at' , identifier ] ;
+intro_tactic = 'intro' , [ identifier | '(' , [ identifier ,
+                  { ',' , identifier } ] , ')' ] ;
 
 tactic_name =
     'auto' | 'simp' | 'ring' | 'field' | 'omega' | 'blast' | 'smt'
@@ -2923,10 +2935,14 @@ calc_relation = '==' | '<' | '<=' | '>' | '>=' | '!='
 (* Spec: docs/architecture/new-features.md Cluster 3                       *)
 
 forall_expr =
-    'forall' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
+    'forall' , quantifier_bindings , '.' , expression ;
 
 exists_expr =
-    'exists' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
+    'exists' , quantifier_bindings , '.' , expression ;
+
+quantifier_bindings =
+    quantifier_binding , { ',' , quantifier_binding }
+    | '(' , quantifier_binding , { ',' , quantifier_binding } , ')' ;
 
 (* Quantifier binding supports three forms:                                 *)
 (*   1. Type-based:       x: Int                  (type required)          *)

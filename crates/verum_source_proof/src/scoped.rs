@@ -7,6 +7,8 @@ use verum_ast::{BinOp, Expr, ExprKind, Path, PathSegment};
 use verum_common::{Maybe, span::Span};
 use verum_proof::proof_checker::{self as k, Certificate, Context, Level, Term};
 
+mod tactics;
+
 pub const PROFILE: &str = "verum-source-pi-id/1";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -39,6 +41,12 @@ pub enum Ir {
     },
     Refl {
         value: Box<Ir>,
+    },
+    /// Equality transport through an endpoint-dependent type family.
+    J {
+        motive: Box<Ir>,
+        base: Box<Ir>,
+        scrutinee: Box<Ir>,
     },
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,34 +483,24 @@ impl Elab {
             Term::Refl(val) => Ir::Refl {
                 value: Box::new(self.raise(val, frame)?),
             },
+            Term::J {
+                motive,
+                base,
+                scrutinee,
+            } => Ir::J {
+                motive: Box::new(self.raise(motive, frame)?),
+                base: Box::new(self.raise(base, frame)?),
+                scrutinee: Box::new(self.raise(scrutinee, frame)?),
+            },
             _ => return Err(unsupported("kernel type outside selected fragment")),
         })
     }
     fn proof(&mut self, p: &ProofBody, goal: &Ir) -> Result<Ir> {
         match p {
             ProofBody::Term(e) => self.expr(e),
-            ProofBody::Tactic(TacticExpr::Exact(e)) => self.expr(e),
-            ProofBody::Tactic(TacticExpr::Reflexivity) => match goal {
-                Ir::Id { left, .. } => Ok(Ir::Refl {
-                    value: left.clone(),
-                }),
-                _ => Err(unsupported("reflexivity expects identity type")),
-            },
-            ProofBody::Tactic(TacticExpr::Assumption) => {
-                let ctx = self.context()?;
-                let goal = lower(goal, &mut self.frame())?;
-                for b in self.stack.iter().rev() {
-                    let ir = Ir::Var(b.id);
-                    if k::check(&ctx, &lower(&ir, &mut self.frame())?, &goal).is_ok() {
-                        return Ok(ir);
-                    }
-                }
-                Err(Error::Rejected(
-                    "no assumption has the requested type".into(),
-                ))
-            }
+            ProofBody::Tactic(tactic) => self.tactics(tactic, goal),
             _ => Err(unsupported(
-                "only explicit term, exact, assumption and reflexivity proofs are in this profile",
+                "structured proof steps require explicit elaboration; use a term or supported tactics",
             )),
         }
     }
@@ -544,6 +542,15 @@ pub fn lower(t: &Ir, frame: &mut Vec<BinderId>) -> Result<Term> {
             rhs: Box::new(lower(right, frame)?),
         },
         Ir::Refl { value } => Term::Refl(Box::new(lower(value, frame)?)),
+        Ir::J {
+            motive,
+            base,
+            scrutinee,
+        } => Term::j(
+            lower(motive, frame)?,
+            lower(base, frame)?,
+            lower(scrutinee, frame)?,
+        ),
     })
 }
 /// Caller must explicitly select this proof-only profile; it is not the global runtime fn semantics.

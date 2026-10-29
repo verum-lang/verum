@@ -1,0 +1,3 @@
+public theorem transport(a: Type, p: fn(a) -> Type,
+    x: a, y: a, equality: Path<a>(x, y), value: p(x)): p(y)
+proof by rewrite < equality; exact(value);
