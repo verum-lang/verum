@@ -51,6 +51,7 @@ fn run(source: &str) {
 fn returned_resource(annotation: &str) {
     for selected in [
         "match self.value { Choice.Held(value) => value, Choice.Empty => return }",
+        "(match self.value { Choice.Held(value) => value, Choice.Empty => return })",
         "match self.value { Choice.Held(value) => { let value = value; value }, Choice.Empty => { return; } }",
         "match self.value { Choice.Held(value) if false => value, Choice.Held(value) => { if true { value } else { return; } }, Choice.Empty => return }",
     ] {

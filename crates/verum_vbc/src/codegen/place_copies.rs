@@ -66,8 +66,9 @@ impl VbcCodegen {
     ) -> Maybe<TypeRef> {
         use crate::types::{CbgrTier, Mutability};
         if depth >= 64 { return None; }
+        let expr = Self::normalized_place(expr);
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
-        match &Self::normalized_place(expr).kind {
+        match &expr.kind {
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
                 Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
             ExprKind::Block(block) => self.ctx.declared_result_types.get(&block.span).cloned().flatten(),
