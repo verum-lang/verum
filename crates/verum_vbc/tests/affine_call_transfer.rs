@@ -91,6 +91,26 @@ fn probe() -> Int {{
         }
     }
 }
+
+#[test]
+fn unrestricted_call_result_keeps_the_argument_and_caller_cleanup_separate() {
+    let source = r#"
+fn finish(socket: Socket) -> Int { drop(socket); 7 }
+fn make(counter: &mut Count) -> Int {
+    let retained = Socket { counter, digit: 1 };
+    let passed = Socket { counter, digit: 2 };
+    return finish(passed);
+}
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    let result = make(&mut counter);
+    counter.value * 10 + result
+}
+"#;
+    for bootstrap in [false, true] {
+        assert_eq!(run(source, bootstrap), 217);
+    }
+}
 #[test]
 fn borrowed_calls_do_not_consume_or_close_the_referent() {
     let source = r#"

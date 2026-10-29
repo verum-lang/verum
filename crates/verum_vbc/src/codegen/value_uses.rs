@@ -22,6 +22,7 @@ pub(super) struct BindingFact {
 pub(super) struct ReturnUseCapture {
     pub unhandled: bool,
     pub transferred: bool,
+    pub call_transferred: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -82,7 +83,16 @@ impl ValueUseRecorder {
         self.return_use_capture.pop().unwrap_or(ReturnUseCapture {
             unhandled: true,
             transferred: false,
+            call_transferred: false,
         })
+    }
+    fn capture_owned_call_argument(&mut self) {
+        // The parameter declaration authorizes the argument handoff only.
+        // It supplies no producer evidence for the call's result, even when
+        // that result has the same type or is stored into a fresh aggregate.
+        for captured in &mut self.return_use_capture {
+            captured.call_transferred = true;
+        }
     }
     fn capture_affine_operand(&mut self, reg: Reg) {
         if !self.return_use_capture.is_empty()
@@ -343,6 +353,7 @@ impl super::VbcCodegen {
             .and_then(|params| params.get(index)).and_then(|ty| ty.as_ref())
             .is_some_and(|ty| !matches!(ty, TypeRef::Reference { .. }));
         if !owns { return source; }
+        self.ctx.registers.value_uses.capture_owned_call_argument();
         if let Some(ty) = generic {
             return self.emit_generic_value_handoff(source, ty, false);
         }
@@ -393,15 +404,16 @@ impl super::VbcCodegen {
             .current_return_ast_type
             .as_ref()
             .map(|ast| self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids));
-        let declared_affine = declared.as_ref().is_some_and(|ty| {
-            constrained(crate::resource_discipline::resource_discipline_with(
+        let declared_discipline = declared.as_ref().map(|ty| {
+            crate::resource_discipline::resource_discipline_with(
                 ty,
                 |id| {
                     self.type_index_of(id)
                         .and_then(|index| self.types.get(index))
                 },
-            ))
+            )
         });
+        let declared_affine = declared_discipline.is_some_and(constrained);
         let fact = self.ctx.registers.value_uses.active.get(&source);
         // A result declaration is not a consuming event. In particular, a
         // fresh sum/record result must not be rejected merely because one of
@@ -415,8 +427,12 @@ impl super::VbcCodegen {
             binding.reg == source && fact.is_some_and(|fact| fact.id == binding.binding_id)
         });
         let direct_local = exact_local && self.consumes_named_place(expr, source);
-        let fresh_aggregate = capture.transferred && !capture.unhandled && fact.is_none();
-        if (!direct_local && !fresh_aggregate)
+        // A consumed argument cannot establish a resource-bearing result.
+        // An unrestricted result needs no resource handoff of its own, but
+        // still leaves the remaining lexical locals to clean up on this edge.
+        let supported_temporary = capture.transferred && !capture.unhandled && fact.is_none()
+            && (!capture.call_transferred || declared_discipline == Some(ResourceDiscipline::Unrestricted));
+        if (!direct_local && !supported_temporary)
             || self.ctx.has_pending_defers()
             || bindings.iter().any(|(name, binding)| {
                 binding.is_cell

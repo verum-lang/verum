@@ -264,6 +264,25 @@ fn make(counter: &mut Count) -> Watch {
     return forward(held);
 }
 "#,
+        r#"
+type Outcome is Ready(Watch) | Failed(Int);
+fn forward(value: Watch) -> Watch { value }
+fn make(counter: &mut Count) -> Outcome {
+    let held: Watch = Watch { counter, digit: 1 };
+    return Outcome.Ready(forward(held));
+}
+"#,
+        r#"
+type Forwarder is ();
+implement Forwarder {
+    fn forward(&self, value: Watch) -> Watch { value }
+}
+fn make(counter: &mut Count) -> Watch {
+    let forwarder = Forwarder;
+    let held: Watch = Watch { counter, digit: 1 };
+    return forwarder.forward(held);
+}
+"#,
     ] {
         for bootstrap in [false, true] {
             let error = compile(source, bootstrap)
