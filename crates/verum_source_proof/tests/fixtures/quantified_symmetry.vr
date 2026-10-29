@@ -1,0 +1,3 @@
+public theorem symmetry(a: Type, x: a):
+    forall y: a. forall equality: Path<a>(x, y). y == x
+proof by intro(y, equality); rewrite(equality); reflexivity;

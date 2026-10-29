@@ -22,6 +22,14 @@ use verum_lexer::{Token, TokenKind};
 use crate::error::{ErrorCode, ParseError, ParseErrorKind};
 use crate::parser::{ParseResult, RecursiveParser};
 
+/// Undelimited quantifiers own their trailing dot and guard. Nested generic
+/// arguments, tuple fields and function parameters use ordinary parsing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TypeBoundary {
+    Ordinary,
+    Quantifier,
+}
+
 impl<'a> RecursiveParser<'a> {
     /// Parse a type expression.
     ///
@@ -157,14 +165,14 @@ impl<'a> RecursiveParser<'a> {
         // `parse_type_no_sigma`) left `signature_ctx` inert — measured: the
         // return-type-only case still failed while the other three passed.
         // Sigma stays OFF: a theorem's `:` introduces the proposition.
-        self.parse_type_impl_ctx(true, true, false, true)
+        self.parse_type_impl_ctx(true, true, false, true, TypeBoundary::Ordinary)
     }
 
     /// Return type of a DECLARATION: same as
     /// [`Self::parse_type_with_lookahead`], but the refinement-vs-body
     /// question is answered deterministically instead of by name.
     pub fn parse_return_type(&mut self) -> ParseResult<Type> {
-        self.parse_type_impl_ctx(true, true, true, true)
+        self.parse_type_impl_ctx(true, true, true, true, TypeBoundary::Ordinary)
     }
 
     pub fn parse_type_with_lookahead(&mut self) -> ParseResult<Type> {
@@ -178,149 +186,9 @@ impl<'a> RecursiveParser<'a> {
         self.parse_type_impl(true, false, false)
     }
 
-    /// Parse a simple type for quantifier bindings.
-    /// This is a non-path-extending type that doesn't consume `.` for associated types.
-    /// Used in `forall x: T . body` and `exists x: T . body` where `.` separates the
-    /// binding from the body expression, not part of the type.
+    /// Use the common type parser, retaining the quantifier's outer boundary.
     pub fn parse_type_for_quantifier(&mut self) -> ParseResult<Type> {
-        // Save the current position to potentially backtrack
-        let start_pos = self.stream.position();
-
-        // For quantifier bindings, we only want simple types (no path continuation with `.`)
-        // Parse primitives, path types without `.`, function types, etc.
-        // but don't allow T.x to be parsed as associated type
-
-        // Try primitives first
-        if let Some(prim) = self.optional(|p| p.parse_primitive_type()) {
-            // Check for inline refinement: Int{> 0}, Float{!= 0.0}, etc.
-            if self.stream.check(&TokenKind::LBrace) {
-                let predicate = self.parse_refinement_predicate()?;
-                let span = self.stream.make_span(start_pos);
-                return Ok(Type::new(
-                    TypeKind::Refined {
-                        base: Box::new(prim),
-                        predicate: Box::new(predicate),
-                    },
-                    span,
-                ));
-            }
-            return Ok(prim);
-        }
-
-        // Unit type: ()
-        if self.stream.check(&TokenKind::LParen)
-            && let Some(unit) = self.optional(|p| {
-                p.stream.expect(TokenKind::LParen)?;
-                p.stream.expect(TokenKind::RParen)?;
-                let span = p.stream.make_span(start_pos);
-                Ok(Type::unit(span))
-            })
-        {
-            return Ok(unit);
-        }
-
-        // Never type: !
-        if self.stream.check(&TokenKind::Bang) {
-            self.stream.advance();
-            let span = self.stream.make_span(start_pos);
-            return Ok(Type::never(span));
-        }
-
-        // Tuple type: (A, B) - parse without consuming subsequent `.`
-        if self.stream.check(&TokenKind::LParen)
-            && let Some(tuple) = self.optional(|p| p.parse_tuple_type())
-        {
-            return Ok(tuple);
-        }
-
-        // Array/slice type: [T; N] or [T]
-        if self.stream.check(&TokenKind::LBracket) {
-            return self.parse_array_or_slice_type();
-        }
-
-        // Reference types without path extension
-        if self.stream.check_any(&[
-            TokenKind::Ampersand,
-            TokenKind::Percent,
-            TokenKind::Star,
-            TokenKind::StarStar,
-            TokenKind::AmpersandAmpersand,
-        ]) {
-            return self.parse_reference_type();
-        }
-
-        // For simple identifiers/path types: parse just the base identifier without `.` continuation
-        // This is the key difference from parse_path_type - we don't allow T.Item syntax
-        if self.is_ident()
-            || self.stream.check(&TokenKind::SelfValue)
-            || self.stream.check(&TokenKind::SelfType)
-        {
-            return self.parse_simple_path_type_for_quantifier();
-        }
-
-        // Function type
-        if self.stream.check(&TokenKind::Fn) {
-            return self.parse_function_type(Maybe::None);
-        }
-
-        let span = self.stream.current_span();
-        Err(ParseError::invalid_syntax(
-            "expected type in quantifier binding",
-            span,
-        ))
-    }
-
-    /// Parse a simple path-based type without `.` continuation.
-    /// Used for quantifier bindings where `.` separates binding from body.
-    fn parse_simple_path_type_for_quantifier(&mut self) -> ParseResult<Type> {
-        let start_pos = self.stream.position();
-
-        // Parse the type name
-        let name = self.consume_ident()?;
-        let name_span = self.stream.current_span();
-
-        let span = self.stream.make_span(start_pos);
-
-        // Create a simple path type (single segment, no `.` continuation)
-        let path = Path::new(
-            vec![PathSegment::Name(Ident::new(name, name_span))]
-                .into_iter()
-                .collect(),
-            span,
-        );
-
-        let base_type = Type::new(TypeKind::Path(path), span);
-
-        // Check for generic arguments: T<U>
-        let base_type = if self.stream.check(&TokenKind::Lt) {
-            let args = self.parse_generic_args()?;
-            let span = self.stream.make_span(start_pos);
-
-            Type::new(
-                TypeKind::Generic {
-                    base: Box::new(base_type),
-                    args: args.into_iter().collect::<List<_>>(),
-                },
-                span,
-            )
-        } else {
-            base_type
-        };
-
-        // Check for inline refinement: T{predicate} (e.g., Int{> 0 && < m})
-        if self.stream.check(&TokenKind::LBrace) {
-            let predicate = self.parse_refinement_predicate()?;
-            let span = self.stream.make_span(start_pos);
-            Ok(Type::new(
-                TypeKind::Refined {
-                    base: Box::new(base_type),
-                    predicate: Box::new(predicate),
-                },
-                span,
-            ))
-        } else {
-            Ok(base_type)
-        }
+        self.parse_type_impl_ctx(true, false, false, false, TypeBoundary::Quantifier)
     }
 
     fn parse_type_impl(
@@ -329,7 +197,13 @@ impl<'a> RecursiveParser<'a> {
         use_lookahead: bool,
         allow_sigma: bool,
     ) -> ParseResult<Type> {
-        self.parse_type_impl_ctx(allow_refinement, use_lookahead, allow_sigma, false)
+        self.parse_type_impl_ctx(
+            allow_refinement,
+            use_lookahead,
+            allow_sigma,
+            false,
+            TypeBoundary::Ordinary,
+        )
     }
 
     /// `signature_ctx` marks a DECLARATION return type, where the body
@@ -341,10 +215,16 @@ impl<'a> RecursiveParser<'a> {
         use_lookahead: bool,
         allow_sigma: bool,
         signature_ctx: bool,
+        boundary: TypeBoundary,
     ) -> ParseResult<Type> {
         self.enter_recursion()?;
-        let result =
-            self.parse_type_impl_inner(allow_refinement, use_lookahead, allow_sigma, signature_ctx);
+        let result = self.parse_type_impl_inner(
+            allow_refinement,
+            use_lookahead,
+            allow_sigma,
+            signature_ctx,
+            boundary,
+        );
         self.exit_recursion();
         result
     }
@@ -355,6 +235,7 @@ impl<'a> RecursiveParser<'a> {
         use_lookahead: bool,
         allow_sigma: bool,
         signature_ctx: bool,
+        boundary: TypeBoundary,
     ) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
@@ -371,7 +252,7 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // Parse base type
-        let mut base = self.parse_base_type()?;
+        let mut base = self.parse_base_type(boundary)?;
 
         // Check for capability-restricted type: Type with [Capabilities]
         // Capability-restricted types: `Type with [Cap1, Cap2]` restricts a context
@@ -433,29 +314,30 @@ impl<'a> RecursiveParser<'a> {
         // So `where` refinements are only allowed when:
         // 1. use_lookahead is false (type alias context), OR
         // 2. The where is followed by a lambda: where |x| expr
-        let has_where_refinement = self.stream.check(&TokenKind::Where) && {
-            // Check if it's a refinement `where` or a declaration-level where clause
-            // If next token is `meta` or `type`, it's a declaration-level where clause
-            // Note: `where value` and `where ensures` are handled in refinement parsing
-            let is_declaration_where = matches!(
-                self.stream.peek_nth(1).map(|t| &t.kind),
-                Some(TokenKind::Meta) | Some(TokenKind::Type) | Some(TokenKind::Ensures)
-            );
-
-            // If it's a declaration-level where clause, don't treat as refinement
-            if is_declaration_where {
-                false
-            } else {
-                // Check if it's a lambda refinement: where |x| expr
-                let is_lambda_refinement = matches!(
+        let has_where_refinement =
+            boundary == TypeBoundary::Ordinary && self.stream.check(&TokenKind::Where) && {
+                // Check if it's a refinement `where` or a declaration-level where clause
+                // If next token is `meta` or `type`, it's a declaration-level where clause
+                // Note: `where value` and `where ensures` are handled in refinement parsing
+                let is_declaration_where = matches!(
                     self.stream.peek_nth(1).map(|t| &t.kind),
-                    Some(TokenKind::Pipe)
+                    Some(TokenKind::Meta) | Some(TokenKind::Type) | Some(TokenKind::Ensures)
                 );
 
-                // Allow if: not using lookahead, OR it's a lambda refinement
-                !use_lookahead || is_lambda_refinement
-            }
-        };
+                // If it's a declaration-level where clause, don't treat as refinement
+                if is_declaration_where {
+                    false
+                } else {
+                    // Check if it's a lambda refinement: where |x| expr
+                    let is_lambda_refinement = matches!(
+                        self.stream.peek_nth(1).map(|t| &t.kind),
+                        Some(TokenKind::Pipe)
+                    );
+
+                    // Allow if: not using lookahead, OR it's a lambda refinement
+                    !use_lookahead || is_lambda_refinement
+                }
+            };
 
         if allow_refinement && (self.stream.check(&TokenKind::LBrace) || has_where_refinement) {
             // For `where` refinements, we can parse directly without lookahead
@@ -521,107 +403,52 @@ impl<'a> RecursiveParser<'a> {
                     }
                 } else {
                     match self.stream.peek_kind() {
-                    // Empty braces: could be empty body {}, definitely not a refinement
-                    Some(TokenKind::RBrace) => false,
-                    // Comparison operators: definitely a refinement {>= 0}, {< 100}
-                    Some(TokenKind::Gt)
-                    | Some(TokenKind::Lt)
-                    | Some(TokenKind::GtEq)
-                    | Some(TokenKind::LtEq)
-                    | Some(TokenKind::EqEq)
-                    | Some(TokenKind::BangEq) => true,
-                    // Negation operator: could be refinement {!it.starts_with('/')}
-                    // or function body { !foo() }
-                    // Only treat as refinement if the token after ! is 'it'
-                    Some(TokenKind::Bang) => {
-                        // Look at what follows the !
-                        match self.stream.peek_nth(1).map(|t| &t.kind) {
-                            Some(TokenKind::Ident(name)) if name.as_str() == "it" => true,
-                            _ => false, // Conservatively assume function body for { !foo() }, { !true }, etc.
-                        }
-                    }
-                    // Statement keywords: definitely a function body
-                    Some(TokenKind::Let)
-                    | Some(TokenKind::If)
-                    | Some(TokenKind::Return)
-                    | Some(TokenKind::Loop)
-                    | Some(TokenKind::While)
-                    | Some(TokenKind::For)
-                    | Some(TokenKind::Match)
-                    | Some(TokenKind::Break)
-                    | Some(TokenKind::Continue) => false,
-                    // Identifiers are tricky. In practice:
-                    // - Refinements: {is_valid(it)}, {it > 0}
-                    // - Function bodies: {x + y}, {n % 2 == 0}, { x }
-                    //
-
-                    // Conservative approach: assume identifier = function body
-                    // Only treat as refinement if followed immediately by `(`
-                    // (indicating a predicate call like {is_valid(it)})
-                    //
-
-                    // Note: {foo} could be either a refinement or a function body.
-                    // In function return type context, it's more likely a function body,
-                    // so we treat it conservatively as a function body.
-                    // Handle 'result' keyword for return type refinements like Int{result > 0}
-                    // Note: 'result' is lexed as TokenKind::Result (a keyword), not as an identifier
-                    Some(TokenKind::Result) => {
-                        match self.stream.peek_nth(1).map(|t| &t.kind) {
-                            // Comparison operators suggest refinement predicates
-                            Some(TokenKind::Gt)
-                            | Some(TokenKind::Lt)
-                            | Some(TokenKind::GtEq)
-                            | Some(TokenKind::LtEq)
-                            | Some(TokenKind::EqEq)
-                            | Some(TokenKind::BangEq) => true,
-                            // Logical operators
-                            Some(TokenKind::AmpersandAmpersand) | Some(TokenKind::PipePipe) => true,
-                            // Pattern matching: {result is Some => ...}
-                            Some(TokenKind::Is) => true,
-                            // result.xxx is ambiguous: could be refinement {result.len() > 0}
-                            // or function body {result.map(|x| x + 1)}. In return type context,
-                            // treat as function body since method call chains are more common.
-                            // Users should write `result > 0` for simple refinements.
-                            Some(TokenKind::Dot) => false,
-                            _ => false,
-                        }
-                    }
-                    // Handle 'self' for tuple/struct refinements like (Int, Int) { self.0 <= self.1 }
-                    //
-
-                    // IMPORTANT: In return type context (use_lookahead=true), `{ self ... }` is
-                    // almost always a function body, not a refinement:
-                    // - `fn method(&self) -> Bool { self == other }` - function body
-                    // - `fn method(&self) -> Bool { self.x >= 0 }` - function body
-                    //
-
-                    // Refinements on return types use `it` or `result`, not `self`:
-                    // - `fn foo() -> Int { it > 0 }` - refinement
-                    // - `fn foo() -> Int { result >= 0 }` - refinement
-                    //
-
-                    // Type alias contexts (use_lookahead=false) can have `self` refinements:
-                    // - `type Pos is (Int, Int) { self.0 >= 0 && self.1 >= 0 };`
-                    //
-
-                    // Since we're in use_lookahead=true context here, always treat { self ... }
-                    // as a function body to avoid the confusing parse error where the function
-                    // body is consumed as a refinement type.
-                    Some(TokenKind::SelfValue) => false,
-                    Some(TokenKind::Ident(name)) => {
-                        // VERY conservative heuristic: Only treat as refinement if it's explicitly using 'it'
-                        // This avoids false positives like `Bool { x > 0 }` (function body) vs `Int{it > 0}` (refinement)
-                        //
-
-                        // Refinements typically use the implicit `it` variable: {it > 0}, {it.contains('@')}
-                        // For 'result', it's handled as TokenKind::Result above (lexed as a keyword)
-                        // Function bodies use parameter names: {x > 0}, {n % 2 == 0}
-                        //
-
-                        // If the identifier is 'it', check the next token:
-                        if name.as_str() == "it" {
+                        // Empty braces: could be empty body {}, definitely not a refinement
+                        Some(TokenKind::RBrace) => false,
+                        // Comparison operators: definitely a refinement {>= 0}, {< 100}
+                        Some(TokenKind::Gt)
+                        | Some(TokenKind::Lt)
+                        | Some(TokenKind::GtEq)
+                        | Some(TokenKind::LtEq)
+                        | Some(TokenKind::EqEq)
+                        | Some(TokenKind::BangEq) => true,
+                        // Negation operator: could be refinement {!it.starts_with('/')}
+                        // or function body { !foo() }
+                        // Only treat as refinement if the token after ! is 'it'
+                        Some(TokenKind::Bang) => {
+                            // Look at what follows the !
                             match self.stream.peek_nth(1).map(|t| &t.kind) {
-                                Some(TokenKind::Dot) => true, // Method call: {it.contains}
+                                Some(TokenKind::Ident(name)) if name.as_str() == "it" => true,
+                                _ => false, // Conservatively assume function body for { !foo() }, { !true }, etc.
+                            }
+                        }
+                        // Statement keywords: definitely a function body
+                        Some(TokenKind::Let)
+                        | Some(TokenKind::If)
+                        | Some(TokenKind::Return)
+                        | Some(TokenKind::Loop)
+                        | Some(TokenKind::While)
+                        | Some(TokenKind::For)
+                        | Some(TokenKind::Match)
+                        | Some(TokenKind::Break)
+                        | Some(TokenKind::Continue) => false,
+                        // Identifiers are tricky. In practice:
+                        // - Refinements: {is_valid(it)}, {it > 0}
+                        // - Function bodies: {x + y}, {n % 2 == 0}, { x }
+                        //
+
+                        // Conservative approach: assume identifier = function body
+                        // Only treat as refinement if followed immediately by `(`
+                        // (indicating a predicate call like {is_valid(it)})
+                        //
+
+                        // Note: {foo} could be either a refinement or a function body.
+                        // In function return type context, it's more likely a function body,
+                        // so we treat it conservatively as a function body.
+                        // Handle 'result' keyword for return type refinements like Int{result > 0}
+                        // Note: 'result' is lexed as TokenKind::Result (a keyword), not as an identifier
+                        Some(TokenKind::Result) => {
+                            match self.stream.peek_nth(1).map(|t| &t.kind) {
                                 // Comparison operators suggest refinement predicates
                                 Some(TokenKind::Gt)
                                 | Some(TokenKind::Lt)
@@ -633,17 +460,73 @@ impl<'a> RecursiveParser<'a> {
                                 Some(TokenKind::AmpersandAmpersand) | Some(TokenKind::PipePipe) => {
                                     true
                                 }
-                                // Pattern matching: {it is Some => ...}
+                                // Pattern matching: {result is Some => ...}
                                 Some(TokenKind::Is) => true,
+                                // result.xxx is ambiguous: could be refinement {result.len() > 0}
+                                // or function body {result.map(|x| x + 1)}. In return type context,
+                                // treat as function body since method call chains are more common.
+                                // Users should write `result > 0` for simple refinements.
+                                Some(TokenKind::Dot) => false,
                                 _ => false,
                             }
-                        } else {
-                            // Not 'it' - conservatively assume function body
-                            false
                         }
-                    }
-                    // Other tokens: conservatively assume function body
-                    _ => false,
+                        // Handle 'self' for tuple/struct refinements like (Int, Int) { self.0 <= self.1 }
+                        //
+
+                        // IMPORTANT: In return type context (use_lookahead=true), `{ self ... }` is
+                        // almost always a function body, not a refinement:
+                        // - `fn method(&self) -> Bool { self == other }` - function body
+                        // - `fn method(&self) -> Bool { self.x >= 0 }` - function body
+                        //
+
+                        // Refinements on return types use `it` or `result`, not `self`:
+                        // - `fn foo() -> Int { it > 0 }` - refinement
+                        // - `fn foo() -> Int { result >= 0 }` - refinement
+                        //
+
+                        // Type alias contexts (use_lookahead=false) can have `self` refinements:
+                        // - `type Pos is (Int, Int) { self.0 >= 0 && self.1 >= 0 };`
+                        //
+
+                        // Since we're in use_lookahead=true context here, always treat { self ... }
+                        // as a function body to avoid the confusing parse error where the function
+                        // body is consumed as a refinement type.
+                        Some(TokenKind::SelfValue) => false,
+                        Some(TokenKind::Ident(name)) => {
+                            // VERY conservative heuristic: Only treat as refinement if it's explicitly using 'it'
+                            // This avoids false positives like `Bool { x > 0 }` (function body) vs `Int{it > 0}` (refinement)
+                            //
+
+                            // Refinements typically use the implicit `it` variable: {it > 0}, {it.contains('@')}
+                            // For 'result', it's handled as TokenKind::Result above (lexed as a keyword)
+                            // Function bodies use parameter names: {x > 0}, {n % 2 == 0}
+                            //
+
+                            // If the identifier is 'it', check the next token:
+                            if name.as_str() == "it" {
+                                match self.stream.peek_nth(1).map(|t| &t.kind) {
+                                    Some(TokenKind::Dot) => true, // Method call: {it.contains}
+                                    // Comparison operators suggest refinement predicates
+                                    Some(TokenKind::Gt)
+                                    | Some(TokenKind::Lt)
+                                    | Some(TokenKind::GtEq)
+                                    | Some(TokenKind::LtEq)
+                                    | Some(TokenKind::EqEq)
+                                    | Some(TokenKind::BangEq) => true,
+                                    // Logical operators
+                                    Some(TokenKind::AmpersandAmpersand)
+                                    | Some(TokenKind::PipePipe) => true,
+                                    // Pattern matching: {it is Some => ...}
+                                    Some(TokenKind::Is) => true,
+                                    _ => false,
+                                }
+                            } else {
+                                // Not 'it' - conservatively assume function body
+                                false
+                            }
+                        }
+                        // Other tokens: conservatively assume function body
+                        _ => false,
                     }
                 };
 
@@ -793,14 +676,14 @@ impl<'a> RecursiveParser<'a> {
     }
 
     /// Parse a base type (without refinements).
-    fn parse_base_type(&mut self) -> ParseResult<Type> {
+    fn parse_base_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
         // Type lambda: |x| TypeExpr or |x, y| TypeExpr
         // Used in dependent type positions: Sigma<A, |a| B(a)>
         // Try to parse as type lambda first; if it fails, report the original error.
         if self.stream.check(&TokenKind::Pipe) {
-            if let Some(type_lambda) = self.optional(|p| p.parse_type_lambda()) {
+            if let Some(type_lambda) = self.optional(|p| p.parse_type_lambda(boundary)) {
                 return Ok(type_lambda);
             }
             // If type lambda parsing failed, report the original error
@@ -898,7 +781,7 @@ impl<'a> RecursiveParser<'a> {
                     // Type<...> — generic path type, fall through
                     Some(TokenKind::Lt) => {}
                     // Type.Foo — associated/path type, fall through
-                    Some(TokenKind::Dot) => {}
+                    Some(TokenKind::Dot) if boundary == TypeBoundary::Ordinary => {}
                     // Bare `Type` — universe Type(0)
                     _ => {
                         return self.parse_universe_type();
@@ -918,7 +801,7 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.peek_nth(1).map(|t| &t.kind),
                 Some(TokenKind::Fn)
             ) {
-                return self.parse_async_function_type();
+                return self.parse_async_function_type(boundary);
             } else if matches!(
                 self.stream.peek_nth(1).map(|t| &t.kind),
                 Some(TokenKind::Async)
@@ -933,18 +816,18 @@ impl<'a> RecursiveParser<'a> {
                 // The async qualifier is treated as an annotation on the bound
                 // e.g., `async FnOnce()` is parsed as `FnOnce()` with async semantics
                 self.stream.advance(); // consume 'async'
-                return self.parse_type_no_refinement();
+                return self.parse_type_impl_ctx(false, false, true, false, boundary);
             }
         }
 
         // Function type: fn(A, B) -> C or extern "C" fn(A, B) -> C
         if self.stream.check(&TokenKind::Fn) {
-            return self.parse_function_type(Maybe::None);
+            return self.parse_function_type(Maybe::None, boundary);
         }
 
         // Extern function pointer type: extern "C" fn(A, B) -> C
         if self.stream.check(&TokenKind::Extern) {
-            return self.parse_extern_function_type();
+            return self.parse_extern_function_type(boundary);
         }
 
         // Tuple type: (A, B, C) - at least 2 elements
@@ -969,7 +852,7 @@ impl<'a> RecursiveParser<'a> {
             TokenKind::StarStar,
             TokenKind::AmpersandAmpersand,
         ]) {
-            return self.parse_reference_type();
+            return self.parse_reference_type(boundary);
         }
 
         // Type placeholder: _ (must be checked BEFORE path-based types)
@@ -989,7 +872,7 @@ impl<'a> RecursiveParser<'a> {
         // Example: fn take<T>(k: meta K) -> SizedList<T, K>
         if self.stream.check(&TokenKind::Meta) {
             self.stream.advance(); // consume 'meta'
-            let inner = self.parse_type_no_refinement()?;
+            let inner = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
             let span = self.stream.make_span(start_pos);
             return Ok(Type::new(
                 TypeKind::Meta {
@@ -1023,7 +906,7 @@ impl<'a> RecursiveParser<'a> {
             || self.stream.check(&TokenKind::Cog)
             || self.stream.check(&TokenKind::Module)
         {
-            return self.parse_path_type();
+            return self.parse_path_type(boundary);
         }
 
         let span = self.stream.current_span();
@@ -1033,7 +916,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse type lambda: |x| TypeExpr or |x, y| TypeExpr
     /// Used in dependent type contexts: Sigma<A, |a| B(a)>
     /// Grammar: '|' ident {',' ident} '|' type_expr
-    fn parse_type_lambda(&mut self) -> ParseResult<Type> {
+    fn parse_type_lambda(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
         self.stream.expect(TokenKind::Pipe)?;
 
@@ -1054,7 +937,7 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Pipe)?;
 
         // Parse body type
-        let body = self.parse_type_no_refinement()?;
+        let body = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
 
         let span = self.stream.make_span(start_pos);
         Ok(Type::new(
@@ -1478,7 +1361,7 @@ impl<'a> RecursiveParser<'a> {
     /// - `extern "stdcall" fn(...)` - Windows stdcall
     /// - `extern "fastcall" fn(...)` - Fast call convention
     /// - `extern "sysv64" fn(...)` - System V AMD64 ABI
-    fn parse_extern_function_type(&mut self) -> ParseResult<Type> {
+    fn parse_extern_function_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
         self.stream.expect(TokenKind::Extern)?;
@@ -1511,7 +1394,7 @@ impl<'a> RecursiveParser<'a> {
         };
 
         // Now parse the function type with the calling convention
-        self.parse_function_type(Maybe::Some(calling_convention))
+        self.parse_function_type(Maybe::Some(calling_convention), boundary)
     }
 
     /// Parse function type: fn(A, B) -> C or fn<R>(A, R) -> R (rank-2)
@@ -1525,6 +1408,7 @@ impl<'a> RecursiveParser<'a> {
     fn parse_function_type(
         &mut self,
         calling_convention: Maybe<CallingConvention>,
+        boundary: TypeBoundary,
     ) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
@@ -1600,7 +1484,7 @@ impl<'a> RecursiveParser<'a> {
                     ErrorCode::FnTypeMissingReturn,
                 ));
             }
-            self.parse_type_with_lookahead()?
+            self.parse_type_impl_ctx(true, true, true, false, boundary)?
         } else {
             let span = self.stream.current_span();
             Type::unit(span)
@@ -1621,7 +1505,10 @@ impl<'a> RecursiveParser<'a> {
         };
 
         // Optional where clause for rank-2 types: fn<T>(T) -> T where type T: Clone
-        let where_clause = if !type_params.is_empty() && self.stream.check(&TokenKind::Where) {
+        let where_clause = if boundary == TypeBoundary::Ordinary
+            && !type_params.is_empty()
+            && self.stream.check(&TokenKind::Where)
+        {
             Maybe::Some(self.parse_where_clause()?)
         } else {
             Maybe::None
@@ -1655,14 +1542,14 @@ impl<'a> RecursiveParser<'a> {
     /// Transforms to fn(A, B) -> Future<C>
     ///
     /// Grammar: function_type = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
-    fn parse_async_function_type(&mut self) -> ParseResult<Type> {
+    fn parse_async_function_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
         // Consume 'async'
         self.stream.expect(TokenKind::Async)?;
 
         // Parse the rest as a regular function type
-        let fn_type = self.parse_function_type(Maybe::None)?;
+        let fn_type = self.parse_function_type(Maybe::None, boundary)?;
 
         // Wrap the return type in Future<T>
         // async fn() -> T becomes fn() -> Future<T>
@@ -1853,7 +1740,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse reference types: &T, &mut T, &checked T, &unsafe T, &'a T, %T, *const T, *mut T
     /// Also handles && (AmpersandAmpersand) by splitting it into two & tokens for double references: &&T
-    fn parse_reference_type(&mut self) -> ParseResult<Type> {
+    fn parse_reference_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
         // Handle && (AmpersandAmpersand) token by splitting it into two & tokens
@@ -1962,7 +1849,7 @@ impl<'a> RecursiveParser<'a> {
             // where F: fn(Int) -> Int { body }
             // Without this, the parser would try to parse `Int{ body }` as a refinement.
             // If you need &(Int{> 0}), write it explicitly with parentheses.
-            let inner = self.parse_type_no_refinement()?;
+            let inner = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
             let span = self.stream.make_span(start_pos);
 
             let kind = if is_checked {
@@ -1989,7 +1876,7 @@ impl<'a> RecursiveParser<'a> {
         if self.stream.consume(&TokenKind::Percent).is_some() {
             let mutable = self.stream.consume(&TokenKind::Mut).is_some();
             // Parse inner type WITHOUT refinements to avoid consuming function body brace
-            let inner = self.parse_type_no_refinement()?;
+            let inner = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
             let span = self.stream.make_span(start_pos);
 
             return Ok(Type::new(
@@ -2025,7 +1912,7 @@ impl<'a> RecursiveParser<'a> {
             // Check for volatile pointer: *volatile T or *volatile mut T
             if self.stream.consume(&TokenKind::Volatile).is_some() {
                 let mutable = self.stream.consume(&TokenKind::Mut).is_some();
-                let inner = self.parse_type_no_refinement()?;
+                let inner = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
                 let span = self.stream.make_span(start_pos);
                 return Ok(Type::new(
                     TypeKind::VolatilePointer {
@@ -2049,7 +1936,7 @@ impl<'a> RecursiveParser<'a> {
             // Parse inner type WITHOUT refinements to avoid consuming function body brace
             // For example: fn get_ptr() -> *const Int { body }
             // Without this, the parser would try to parse `Int{ body }` as a refinement.
-            let inner = self.parse_type_no_refinement()?;
+            let inner = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
             let span = self.stream.make_span(start_pos);
 
             return Ok(Type::new(
@@ -2069,10 +1956,16 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse path-based type with optional generic arguments.
     /// Also handles associated type instantiation: Protocol::Assoc<T> or Self.Item<T>
-    fn parse_path_type(&mut self) -> ParseResult<Type> {
+    fn parse_path_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
-        let path = self.parse_path()?;
+        let path = match boundary {
+            TypeBoundary::Ordinary => self.parse_path()?,
+            TypeBoundary::Quantifier => {
+                let segment = self.parse_path_segment()?;
+                Path::new(List::from_iter([segment]), self.stream.make_span(start_pos))
+            }
+        };
 
         // Check for associated type projection with dot notation: Self.Item<T>, T.Item<U>
         // This is Verum's syntax for associated types (not Self::Item)
@@ -2184,7 +2077,10 @@ impl<'a> RecursiveParser<'a> {
         // This prevents `.` from being consumed when it's used as a separator in
         // forall/exists expressions (e.g., `forall i: T . body`), where the `.`
         // separates the quantifier binding from the body expression.
-        while self.stream.check(&TokenKind::Dot) && self.is_dot_followed_by_ident() {
+        while boundary == TypeBoundary::Ordinary
+            && self.stream.check(&TokenKind::Dot)
+            && self.is_dot_followed_by_ident()
+        {
             self.stream.advance(); // consume '.'
             // Parse the associated type name
             let assoc_name = self.consume_ident()?;
@@ -2355,7 +2251,7 @@ impl<'a> RecursiveParser<'a> {
             if self.stream.consume(&TokenKind::RArrow).is_some() {
                 // Use parse_type_no_refinement to avoid consuming { } as refinement
                 // This is especially important in where clauses
-                let return_type = self.parse_type_no_refinement()?;
+                let return_type = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
                 // Add Output = R as an associated type binding
                 // For now, we'll represent this as a Const generic arg wrapping the type
                 // The type checker will interpret this correctly

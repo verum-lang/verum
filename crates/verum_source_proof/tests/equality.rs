@@ -23,6 +23,7 @@ fn accepts(source: &str, declaration: &str) -> Certificate {
 }
 
 const TRANSPORT: &str = include_str!("fixtures/transport.vr");
+const QUANTIFIED: &str = include_str!("fixtures/quantified_symmetry.vr");
 const SYMMETRY: &str =
     "theorem t(a:Type,x:a,y:a,h:Path<a>(x,y)):y==x proof by rewrite(h); reflexivity;";
 const CHAIN: &str = "theorem t(a:Type,x:a,y:a,z:a,h:Path<a>(x,y),k:Path<a>(y,z)):x==z proof by { rewrite(h); { rewrite(k); reflexivity; } };";
@@ -110,6 +111,24 @@ fn introductions_and_rewrites_preserve_shadowing_and_alpha_renaming() {
 }
 
 #[test]
+fn quantified_dependent_types_do_not_require_extra_parentheses() {
+    accepts(QUANTIFIED, "symmetry");
+    for source in [INTRO, FAMILY] {
+        let bare = source
+            .replace("(h:Path<a>(x,y))", "h:Path<a>(x,y)")
+            .replace("(z:p(x))", "z:p(x)");
+        let grouped = accepts(source, "t");
+        let plain = accepts(&bare, "t");
+        assert_eq!(plain.term, grouped.term);
+        assert_eq!(plain.claimed_type, grouped.claimed_type);
+    }
+    accepts(
+        "theorem t():forall a:Type. forall x:a. a proof by intro(a,x); exact(x);",
+        "t",
+    );
+}
+
+#[test]
 fn invalid_proofs_do_not_become_successful_goal_mutations() {
     for source in [
         "theorem t(a:Type,x:a,y:a):x==y proof by reflexivity;",
@@ -161,6 +180,7 @@ fn independently_replay_source_transports_and_corrupted_certificates() {
     let mut cases = List::new();
     for (source, name) in [
         (TRANSPORT, "transport"),
+        (QUANTIFIED, "symmetry"),
         (SYMMETRY, "t"),
         (CHAIN, "t"),
         (CONGRUENCE, "t"),
