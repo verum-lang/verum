@@ -76,6 +76,12 @@ example (past : List Nat) (n : Nat) :
   shared_words_normalized oneCell splitCells past n
 example : Equal (sum ((CategoricalPrediction.words 2 3).map
     (contextMass splitCells.choose splitCells.counts []))) one := by decide_cbv
+example : matched (recordedMass alphabet ([(3,7),(3,11)] : List (Nat × Nat)))
+    (unit 8 (by decide)) = true := by decide_cbv
+example : matched (recordedMass alphabet ([(3,7),(9,11)] : List (Nat × Nat)))
+    (unit 4 (by decide)) = true := by decide_cbv
+example : recordedMass alphabet ([(3,13)] : List (Nat × Nat)) = none := by decide_cbv
+example : recordedMass alphabet ([] : List (Nat × Nat)) = some one := by decide_cbv
 ''')
 
     def test_reference_cancellation_and_original_price(self):
@@ -109,6 +115,8 @@ example : Equal (add (predict singleton ⟨0,by decide⟩) (predict singleton �
             'zero_reference_is_positive':'0 < zero.numerator',
             'outcome_selected_support':'Equal (add (predict singleton ⟨0,by decide⟩) (predict singleton ⟨0,by decide⟩)) one',
             'drop_unobserved_words':'Equal (sum ([[0,0],[1,1]].map (contextMass oneCell.choose oneCell.counts []))) one',
+            'recorded_partition_merged':'matched (recordedMass alphabet ([(3,7),(9,11)] : List (Nat × Nat))) (unit 8 (by decide)) = true',
+            'recorded_unknown_label':'(recordedMass alphabet ([(3,13)] : List (Nat × Nat))).isSome = true',
         }
         for name,claim in claims.items():
             with self.subTest(control=name):self.prove(f'example : {claim} := by decide_cbv\n',True)

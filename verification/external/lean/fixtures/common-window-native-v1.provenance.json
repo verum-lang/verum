@@ -1,0 +1,110 @@
+{
+  "export_sha256": "f5b665781cbffcd16d86c5096d6fa7644aa4c441980e4a81f515e4975305d088",
+  "native_source_parent": "212437a417507bd99bf0ef124c6836a5f3e0f600",
+  "native_source_patch_sha256": "e53489305fc77909fa220655daf4bda9715e16fd986bfd45fdb45df178a21cfc",
+  "verified_native_source_files": 1511,
+  "native_binary_sha256": "12980d7ec795237df6ca8ef35281b0d33b7099432ff9f820352149935e636946",
+  "native_binary_format": "Mach-O arm64 64-bit",
+  "native_original_receipt_sha256": "89b65c9e1b306ca76fe8e419c7b42adaf4b178cceb144e02c9162a218c160540",
+  "native_original_status": "interrupted_after_native_failure",
+  "native_original_failure": "automatic: same_paid_family_completes_fresh_validation_then_replaces_a_general_incumbent unwraps EmptyWindow; process exit unavailable after controller interruption",
+  "native_scopes": [
+    {
+      "name": "common-window",
+      "status": "passed",
+      "returncode": 0,
+      "counts": {
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 1921
+      },
+      "log": {
+        "bytes": 1265,
+        "sha256": "0ed38f07e9b77a59ab3b9931256db4a70e0eb704061a19199ca768e2eddcd968"
+      }
+    },
+    {
+      "name": "general-duel",
+      "status": "passed",
+      "returncode": 0,
+      "counts": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 1920
+      },
+      "log": {
+        "bytes": 1119,
+        "sha256": "3910cad6aade5a401ae0f6ad62431e4db9389d4b4f2ffbb17b94861b9c9fb55b"
+      }
+    }
+  ],
+  "producer": "rust/crates/synarc-kan/src/program/observer/acquisition/common_window/courts.rs",
+  "producer_sha256": "835e714014203e93e8cee01e05f0f89fdc9139c98f27e0c3f16abed9968b13ae",
+  "scope": "Supplied native readings to declared-support parent/child KT and compression. Shared-window equality is a native observation. Original price factors checked for coherence only. No VM/read causality, preregistration, weighted Comparison stage, admission, or full native suite success claim.",
+  "additional_native_binding": {
+    "source_parent": "212437a417507bd99bf0ef124c6836a5f3e0f600",
+    "source_patch_sha256": "931d27d63b538da65a355e6140b89e2eefef586a515062bb9411f82323e52f26",
+    "source_files": 1511,
+    "binary_sha256": "73c048aef1a8eb3b0645e2715e0214a6d3e35a042a0fd15e467cd6493b8f88b1",
+    "receipt_sha256": "38b9d41d302293328f9f61667f881d7d4d33647c891f0c58b9eed37f0e1d5940",
+    "status": "scoped_passed_with_behavioral_failures",
+    "passed_scopes": [
+      "typecheck",
+      "build",
+      "common-window",
+      "general-duel",
+      "legacy-reference",
+      "clock-correspondence",
+      "identity-reference",
+      "origin",
+      "canonical-miss",
+      "canonical-toll",
+      "sequences",
+      "native-sequences",
+      "predictive-source",
+      "portable-sequences",
+      "prefix-native",
+      "residual-laws",
+      "structural",
+      "pricing",
+      "control-vm",
+      "acquisition",
+      "automatic",
+      "source-boundary",
+      "causal-history",
+      "receiver",
+      "native-invocation",
+      "arena",
+      "typecheck-no-serde"
+    ],
+    "failed_controls": [
+      {
+        "name": "unchanged-monoid",
+        "returncode": 101,
+        "counts": {
+          "passed": 0,
+          "failed": 1,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 1929
+        }
+      },
+      {
+        "name": "unchanged-safety",
+        "returncode": 101,
+        "counts": {
+          "passed": 0,
+          "failed": 1,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 1929
+        }
+      }
+    ],
+    "scope": "Identical exported bytes; common-window implementation and producer unchanged. Source-discovery/ownership scopes, both typechecks and arena pass; separate behavioral control failures remain visible."
+  }
+}

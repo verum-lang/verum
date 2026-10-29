@@ -1,0 +1,1333 @@
+{
+  "child_ratio": {
+    "denominator": "15944049",
+    "numerator": "13648104868480004370212554931640625"
+  },
+  "declaration_identity": 1,
+  "descriptive_only": true,
+  "new_child_kt": {
+    "denominator": "1291467969",
+    "numerator": "1"
+  },
+  "new_definition": {
+    "initial": 7,
+    "read": "Program { steps: [Step { operation: Primitive(Read), arguments: [Literal(0), Input(1)] }], output: Some(0), library: [] }",
+    "update": "Program { steps: [Step { operation: Primitive(Update), arguments: [Input(0), Input(1)] }], output: Some(0), library: [] }"
+  },
+  "new_native_compression_ratio": {
+    "denominator": "4563240143994081",
+    "numerator": "53622117258829820555977731498972641348703905299419342049"
+  },
+  "new_original_price": {
+    "authority": "ExplicitUniformSingleUse",
+    "mass_denominator": "2",
+    "name_denominator": "2",
+    "paid_look": null
+  },
+  "new_training_support": {
+    "0": [
+      0,
+      1,
+      2
+    ],
+    "1": [
+      0,
+      1,
+      2
+    ]
+  },
+  "old_child_kt": {
+    "denominator": "1105496494346880353987216949462890625",
+    "numerator": "1"
+  },
+  "old_definition": {
+    "initial": 7,
+    "read": "Program { steps: [Step { operation: Primitive(Read), arguments: [Input(0), Input(1)] }], output: Some(0), library: [] }",
+    "update": "Program { steps: [Step { operation: Primitive(Update), arguments: [Input(0), Input(1)] }], output: Some(0), library: [] }"
+  },
+  "old_native_compression_ratio": {
+    "denominator": "196852196546615232364274561405181884765625",
+    "numerator": "2702322444114289165878094756924485465719771987184398329"
+  },
+  "old_original_price": {
+    "authority": "ExplicitUniformSingleUse",
+    "mass_denominator": "1",
+    "name_denominator": "1",
+    "paid_look": null
+  },
+  "old_training_support": {
+    "0": [
+      0,
+      1
+    ]
+  },
+  "ordered_rows": [
+    {
+      "context": 0,
+      "cut": 0,
+      "new_reading": 0,
+      "old_reading": 7,
+      "ordinal": 0,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 1,
+      "new_reading": 1,
+      "old_reading": 20,
+      "ordinal": 1,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 2,
+      "new_reading": 2,
+      "old_reading": 61,
+      "ordinal": 2,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 3,
+      "new_reading": 0,
+      "old_reading": 92,
+      "ordinal": 3,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 4,
+      "new_reading": 1,
+      "old_reading": 83,
+      "ordinal": 4,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 5,
+      "new_reading": 2,
+      "old_reading": 54,
+      "ordinal": 5,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 6,
+      "new_reading": 0,
+      "old_reading": 59,
+      "ordinal": 6,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 7,
+      "new_reading": 1,
+      "old_reading": 81,
+      "ordinal": 7,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 8,
+      "new_reading": 2,
+      "old_reading": 44,
+      "ordinal": 8,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 9,
+      "new_reading": 0,
+      "old_reading": 41,
+      "ordinal": 9,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 10,
+      "new_reading": 1,
+      "old_reading": 27,
+      "ordinal": 10,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 11,
+      "new_reading": 2,
+      "old_reading": 76,
+      "ordinal": 11,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 12,
+      "new_reading": 0,
+      "old_reading": 40,
+      "ordinal": 12,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 13,
+      "new_reading": 1,
+      "old_reading": 22,
+      "ordinal": 13,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 14,
+      "new_reading": 2,
+      "old_reading": 71,
+      "ordinal": 14,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 15,
+      "new_reading": 0,
+      "old_reading": 13,
+      "ordinal": 15,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 16,
+      "new_reading": 1,
+      "old_reading": 38,
+      "ordinal": 16,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 17,
+      "new_reading": 2,
+      "old_reading": 22,
+      "ordinal": 17,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 18,
+      "new_reading": 0,
+      "old_reading": 60,
+      "ordinal": 18,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 19,
+      "new_reading": 1,
+      "old_reading": 82,
+      "ordinal": 19,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 20,
+      "new_reading": 2,
+      "old_reading": 53,
+      "ordinal": 20,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 21,
+      "new_reading": 0,
+      "old_reading": 68,
+      "ordinal": 21,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 22,
+      "new_reading": 1,
+      "old_reading": 11,
+      "ordinal": 22,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 23,
+      "new_reading": 2,
+      "old_reading": 28,
+      "ordinal": 23,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 24,
+      "new_reading": 0,
+      "old_reading": 90,
+      "ordinal": 24,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 25,
+      "new_reading": 1,
+      "old_reading": 77,
+      "ordinal": 25,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 26,
+      "new_reading": 2,
+      "old_reading": 32,
+      "ordinal": 26,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 27,
+      "new_reading": 0,
+      "old_reading": 5,
+      "ordinal": 27,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 28,
+      "new_reading": 1,
+      "old_reading": 14,
+      "ordinal": 28,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 29,
+      "new_reading": 2,
+      "old_reading": 47,
+      "ordinal": 29,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 30,
+      "new_reading": 0,
+      "old_reading": 38,
+      "ordinal": 30,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 31,
+      "new_reading": 1,
+      "old_reading": 16,
+      "ordinal": 31,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 32,
+      "new_reading": 2,
+      "old_reading": 49,
+      "ordinal": 32,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 33,
+      "new_reading": 0,
+      "old_reading": 56,
+      "ordinal": 33,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 34,
+      "new_reading": 1,
+      "old_reading": 70,
+      "ordinal": 34,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 35,
+      "new_reading": 2,
+      "old_reading": 17,
+      "ordinal": 35,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 36,
+      "new_reading": 0,
+      "old_reading": 57,
+      "ordinal": 36,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 37,
+      "new_reading": 1,
+      "old_reading": 75,
+      "ordinal": 37,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 38,
+      "new_reading": 2,
+      "old_reading": 30,
+      "ordinal": 38,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 39,
+      "new_reading": 0,
+      "old_reading": 84,
+      "ordinal": 39,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 40,
+      "new_reading": 1,
+      "old_reading": 59,
+      "ordinal": 40,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 41,
+      "new_reading": 2,
+      "old_reading": 79,
+      "ordinal": 41,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 42,
+      "new_reading": 0,
+      "old_reading": 37,
+      "ordinal": 42,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 43,
+      "new_reading": 1,
+      "old_reading": 15,
+      "ordinal": 43,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 44,
+      "new_reading": 2,
+      "old_reading": 40,
+      "ordinal": 44,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 45,
+      "new_reading": 0,
+      "old_reading": 29,
+      "ordinal": 45,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 46,
+      "new_reading": 1,
+      "old_reading": 86,
+      "ordinal": 46,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 47,
+      "new_reading": 2,
+      "old_reading": 65,
+      "ordinal": 47,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 48,
+      "new_reading": 0,
+      "old_reading": 7,
+      "ordinal": 48,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 49,
+      "new_reading": 1,
+      "old_reading": 20,
+      "ordinal": 49,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 50,
+      "new_reading": 2,
+      "old_reading": 61,
+      "ordinal": 50,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 51,
+      "new_reading": 0,
+      "old_reading": 92,
+      "ordinal": 51,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 52,
+      "new_reading": 1,
+      "old_reading": 83,
+      "ordinal": 52,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 53,
+      "new_reading": 2,
+      "old_reading": 54,
+      "ordinal": 53,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 54,
+      "new_reading": 0,
+      "old_reading": 59,
+      "ordinal": 54,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 55,
+      "new_reading": 1,
+      "old_reading": 81,
+      "ordinal": 55,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 56,
+      "new_reading": 2,
+      "old_reading": 44,
+      "ordinal": 56,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 57,
+      "new_reading": 0,
+      "old_reading": 41,
+      "ordinal": 57,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 58,
+      "new_reading": 1,
+      "old_reading": 27,
+      "ordinal": 58,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 59,
+      "new_reading": 2,
+      "old_reading": 76,
+      "ordinal": 59,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 60,
+      "new_reading": 0,
+      "old_reading": 40,
+      "ordinal": 60,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 61,
+      "new_reading": 1,
+      "old_reading": 22,
+      "ordinal": 61,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 62,
+      "new_reading": 2,
+      "old_reading": 71,
+      "ordinal": 62,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 63,
+      "new_reading": 0,
+      "old_reading": 13,
+      "ordinal": 63,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 64,
+      "new_reading": 1,
+      "old_reading": 38,
+      "ordinal": 64,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 65,
+      "new_reading": 2,
+      "old_reading": 22,
+      "ordinal": 65,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 66,
+      "new_reading": 0,
+      "old_reading": 60,
+      "ordinal": 66,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 67,
+      "new_reading": 1,
+      "old_reading": 82,
+      "ordinal": 67,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 68,
+      "new_reading": 2,
+      "old_reading": 53,
+      "ordinal": 68,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 69,
+      "new_reading": 0,
+      "old_reading": 68,
+      "ordinal": 69,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 70,
+      "new_reading": 1,
+      "old_reading": 11,
+      "ordinal": 70,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 71,
+      "new_reading": 2,
+      "old_reading": 28,
+      "ordinal": 71,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 72,
+      "new_reading": 0,
+      "old_reading": 90,
+      "ordinal": 72,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 73,
+      "new_reading": 1,
+      "old_reading": 77,
+      "ordinal": 73,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 74,
+      "new_reading": 2,
+      "old_reading": 32,
+      "ordinal": 74,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 75,
+      "new_reading": 0,
+      "old_reading": 5,
+      "ordinal": 75,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 76,
+      "new_reading": 1,
+      "old_reading": 14,
+      "ordinal": 76,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 77,
+      "new_reading": 2,
+      "old_reading": 47,
+      "ordinal": 77,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 78,
+      "new_reading": 0,
+      "old_reading": 38,
+      "ordinal": 78,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 79,
+      "new_reading": 1,
+      "old_reading": 16,
+      "ordinal": 79,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 80,
+      "new_reading": 2,
+      "old_reading": 49,
+      "ordinal": 80,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 81,
+      "new_reading": 0,
+      "old_reading": 56,
+      "ordinal": 81,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 82,
+      "new_reading": 1,
+      "old_reading": 70,
+      "ordinal": 82,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 83,
+      "new_reading": 2,
+      "old_reading": 17,
+      "ordinal": 83,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 84,
+      "new_reading": 0,
+      "old_reading": 57,
+      "ordinal": 84,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 85,
+      "new_reading": 1,
+      "old_reading": 75,
+      "ordinal": 85,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 86,
+      "new_reading": 2,
+      "old_reading": 30,
+      "ordinal": 86,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 87,
+      "new_reading": 0,
+      "old_reading": 84,
+      "ordinal": 87,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 88,
+      "new_reading": 1,
+      "old_reading": 59,
+      "ordinal": 88,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 89,
+      "new_reading": 2,
+      "old_reading": 79,
+      "ordinal": 89,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 90,
+      "new_reading": 0,
+      "old_reading": 37,
+      "ordinal": 90,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 91,
+      "new_reading": 1,
+      "old_reading": 15,
+      "ordinal": 91,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 92,
+      "new_reading": 2,
+      "old_reading": 40,
+      "ordinal": 92,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 93,
+      "new_reading": 0,
+      "old_reading": 29,
+      "ordinal": 93,
+      "origin": 0,
+      "outcome": 0,
+      "query_interface": 1,
+      "query_values": [
+        0
+      ]
+    },
+    {
+      "context": 0,
+      "cut": 94,
+      "new_reading": 1,
+      "old_reading": 86,
+      "ordinal": 94,
+      "origin": 0,
+      "outcome": 1,
+      "query_interface": 1,
+      "query_values": [
+        1
+      ]
+    },
+    {
+      "context": 1,
+      "cut": 95,
+      "new_reading": 2,
+      "old_reading": 65,
+      "ordinal": 95,
+      "origin": 0,
+      "outcome": 2,
+      "query_interface": 1,
+      "query_values": [
+        2
+      ]
+    }
+  ],
+  "parent_kt": {
+    "denominator": "6488276188318408287273305511375689603193172541229740387929",
+    "numerator": "427538329"
+  },
+  "same_window_owner": true,
+  "schema": "synarc-common-window-v1",
+  "support": {
+    "0": [
+      0,
+      1,
+      2
+    ],
+    "1": [
+      0,
+      1,
+      2
+    ]
+  },
+  "window_identity": 1
+}

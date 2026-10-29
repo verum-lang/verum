@@ -71,6 +71,54 @@ theorem child_positive [DecidableEq Cell] (partition : Partition alphabet Cell)
     subst mass
     exact context_path_positive _ _ _ _ _ _ path
 
+/-- Replay supplied cell readings against the declared alphabet, starting with
+empty counts. This checks their scoring, not the program that produced them or
+whether it read future outcomes. The total selector's fallback is never used
+on the supplied word: its position is the length of the already scored prefix. -/
+def recordedPartition (alphabet : Alphabet Label) (first : Cell)
+    (readings : List Cell) : Partition alphabet Cell where
+  counts := fun _ => ⟨List.replicate alphabet.labels.length 0, by
+    simpa using alphabet.nonempty⟩
+  fixed := by intro c; simp
+  choose := fun past => readings[past.length]?.getD first
+
+def recordedMass [DecidableEq Label] [DecidableEq Cell] (alphabet : Alphabet Label)
+    (rows : List (Cell × Label)) : Option Fraction :=
+  match rows with
+  | [] => some one
+  | (first, _) :: _ =>
+    likelihood (recordedPartition alphabet first (rows.map Prod.fst)) []
+      (rows.map (fun row => alphabet.labels.idxOf row.2))
+
+-- Use the constructive indexing witnesses; the standard combined equivalence
+-- currently has Classical.choice in its transitive axiom graph.
+theorem named_index_domain [DecidableEq Label] (labels : List Label) (label : Label) :
+    labels.idxOf label < labels.length ↔ label ∈ labels := by
+  constructor
+  · intro within
+    simpa only [List.getElem_idxOf within] using List.getElem_mem within
+  · exact List.idxOf_lt_length_of_mem
+
+theorem recorded_mass_domain [DecidableEq Label] [DecidableEq Cell]
+    (alphabet : Alphabet Label) (rows : List (Cell × Label)) :
+    (recordedMass alphabet rows).isSome = rows.all (fun row => row.2 ∈ alphabet.labels) := by
+  cases rows with
+  | nil => rfl
+  | cons row rest =>
+    simp only [recordedMass, likelihood_domain, List.all_map, Function.comp_def, named_index_domain]
+
+theorem recorded_mass_positive [DecidableEq Label] [DecidableEq Cell]
+    (alphabet : Alphabet Label) (rows : List (Cell × Label)) (mass : Fraction)
+    (accepted : recordedMass alphabet rows = some mass) : 0 < mass.numerator := by
+  cases rows with
+  | nil => cases Option.some.inj accepted; exact Nat.zero_lt_one
+  | cons row rest => exact child_positive _ _ _ _ accepted
+
+theorem recorded_selector_exact (alphabet : Alphabet Label) (first : Cell)
+    (readings : List Cell) (past : List Nat) (within : past.length < readings.length) :
+    (recordedPartition alphabet first readings).choose past = readings[past.length] := by
+  simp [recordedPartition, List.getElem?_eq_getElem within]
+
 /-- Keep the original program-name and paid-look allocations as separate
 factors. Reassessment cannot mint a new allocation or erase one of them. -/
 structure Price where
