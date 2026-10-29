@@ -1,0 +1,10 @@
+{
+  "export_sha256": "fab03b072cbef22851d8458257d1e0ae6a5f4c16b33c2e2554ce8007d3e6ef8c",
+  "rust_binary_sha256": "1acad272302673c4946eaa355c0e8654755be1acf2d3903c62b2c8baacf08a93",
+  "source_head": "b1ad1ea6f6ac3159a1a4233ca603fd82e24acff8",
+  "source_files_audited": 1528,
+  "producer_receipt_sha256": "2508ce45b7a5c4466756bcc70d8d98eed629ae0d7b64482d9007ff5f0feafd4f",
+  "patch_sha256": "e31798012ee7b212c8bc6d524ff27519efc675ad29ce0b258ee63d8fddeddafe",
+  "independent_replay_receipt_sha256": "af90e5ce6c5db6ded6de0c972b96f0e5590dc0f72c50b748e37aaed6a00c4ce8",
+  "scope": "Frozen native numeral code and VM observations; five native courts independently reproduced with byte-identical exports. No wider campaign, universal Rust refinement or portable byte-decoder claim."
+}
