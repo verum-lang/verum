@@ -64,3 +64,4 @@ import VerumExternalReplay.ProgramTotality
 import VerumExternalReplay.ContextualRows
 import VerumExternalReplay.WorkDrain
 import VerumExternalReplay.GuardedDrain
+import VerumExternalReplay.GuardedDrainTrace

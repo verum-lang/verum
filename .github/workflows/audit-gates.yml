@@ -235,6 +235,13 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_program_totality.py
           python3 -m unittest discover -s verification/external/lean -p test_work_drain.py
           python3 -m unittest discover -s verification/external/lean -p test_guarded_drain.py
+          python3 -m unittest discover -s verification/external/lean -p test_guarded_driver_export.py
+          gzip -dc verification/external/lean/fixtures/guarded-driver-native-v1.jsonl.gz > guarded-driver-native-v1.jsonl
+          python3 verification/external/lean/check_guarded_driver_export.py \
+            --export guarded-driver-native-v1.jsonl \
+            --sha256 b2b29bad7c6c040d4470ea074d49031a97f4a6e15793db0b00bf33061dcb0b97 \
+            --provenance verification/external/lean/fixtures/guarded-driver-native-v1.provenance.json \
+            --output guarded-driver-native.lean --report guarded-driver-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_contextual_rows_export.py
           gzip -dc verification/external/lean/fixtures/contextual-rows-native-v1.json.gz > contextual-rows-native-v1.json
           python3 verification/external/lean/check_contextual_rows_export.py \
