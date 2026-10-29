@@ -42,6 +42,8 @@ def program(value,depth=0):
         elif kind=='Branch':
             fields(payload,'yes no');natural(payload['yes']);natural(payload['no'])
         else:
+            # compositional_courts::export supplies this codec to Owners::snapshot,
+            # including captured calls: Fold is scalar here, unlike generic serde.
             require(kind in ('Call','Fold'),'Unknown captured operation');natural(payload)
         for argument in sequence(step['arguments']):
             kind,payload=variant(argument)

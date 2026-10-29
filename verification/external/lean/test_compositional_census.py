@@ -118,7 +118,7 @@ class CompositionalCensusTests(ReplayAssertions,unittest.TestCase):
 
     def test_captured_program_payloads_are_not_ignored(self):
         for kind in ('fields','output','library','primitive','operation','branch',
-                     'callee','argument','literal','nested','arguments','steps'):
+                     'callee','fold_object','callee_overflow','argument','literal','nested','arguments','steps'):
             data=fixture();child=captured_program();step=child['steps'][0]
             if kind=='fields':child['extra']=0
             elif kind=='output':child['output']=True
@@ -127,6 +127,8 @@ class CompositionalCensusTests(ReplayAssertions,unittest.TestCase):
             elif kind=='operation':step['operation']={'Unknown':0}
             elif kind=='branch':step['operation']={'Branch':{'yes':0,'no':False}}
             elif kind=='callee':step['operation']={'Fold':-1}
+            elif kind=='fold_object':step['operation']={'Fold':{'body':0}}
+            elif kind=='callee_overflow':step['operation']={'Call':2**64}
             elif kind=='argument':step['arguments']=[{'Register':True}]
             elif kind=='literal':step['arguments']=[{'Literal':{'Bit':0}}]
             elif kind=='nested':child['library']=[dict(steps=[],output=None)]
@@ -134,6 +136,17 @@ class CompositionalCensusTests(ReplayAssertions,unittest.TestCase):
             else:child['steps']=None
             data['packets'][0]['parts'][0]['language']['calls']=[dict(arity=0,program=child)]
             with self.subTest(kind=kind),self.assertRaises(ValueError):emit(data)
+
+    def test_branch_condition_must_fit_native_width(self):
+        data=fixture();p=data['packets'][0];root=p['parts'][2]['language']
+        body=root['controls'][0]['body']
+        body['inputs']=2**64-1;body['extent']['steps']=0
+        root['inputs']=0;root['operations']=[dict(primitive='Zero',arity=0)]
+        root['controls']=[dict(kind='Branch',yes=body,no=body)]
+        # The child family is empty. Its zero contribution must not conceal an
+        # invalid branch declaration behind the parent's valid Zero alternative.
+        p['index']='0';p['family_names']=1;p['charged_comparisons']=2
+        self.prove(data,'family = some ')
 
     def test_general_enumeration_and_branch_contract(self):
         body='''open CompositionalFamily
@@ -146,6 +159,11 @@ example : count [⟨2,[6]⟩] 2 0 1 = 24 := by decide_cbv
 example : count [⟨2,[2,3]⟩] 3 0 1 = 54 := by decide_cbv
 example : control [⟨0,1,2⟩,⟨1,1,3⟩] (.branch 0 1) = some ⟨2,[2,3]⟩ := by decide_cbv
 example : control [⟨0,1,2⟩,⟨1,2,3⟩] (.branch 0 1) = none := by decide_cbv
+example : branchArity 8 6 6 = some 7 := by decide_cbv
+example : branchArity 8 7 7 = none := by decide_cbv
+example : branchArity 8 3 4 = none := by decide_cbv
+example : control [⟨0,2^64-2,0⟩] (.branch 0 0) = some ⟨2^64-1,[0,0]⟩ := by decide_cbv
+example : control [⟨0,2^64-1,0⟩] (.branch 0 0) = none := by decide_cbv
 example : control [⟨0,1,2⟩] (.fold 0) = none := by decide_cbv
 example : census [] [⟨0,2,0,1,[],[.fold 0]⟩] = none := by decide_cbv
 example : census [] [⟨0,0,0,1,[0],[]⟩,⟨0,0,0,1,[0],[]⟩] = none := by decide_cbv

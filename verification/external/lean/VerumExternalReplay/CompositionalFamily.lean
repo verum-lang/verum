@@ -171,11 +171,35 @@ theorem checked_declaration_spec {P V : Type} [DecidableEq P] [DecidableEq V]
     rw [decide_eq_true ops,decide_eq_true lits,decide_eq_true nonempty]
     rfl
 
+/-- A branch adds a condition to the common capture row. The exclusive capacity
+is explicit so the shape law applies to any native index width. -/
+def branchArity (capacity yes no : Nat) : Option Nat :=
+  if decide (yes = no) && decide (yes + 1 < capacity) then some (yes + 1) else none
+
+theorem branch_arity_spec (capacity yes no arity : Nat) :
+    branchArity capacity yes no = some arity ↔
+      yes = no ∧ arity = yes + 1 ∧ arity < capacity := by
+  unfold branchArity
+  constructor
+  · intro success
+    split at success
+    · rename_i valid
+      obtain ⟨same,bounded⟩ := Bool.and_eq_true_iff.mp valid
+      have arity_eq := (Option.some.inj success).symm
+      exact ⟨of_decide_eq_true same,arity_eq,arity_eq ▸ of_decide_eq_true bounded⟩
+    · cases success
+  · rintro ⟨same,rfl,bounded⟩
+    rw [decide_eq_true same,decide_eq_true bounded]
+    rfl
+
+/-- The frozen source profile uses 64-bit usize. All supplied signature widths
+are decoded within that range; the extra branch condition must also fit. -/
 def control (prior : List Signature) : Control → Option Alternative
   | .branch yes no => do
     let yes ← prior.find? (fun p => p.owner = yes)
     let no ← prior.find? (fun p => p.owner = no)
-    if yes.inputs = no.inputs then some ⟨yes.inputs+1,[yes.names,no.names]⟩ else none
+    let arity ← branchArity (2^64) yes.inputs no.inputs
+    pure ⟨arity,[yes.names,no.names]⟩
   | .fold body => do
     let body ← prior.find? (fun p => p.owner = body)
     if 2 ≤ body.inputs then some ⟨body.inputs,[body.names]⟩ else none
