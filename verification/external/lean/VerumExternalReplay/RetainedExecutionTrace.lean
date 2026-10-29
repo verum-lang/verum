@@ -93,7 +93,7 @@ theorem admitted_accounting (s : State V E) (g : Grant) (d : Demand)
   simp only [spend, charge]
   constructor <;> omega
 
-theorem next_preserves_authority (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem next_preserves_authority (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s t : State V E) (events : List (Event V E))
     (step : next source apply policy s = some (t, events)) : t.originalLimit = s.originalLimit := by
   unfold next at step
@@ -103,7 +103,7 @@ theorem next_preserves_authority (source : FiniteCode.Code O V) (apply : O → L
   obtain ⟨rfl, _⟩ := step
   rfl
 
-theorem next_monotone (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem next_monotone (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s t : State V E) (events : List (Event V E))
     (step : next source apply policy s = some (t, events)) :
     s.usage.work ≤ t.usage.work ∧ s.usage.dispatch ≤ t.usage.dispatch := by
@@ -114,7 +114,7 @@ theorem next_monotone (source : FiniteCode.Code O V) (apply : O → List V → E
   obtain ⟨rfl, _⟩ := step
   simp [charge]
 
-theorem next_partition (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem next_partition (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s t : State V E) (events : List (Event V E))
     (step : next source apply policy s = some (t, events))
     (partition : s.usage.expanded + s.usage.calls = s.usage.dispatch) :
@@ -126,18 +126,18 @@ theorem next_partition (source : FiniteCode.Code O V) (apply : O → List V → 
   obtain ⟨rfl, _⟩ := step
   exact charge_partition s.usage d partition
 
-theorem terminal_stopped (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem terminal_stopped (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (terminal : s.control.terminal.isSome = true) :
     next source apply policy s = none := by
   simp [next, demand, terminal]
 
-theorem poisoned_cannot_resume (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem poisoned_cannot_resume (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (g : Grant) (poisoned : s.control.poisoned = true) :
     tick source apply policy s g = ⟨s, g, .poisoned, []⟩ := by simp [tick, poisoned]
 
 /-- Each actual bounded-meter tick either retains everything or follows exactly
 one fixed-source transition. In particular a fresh grant cannot replace state. -/
-theorem tick_refines (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem tick_refines (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (g : Grant) :
     let observed := tick source apply policy s g
     (observed.state = s ∧ observed.events = []) ∨
@@ -157,7 +157,7 @@ theorem tick_refines (source : FiniteCode.Code O V) (apply : O → List V → Ex
           | none => exact Or.inl (by simp [hg, he])
           | some effect => exact Or.inr (by simp [next, hd, hg, he])
 
-theorem trace_monotone (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem trace_monotone (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (trace : Trace (next source apply policy) s events t) :
     s.usage.work ≤ t.usage.work ∧ s.usage.dispatch ≤ t.usage.dispatch := by
   induction trace with
@@ -168,7 +168,7 @@ theorem trace_monotone (source : FiniteCode.Code O V) (apply : O → List V → 
 
 /-- Splitting a retained execution bills only each segment's new dispatches and
 work. Previously completed instructions cannot be billed again as new ones. -/
-theorem split_accounting (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem split_accounting (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (first : Trace (next source apply policy) s xs t)
     (second : Trace (next source apply policy) t ys u) :
     u.usage.work - s.usage.work = (t.usage.work - s.usage.work) + (u.usage.work - t.usage.work) ∧
@@ -178,7 +178,7 @@ theorem split_accounting (source : FiniteCode.Code O V) (apply : O → List V �
   have b := trace_monotone source apply policy second
   constructor <;> omega
 
-theorem tick_trace (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem tick_trace (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (g : Grant) :
     Trace (next source apply policy) s (tick source apply policy s g).events
       (tick source apply policy s g).state := by
@@ -188,7 +188,7 @@ theorem tick_trace (source : FiniteCode.Code O V) (apply : O → List V → Exce
 
 /-- This service proof includes denied attempts: only their semantic projection
 stutters; the executable run keeps the original statuses and grant snapshots. -/
-theorem run_trace (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem run_trace (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (n : Nat) (s : State V E) (g : Grant) :
     Trace (next source apply policy) s (run source apply policy n s g).events
       (run source apply policy n s g).state := by
@@ -200,7 +200,7 @@ theorem run_trace (source : FiniteCode.Code O V) (apply : O → List V → Excep
       · exact (tick_trace source apply policy s g).append (ih _ _)
       · exact tick_trace source apply policy s g
 
-theorem tick_accounting (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem tick_accounting (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (g : Grant) :
     let result := tick source apply policy s g
     result.grant.work + result.state.usage.work = g.work + s.usage.work ∧
@@ -224,7 +224,7 @@ theorem tick_accounting (source : FiniteCode.Code O V) (apply : O → List V →
             simp [hg, he, spend, charge]
             constructor <;> omega
 
-theorem run_accounting (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem run_accounting (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (n : Nat) (s : State V E) (g : Grant) :
     let result := run source apply policy n s g
     result.grant.work + result.state.usage.work = g.work + s.usage.work ∧
@@ -239,7 +239,7 @@ theorem run_accounting (source : FiniteCode.Code O V) (apply : O → List V → 
         exact ⟨rest.1.trans first.1, rest.2.trans first.2⟩
       · exact first
 
-theorem tick_dispatch_bounded (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem tick_dispatch_bounded (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (g : Grant)
     (bounded : s.usage.dispatch < FiniteExecution.capacity) :
     (tick source apply policy s g).state.usage.dispatch < FiniteExecution.capacity := by
@@ -258,7 +258,7 @@ theorem tick_dispatch_bounded (source : FiniteCode.Code O V) (apply : O → List
           | none => simpa [hg, he] using bounded
           | some effect => simpa [hg, he] using gate_charge_bounded s g d bounded hg
 
-theorem run_dispatch_bounded (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem run_dispatch_bounded (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (n : Nat) (s : State V E) (g : Grant)
     (bounded : s.usage.dispatch < FiniteExecution.capacity) :
     (run source apply policy n s g).state.usage.dispatch < FiniteExecution.capacity := by
@@ -271,14 +271,14 @@ theorem run_dispatch_bounded (source : FiniteCode.Code O V) (apply : O → List 
       · exact ih _ _ first
       · exact first
 
-theorem trace_authority (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem trace_authority (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (trace : Trace (next source apply policy) s events t) :
     t.originalLimit = s.originalLimit := by
   induction trace with
   | nil => rfl
   | cons step _ ih => exact ih.trans (next_preserves_authority source apply policy _ _ _ step)
 
-theorem trace_partition (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem trace_partition (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (trace : Trace (next source apply policy) s events t)
     (partition : s.usage.expanded + s.usage.calls = s.usage.dispatch) :
     t.usage.expanded + t.usage.calls = t.usage.dispatch := by
@@ -288,7 +288,7 @@ theorem trace_partition (source : FiniteCode.Code O V) (apply : O → List V →
 
 /-- The partition invariant also bounds the independently incremented call and
 primitive counters, so all three native u64 counters have a justified bound. -/
-theorem run_counters_bounded (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem run_counters_bounded (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (n : Nat) (s : State V E) (g : Grant)
     (bounded : s.usage.dispatch < FiniteExecution.capacity)
     (partition : s.usage.expanded + s.usage.calls = s.usage.dispatch) :
@@ -304,7 +304,7 @@ theorem run_counters_bounded (source : FiniteCode.Code O V) (apply : O → List 
 
 /-- Arbitrary services may supply fresh grants; each begins with the exact state
 left by its predecessor. Neither a new input nor a new original bound is allowed. -/
-inductive Services (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+inductive Services (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) : State V E → List (Event V E) → State V E → Prop where
   | nil (s) : Services source apply policy s [] s
   | cons (n : Nat) (g : Grant) {s t : State V E} {rest : List (Event V E)} :

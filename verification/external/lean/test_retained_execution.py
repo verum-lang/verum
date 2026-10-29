@@ -21,7 +21,8 @@ class RetainedExecutionTests(unittest.TestCase):
         require_success(run('lake', 'build', 'VerumExternalReplay.RetainedExecutionControls'))
 
     def test_no_added_axioms(self):
-        names = '''Trace.append Trace.refine Trace.terminal_unique charge_partition
+        names = '''ofCode_missing_scope ofCode_decode ofCode_operands ofCode_selected
+            Trace.append Trace.refine Trace.terminal_unique charge_partition
             gate_work_sufficient gate_dispatch_sufficient admitted_accounting
             next_preserves_authority next_monotone terminal_stopped poisoned_cannot_resume
             tick_refines trace_monotone split_accounting tick_trace run_trace
@@ -43,9 +44,12 @@ class RetainedExecutionTests(unittest.TestCase):
 
     def test_invalid_execution_claims_rejected(self):
         claims = {
+            'source_view_callee_not_reindexed': 'decode sparseSource [] 0 = some (.call (some [0]),1)',
+            'source_view_output_not_last': 'selected sparseSource ⟨[7,9],.call,[5],[7,99]⟩ = some 99',
+            'source_view_call_not_erased': 'sparseRun.state.usage.calls = 0',
             'atomic_grants_do_not_accumulate': '(sliced .atomic 17 start).state = (whole .atomic).state',
             'unfinished_body_not_complete': '(sliced .phased 16 start).state = (whole .phased).state',
-            'selected_output_not_last': '(whole .phased).state.control.frames.head?.bind (selected code) = some 8',
+            'selected_output_not_last': '(whole .phased).state.control.frames.head?.bind (selected (Source.ofCode code)) = some 8',
             'child_registers_not_root_registers': 'observation (whole .phased).state = some ⟨.complete, [7, 99], 4, 3, 1, none⟩',
             'no_dispatch_rebilling': 'third.state.usage.dispatch = 2',
             'resolved_prefix_kept': 'third.state.control.pending = some ⟨[], 0, .call (some [0]), 1, [], .reserveReturn⟩',

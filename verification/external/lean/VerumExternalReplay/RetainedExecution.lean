@@ -98,21 +98,80 @@ def codeAt : Code O V → Scope → Option (Code O V)
   | code, [] => some code
   | .mk _ _ library, index :: rest => library[index]?.bind (fun code => codeAt code rest)
 
-def instruction (source : Code O V) (scope : Scope) (pc : Nat) : Option (Step O V) := do
-  let .mk instructions _ _ ← codeAt source scope
-  instructions[pc]?
+/-- Immutable source access is independent of the syntax that owns a program.
+The same view supplies dispatch, operands and selected output, so those facts
+cannot silently come from different source projections. -/
+inductive Dispatch (O : Type) where
+  | primitive : O → Dispatch O
+  | call : Option Scope → Dispatch O
 
-def decode (source : Code O V) (scope : Scope) (pc : Nat) : Option (Decoded × Nat) := do
-  let .mk instructions _ library ← codeAt source scope
-  let step ← instructions[pc]?
+structure InstructionView (O V : Type) where
+  operation : Dispatch O
+  arguments : List (Operand V)
+  arity : Nat
+
+structure ScopeView (O V : Type) where
+  instruction : Nat → Option (InstructionView O V)
+  output : Option Nat
+
+structure Source (O V : Type) where
+  scope : Scope → Option (ScopeView O V)
+
+/-- Resolving one instruction does not map or copy the rest of its scope.
+Native callback purity and fidelity to this fixed view are separate premises. -/
+def Source.ofCode (source : Code O V) : Source O V := ⟨fun scope => do
+  let .mk instructions output library ← codeAt source scope
+  pure ⟨fun pc => instructions[pc]?.map (fun step =>
+    ⟨match step.operation with
+      | .primitive op => .primitive op
+      | .call index => .call (library[index]?.map (fun _ => scope ++ [index])),
+     step.arguments,step.arity⟩),output⟩⟩
+
+instance : CoeOut (Code O V) (Source O V) := ⟨Source.ofCode⟩
+
+def instruction (source : Source O V) (scope : Scope) (pc : Nat) : Option (InstructionView O V) := do
+  let view ← source.scope scope
+  view.instruction pc
+
+def decode (source : Source O V) (scope : Scope) (pc : Nat) : Option (Decoded × Nat) := do
+  let step ← instruction source scope pc
   let op := match step.operation with
     | .primitive _ => .primitive scope pc
-    | .call n => .call (library[n]?.map (fun _ => scope ++ [n]))
+    | .call target => .call target
   pure (op, step.arity)
 
-def selected (source : Code O V) (frame : Frame V) : Option V := do
-  let .mk _ output _ ← codeAt source frame.scope
-  FiniteExecution.output output frame.registers
+def selected (source : Source O V) (frame : Frame V) : Option V := do
+  let view ← source.scope frame.scope
+  FiniteExecution.output view.output frame.registers
+
+theorem ofCode_missing_scope (source : Code O V) (scope : Scope)
+    (missing : codeAt source scope = none) :
+    (Source.ofCode source).scope scope = none := by
+  simp [Source.ofCode,missing]
+
+theorem ofCode_decode (source : Code O V) (scope : Scope) (pc : Nat)
+    (instructions : List (Step O V)) (output : Option Nat) (library : List (Code O V))
+    (step : Step O V) (owned : codeAt source scope = some (.mk instructions output library))
+    (found : instructions[pc]? = some step) :
+    decode (Source.ofCode source) scope pc = some
+      ((match step.operation with
+        | .primitive _ => .primitive scope pc
+        | .call index => .call (library[index]?.map (fun _ => scope ++ [index]))),step.arity) := by
+  cases step with | mk operation arguments declaredArity =>
+    cases operation <;> simp [decode,instruction,Source.ofCode,owned,found]
+
+theorem ofCode_operands (source : Code O V) (scope : Scope) (pc : Nat)
+    (instructions : List (Step O V)) (output : Option Nat) (library : List (Code O V))
+    (step : Step O V) (owned : codeAt source scope = some (.mk instructions output library))
+    (found : instructions[pc]? = some step) :
+    (instruction (Source.ofCode source) scope pc).map InstructionView.arguments = some step.arguments := by
+  simp [instruction,Source.ofCode,owned,found]
+
+theorem ofCode_selected (source : Code O V) (frame : Frame V)
+    (instructions : List (Step O V)) (output : Option Nat) (library : List (Code O V))
+    (owned : codeAt source frame.scope = some (.mk instructions output library)) :
+    selected (Source.ofCode source) frame = FiniteExecution.output output frame.registers := by
+  simp [selected,Source.ofCode,owned]
 
 def initial (inputs : List V) (limit : Option Nat) : State V E :=
   ⟨limit, ⟨some inputs, [], none, none, false⟩, {}⟩
@@ -147,7 +206,7 @@ structure Effect (V E : Type) where
 def halt (c : Control V E) (reason : Failure E) : Control V E :=
   { c with pending := none, terminal := some (.undefined, some reason) }
 
-def perform (source : Code O V) (apply : O → List V → Except E V)
+def perform (source : Source O V) (apply : O → List V → Except E V)
     (action : Action) (c : Control V E) : Option (Effect V E) := do
   match action with
   | .root =>
@@ -155,7 +214,7 @@ def perform (source : Code O V) (apply : O → List V → Except E V)
       pure ⟨{ c with rootInputs := none, frames := [⟨[], .root, ins, []⟩] }, [.root]⟩
   | .inspect =>
       let frame :: parents := c.frames | none
-      let _ ← codeAt source frame.scope
+      let _ ← source.scope frame.scope
       let decoded := decode source frame.scope frame.registers.length
       let event := Event.decode frame.scope frame.registers.length decoded
       match decoded with
@@ -220,7 +279,7 @@ def charge (usage : Usage) (d : Demand) : Usage :=
 
 /-- The deterministic admitted transition. Permission is checked by `tick`;
 this semantic spine also retains the exact successful structural-work ledger. -/
-def next (source : Code O V) (apply : O → List V → Except E V)
+def next (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) : Option (State V E × List (Event V E)) := do
   let d ← demand policy s.control
   let effect ← perform source apply d.action s.control
@@ -257,7 +316,7 @@ structure Tick (V E : Type) where
   events : List (Event V E)
   deriving DecidableEq
 
-def tick (source : Code O V) (apply : O → List V → Except E V)
+def tick (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s : State V E) (g : Grant) : Tick V E :=
   if s.control.poisoned then ⟨s, g, .poisoned, []⟩
   else if s.control.terminal.isSome then ⟨s, g, .complete, []⟩
@@ -281,7 +340,7 @@ structure Run (V E : Type) where
   attempts : List (Tick V E)
   deriving DecidableEq
 
-def run (source : Code O V) (apply : O → List V → Except E V)
+def run (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) : Nat → State V E → Grant → Run V E
   | 0, s, g => ⟨s, g, [], []⟩
   | n + 1, s, g =>

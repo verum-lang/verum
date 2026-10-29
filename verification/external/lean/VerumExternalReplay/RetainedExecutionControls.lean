@@ -39,11 +39,28 @@ def fullCounter : State Nat Nat :=
   { first.state with originalLimit := none, usage := ⟨1, FiniteExecution.capacity - 1, FiniteExecution.capacity - 1, 0⟩ }
 def fullDemand : Demand := ⟨.start, some 1, some false, false⟩
 
+/-- A scope handle need not be an index path into the finite-code syntax. Both
+views still run through the same machine, with selected outputs kept explicit. -/
+def sparseSource : Source Bool Nat := ⟨fun scope => match scope with
+  | [] => some ⟨fun pc => if pc = 0 then some ⟨.call (some [7,9]),[.input 0],1⟩ else none,some 0⟩
+  | [7,9] => some ⟨fun pc => match pc with
+      | 0 => some ⟨.primitive true,[.input 0,.literal 2],2⟩
+      | 1 => some ⟨.primitive true,[.literal 99],1⟩
+      | _ => none,some 0⟩
+  | _ => none⟩
+
+def sparseRun := run sparseSource apply .phased 40 (initial [5] none) ⟨100,100⟩
+
+example : observation sparseRun.state = some ⟨.complete,[7],3,2,1,none⟩ := by decide
+example : decode sparseSource [] 0 = some (.call (some [7,9]),1) := by decide
+example : selected sparseSource ⟨[7,9],.call,[5],[7,99]⟩ = some 7 := by decide
+example : (instruction sparseSource [7,10] 0).map InstructionView.arity = none := by decide
+
 example : (whole .phased).state.usage = ⟨17, 4, 3, 1⟩ := by decide
 example : (whole .atomic).state = (whole .phased).state := by decide
 example : (whole .unmetered).state.usage = ⟨1, 4, 3, 1⟩ := by decide
 example : observation (whole .phased).state = some ⟨.complete, [7, 8], 4, 3, 1, none⟩ := by decide
-example : (whole .phased).state.control.frames.head?.bind (selected code) = some 7 := by decide
+example : (whole .phased).state.control.frames.head?.bind (selected (Source.ofCode code)) = some 7 := by decide
 example : (sliced .phased 17 start).state = (whole .phased).state := by decide
 example : (sliced .phased 17 start).events = (whole .phased).events := by decide
 -- Undersized atomic grants cannot buy an instruction by being discarded and summed.

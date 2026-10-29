@@ -60,7 +60,7 @@ theorem abort_retains_poison (policy : Policy) (s t : State V E) (g h : Grant)
   obtain ⟨_, _, rfl, _⟩ := aborted
   rfl
 
-theorem abort_cannot_resume (source : FiniteCode.Code O V) (apply : O → List V → Except E V)
+theorem abort_cannot_resume (source : Source O V) (apply : O → List V → Except E V)
     (policy : Policy) (s t : State V E) (g h fresh : Grant)
     (aborted : abortPrimitive policy s g = some (t, h)) :
     tick source apply policy t fresh = ⟨t, fresh, .poisoned, []⟩ :=
