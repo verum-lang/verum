@@ -13,7 +13,7 @@ from check_residual_queries import load_jsonl
 from observer_export_replay import (array, boolean, fields, natural, require,
     sequence, module_closure, main as replay_main)
 
-MODULES = module_closure(['InvocationOwnership', 'AtomicPublication'])
+MODULES = module_closure(['InvocationOwnership', 'RetainedOwnership', 'AtomicPublication'])
 PHASES = 'Prepared Armed Invoked Completed Cancelled Unknown'.split()
 SCOPE = ('native registration/invocation/receiver observations; '
          'no numeric pre-action evaluation or action-ranking claim')
@@ -109,7 +109,14 @@ class Replay:
             fields(runtime, 'cut protocol score'); current = self.frontier(runtime['cut'],runtime['score'])
             require(int(natural(runtime['protocol'])) in self.tables['protocols'], 'Unknown runtime protocol')
         r = value['registration']
-        if r is None: return
+        if r is None:
+            # Repeated absent snapshots are inert. Record the actual observed
+            # loss of a binding; never infer consumption from a phase label.
+            if self.active.get(value['owner']) is not None:
+                self.retained.append(f'({natural(value["owner"])},none)')
+                self.counts['retained_observations'] += 1
+                self.active[value['owner']] = None
+            return
         fields(r, 'current event invocation predicting query sample'); self.invocation(r['invocation']); self.sample(r['sample'])
         p = r['predicting']; require(p is not None and runtime is not None, 'Missing retained registration projection')
         fields(p, 'cut done event previous_score protocol query')
@@ -132,6 +139,12 @@ class Replay:
         event,query = r['event'],r['query']
         self.equal(query['interface'],{**event['interface'],'shape':'Query'})
         self.equal(query['values'],[{**v,'kind':'Query'} for v in event['values']])
+        owner = int(natural(value['owner'])); invocation = int(natural(r['invocation']['id']))
+        key = (owner,invocation)
+        binding = self.opaque({k:r[k] for k in ('sample','query','event','predicting')})
+        self.retained.append(f'({owner},some (({owner},{invocation}),{binding}))')
+        self.active[owner] = invocation; self.binding_keys.add(key)
+        self.counts['retained_observations'] += 1
         if r['invocation']['phase']=='Prepared':
             self.registered.setdefault((value['owner'],self.sample(r['sample'])),set()).add(r['invocation']['id'])
         self.counts['registrations'] += 1
@@ -158,6 +171,7 @@ class Replay:
         require(native['format']=='synarc-residual-transactions-v1' and native['case']==packet['case'], 'Mismatched native table')
         require(native['events']==[], 'Separate native transaction events need their own replay')
         self.tables={}; self.phases={}; self.states={}; self.completed={}; self.registered={}
+        self.retained=[]; self.active={}; self.binding_keys=set()
         for name in ('definitions','inputs','scores','models','protocols'):
             entries=sequence(native[name]); table={}
             for item in entries:
@@ -242,6 +256,10 @@ class Replay:
                             else: require(False,'Uncovered invocation refusal')
                         self.counts['preserved_refusals'] += 1
             self.counts['events'] += 1
+        name=f'retained_{self.counts["cases"]}'
+        self.definitions.append(f'def {name} : List (Nat × Option ((Nat × Nat) × List Nat)) := {array(self.retained)}')
+        self.claim(f'RetainedOwnership.valid {name}')
+        self.counts['retained_bindings'] += len(self.binding_keys)
         self.counts['cases'] += 1
 
 
@@ -251,7 +269,8 @@ def emit(data):
     for packet in packets:
         require(type(packet.get('case')) is str and packet['case'] not in names,'Duplicate/invalid case')
         names.add(packet['case']);replay.packet(packet)
-    lines=['import VerumExternalReplay.InvocationOwnership','import VerumExternalReplay.AtomicPublication',
+    lines=['import VerumExternalReplay.InvocationOwnership','import VerumExternalReplay.RetainedOwnership',
+           'import VerumExternalReplay.AtomicPublication',
            'set_option warningAsError true','set_option maxRecDepth 65536',
            'set_option maxHeartbeats 30000000','set_option cbv.maxSteps 10000000',
            'namespace FrozenObserverExport',*replay.definitions]
@@ -266,8 +285,9 @@ if __name__=='__main__':
     replay_main(emit=emit, modules=MODULES,
         producers=[Path(__file__).resolve(),Path(__file__).with_name('acquired_export_codec.py'),
                    Path(__file__).with_name('check_residual_queries.py')],
-        scope='Supplied registration revision/score identities, query/event bindings, phase checkpoint '
-              'consistency, and refusal preservation. Allocation classes are native observations. '
+        scope='Supplied registration revision/score identities, immutable query/event bindings, '
+              'nonresurrection after observed release/replacement, phase checkpoint consistency, '
+              'and refusal preservation. Allocation classes are native observations. '
               'No complete pending ownership, roster scheduling, VM execution, score arithmetic, '
               'unobserved transitions or universal native memory correctness.',
         description=__doc__,export_loader=load_jsonl)

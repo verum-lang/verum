@@ -24,7 +24,8 @@ def packet():
 class PreActionExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        require_success(run('lake','build','VerumExternalReplay.InvocationOwnership','VerumExternalReplay.AtomicPublication'))
+        require_success(run('lake','build','VerumExternalReplay.InvocationOwnership',
+                            'VerumExternalReplay.RetainedOwnership','VerumExternalReplay.AtomicPublication'))
 
     def prove(self,data,failure=False):
         source,counts=emit(data)
@@ -39,7 +40,8 @@ class PreActionExportTests(unittest.TestCase):
 
     def test_frozen_packet(self):
         self.assertEqual(self.prove(packet()),dict(events=2093,phase_observations=111,
-            registrations=79,preserved_refusals=3,cases=3,conditions=82,claims=3))
+            registrations=79,preserved_refusals=3,retained_observations=81,retained_bindings=7,
+            cases=3,conditions=85,claims=3))
         p=json.loads((ROOT/'fixtures/preaction-native-v1.provenance.json').read_text())
         self.assertEqual(p['export_sha256'],SHA)
         self.assertTrue(p['native_original_status'].startswith('failed:'))
@@ -75,6 +77,41 @@ class PreActionExportTests(unittest.TestCase):
         else:self.fail('Missing actual registered evaluation')
         self.prove(data,True)
 
+    def test_binding_cannot_change_or_return_after_release(self):
+        cases=packet()['packets']
+        # These preserve the local current-snapshot checks. Only comparison
+        # with the retained binding and its observed lifetime exposes them.
+        mutations=[
+            (1,lambda es:es[3]['before']['registration']['predicting'].update(previous_score=0)),
+            (1,lambda es:es[0]['after']['registration']['predicting'].update(query=2)),
+            (0,lambda es:es[28]['after'].update(registration=copy.deepcopy(es[27]['before']['registration']))),
+        ]
+        for index,(ci,mutate) in enumerate(mutations):
+            with self.subTest(control=index):
+                case=copy.deepcopy(cases[ci]);mutate(case['events'])
+                self.prove({'packets':[case]},True)
+
+    def test_generic_retention_laws(self):
+        header='import VerumExternalReplay.RetainedOwnership\nopen RetainedOwnership\nset_option warningAsError true\n'
+        positive='''
+example : valid (Owner:=Nat) (Key:=Nat) (Payload:=Nat)
+    [(0,some (7,11)),(0,some (7,11)),(1,some (8,12)),(0,none),(0,some (9,13))] = true := by decide_cbv
+'''
+        negative=[
+            '[(0,some (7,11)),(0,some (7,12))]',
+            '[(0,some (7,11)),(1,some (7,11))]',
+            '[(0,some (7,11)),(0,none),(1,some (8,12)),(0,some (7,11))]',
+            '[(0,some (7,11)),(0,some (8,12)),(0,some (7,11))]',
+        ]
+        with tempfile.TemporaryDirectory(prefix='verum-retention-') as directory:
+            path=Path(directory)/'positive.lean';path.write_text(header+positive);check(path)
+            for i,events in enumerate(negative):
+                path=Path(directory)/f'negative{i}.lean'
+                path.write_text(header+f'example : valid (Owner:=Nat) (Key:=Nat) (Payload:=Nat) {events} = true := by decide_cbv\n')
+                result=check(path,FALSE);errors=[d for d in result['diagnostics'] if d['severity']=='error']
+                self.assertEqual(len(errors),1,errors)
+                self.assertTrue(errors[0]['data'].startswith(FALSE),errors)
+
     def test_schema_rejections(self):
         original=packet()['packets'][1]
         controls=[
@@ -94,12 +131,17 @@ class PreActionExportTests(unittest.TestCase):
                 with self.assertRaises(ValueError):emit({'packets':[case]})
 
     def test_phase_laws_and_constructive_axioms(self):
-        model=(ROOT/'VerumExternalReplay/InvocationOwnership.lean').read_text()
-        names=re.findall(r'^theorem ([\w.]+)',model,re.M)+['step','run','interval','follows','authentic']
+        names=[]
+        for module,definitions in [
+            ('InvocationOwnership',['step','run','interval','follows','authentic']),
+            ('RetainedOwnership',['observe','valid']),
+        ]:
+            model=(ROOT/'VerumExternalReplay'/(module+'.lean')).read_text()
+            names += [module+'.'+name for name in re.findall(r'^theorem ([\w.]+)',model,re.M)+definitions]
         with tempfile.TemporaryDirectory(prefix='verum-invocation-axioms-') as directory:
             path=Path(directory)/'audit.lean'
-            path.write_text('import VerumExternalReplay.InvocationOwnership\n'+
-                '\n'.join('#print axioms InvocationOwnership.'+n for n in names))
+            path.write_text('import VerumExternalReplay.InvocationOwnership\nimport VerumExternalReplay.RetainedOwnership\n'+
+                '\n'.join('#print axioms '+n for n in names))
             result=check(path)
         rows=[d['data'] for d in result['diagnostics'] if d['severity']=='information']
         self.assertEqual(len(rows),len(names))
