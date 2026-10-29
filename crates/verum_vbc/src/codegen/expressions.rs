@@ -8587,9 +8587,9 @@ impl VbcCodegen {
         true
     }
 
-    /// Instantiate a method result from proven callable arguments, or from a
-    /// receiver that already carries such a result. Keep TypeRefs structural
-    /// across chained calls; textual method names select declarations only.
+    /// Carry a declared method result, specializing it from proven callable
+    /// arguments when needed. Keep TypeRefs structural across chained calls;
+    /// textual method names select declarations only.
     pub(super) fn callable_method_result_type(&self, expr: &Expr) -> Option<crate::types::TypeRef> {
         use crate::types::TypeRef;
         let ExprKind::MethodCall { receiver, method, type_args, args } = &expr.kind else {
@@ -8602,7 +8602,11 @@ impl VbcCodegen {
             while let ExprKind::Paren(inner) = &arg.kind { arg = inner; }
             matches!(&arg.kind, ExprKind::Closure { .. })
         }) {
-            return None;
+            // Associated constructors also produce temporary receivers. Their
+            // source signatures are sufficient evidence even when the import
+            // has no textual return hint or that hint names an exporting scope.
+            let owner = self.declared_callable_receiver_name(receiver)?;
+            return self.declared_method_result_type(&owner, method.name.as_str(), type_args);
         }
         let receiver_name = match carried_receiver.as_ref() {
             Some(ty) => self.callable_type_name(ty).map(|name| name.to_string())

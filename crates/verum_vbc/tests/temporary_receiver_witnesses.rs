@@ -87,8 +87,26 @@ implement Factory { fn borrow(value: &Payload) -> &Payload { value } }
 
 #[test]
 fn imported_temporary_receiver_and_callback_supply_all_declared_witnesses() {
-    let source = Parser::new(
-        r#"
+    for owner in ["Factory", "Text"] {
+        for (payload, value, payload_id) in [
+            ("Int", "7", TypeId::INT),
+            ("Text", "\"payload\"", TypeId::TEXT),
+        ] {
+            for return_names in [true, false] {
+                imported_temporary_case(owner, payload, value, payload_id, return_names);
+            }
+        }
+    }
+}
+
+fn imported_temporary_case(
+    owner: &str,
+    payload: &str,
+    value: &str,
+    payload_id: TypeId,
+    return_names: bool,
+) {
+    let provider_source = r#"
 module producer;
 type Outcome<T, E> is Good(T) | Bad(E);
 implement<T, E> Outcome<T, E> {
@@ -102,31 +120,83 @@ implement Factory {
         if fail { Outcome.Bad(false) } else { Outcome.Good(7) }
     }
 }
-"#,
-    )
-    .parse_module()
-    .unwrap();
-    let mut provider = VbcCodegen::with_config(CodegenConfig::new("producer"));
+"#;
+    let provider_source = provider_source
+        .replace(
+            "type Factory is {};",
+            if owner == "Factory" {
+                "type Factory is {};"
+            } else {
+                ""
+            },
+        )
+        .replace("Factory", owner)
+        .replace("Outcome<Int, Bool>", &format!("Outcome<{payload}, Bool>"))
+        .replace("Outcome.Good(7)", &format!("Outcome.Good({value})"));
+    let provider_name = if owner == "Text" {
+        "core.text.text"
+    } else {
+        "producer"
+    };
+    let provider_source =
+        provider_source.replace("module producer;", &format!("module {provider_name};"));
+    let mut source = Parser::new(&provider_source).parse_module().unwrap();
+    if owner == "Text" {
+        let text = Parser::new(include_str!("../../../core/text/text.vr"))
+            .parse_module()
+            .unwrap();
+        source.items.extend(text.items.into_iter().filter(|item| {
+            matches!(&item.kind,
+            verum_ast::ItemKind::Type(declaration) if declaration.name.name.as_str() == "Text")
+        }));
+    }
+    let mut provider = VbcCodegen::with_config(CodegenConfig::new(provider_name));
     let module = provider.compile_module(&source).unwrap();
     let dependency = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
-    let source = Parser::new(
-        r#"
+    let consumer_source = r#"
 module consumer;
 mount producer.{Factory, Outcome};
 fn probe(fail: Bool) -> Int {
     let value = Factory.decode(fail).map_error(|_| 11);
-    match value { Good(value) => value, Bad(error) => error }
+    match value { Good(_) => 7, Bad(error) => error }
 }
-"#,
-    )
-    .parse_module()
-    .unwrap();
+"#;
+    let consumer_source = consumer_source
+        .replace("Factory", owner)
+        .replace("producer", provider_name);
+    let consumer_source = if owner == "Text" {
+        consumer_source.replace(
+            "mount core.text.text.{Text, Outcome};",
+            "mount base.Text; mount core.text.text.Outcome;",
+        )
+    } else {
+        consumer_source
+    };
+    let source = Parser::new(&consumer_source).parse_module().unwrap();
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
-    codegen.import_functions(&provider.export_functions());
+    let mut exports = provider.export_functions();
+    if !return_names {
+        for (name, info) in &mut exports {
+            if name.ends_with(".decode") {
+                info.return_type_name = None;
+                info.return_type_inner = None;
+            }
+        }
+    }
+    codegen.import_functions(&exports);
     codegen.import_type_layouts(&provider.export_type_layouts());
     codegen.import_type_field_names(&provider.export_type_field_names());
     codegen
-        .import_bootstrap_nominal_dependencies(&[&source], &[&dependency])
+        .import_bootstrap_nominal_dependencies_with_resolver(&[&source], &[&dependency], |name| {
+            Some(
+                if name == "base.Text" {
+                    "core.text.text.Text"
+                } else {
+                    name
+                }
+                .into(),
+            )
+        })
         .unwrap();
     codegen.collect_unit_declarations(&[&source]).unwrap();
     let module = codegen.compile_function_bodies(&source).unwrap();
@@ -160,12 +230,15 @@ fn probe(fail: Bool) -> Int {
             };
         if let Some(type_args) = type_args {
             calls += 1;
-            assert!(!type_args.iter().any(|ty| ty.is_generic()), "{type_args:?}");
+            assert!(
+                !type_args.iter().any(|ty| ty.is_generic()),
+                "owner={owner}, payload={payload}: {type_args:?}"
+            );
             assert_eq!(type_args.len(), 4, "{type_args:?}");
             assert_eq!(
                 &type_args[..3],
                 &[
-                    TypeRef::Concrete(TypeId::INT),
+                    TypeRef::Concrete(payload_id),
                     TypeRef::Concrete(TypeId::BOOL),
                     TypeRef::Concrete(TypeId::INT)
                 ]
