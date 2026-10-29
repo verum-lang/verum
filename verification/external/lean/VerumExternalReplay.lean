@@ -34,6 +34,7 @@ import VerumExternalReplay.ObserverLifecycleControls
 import VerumExternalReplay.SignatureCatalogues
 import VerumExternalReplay.PhysicalTransducers
 import VerumExternalReplay.SourceCalibration
+import VerumExternalReplay.ResourceTransfer
 import VerumExternalReplay.AcquiredObserverControls
 import VerumExternalReplay.CommonDescriptionCost
 import VerumExternalReplay.ObserverRetirementControls
