@@ -1,5 +1,8 @@
 """Independent semantic corruption controls; synthetic fixtures are not runtime evidence."""
 import copy
+import gzip
+import hashlib
+import json
 from pathlib import Path
 import re
 import tempfile
@@ -52,16 +55,44 @@ def refusal_fixture():
     return data
 
 
+def reservation_fixture():
+    data = fixture(); data['schema'] = 'synarc-source-profile-lifecycle-v2'
+    for event in data['events']:
+        for side in ('before', 'after'):
+            event[side]['current'].update(reserved_look=None, opening_rows=[])
+    before = copy.deepcopy(data['events'][-1]['after'])
+    after = copy.deepcopy(before); after['next_look'] = '1'
+    after['current'].update(reserved_look='0', declared=dict(role='Categorical', depth=1,
+        evidence_round=0, imported=None, composition=None),
+        snapshot={k: copy.deepcopy(after['profile'][k]) for k in
+            'identity source origin revision last_novel end maximum support'.split()})
+    data['events'].append(dict(kind='Service', name='reserve', grant=1, remaining=0,
+        result=dict(kind='Ok'), before=before, after=after))
+    physical = copy.deepcopy(data['events'][0]); physical['name'] = 'post_declaration_row'
+    physical['before'] = copy.deepcopy(after); physical['after'] = copy.deepcopy(after)
+    physical['input']['id']['ordinal'] = 1
+    physical['after']['profile']['end'] = copy.deepcopy(physical['input']['id'])
+    physical['after']['current']['opening_rows'] = [copy.deepcopy(physical['input']['id'])]
+    data['events'].append(physical)
+    return data
+
+
 class SourceCalibrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        require_success(run('lake', 'build', 'VerumExternalReplay.SourceCalibration'))
+        require_success(run('lake', 'build', 'VerumExternalReplay.SourceCalibration',
+                            'VerumExternalReplay.PredeclaredEvidence'))
 
     def prove(self, data, false=False):
         source, counts = emit(data)
         with tempfile.TemporaryDirectory(prefix='verum-source-calibration-') as directory:
             path = Path(directory)/'check.lean'; path.write_text(source)
             result = check(path, '`decide_cbv` failed: the proposition evaluates to `false`' if false else None)
+        if false:
+            errors = [d['data'] for d in result['diagnostics'] if d['severity'] == 'error']
+            self.assertTrue(errors)
+            self.assertTrue(all(e.startswith('`decide_cbv` failed: the proposition evaluates to `false`')
+                                for e in errors), errors)
         if not false:
             rosters = [d['data'] for d in result['diagnostics'] if d['severity'] == 'information']
             self.assertEqual(len(rosters), counts['claims'])
@@ -70,6 +101,75 @@ class SourceCalibrationTests(unittest.TestCase):
                     'depends on axioms: [propext]', 'depends on axioms: [propext, Quot.sound]')), row)
         return counts
 
+    def test_frozen_native_calibration_v2_exports(self):
+        fixtures = ROOT / 'fixtures'
+        cases = ['injected_arithmetic_controls', 'incomplete', 'materialization',
+                 'typed_boundary', 'predictive_enabled_categorical']
+        claims = 0
+        for case in cases:
+            name = 'native-calibration-' + case + '-v2'
+            with self.subTest(case=case):
+                raw = gzip.decompress((fixtures / (name + '.json.gz')).read_bytes())
+                provenance = json.loads((fixtures / (name + '.provenance.json')).read_text())
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), provenance['export_sha256'])
+                data = json.loads(raw)
+                self.assertEqual(data['schema'], 'synarc-source-profile-lifecycle-v2')
+                claims += self.prove(data)['claims']
+        self.assertEqual(claims, 86)
+
+    def test_versioned_reservation_precedes_intake_and_survives_retirement(self):
+        data = reservation_fixture()
+        counts = self.prove(data)
+        self.assertEqual(counts['reservation_projection'], 'checked')
+        self.assertEqual(counts['checked']['ReservationTransition'], 3)
+        self.assertEqual(counts['unchecked']['OpeningRowPayloadAndCapture'], 1)
+        # A physical revision may move the same retained attempt into workers.
+        after = data['events'][-1]['after']
+        after['workers'] = [after['current']]
+        after['current'] = copy.deepcopy(data['events'][0]['before']['current'])
+        after['current']['identity'] = 7
+        self.prove(data)
+        # Retirement retains the same reservation; it is not a fresh look.
+        before = copy.deepcopy(after); after = copy.deepcopy(before)
+        after['retired'] = after['workers']; after['workers'] = []
+        data['events'].append(dict(kind='Service', name='retained', grant=0, remaining=0,
+            result=dict(kind='Ok'), before=before, after=after))
+        self.prove(data)
+        self.assertEqual(self.prove(fixture())['reservation_projection'], 'unavailable')
+
+    def test_lean_rejects_reassigned_refunded_or_retrospective_looks_and_rows(self):
+        cases = []
+        data = reservation_fixture(); data['events'] = data['events'][:2]
+        data['events'][-1]['after']['current']['reserved_look'] = '1'; cases.append(data)
+        data = reservation_fixture(); data['events'] = data['events'][:2]
+        data['events'][-1]['after']['next_look'] = '0'; cases.append(data)
+        data = reservation_fixture(); data['events'] = data['events'][:2]
+        data['events'][-1]['after']['next_look'] = '2'; cases.append(data)
+        data = reservation_fixture(); data['events'] = data['events'][:2]
+        data['events'][-1]['grant'] = 0; cases.append(data)
+        data = reservation_fixture(); data['events'][-1]['after']['next_look'] = '2'; cases.append(data)
+        data = reservation_fixture(); data['events'][-1]['after']['current']['reserved_look'] = None; cases.append(data)
+        data = reservation_fixture(); data['events'][-1]['after']['current']['look'] = '1'; cases.append(data)
+        data = reservation_fixture(); data['events'][-1]['after']['current']['opening_rows'][0]['ordinal'] = 0; cases.append(data)
+        data = reservation_fixture(); rows = data['events'][-1]['after']['current']['opening_rows']
+        rows.append(copy.deepcopy(rows[0])); cases.append(data)
+        data = reservation_fixture(); data['events'][-1]['after']['current']['opening_rows'][0]['lineage']['authority'] = 8; cases.append(data)
+        data = reservation_fixture(); data['events'] = data['events'][:2]
+        data['events'][-1]['after']['current']['opening_rows'] = [dict(lineage=dict(authority=5,birth=0),ordinal=1)]; cases.append(data)
+        for i, data in enumerate(cases):
+            with self.subTest(case=i): self.prove(data, false=True)
+
+    def test_schema_versions_require_exact_reservation_fields(self):
+        data = reservation_fixture(); data['schema'] = 'synarc-source-profile-lifecycle-v1'
+        with self.assertRaisesRegex(ValueError, 'Expected fields'): emit(data)
+        data = fixture(); data['schema'] = 'synarc-source-profile-lifecycle-v2'
+        with self.assertRaisesRegex(ValueError, 'Expected fields'): emit(data)
+        data = reservation_fixture(); data['events'][-1]['after']['current']['reserved_look'] = True
+        with self.assertRaises(ValueError): emit(data)
+        data = reservation_fixture(); data['events'][-1]['after']['current']['opening_rows'] = None
+        with self.assertRaisesRegex(ValueError, 'Expected array'): emit(data)
+        data = reservation_fixture(); data['schema'] = 'synarc-source-profile-lifecycle-v3'
+        with self.assertRaisesRegex(ValueError, 'Unknown calibration schema'): emit(data)
     def test_projection_and_actual_refusal_are_separate_checked_scopes(self):
         self.assertEqual(self.prove(fixture())['unchecked'], {'CutLayerProjection': 1})
         self.prove(service_fixture()); self.prove(refusal_fixture())

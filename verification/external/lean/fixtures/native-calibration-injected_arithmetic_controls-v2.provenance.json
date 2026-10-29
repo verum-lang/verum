@@ -1,0 +1,10 @@
+{
+  "export_sha256": "7b9dc763ec999b499de848e57b7a63a64e116e8a517704cfb93dcfeb68b90f7f",
+  "rust_binary_sha256": "d951fe4f8fba54260f72a2b859cf0da344352b1746f882ef76a5965c47dd26f7",
+  "source_head": "09592b2abc797b6edb452de96fa25058fcdbb42d",
+  "source_files_audited": 1532,
+  "producer_receipt_sha256": "b0df12f3bc38dfb6792ce3e868487c8fda31e8f3e3033c1b33f9394e385e078b",
+  "patch_sha256": "d5ea1353964bc2dd21a5b0b3bcda6c6de54883cf413d47e4324c203ba8d99c19",
+  "independent_replay_receipt_sha256": "d16cd3eb755acb7746e96b49afc944ef42207fcb6cfbcbf07b5694a693c11061",
+  "scope": "Five frozen native v2 calibration exports. Eighteen native courts independently passed; all five JSON exports match exactly. Discovery-owner projections only; complete risk inventory, allocation identity, row payloads and statistical validity are not established."
+}
