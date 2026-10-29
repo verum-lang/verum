@@ -47,6 +47,19 @@ theorem le_trans {a b c : Fraction} (h : AtMost a b) (k : AtMost b c) : AtMost a
 theorem eq_trans {a b c : Fraction} (h : Equal a b) (k : Equal b c) : Equal a c :=
   le_antisymm (le_trans (eq_le h) (eq_le k)) (le_trans (eq_le (eq_symm k)) (eq_le (eq_symm h)))
 
+theorem le_less_trans {a b c : Fraction} (h : AtMost a b) (k : Less b c) : Less a c := by
+  have first := Nat.mul_le_mul_right c.denominator h
+  have second := Nat.mul_lt_mul_of_pos_right k a.positive
+  have scaled : (a.numerator*c.denominator)*b.denominator <
+      (c.numerator*a.denominator)*b.denominator := by
+    simp only [Nat.mul_comm, Nat.mul_left_comm] at first second ⊢
+    exact Nat.lt_of_le_of_lt first second
+  by_cases ordered : a.numerator*c.denominator < c.numerator*a.denominator
+  · exact ordered
+  · have reverse : c.numerator*a.denominator ≤ a.numerator*c.denominator := by omega
+    have impossible := Nat.mul_le_mul_right b.denominator reverse
+    omega
+
 theorem add_comm (a b : Fraction) : Equal (add a b) (add b a) := by
   simp [Equal, add, Nat.mul_comm, Nat.add_comm]
 
