@@ -138,6 +138,39 @@ structure Declaration where
   controls : List Control
   deriving DecidableEq
 
+/-- Preserve source identity until the native declaration conditions have been
+checked. Equal arities do not make primitive identities interchangeable; equal
+literal values cannot occupy different source-pool positions. Captured calls
+remain distinct alternatives even when their bodies happen to be equal. -/
+def checkedDeclaration {P V : Type} [DecidableEq P] [DecidableEq V]
+    (owner inputs steps : Nat) (operations : List (P × Nat)) (literals : List V)
+    (calls : List Nat) (controls : List Control) : Option Declaration :=
+  if decide (operations.map Prod.fst).Nodup && decide literals.Nodup &&
+      decide (0 < operations.length + calls.length + controls.length) then
+    some ⟨owner,inputs,literals.length,steps,operations.map Prod.snd ++ calls,controls⟩
+  else none
+
+theorem checked_declaration_spec {P V : Type} [DecidableEq P] [DecidableEq V]
+    (owner inputs steps : Nat) (operations : List (P × Nat)) (literals : List V)
+    (calls : List Nat) (controls : List Control) (declaration : Declaration) :
+    checkedDeclaration owner inputs steps operations literals calls controls = some declaration ↔
+    (operations.map Prod.fst).Nodup ∧ literals.Nodup ∧
+      0 < operations.length + calls.length + controls.length ∧
+      declaration = ⟨owner,inputs,literals.length,steps,operations.map Prod.snd ++ calls,controls⟩ := by
+  unfold checkedDeclaration
+  constructor
+  · intro success
+    split at success
+    · rename_i valid
+      obtain ⟨both,nonempty⟩ := Bool.and_eq_true_iff.mp valid
+      obtain ⟨ops,lits⟩ := Bool.and_eq_true_iff.mp both
+      exact ⟨of_decide_eq_true ops,of_decide_eq_true lits,of_decide_eq_true nonempty,
+        (Option.some.inj success).symm⟩
+    · cases success
+  · rintro ⟨ops,lits,nonempty,rfl⟩
+    rw [decide_eq_true ops,decide_eq_true lits,decide_eq_true nonempty]
+    rfl
+
 def control (prior : List Signature) : Control → Option Alternative
   | .branch yes no => do
     let yes ← prior.find? (fun p => p.owner = yes)

@@ -44,6 +44,12 @@
       "bytes": 7914,
       "sha256": "98e2354874836140595b86dea80a8725ede6243b09c7778043da02360ca211d6",
       "source_path": "rust/crates/synarc-kan/src/program/observer/acquisition/joint/compositional_courts.rs"
+    },
+    {
+      "file": "compositional-census-native-v2.source-3.rs.gz",
+      "bytes": 13655,
+      "sha256": "05ee86d7392aaaec61c8ba2bc02c3a3541e5e0f181c0507aceeb70c095a33938",
+      "source_path": "rust/crates/synarc-kan/src/construction/family/syntax.rs"
     }
   ],
   "scope": "Finite declared family census and Uniform paid-look denominator only; not code codec, VM execution or native resource refinement"

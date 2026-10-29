@@ -16,6 +16,9 @@ def fixture():
     raw=gzip.decompress((ROOT/'fixtures'/(STEM+'.jsonl.gz')).read_bytes())
     return dict(packets=[json.loads(line) for line in raw.splitlines()])
 
+def captured_program():
+    return dict(steps=[dict(operation={'Primitive':'Zero'},arguments=[])],output=0,library=[])
+
 class CompositionalCensusTests(ReplayAssertions,unittest.TestCase):
     emitter=staticmethod(emit)
 
@@ -63,6 +66,73 @@ class CompositionalCensusTests(ReplayAssertions,unittest.TestCase):
             elif kind=='boolean_arity':body['operations'][0]['arity']=True
             elif kind=='control':root['controls'][0]['kind']='Unknown'
             else:p['look']='00'
+            with self.subTest(kind=kind),self.assertRaises(ValueError):emit(data)
+
+    def test_invalid_declarations_fail_before_arity_projection(self):
+        for kind in ('duplicate_primitive','duplicate_bit','duplicate_sequence','empty'):
+            data=fixture();p=data['packets'][0];body=p['parts'][2]['language']['controls'][0]['body']
+            if kind=='duplicate_primitive':
+                # Different arities must not conceal identical primitive IDs.
+                body['operations'][1]['primitive']='Identity';count=24
+            elif kind=='empty':
+                body['operations']=[];count=0
+            else:
+                value={'Bit':False} if kind=='duplicate_bit' else {'Sequence':[False,True]}
+                body['literals']=[value,value];count=80
+            # Each reported count is correct for the old arity-only projection.
+            # Rejection must therefore come from declaration validity itself.
+            p['family_names']=count;p['charged_comparisons']=count*2
+            with self.subTest(kind=kind):self.prove(data,'family = some ')
+
+    def test_distinct_values_equal_arities_and_captured_calls_are_admitted(self):
+        for kind in ('same_arity','distinct_values','duplicate_calls','control_program'):
+            data=fixture();p=data['packets'][0];body=p['parts'][2]['language']['controls'][0]['body']
+            if kind=='same_arity':
+                body['operations'][1]['arity']=1;count=16
+            elif kind=='distinct_values':
+                body['literals']=[{'Bit':False},{'Sequence':[]},{'Sequence':[False]},{'Bit':True}]
+                count=168
+            elif kind=='duplicate_calls':
+                body['calls']=[dict(arity=0,program=captured_program()) for _ in range(2)];count=32
+            else:
+                # A typed captured Program need not succeed at execution; all
+                # constructors and its lexical library must still be decoded.
+                child=captured_program()
+                child['steps'].extend([
+                    dict(operation={'Branch':{'yes':0,'no':1}},arguments=[{'Literal':{'Bit':True}}]),
+                    dict(operation={'Call':0},arguments=[{'Input':0}]),
+                    dict(operation={'Fold':1},arguments=[{'Register':0},{'Literal':{'Sequence':[False]}}])])
+                child['library']=[captured_program()]
+                body['calls']=[dict(arity=0,program=child)];count=28
+            p['family_names']=count;p['charged_comparisons']=count*2
+            with self.subTest(kind=kind):self.prove(data)
+
+    def test_source_value_codec_is_strict(self):
+        for value in ('Unknown',1,None,{'Identity':None}):
+            data=fixture();data['packets'][0]['parts'][0]['language']['operations'][0]['primitive']=value
+            with self.subTest(primitive=value),self.assertRaises(ValueError):emit(data)
+        for value in ({'Bit':1},{'Sequence':[False,0]},{'Sequence':'01'},
+                      {'Other':False},{'Bit':False,'Sequence':[]},False):
+            data=fixture();data['packets'][0]['parts'][0]['language']['literals']=[value]
+            with self.subTest(literal=value),self.assertRaises(ValueError):emit(data)
+
+    def test_captured_program_payloads_are_not_ignored(self):
+        for kind in ('fields','output','library','primitive','operation','branch',
+                     'callee','argument','literal','nested','arguments','steps'):
+            data=fixture();child=captured_program();step=child['steps'][0]
+            if kind=='fields':child['extra']=0
+            elif kind=='output':child['output']=True
+            elif kind=='library':child['library']={}
+            elif kind=='primitive':step['operation']={'Primitive':'Unknown'}
+            elif kind=='operation':step['operation']={'Unknown':0}
+            elif kind=='branch':step['operation']={'Branch':{'yes':0,'no':False}}
+            elif kind=='callee':step['operation']={'Fold':-1}
+            elif kind=='argument':step['arguments']=[{'Register':True}]
+            elif kind=='literal':step['arguments']=[{'Literal':{'Bit':0}}]
+            elif kind=='nested':child['library']=[dict(steps=[],output=None)]
+            elif kind=='arguments':step['arguments']={}
+            else:child['steps']=None
+            data['packets'][0]['parts'][0]['language']['calls']=[dict(arity=0,program=child)]
             with self.subTest(kind=kind),self.assertRaises(ValueError):emit(data)
 
     def test_general_enumeration_and_branch_contract(self):
