@@ -252,6 +252,7 @@ jobs:
             --report observer-retirement-acceptance.json
           python3 verification/external/lean/check_enumerable_mass.py \
             --report enumerable-mass-acceptance.json
+          python3 -m unittest discover -s verification/external/lean -p test_finite_risk.py
           python3 verification/external/lean/check_categorical_prediction.py \
             --report categorical-prediction-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_causal_coding.py

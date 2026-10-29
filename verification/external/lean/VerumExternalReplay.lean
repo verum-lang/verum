@@ -40,6 +40,7 @@ import VerumExternalReplay.AcquiredObserverControls
 import VerumExternalReplay.CommonDescriptionCost
 import VerumExternalReplay.ObserverRetirementControls
 import VerumExternalReplay.EnumerableMass
+import VerumExternalReplay.FiniteRisk
 import VerumExternalReplay.CategoricalPrediction
 import VerumExternalReplay.FiniteAdmission
 import VerumExternalReplay.TraceReduction
