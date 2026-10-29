@@ -1,0 +1,14 @@
+{
+  "export_sha256": "f8700385db95ddec14a3f5c210b2f168c2e03112e4e2c673b047c034b7305149",
+  "compressed_sha256": "4497df28cdc091d482c65722e225a1729709c0278c34cb4943fe13518897e1b8",
+  "native_commit": "0298b51cf5d0e9c898f3a67ec64ed6b2425901f8",
+  "native_receipt_sha256": "7b3da926c3359ba0a95c90f1bbd8059ab0c3f6da2d0f390846f20b39bda92a78",
+  "native_binary_sha256": "bb99aa2ddf068ed8d0a3c74d6b986d7323f527a178ac4e18ba8c30076f8e0fa7",
+  "native_source_sha256": {
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual.rs": "aa5515c72d0b69eea58a62cfa5c09223eb157c0f1c8c111ccd253dc6cb221a03",
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual/joint.rs": "b84ebc3ac8d6ff05358a5669278ed0b9eb2f87f671e050fd840d1bc1e6c54ea5",
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/residual/joint_courts.rs": "6189a16598b167f63943614a308eca2e8fa766426353a46c60fa99c894cd97fc"
+  },
+  "independent_source_files_checked": 1488,
+  "scope": "Actual Rust frozen/staged banks under declared FirstBit fixture. Native acquired-program execution is exercised separately, not yet machine-proved by this export."
+}
