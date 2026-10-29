@@ -146,3 +146,66 @@ fn indexed_reflection_preserves_each_telescope_and_rejects_escaping_indices() {
         ReflectedTerm::from(&Term::universe(2))
     )));
 }
+
+#[test]
+fn proof_dependent_identity_survives_reflection_and_universe_translation() {
+    use verum_kernel::proof_checker::Certificate;
+    use verum_kernel::proof_checker_meta::shift_universes;
+    // A closed, genuinely proof-dependent family: reflexivity of the path,
+    // with reflexivity of reflexivity as its base.
+    let family = Term::lam(
+        Term::universe(0),
+        Term::lam(
+            Term::id_ty(Term::universe(0), Term::var(1), Term::var(0)),
+            Term::id_ty(
+                Term::id_ty(Term::universe(0), Term::var(2), Term::var(1)),
+                Term::var(0),
+                Term::var(0),
+            ),
+        ),
+    );
+    let original = Term::lam(
+        Term::universe(0),
+        Term::id_elim(
+            family,
+            Term::refl(Term::refl(Term::var(0))),
+            Term::refl(Term::var(0)),
+        ),
+    );
+    let claim = Term::pi(
+        Term::universe(0),
+        Term::id_ty(
+            Term::id_ty(Term::universe(0), Term::var(0), Term::var(0)),
+            Term::refl(Term::var(0)),
+            Term::refl(Term::var(0)),
+        ),
+    );
+    for lift in [0, 1, 7] {
+        let term = shift_universes(&original, lift);
+        let ty = shift_universes(&claim, lift);
+        let reflected = ReflectedTerm::from(&term);
+        let decoded: ReflectedTerm =
+            serde_json::from_slice(&serde_json::to_vec(&reflected).unwrap()).unwrap();
+        assert_eq!(Term::try_from(&decoded).unwrap(), term);
+        assert!(is_reflected_well_formed(&ReflectedJudgment::closed(
+            decoded,
+            ReflectedTerm::from(&ty),
+        )));
+        let cert = Certificate {
+            term,
+            claimed_type: ty,
+            metadata: Default::default(),
+        };
+        assert!(cert.verify().is_ok(), "{:?}", cert.verify());
+        assert!(verum_kernel::proof_checker_nbe::verify_certificate(&cert).is_ok());
+    }
+    for child in 0..3 {
+        let mut children = [Term::universe(0), Term::universe(0), Term::universe(0)];
+        children[child] = Term::var(0);
+        let [motive, base, path] = children;
+        assert!(!is_reflected_well_formed(&ReflectedJudgment::closed(
+            ReflectedTerm::from(&Term::id_elim(motive, base, path)),
+            ReflectedTerm::from(&Term::universe(1)),
+        )));
+    }
+}

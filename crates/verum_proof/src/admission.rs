@@ -173,6 +173,11 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
                     motive: a,
                     base: b,
                     scrutinee: c,
+                }
+                | Term::IdElim {
+                    motive: a,
+                    base: b,
+                    scrutinee: c,
                 } => {
                     for t in [a, b, c] {
                         queue.push((Node::Term(t, binders), depth + 1));

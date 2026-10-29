@@ -72,6 +72,7 @@ inductive Term : Type where
   | identity (ty lhs rhs : Term)
   | refl     (value : Term)
   | transport (motive base path : Term)
+  | idElim (motive base path : Term)
   deriving Inhabited, Repr
 
 /-- Type-checking error — mirrors `proof_checker::CheckError` for
@@ -288,7 +289,7 @@ def scopeError (bound : Nat) (t : Term) : Option Nat :=
   | .pi a b | .lam a b | .sigma a b => (scopeError bound a).or (scopeError (bound + 1) b)
   | .app a b | .pair a b => (scopeError bound a).or (scopeError bound b)
   | .fst value | .snd value | .refl value => scopeError bound value
-  | .identity a b c | .transport a b c =>
+  | .identity a b c | .transport a b c | .idElim a b c =>
     (scopeError bound a).or ((scopeError bound b).or (scopeError bound c))
   | .data _ _ indices constructors => (scopeTelescope bound indices).or (scopeConstructors bound constructors)
   | .construct data _ args => (scopeError bound data).or (scopeTerms bound args)
@@ -357,6 +358,7 @@ def mapVars (replace : Nat → Nat → Term) (cutoff : Nat) (t : Term) : Term :=
   | .identity a x y => .identity (mapVars replace cutoff a) (mapVars replace cutoff x) (mapVars replace cutoff y)
   | .refl x => .refl (mapVars replace cutoff x)
   | .transport p h e => .transport (mapVars replace cutoff p) (mapVars replace cutoff h) (mapVars replace cutoff e)
+  | .idElim p h e => .idElim (mapVars replace cutoff p) (mapVars replace cutoff h) (mapVars replace cutoff e)
 termination_by sizeOf t
 
 def mapTerms (replace : Nat → Nat → Term) (cutoff : Nat) (terms : List Term) : List Term :=
@@ -476,6 +478,10 @@ def whnfFuel (fuel : Nat) (t : Term) : Term :=
       match whnfFuel fuel e with
       | .refl _ => whnfFuel fuel h
       | other => .transport p h other
+    | .idElim p h e =>
+      match whnfFuel fuel e with
+      | .refl _ => whnfFuel fuel h
+      | other => .idElim p h other
     | other => other
 termination_by fuel
 
@@ -509,6 +515,7 @@ partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   | .identity a x y => isFreeIn target a || isFreeIn target x || isFreeIn target y
   | .refl x => isFreeIn target x
   | .transport p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
+  | .idElim p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
 
 /-- Field domain in the frame of every preceding field. -/
 def fieldValueType (field : DataField Term) (preceding : Nat) : Option Term :=
@@ -579,6 +586,7 @@ partial def defEqWhnf : Term → Term → Bool
   | .identity a x y, .identity b u v => defEq a b && defEq x u && defEq y v
   | .refl x, .refl y => defEq x y
   | .transport p h e, .transport q k f => defEq p q && defEq h k && defEq e f
+  | .idElim p h e, .idElim q k f => defEq p q && defEq h k && defEq e f
   | .lam _ body,   other         => etaMatch body other
   | other,         .lam _ body   => etaMatch body other
   | _,             _             => false
@@ -791,6 +799,17 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     let some _ := expectUniverse codomain | .error (.not_a_valid_j_motive motive)
     checkDomain Γ base (.app motive lhs)
     return .app motive rhs
+  | .idElim motive base path => do
+    let .identity carrier lhs rhs := whnf (← infer Γ path) | .error (.not_an_identity path)
+    let .pi domain codomain := whnf (← infer Γ motive) | .error (.not_a_valid_j_motive motive)
+    unless defEq domain carrier do throw (.domain_mismatch carrier domain)
+    let .pi proofDomain resultKind := whnf codomain | .error (.not_a_valid_j_motive motive)
+    let expectedPath := .identity (shiftUp 1 0 carrier) (shiftUp 1 0 lhs) (.var 0)
+    unless defEq proofDomain expectedPath do throw (.domain_mismatch expectedPath proofDomain)
+    let some _ := expectUniverse resultKind | .error (.not_a_valid_j_motive motive)
+    checkDomain Γ base (.app (.app motive lhs) (.refl lhs))
+    return .app (.app motive rhs) path
+
 
 /-- Check introductions using an already formed expected type. -/
 partial def checkAgainst (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do

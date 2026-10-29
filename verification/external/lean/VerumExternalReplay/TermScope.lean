@@ -63,6 +63,9 @@ theorem scope_mapVars (n m : Nat) (replace : Nat → Nat → Term)
   | transport a b c =>
     simp only [mapVars, scopeError, Option.or_eq_none_iff] at good ⊢
     exact ⟨scope_mapVars n m replace law cutoff a good.1, scope_mapVars n m replace law cutoff b good.2.1, scope_mapVars n m replace law cutoff c good.2.2⟩
+  | idElim a b c =>
+    simp only [mapVars, scopeError, Option.or_eq_none_iff] at good ⊢
+    exact ⟨scope_mapVars n m replace law cutoff a good.1, scope_mapVars n m replace law cutoff b good.2.1, scope_mapVars n m replace law cutoff c good.2.2⟩
 termination_by sizeOf t
 
 theorem scope_mapTerms (n m : Nat) (replace : Nat → Nat → Term)

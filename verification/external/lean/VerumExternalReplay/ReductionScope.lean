@@ -121,6 +121,17 @@ theorem scope_whnfFuel (fuel bound : Nat) (term : Term)
       next other equation =>
         simp only [scopeError, Option.or_eq_none_iff]
         exact ⟨parts.1, parts.2.1, by simpa only [equation] using headGood⟩
+    | idElim motive base path =>
+      have parts : scopeError bound motive = none ∧ scopeError bound base = none ∧
+          scopeError bound path = none := by
+        simpa only [scopeError, Option.or_eq_none_iff] using good
+      have headGood := ih path parts.2.2
+      simp only [whnfFuel]
+      split
+      next value equation => exact ih base parts.2.1
+      next other equation =>
+        simp only [scopeError, Option.or_eq_none_iff]
+        exact ⟨parts.1, parts.2.1, by simpa only [equation] using headGood⟩
     | induct value motive cases =>
       have parts : scopeError bound value = none ∧ scopeError bound motive = none ∧
           scopeTerms bound cases = none := by

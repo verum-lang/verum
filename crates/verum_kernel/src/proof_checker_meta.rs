@@ -119,6 +119,15 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
             base: Box::new(shift_universes(base, lift)),
             scrutinee: Box::new(shift_universes(scrutinee, lift)),
         },
+        Term::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => Term::IdElim {
+            motive: Box::new(shift_universes(motive, lift)),
+            base: Box::new(shift_universes(base, lift)),
+            scrutinee: Box::new(shift_universes(scrutinee, lift)),
+        },
     }
 }
 

@@ -619,7 +619,7 @@ pub enum Term {
     /// canonical inhabitant of `Id(A, a, a)`; J-reduction collapses
     /// path induction at the refl scrutinee.
     Refl(Box<Term>),
-    /// Paulin-Mohring J eliminator (path induction).
+    /// Endpoint-dependent equality transport (the legacy J wire format).
     ///
     /// ```text
     /// motive    : Π(_ : A). Universe(n)
@@ -641,6 +641,23 @@ pub enum Term {
         /// Base case `h : P(a)` — proof at the lhs of the path.
         base: Box<Term>,
         /// The path being eliminated: `eq : Id(A, a, b)`.
+        scrutinee: Box<Term>,
+    },
+    /// Based identity induction with a motive depending on the path itself.
+    ///
+    /// ```text
+    /// scrutinee : Id(A, a, b)
+    /// motive    : Π(y : A). Π(p : Id(A, a, y)). Universe(v)
+    /// base      : motive(a, Refl(a))
+    /// ───────────────────────────────────────────────────────
+    /// IdElim(motive, base, scrutinee) : motive(b, scrutinee)
+    /// ```
+    /// Reduces to `base` only at reflexivity. Equal endpoints alone do not
+    /// make a neutral proof reflexivity; this rule supplies neither K nor UIP.
+    /// The distinct constructor preserves the meaning of existing J artifacts.
+    IdElim {
+        motive: Box<Term>,
+        base: Box<Term>,
         scrutinee: Box<Term>,
     },
 }
@@ -729,6 +746,15 @@ impl Term {
                 base,
                 scrutinee,
             } => Term::J {
+                motive: Box::new(map(*motive, 0)),
+                base: Box::new(map(*base, 0)),
+                scrutinee: Box::new(map(*scrutinee, 0)),
+            },
+            Term::IdElim {
+                motive,
+                base,
+                scrutinee,
+            } => Term::IdElim {
                 motive: Box::new(map(*motive, 0)),
                 base: Box::new(map(*base, 0)),
                 scrutinee: Box::new(map(*scrutinee, 0)),
@@ -825,6 +851,15 @@ impl Term {
     /// Convenience: build `J { motive, base, scrutinee }`.
     pub fn j(motive: Term, base: Term, scrutinee: Term) -> Self {
         Term::J {
+            motive: Box::new(motive),
+            base: Box::new(base),
+            scrutinee: Box::new(scrutinee),
+        }
+    }
+
+    /// Eliminate an identity with an endpoint-and-proof-dependent motive.
+    pub fn id_elim(motive: Term, base: Term, scrutinee: Term) -> Self {
+        Self::IdElim {
             motive: Box::new(motive),
             base: Box::new(base),
             scrutinee: Box::new(scrutinee),
@@ -1030,6 +1065,15 @@ pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
             base: Box::new(shift_up(*base, amount, cutoff)),
             scrutinee: Box::new(shift_up(*scrutinee, amount, cutoff)),
         },
+        Term::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => Term::IdElim {
+            motive: Box::new(shift_up(*motive, amount, cutoff)),
+            base: Box::new(shift_up(*base, amount, cutoff)),
+            scrutinee: Box::new(shift_up(*scrutinee, amount, cutoff)),
+        },
     }
 }
 
@@ -1097,6 +1141,15 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
             base,
             scrutinee,
         } => Term::J {
+            motive: Box::new(subst(*motive, target, replacement)),
+            base: Box::new(subst(*base, target, replacement)),
+            scrutinee: Box::new(subst(*scrutinee, target, replacement)),
+        },
+        Term::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => Term::IdElim {
             motive: Box::new(subst(*motive, target, replacement)),
             base: Box::new(subst(*base, target, replacement)),
             scrutinee: Box::new(subst(*scrutinee, target, replacement)),
@@ -1300,6 +1353,30 @@ impl Conversion<'_> {
                         }
                     }
                 }
+                Term::IdElim {
+                    motive,
+                    base,
+                    scrutinee,
+                } => {
+                    let (s_whnf, fuel_after) = self.whnf_fuel(*scrutinee, fuel);
+                    fuel = fuel_after;
+                    match s_whnf {
+                        Term::Refl(_) => {
+                            // Continue reducing the base term.
+                            term = *base;
+                        }
+                        other => {
+                            return (
+                                Term::IdElim {
+                                    motive,
+                                    base,
+                                    scrutinee: Box::new(other),
+                                },
+                                fuel,
+                            );
+                        }
+                    }
+                }
 
                 _ => return (term, fuel),
             }
@@ -1474,6 +1551,18 @@ impl Conversion<'_> {
                     scrutinee: s2,
                 },
             ) => self.def_eq(m1, m2) && self.def_eq(b1, b2) && self.def_eq(s1, s2),
+            (
+                Term::IdElim {
+                    motive: m1,
+                    base: b1,
+                    scrutinee: s1,
+                },
+                Term::IdElim {
+                    motive: m2,
+                    base: b2,
+                    scrutinee: s2,
+                },
+            ) => self.def_eq(m1, m2) && self.def_eq(b1, b2) && self.def_eq(s1, s2),
             // η-equivalence — one-sided cases. When one side is a
             // λx.(f x) and the other is `f`, they're equal iff `x`
             // does not appear free in `f`. This rule fires AFTER WHNF
@@ -1576,6 +1665,11 @@ pub(crate) fn contains_free_by(term: &Term, depth: usize, wanted: &impl Fn(usize
         Term::Fst(term) | Term::Snd(term) | Term::Refl(term) => here(term),
         Term::Id { ty, lhs, rhs } => here(ty) || here(lhs) || here(rhs),
         Term::J {
+            motive,
+            base,
+            scrutinee,
+        }
+        | Term::IdElim {
             motive,
             base,
             scrutinee,
@@ -1682,6 +1776,15 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
             base: Box::new(shift_down(*base, amount, cutoff)),
             scrutinee: Box::new(shift_down(*scrutinee, amount, cutoff)),
         },
+        Term::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => Term::IdElim {
+            motive: Box::new(shift_down(*motive, amount, cutoff)),
+            base: Box::new(shift_down(*base, amount, cutoff)),
+            scrutinee: Box::new(shift_down(*scrutinee, amount, cutoff)),
+        },
     }
 }
 
@@ -1719,9 +1822,8 @@ pub enum CheckError {
         /// The rhs of the claimed Id type.
         rhs: Term,
     },
-    /// T-J-Elim: the J motive isn't a `Π(_ : A). U(_)`
-    /// shape — path induction needs a non-dependent motive index by
-    /// the path's right endpoint.
+    /// An identity eliminator's motive has the wrong shape: J expects
+    /// `Π(y : A). U(_)`; IdElim additionally binds `p : Id(A, a, y)`.
     NotAValidJMotive(Term),
     /// T-App-Elim: argument's type doesn't match the Pi's domain.
     DomainMismatch {
@@ -2131,7 +2233,9 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             })
         }
 
-        // T-J-Elim (Paulin-Mohring path induction).
+        // Equality elimination: legacy endpoint transport and full based
+        // induction share the endpoint check, with a second motive binder
+        // only for IdElim. Its domain must be Id(A, a, the fresh endpoint).
         //
         //   motive    : Π(_ : A). Universe(n)
         //   base      : motive(a)              where `a` is the lhs
@@ -2145,7 +2249,13 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             motive,
             base,
             scrutinee,
+        }
+        | Term::IdElim {
+            motive,
+            base,
+            scrutinee,
         } => {
+            let dependent = matches!(term, Term::IdElim { .. });
             // Infer the scrutinee's Id type to extract `A`, `a`, `b`.
             let s_ty = ctx.conversion().whnf(infer(ctx, scrutinee)?);
             let (a_ty, a_lhs, a_rhs) = match s_ty {
@@ -2153,7 +2263,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                 other => return Err(CheckError::NotAnIdentity(other)),
             };
 
-            // Validate the motive is Π(_ : A). Universe(_).
+            // Both motives bind the endpoint first; IdElim then binds its path.
             let motive_ty = ctx.conversion().whnf(infer(ctx, motive)?);
             let (motive_dom, motive_codom) = match &motive_ty {
                 Term::Pi(d, c) => (d.as_ref().clone(), c.as_ref().clone()),
@@ -2165,27 +2275,53 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     actual: motive_dom,
                 });
             }
-            // The motive's codomain (under the binder) must reduce
-            // to a Universe.  We require this constraint so the
-            // J-eliminator's result is well-typed.
+            let (result_codom, binders) = if dependent {
+                let codomain = ctx.conversion().under(1).whnf(motive_codom);
+                let Term::Pi(path_domain, result) = codomain else {
+                    return Err(CheckError::NotAValidJMotive((**motive).clone()));
+                };
+                let expected_path = Term::id_ty(
+                    shift_up((*a_ty).clone(), 1, 0),
+                    shift_up((*a_lhs).clone(), 1, 0),
+                    Term::var(0),
+                );
+                if !ctx
+                    .conversion()
+                    .under(1)
+                    .def_eq(&path_domain, &expected_path)
+                {
+                    return Err(CheckError::DomainMismatch {
+                        expected: expected_path,
+                        actual: *path_domain,
+                    });
+                }
+                (*result, 2)
+            } else {
+                (motive_codom, 1)
+            };
             if ctx
                 .conversion()
-                .under(1)
-                .expect_universe(&motive_codom)
+                .under(binders)
+                .expect_universe(&result_codom)
                 .is_none()
             {
                 return Err(CheckError::NotAValidJMotive((**motive).clone()));
             }
 
-            // The base must inhabit `motive(a_lhs)` — the motive
-            // applied to the path's LEFT endpoint.
-            let expected_base_ty = ctx
-                .conversion()
-                .whnf(Term::App(motive.clone(), a_lhs.clone()));
+            // Instantiate the base at the left endpoint, and at its reflexive
+            // path as well when the motive depends on the proof.
+            let mut expected_base_ty = Term::App(motive.clone(), a_lhs.clone());
+            if dependent {
+                expected_base_ty = Term::app(expected_base_ty, Term::refl((*a_lhs).clone()));
+            }
             check_domain(ctx, base, &expected_base_ty)?;
 
-            // Result: motive applied to the path's RIGHT endpoint.
-            Ok(Term::App(motive.clone(), a_rhs))
+            let result = Term::App(motive.clone(), a_rhs);
+            Ok(if dependent {
+                Term::app(result, (**scrutinee).clone())
+            } else {
+                result
+            })
         }
     }
 }

@@ -263,6 +263,12 @@ pub enum Neutral {
         /// Stuck path scrutinee head.
         scrutinee: Box<Neutral>,
     },
+    /// Stuck based identity induction; the motive also binds the proof.
+    NIdElim {
+        motive: Box<Value>,
+        base: Box<Value>,
+        scrutinee: Box<Neutral>,
+    },
     /// Soundness gate: a stuck head that is itself a non-function,
     /// non-pair, non-path value (e.g. `Universe(_)` applied to an
     /// argument or projected via `fst`/`snd`).  Wrapping the
@@ -429,6 +435,16 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             base,
             scrutinee,
         } => apply_j(eval(motive, env), eval(base, env), eval(scrutinee, env)),
+        Term::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => apply_identity_elim(
+            eval(motive, env),
+            eval(base, env),
+            eval(scrutinee, env),
+            true,
+        ),
     }
 }
 
@@ -472,19 +488,31 @@ pub fn apply_induct(scrutinee: Value, motive: Value, cases: Vec<Value>) -> Value
 /// stays stuck on neutral scrutinees via `NJ`; falls through
 /// `NStuck` for non-path, non-neutral heads.
 pub fn apply_j(motive: Value, base: Value, scrutinee: Value) -> Value {
-    match scrutinee {
-        Value::VRefl(_) => base,
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NJ {
-            motive: Box::new(motive),
-            base: Box::new(base),
-            scrutinee: Box::new(n),
-        }),
-        other => Value::VNeutral(Neutral::NJ {
-            motive: Box::new(motive),
-            base: Box::new(base),
-            scrutinee: Box::new(Neutral::NStuck(Box::new(other))),
-        }),
-    }
+    apply_identity_elim(motive, base, scrutinee, false)
+}
+
+fn apply_identity_elim(motive: Value, base: Value, scrutinee: Value, dependent: bool) -> Value {
+    let path = match scrutinee {
+        Value::VRefl(_) => return base,
+        Value::VNeutral(n) => n,
+        other => Neutral::NStuck(Box::new(other)),
+    };
+    let motive = Box::new(motive);
+    let base = Box::new(base);
+    let scrutinee = Box::new(path);
+    Value::VNeutral(if dependent {
+        Neutral::NIdElim {
+            motive,
+            base,
+            scrutinee,
+        }
+    } else {
+        Neutral::NJ {
+            motive,
+            base,
+            scrutinee,
+        }
+    })
 }
 
 /// Apply one value to another.
@@ -703,6 +731,15 @@ fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
             base,
             scrutinee,
         } => Term::J {
+            motive: Box::new(quote(motive, level)),
+            base: Box::new(quote(base, level)),
+            scrutinee: Box::new(quote_neutral(scrutinee, level)),
+        },
+        Neutral::NIdElim {
+            motive,
+            base,
+            scrutinee,
+        } => Term::IdElim {
             motive: Box::new(quote(motive, level)),
             base: Box::new(quote(base, level)),
             scrutinee: Box::new(quote_neutral(scrutinee, level)),
@@ -948,6 +985,18 @@ fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
                 scrutinee: s1,
             },
             Neutral::NJ {
+                motive: m2,
+                base: b2,
+                scrutinee: s2,
+            },
+        ) => def_eq(m1, m2, level) && def_eq(b1, b2, level) && def_eq_neutral(s1, s2, level),
+        (
+            Neutral::NIdElim {
+                motive: m1,
+                base: b1,
+                scrutinee: s1,
+            },
+            Neutral::NIdElim {
                 motive: m2,
                 base: b2,
                 scrutinee: s2,
@@ -1443,13 +1492,19 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             })
         }
 
-        // T-J-Elim (Paulin-Mohring path induction): mirrors
-        // `proof_checker::infer Term::J`.
+        // Equality elimination, checked in the semantic domain. A dependent
+        // motive receives both a fresh endpoint and a fresh proof of its path.
         Term::J {
             motive,
             base,
             scrutinee,
+        }
+        | Term::IdElim {
+            motive,
+            base,
+            scrutinee,
         } => {
+            let dependent = matches!(term, Term::IdElim { .. });
             let s_ty = infer_value(ctx, scrutinee)?;
             let (a_ty, a_lhs, a_rhs) = match s_ty {
                 Value::VId { ty, lhs, rhs } => (ty, lhs, rhs),
@@ -1469,18 +1524,45 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             }
             // Validate motive's codomain is a Universe at every input.
             let probe = Value::VNeutral(Neutral::NVar(ctx.level()));
-            let codom_at_probe = motive_codom.apply(probe);
-            if expect_universe(&codom_at_probe).is_none() {
+            let codom_at_probe = motive_codom.apply(probe.clone());
+            let result_kind = if dependent {
+                let Value::VPi { domain, codomain } = codom_at_probe else {
+                    return Err(CheckError::NotAValidJMotive((**motive).clone()));
+                };
+                let expected = Value::VId {
+                    ty: a_ty.clone(),
+                    lhs: a_lhs.clone(),
+                    rhs: Box::new(probe),
+                };
+                if !def_eq(&domain, &expected, ctx.level() + 1) {
+                    return Err(CheckError::DomainMismatch {
+                        expected: quote(&expected, ctx.level() + 1),
+                        actual: quote(&domain, ctx.level() + 1),
+                    });
+                }
+                codomain.apply(Value::VNeutral(Neutral::NVar(ctx.level() + 1)))
+            } else {
+                codom_at_probe
+            };
+            if expect_universe(&result_kind).is_none() {
                 return Err(CheckError::NotAValidJMotive((**motive).clone()));
             }
 
-            // The base must inhabit `motive(a_lhs)`.
+            // The base uses the left endpoint and, for IdElim, reflexivity.
             let motive_value = eval(motive, ctx.env());
-            let expected_base_ty = apply_value(motive_value.clone(), (*a_lhs).clone());
+            let mut expected_base_ty = apply_value(motive_value.clone(), (*a_lhs).clone());
+            if dependent {
+                expected_base_ty = apply_value(expected_base_ty, Value::VRefl(a_lhs));
+            }
             check_domain_value(ctx, base, &expected_base_ty)?;
 
-            // Result: motive applied to the path's RIGHT endpoint.
-            Ok(apply_value(motive_value, *a_rhs))
+            // The result retains the right endpoint and the supplied proof.
+            let result = apply_value(motive_value, *a_rhs);
+            Ok(if dependent {
+                apply_value(result, eval(scrutinee, ctx.env()))
+            } else {
+                result
+            })
         }
     }
 }

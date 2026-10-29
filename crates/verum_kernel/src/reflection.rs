@@ -247,6 +247,15 @@ pub enum ReflectedTerm {
         /// Reflected scrutinee `eq : Id(A, a, b)`.
         scrutinee: Box<ReflectedTerm>,
     },
+    /// Mirror of proof-dependent based identity induction.
+    IdElim {
+        /// Reflected motive `P : Π(y : A). Π(p : Id(A, a, y)). Universe(_)`.
+        motive: Box<ReflectedTerm>,
+        /// Reflected base case `h : P(a, Refl(a))`.
+        base: Box<ReflectedTerm>,
+        /// Reflected scrutinee `eq : Id(A, a, b)`.
+        scrutinee: Box<ReflectedTerm>,
+    },
 }
 
 // =============================================================================
@@ -391,6 +400,15 @@ impl From<&Term> for ReflectedTerm {
                 base: Box::new(ReflectedTerm::from(base.as_ref())),
                 scrutinee: Box::new(ReflectedTerm::from(scrutinee.as_ref())),
             },
+            Term::IdElim {
+                motive,
+                base,
+                scrutinee,
+            } => ReflectedTerm::IdElim {
+                motive: Box::new(ReflectedTerm::from(motive.as_ref())),
+                base: Box::new(ReflectedTerm::from(base.as_ref())),
+                scrutinee: Box::new(ReflectedTerm::from(scrutinee.as_ref())),
+            },
         }
     }
 }
@@ -503,6 +521,15 @@ impl TryFrom<&ReflectedTerm> for Term {
                 base,
                 scrutinee,
             } => Ok(Term::J {
+                motive: Box::new(Term::try_from(motive.as_ref())?),
+                base: Box::new(Term::try_from(base.as_ref())?),
+                scrutinee: Box::new(Term::try_from(scrutinee.as_ref())?),
+            }),
+            ReflectedTerm::IdElim {
+                motive,
+                base,
+                scrutinee,
+            } => Ok(Term::IdElim {
                 motive: Box::new(Term::try_from(motive.as_ref())?),
                 base: Box::new(Term::try_from(base.as_ref())?),
                 scrutinee: Box::new(Term::try_from(scrutinee.as_ref())?),
@@ -874,6 +901,15 @@ fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
         }
         ReflectedTerm::Refl { value } => debruijn_in_range(value, depth),
         ReflectedTerm::J {
+            motive,
+            base,
+            scrutinee,
+        } => {
+            debruijn_in_range(motive, depth)
+                && debruijn_in_range(base, depth)
+                && debruijn_in_range(scrutinee, depth)
+        }
+        ReflectedTerm::IdElim {
             motive,
             base,
             scrutinee,

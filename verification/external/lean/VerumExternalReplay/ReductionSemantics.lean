@@ -16,6 +16,7 @@ inductive HeadStep : Term → Term → Prop where
   | first (a b : Term) : HeadStep (.fst (.pair a b)) a
   | second (a b : Term) : HeadStep (.snd (.pair a b)) b
   | transport (motive base value : Term) : HeadStep (.transport motive base (.refl value)) base
+  | idElim (motive base value : Term) : HeadStep (.idElim motive base (.refl value)) base
   | induction (name : String) (level : Level) (indices : List Term) (constructors : List (DataConstructor Term))
       (ctor : Nat) (args : List Term) (motive : Term) (cases : List Term)
       (fields : DataConstructor Term) (branch : Term)
@@ -28,6 +29,8 @@ inductive HeadStep : Term → Term → Prop where
   | sndHead {a b : Term} : HeadStep a b → HeadStep (.snd a) (.snd b)
   | transportHead {a b : Term} (motive base : Term) :
       HeadStep a b → HeadStep (.transport motive base a) (.transport motive base b)
+  | idElimHead {a b : Term} (motive base : Term) :
+      HeadStep a b → HeadStep (.idElim motive base a) (.idElim motive base b)
   | inductHead {a b : Term} (motive : Term) (cases : List Term) :
       HeadStep a b → HeadStep (.induct a motive cases) (.induct b motive cases)
   | inductDeclaration {a b : Term} (ctor : Nat) (args : List Term) (motive : Term) (cases : List Term) :
@@ -128,6 +131,16 @@ theorem whnfFuel_reduces (fuel : Nat) (term : Term) : HeadSteps term (whnfFuel f
         have steps : HeadSteps (.transport motive base path) (.transport motive base (.refl value)) := by
           simpa only [equation] using headPath
         exact steps.trans (.step (.transport motive base value) (ih base))
+      next other equation => simpa only [equation] using headPath
+    | idElim motive base path =>
+      have headPath := HeadSteps.lift (fun head => .idElim motive base head)
+        (HeadStep.idElimHead motive base) (ih path)
+      simp only [whnfFuel]
+      split
+      next value equation =>
+        have steps : HeadSteps (.idElim motive base path) (.idElim motive base (.refl value)) := by
+          simpa only [equation] using headPath
+        exact steps.trans (.step (.idElim motive base value) (ih base))
       next other equation => simpa only [equation] using headPath
     | induct value motive cases =>
       have headPath := HeadSteps.lift (fun head => .induct head motive cases)

@@ -167,6 +167,10 @@ partial def termFromJson (j : Json) : Except String Term := do
     exactKeys v ["motive", "base", "scrutinee"]
     return .transport (← termFromJson (← v.getObjVal? "motive"))
       (← termFromJson (← v.getObjVal? "base")) (← termFromJson (← v.getObjVal? "scrutinee"))
+  else if let .ok v := j.getObjVal? "IdElim" then do
+    exactKeys v ["motive", "base", "scrutinee"]
+    return .idElim (← termFromJson (← v.getObjVal? "motive"))
+      (← termFromJson (← v.getObjVal? "base")) (← termFromJson (← v.getObjVal? "scrutinee"))
   else
     Except.error s!"unrecognized Term variant in: {j.compress}"
 
