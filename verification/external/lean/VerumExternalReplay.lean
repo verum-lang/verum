@@ -60,3 +60,4 @@ import VerumExternalReplay.ResidualPrediction
 import VerumExternalReplay.SensoryPort
 import VerumExternalReplay.ActionCapture
 import VerumExternalReplay.ActionTargetWire
+import VerumExternalReplay.ProgramTotality
