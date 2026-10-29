@@ -1,3 +1,5 @@
+import VerumExternalReplay.FunctionExtensionality
+
 /-! ============================================================== -/
 /-! # Verum reference kernel checker                                 -/
 /-! ============================================================== -/
@@ -73,6 +75,7 @@ inductive Term : Type where
   | refl     (value : Term)
   | transport (motive base path : Term)
   | idElim (motive base path : Term)
+  | funExt (functionType lhs rhs pointwise : Term)
   deriving Inhabited, Repr
 
 /-- Type-checking error — mirrors `proof_checker::CheckError` for
@@ -89,12 +92,23 @@ inductive CheckError : Type where
   | type_mismatch        (expected actual : Term)
   | universe_overflow    (level : Nat)
   | claimed_type_not_a_type (claimed actual : Term)
+  | foundation_required
   | fuel_exhausted
   deriving Repr
 
 /-- Context = inner-first stack of binder types, identical to
     `proof_checker::Context`. -/
-abbrev Ctx := List Term
+inductive Foundation where
+  | intensional
+  | functionExtensionality
+  deriving BEq, Inhabited, Repr
+
+structure Ctx where
+  bindings : List Term := []
+  foundation : Foundation := .intensional
+
+def Ctx.length (ctx : Ctx) : Nat := ctx.bindings.length
+def Ctx.extend (ctx : Ctx) (ty : Term) : Ctx := { ctx with bindings := ty :: ctx.bindings }
 
 -- =============================================================================
 -- Level normalisation — mirrors `proof_checker::Level::normalize`
@@ -289,6 +303,8 @@ def scopeError (bound : Nat) (t : Term) : Option Nat :=
   | .pi a b | .lam a b | .sigma a b => (scopeError bound a).or (scopeError (bound + 1) b)
   | .app a b | .pair a b => (scopeError bound a).or (scopeError bound b)
   | .fst value | .snd value | .refl value => scopeError bound value
+  | .funExt a b c d =>
+    (scopeError bound a).or ((scopeError bound b).or ((scopeError bound c).or (scopeError bound d)))
   | .identity a b c | .transport a b c | .idElim a b c =>
     (scopeError bound a).or ((scopeError bound b).or (scopeError bound c))
   | .data _ _ indices constructors => (scopeTelescope bound indices).or (scopeConstructors bound constructors)
@@ -359,6 +375,8 @@ def mapVars (replace : Nat → Nat → Term) (cutoff : Nat) (t : Term) : Term :=
   | .refl x => .refl (mapVars replace cutoff x)
   | .transport p h e => .transport (mapVars replace cutoff p) (mapVars replace cutoff h) (mapVars replace cutoff e)
   | .idElim p h e => .idElim (mapVars replace cutoff p) (mapVars replace cutoff h) (mapVars replace cutoff e)
+  | .funExt a b c d => .funExt (mapVars replace cutoff a) (mapVars replace cutoff b)
+      (mapVars replace cutoff c) (mapVars replace cutoff d)
 termination_by sizeOf t
 
 def mapTerms (replace : Nat → Nat → Term) (cutoff : Nat) (terms : List Term) : List Term :=
@@ -516,6 +534,7 @@ partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   | .refl x => isFreeIn target x
   | .transport p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
   | .idElim p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
+  | .funExt a b c d => isFreeIn target a || isFreeIn target b || isFreeIn target c || isFreeIn target d
 
 /-- Field domain in the frame of every preceding field. -/
 def fieldValueType (field : DataField Term) (preceding : Nat) : Option Term :=
@@ -587,6 +606,7 @@ partial def defEqWhnf : Term → Term → Bool
   | .refl x, .refl y => defEq x y
   | .transport p h e, .transport q k f => defEq p q && defEq h k && defEq e f
   | .idElim p h e, .idElim q k f => defEq p q && defEq h k && defEq e f
+  | .funExt a b c d, .funExt e f g h => defEq a e && defEq b f && defEq c g && defEq d h
   | .lam _ body,   other         => etaMatch body other
   | other,         .lam _ body   => etaMatch body other
   | _,             _             => false
@@ -611,7 +631,7 @@ end
 def lookupCtx (Γ : Ctx) (i : Nat) : Option Term :=
   let len := Γ.length
   if h : i < len then
-    let raw := Γ[i]
+    let raw := Γ.bindings[i]
     some (shiftUp (i + 1) 0 raw)
   else
     none
@@ -648,6 +668,16 @@ mutual
 /-- Bidirectional type inference for the structural fragment. -/
 partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
   match t with
+  | .funExt functionType lhs rhs pointwise => do
+    unless Γ.foundation == .functionExtensionality do throw .foundation_required
+    let some _ := expectUniverse (← infer Γ functionType) | throw (.not_a_type functionType)
+    let .pi domain codomain := whnf functionType | throw (.not_a_function functionType)
+    checkAgainst Γ lhs functionType
+    checkAgainst Γ rhs functionType
+    let premise := .pi domain (.identity codomain
+      (.app (shiftUp 1 0 lhs) (.var 0)) (.app (shiftUp 1 0 rhs) (.var 0)))
+    checkAgainst Γ pointwise premise
+    return .identity functionType lhs rhs
   | .letE value body => do
     let _ ← infer Γ value
     infer Γ (subst 0 value body)
@@ -656,7 +686,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     for ty in indices do
       let kind ← infer indexContext ty
       let some _ := expectUniverse kind | throw (.not_a_type ty)
-      indexContext := ty :: indexContext
+      indexContext := indexContext.extend ty
     for constructor in constructors do
       let mut fieldContext := Γ
       for (field, index) in constructor.fields.zipIdx do
@@ -668,7 +698,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
           let some fieldLevel := expectUniverse kind | throw (.not_a_type domain)
           unless Level.eq (Level.maxCanonical fieldLevel level) level do
             throw (.invalid_inductive "field exceeds declaration universe")
-        fieldContext := domain :: fieldContext
+        fieldContext := fieldContext.extend domain
       checkIndices fieldContext indices constructor.indices constructor.fields.length
     return indices.foldr Term.pi (.universe (Level.normalize level))
   | .construct data ctor args => do
@@ -719,7 +749,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
       match expectUniverse aTy with
       | none => .error (.not_a_type a)
       | some n =>
-        match infer (a :: Γ) b with
+        match infer (Γ.extend a) b with
         | .error e => .error e
         | .ok bTy =>
           match expectUniverse bTy with
@@ -732,7 +762,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
       match expectUniverse aTy with
       | none => .error (.not_a_type a)
       | some _ =>
-        match infer (a :: Γ) body with
+        match infer (Γ.extend a) body with
         | .error e => .error e
         | .ok bodyTy => .ok (.pi a bodyTy)
   | .app f x => do
@@ -748,7 +778,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
       match expectUniverse aTy with
       | none => .error (.not_a_type a)
       | some n =>
-        match infer (a :: Γ) b with
+        match infer (Γ.extend a) b with
         | .error e => .error e
         | .ok bTy =>
           match expectUniverse bTy with
@@ -821,7 +851,7 @@ partial def checkAgainst (Γ : Ctx) (t expected : Term) : Except CheckError Unit
     let kind ← infer Γ domain
     let some _ := expectUniverse kind | throw (.not_a_type domain)
     unless defEq domain expectedDomain do throw (.type_mismatch expectedDomain domain)
-    checkAgainst (domain :: Γ) body codomain
+    checkAgainst (Γ.extend domain) body codomain
   | .pair first second, .sigma domain family =>
     checkAgainst Γ first domain
     checkAgainst Γ second (subst 0 first family)
@@ -861,17 +891,19 @@ partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
   checkAgainst Γ t expected
 
 /-- Verify a closed `(term, claimed_type)` certificate. -/
-def verifyCertificate (term claimedType : Term) : Except CheckError Unit := do
+def verifyCertificate (term claimedType : Term)
+    (foundation : Foundation := .intensional) : Except CheckError Unit := do
+  let ctx : Ctx := { foundation }
   checkScope 0 claimedType
   checkScope 0 term
-  match infer [] claimedType with
+  match infer ctx claimedType with
   | .ok kind =>
     let some _ := expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)
   | .error (.universe_overflow n) =>
     if let .universe _ := claimedType then pure ()
     else throw (.universe_overflow n)
   | .error error => throw error
-  checkAgainst [] term claimedType
+  checkAgainst ctx term claimedType
 
 end VerumKernel
 
@@ -900,29 +932,29 @@ def univ (n : Nat) : Term := .universe (.concrete n)
 -- Helper: build a level-variable Universe term.
 def univVar (name : String) : Term := .universe (.var name)
 
-#eval! expectInfer [] (univ 0) (univ 1)
+#eval! expectInfer {} (univ 0) (univ 1)
   -- T-Univ — true
 
-#eval! expectInferError [] (.var 0) (fun e => match e with | .unbound_variable 0 => true | _ => false)
+#eval! expectInferError {} (.var 0) (fun e => match e with | .unbound_variable 0 => true | _ => false)
   -- T-Var unbound — true
 
-#eval! expectInfer [univ 0] (.var 0) (univ 0)
+#eval! expectInfer { bindings := [univ 0] } (.var 0) (univ 0)
   -- T-Var with hypothesis — true
 
-#eval! expectInfer [] (.pi (univ 2) (univ 5)) (univ 6)
+#eval! expectInfer {} (.pi (univ 2) (univ 5)) (univ 6)
   -- T-Pi-Form max(3, 6) = 6 — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.lam (univ 0) (.var 0))
         (.pi (univ 0) (univ 0))
   -- T-Lam-Intro identity at Universe(0) — true
 
-#eval! expectInferError []
+#eval! expectInferError {}
         (.app (univ 0) (univ 0))
         (fun e => match e with | .not_a_function _ => true | _ => false)
   -- T-App-Elim rejects non-function — true
 
-#eval! expectInfer [] (univ 1000) (univ 1001)
+#eval! expectInfer {} (univ 1000) (univ 1001)
   -- universe successor (Nat-unbounded on Lean side) — true
 
 #eval! (
@@ -956,17 +988,17 @@ def univVar (name : String) : Term := .universe (.var name)
         (Level.succ (Level.max (Level.var "u") (Level.var "v"))))
   -- common-succ factoring — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (univVar "u")
         (.universe (.succ (.var "u")))
   -- T-Univ on a level variable: Universe(u) : Universe(succ(u)) — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.pi (univVar "u") (univVar "v"))
         (.universe (.succ (Level.maxCanonical (.var "u") (.var "v"))))
   -- T-Pi-Form on polymorphic levels: Π(_:Type@u). Type@v : Type@succ(max(u,v)) — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.lam (univVar "u") (.lam (.var 0) (.var 0)))
         (.pi (univVar "u") (.pi (.var 0) (.var 1)))
   -- Polymorphic identity at Type@u — true
@@ -992,22 +1024,22 @@ def univVar (name : String) : Term := .universe (.var name)
 -- FV-20 Σ-types battery (mirrors proof_checker::tests Σ section)
 -- =============================================================================
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.sigma (univ 0) (univ 0))
         (univ 1)
   -- T-Sigma-Form at concrete universe — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.sigma (univ 2) (univ 5))
         (univ 6)
   -- T-Sigma-Form takes max universe — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.sigma (univVar "u") (univVar "v"))
         (.universe (.succ (Level.maxCanonical (.var "u") (.var "v"))))
   -- T-Sigma-Form polymorphic — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.pair (univ 0) (univ 0))
         (.sigma (univ 1) (univ 1))
   -- T-Pair-Intro non-dependent — true
@@ -1018,12 +1050,12 @@ def univVar (name : String) : Term := .universe (.var name)
 #eval! defEq (.snd (.pair (univ 0) (univ 1))) (univ 1)
   -- β-projection: snd(pair(a, b)) ≡ b — true
 
-#eval! expectInferError []
+#eval! expectInferError {}
         (.fst (univ 0))
         (fun e => match e with | .not_a_sigma _ => true | _ => false)
   -- T-Fst-Elim rejects non-Σ — true
 
-#eval! expectInferError []
+#eval! expectInferError {}
         (.snd (univ 0))
         (fun e => match e with | .not_a_sigma _ => true | _ => false)
   -- T-Snd-Elim rejects non-Σ — true
@@ -1036,7 +1068,7 @@ def univVar (name : String) : Term := .universe (.var name)
   | _     => false)
   -- Pair certificate at non-dependent Σ verifies — true
 
-#eval! expectInfer []
+#eval! expectInfer {}
         (.sigma (univ 0) (.sigma (univ 0) (univ 0)))
         (univ 1)
   -- Nested Σ — true

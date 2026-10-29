@@ -46,7 +46,7 @@
 //!     `BothAccept` / `BothReject` / `Disagreement` /
 //!     `NotYetSelfHosting` (the last unused once this lands).
 
-use crate::proof_checker::{CheckError, DataConstructor, DataField, Level, Term};
+use crate::proof_checker::{CheckError, DataConstructor, DataField, Foundation, Level, Term};
 use std::sync::Arc;
 
 // =============================================================================
@@ -237,6 +237,13 @@ pub enum Value {
 /// variables and applications headed by neutrals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Neutral {
+    /// An opaque proof of function equality; no reflexivity computation rule.
+    NFunExt {
+        function_type: Box<Value>,
+        lhs: Box<Value>,
+        rhs: Box<Value>,
+        pointwise: Box<Value>,
+    },
     NInduct {
         scrutinee: Box<Value>,
         motive: Box<Value>,
@@ -299,6 +306,17 @@ pub type Env = Vec<Arc<Value>>;
 /// the env state at the binding site.
 pub fn eval(term: &Term, env: &Env) -> Value {
     match term {
+        Term::FunExt {
+            function_type,
+            lhs,
+            rhs,
+            pointwise,
+        } => Value::VNeutral(Neutral::NFunExt {
+            function_type: Box::new(eval(function_type, env)),
+            lhs: Box::new(eval(lhs, env)),
+            rhs: Box::new(eval(rhs, env)),
+            pointwise: Box::new(eval(pointwise, env)),
+        }),
         Term::Let { value, body } => {
             let mut extended = env.clone();
             extended.push(Arc::new(eval(value, env)));
@@ -698,6 +716,17 @@ pub fn quote(value: &Value, level: usize) -> Term {
 /// current binding depth.
 fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
     match neutral {
+        Neutral::NFunExt {
+            function_type,
+            lhs,
+            rhs,
+            pointwise,
+        } => Term::FunExt {
+            function_type: Box::new(quote(function_type, level)),
+            lhs: Box::new(quote(lhs, level)),
+            rhs: Box::new(quote(rhs, level)),
+            pointwise: Box::new(quote(pointwise, level)),
+        },
         Neutral::NInduct {
             scrutinee,
             motive,
@@ -955,6 +984,22 @@ fn eta_match(body: &Closure, other: &Value, level: usize) -> bool {
 fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
     match (a, b) {
         (
+            Neutral::NFunExt {
+                function_type: a,
+                lhs: b,
+                rhs: c,
+                pointwise: d,
+            },
+            Neutral::NFunExt {
+                function_type: e,
+                lhs: f,
+                rhs: g,
+                pointwise: h,
+            },
+        ) => {
+            def_eq(a, e, level) && def_eq(b, f, level) && def_eq(c, g, level) && def_eq(d, h, level)
+        }
+        (
             Neutral::NInduct {
                 scrutinee: a,
                 motive: am,
@@ -1019,6 +1064,7 @@ fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
 /// the binder's domain (as a value).
 #[derive(Debug, Clone, Default)]
 pub struct NbeContext {
+    foundation: Foundation,
     /// Checked bindings, outermost-first. Definitions retain their source so
     /// expected families can reach introductions without reducing arbitrary
     /// applications or discarding their type annotations.
@@ -1040,6 +1086,14 @@ impl NbeContext {
         Self::default()
     }
 
+    /// Construct an empty context under an explicit logical foundation.
+    pub fn with_foundation(foundation: Foundation) -> Self {
+        Self {
+            foundation,
+            ..Self::default()
+        }
+    }
+
     /// Current binding depth (level for next fresh neutral).
     pub fn level(&self) -> usize {
         self.env.len()
@@ -1059,6 +1113,7 @@ impl NbeContext {
         Self {
             bindings,
             env: new_env,
+            foundation: self.foundation,
         }
     }
 
@@ -1142,6 +1197,48 @@ fn check_index_arguments(
 /// roundtrips during recursive checking).
 fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
     match term {
+        Term::FunExt {
+            function_type,
+            lhs,
+            rhs,
+            pointwise,
+        } => {
+            if ctx.foundation != Foundation::FunctionExtensionality {
+                return Err(CheckError::FoundationRequired(
+                    Foundation::FunctionExtensionality,
+                ));
+            }
+            let kind = infer_value(ctx, function_type)?;
+            expect_universe(&kind)
+                .ok_or_else(|| CheckError::NotAType((**function_type).clone()))?;
+            let function = eval(function_type, ctx.env());
+            let Value::VPi { domain, codomain } = &function else {
+                return Err(CheckError::NotAFunction(quote(&function, ctx.level())));
+            };
+            check_value(ctx, lhs, &function)?;
+            check_value(ctx, rhs, &function)?;
+            let left = eval(lhs, ctx.env());
+            let right = eval(rhs, ctx.env());
+            // Build the dependent premise in the semantic domain, independently
+            // of the substitution checker's syntactic shifting algorithm.
+            let probe = Value::VNeutral(Neutral::NVar(ctx.level()));
+            let pointwise_body = Value::VId {
+                ty: Box::new(codomain.apply(probe.clone())),
+                lhs: Box::new(apply_value(left.clone(), probe.clone())),
+                rhs: Box::new(apply_value(right.clone(), probe)),
+            };
+            let premise = Term::pi(
+                quote(domain, ctx.level()),
+                quote(&pointwise_body, ctx.level() + 1),
+            );
+            check_value(ctx, pointwise, &eval(&premise, ctx.env()))?;
+            Ok(Value::VId {
+                ty: Box::new(function),
+                lhs: Box::new(left),
+                rhs: Box::new(right),
+            })
+        }
+
         Term::Let { value, body } => {
             let ty = infer_value(ctx, value)?;
             infer_value(&ctx.define(ty, eval(value, ctx.env()), value), body)
@@ -1698,7 +1795,15 @@ fn expect_universe(value: &Value) -> Option<Level> {
 /// valid type — swallow the overflow there and let the structural
 /// check downstream catch any genuine type mismatch).
 pub fn verify_certificate(cert: &crate::proof_checker::Certificate) -> Result<(), CheckError> {
-    let ctx = NbeContext::new();
+    verify_certificate_with_foundation(cert, Foundation::Intensional)
+}
+
+/// Verify with an explicit foundation; the default entry point stays intensional.
+pub fn verify_certificate_with_foundation(
+    cert: &crate::proof_checker::Certificate,
+    foundation: Foundation,
+) -> Result<(), CheckError> {
+    let ctx = NbeContext::with_foundation(foundation);
     match infer(&ctx, &cert.claimed_type) {
         Ok(claimed_kind) => {
             let claimed_kind_value = eval(&claimed_kind, ctx.env());

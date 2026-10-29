@@ -2,10 +2,18 @@
 //! Source-language elaboration, prose interpretation and SMT traces are not admitted here.
 //! Execute untrusted replay in a resource-limited worker; structural limits do not bound
 //! normalization cost or replace a wall-clock/process memory budget.
-use crate::proof_checker::{Certificate, CheckError, DataField, Level, Term};
+use crate::proof_checker::{Certificate, CheckError, DataField, Foundation, Level, Term};
 use serde::{Deserialize, Serialize};
 
 pub const PROFILE: &str = "verum-native/1";
+pub const EXTENSIONAL_PROFILE: &str = "verum-native-funext/1";
+
+pub fn profile_for(foundation: Foundation) -> &'static str {
+    match foundation {
+        Foundation::Intensional => PROFILE,
+        Foundation::FunctionExtensionality => EXTENSIONAL_PROFILE,
+    }
+}
 pub const MAX_BYTES: usize = 1024 * 1024;
 // Structural bounds protect decoding and traversal, not normalization. General
 // dependent program proofs contain thousands of nodes even with shared local
@@ -56,6 +64,7 @@ pub fn checker_identity() -> String {
 }
 fn code(error: &CheckError) -> &'static str {
     match error {
+        CheckError::FoundationRequired(_) => "foundation_required",
         CheckError::InvalidInductive(_) => "invalid_inductive",
         CheckError::UnboundVariable(_) => "unbound_variable",
         CheckError::NotAType(_) | CheckError::ClaimedTypeNotAType { .. } => "not_a_type",
@@ -90,6 +99,16 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
         }
         match node {
             Node::Term(t, binders) => match t {
+                Term::FunExt {
+                    function_type,
+                    lhs,
+                    rhs,
+                    pointwise,
+                } => {
+                    for term in [function_type, lhs, rhs, pointwise] {
+                        queue.push((Node::Term(term, binders), depth + 1));
+                    }
+                }
                 Term::Data {
                     level,
                     indices,
@@ -244,8 +263,14 @@ fn json_envelope(bytes: &[u8]) -> Result<(), &'static str> {
 /// Replay exactly the statement carried by a native judgment. A metadata name,
 /// filename, hash or citation cannot change the judgment being checked.
 pub fn replay(bytes: &[u8]) -> Report {
+    replay_with_foundation(bytes, Foundation::Intensional)
+}
+
+/// The verifier selects the foundation, and the judgment must name exactly
+/// that profile. A submitted artifact cannot silently strengthen its verifier.
+pub fn replay_with_foundation(bytes: &[u8], foundation: Foundation) -> Report {
     let rejected = |stage: &str, code: &str, message: &str| Report {
-        profile: PROFILE.into(),
+        profile: profile_for(foundation).into(),
         checker: checker_identity(),
         accepted: false,
         diagnostic: Some(Diagnostic {
@@ -284,7 +309,7 @@ pub fn replay(bytes: &[u8]) -> Report {
             );
         }
     };
-    if judgment.profile != PROFILE {
+    if judgment.profile != profile_for(foundation) {
         return rejected(
             "profile",
             "unsupported_profile",
@@ -309,14 +334,17 @@ pub fn replay(bytes: &[u8]) -> Report {
             "The certificate claims a different formal statement.",
         );
     }
-    if let Err(e) = judgment.certificate.verify() {
+    if let Err(e) = judgment.certificate.verify_with_foundation(foundation) {
         return rejected(
             "substitution",
             code(&e),
             "The native substitution checker rejected the judgment.",
         );
     }
-    if let Err(e) = crate::proof_checker_nbe::verify_certificate(&judgment.certificate) {
+    if let Err(e) = crate::proof_checker_nbe::verify_certificate_with_foundation(
+        &judgment.certificate,
+        foundation,
+    ) {
         return rejected(
             "normalization",
             code(&e),
@@ -324,7 +352,7 @@ pub fn replay(bytes: &[u8]) -> Report {
         );
     }
     Report {
-        profile: PROFILE.into(),
+        profile: profile_for(foundation).into(),
         checker: checker_identity(),
         accepted: true,
         diagnostic: None,

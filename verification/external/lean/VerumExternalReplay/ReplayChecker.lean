@@ -167,6 +167,11 @@ partial def termFromJson (j : Json) : Except String Term := do
     exactKeys v ["motive", "base", "scrutinee"]
     return .transport (← termFromJson (← v.getObjVal? "motive"))
       (← termFromJson (← v.getObjVal? "base")) (← termFromJson (← v.getObjVal? "scrutinee"))
+  else if let .ok v := j.getObjVal? "FunExt" then do
+    exactKeys v ["function_type", "lhs", "rhs", "pointwise"]
+    return .funExt (← termFromJson (← v.getObjVal? "function_type"))
+      (← termFromJson (← v.getObjVal? "lhs")) (← termFromJson (← v.getObjVal? "rhs"))
+      (← termFromJson (← v.getObjVal? "pointwise"))
   else if let .ok v := j.getObjVal? "IdElim" then do
     exactKeys v ["motive", "base", "scrutinee"]
     return .idElim (← termFromJson (← v.getObjVal? "motive"))
@@ -179,6 +184,7 @@ structure BatteryCert where
   id : String
   term : Term
   claimedType : Term
+  profile : String
   deriving Repr
 
 partial def batteryCertFromJson (j : Json) : Except String BatteryCert := do
@@ -190,7 +196,10 @@ partial def batteryCertFromJson (j : Json) : Except String BatteryCert := do
   let claimJ ← j.getObjValAs? Json "claimed_type" |>.mapError (fun _ => "missing 'claimed_type'")
   let term ← termFromJson termJ
   let claimedType ← termFromJson claimJ
-  Except.ok { id, term, claimedType }
+  let profile ← match j.getObjVal? "profile" with
+    | .error _ => .ok "verum-native/1"
+    | .ok value => value.getStr?
+  Except.ok { id, term, claimedType, profile }
 
 partial def batteryFromJson (j : Json) : Except String (List BatteryCert) := do
   let arr ← j.getObjValAs? Json "certificates"
@@ -202,8 +211,13 @@ partial def batteryFromJson (j : Json) : Except String (List BatteryCert) := do
 
 -- Run `verifyCertificate` on a single battery row, package the
 -- verdict as a JSON object.
-def runOne (cert : BatteryCert) : Json :=
-  match verifyCertificate cert.term cert.claimedType with
+def runOne (cert : BatteryCert) : Json := Id.run do
+  let foundation ← match cert.profile with
+    | "verum-native/1" => pure Foundation.intensional
+    | "verum-native-funext/1" => pure Foundation.functionExtensionality
+    | _ => return Json.mkObj [("id", Json.str cert.id), ("ok", Json.bool false),
+        ("error", Json.str "UnsupportedProfile")]
+  return match verifyCertificate cert.term cert.claimedType foundation with
   | Except.ok () =>
     Json.mkObj [("id", Json.str cert.id), ("ok", Json.bool true)]
   | Except.error e =>
@@ -219,6 +233,7 @@ def runOne (cert : BatteryCert) : Json :=
       | .type_mismatch _ _         => "TypeMismatch"
       | .universe_overflow _       => "UniverseOverflow"
       | .claimed_type_not_a_type _ _ => "ClaimedTypeNotAType"
+      | .foundation_required       => "FoundationRequired"
       | .fuel_exhausted            => "FuelExhausted"
     Json.mkObj
       [ ("id", Json.str cert.id)

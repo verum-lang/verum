@@ -1,7 +1,8 @@
 //! A bounded host worker for untrusted native proof terms.
 //! The executable and worker argument are deployment configuration, never input.
 //! Files rather than pipes keep either direction from blocking the supervisor.
-use crate::admission::{Diagnostic, MAX_BYTES, PROFILE, Report, checker_identity};
+use crate::admission::{Diagnostic, MAX_BYTES, Report, checker_identity, profile_for};
+use crate::proof_checker::Foundation;
 use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
@@ -10,14 +11,15 @@ use std::{
 };
 
 pub const WORKER_ARG: &str = "--internal-native-proof-worker";
+pub const EXTENSIONAL_WORKER_ARG: &str = "--internal-native-funext-proof-worker";
 pub const WALL_LIMIT: Duration = Duration::from_secs(5);
 pub const CPU_SECONDS: u64 = 3;
 pub const MEMORY_BYTES: u64 = 512 * 1024 * 1024;
 pub const OUTPUT_BYTES: u64 = 64 * 1024;
 
-fn refused(code: &str, message: &str) -> Report {
+fn refused(foundation: Foundation, code: &str, message: &str) -> Report {
     Report {
-        profile: PROFILE.into(),
+        profile: profile_for(foundation).into(),
         checker: checker_identity(),
         accepted: false,
         diagnostic: Some(Diagnostic {
@@ -57,8 +59,14 @@ pub fn install_worker_limits() -> std::io::Result<()> {
 
 /// Call before initializing any async runtime. stdout is one bounded JSON report.
 pub fn worker() -> std::io::Result<()> {
+    worker_with_foundation(Foundation::Intensional)
+}
+
+/// Worker policy is trusted launch configuration, not submitted metadata.
+pub fn worker_with_foundation(foundation: Foundation) -> std::io::Result<()> {
     let report = if install_worker_limits().is_err() {
         refused(
+            foundation,
             "sandbox_unavailable",
             "The worker could not install its required process limits.",
         )
@@ -67,7 +75,7 @@ pub fn worker() -> std::io::Result<()> {
         std::io::stdin()
             .take(MAX_BYTES as u64 + 1)
             .read_to_end(&mut bytes)?;
-        crate::admission::replay(&bytes)
+        crate::admission::replay_with_foundation(&bytes, foundation)
     };
     serde_json::to_writer(std::io::stdout().lock(), &report).map_err(std::io::Error::other)
 }
@@ -89,11 +97,29 @@ pub fn replay(executable: &Path, bytes: &[u8]) -> Report {
 
 /// The caller may lower the wall budget but cannot raise the default ceiling.
 pub fn replay_with_deadline(executable: &Path, bytes: &[u8], wall: Duration) -> Report {
-    let response = match run_worker_with_deadline(executable, WORKER_ARG, bytes, wall) {
+    replay_with_foundation_and_deadline(executable, bytes, Foundation::Intensional, wall)
+}
+
+/// Replay under an explicitly selected foundation in a resource-limited child.
+pub fn replay_with_foundation(executable: &Path, bytes: &[u8], foundation: Foundation) -> Report {
+    replay_with_foundation_and_deadline(executable, bytes, foundation, WALL_LIMIT)
+}
+
+fn replay_with_foundation_and_deadline(
+    executable: &Path,
+    bytes: &[u8],
+    foundation: Foundation,
+    wall: Duration,
+) -> Report {
+    let worker_arg = match foundation {
+        Foundation::Intensional => WORKER_ARG,
+        Foundation::FunctionExtensionality => EXTENSIONAL_WORKER_ARG,
+    };
+    let response = match run_worker_with_deadline(executable, worker_arg, bytes, wall) {
         Ok(bytes) => bytes,
         Err(diagnostic) => {
             return Report {
-                profile: PROFILE.into(),
+                profile: profile_for(foundation).into(),
                 checker: checker_identity(),
                 accepted: false,
                 diagnostic: Some(diagnostic),
@@ -104,16 +130,18 @@ pub fn replay_with_deadline(executable: &Path, bytes: &[u8], wall: Duration) -> 
         Ok(report) => report,
         Err(_) => {
             return refused(
+                foundation,
                 "worker_protocol",
                 "The worker returned an invalid response.",
             );
         }
     };
-    if report.profile != PROFILE
+    if report.profile != crate::admission::profile_for(foundation)
         || report.checker != checker_identity()
         || report.accepted == report.diagnostic.is_some()
     {
         return refused(
+            foundation,
             "worker_protocol",
             "The worker returned an inconsistent result or a different checker identity.",
         );

@@ -660,6 +660,17 @@ pub enum Term {
         base: Box<Term>,
         scrutinee: Box<Term>,
     },
+    /// Dependent function extensionality, available only under the explicitly
+    /// selected `Foundation::FunctionExtensionality` foundation.
+    /// For `function_type = Π(x : A). B(x)`, check both endpoints at that type
+    /// and `pointwise : Π(x : A). Id(B(x), lhs(x), rhs(x))`.
+    /// This proof has no computation rule and never reduces to reflexivity.
+    FunExt {
+        function_type: Box<Term>,
+        lhs: Box<Term>,
+        rhs: Box<Term>,
+        pointwise: Box<Term>,
+    },
 }
 
 impl Term {
@@ -667,6 +678,17 @@ impl Term {
     /// indices and constructor fields retain their own dependent telescopes.
     fn map_children(self, mut map: impl FnMut(Term, usize) -> Term) -> Term {
         match self {
+            Term::FunExt {
+                function_type,
+                lhs,
+                rhs,
+                pointwise,
+            } => Term::FunExt {
+                function_type: Box::new(map(*function_type, 0)),
+                lhs: Box::new(map(*lhs, 0)),
+                rhs: Box::new(map(*rhs, 0)),
+                pointwise: Box::new(map(*pointwise, 0)),
+            },
             Term::Data {
                 name,
                 level,
@@ -843,6 +865,16 @@ impl Term {
         }
     }
 
+    /// Build an opaque extensionality proof; verification requires an explicit foundation.
+    pub fn fun_ext(function_type: Term, lhs: Term, rhs: Term, pointwise: Term) -> Self {
+        Self::FunExt {
+            function_type: Box::new(function_type),
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            pointwise: Box::new(pointwise),
+        }
+    }
+
     /// Convenience: build `Refl(value)` — reflexivity at value.
     pub fn refl(value: Term) -> Self {
         Term::Refl(Box::new(value))
@@ -871,10 +903,21 @@ impl Term {
 // Context (de Bruijn-indexed variable types)
 // =============================================================================
 
+/// Logical foundation selected by the verifier, never by certificate metadata.
+/// The default remains intensional; the extension supplies only dependent
+/// function extensionality, without equality reflection, K or proof irrelevance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Foundation {
+    #[default]
+    Intensional,
+    FunctionExtensionality,
+}
+
 /// Type-checking context: stack of types corresponding to bound
 /// variables, with index 0 being the most-recent binder.
 #[derive(Debug, Default)]
 pub struct Context {
+    foundation: Foundation,
     /// Shared binding-site types and optional checked definitions.
     bindings: Vec<ContextBinding>,
     /// Preserve the public slice view without materializing it during checking.
@@ -891,6 +934,7 @@ struct ContextBinding {
 impl Clone for Context {
     fn clone(&self) -> Self {
         Self {
+            foundation: self.foundation,
             bindings: self.bindings.clone(),
             types_view: std::sync::OnceLock::new(),
         }
@@ -901,6 +945,19 @@ impl Context {
     /// Construct an empty context.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Construct an empty context under an explicit logical foundation.
+    pub fn with_foundation(foundation: Foundation) -> Self {
+        Self {
+            foundation,
+            ..Self::default()
+        }
+    }
+
+    /// Logical foundation retained by context transformations.
+    pub fn foundation(&self) -> Foundation {
+        self.foundation
     }
 
     /// Look up the type of variable at de Bruijn index `i`. Returns
@@ -1015,7 +1072,10 @@ pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
             value: Box::new(shift_up(*value, amount, cutoff)),
             body: Box::new(shift_up(*body, amount, cutoff + 1)),
         },
-        data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
+        data @ (Term::Data { .. }
+        | Term::Construct { .. }
+        | Term::Induct { .. }
+        | Term::FunExt { .. }) => {
             data.map_children(|child, binders| shift_up(child, amount, cutoff + binders))
         }
         Term::Var(i) => {
@@ -1092,7 +1152,10 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
             value: Box::new(subst(*value, target, replacement)),
             body: Box::new(subst(*body, target + 1, replacement)),
         },
-        data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
+        data @ (Term::Data { .. }
+        | Term::Construct { .. }
+        | Term::Induct { .. }
+        | Term::FunExt { .. }) => {
             data.map_children(|child, binders| subst(child, target + binders, replacement))
         }
         Term::Var(i) => {
@@ -1563,6 +1626,20 @@ impl Conversion<'_> {
                     scrutinee: s2,
                 },
             ) => self.def_eq(m1, m2) && self.def_eq(b1, b2) && self.def_eq(s1, s2),
+            (
+                Term::FunExt {
+                    function_type: a,
+                    lhs: b,
+                    rhs: c,
+                    pointwise: d,
+                },
+                Term::FunExt {
+                    function_type: e,
+                    lhs: f,
+                    rhs: g,
+                    pointwise: h,
+                },
+            ) => self.def_eq(a, e) && self.def_eq(b, f) && self.def_eq(c, g) && self.def_eq(d, h),
             // η-equivalence — one-sided cases. When one side is a
             // λx.(f x) and the other is `f`, they're equal iff `x`
             // does not appear free in `f`. This rule fires AFTER WHNF
@@ -1664,6 +1741,12 @@ pub(crate) fn contains_free_by(term: &Term, depth: usize, wanted: &impl Fn(usize
         Term::App(a, b) | Term::Pair(a, b) => here(a) || here(b),
         Term::Fst(term) | Term::Snd(term) | Term::Refl(term) => here(term),
         Term::Id { ty, lhs, rhs } => here(ty) || here(lhs) || here(rhs),
+        Term::FunExt {
+            function_type,
+            lhs,
+            rhs,
+            pointwise,
+        } => here(function_type) || here(lhs) || here(rhs) || here(pointwise),
         Term::J {
             motive,
             base,
@@ -1719,7 +1802,10 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
             value: Box::new(shift_down(*value, amount, cutoff)),
             body: Box::new(shift_down(*body, amount, cutoff + 1)),
         },
-        data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
+        data @ (Term::Data { .. }
+        | Term::Construct { .. }
+        | Term::Induct { .. }
+        | Term::FunExt { .. }) => {
             data.map_children(|child, binders| shift_down(child, amount, cutoff + binders))
         }
         Term::Var(i) => {
@@ -1797,6 +1883,8 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
 /// exact arm of `infer`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {
+    /// The proof uses a principle outside the verifier's selected foundation.
+    FoundationRequired(Foundation),
     /// Malformed declaration, constructor ownership, or induction premises.
     InvalidInductive(String),
     /// T-Var: variable index out of bounds (free variable).
@@ -1919,6 +2007,43 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
 
 fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
     match term {
+        Term::FunExt {
+            function_type,
+            lhs,
+            rhs,
+            pointwise,
+        } => {
+            if ctx.foundation != Foundation::FunctionExtensionality {
+                return Err(CheckError::FoundationRequired(
+                    Foundation::FunctionExtensionality,
+                ));
+            }
+            let kind = infer(ctx, function_type)?;
+            ctx.conversion()
+                .expect_universe(&kind)
+                .ok_or_else(|| CheckError::NotAType((**function_type).clone()))?;
+            let Term::Pi(domain, codomain) = ctx.conversion().whnf((**function_type).clone())
+            else {
+                return Err(CheckError::NotAFunction((**function_type).clone()));
+            };
+            check_against(ctx, lhs, function_type)?;
+            check_against(ctx, rhs, function_type)?;
+            let premise = Term::pi(
+                *domain,
+                Term::id_ty(
+                    *codomain,
+                    Term::app(shift_up((**lhs).clone(), 1, 0), Term::var(0)),
+                    Term::app(shift_up((**rhs).clone(), 1, 0), Term::var(0)),
+                ),
+            );
+            check_against(ctx, pointwise, &premise)?;
+            Ok(Term::id_ty(
+                (**function_type).clone(),
+                (**lhs).clone(),
+                (**rhs).clone(),
+            ))
+        }
+
         Term::Let { value, body } => {
             let ty = infer(ctx, value)?;
             let result = infer(&ctx.define(ty, value), body)?;
@@ -2585,7 +2710,13 @@ impl Certificate {
     /// a type, we hard-reject with `ClaimedTypeNotAType` carrying
     /// both the offending term and whatever inferred kind it had.
     pub fn verify(&self) -> Result<(), CheckError> {
-        let ctx = Context::new();
+        self.verify_with_foundation(Foundation::Intensional)
+    }
+
+    /// Verify under an explicitly selected logical foundation. Metadata never
+    /// grants permission to use an additional foundational principle.
+    pub fn verify_with_foundation(&self, foundation: Foundation) -> Result<(), CheckError> {
+        let ctx = Context::with_foundation(foundation);
         // Step 1 — claimed_type must itself be a type.
         //
         // **Top-of-tower escape hatch.**  When `claimed_type` is at

@@ -115,6 +115,17 @@ pub type ReflectedDataConstructor = DataConstructor<ReflectedDataField, Reflecte
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReflectedTerm {
+    /// Explicit function-extensionality proof; reflection grants no authority.
+    FunExt {
+        /// Dependent function type of both endpoints.
+        function_type: Box<ReflectedTerm>,
+        /// Left function.
+        lhs: Box<ReflectedTerm>,
+        /// Right function.
+        rhs: Box<ReflectedTerm>,
+        /// Equality at every input.
+        pointwise: Box<ReflectedTerm>,
+    },
     /// Complete structural identity of an ordinary inductive declaration.
     Data {
         /// Declaration name; identity also includes every field and universe.
@@ -400,6 +411,17 @@ impl From<&Term> for ReflectedTerm {
                 base: Box::new(ReflectedTerm::from(base.as_ref())),
                 scrutinee: Box::new(ReflectedTerm::from(scrutinee.as_ref())),
             },
+            Term::FunExt {
+                function_type,
+                lhs,
+                rhs,
+                pointwise,
+            } => ReflectedTerm::FunExt {
+                function_type: Box::new(ReflectedTerm::from(function_type.as_ref())),
+                lhs: Box::new(ReflectedTerm::from(lhs.as_ref())),
+                rhs: Box::new(ReflectedTerm::from(rhs.as_ref())),
+                pointwise: Box::new(ReflectedTerm::from(pointwise.as_ref())),
+            },
             Term::IdElim {
                 motive,
                 base,
@@ -524,6 +546,17 @@ impl TryFrom<&ReflectedTerm> for Term {
                 motive: Box::new(Term::try_from(motive.as_ref())?),
                 base: Box::new(Term::try_from(base.as_ref())?),
                 scrutinee: Box::new(Term::try_from(scrutinee.as_ref())?),
+            }),
+            ReflectedTerm::FunExt {
+                function_type,
+                lhs,
+                rhs,
+                pointwise,
+            } => Ok(Term::FunExt {
+                function_type: Box::new(Term::try_from(function_type.as_ref())?),
+                lhs: Box::new(Term::try_from(lhs.as_ref())?),
+                rhs: Box::new(Term::try_from(rhs.as_ref())?),
+                pointwise: Box::new(Term::try_from(pointwise.as_ref())?),
             }),
             ReflectedTerm::IdElim {
                 motive,
@@ -909,6 +942,14 @@ fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
                 && debruijn_in_range(base, depth)
                 && debruijn_in_range(scrutinee, depth)
         }
+        ReflectedTerm::FunExt {
+            function_type,
+            lhs,
+            rhs,
+            pointwise,
+        } => [function_type, lhs, rhs, pointwise]
+            .iter()
+            .all(|term| debruijn_in_range(term, depth)),
         ReflectedTerm::IdElim {
             motive,
             base,

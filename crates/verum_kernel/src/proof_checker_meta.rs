@@ -40,6 +40,17 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
         return term.clone();
     }
     match term {
+        Term::FunExt {
+            function_type,
+            lhs,
+            rhs,
+            pointwise,
+        } => Term::FunExt {
+            function_type: Box::new(shift_universes(function_type, lift)),
+            lhs: Box::new(shift_universes(lhs, lift)),
+            rhs: Box::new(shift_universes(rhs, lift)),
+            pointwise: Box::new(shift_universes(pointwise, lift)),
+        },
         Term::Data { name, level, indices, constructors } => Term::Data {
             name: name.clone(), level: level.clone().shifted_by(lift),
             indices: indices.iter().map(|t| shift_universes(t, lift)).collect(),
@@ -151,7 +162,7 @@ pub fn shift_universes_in_context(ctx: &Context, lift: u32) -> Context {
     if lift == 0 {
         return ctx.clone();
     }
-    let mut shifted = Context::new();
+    let mut shifted = Context::with_foundation(ctx.foundation());
     for raw_ty in ctx.iter_outer_to_inner() {
         shifted = shifted.extend(shift_universes(raw_ty, lift));
     }
