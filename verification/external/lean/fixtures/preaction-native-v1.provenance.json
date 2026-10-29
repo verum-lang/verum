@@ -1,0 +1,32 @@
+{
+  "export_sha256": "2fc70f552ca8e83aa807d03f64035cfa3b0f54b8aa58d06365f35c6dae18a445",
+  "native_source_parent": "3d79273df105ea2e1e3481bae9a2e7e7e0189d70",
+  "native_source_patch_sha256": "c4f700a18648b00de7320e0f0c9fbc47dd34daf33a9fd24a456584d87e0158b8",
+  "verified_native_source_files": 1509,
+  "native_binary_sha256": "eead0889cc7a4c3fb8733ca34c6efbcfa1b13ddb63eef695e4a3dfedbe998251",
+  "native_binary_format": "Mach-O arm64 64-bit",
+  "native_original_receipt_sha256": "7175fc9959692eb624b8a55643eeed6ff1fd0606c58f32e489b7496157143d90",
+  "native_original_status": "failed: acquisition test misses resumable native InputBinding work refusal",
+  "native_scoped_receipt_sha256": "7db394e34812e96fbcff0e3cbfbd8d000de5a3bc42e4c37294eb24dd3d6640ed",
+  "native_scoped_status": "passed",
+  "native_scopes": [
+    "automatic",
+    "source-boundary",
+    "causal-history",
+    "receiver",
+    "native-invocation",
+    "arena",
+    "typecheck-no-serde"
+  ],
+  "producer": "rust/crates/synarc-kan/src/organism/observer_acceptance/predictive_receiver/pre_action/export.rs",
+  "scope": "Supplied registration identity/binding/checkpoint observations only; pending payloads and complete ownership refinement absent. Original failed candidate and scoped passed tail remain distinct.",
+  "additional_native_binding": {
+    "source_commit": "212437a417507bd99bf0ef124c6836a5f3e0f600",
+    "source_files": 1509,
+    "binary_sha256": "1c16ed4f76bbbabbf324de42cce42ee5ea4e0d02b871d159a6a2b22b72a865e9",
+    "receipt_sha256": "0ba8e5b9eaf8e6b6acc97d302cd9b6573a805056b2bd479b95d628e217913f03",
+    "status": "passed",
+    "tests": 289,
+    "scope": "All recorded scoped checks, both typecheck configurations and arena build. Driver, registration and identity producers and snapshot-current guard unchanged; predictive stop resumability centralized."
+  }
+}

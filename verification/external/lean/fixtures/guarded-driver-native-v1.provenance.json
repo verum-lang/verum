@@ -19,5 +19,14 @@
     "typecheck-no-serde"
   ],
   "producer": "rust/crates/synarc-kan/src/organism/observer_acceptance/predictive_receiver/drain.rs",
-  "scope": "Observed callback rank/work projection and explicit driver boundaries; no full candidate acceptance, complete receiver state or ownership refinement."
+  "scope": "Observed callback rank/work projection and explicit driver boundaries; no full candidate acceptance, complete receiver state or ownership refinement.",
+  "additional_native_binding": {
+    "source_commit": "212437a417507bd99bf0ef124c6836a5f3e0f600",
+    "source_files": 1509,
+    "binary_sha256": "1c16ed4f76bbbabbf324de42cce42ee5ea4e0d02b871d159a6a2b22b72a865e9",
+    "receipt_sha256": "0ba8e5b9eaf8e6b6acc97d302cd9b6573a805056b2bd479b95d628e217913f03",
+    "status": "passed",
+    "tests": 289,
+    "scope": "All recorded scoped checks, both typecheck configurations and arena build. Driver, registration and identity producers and snapshot-current guard unchanged; predictive stop resumability centralized."
+  }
 }
