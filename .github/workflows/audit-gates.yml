@@ -214,6 +214,11 @@ jobs:
             --report resource-transfer-native-acceptance.json
       - name: Native typed observer folds and exact partial domains
         run: |
+          python3 -m unittest discover -s verification/external/lean -p test_numeral_programs.py
+          python3 verification/certificates/check_numeral_programs.py \
+            --native target/release/verum-proof \
+            --lean verification/external/lean/.lake/build/bin/verum_replay_checker \
+            --report numeral-programs-native-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_predeclared_evidence.py
           python3 -m unittest discover -s verification/external/lean -p test_predeclared_export.py
           python3 verification/certificates/check_predeclared_evidence.py \

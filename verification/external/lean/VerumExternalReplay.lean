@@ -76,3 +76,4 @@ import VerumExternalReplay.RetainedOwnership
 import VerumExternalReplay.CommonWindow
 
 import VerumExternalReplay.AdaptiveObservation
+import VerumExternalReplay.NumeralPrograms
