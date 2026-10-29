@@ -275,6 +275,7 @@ jobs:
             --report finite-admission-acceptance.json
           python3 verification/external/lean/check_acquisition_scheduling.py \
             --report acquisition-scheduling-acceptance.json
+          python3 -m unittest discover -s verification/external/lean -p test_finite_decoder.py
       - name: Frozen observer export correspondence
         run: |
           python3 -c 'import gzip; from pathlib import Path; Path("predictive-transactions-native.jsonl").write_bytes(gzip.decompress(Path("verification/external/lean/fixtures/predictive-transactions-v1.jsonl.gz").read_bytes()))'

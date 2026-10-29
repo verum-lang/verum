@@ -39,6 +39,7 @@ import VerumExternalReplay.CategoricalPrediction
 import VerumExternalReplay.FiniteAdmission
 import VerumExternalReplay.TraceReduction
 import VerumExternalReplay.AcquisitionScheduling
+import VerumExternalReplay.FiniteDecoder
 import VerumExternalReplay.StructuralNames
 import VerumExternalReplay.CompositionalFamily
 import VerumExternalReplay.DeclarationCoverage
