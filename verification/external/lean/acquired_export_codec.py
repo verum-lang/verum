@@ -67,6 +67,7 @@ def origin(item):
 @dataclass(frozen=True)
 class AcquiredDecoder:
     sensory: bool = False
+    primitive_extensions: tuple[str, ...] = ()
 
     def bytes(self, value):
         return array(natural(byte, 255) for byte in sequence(value))
@@ -142,7 +143,7 @@ class AcquiredDecoder:
             fields(step, 'operation arguments')
             kind, payload = variant(step['operation'])
             require(kind in ('Primitive', 'Call'), 'Unknown operation form')
-            allowed = OPS + POSE_OPS + (['EventSensory', 'QuerySensory'] if self.sensory else [])
+            allowed = OPS + POSE_OPS + list(self.primitive_extensions) + (['EventSensory', 'QuerySensory'] if self.sensory else [])
             operation = '.primitive ' + tag(payload, allowed) if kind == 'Primitive' else '.call ' + natural(payload)
             args = []
             for operand in sequence(step['arguments']):
@@ -251,4 +252,4 @@ class AcquiredDecoder:
 
 
 LEGACY = AcquiredDecoder()
-SENSORY = AcquiredDecoder(sensory=True)
+SENSORY = AcquiredDecoder(sensory=True, primitive_extensions=('Succ',))

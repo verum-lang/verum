@@ -87,6 +87,7 @@ inductive Op where
   | eventPose | queryInput | queryRaw | queryAge | queryAction | queryPose
   | pair | first | second | equal | select | add | rem | next | refused
   | eventSensory | querySensory
+  | succ
   deriving DecidableEq
 
 inductive Error where
@@ -156,6 +157,8 @@ def apply (maxTrace : Nat) (op : Op) (args : List Value) : Except Error Value :=
   | .select, [.bool test, a, b] => .ok (if test then a else b)
   | .add, [.nat a, .nat b] =>
       if a.toNat + b.toNat < 2^64 then .ok (.nat (a + b)) else .error .overflow
+  | .succ, [.nat n] =>
+      if n.toNat + 1 < 2^64 then .ok (.nat (n + 1)) else .error .overflow
   | .rem, [.nat a, .nat b] => if b = 0 then .error .missing else .ok (.nat (a % b))
   | .next, [.nat key] => .ok (.outcome (.next key))
   | .refused, [.nat key] => .ok (.outcome (.refused key))

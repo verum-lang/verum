@@ -77,3 +77,4 @@ import VerumExternalReplay.CommonWindow
 
 import VerumExternalReplay.AdaptiveObservation
 import VerumExternalReplay.NumeralPrograms
+import VerumExternalReplay.CheckedNumerals
