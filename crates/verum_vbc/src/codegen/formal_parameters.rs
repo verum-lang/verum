@@ -114,7 +114,8 @@ impl VbcCodegen {
 
     /// The general ABI resolver retains bare-name recovery for bootstrap.
     /// A semantic signature may only use a generic slot, an exact owner key,
-    /// an explicit mount, or a primitive. A sibling's convenient bare alias
+    /// an explicit mount, a primitive, or a canonical prelude variant carrier.
+    /// A sibling's convenient bare alias
     /// is not evidence that this declaration can name that sibling's type.
     fn semantic_formal_path_is_declared(
         &self,
@@ -135,7 +136,7 @@ impl VbcCodegen {
             return false;
         }
         if !path.is_single() {
-            return self.type_name_to_id.contains_key(&name);
+            return self.nominal_type_id(&name).is_some();
         }
         let owner = self
             .ctx
@@ -162,8 +163,10 @@ impl VbcCodegen {
         {
             return true;
         }
-        self.nominal_type_id(&name)
-            .is_some_and(|id| id.is_builtin())
+        self.nominal_type_id(&name).is_some_and(|id| id.is_builtin()
+            || (id.well_known_name() == Some(name.as_str())
+                && verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS
+                    .iter().any(|(parent, _)| *parent == name)))
     }
 
     pub(super) fn semantic_formal_type(

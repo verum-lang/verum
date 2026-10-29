@@ -5,7 +5,48 @@ use crate::{Instruction, instruction::Reg, types::TypeRef};
 use verum_ast::{Expr, ExprKind, UnOp};
 use verum_common::Maybe;
 
+/// A branch join retains a declaration only if every returning arm agrees.
+/// Divergence contributes no value; an unknown arm never borrows another arm's
+/// ownership authority.
+pub(super) fn join_result_types(left: Maybe<TypeRef>, right: Maybe<TypeRef>) -> Maybe<TypeRef> {
+    let (left, right) = (left?, right?);
+    let never = TypeRef::Concrete(crate::types::TypeId::NEVER);
+    if left == never { Some(right) }
+    else if right == never || left == right { Some(left) }
+    else { None }
+}
+
 impl VbcCodegen {
+    /// Resolve a carried declaration in the active callable's binder scope.
+    /// Undeclared names never become positional generic placeholders.
+    pub(super) fn semantic_type_in_current_scope(&self, name: &str) -> Maybe<TypeRef> {
+        let ast = verum_fast_parser::Parser::new(name).parse_type().ok()?;
+        let ids: Vec<_> = self.ctx.current_generic_param_ids.values()
+            .copied().map(crate::types::TypeParamId).collect();
+        self.semantic_formal_type(&ast, &self.ctx.current_generic_param_ids, &ids)
+    }
+
+    pub(super) fn declared_expression_result(
+        &self, expr: &Expr, reg: Maybe<Reg>, start: usize, end: usize,
+    ) -> Maybe<TypeRef> {
+        self.copy_source_type_inner(expr, reg.map(|reg| (reg, start, end)), 0)
+    }
+
+    pub(super) fn declared_block_result(
+        &self, block: &verum_ast::Block, reg: Maybe<Reg>, start: usize, end: usize,
+    ) -> Maybe<TypeRef> {
+        if let Some(expr) = &block.expr {
+            return self.declared_expression_result(expr, reg, start, end);
+        }
+        // A semicolon discards a value but cannot make a diverging edge return.
+        let never = TypeRef::Concrete(crate::types::TypeId::NEVER);
+        if let Some(verum_ast::Stmt { kind: verum_ast::StmtKind::Expr { expr, .. }, .. }) = block.stmts.last()
+            && self.declared_expression_result(expr, reg, start, end) == Some(never.clone()) {
+            return Some(never);
+        }
+        Some(TypeRef::Concrete(crate::types::TypeId::UNIT))
+    }
+
     /// Parentheses preserve a place for both copies and consuming handoffs.
     pub(super) fn normalized_place(mut expr: &Expr) -> &Expr {
         while let ExprKind::Paren(inner) = &expr.kind { expr = inner; }
@@ -27,6 +68,14 @@ impl VbcCodegen {
         if depth >= 64 { return None; }
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
         match &Self::normalized_place(expr).kind {
+            ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
+                Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
+            ExprKind::Block(block) => self.ctx.declared_result_types.get(&block.span).cloned().flatten(),
+            ExprKind::Match { .. } => self.ctx.declared_result_types.get(&expr.span).cloned().flatten(),
+            ExprKind::If { then_branch, else_branch, .. } => join_result_types(
+                self.ctx.declared_result_types.get(&then_branch.span).cloned().flatten(),
+                else_branch.as_ref().map_or(Some(TypeRef::Concrete(crate::types::TypeId::UNIT)), |branch| nested(branch, None)),
+            ),
             ExprKind::Path(path) => {
                 let binding = self.ctx.lookup_var(path.as_ident()?.name.as_str())?;
                 if binding.is_cell || binding.is_pattern_alias { return None; }

@@ -21543,6 +21543,7 @@ impl VbcCodegen {
         self.ctx.enter_scope();
 
         let mut result = None;
+        let block_start = self.ctx.instructions.len();
 
         // Compile statements.
         // Only update result when a statement produces a value (Some).
@@ -21567,6 +21568,10 @@ impl VbcCodegen {
         // T1506: preserve the result while its binding is still in scope.
         // Re-reading a tail name later can see a shadow or a sibling local.
         if block.span.start < block.span.end {
+            let semantic_result = self.declared_block_result(
+                block, result, block_start, self.ctx.instructions.len(),
+            );
+            self.ctx.declared_result_types.insert(block.span, semantic_result);
             let result_type = block.expr.as_ref().and_then(|expr| {
                 self.extract_expr_type_name(expr)
                     .or_else(|| self.infer_expr_type_name(expr))

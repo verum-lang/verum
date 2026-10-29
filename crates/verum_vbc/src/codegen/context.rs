@@ -442,6 +442,8 @@ pub struct CodegenContext {
     /// same-named local belonging to a later sibling block (T1506).
     pub compiled_block_result_types:
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
+    /// Semantic result declarations captured while branch-local bindings exist.
+    pub(super) declared_result_types: Map<verum_ast::Span, Option<TypeRef>>,
     /// Emitted result storage is separate from declaration/type hints.
     pub(super) array_result_facts: super::array_coercions::ArrayResultFacts,
 
@@ -1011,6 +1013,8 @@ pub struct ClosureCompilationContext {
     /// Saved block result facts in the enclosing function's type scope.
     pub compiled_block_result_types:
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
+    /// Semantic result declarations captured while branch-local bindings exist.
+    pub(super) declared_result_types: Map<verum_ast::Span, Option<TypeRef>>,
     /// Emitted result storage is separate from declaration/type hints.
     pub(super) array_result_facts: super::array_coercions::ArrayResultFacts,
     /// The enclosing callable's residual target, independent of expression hints.
@@ -1720,6 +1724,7 @@ impl CodegenContext {
             constant_types: HashMap::new(),
             variable_type_names: HashMap::new(),
             compiled_block_result_types: Map::new(),
+            declared_result_types: Map::new(),
             array_result_facts: Default::default(),
             array_element_type_names: HashMap::new(),
             reference_bindings: std::collections::HashSet::new(),
@@ -2756,6 +2761,7 @@ impl CodegenContext {
         }
         self.variable_type_names.clear();
         self.compiled_block_result_types.clear();
+        self.declared_result_types.clear();
         self.array_result_facts.clear();
         self.reference_bound_vars.clear();
         self.array_element_type_names.clear();
@@ -4745,6 +4751,7 @@ impl CodegenContext {
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
             compiled_block_result_types: self.compiled_block_result_types.clone(),
+            declared_result_types: self.declared_result_types.clone(),
             array_result_facts: self.array_result_facts.clone(),
             function_return_type_name: self.function_return_type_name.clone(),
             try_recover_depth: self.try_recover_depth,
@@ -4777,6 +4784,7 @@ impl CodegenContext {
         self.defer_stack = saved.defer_stack;
         self.variable_type_names = saved.variable_type_names;
         self.compiled_block_result_types = saved.compiled_block_result_types;
+        self.declared_result_types = saved.declared_result_types;
         self.array_result_facts = saved.array_result_facts;
         self.reference_bindings = saved.reference_bindings;
         self.byte_array_vars = saved.byte_array_vars;
@@ -4935,6 +4943,7 @@ impl CodegenContext {
         self.reference_bound_vars.clear();
         self.generic_type_params.clear();
         self.compiled_block_result_types.clear();
+        self.declared_result_types.clear();
         self.array_result_facts.clear();
         self.generic_type_params_ordered.clear();
         self.current_generic_param_ids.clear();

@@ -682,8 +682,7 @@ impl VbcCodegen {
             return Some(None);
         };
         let Some(payload) = variant.fields.get(field)
-            .map(|field| &field.type_ref)
-            .or_else(|| (field == 0).then_some(variant.payload.as_ref()).flatten())
+            .and_then(|field| field.declaration_type.as_ref())
         else {
             return Some(None);
         };
@@ -700,16 +699,19 @@ impl VbcCodegen {
             }
             for (parameter, argument) in descriptor.type_params.iter().zip(args.iter()) {
                 if let verum_ast::GenericArg::Type(ty) = argument
-                    && let Some(actual) = self.type_name_to_type_ref_mono(
+                    && let Some(actual) = self.semantic_type_in_current_scope(
                         &Self::render_field_type_name(ty, true),
                     )
                 {
                     substitution.bind(parameter.id, actual);
+                } else {
+                    return Some(None);
                 }
             }
         }
         let payload = substitution.apply(payload);
-        Some(self.render_field_type_ref(&payload, true))
+        Some(self.scoped_callable_type_name(&payload, Some(&self.ctx.current_generic_param_ids))
+            .map(|name| name.to_string()))
     }
 
     /// **MATCH-DESTRUCTURE-VARIANT-OFFSET-1 (T0243).** The type-name KEY a
@@ -1257,7 +1259,7 @@ impl VbcCodegen {
             ExprKind::Match {
                 expr: scrutinee,
                 arms,
-            } => self.compile_match(scrutinee, arms, demand),
+            } => self.compile_match(scrutinee, arms, demand, expr.span),
             ExprKind::Loop { label, body, .. } => {
                 self.compile_loop(label.as_ref().map(|l| l.as_str()), body, demand)
             }
@@ -19540,6 +19542,7 @@ impl VbcCodegen {
         scrutinee: &Expr,
         arms: &verum_common::List<verum_ast::MatchArm>,
         demand: ResultDemand,
+        span: verum_ast::Span,
     ) -> CodegenResult<Option<Reg>> {
         // Evaluate scrutinee
         let scrutinee_reg = self
@@ -19555,6 +19558,7 @@ impl VbcCodegen {
 
         let result = self.ctx.alloc_temp();
         let end_label = self.ctx.new_label("match_end");
+        let mut result_type = Some(crate::types::TypeRef::Concrete(crate::types::TypeId::NEVER));
 
         // Compile each arm
         for (i, arm) in arms.iter().enumerate() {
@@ -19601,11 +19605,16 @@ impl VbcCodegen {
             }
 
             // Compile arm body
+            let arm_start = self.ctx.instructions.len();
             let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
+            let arm_type = self.declared_expression_result(
+                &arm.body, arm_result, arm_start, self.ctx.instructions.len(),
+            );
+            result_type = super::place_copies::join_result_types(result_type, arm_type);
             if std::env::var("VERUM_TRACE_MATCH_ARM").is_ok() {
                 eprintln!(
-                    "[match-arm {}] result_reg={} arm_result={:?}",
-                    i, result.0, arm_result.map(|r| r.0)
+                    "[match-arm {}] result_reg={} arm_result={:?} joined_type={:?}",
+                    i, result.0, arm_result.map(|r| r.0), result_type
                 );
             }
             if let Some(reg) = arm_result {
@@ -19639,6 +19648,9 @@ impl VbcCodegen {
         }
 
         self.ctx.define_label(&end_label);
+        if span.start < span.end {
+            self.ctx.declared_result_types.insert(span, result_type);
+        }
 
         // Clear all active pattern cache at end of match expression
         self.ctx.clear_active_pattern_cache();
@@ -21529,25 +21541,23 @@ impl VbcCodegen {
         }
     }
 
-    fn record_pattern_borrow(
+    fn record_pattern_type(
         &mut self,
         reg: Reg,
         mode: &PatternBindingMode,
         type_name: Option<&str>,
     ) {
-        if let PatternBindingMode::Borrowed(mutability, tier) = mode
-            && let Some(inner) = type_name.and_then(|name| self.type_name_to_type_ref_mono(name))
-        {
-            self.ctx.registers.value_uses.set_type(
-                reg,
-                crate::types::TypeRef::Reference {
-                    inner: Box::new(inner),
-                    mutability: *mutability,
-                    tier: *tier,
-                },
-                verum_common::ResourceDiscipline::Unrestricted,
-            );
-        }
+        let Some(inner) = type_name.and_then(|name| self.semantic_type_in_current_scope(name))
+        else { return; };
+        let ty = match mode {
+            PatternBindingMode::Borrowed(mutability, tier) => crate::types::TypeRef::Reference {
+                inner: Box::new(inner), mutability: *mutability, tier: *tier,
+            },
+            PatternBindingMode::Value => inner,
+            PatternBindingMode::Tuple(_) => return,
+        };
+        let discipline = crate::resource_discipline::resource_discipline_with(&ty, |id| self.type_by_id(id));
+        self.ctx.registers.value_uses.set_type(reg, ty, discipline);
     }
 
     /// Preserve the scrutinee's borrow while destructuring its payloads.
@@ -21603,7 +21613,7 @@ impl VbcCodegen {
                 );
                 let binding_mode = if *by_ref { &explicit_mode } else { mode };
                 let binding_type = self.ctx.match_scrutinee_type.clone();
-                self.record_pattern_borrow(var_reg, binding_mode, binding_type.as_deref());
+                self.record_pattern_type(var_reg, binding_mode, binding_type.as_deref());
                 // A fresh declaration must not inherit a shadowed array's
                 // count. T1615 keys this by binding identity so the outer
                 // declaration's facts survive its temporary shadow.
@@ -22135,10 +22145,10 @@ impl VbcCodegen {
                                     });
                                 }
 
-                                let field_type = payload_types
-                                    .as_ref()
-                                    .and_then(|types| types.get(field_idx as usize))
-                                    .cloned();
+                                let field_type = self.declared_variant_payload_type(
+                                    &variant_name, field_idx as usize,
+                                ).unwrap_or_else(|| payload_types.as_ref()
+                                    .and_then(|types| types.get(field_idx as usize)).cloned());
                                 let previous_type = std::mem::replace(
                                     &mut self.ctx.match_scrutinee_type,
                                     field_type.clone(),
@@ -22162,7 +22172,7 @@ impl VbcCodegen {
                                 } else {
                                     // Shorthand: { field } means { field: field }
                                     let var_reg = self.ctx.define_var(&field_name, false);
-                                    self.record_pattern_borrow(var_reg, mode, field_type.as_deref());
+                                    self.record_pattern_type(var_reg, mode, field_type.as_deref());
                                     if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
                                         binding.is_pattern_alias = mode.is_borrowed();
                                     }
@@ -22379,7 +22389,7 @@ impl VbcCodegen {
                     } else {
                         // Shorthand: { x } means bind x to the field value
                         let var_reg = self.ctx.define_var(&field_name, false);
-                        self.record_pattern_borrow(var_reg, mode, field_type_name.as_deref());
+                        self.record_pattern_type(var_reg, mode, field_type_name.as_deref());
                         if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
                             binding.is_pattern_alias = mode.is_borrowed();
                         }
@@ -32650,21 +32660,31 @@ impl VbcCodegen {
     /// function shapes and erases managed references, so it is only the nominal
     /// leaf authority here.
     fn callable_type_name(&self, ty: &crate::types::TypeRef) -> Option<verum_common::Text> {
+        self.scoped_callable_type_name(ty, None)
+    }
+
+    fn scoped_callable_type_name(
+        &self, ty: &crate::types::TypeRef,
+        scope: Option<&std::collections::HashMap<String, u16>>,
+    ) -> Option<verum_common::Text> {
         use crate::types::{CbgrTier, Mutability, TypeRef};
+        let render = |ty| self.scoped_callable_type_name(ty, scope);
         match ty {
-            TypeRef::Concrete(_) => self.type_ref_to_field_name(ty).map(Into::into),
+            TypeRef::Generic(id) => scope?.iter().find_map(|(name, value)|
+                (*value == id.0).then(|| name.as_str().into())),
+            TypeRef::Concrete(_) => self.render_field_type_ref(ty, scope.is_some()).map(Into::into),
             TypeRef::Instantiated { base, args } => Some(format!("{}<{}>",
-                self.type_ref_to_field_name(&TypeRef::Concrete(*base))?,
-                args.iter().map(|arg| self.callable_type_name(arg)).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
+                render(&TypeRef::Concrete(*base))?,
+                args.iter().map(render).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
             TypeRef::Tuple(items) => Some(format!("({})",
-                items.iter().map(|item| self.callable_type_name(item)).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
+                items.iter().map(render).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
             TypeRef::Function { params, return_type, contexts } if contexts.is_empty() => Some(format!("fn({}) -> {}",
-                params.iter().map(|param| self.callable_type_name(param)).collect::<Option<verum_common::List<_>>>()?.join(", "),
-                self.callable_type_name(return_type)?).into()),
+                params.iter().map(render).collect::<Option<verum_common::List<_>>>()?.join(", "),
+                render(return_type)?).into()),
             TypeRef::Reference { inner, tier, mutability } => Some(format!("&{}{}{}",
                 match tier { CbgrTier::Tier0 => "", CbgrTier::Tier1 => "checked ", CbgrTier::Tier2 => "unsafe " },
-                if *mutability == Mutability::Mutable { "mut " } else { "" }, self.callable_type_name(inner)?).into()),
-            TypeRef::Slice(inner) => self.callable_type_name(inner).map(|name| format!("[{name}]").into()),
+                if *mutability == Mutability::Mutable { "mut " } else { "" }, render(inner)?).into()),
+            TypeRef::Slice(inner) => render(inner).map(|name| format!("[{name}]").into()),
             TypeRef::ConstValue(value) => Some(value.to_string().into()),
             _ => None,
         }
