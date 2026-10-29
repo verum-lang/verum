@@ -1,0 +1,44 @@
+{
+  "status": "source_identity_verified",
+  "native_source_commit": "4978aaf39b27d44ad02230ba68e0404b7f525510",
+  "native_source_files": 1479,
+  "receipt_sha256": "59919e79dc7057d26a3eb8227eb5eaa96be79a234b90b8d509a5714cf27b3a60",
+  "native_binary_sha256": "7fa6fca32c14d2e9a5fb01d45918658621c1b0bbda363db29a828b7db9d7c69a",
+  "archive_sha256": "699807ebc7393d6eb3bf84fad51fea68d8c4388642dfc238623a3c374b2f36aa",
+  "retained_files": [
+    {
+      "file": "declaration-coverage-native-v1.receipt.json.gz",
+      "bytes": 446610,
+      "sha256": "59919e79dc7057d26a3eb8227eb5eaa96be79a234b90b8d509a5714cf27b3a60"
+    },
+    {
+      "file": "declaration-coverage-native-v1.producer.py.gz",
+      "bytes": 8969,
+      "sha256": "4568b83b7b3ef8a9d7e301a2751196a8882e31bf0a3f5808cb2a763a5177fdce"
+    },
+    {
+      "file": "declaration-coverage-native-v1.source.patch.gz",
+      "bytes": 24963,
+      "sha256": "f0428842005810513641b8ca6451fb995c34043febc04f4a677887464f340bfd"
+    },
+    {
+      "file": "declaration-coverage-native-v1.source-0.rs.gz",
+      "bytes": 8037,
+      "sha256": "ddbc87a0d9ccd69e0acc53df77da872885660d810d1c74a4250e608002ad25c5",
+      "source_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/declaration.rs"
+    },
+    {
+      "file": "declaration-coverage-native-v1.source-1.rs.gz",
+      "bytes": 7763,
+      "sha256": "5489e020572b3c211f7b754a8fe8680e5d341b1685ff126c4dbf0348a9caac41",
+      "source_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/declaration/courts.rs"
+    },
+    {
+      "file": "declaration-coverage-native-v1.source-2.rs.gz",
+      "bytes": 7285,
+      "sha256": "81cf81ca5a2e99c17343daa8a6f10febbf89f444e2e4945adb33b3363fe491eb",
+      "source_path": "rust/crates/synarc-kan/src/organism/observer_acquired/structural_source.rs"
+    }
+  ],
+  "scope": "Finite lexical tree membership in the mathematical declaration schema; source identity only, no native cursor/export, codec, VM, resource or scheduling correspondence"
+}

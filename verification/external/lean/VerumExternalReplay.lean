@@ -41,6 +41,7 @@ import VerumExternalReplay.TraceReduction
 import VerumExternalReplay.AcquisitionScheduling
 import VerumExternalReplay.StructuralNames
 import VerumExternalReplay.CompositionalFamily
+import VerumExternalReplay.DeclarationCoverage
 import VerumExternalReplay.RetainedNames
 import VerumExternalReplay.RetainedExecutionTrace
 import VerumExternalReplay.RetainedNative

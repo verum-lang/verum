@@ -238,6 +238,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_physical_causal_export.py
           python3 -m unittest discover -s verification/external/lean -p test_causal_snapshot.py
           python3 -m unittest discover -s verification/external/lean -p test_compositional_census.py
+          python3 -m unittest discover -s verification/external/lean -p test_declaration_coverage.py
           python3 -m unittest discover -s verification/external/lean -p test_checker_process.py
           python3 -m unittest discover -s verification/external/lean -p test_sensory_port.py
           python3 -m unittest discover -s verification/external/lean -p test_action_capture.py
