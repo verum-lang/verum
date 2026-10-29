@@ -287,6 +287,27 @@ impl VbcCodegen {
                 }
             }
         }
+        // A declaration interface can reference a reserved source type before
+        // its owning module is compiled, without containing that descriptor.
+        // Resolve those references through the canonical declaration catalogue
+        // so dependency closure and signature remapping use the same identity.
+        // A source descriptor always wins; a same-leaf type in another module
+        // cannot supply the missing declaration.
+        for (mi, module) in available.iter().enumerate() {
+            let ids = module.types.iter().flat_map(descriptor_ids)
+                .chain(module.functions.iter().flat_map(function_ids));
+            for id in ids.filter(|id| !id.is_builtin()) {
+                if source_keys.contains_key(&(mi, id)) { continue; }
+                let Some(name) = id.well_known_name() else { continue };
+                let Some(owner) = verum_common::well_known_types::WellKnownType::from_name(name)
+                    .and_then(|kind| kind.canonical_archive_modules().first().copied())
+                else { continue };
+                let key = format!("{owner}.{name}");
+                if catalog.contains_key(&key) {
+                    source_keys.entry((mi, id)).or_insert(key);
+                }
+            }
+        }
         let mut bare = HashMap::<String, Option<String>>::new();
         for key in catalog.keys() {
             let leaf = key.rsplit('.').next().unwrap().to_owned();

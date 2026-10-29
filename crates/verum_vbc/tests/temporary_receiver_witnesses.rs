@@ -103,6 +103,88 @@ fn imported_temporary_receiver_and_callback_supply_all_declared_witnesses() {
     }
 }
 
+#[test]
+fn cold_constructor_signature_imports_its_reserved_result_declaration() {
+    let result = Parser::new(r#"
+module core.base.result;
+public type Result<T, E> is Ok(T) | Err(E);
+implement<T, E> Result<T, E> {
+    public fn map_err<F, O: fn(E) -> F>(self, f: O) -> Result<T, F> {
+        match self { Ok(value) => Ok(value), Err(error) => Err(f(error)) }
+    }
+}
+"#).parse_module().unwrap();
+    let text = Parser::new(include_str!("../../../core/text/text.vr"))
+        .parse_module().unwrap();
+    let mut results = VbcCodegen::with_config(CodegenConfig::new("core.base"));
+    let result_interface = results.collect_declaration_interface(&[&result]).unwrap();
+    let mut texts = VbcCodegen::with_config(CodegenConfig::new("core.text"));
+    let text_interface = texts.collect_declaration_interface(&[&text]).unwrap();
+    assert!(!text_interface.types.iter().any(|ty| ty.id == TypeId::RESULT),
+        "a cold producer references Result before importing its descriptor");
+
+    let consumer = Parser::new(r#"
+module consumer;
+mount base.Text;
+fn probe(bytes: &[Byte]) -> Int {
+    let decoded = Text.from_utf8(bytes).map_err(|_| 11);
+    11
+}
+"#).parse_module().unwrap();
+    let mut exports = std::collections::HashMap::new();
+    for (ordinal, (provider, owner, name)) in [
+        (&texts, "core.text.text", "Text.from_utf8"),
+        (&results, "core.base.result", "Result.map_err"),
+    ].into_iter().enumerate() {
+        let mut info = provider.export_functions()[name].clone();
+        info.id = verum_vbc::module::FunctionId(verum_vbc::stub_ranges::STAGE1_BASE - ordinal as u32);
+        info.callable_signature = None;
+        info.return_type = None;
+        info.return_type_name = None;
+        info.return_type_inner = None;
+        exports.insert(name.to_string(), info.clone());
+        exports.insert(format!("{owner}.{name}"), info);
+    }
+    let text_interface = deserialize_module(&serialize_module(&text_interface).unwrap()).unwrap();
+    let result_interface = deserialize_module(&serialize_module(&result_interface).unwrap()).unwrap();
+    let impostor = Parser::new("module unrelated; type Result<T, E> is Ok(T) | Err(E);")
+        .parse_module().unwrap();
+    let impostor = VbcCodegen::with_config(CodegenConfig::new("unrelated"))
+        .collect_declaration_interface(&[&impostor]).unwrap();
+    for (available, canonical_present) in [
+        (vec![&text_interface], false),
+        (vec![&text_interface, &impostor], false),
+        (vec![&text_interface, &impostor, &result_interface], true),
+        (vec![&result_interface, &impostor, &text_interface], true),
+    ] {
+        let mut consumer_codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        consumer_codegen.import_functions(&exports);
+        consumer_codegen.import_bootstrap_nominal_dependencies_with_resolver(
+            &[&consumer], &available, |name| {
+                Some(if name == "base.Text" { "core.text.text.Text" } else { name }.into())
+            },
+        ).unwrap();
+        let functions = consumer_codegen.export_functions();
+        assert_eq!(functions["Text.from_utf8"].callable_signature.is_some(), canonical_present,
+            "only the canonical Result declaration can complete the constructor signature");
+        if !canonical_present { continue; }
+        consumer_codegen.collect_unit_declarations(&[&consumer]).unwrap();
+        let module = consumer_codegen.compile_function_bodies(&consumer).unwrap();
+        let mut pc = 0;
+        let mut witnesses = Vec::new();
+        while pc < module.bytecode.len() {
+            if let verum_vbc::Instruction::SetCallWitness { type_args } =
+                verum_vbc::bytecode::decode_instruction(&module.bytecode, &mut pc).unwrap() {
+                witnesses.push(type_args);
+            }
+        }
+        let arguments = witnesses.last().expect("map_err witnesses");
+        assert_eq!(arguments.len(), 4);
+        assert_eq!(arguments[0], TypeRef::Concrete(TypeId::TEXT));
+        assert!(arguments.iter().all(|ty| !ty.is_generic()), "{arguments:?}");
+    }
+}
+
 fn imported_temporary_case(
     owner: &str,
     payload: &str,
