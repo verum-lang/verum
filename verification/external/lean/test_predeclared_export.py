@@ -12,7 +12,8 @@ def fixture():
     source = dict(epoch='1', raw_space='2', owner=lineage, shape='Event')
     id_ = lambda n: dict(lineage=lineage, ordinal=n)
     row = lambda n: dict(id=id_(n), source=source, origin=dict(epoch='1', lineage=lineage, ordinal=0),
-        context=dict(epoch='1', input=n, action=0), outcome=dict(kind='Outcome', value=dict(kind='Next', key=n)))
+        context=dict(epoch='1', input=n, action=0), derived_context=dict(epoch='1', input=n, action=0),
+        actual_cut_epoch='1', selected_input_epoch='1', outcome=dict(kind='Outcome', value=dict(kind='Next', key=n)))
     base = dict(source=source, origin=dict(epoch='1', lineage=lineage, ordinal=0), declaration_end=id_(0),
         reserved_look='2', paid_look=None, next_reservation='3', rows=[],
         unscored=None, validation_from=None, collecting_validation=False, selected_training=None,
@@ -41,6 +42,9 @@ def freshness():
         if kind=='ActualFreshRow':
             row=copy.deepcopy(fixture()[1]['rows'][0]); row['id']['ordinal']=3
             current['rows']=[row]
+        if kind=='OldRowRefused':
+            current['attempted_row']=copy.deepcopy(fixture()[1]['rows'][1])
+            current['observed_result']=dict(kind='Err',reason='validation observation predates candidate selection')
         events.append(current)
     return events
 
@@ -71,7 +75,7 @@ class PredeclaredExportTests(unittest.TestCase):
         fresh=self.prove(freshness())
         self.assertTrue(fresh['validation'])
         self.assertEqual(fresh['buffered_rows'],1)
-        self.assertIn('refused input and error absent from snapshots',fresh['unchecked'])
+        self.assertIn('refusal diagnostic text and cross-epoch replacements',fresh['unchecked'])
 
     def test_changed_ordinals_owners_payloads_and_splits_fail_semantically(self):
         cases = []
@@ -109,6 +113,13 @@ class PredeclaredExportTests(unittest.TestCase):
         for event in data: event['capacity']=0
         cases.append(data)
         data=freshness(); data[-1]['validation_from']['ordinal']=4; cases.append(data)
+        data=freshness(); data[1]['attempted_row']['id']['ordinal']=3; cases.append(data)
+        data=freshness(); data[1]['attempted_row']['id']['ordinal']=0; cases.append(data)
+        data=freshness(); data[1]['observed_result']['kind']='Ok'; cases.append(data)
+        data=freshness(); data[1]['attempted_row']['derived_context']['input']=999; cases.append(data)
+        data=freshness(); data[-1]['rows'][0]['actual_cut_epoch']='2'; cases.append(data)
+        data=freshness(); data[-1]['rows'][0]['selected_input_epoch']='2'; cases.append(data)
+        data=freshness(); data[-1]['rows'][0]['context']['input']=999; cases.append(data)
         for index,data in enumerate(cases):
             with self.subTest(index=index): self.prove(data,True)
 

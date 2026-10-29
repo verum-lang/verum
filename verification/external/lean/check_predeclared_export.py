@@ -2,9 +2,9 @@
 """Finite correspondence of frozen declarations and selection-frontier snapshots.
 
 Checks declaration identity, native paid ordinals, retained Cut source/origin,
-capacity, exact ordered prefixes and fresh-row admission. Cached input/action
-projection, omitted refused inputs, issued criterion semantics, exact family
-cardinality and native affine ownership remain separate obligations. A null
+capacity, exact ordered prefixes, independent input/action projections and
+preselection refusal versus fresh-row admission. Issued criterion semantics,
+exact family cardinality and native affine ownership remain separate obligations. A null
 signature records the absence of a signature, never evidence of a present one.
 """
 from pathlib import Path
@@ -32,8 +32,27 @@ def sample(value):
     fields(value, 'lineage ordinal'); lineage(value['lineage']); natural(value['ordinal'])
 
 
+def context(value):
+    fields(value, 'epoch input action')
+    wide(value['epoch']); natural(value['input']); natural(value['action'],255)
+
+
+def row(value):
+    fields(value, 'id source origin context outcome actual_cut_epoch selected_input_epoch derived_context')
+    sample(value['id']); SENSORY.source(value['source']); origin(value['origin'])
+    context(value['context']); context(value['derived_context'])
+    wide(value['actual_cut_epoch']); wide(value['selected_input_epoch'])
+    SENSORY.value(value['outcome']); require(value['outcome']['kind'] == 'Outcome', 'Wrong row outcome sort')
+
+
 def snapshot(event):
-    fields(event, SNAPSHOT)
+    require(type(event) is dict, 'Expected snapshot')
+    refused = event.get('kind') == 'OldRowRefused'
+    fields(event, SNAPSHOT + (' attempted_row observed_result' if refused else ''))
+    if refused:
+        row(event['attempted_row'])
+        result=event['observed_result']; fields(result,'kind reason')
+        require(result['kind'] in ('Ok','Err') and type(result['reason']) is str, 'Invalid observed result')
     SENSORY.source(event['source']); origin(event['origin']); sample(event['declaration_end'])
     natural(event['capacity']); wide(event['reserved_look']); wide(event['next_reservation'])
     wide(event['risk_denominator']); boolean(event['collecting_validation'])
@@ -52,12 +71,7 @@ def snapshot(event):
         natural(address['composition']['nesting']); natural(address['composition']['body_inputs'])
     if event['unscored'] is not None:
         for id_ in sequence(event['unscored']): sample(id_)
-    for row in sequence(event['rows']):
-        fields(row, 'id source origin context outcome'); sample(row['id'])
-        SENSORY.source(row['source']); origin(row['origin'])
-        fields(row['context'], 'epoch input action')
-        wide(row['context']['epoch']); natural(row['context']['input']); natural(row['context']['action'],255)
-        SENSORY.value(row['outcome']); require(row['outcome']['kind'] == 'Outcome', 'Wrong row outcome sort')
+    for value in sequence(event['rows']): row(value)
 
 
 def emit(data):
@@ -103,9 +117,8 @@ def emit(data):
 
     if validation:
         selected, refused, received = events
-        # The attempted old row and its error are not exported. This checks
-        # preservation of the observed state, not the absent refusal decision.
-        same_state = lambda event: {k:v for k,v in event.items() if k not in ('kind','rows')}
+        same_state = lambda event: {k:v for k,v in event.items()
+            if k not in ('kind','rows','attempted_row','observed_result')}
         for index in (1,2):
             claim(f'({literal(same_state(events[index]))} : String) = {literal(same_state(selected))}')
         claim('rows0 = []'); claim('buffer1 = buffer0')
@@ -131,7 +144,21 @@ def emit(data):
         claim(f'(Exact.receiveValidation {natural(selected["capacity"])} {natural(frontier["ordinal"])} '
             f'selectedBuffer {owner(row["source"],row["origin"],row["id"])} {ordinal} {literal(row)}).toOption = '
             f'some (appendBatch selectedBuffer [({ordinal}, {literal(row)})])')
-        checked_rows = received['rows']; row_index = 2
+        attempted = refused['attempted_row']
+        old_ordinal = natural(attempted['id']['ordinal'])
+        claim(f'({old_ordinal} : Nat) < {natural(frontier["ordinal"])}')
+        claim(f'({literal(refused["observed_result"]["kind"])} : String) = {literal("Err")}')
+        claim(f'(Exact.receive {natural(selected["capacity"])} selectedBuffer '
+            f'{owner(attempted["source"],attempted["origin"],attempted["id"])} '
+            f'{old_ordinal} {literal(attempted)}).toOption = '
+            f'some (appendBatch selectedBuffer [({old_ordinal}, {literal(attempted)})])')
+        claim(f'(match Exact.receiveValidation {natural(selected["capacity"])} {natural(frontier["ordinal"])} '
+            f'selectedBuffer {owner(attempted["source"],attempted["origin"],attempted["id"])} '
+            f'{old_ordinal} {literal(attempted)} with '
+            f'| .error retained => some retained | .ok _ => none) = some selectedBuffer')
+        # Include attempted coordinates in the provenance checks even though
+        # they must never become part of the accepted validation prefix.
+        checked_rows = received['rows']+[attempted]; row_index = 2
     else:
         declared, buffered, later, opened, boundary = events
         require(not declared['rows'], 'Declaration already includes trial rows')
@@ -151,23 +178,30 @@ def emit(data):
         claim(f'({array(literal(id_) for id_ in unscored)} : List String) = ({original_ids} : List String).drop {selected}')
         checked_rows = buffered['rows']; row_index = 1
 
+    accepted_rows = events[row_index]['rows']
+    lines.append(f'def checkedRows : List String := {array(literal(row) for row in checked_rows)}')
     first = events[0]
     for field in ('source','origin'):
         claim(f'({array(literal(row[field]) for row in checked_rows)} : List String) = '
-              f'List.replicate rows{row_index}.length {literal(first[field])}')
+              f'List.replicate checkedRows.length {literal(first[field])}')
     claim(f'({array(literal(row["id"]["lineage"]) for row in checked_rows)} : List String) = '
-          f'List.replicate rows{row_index}.length {literal(first["declaration_end"]["lineage"])}')
+          f'List.replicate checkedRows.length {literal(first["declaration_end"]["lineage"])}')
     claim(f'({array(wide(row["context"]["epoch"]) for row in checked_rows)} : List Nat) = '
-          f'List.replicate rows{row_index}.length {wide(first["source"]["epoch"])}')
-    ordinals = [row['id']['ordinal'] for row in checked_rows]
+          f'List.replicate checkedRows.length {wide(first["source"]["epoch"])}')
+    claim(f'({array(literal(row["context"]) for row in checked_rows)} : List String) = '
+          f'{array(literal(row["derived_context"]) for row in checked_rows)}')
+    for field in ('actual_cut_epoch','selected_input_epoch'):
+        claim(f'({array(wide(row[field]) for row in checked_rows)} : List Nat) = '
+              f'List.replicate checkedRows.length {wide(first["source"]["epoch"])}')
+    ordinals = [row['id']['ordinal'] for row in accepted_rows]
     previous = [first['declaration_end']['ordinal']]+ordinals
     adjacent = array(f'({natural(before)}, {natural(after)})' for before,after in zip(previous,ordinals))
     claim(f'({adjacent} : List (Nat × Nat)).all (fun pair => decide (pair.1 < pair.2)) = true')
     lines += ['#print axioms '+name for name in claims]+['end FrozenObserverExport']
     return '\n\n'.join(lines)+'\n', dict(claims=len(claims), snapshots=len(events),
-        buffered_rows=len(checked_rows), selected_rows=events[-1]['selected_training'],
+        buffered_rows=len(accepted_rows), selected_rows=events[-1]['selected_training'],
         unscored_ids=len(events[-1]['unscored']), validation=validation,
-        unchecked=['refused input and error absent from snapshots', 'independent cut input/action projection',
+        unchecked=['refusal diagnostic text and cross-epoch replacements',
             'issued criterion semantics and exact family cardinality', 'other reservation identities',
             'native affine ownership and whole-runtime refinement'], scope=__doc__)
 
