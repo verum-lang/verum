@@ -35,6 +35,7 @@ import VerumExternalReplay.SignatureCatalogues
 import VerumExternalReplay.PhysicalTransducers
 import VerumExternalReplay.SourceCalibration
 import VerumExternalReplay.ResourceTransfer
+import VerumExternalReplay.PredeclaredEvidence
 import VerumExternalReplay.AcquiredObserverControls
 import VerumExternalReplay.CommonDescriptionCost
 import VerumExternalReplay.ObserverRetirementControls
