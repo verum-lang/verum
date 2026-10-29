@@ -1,4 +1,4 @@
-use super::apply_function_signatures;
+use super::{ImportedSignature, apply_function_signatures};
 use crate::codegen::{CodegenConfig, VbcCodegen};
 use std::cell::Cell;
 use verum_common::{List, Map, Text};
@@ -54,8 +54,14 @@ fn signature_batch_matches_ordered_replay_with_one_live_registry_visit() {
         }
     }
     let mut signatures = Map::new();
-    for (id, signature) in updates.iter() {
-        signatures.insert(*id, signature.clone());
+    for (id, (result, yielded, callable, name)) in updates.iter() {
+        signatures.insert(*id, ImportedSignature {
+            result: result.clone(),
+            yielded: yielded.clone(),
+            callable: callable.clone(),
+            result_name: name.clone(),
+            parameter_names: List::new(),
+        });
     }
     let visits = Cell::new(0);
     // Count the actual production helper's iterator, not a copied batch model.

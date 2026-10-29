@@ -39,12 +39,16 @@ fn colliding_free_function_stubs_keep_both_source_owners() {
 #[test]
 fn forward_result_payload_selects_its_foreign_nominal_method() {
     for serialized in [false, true] {
-        forward_result_case(serialized);
+        for relative in [false, true] { forward_result_case(serialized, relative); }
     }
 }
 
-fn forward_result_case(serialized: bool) {
-    let parsed = parsed();
+fn forward_result_case(serialized: bool, relative: bool) {
+    let mut parsed = parsed();
+    if relative {
+        parsed[2].1[0].1 = Parser::new("module core.provider; mount super.handles.Descriptor; public fn acquire() -> Result<Descriptor, Int> { Result.Ok(Descriptor(7)) }").parse_module().unwrap();
+        parsed[4].1[0].1 = Parser::new("module core.consumer; mount super.provider.acquire as open_handle; public fn probe() -> Int { match open_handle() { Result.Ok(value) => value.raw(), Result.Err(_) => 0 } }").parse_module().unwrap();
+    }
     let mut session = Session::new(Default::default());
     {
         let registry = session.module_registry();

@@ -17022,8 +17022,8 @@ impl VbcCodegen {
         let type_name = type_ident.name.to_string();
         let method_name = method.name.to_string();
 
-        // Gate: if the receiver name is a local variable AND not a known
-        // type name, dispatch as value method — never as static. Without
+        // Gate: a lexical value owns its name even when it shadows a known
+        // type. Dispatch its instance method rather than a type namespace. Without
         // this, a `mount`-imported free function whose simple name matches
         // the method (e.g. `stdout`, `stderr`, `len`) silently shadows
         // method dispatch on the local.
@@ -17039,9 +17039,8 @@ impl VbcCodegen {
         // through a method call (get_heap, hazard_stats, get_segment_stats).
         // `is_thread_local` is the authoritative static-mut registry (every
         // `static mut`/`@thread_local` is registered there at decl time).
-        let receiver_is_local_value = !is_type_name(&type_name)
-            && (self.ctx.registers.contains(&type_name)
-                || self.ctx.is_thread_local(&type_name).is_some());
+        let receiver_is_local_value = self.ctx.get_var_reg(&type_name).is_ok()
+            || self.ctx.is_thread_local(&type_name).is_some();
         if receiver_is_local_value {
             return Ok(None);
         }
@@ -23801,9 +23800,6 @@ impl VbcCodegen {
     /// top of "main"), returns `None` — callers should emit a nil stub or a
     /// diagnostic, never silently rebind to a local symbol of the same name.
     pub(super) fn resolve_module_path_head(&self, parts: &[String]) -> Option<Vec<String>> {
-        if parts.is_empty() {
-            return None;
-        }
         // Prefer the *source module* (from the `module X.Y.Z;` declaration of
         // the file currently being compiled). `config.module_name` is fixed
         // per-codegen-session and is "main" for single-file user runs; the
@@ -23814,7 +23810,14 @@ impl VbcCodegen {
             .current_source_module
             .as_deref()
             .unwrap_or(&self.config.module_name);
-        if module_name.is_empty() || module_name == "main" {
+        Self::resolve_module_path_head_in_scope(parts, module_name)
+    }
+
+    /// Resolve declaration and expression paths against the same source scope.
+    pub(super) fn resolve_module_path_head_in_scope(
+        parts: &[String], module_name: &str,
+    ) -> Option<Vec<String>> {
+        if parts.is_empty() || module_name.is_empty() || module_name == "main" {
             return None;
         }
         let module_parts: Vec<&str> = module_name.split('.').collect();
@@ -32722,14 +32725,26 @@ impl VbcCodegen {
     }
 
     fn declared_callable_receiver_name(&self, receiver: &Expr) -> Option<String> {
-        self.extract_expr_type_name(receiver).or_else(|| {
-            let ExprKind::Path(path) = &receiver.kind else { return None };
+        // Classify type operands before value inference can mistake a nominal
+        // declaration for a same-named variant. Reuse the declaration resolver
+        // so lexical values, statics and explicit mounts keep their authority.
+        if let Some(ty) = self.declaration_property_operand(receiver)
+            && let verum_ast::ty::TypeKind::Path(path) = &ty.kind
+        {
             let name = path.to_string().replace("::", ".");
-            if self.ctx.lookup_var(&name).is_some() || self.ctx.generic_type_params.contains(&name) {
-                return None;
+            if !self.ctx.generic_type_params.contains(&name)
+                && self.nominal_type_id(&name).is_some()
+            {
+                return Some(name);
             }
-            self.nominal_type_id(&name).map(|_| name)
-        })
+        }
+        // Temporary receivers carry the same structural result into closure
+        // parameter hints and call witnesses. Recursion follows the receiver
+        // subtree; no registry-wide same-name inference supplies a type.
+        self.callable_method_result_type(receiver)
+            .and_then(|ty| self.callable_type_name(&ty).map(|name| name.to_string())
+                .or_else(|| self.type_ref_to_field_name(&ty)))
+            .or_else(|| self.extract_expr_type_name(receiver))
     }
 
     /// Contextual lambda parameters come from the exact resolved declaration.

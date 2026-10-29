@@ -12272,6 +12272,10 @@ impl VbcCodegen {
                     return Ok(());
                 }
 
+                if let Some(resolved) = self.resolve_module_path_head(&full_path) {
+                    full_path = resolved;
+                }
+
                 // The last segment is the function/item name
                 let func_name = match full_path.last() {
                     Some(name) => name.clone(),

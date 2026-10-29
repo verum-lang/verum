@@ -48,6 +48,32 @@ fn named_id(module: &VbcModule, name: &str) -> TypeId {
 }
 
 #[test]
+fn relative_mounts_preserve_the_source_nominal_owner() {
+    let owner = producer("core.handles", "module core.handles; public type Handle is { raw: Int };");
+    let stranger = producer("unrelated", "module unrelated; public type Handle is { raw: Bool };");
+    for (scope, mount) in [
+        ("core.provider.file", "core.handles.Handle"),
+        ("core.provider.file", "super.super.handles.Handle"),
+        ("core.provider.file", "cog.handles.Handle"),
+        ("core", ".handles.Handle"),
+    ] {
+        let ast = source(&format!(
+            "module {scope}; mount {mount} as Owned; fn accept(x: Owned) -> Int {{ 7 }}"
+        ));
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new(scope));
+        codegen.import_bootstrap_nominal_dependencies(&[&ast], &[&stranger, &owner]).unwrap();
+        codegen.collect_unit_declarations(&[&ast]).unwrap();
+        let module = codegen.compile_function_bodies(&ast).unwrap();
+        let handle = descriptor(&module, "Handle");
+        assert_eq!(module.strings.get(handle.origin_module.unwrap()), Some("core.handles"), "{mount}");
+        let function = module.functions.iter().find(|f|
+            module.strings.get(f.name).is_some_and(|name| name.ends_with(".accept"))).unwrap();
+        assert_eq!(function.params[0].type_ref,
+            TypeRef::Concrete(handle.id), "{mount}");
+    }
+}
+
+#[test]
 fn nested_nominal_function_signature_survives_bootstrap_import() {
     let dependency = producer(
         "alpha",

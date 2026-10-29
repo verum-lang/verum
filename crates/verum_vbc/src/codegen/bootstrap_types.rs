@@ -317,25 +317,40 @@ impl VbcCodegen {
         }
         let mut names = BTreeSet::new();
         for source in sources {
+            let owner = Self::resolve_full_module_path(source, &self.config.module_name)
+                .unwrap_or_else(|| self.config.module_name.clone());
+            let qualify = |written: String| {
+                // Path's Relative segment renders as `.::`, hence `..`
+                // after the same separator normalization used by mounts.
+                let parts: verum_common::List<String> = if let Some(tail) = written.strip_prefix("..") {
+                    std::iter::once(".".to_owned())
+                        .chain(tail.split('.').map(str::to_owned)).collect()
+                } else {
+                    written.split('.').map(str::to_owned).collect()
+                };
+                Self::resolve_module_path_head_in_scope(&parts, &owner)
+                    .map(|parts| parts.join(".")).unwrap_or(written)
+            };
             let mut paths = SourceNames {
                 names: BTreeSet::new(),
                 codegen: self,
             };
             let mut bindings = HashMap::new();
             for item in &source.items {
+                if !self.should_compile_item(item) { continue; }
                 paths.visit_item(item);
                 if let ItemKind::Mount(decl) = &item.kind {
                     mounts(&decl.tree, "", decl.alias.as_ref(), &mut bindings);
                 }
             }
-            names.extend(bindings.values().cloned());
+            names.extend(bindings.values().cloned().map(&qualify));
             for name in paths.names {
                 let (head, tail) = name.split_once('.').unwrap_or((&name, ""));
-                names.insert(match bindings.get(head) {
+                names.insert(qualify(match bindings.get(head) {
                     Some(owner) if tail.is_empty() => owner.clone(),
                     Some(owner) => format!("{owner}.{tail}"),
                     None => name,
-                });
+                }));
             }
         }
         let mut selected = BTreeSet::new();
@@ -639,16 +654,17 @@ impl VbcCodegen {
                 // Preserve the ordered sites' last update for a shared ID.
                 // Resolution reads names/IDs only, so signatures can be applied
                 // together after all source-owned parameter facts are carried.
-                signatures.insert(
-                    FunctionId(id),
-                    (
-                        result,
-                        function.yield_type.as_ref()
-                            .map(|ty| remap_type_ref_archive(ty, &maps[mi])),
-                        callable,
-                        result_name,
-                    ),
-                );
+                signatures.insert(FunctionId(id), ImportedSignature {
+                    result,
+                    yielded: function.yield_type.as_ref()
+                        .map(|ty| remap_type_ref_archive(ty, &maps[mi])),
+                    callable,
+                    result_name,
+                    parameter_names: function.params.iter().map(|parameter|
+                        module.strings.get(parameter.name).map(str::to_owned))
+                        .collect::<Option<_>>()
+                        .ok_or_else(|| CodegenError::internal("missing source parameter name"))?,
+                });
             }
         }
         apply_function_signatures(self.ctx.functions.values_mut(), &signatures);
@@ -701,22 +717,35 @@ impl VbcCodegen {
 
 // Read current alias ownership once; a persistent reverse index could retain
 // names that authoritative registration has since rebound to another ID.
+struct ImportedSignature {
+    result: TypeRef,
+    yielded: Option<TypeRef>,
+    callable: Option<TypeRef>,
+    result_name: Option<String>,
+    parameter_names: verum_common::List<String>,
+}
+
 fn apply_function_signatures<'a>(
     functions: impl Iterator<Item = &'a mut FunctionInfo>,
-    signatures: &Map<FunctionId, (TypeRef, Option<TypeRef>, Option<TypeRef>, Option<String>)>,
+    signatures: &Map<FunctionId, ImportedSignature>,
 ) {
     if signatures.is_empty() {
         return;
     }
     for info in functions {
-        if let Some((result, yielded, callable, result_name)) = signatures.get(&info.id) {
-            info.return_type = Some(result.clone());
-            info.yield_type = yielded.clone();
+        if let Some(signature) = signatures.get(&info.id) {
+            info.return_type = Some(signature.result.clone());
+            info.yield_type = signature.yielded.clone();
+            // Stage-one placeholders do not establish receiver roles or named
+            // arguments. Restore them from the same source-owned declaration
+            // that supplies structural parameter and result types.
+            info.param_names = signature.parameter_names.as_slice().to_vec();
+            info.param_count = info.param_names.len();
             // Preserve the source signature, including reference qualifiers,
             // while translating every nominal identity into the consumer pool.
             // Reconstructing it from ABI parameters would lose those qualifiers.
-            info.callable_signature = callable.clone();
-            if let Some(name) = result_name {
+            info.callable_signature = signature.callable.clone();
+            if let Some(name) = &signature.result_name {
                 info.return_type_name = Some(name.clone());
                 info.return_type_inner = None;
             }

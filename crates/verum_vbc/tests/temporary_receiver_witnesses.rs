@@ -126,9 +126,14 @@ implement<T, E> Result<T, E> {
     let consumer = Parser::new(r#"
 module consumer;
 mount base.Text;
+type Data is Text(Text) | Empty;
 fn probe(bytes: &[Byte]) -> Int {
     let decoded = Text.from_utf8(bytes).map_err(|_| 11);
     11
+}
+fn shadow(Text: Result<Text, Int>) -> Int {
+    let decoded = Text.map_err(|_| false);
+    12
 }
 "#).parse_module().unwrap();
     let mut exports = std::collections::HashMap::new();
@@ -142,6 +147,9 @@ fn probe(bytes: &[Byte]) -> Int {
         info.return_type = None;
         info.return_type_name = None;
         info.return_type_inner = None;
+        // Forward registration has dispatch IDs before source parameter
+        // names exist. The declaration interface must restore receiver roles.
+        info.param_names = (0..info.param_count).map(|i| format!("_arg{i}")).collect();
         exports.insert(name.to_string(), info.clone());
         exports.insert(format!("{owner}.{name}"), info);
     }
@@ -159,6 +167,8 @@ fn probe(bytes: &[Byte]) -> Int {
     ] {
         let mut consumer_codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
         consumer_codegen.import_functions(&exports);
+        consumer_codegen.register_stdlib_intrinsics();
+        consumer_codegen.register_runtime_io_functions();
         consumer_codegen.import_bootstrap_nominal_dependencies_with_resolver(
             &[&consumer], &available, |name| {
                 Some(if name == "base.Text" { "core.text.text.Text" } else { name }.into())
@@ -168,6 +178,7 @@ fn probe(bytes: &[Byte]) -> Int {
         assert_eq!(functions["Text.from_utf8"].callable_signature.is_some(), canonical_present,
             "only the canonical Result declaration can complete the constructor signature");
         if !canonical_present { continue; }
+        assert_eq!(functions["Result.map_err"].param_names[0], "self");
         consumer_codegen.collect_unit_declarations(&[&consumer]).unwrap();
         let module = consumer_codegen.compile_function_bodies(&consumer).unwrap();
         let mut pc = 0;
@@ -178,10 +189,12 @@ fn probe(bytes: &[Byte]) -> Int {
                 witnesses.push(type_args);
             }
         }
-        let arguments = witnesses.last().expect("map_err witnesses");
-        assert_eq!(arguments.len(), 4);
-        assert_eq!(arguments[0], TypeRef::Concrete(TypeId::TEXT));
-        assert!(arguments.iter().all(|ty| !ty.is_generic()), "{arguments:?}");
+        assert_eq!(witnesses.len(), 2, "both temporary and local receivers");
+        for arguments in witnesses {
+            assert_eq!(arguments.len(), 4);
+            assert_eq!(arguments[0], TypeRef::Concrete(TypeId::TEXT));
+            assert!(arguments.iter().all(|ty| !ty.is_generic()), "{arguments:?}");
+        }
     }
 }
 
@@ -246,6 +259,7 @@ implement Factory {
     let consumer_source = r#"
 module consumer;
 mount producer.{Factory, Outcome};
+type Other is Factory(Int) | Empty;
 fn probe(fail: Bool) -> Int {
     let value = Factory.decode(fail).map_error(|_| 11);
     match value { Good(_) => 7, Bad(error) => error }
