@@ -34,7 +34,8 @@ FALSE = '`decide_cbv` failed: the proposition evaluates to `false`'
 class PartialPredictionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        require_success(run('lake', 'build', 'VerumExternalReplay.PartialPrediction'))
+        require_success(run('lake', 'build', 'VerumExternalReplay.PartialPrediction',
+                            'VerumExternalReplay.ContextualStop'))
 
     def prove(self, source, expected=None):
         with tempfile.TemporaryDirectory(prefix='verum-partial-prediction-') as directory:
