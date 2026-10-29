@@ -8758,19 +8758,10 @@ impl VbcCodegen {
                     return None;
                 }
                 d.params.iter().map(|p| p.type_ref.clone()).collect()
-            } else if let Some(params) = self.ctx.semantic_fn_params.get(&crate::module::FunctionId(func_id)) {
-                // Deferred initializers can call a source declaration before
-                // its body is emitted. Its semantic signature already owns
-                // the generic slots; compilation order cannot erase them.
-                let params = params.iter().cloned().collect::<Option<Vec<_>>>()?;
-                let declaration = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))?;
-                if declaration.type_param_ids.is_empty()
-                    && !params.iter().any(|ty| ty.is_generic())
-                    && !declaration.return_type.as_ref().is_some_and(|ty| ty.is_generic()) {
-                    return None;
-                }
-                params
             } else if let Some(trs) = self.ctx.archive_fn_param_types.get(&func_id) {
+                // Bootstrap also retains semantic inputs, but a callback's
+                // semantic type O does not carry its declared fn(E) -> F bound.
+                // Use the imported template to infer E/F, as local bodies do.
                 // T0330: archive-loaded callee — its descriptor is not in
                 // `self.functions` during user-fn codegen (bodies merge in
                 // Phase 5), but the loader carried its raw param TypeRefs.
@@ -8797,10 +8788,25 @@ impl VbcCodegen {
                         trs.iter().any(|t| t.is_generic()),
                     );
                 }
-                if !trs.iter().any(|t| t.is_generic()) {
+                let declaration = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id));
+                if !trs.iter().any(|t| t.is_generic())
+                    && !declaration.is_some_and(|info| !info.type_param_ids.is_empty()
+                        || info.return_type.as_ref().is_some_and(|ty| ty.is_generic())) {
                     return None;
                 }
                 trs.clone()
+            } else if let Some(params) = self.ctx.semantic_fn_params.get(&crate::module::FunctionId(func_id)) {
+                // Deferred initializers can call a source declaration before
+                // its body is emitted. Its semantic signature already owns
+                // the generic slots; compilation order cannot erase them.
+                let params = params.iter().cloned().collect::<Option<Vec<_>>>()?;
+                let declaration = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))?;
+                if declaration.type_param_ids.is_empty()
+                    && !params.iter().any(|ty| ty.is_generic())
+                    && !declaration.return_type.as_ref().is_some_and(|ty| ty.is_generic()) {
+                    return None;
+                }
+                params
             } else {
                 if std::env::var_os("VERUM_TRACE_MONO").is_some() {
                     eprintln!(

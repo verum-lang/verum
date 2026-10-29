@@ -31,18 +31,20 @@ fn signature_batch_matches_ordered_replay_with_one_live_registry_visit() {
         // Optional archive yield facts exercise both setting and clearing the
         // carrier, independently of source generator inference.
         let yielded = (index % 4 < 2).then(|| result.clone());
-        updates.push((declaration.id, (result, yielded)));
+        let callable = (index % 4 < 2).then(|| declaration.callable_signature.clone()).flatten();
+        updates.push((declaration.id, (result, yielded, callable)));
     }
     let mut expected = original.clone();
     let mut old_visits = 0;
     // The previous production algorithm is the reference, including repeated
     // IDs and a later None replacing an earlier Some yield fact.
-    for (id, (result, yielded)) in &updates {
+    for (id, (result, yielded, callable)) in &updates {
         for info in expected.values_mut() {
             old_visits += 1;
             if info.id == *id {
                 info.return_type = Some(result.clone());
                 info.yield_type = yielded.clone();
+                info.callable_signature = callable.clone();
             }
         }
     }
@@ -63,6 +65,7 @@ fn signature_batch_matches_ordered_replay_with_one_live_registry_visit() {
         assert_eq!(after.id, before.id, "{alias}");
         assert_eq!(after.return_type, before.return_type, "{alias}");
         assert_eq!(after.yield_type, before.yield_type, "{alias}");
+        assert_eq!(after.callable_signature, before.callable_signature, "{alias}");
     }
     assert_eq!(old_visits, original.len() * updates.len());
     assert_eq!(visits.get(), original.len());

@@ -510,10 +510,10 @@ impl VbcCodegen {
             }
             ty.drop_fn = ty
                 .drop_fn
-                .and_then(|id| self.bootstrap_function_id(module, id));
+                .and_then(|id| self.bootstrap_function(module, id).map(|info| info.id.0));
             ty.clone_fn = ty
                 .clone_fn
-                .and_then(|id| self.bootstrap_function_id(module, id));
+                .and_then(|id| self.bootstrap_function(module, id).map(|info| info.id.0));
             let owner = ty
                 .origin_module
                 .and_then(|id| module.strings.get(id))
@@ -565,7 +565,10 @@ impl VbcCodegen {
         for (mi, fi) in function_sites {
             let module = available[mi];
             let function = &module.functions[fi];
-            if let Some(id) = self.bootstrap_function_id(module, function.id.0) {
+            if let Some(info) = self.bootstrap_function(module, function.id.0) {
+                let id = info.id.0;
+                let callable = info.callable_signature.as_ref()
+                    .map(|ty| remap_type_ref_archive(ty, &maps[mi]));
                 // A type re-export also names its declaration-owned methods.
                 // Keep their actual FunctionInfo identity and generic roster;
                 // synthesizing an external stub here would erase CallG witnesses.
@@ -606,6 +609,7 @@ impl VbcCodegen {
                         result,
                         function.yield_type.as_ref()
                             .map(|ty| remap_type_ref_archive(ty, &maps[mi])),
+                        callable,
                     ),
                 );
             }
@@ -637,7 +641,7 @@ impl VbcCodegen {
         lookup(name)
     }
 
-    fn bootstrap_function_id(&self, module: &VbcModule, id: u32) -> Option<u32> {
+    fn bootstrap_function(&self, module: &VbcModule, id: u32) -> Option<&FunctionInfo> {
         if let Some((_, name)) = module
             .external_function_names
             .iter()
@@ -646,8 +650,7 @@ impl VbcCodegen {
             return module
                 .strings
                 .get(*name)
-                .and_then(|name| self.ctx.functions.get(name))
-                .map(|info| info.id.0);
+                .and_then(|name| self.ctx.functions.get(name));
         }
         let function = module
             .functions
@@ -656,7 +659,6 @@ impl VbcCodegen {
         self.ctx
             .functions
             .get(&function_identity(module, function)?)
-            .map(|info| info.id.0)
     }
 }
 
@@ -664,15 +666,19 @@ impl VbcCodegen {
 // names that authoritative registration has since rebound to another ID.
 fn apply_function_signatures<'a>(
     functions: impl Iterator<Item = &'a mut FunctionInfo>,
-    signatures: &Map<FunctionId, (TypeRef, Option<TypeRef>)>,
+    signatures: &Map<FunctionId, (TypeRef, Option<TypeRef>, Option<TypeRef>)>,
 ) {
     if signatures.is_empty() {
         return;
     }
     for info in functions {
-        if let Some((result, yielded)) = signatures.get(&info.id) {
+        if let Some((result, yielded, callable)) = signatures.get(&info.id) {
             info.return_type = Some(result.clone());
             info.yield_type = yielded.clone();
+            // Preserve the source signature, including reference qualifiers,
+            // while translating every nominal identity into the consumer pool.
+            // Reconstructing it from ABI parameters would lose those qualifiers.
+            info.callable_signature = callable.clone();
         }
     }
 }
