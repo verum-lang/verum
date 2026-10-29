@@ -92,6 +92,9 @@ theorem whnfFuel_reduces (fuel : Nat) (term : Term) : HeadSteps term (whnfFuel f
     | refl value =>
       simp only [whnfFuel]
       exact .refl _
+    | funExt a b c d =>
+      simp only [whnfFuel]
+      exact .refl _
     | letE value body =>
       simp only [whnfFuel]
       exact .step (.letValue value body) (ih (subst 0 value body))

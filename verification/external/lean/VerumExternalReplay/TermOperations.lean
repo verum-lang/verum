@@ -31,6 +31,7 @@ theorem mapVars_identity (cutoff : Nat) (t : Term) :
   | identity a b c => simp only [mapVars, mapVars_identity cutoff a, mapVars_identity cutoff b, mapVars_identity cutoff c]
   | transport a b c => simp only [mapVars, mapVars_identity cutoff a, mapVars_identity cutoff b, mapVars_identity cutoff c]
   | idElim a b c => simp only [mapVars, mapVars_identity cutoff a, mapVars_identity cutoff b, mapVars_identity cutoff c]
+  | funExt a b c d => simp only [mapVars, mapVars_identity cutoff a, mapVars_identity cutoff b, mapVars_identity cutoff c, mapVars_identity cutoff d]
 termination_by sizeOf t
 
 theorem mapTerms_identity (cutoff : Nat) (terms : List Term) :
@@ -95,6 +96,7 @@ theorem mapVars_fusion (f g h : Nat → Nat → Term)
   | identity a b c => simp only [mapVars, mapVars_fusion f g h law cutoff a, mapVars_fusion f g h law cutoff b, mapVars_fusion f g h law cutoff c]
   | transport a b c => simp only [mapVars, mapVars_fusion f g h law cutoff a, mapVars_fusion f g h law cutoff b, mapVars_fusion f g h law cutoff c]
   | idElim a b c => simp only [mapVars, mapVars_fusion f g h law cutoff a, mapVars_fusion f g h law cutoff b, mapVars_fusion f g h law cutoff c]
+  | funExt a b c d => simp only [mapVars, mapVars_fusion f g h law cutoff a, mapVars_fusion f g h law cutoff b, mapVars_fusion f g h law cutoff c, mapVars_fusion f g h law cutoff d]
 termination_by sizeOf t
 
 theorem mapTerms_fusion (f g h : Nat → Nat → Term)

@@ -27,6 +27,12 @@ def identity(carrier, left, right): return ('Id', carrier, left, right)
 
 def refl(value): return ('Refl', value)
 
+def fun_ext(function_type, left, right, pointwise):
+    return ('FunExt', function_type, left, right, pointwise)
+
+def level_wire(level):
+    return level if isinstance(level, dict) else {'Concrete': level}
+
 def j(motive, base, path): return ('J', motive, base, path)
 
 def pair(left, right): return ('Pair', left, right)
@@ -86,7 +92,7 @@ def lower(term, context=()):
     if kind == 'Var':
         if term[1] not in context: raise ValueError(f'unbound generator variable: {term[1]}')
         return {'Var': context.index(term[1])}
-    if kind == 'Universe': return {'Universe': {'Concrete': term[1]}}
+    if kind == 'Universe': return {'Universe': level_wire(term[1])}
     if kind == 'Let':
         return {'Let': {'value': lower(term[2], context), 'body': lower(term[3], (term[1],) + context)}}
     if kind in ('Pi', 'Lam', 'Sigma'):
@@ -95,6 +101,7 @@ def lower(term, context=()):
     if kind in ('App', 'Pair'): return {kind: [lower(term[1], context), lower(term[2], context)]}
     if kind in ('Refl', 'Fst', 'Snd'): return {kind: lower(term[1], context)}
     if kind == 'Id': return {'Id': dict(zip(('ty', 'lhs', 'rhs'), (lower(x, context) for x in term[1:])))}
+    if kind == 'FunExt': return {'FunExt': dict(zip(('function_type', 'lhs', 'rhs', 'pointwise'), (lower(x, context) for x in term[1:])))}
     if kind == 'J': return {'J': dict(zip(('motive', 'base', 'scrutinee'), (lower(x, context) for x in term[1:])))}
     if kind == 'Data':
         indices, index_context = [], context
@@ -126,7 +133,7 @@ def lower(term, context=()):
                 field_context = (binder,) + field_context
             result = [lower(index, field_context) for index in result_indices]
             constructors.append({'fields': lowered, 'indices': result} if result else lowered)
-        declaration = {'name': term[1], 'level': {'Concrete': term[4]}, 'constructors': constructors}
+        declaration = {'name': term[1], 'level': level_wire(term[4]), 'constructors': constructors}
         if indices:
             declaration['indices'] = indices
         return {'Data': declaration}

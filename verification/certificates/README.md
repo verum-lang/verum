@@ -19,6 +19,24 @@ hashes and producer sources. CI runs the dispatch, candidate-locality, diagnosti
 batteries. Rejection controls change the policy or evidence while retaining
 the property being checked; admission-limit rejection is not a passing control.
 
+## Adaptive observations
+
+`check_adaptive_observation.py` replays the universal laws in
+`VerumExternalReplay/AdaptiveObservation.lean`: reversible XOR lifts, total and
+Option readout transport, reflection of absence, and the separated-fibre
+obstruction to reconstruction. Carriers have independent symbolic universe
+levels. Products, existence and iff use constructive Sigma encodings; negation
+targets an empty inductive type. The proof producer contains no project axioms.
+
+Only the function-valued lift laws select `verum-native-funext/1`; the remaining
+laws use the intensional profile. Foundation selection is verifier configuration,
+and each report checks the exact requested profile. `--export-dir NEW_DIRECTORY`
+retains the exact judgments and independent replay battery with their hashes.
+The corresponding source audit is
+`verification/external/lean/check_adaptive_observation.py`. False erased-input
+and blind-readout claims must fail semantically. These are model proofs, without
+a verified translation of runtime code or a statistical-risk/cost guarantee.
+
 ## Dispatch correspondence
 
 The contract is a projection of SYNARC `c80ce5455`, specifically

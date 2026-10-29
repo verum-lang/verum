@@ -66,6 +66,12 @@ theorem scope_mapVars (n m : Nat) (replace : Nat → Nat → Term)
   | idElim a b c =>
     simp only [mapVars, scopeError, Option.or_eq_none_iff] at good ⊢
     exact ⟨scope_mapVars n m replace law cutoff a good.1, scope_mapVars n m replace law cutoff b good.2.1, scope_mapVars n m replace law cutoff c good.2.2⟩
+  | funExt a b c d =>
+    simp only [mapVars, scopeError, Option.or_eq_none_iff] at good ⊢
+    exact ⟨scope_mapVars n m replace law cutoff a good.1,
+      scope_mapVars n m replace law cutoff b good.2.1,
+      scope_mapVars n m replace law cutoff c good.2.2.1,
+      scope_mapVars n m replace law cutoff d good.2.2.2⟩
 termination_by sizeOf t
 
 theorem scope_mapTerms (n m : Nat) (replace : Nat → Nat → Term)
@@ -192,8 +198,8 @@ theorem scope_weaken (n m : Nat) (t : Term) (growth : n ≤ m)
 
 /-- This is a necessary condition of the actual executable verifier, not an
     invented typing relation: accepted certificates have closed proof and goal. -/
-theorem verifyCertificate_scoped (term claimed : Term)
-    (accepted : verifyCertificate term claimed = .ok ()) :
+theorem verifyCertificate_scoped (term claimed : Term) (foundation : Foundation)
+    (accepted : verifyCertificate term claimed foundation = .ok ()) :
     scopeError 0 term = none ∧ scopeError 0 claimed = none := by
   unfold verifyCertificate checkScope at accepted
   cases goalScope : scopeError 0 claimed with
@@ -207,10 +213,10 @@ theorem verifyCertificate_scoped (term claimed : Term)
     simp only [goalScope] at accepted
     cases accepted
 
-theorem free_variable_rejected (index : Nat) (claimed : Term) :
-    verifyCertificate (.var index) claimed ≠ .ok () := by
+theorem free_variable_rejected (index : Nat) (claimed : Term) (foundation : Foundation) :
+    verifyCertificate (.var index) claimed foundation ≠ .ok () := by
   intro accepted
-  have closed := (verifyCertificate_scoped (.var index) claimed accepted).1
+  have closed := (verifyCertificate_scoped (.var index) claimed foundation accepted).1
   simp [scopeError] at closed
 
 /-- info: 'VerumKernel.scope_mapVars' depends on axioms: [propext, Quot.sound] -/

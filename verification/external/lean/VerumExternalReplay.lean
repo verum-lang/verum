@@ -69,3 +69,5 @@ import VerumExternalReplay.GuardedDrainTrace
 import VerumExternalReplay.InvocationOwnership
 import VerumExternalReplay.RetainedOwnership
 import VerumExternalReplay.CommonWindow
+
+import VerumExternalReplay.AdaptiveObservation

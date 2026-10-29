@@ -76,6 +76,7 @@ theorem scope_whnfFuel (fuel bound : Nat) (term : Term)
     | pair a b => simpa only [whnfFuel] using good
     | identity a b c => simpa only [whnfFuel] using good
     | refl value => simpa only [whnfFuel] using good
+    | funExt a b c d => simpa only [whnfFuel] using good
     | letE value body =>
       have parts : scopeError bound value = none ∧ scopeError (bound + 1) body = none := by
         simpa only [scopeError, Option.or_eq_none_iff] using good
