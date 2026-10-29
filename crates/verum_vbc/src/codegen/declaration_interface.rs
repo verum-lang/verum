@@ -68,6 +68,7 @@ impl VbcCodegen {
             .as_ref()
             .map(|name| StringId(self.intern_string(name)));
         descriptor.explicit_type_param_ids = info.explicit_type_param_ids.clone();
+        descriptor.semantic_return = self.source_semantic_result(source, &scope, &info.type_param_ids);
         let semantic = self
             .ctx
             .semantic_fn_params
@@ -80,12 +81,18 @@ impl VbcCodegen {
                 FunctionParamKind::Regular { ty, .. } => Some(ty),
                 _ => None,
             };
+            let resolved = semantic[index].clone()
+                .or_else(|| declared.map(|ty| self.resolve_field_type_ref(ty, &scope)))
+                .unwrap_or(TypeRef::Concrete(TypeId::UNIT));
+            // The declaration interface carries the same callable bound as
+            // ordinary body compilation; the semantic slot still names O.
+            let type_ref = match declared {
+                Some(ty) => self.substitute_fn_bound_for_generic(resolved, ty, &source.generics, &scope),
+                None => resolved,
+            };
             descriptor.params.push(ParamDescriptor {
                 name: StringId(self.intern_string(&info.param_names[index])),
-                type_ref: semantic[index]
-                    .clone()
-                    .or_else(|| declared.map(|ty| self.resolve_field_type_ref(ty, &scope)))
-                    .unwrap_or(TypeRef::Concrete(TypeId::UNIT)),
+                type_ref,
                 type_name: declared
                     .map(|ty| StringId(self.intern_string(&Self::extract_type_name_from_ast(ty))))
                     .unwrap_or(StringId::EMPTY),

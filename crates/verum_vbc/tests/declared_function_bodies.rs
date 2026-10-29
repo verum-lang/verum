@@ -59,8 +59,21 @@ fn source_body_presence_survives_wire_without_conflating_forward_stubs() {
 
 #[test]
 fn legacy_reserved_flag_cannot_authorize_a_source_body() {
-    let (_, source) = compile("fn empty() -> Unit {}");
+    let (_, mut source) = compile("fn empty() -> Unit {}");
+    let id = descriptor(&source, "body_presence.empty").id;
+    source.functions.retain(|function| function.id == id);
+    source.functions[0].semantic_return = None;
     let mut bytes = serialize_module(&source).unwrap();
+    // Remove the v2.27 result-presence byte from this single-function fixture.
+    let read = |bytes: &[u8], at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let tail = read(&bytes, 32) as usize - 1;
+    assert_eq!(bytes.remove(tail), 0);
+    for at in [16, 24, 32, 40, 48, 56, 64, 88] {
+        let offset = read(&bytes, at);
+        if offset > tail as u32 { bytes[at..at + 4].copy_from_slice(&(offset - 1).to_le_bytes()); }
+    }
+    let hash = blake3::hash(&bytes[verum_vbc::format::HEADER_SIZE..]);
+    bytes[72..80].copy_from_slice(&hash.as_bytes()[..8]);
     // v2.24 uses an existing flag byte and adds no tail. Keep its bit set to
     // prove that a v2.23 descriptor's reserved bit has no source authority.
     bytes[6..8].copy_from_slice(&23_u16.to_le_bytes());

@@ -34,10 +34,7 @@ impl VbcCodegen {
         receiver_scope: &std::collections::HashMap<String, u16>,
         declared_ids: &[TypeParamId],
     ) -> Option<TypeRef> {
-        if function.is_async || function.is_generator || !function.contexts.is_empty() {
-            return None;
-        }
-        let return_type = self.semantic_formal_type(function.return_type.as_ref()?, scope, declared_ids)?;
+        let return_type = self.source_semantic_result(function, scope, declared_ids)?;
         let params = self.source_semantic_parameters(function, scope, receiver_scope, declared_ids)
             .into_iter().collect::<Option<List<_>>>()?;
         Some(TypeRef::Function {
@@ -45,6 +42,18 @@ impl VbcCodegen {
             return_type: Box::new(return_type),
             contexts: Default::default(),
         })
+    }
+
+    pub(super) fn source_semantic_result(
+        &self,
+        function: &FunctionDecl,
+        scope: &std::collections::HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+    ) -> Option<TypeRef> {
+        if function.is_async || function.is_generator || !function.contexts.is_empty() {
+            return None;
+        }
+        self.semantic_formal_type(function.return_type.as_ref()?, scope, declared_ids)
     }
 
     pub(super) fn register_declared_impl_function(
@@ -251,6 +260,29 @@ pub(super) fn remapped_parameters(
     function: &crate::FunctionDescriptor,
     map: &std::collections::HashMap<u32, u32>,
 ) -> Option<List<Option<TypeRef>>> {
+    function.semantic_parameter_types().map(|params| {
+        params.iter().map(|ty| ty.as_ref().and_then(|ty| remapped_declaration_type(ty, map))).collect()
+    })
+}
+
+pub(super) fn remapped_result(
+    function: &crate::FunctionDescriptor,
+    map: &std::collections::HashMap<u32, u32>,
+) -> Option<TypeRef> {
+    remapped_declaration_type(function.semantic_return.as_ref()?, map)
+}
+
+pub(super) fn remapped_callable(
+    function: &crate::FunctionDescriptor,
+    map: &std::collections::HashMap<u32, u32>,
+) -> Option<TypeRef> {
+    remapped_declaration_type(&function.semantic_callable_signature()?, map)
+}
+
+fn remapped_declaration_type(
+    ty: &TypeRef,
+    map: &std::collections::HashMap<u32, u32>,
+) -> Option<TypeRef> {
     fn known(ty: &TypeRef, map: &std::collections::HashMap<u32, u32>, depth: usize) -> bool {
         if depth > 64 {
             return false;
@@ -287,16 +319,7 @@ pub(super) fn remapped_parameters(
             }
         }
     }
-    function.semantic_parameter_types().map(|params| {
-        params
-            .iter()
-            .map(|ty| {
-                ty.as_ref()
-                    .filter(|ty| known(ty, map, 0))
-                    .map(|ty| super::remap_type_ref_archive(ty, map))
-            })
-            .collect()
-    })
+    known(ty, map, 0).then(|| super::remap_type_ref_archive(ty, map))
 }
 
 fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize) -> bool {

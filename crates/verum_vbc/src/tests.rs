@@ -307,6 +307,7 @@ fn test_roundtrip_function_descriptor() {
         origin_module: None,  // v2.13 wire field — test fixtures carry no origin
             value_uses: None,
             semantic_params: None,
+            semantic_return: None,
     };
 
     // Add some dummy bytecode
@@ -373,6 +374,7 @@ fn intrinsic_name_marker_survives_round_trip() {
         origin_module: None,  // v2.13 wire field — test fixtures carry no origin
             value_uses: None,
             semantic_params: None,
+            semantic_return: None,
     });
     module.header.function_table_count = 1;
 

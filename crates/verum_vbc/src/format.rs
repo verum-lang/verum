@@ -118,7 +118,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.25 carries complete optional field declaration visibility.
 /// Legacy coarse flags cannot authorize access when that policy is absent.
 /// Version 2.26 adds TypeResource, preserving generic ownership declarations.
-pub const VERSION_MINOR: u16 = 26;
+/// Version 2.27 retains declaration-owned semantic function results.
+pub const VERSION_MINOR: u16 = 27;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

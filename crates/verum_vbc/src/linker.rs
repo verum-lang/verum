@@ -960,6 +960,8 @@ impl VbcLinker {
             .map(|ty| ty.as_ref().map(|ty| self.remap_type_ref(ty, remap)).transpose())
             .collect::<Result<verum_common::List<_>, LinkError>>()).transpose()?;
         out.return_type = self.remap_type_ref(&src.return_type, remap)?;
+        out.semantic_return = src.semantic_return.as_ref()
+            .map(|ty| self.remap_type_ref(ty, remap)).transpose()?;
         for ctx in out.contexts.iter_mut() {
             *ctx = remap.map_context(*ctx)?;
         }
@@ -1380,6 +1382,7 @@ mod tests {
             origin_module: None,  // v2.13 wire field — test fixtures carry no origin
             value_uses: None,
             semantic_params: None,
+            semantic_return: None,
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");

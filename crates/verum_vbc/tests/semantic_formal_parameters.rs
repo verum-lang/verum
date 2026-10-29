@@ -307,7 +307,7 @@ fn missing_archive_type_map_never_retains_a_foreign_numeric_identity() {
 fn actual_monomorphization_substitutes_exact_method_shadow_ids() {
     use verum_vbc::mono::{InstantiationGraph, SourceLocation, monomorphize_minimal};
     let mut m = compile(
-        "type Container<Item> is { value: Item }; implement<Item> Container<Item> { fn take<Item>(&self, value: &Item) -> Int { 1 } }",
+        "type Container<Item> is { value: Item }; implement<Item> Container<Item> { fn take<Item>(&self, value: &Item) -> &Item { value } }",
     );
     for f in &mut m.functions {
         f.is_generic = !f.type_params.is_empty();
@@ -333,6 +333,7 @@ fn actual_monomorphization_substitutes_exact_method_shadow_ids() {
         specialized.semantic_parameter_types().unwrap()[1],
         Some(reference(T::Concrete(TypeId::BOOL), CbgrTier::Tier0, false))
     );
+    assert_eq!(specialized.semantic_return, specialized.semantic_parameter_types().unwrap()[1]);
     let Some(T::Reference { inner, .. }) = &specialized.semantic_parameter_types().unwrap()[0]
     else {
         panic!()
@@ -353,7 +354,7 @@ fn linker_remaps_semantic_types_with_their_function_and_type_owners() {
     for owner in ["alpha", "beta"] {
         let field = if owner == "alpha" { "Int" } else { "Text" };
         let source = format!(
-            "module {owner}; type Token is {{ value: {field} }}; fn receive(p: &Token) -> Int {{ 1 }}"
+            "module {owner}; type Token is {{ value: {field} }}; fn receive(p: &Token) -> &Token {{ p }}"
         );
         let m = VbcCodegen::with_config(CodegenConfig::new(owner))
             .compile_module(&Parser::new(&source).parse_module().unwrap())
@@ -369,6 +370,7 @@ fn linker_remaps_semantic_types_with_their_function_and_type_owners() {
         .unwrap();
     assert_ne!(alpha, beta, "same source IDs must separate after linking");
     for (owner, params) in [("alpha", alpha), ("beta", beta)] {
+        assert_eq!(function(&m, &format!("{owner}.receive")).semantic_return, params[0]);
         let Some(T::Reference { inner, .. }) = &params[0] else {
             panic!()
         };
@@ -385,6 +387,28 @@ fn linker_remaps_semantic_types_with_their_function_and_type_owners() {
             })
         );
     }
+}
+
+#[test]
+fn semantic_result_roundtrips_and_legacy_abi_cannot_replace_it() {
+    let original = compile("fn borrow(value: &Int) -> &Int { value }");
+    let source = function(&original, "borrow");
+    let expected = Some(reference(T::Concrete(TypeId::INT), CbgrTier::Tier0, false));
+    assert_eq!(source.semantic_return, expected);
+    let loaded = roundtrip(&original);
+    assert_eq!(function(&loaded, "borrow").semantic_return, expected);
+    assert!(source.semantic_callable_signature().is_some());
+    let mut legacy = original.clone();
+    for descriptor in &mut legacy.functions { descriptor.semantic_return = None; }
+    let legacy = roundtrip(&legacy);
+    let legacy = function(&legacy, "borrow");
+    assert!(legacy.semantic_return.is_none());
+    assert!(legacy.semantic_callable_signature().is_none(), "ABI is not a source signature");
+
+    let mut changed = source.clone();
+    changed.semantic_return = Some(T::Concrete(TypeId::BOOL));
+    assert!(!source.value_uses.as_ref().unwrap().matches_signature(&changed),
+        "a changed declared result invalidates the producer seal");
 }
 
 #[test]

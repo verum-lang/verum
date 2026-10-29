@@ -20980,6 +20980,10 @@ impl VbcCodegen {
         );
         self.ctx.semantic_fn_params.insert(descriptor.id, semantic_params.clone());
         descriptor.semantic_params = Some(semantic_params);
+        descriptor.semantic_return = self.source_semantic_result(
+            func, &render_generic_param_map,
+            &descriptor.type_params.iter().map(|p| p.id).collect::<verum_common::List<_>>(),
+        );
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
@@ -27674,6 +27678,7 @@ impl VbcCodegen {
         for info in self.ctx.functions.values_mut() {
             if let Some(source) = signatures.get(&info.id.0) {
                 info.return_type = Some(remap_type_ref_archive(&source.return_type, &type_id_remap));
+                info.callable_signature = formal_parameters::remapped_callable(source, &type_id_remap);
                 info.yield_type = source.yield_type.as_ref()
                     .map(|ty| remap_type_ref_archive(ty, &type_id_remap));
             }
@@ -28369,6 +28374,7 @@ impl VbcCodegen {
                 param.type_ref = remap_type_ref_archive(&param.type_ref, &type_id_remap);
             }
             new_desc.semantic_params = formal_parameters::remapped_parameters(archive_desc, &type_id_remap);
+            new_desc.semantic_return = formal_parameters::remapped_result(archive_desc, &type_id_remap);
             new_desc.return_type =
                 remap_type_ref_archive(&new_desc.return_type, &type_id_remap);
             new_desc.value_uses = archive_module.value_use_receipts(archive_desc.id)

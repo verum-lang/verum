@@ -32,6 +32,9 @@ fn function_bytes(minor: u16) -> Vec<u8> {
     if minor >= 23 {
         bytes.push(0); // v2.23 optional semantic formal roster
     }
+    if minor >= 27 {
+        bytes.push(0); // v2.27 optional semantic result
+    }
     bytes
 }
 
@@ -86,7 +89,7 @@ fn v216_truncated_or_oversized_generic_tail_is_rejected() {
 
 #[test]
 fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
-    for (minor, one_len) in [(15, 41), (16, 42), (19, 42), (20, 43), (22, 43), (crate::format::VERSION_MINOR, 44)] {
+    for (minor, one_len) in [(15, 41), (16, 42), (19, 42), (20, 43), (22, 43), (26, 44), (crate::format::VERSION_MINOR, 45)] {
         let mut bytes = function_bytes(minor);
         assert_eq!(bytes.len(), one_len);
         append_next_descriptor(&mut bytes, minor);
@@ -99,8 +102,39 @@ fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
             assert_eq!(descriptor.return_type, TypeRef::Concrete(TypeId::UNIT));
             assert!(descriptor.explicit_type_param_ids.is_empty());
             assert!(descriptor.value_uses.is_none());
+            assert!(descriptor.semantic_return.is_none());
             assert_eq!(reader.offset, expected, "minor={minor}");
         }
+    }
+}
+
+#[test]
+fn semantic_result_tail_preserves_the_source_type_and_descriptor_boundary() {
+    let mut bytes = function_bytes(27);
+    assert_eq!(bytes.pop(), Some(0));
+    bytes.extend([1, 1, 2, 0, 0, 0]); // present, Concrete(Int), unlike the Unit ABI
+    let boundary = bytes.len();
+    append_next_descriptor(&mut bytes, 27);
+    let mut reader = Deserializer::new(&bytes);
+    reader.header = Some(VbcHeader { version_minor: 27, ..VbcHeader::default() });
+    let descriptor = reader.parse_function_descriptor().unwrap();
+    assert_eq!(descriptor.return_type, TypeRef::Concrete(TypeId::UNIT));
+    assert_eq!(descriptor.semantic_return, Some(TypeRef::Concrete(TypeId::INT)));
+    assert_eq!(reader.offset, boundary);
+    assert_eq!(reader.parse_function_descriptor().unwrap().id.0, NEXT_ID);
+    assert_eq!(reader.offset, bytes.len());
+}
+
+#[test]
+fn semantic_result_tail_refuses_malformed_evidence_instead_of_treating_it_as_absent() {
+    let mut prefix = function_bytes(27);
+    assert_eq!(prefix.pop(), Some(0));
+    for tail in [vec![], vec![2], vec![1], vec![1, 255], vec![1, 1], vec![1, 1, 2, 0, 0]] {
+        let mut bytes = prefix.clone();
+        bytes.extend(tail);
+        let mut reader = Deserializer::new(&bytes);
+        reader.header = Some(VbcHeader { version_minor: 27, ..VbcHeader::default() });
+        assert!(reader.parse_function_descriptor().is_err());
     }
 }
 

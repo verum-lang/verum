@@ -120,6 +120,7 @@ fn descriptor_ids(ty: &TypeDescriptor) -> Vec<TypeId> {
 fn function_ids(function: &FunctionDescriptor) -> Vec<TypeId> {
     let mut ids = Vec::new();
     type_ids(&function.return_type, &mut ids);
+    if let Some(result) = &function.semantic_return { type_ids(result, &mut ids); }
     if let Some(yield_type) = &function.yield_type {
         type_ids(yield_type, &mut ids);
     }
@@ -567,8 +568,12 @@ impl VbcCodegen {
             let function = &module.functions[fi];
             if let Some(info) = self.bootstrap_function(module, function.id.0) {
                 let id = info.id.0;
-                let callable = info.callable_signature.as_ref()
-                    .map(|ty| remap_type_ref_archive(ty, &maps[mi]));
+                // Forward registrations may have no source signature yet.
+                // The declaration interface owns the exact semantic result
+                // and parameters; ABI return types are not evidence.
+                let callable = super::formal_parameters::remapped_callable(function, &maps[mi]).or_else(|| {
+                    info.callable_signature.as_ref().map(|ty| remap_type_ref_archive(ty, &maps[mi]))
+                });
                 // A type re-export also names its declaration-owned methods.
                 // Keep their actual FunctionInfo identity and generic roster;
                 // synthesizing an external stub here would erase CallG witnesses.

@@ -1701,6 +1701,7 @@ impl VbcModule {
                     has_source_body: false,
                     value_uses: None,
                     semantic_params: None,
+                    semantic_return: None,
                     explicit_type_param_ids: Vec::new(),
                     id: FunctionId(self.functions.len() as u32),
                     name: name_id,
@@ -2568,6 +2569,10 @@ pub struct FunctionDescriptor {
     /// This signature does not authorize a transfer, cleanup or native carrier.
     #[serde(default)]
     pub semantic_params: Option<verum_common::List<Option<TypeRef>>>,
+    /// Declaration-owned result before ABI erasure. Absence is unknown;
+    /// the ABI return descriptor cannot supply this source fact (v2.27).
+    #[serde(default)]
+    pub semantic_return: Option<TypeRef>,
     /// Unique function ID.
     pub id: FunctionId,
 
@@ -2835,6 +2840,7 @@ impl Default for FunctionDescriptor {
             has_source_body: false,
             value_uses: None,
             semantic_params: None,
+            semantic_return: None,
             id: FunctionId(0),
             name: StringId::EMPTY,
             parent_type: None,
@@ -2872,6 +2878,17 @@ impl Default for FunctionDescriptor {
 }
 
 impl FunctionDescriptor {
+    /// Reconstruct a complete callable only from retained source facts.
+    pub fn semantic_callable_signature(&self) -> Option<TypeRef> {
+        if self.is_generator || self.properties.contains(PropertySet::ASYNC)
+            || !self.contexts.is_empty() { return None; }
+        Some(TypeRef::Function {
+            params: self.semantic_parameter_types()?.iter().cloned().collect::<Option<_>>()?,
+            return_type: Box::new(self.semantic_return.clone()?),
+            contexts: Default::default(),
+        })
+    }
+
     /// Semantic formals belonging to this exact descriptor. Legacy ABI types
     /// and optional spellings cannot fill absent or malformed declaration facts.
     pub fn semantic_parameter_types(&self) -> Option<&[Option<TypeRef>]> {
@@ -4158,6 +4175,7 @@ mod precompile_extension_tests {
             origin_module: None,
             value_uses: None,
             semantic_params: None,
+            semantic_return: None,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -4216,6 +4234,7 @@ mod precompile_extension_tests {
             origin_module: None,
             value_uses: None,
             semantic_params: None,
+            semantic_return: None,
         };
         m.functions.push(desc);
 

@@ -827,6 +827,9 @@ impl Serializer {
                 if let Some(ty) = ty { self.serialize_type_ref(ty)?; }
             }
         }
+        // v2.27: semantic results are independent of the erased ABI result.
+        self.output.push(desc.semantic_return.is_some() as u8);
+        if let Some(ty) = &desc.semantic_return { self.serialize_type_ref(ty)?; }
         Ok(())
     }
 

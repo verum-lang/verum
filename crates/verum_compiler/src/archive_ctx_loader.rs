@@ -599,7 +599,7 @@ fn register_module(
         }
         let info = FunctionInfo {
             has_source_body: fn_desc.has_source_body,
-            callable_signature: None,
+            callable_signature: fn_desc.semantic_callable_signature(),
             type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
             explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
             id: new_id,
@@ -6364,7 +6364,7 @@ fn register_module_filtered(
         }
         let info = FunctionInfo {
             has_source_body: fn_desc.has_source_body,
-            callable_signature: None,
+            callable_signature: fn_desc.semantic_callable_signature(),
             type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
             explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
             id: new_id,

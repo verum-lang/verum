@@ -36,11 +36,13 @@ implement Factory { fn borrow(value: &Payload) -> &Payload { value } }
         .parse_module()
         .unwrap();
     for has_signature in [true, false] {
+        let mut dependency = dependency.clone();
         let mut exports = provider.export_functions();
         if !has_signature {
             for info in exports.values_mut() {
                 info.callable_signature = None;
             }
+            for function in &mut dependency.functions { function.semantic_return = None; }
         }
         let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
         codegen.import_functions(&exports);
@@ -93,7 +95,9 @@ fn imported_temporary_receiver_and_callback_supply_all_declared_witnesses() {
             ("Text", "\"payload\"", TypeId::TEXT),
         ] {
             for return_names in [true, false] {
-                imported_temporary_case(owner, payload, value, payload_id, return_names);
+                for callable_export in [true, false] {
+                    imported_temporary_case(owner, payload, value, payload_id, return_names, callable_export);
+                }
             }
         }
     }
@@ -105,6 +109,7 @@ fn imported_temporary_case(
     value: &str,
     payload_id: TypeId,
     return_names: bool,
+    callable_export: bool,
 ) {
     let provider_source = r#"
 module producer;
@@ -153,6 +158,9 @@ implement Factory {
     let mut provider = VbcCodegen::with_config(CodegenConfig::new(provider_name));
     let module = provider.compile_module(&source).unwrap();
     let dependency = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    let mut declarations = VbcCodegen::with_config(CodegenConfig::new(provider_name));
+    let interface = declarations.collect_declaration_interface(&[&source]).unwrap();
+    let interface = deserialize_module(&serialize_module(&interface).unwrap()).unwrap();
     let consumer_source = r#"
 module consumer;
 mount producer.{Factory, Outcome};
@@ -175,6 +183,11 @@ fn probe(fail: Bool) -> Int {
     let source = Parser::new(&consumer_source).parse_module().unwrap();
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
     let mut exports = provider.export_functions();
+    if !callable_export {
+        // Forward bootstrap registration has names and dispatch IDs before the
+        // provider is compiled. Source evidence must travel with its interface.
+        for info in exports.values_mut() { info.callable_signature = None; }
+    }
     if !return_names {
         for (name, info) in &mut exports {
             if name.ends_with(".decode") {
@@ -187,7 +200,8 @@ fn probe(fail: Bool) -> Int {
     codegen.import_type_layouts(&provider.export_type_layouts());
     codegen.import_type_field_names(&provider.export_type_field_names());
     codegen
-        .import_bootstrap_nominal_dependencies_with_resolver(&[&source], &[&dependency], |name| {
+        .import_bootstrap_nominal_dependencies_with_resolver(&[&source],
+            &[if callable_export { &dependency } else { &interface }], |name| {
             Some(
                 if name == "base.Text" {
                     "core.text.text.Text"

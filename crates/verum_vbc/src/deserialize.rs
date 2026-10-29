@@ -1732,9 +1732,17 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::Deserialization("invalid semantic parameter presence".into())),
      }
  } else { None };
+ let semantic_return = if fmt_minor >= 27 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => Some(self.parse_type_ref()?),
+         _ => return Err(VbcError::Deserialization("invalid semantic result presence".into())),
+     }
+ } else { None };
  Ok(FunctionDescriptor {
  has_source_body,
  semantic_params,
+ semantic_return,
  value_uses,
  explicit_type_param_ids,
  id,
