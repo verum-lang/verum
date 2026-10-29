@@ -171,6 +171,11 @@ theorem sum_common_denominator (ns : List Nat) (d : Nat) (hd : 0 < d) :
 def divide (a b : Fraction) (hb : 0 < b.numerator) : Fraction :=
   ⟨a.numerator * b.denominator, a.denominator * b.numerator, Nat.mul_pos a.positive hb⟩
 
+/-- A positive divisor turns a ratio bound into an exact product comparison. -/
+theorem divide_atMost_iff (a b c : Fraction) (hb : 0 < b.numerator) :
+    AtMost (divide a b hb) c ↔ AtMost a (mul c b) := by
+  simp only [AtMost, divide, mul, Nat.mul_comm, Nat.mul_left_comm]
+
 theorem divide_positive (a b : Fraction) (ha : 0 < a.numerator)
     (hb : 0 < b.numerator) : 0 < (divide a b hb).numerator :=
   Nat.mul_pos ha b.positive
