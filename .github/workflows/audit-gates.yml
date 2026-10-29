@@ -234,6 +234,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_partial_prediction.py
           python3 -m unittest discover -s verification/external/lean -p test_program_totality.py
           python3 -m unittest discover -s verification/external/lean -p test_work_drain.py
+          python3 -m unittest discover -s verification/external/lean -p test_guarded_drain.py
           python3 -m unittest discover -s verification/external/lean -p test_contextual_rows_export.py
           gzip -dc verification/external/lean/fixtures/contextual-rows-native-v1.json.gz > contextual-rows-native-v1.json
           python3 verification/external/lean/check_contextual_rows_export.py \
