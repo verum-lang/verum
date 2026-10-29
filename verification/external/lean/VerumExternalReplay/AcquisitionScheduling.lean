@@ -4,7 +4,8 @@ import VerumExternalReplay.EnumerableMass
    Addresses use depth = offset + 1. Declaration steps, paid openings and service
    turns are different events. A service turn requires a usable grant after
    capture/routing, and adequate atomic primitive work or a real continuation.
-   Applying the bounds requires stable compatible profiles and retained owners.
+   Applying the bounds requires retained owners and compatible intake profiles;
+   persistent-frontier progress permits revisions between declarations.
    Tail arrivals and unfinished work must fit available storage; this model
    does not promise infinite retention in fixed RAM or eventual acceptance. -/
 namespace AcquisitionScheduling
@@ -155,6 +156,169 @@ theorem unfinished_owner_retained (head : A) (tail : List A) (arrivals : List A)
 
 theorem arrivals_cannot_overtake (head : A) (tail arrivals : List A) :
     service (head :: tail) ⟨false, arrivals⟩ = tail ++ arrivals := by simp [service]
+
+-- A source round freezes nominal owners, not their positions in a movable
+-- backing store. This is the unserved suffix of that roster. New owners enter
+-- a subsequent round; a missing owner refuses selection without advancing it.
+def roundSelect [DecidableEq A] (roster live : List A) : Option (A × List A) :=
+  match roster with
+  | [] => none
+  | owner :: rest => if owner ∈ live then some (owner, rest) else none
+
+def roundSelections [DecidableEq A] (roster : List A) (live : Nat → List A) :
+    Nat → Option (List A)
+  | 0 => some []
+  | n + 1 => do
+    let (owner, rest) ← roundSelect roster (live 0)
+    let later ← roundSelections rest (fun i => live (i + 1)) n
+    pure (owner :: later)
+
+theorem round_retained_owner [DecidableEq A] (owner : A) (rest live : List A)
+    (retained : owner ∈ live) :
+    roundSelect (owner :: rest) live = some (owner, rest) := by
+  simp [roundSelect, retained]
+
+theorem round_missing_owner_refused [DecidableEq A] (owner : A) (rest live : List A)
+    (missing : owner ∉ live) : roundSelect (owner :: rest) live = none := by
+  simp [roundSelect, missing]
+
+theorem round_storage_independent [DecidableEq A] (roster left right : List A)
+    (sameOwners : ∀ owner, owner ∈ left ↔ owner ∈ right) :
+    roundSelect roster left = roundSelect roster right := by
+  cases roster with
+  | nil => rfl
+  | cons owner rest => simp only [roundSelect, sameOwners owner]
+
+theorem fixed_round_prefix [DecidableEq A] (roster : List A) (live : Nat → List A)
+    (n : Nat) (within : n ≤ roster.length)
+    (retained : ∀ i < n, ∀ owner ∈ roster, owner ∈ live i) :
+    roundSelections roster live n = some (roster.take n) := by
+  induction n generalizing roster live with
+  | zero => rfl
+  | succ n ih =>
+    cases roster with
+    | nil => simp at within
+    | cons owner rest =>
+      have here := retained 0 (by omega) owner (by simp)
+      have later : ∀ i < n, ∀ a ∈ rest, a ∈ live (i + 1) := by
+        intro i bound a member
+        exact retained (i + 1) (by omega) a (List.mem_cons_of_mem owner member)
+      simp only [roundSelections, round_retained_owner owner rest (live 0) here]
+      simp [ih rest (fun i => live (i + 1)) (by simpa using within) later]
+
+theorem fixed_round_exact [DecidableEq A] (roster : List A) (live : Nat → List A)
+    (retained : ∀ i < roster.length, ∀ owner ∈ roster, owner ∈ live i) :
+    roundSelections roster live roster.length = some roster := by
+  simpa using fixed_round_prefix roster live roster.length (Nat.le_refl _) retained
+
+-- Persistent syntax search, independent of the address representation. A
+-- revision replaces the revisit cursor but preserves the uninterrupted
+-- frontier and turn. The archived cursor's storage/payload is outside this
+-- projection and must remain owned in the implementation.
+structure SearchState (Owner Cursor : Type) where
+  owner : Owner
+  frontier : Cursor
+  revisit : Option Cursor
+  revisitTurn : Bool
+  deriving DecidableEq, Repr
+
+inductive SearchAction (Cursor : Type) where
+  | declaration
+  | revision (start : Cursor)
+  | suspended
+  deriving DecidableEq, Repr
+
+-- Declaration means a newly retained address and a successful cursor
+-- successor, even if subsequent opening runs out of resources. A poll, failed
+-- successor, or resumed opening of an existing address is not a declaration.
+def searchStep (advance : C → C) (s : SearchState O C) : SearchAction C → SearchState O C
+  | .revision start => { s with revisit := some start }
+  | .suspended => s
+  | .declaration =>
+    if s.revisitTurn then
+      match s.revisit with
+      | some cursor => { s with revisit := some (advance cursor), revisitTurn := false }
+      | none => { s with frontier := advance s.frontier, revisitTurn := false }
+    else { s with frontier := advance s.frontier, revisitTurn := true }
+
+def searchTrace (advance : C → C) (s : SearchState O C) : List (SearchAction C) → SearchState O C
+  | [] => s
+  | event :: rest => searchTrace advance (searchStep advance s event) rest
+
+def completedDeclarations : List (SearchAction C) → Nat
+  | [] => 0
+  | .declaration :: rest => completedDeclarations rest + 1
+  | _ :: rest => completedDeclarations rest
+
+def frontierPotential (rank : C → Nat) (s : SearchState O C) : Nat :=
+  2 * rank s.frontier + if s.revisitTurn then 0 else 1
+
+theorem revision_preserves_frontier_and_turn (advance : C → C) (s : SearchState O C) (start : C) :
+    (searchStep advance s (.revision start)).frontier = s.frontier ∧
+    (searchStep advance s (.revision start)).revisitTurn = s.revisitTurn := ⟨rfl, rfl⟩
+
+theorem suspended_search_unchanged (advance : C → C) (s : SearchState O C) :
+    searchStep advance s .suspended = s := rfl
+
+theorem search_step_owner (advance : C → C) (s : SearchState O C) (action : SearchAction C) :
+    (searchStep advance s action).owner = s.owner := by
+  cases action with
+  | revision _ => rfl
+  | suspended => rfl
+  | declaration => cases s with
+    | mk owner frontier revisit turn =>
+      cases turn <;> cases revisit <;> rfl
+
+theorem search_trace_owner (advance : C → C) (s : SearchState O C) (events : List (SearchAction C)) :
+    (searchTrace advance s events).owner = s.owner := by
+  induction events generalizing s with
+  | nil => rfl
+  | cons event rest ih =>
+    exact (ih (searchStep advance s event)).trans (search_step_owner advance s event)
+
+theorem frontier_step_potential (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (action : SearchAction C) :
+    frontierPotential rank s + completedDeclarations [action] ≤
+      frontierPotential rank (searchStep advance s action) := by
+  cases action with
+  | revision _ => exact Nat.le_refl _
+  | suspended => exact Nat.le_refl _
+  | declaration => cases s with
+    | mk owner frontier revisit turn =>
+      cases turn <;> cases revisit <;>
+        simp [searchStep, frontierPotential, completedDeclarations, successor] <;> omega
+
+theorem frontier_trace_potential (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (events : List (SearchAction C)) :
+    frontierPotential rank s + completedDeclarations events ≤
+      frontierPotential rank (searchTrace advance s events) := by
+  induction events generalizing s with
+  | nil => exact Nat.le_refl _
+  | cons event rest ih =>
+    have head := frontier_step_potential advance rank successor s event
+    have tail := ih (searchStep advance s event)
+    change _ ≤ frontierPotential rank (searchTrace advance (searchStep advance s event) rest)
+    cases event <;> simp only [completedDeclarations] at * <;> omega
+
+theorem completed_declarations_advance_frontier (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (events : List (SearchAction C)) :
+    rank s.frontier + completedDeclarations events / 2 ≤
+      rank (searchTrace advance s events).frontier := by
+  have progress := frontier_trace_potential advance rank successor s events
+  simp only [frontierPotential] at progress
+  split at progress <;> split at progress <;> omega
+
+theorem two_declarations_advance_frontier (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (events : List (SearchAction C))
+    (completed : completedDeclarations events = 2) :
+    rank s.frontier < rank (searchTrace advance s events).frontier := by
+  have progress := completed_declarations_advance_frontier advance rank successor s events
+  rw [completed] at progress
+  exact progress
 
 inductive Event (S : Type) where
   | opening (source : S)
