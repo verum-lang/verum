@@ -1,0 +1,3 @@
+public theorem transport_local(a: Type, p: fn(a) -> Type,
+    x: a, y: a, value: p(y), path: Path<a>(x, y)): p(x)
+proof by induction path; exact(value);

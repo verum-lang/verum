@@ -4,16 +4,27 @@ use super::*;
 use verum_common::List;
 
 enum Frame {
-    Intro { id: BinderId, domain: Box<Ir> },
-    Transport { motive: Box<Ir>, path: Box<Ir> },
-    IdentityInduction { motive: Box<Ir>, path: Box<Ir> },
+    Intro {
+        id: BinderId,
+        domain: Box<Ir>,
+    },
+    Transport {
+        motive: Box<Ir>,
+        path: Box<Ir>,
+    },
+    IdentityInduction {
+        motive: Box<Ir>,
+        path: Box<Ir>,
+        locals: Vec<Binding>,
+        arguments: Vec<Ir>,
+    },
 }
 
 impl Elab {
     pub(super) fn tactics(&mut self, tactic: &TacticExpr, goal: &Ir) -> Result<Ir> {
-        let saved = self.stack.len();
+        let saved = self.stack.clone();
         let result = self.tactics_inner(tactic, goal.clone());
-        self.stack.truncate(saved);
+        self.stack = saved;
         result
     }
 
@@ -143,11 +154,29 @@ impl Elab {
                         base: Box::new(proof),
                         scrutinee: path,
                     },
-                    Frame::IdentityInduction { motive, path } => Ir::IdElim {
+                    Frame::IdentityInduction {
                         motive,
-                        base: Box::new(proof),
-                        scrutinee: path,
-                    },
+                        path,
+                        locals,
+                        arguments,
+                    } => {
+                        let base = locals
+                            .into_iter()
+                            .rev()
+                            .fold(proof, |body, binding| Ir::Lam {
+                                id: binding.id,
+                                domain: Box::new(binding.domain),
+                                body: Box::new(body),
+                            });
+                        arguments.into_iter().fold(
+                            Ir::IdElim {
+                                motive,
+                                base: Box::new(base),
+                                scrutinee: path,
+                            },
+                            |function, argument| Ir::App(Box::new(function), Box::new(argument)),
+                        )
+                    }
                 }));
         }
         Err(Error::Rejected(
@@ -170,10 +199,63 @@ impl Elab {
         };
         let endpoint = self.fresh();
         let evidence = self.fresh();
-        // Abstract the proof before its endpoint. Both placeholders are fresh;
-        // instantiating them cannot rewrite inside the supplied base point.
-        let (body, _) = replace(goal, &path, &Ir::Var(evidence));
-        let (body, _) = replace(&body, &right, &Ir::Var(endpoint));
+        // Keep the path's fixed parameters and their dependencies in scope.
+        // A local used by its carrier/origin cannot be treated as an arbitrary
+        // argument of the motive.
+        let mut fixed = BTreeSet::new();
+        free_binders(&path, &mut fixed);
+        for term in [&carrier, &left, &right] {
+            free_binders(term, &mut fixed);
+        }
+        for binding in self.stack.iter().rev() {
+            if fixed.contains(&binding.id) {
+                free_binders(&binding.domain, &mut fixed);
+            }
+        }
+        let mut renamed = BTreeMap::new();
+        let mut generalized = Vec::new();
+        let mut arguments = Vec::new();
+        // One forward pass closes dependencies transitively through the ordered
+        // telescope. Substitution is simultaneous: new terms are never revisited.
+        let original = self.stack.clone();
+        let visible: BTreeMap<_, _> = original
+            .iter()
+            .filter_map(|binding| binding.name.as_deref().map(|name| (name, binding.id)))
+            .collect();
+        for binding in &original {
+            if fixed.contains(&binding.id) {
+                continue;
+            }
+            let (domain, changed) =
+                abstract_identity(&binding.domain, &path, &right, endpoint, evidence, &renamed);
+            if changed {
+                let id = self.fresh();
+                renamed.insert(binding.id, Ir::Var(id));
+                let mut local = binding.clone();
+                local.id = id;
+                local.domain = domain;
+                // Moving locals to the reflexive telescope must not resurrect
+                // a name hidden by a later, independent local.
+                if local
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| visible.get(name) != Some(&binding.id))
+                {
+                    local.name = None;
+                }
+                generalized.push(local);
+                arguments.push(Ir::Var(binding.id));
+            }
+        }
+        let (body, _) = abstract_identity(goal, &path, &right, endpoint, evidence, &renamed);
+        let family = generalized
+            .iter()
+            .rev()
+            .fold(body.clone(), |body, binding| Ir::Pi {
+                id: binding.id,
+                domain: Box::new(binding.domain.clone()),
+                body: Box::new(body),
+            });
         let motive = Ir::Lam {
             id: endpoint,
             domain: carrier.clone(),
@@ -184,20 +266,45 @@ impl Elab {
                     left: left.clone(),
                     right: Box::new(Ir::Var(endpoint)),
                 }),
-                body: Box::new(body.clone()),
+                body: Box::new(family),
             }),
         };
-        // Fixed-loop elimination and dependent locals cannot be silently
-        // generalized: the family must type-check for every fresh endpoint.
+        // In particular, generalizing locals must not turn fixed-loop
+        // elimination into K or identify two arbitrary equality proofs.
         self.infer(&motive)?;
-        let (base, _) = replace(&body, &Ir::Var(endpoint), &left);
-        let (base, _) = replace(&base, &Ir::Var(evidence), &Ir::Refl { value: left });
+        let at_base = BTreeMap::from([
+            (endpoint, (*left).clone()),
+            (evidence, Ir::Refl { value: left }),
+        ]);
+        let instantiate = |term: &Ir| {
+            rewrite_ir(term, &|node| match node {
+                Ir::Var(id) => at_base.get(id).cloned(),
+                _ => None,
+            })
+            .0
+        };
+        let base = instantiate(&body);
+        let locals: Vec<_> = generalized
+            .into_iter()
+            .map(|mut binding| {
+                binding.domain = instantiate(&binding.domain);
+                binding
+            })
+            .collect();
+        self.stack
+            .retain(|binding| !renamed.contains_key(&binding.id));
+        for binding in &locals {
+            self.require_type(&binding.domain)?;
+            self.stack.push(binding.clone());
+        }
         self.require_type(&base)?;
         Ok((
             base,
             Frame::IdentityInduction {
                 motive: Box::new(motive),
                 path: Box::new(path),
+                locals,
+                arguments,
             },
         ))
     }
@@ -270,12 +377,79 @@ impl Elab {
 /// this capture-free even beneath shadowing binders. We do not substitute by
 /// source spelling or assume that unchanged dependent arguments stay typed.
 fn replace(term: &Ir, from: &Ir, to: &Ir) -> (Ir, bool) {
-    if term == from {
-        return (to.clone(), true);
+    rewrite_ir(term, &|node| (node == from).then(|| to.clone()))
+}
+
+fn abstract_identity(
+    term: &Ir,
+    path: &Ir,
+    right: &Ir,
+    endpoint: BinderId,
+    evidence: BinderId,
+    renamed: &BTreeMap<BinderId, Ir>,
+) -> (Ir, bool) {
+    rewrite_ir(term, &|node| {
+        if node == path {
+            Some(Ir::Var(evidence))
+        } else if node == right {
+            Some(Ir::Var(endpoint))
+        } else if let Ir::Var(id) = node {
+            renamed.get(id).cloned()
+        } else {
+            None
+        }
+    })
+}
+
+fn free_binders(term: &Ir, free: &mut BTreeSet<BinderId>) {
+    match term {
+        Ir::Var(id) => {
+            free.insert(*id);
+        }
+        Ir::Universe(_) => {}
+        Ir::Pi { id, domain, body } | Ir::Lam { id, domain, body } => {
+            free_binders(body, free);
+            free.remove(id);
+            free_binders(domain, free);
+        }
+        Ir::App(a, b) => {
+            free_binders(a, free);
+            free_binders(b, free);
+        }
+        Ir::Refl { value } => free_binders(value, free),
+        Ir::Id {
+            carrier,
+            left,
+            right,
+        } => {
+            for term in [carrier, left, right] {
+                free_binders(term, free);
+            }
+        }
+        Ir::J {
+            motive,
+            base,
+            scrutinee,
+        }
+        | Ir::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => {
+            for term in [motive, base, scrutinee] {
+                free_binders(term, free);
+            }
+        }
+    }
+}
+
+fn rewrite_ir(term: &Ir, substitute: &impl Fn(&Ir) -> Option<Ir>) -> (Ir, bool) {
+    if let Some(replacement) = substitute(term) {
+        return (replacement, true);
     }
     let mut changed = false;
     let mut child = |term: &Ir| {
-        let (result, did_change) = replace(term, from, to);
+        let (result, did_change) = rewrite_ir(term, substitute);
         changed |= did_change;
         Box::new(result)
     };

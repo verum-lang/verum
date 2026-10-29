@@ -25,6 +25,11 @@ fn accepts(source: &str, declaration: &str) -> Certificate {
 const TRANSPORT: &str = include_str!("fixtures/transport.vr");
 const QUANTIFIED: &str = include_str!("fixtures/quantified_symmetry.vr");
 const IDENTITY_INDUCTION: &str = include_str!("fixtures/identity_induction.vr");
+const DEPENDENT_LOCAL: &str = include_str!("fixtures/dependent_local_induction.vr");
+const PROOF_LOCAL: &str = "theorem t(a:Type,x:a,family:fn<y:meta a>(Path<a>(x,y))->Type,y:a,path:Path<a>(x,y),value:family(y,path)):family(x,@builtin_refl(x)) proof by induction path; exact(value);";
+const TRANSITIVE_LOCALS: &str = "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,path:Path<a>(x,y),value:p(y),witness:Path<p(y)>(value,value),f:fn<t:meta p(y)>(Path<p(y)>(t,t))->a):f(value,witness)==f(value,witness) proof by induction path; reflexivity;";
+const INTRO_LOCAL: &str = "theorem t(a:Type,p:fn(a)->Type,x:a):forall y:a. forall path:Path<a>(x,y). forall value:p(y). p(x) proof by intro(y,path,value); cases path; exact(value);";
+const NESTED_LOCAL: &str = "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,z:a,path:Path<a>(x,y),next:Path<a>(y,z),value:p(z)):p(x) proof by induction path; induction next; exact(value);";
 const SYMMETRY: &str =
     "theorem t(a:Type,x:a,y:a,h:Path<a>(x,y)):y==x proof by rewrite(h); reflexivity;";
 const CHAIN: &str = "theorem t(a:Type,x:a,y:a,z:a,h:Path<a>(x,y),k:Path<a>(y,z)):x==z proof by { rewrite(h); { rewrite(k); reflexivity; } };";
@@ -91,11 +96,10 @@ fn full_identity_induction_preserves_the_endpoint_and_proof_in_its_statement() {
 }
 
 #[test]
-fn identity_induction_rejects_k_wrong_fibres_and_untransported_locals() {
+fn identity_induction_rejects_k_and_wrong_fibres() {
     for source in [
         "theorem t(a:Type,x:a,path:Path<a>(x,x)):path==@builtin_refl(x) proof by induction path; reflexivity;",
         "theorem t(a:Type,x:a,y:a,path:Path<a>(x,y),other:Path<a>(x,y)):path==other proof by induction path; reflexivity;",
-        "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,path:Path<a>(x,y),value:p(y),f:fn<t:meta a>(p(t))->a):f(y,value)==f(y,value) proof by induction path; reflexivity;",
         "theorem t(a:Type,x:a,y:a,path:Path<a>(x,y)):x==y proof by induction path;",
         "theorem t(a:Type,x:a):x==x proof by exact(@builtin_refl());",
         "theorem t(a:Type,x:a):x==x proof by exact(@builtin_refl(x,x));",
@@ -104,12 +108,16 @@ fn identity_induction_rejects_k_wrong_fibres_and_untransported_locals() {
         assert_eq!(report.status, "rejected", "{source}\n{report:?}");
         assert!(report.judgment.is_none());
     }
-    let wrong = IDENTITY_INDUCTION
+    // Supplying the conclusion as an explicit premise is a conditional
+    // identity theorem, even when that premise depends on the eliminated path.
+    let conditional = IDENTITY_INDUCTION
         .replace("base: family(x, @builtin_refl(x)),", "")
         .replace(
             "path: Path<a>(x, y)",
             "path: Path<a>(x, y), base: family(y, path)",
         );
+    accepts(&conditional, "identity_induction");
+    let wrong = IDENTITY_INDUCTION.replace("exact(base)", "exact(y)");
     assert_eq!(check(&wrong, "identity_induction").status, "rejected");
     for source in [
         "theorem t(a:Type,x:a):x==x proof by induction x; reflexivity;",
@@ -131,6 +139,73 @@ fn identity_induction_rejects_k_wrong_fibres_and_untransported_locals() {
         let span = report.diagnostic_span.unwrap();
         assert_eq!(&source[span.start as usize..span.end as usize], "path");
         assert_eq!(span.start as usize, source.rfind("path").unwrap());
+    }
+}
+
+#[test]
+fn dependent_locals_are_quantified_then_reapplied_without_changing_the_statement() {
+    let cert = accepts(DEPENDENT_LOCAL, "transport_local");
+    // A, P:A->Type, x:A, y:A, value:P(y), path:Id(A,x,y).
+    let domains = [
+        Term::universe(0),
+        Term::pi(Term::var(0), Term::universe(0)),
+        Term::var(1),
+        Term::var(2),
+        Term::app(Term::var(2), Term::var(0)),
+        Term::id_ty(Term::var(4), Term::var(2), Term::var(1)),
+    ];
+    let expected_type = domains
+        .iter()
+        .rev()
+        .fold(Term::app(Term::var(4), Term::var(3)), |body, domain| {
+            Term::pi(domain.clone(), body)
+        });
+    let motive = Term::lam(
+        Term::var(5),
+        Term::lam(
+            Term::id_ty(Term::var(6), Term::var(4), Term::var(0)),
+            Term::pi(
+                Term::app(Term::var(6), Term::var(1)),
+                Term::app(Term::var(7), Term::var(6)),
+            ),
+        ),
+    );
+    let term = Term::app(
+        Term::id_elim(
+            motive,
+            Term::lam(Term::app(Term::var(4), Term::var(3)), Term::var(0)),
+            Term::var(0),
+        ),
+        Term::var(1),
+    );
+    let expected_term = domains
+        .iter()
+        .rev()
+        .fold(term, |body, domain| Term::lam(domain.clone(), body));
+    assert_eq!(cert.claimed_type, expected_type);
+    assert_eq!(cert.term, expected_term);
+}
+
+#[test]
+fn local_telescopes_preserve_transitive_dependencies_introductions_and_shadowing() {
+    for source in [
+        PROOF_LOCAL,
+        TRANSITIVE_LOCALS,
+        INTRO_LOCAL,
+        NESTED_LOCAL,
+        "theorem t(a:Type,p:fn(a)->Type,y:a,value:p(y),x:a,path:Path<a>(x,y)):p(x) proof by induction path; exact(value);",
+        "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,path:Path<a>(x,y)):forall value:p(y). forall value:a. a proof by intro(value,value); induction path; exact(value);",
+        "theorem t<universe u,universe v>(a:Type(u),p:fn(a)->Type(v),x:a,y:a,path:Path<a>(x,y),value:p(y)):p(x) proof by induction path; exact(value);",
+    ] {
+        accepts(source, "t");
+    }
+    for source in [
+        "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,z:a,path:Path<a>(x,y),value:p(z)):p(x) proof by induction path; exact(value);",
+        "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,path:Path<a>(x,y)):forall value:p(y). forall value:a. p(x) proof by intro(value,value); induction path; exact(value);",
+    ] {
+        let report = check(source, "t");
+        assert_eq!(report.status, "rejected", "{report:?}");
+        assert!(report.judgment.is_none());
     }
 }
 
@@ -278,6 +353,11 @@ fn independently_replay_source_transports_and_corrupted_certificates() {
         (TRANSPORT, "transport"),
         (QUANTIFIED, "symmetry"),
         (IDENTITY_INDUCTION, "identity_induction"),
+        (DEPENDENT_LOCAL, "transport_local"),
+        (PROOF_LOCAL, "t"),
+        (TRANSITIVE_LOCALS, "t"),
+        (INTRO_LOCAL, "t"),
+        (NESTED_LOCAL, "t"),
         (SYMMETRY, "t"),
         (CHAIN, "t"),
         (CONGRUENCE, "t"),
@@ -308,6 +388,31 @@ fn independently_replay_source_transports_and_corrupted_certificates() {
             1 => **base = Term::var(2),                  // y:A is not evidence of P(x).
             2 => **motive = Term::lam(Term::var(5), Term::var(6)), // constant A is not P.
             _ => unreachable!(),
+        }
+        cases.push((cert, false));
+    }
+    for mutation in 0..4 {
+        let mut cert = accepts(DEPENDENT_LOCAL, "transport_local");
+        let body = proof_body(&mut cert.term);
+        let Term::App(elimination, argument) = body else {
+            panic!("local application")
+        };
+        if mutation == 0 {
+            *body = (**elimination).clone(); // Omitting a generalized premise is not a proof.
+        } else if mutation == 1 {
+            **argument = Term::var(2); // Endpoint y is not the original P(y) value.
+        } else {
+            let Term::IdElim { base, .. } = elimination.as_mut() else {
+                panic!("induction")
+            };
+            let Term::Lam(domain, proof) = base.as_mut() else {
+                panic!("generalized local")
+            };
+            if mutation == 2 {
+                **domain = Term::app(Term::var(4), Term::var(2)); // P(y) instead of P(x).
+            } else {
+                **proof = Term::var(2); // Capturing original P(y) instead of branch P(x).
+            }
         }
         cases.push((cert, false));
     }
