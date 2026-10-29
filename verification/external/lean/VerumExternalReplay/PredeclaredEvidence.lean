@@ -154,5 +154,35 @@ theorem appended_ordinal_exact (buffer : OwnedBuffer S Signature Family Criterio
     lastOrdinal (appendBatch buffer [(ordinal, row)]) = ordinal := by
   simp [lastOrdinal, appendBatch]
 
+/-- Selection records the next physical ordinal, whereas calibration records
+the last consumed ordinal. Validation therefore has an inclusive lower bound;
+the ordinary source, strict ordering and capacity guards still apply. -/
+def receiveValidation [DecidableEq S] (capacity selectionFrom : Nat)
+    (buffer : OwnedBuffer S Signature Family Criterion R) (rowSource : S) (ordinal : Nat) (row : R) :
+    Except (OwnedBuffer S Signature Family Criterion R) (OwnedBuffer S Signature Family Criterion R) :=
+  if selectionFrom ≤ ordinal then receive capacity buffer rowSource ordinal row else .error buffer
+
+theorem preselection_rows_refused [DecidableEq S] (capacity selectionFrom ordinal : Nat)
+    (buffer : OwnedBuffer S Signature Family Criterion R) (rowSource : S) (row : R)
+    (old : ordinal < selectionFrom) :
+    receiveValidation capacity selectionFrom buffer rowSource ordinal row = .error buffer := by
+  simp [receiveValidation, Nat.not_le.mpr old]
+
+theorem validation_uses_original_guards [DecidableEq S] (capacity selectionFrom ordinal : Nat)
+    (buffer : OwnedBuffer S Signature Family Criterion R) (rowSource : S) (row : R)
+    (fresh : selectionFrom ≤ ordinal) :
+    receiveValidation capacity selectionFrom buffer rowSource ordinal row =
+      receive capacity buffer rowSource ordinal row := by
+  simp [receiveValidation, fresh]
+
+theorem accepted_validation_exact [DecidableEq S] (capacity selectionFrom ordinal : Nat)
+    (buffer : OwnedBuffer S Signature Family Criterion R) (row : R)
+    (selected : selectionFrom ≤ ordinal) (ordered : lastOrdinal buffer < ordinal)
+    (space : buffer.2.length < capacity) :
+    receiveValidation capacity selectionFrom buffer buffer.1.2.source ordinal row =
+      .ok (appendBatch buffer [(ordinal, row)]) := by
+  rw [validation_uses_original_guards capacity selectionFrom ordinal buffer _ row selected]
+  exact accepted_row_exact capacity ordinal buffer row ordered space
+
 end Exact
 end PredeclaredEvidence

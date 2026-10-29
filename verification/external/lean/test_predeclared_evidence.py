@@ -39,6 +39,10 @@ example : Equal (partialSum (fun j => if j == 1 || j == 3 then lookWeight j else
 example : (complete 2 (reserve 0 true).2 (some 3)).2 = some ((0, true), 3) := rfl
 example : (complete 2 (reserve 1 false).2 (some 4)).2 = some ((1, false), 4) := rfl
 example : (beginValidation (R := Bool) 9 13).2 = (13, []) := rfl
+example : receiveValidation 2 12 initial 7 12 true = .ok (appendBatch initial [(12, true)]) := by decide
+example : receiveValidation 2 12 initial 7 11 true = .error initial := by decide
+example : receiveValidation 2 12 initial 8 12 true = .error initial := by decide
+example : receiveValidation 0 12 initial 7 12 true = .error initial := by decide
 '''+ '\n'.join('#print axioms '+name for name in names))
             result = check(path)
         rosters = [d['data'] for d in result['diagnostics'] if d['severity'] == 'information']
@@ -60,6 +64,8 @@ example : (beginValidation (R := Bool) 9 13).2 = (13, []) := rfl
             'training_reused_as_validation': '(beginValidation (R := Bool) 9 13).2.2 = [true]',
             'old_rows_accepted': 'receive 2 buffered 7 10 false = .ok (appendBatch buffered [(10, false)])',
             'capacity_ignored': 'receive 1 buffered 7 12 false = .ok (appendBatch buffered [(12, false)])',
+            'selection_boundary_exclusive': 'receiveValidation 2 12 initial 7 12 true = .error initial',
+            'preselection_row_accepted': 'receiveValidation 2 12 initial 7 11 true = .ok (appendBatch initial [(11, true)])',
         }
         with tempfile.TemporaryDirectory(prefix='verum-reservation-controls-') as directory:
             for name, claim in claims.items():

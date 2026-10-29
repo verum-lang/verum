@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""Finite correspondence of exported reservation and ordered sample projections.
+"""Finite correspondence of frozen declarations and selection-frontier snapshots.
 
-Checks the observed source/origin/end projection, reserved/native-paid ordinal,
-unchanged rows during materialization, and the selected-prefix/unscored-ID split.
-Missing signatures, grammar addresses, criteria, capacity/refusal events, cut
-projection inputs and actual validation state remain unchecked. Per-row source
-is an exporter projection, not independent evidence of the retained cut owner.
+Checks declaration identity, native paid ordinals, retained Cut source/origin,
+capacity, exact ordered prefixes and fresh-row admission. Cached input/action
+projection, omitted refused inputs, issued criterion semantics, exact family
+cardinality and native affine ownership remain separate obligations. A null
+signature records the absence of a signature, never evidence of a present one.
 """
 from pathlib import Path
 import json
 import acquired_export_codec
-from acquired_export_codec import SENSORY, lineage, wide
+from acquired_export_codec import SENSORY, lineage, origin, wide
 from observer_export_replay import (array, boolean, fields, natural, require,
     sequence, module_closure, main as replay_main)
 
 MODELS = module_closure(['PredeclaredEvidence'])
 PRODUCERS = [Path(__file__).resolve(), Path(acquired_export_codec.__file__).resolve()]
+DECLARATION = 'source origin declaration_end capacity signature address declared_criterion risk_denominator'.split()
+SNAPSHOT = ('kind source origin declaration_end reserved_look paid_look next_reservation rows unscored '
+    'validation_from collecting_validation selected_training capacity signature address family_count '
+    'declared_criterion risk_denominator issued_criterion')
+DECLARED = ['Declared', 'Buffered', 'OtherReservations', 'Opened', 'TrainingBoundary']
+SELECTED = ['Selected', 'OldRowRefused', 'ActualFreshRow']
 
 
 def literal(value):
@@ -26,91 +32,144 @@ def sample(value):
     fields(value, 'lineage ordinal'); lineage(value['lineage']); natural(value['ordinal'])
 
 
+def snapshot(event):
+    fields(event, SNAPSHOT)
+    SENSORY.source(event['source']); origin(event['origin']); sample(event['declaration_end'])
+    natural(event['capacity']); wide(event['reserved_look']); wide(event['next_reservation'])
+    wide(event['risk_denominator']); boolean(event['collecting_validation'])
+    for key, decode in [('paid_look',wide), ('family_count',wide), ('signature',natural),
+                        ('selected_training',natural), ('validation_from',sample)]:
+        if event[key] is not None: decode(event[key])
+    require(event['declared_criterion'] in ('ExactPredictiveV1','ExactResidualPredictiveV1'), 'Unknown criterion')
+    require(event['issued_criterion'] is None or type(event['issued_criterion']) is str, 'Expected issued criterion text')
+    address = event['address']
+    fields(address, 'role depth evidence_round imported composition')
+    require(address['role'] in ('Categorical','Predictive'), 'Unknown source role')
+    natural(address['depth']); natural(address['evidence_round'])
+    if address['imported'] is not None: natural(address['imported'])
+    if address['composition'] is not None:
+        fields(address['composition'], 'nesting body_inputs')
+        natural(address['composition']['nesting']); natural(address['composition']['body_inputs'])
+    if event['unscored'] is not None:
+        for id_ in sequence(event['unscored']): sample(id_)
+    for row in sequence(event['rows']):
+        fields(row, 'id source origin context outcome'); sample(row['id'])
+        SENSORY.source(row['source']); origin(row['origin'])
+        fields(row['context'], 'epoch input action')
+        wide(row['context']['epoch']); natural(row['context']['input']); natural(row['context']['action'],255)
+        SENSORY.value(row['outcome']); require(row['outcome']['kind'] == 'Outcome', 'Wrong row outcome sort')
+
+
 def emit(data):
     events = sequence(data)
-    require(len(events) == 5, 'Expected all five declaration lifecycle snapshots')
-    kinds = ['Declared', 'Buffered', 'OtherReservations', 'Opened', 'TrainingBoundary']
+    for event in events: snapshot(event)
+    kinds = [event['kind'] for event in events]
+    require(kinds in (DECLARED, SELECTED), 'Expected complete declaration or selection lifecycle')
+    validation = kinds == SELECTED
     lines = ['import VerumExternalReplay.PredeclaredEvidence',
-        'open PredeclaredEvidence', 'set_option warningAsError true', 'set_option maxRecDepth 8192', 'namespace FrozenObserverExport']
+        'open PredeclaredEvidence', 'set_option warningAsError true', 'set_option maxRecDepth 8192',
+        'namespace FrozenObserverExport']
     claims = []
     def claim(equation):
         name = 'c'+str(len(claims)); claims.append(name)
         lines.append(f'theorem {name} : {equation} := by decide_cbv')
-    for index, (event, expected) in enumerate(zip(events, kinds)):
-        fields(event, 'kind source origin declaration_end reserved_look paid_look next_reservation rows unscored validation_selected selected_training')
-        require(event['kind'] == expected, 'Unexpected declaration lifecycle order')
-        SENSORY.source(event['source']); fields(event['origin'], 'epoch lineage ordinal')
-        wide(event['origin']['epoch']); lineage(event['origin']['lineage']); natural(event['origin']['ordinal'])
-        sample(event['declaration_end'])
+    def same(field, index, reference=0):
+        claim(f'({literal(events[index][field])} : String) = {literal(events[reference][field])}')
+    for index, event in enumerate(events):
         reserved, next_ = wide(event['reserved_look']), wide(event['next_reservation'])
-        if event['paid_look'] is not None: wide(event['paid_look'])
-        boolean(event['validation_selected'])
-        require(event['validation_selected'] is False, 'Actual validation evidence is unsupported by this export')
-        owner = {key:event[key] for key in ('source','origin','declaration_end')}
-        rows = sequence(event['rows'])
-        for row in rows:
-            fields(row, 'id source origin context outcome'); sample(row['id']); SENSORY.source(row['source'])
-            natural(row['origin']); fields(row['context'], 'epoch input action')
-            wide(row['context']['epoch']); natural(row['context']['input']); natural(row['context']['action'],255)
-            SENSORY.value(row['outcome']); require(row['outcome']['kind'] == 'Outcome', 'Wrong row outcome sort')
+        owner = {key:event[key] for key in DECLARATION}
         lines += [f'def owner{index} : String := {literal(owner)}',
-            f'def rows{index} : List String := {array(literal(row) for row in rows)}',
+            f'def rows{index} : List String := {array(literal(row) for row in event["rows"])}',
             f'def buffer{index} : Buffer String String := (({reserved}, owner{index}), rows{index})']
         if index:
-            claim(f'owner{index} = owner0')
-            claim(f'({reserved} : Nat) = {wide(events[0]["reserved_look"])}')
-        if index < 3:
-            require(event['paid_look'] is None, 'Reservation must precede native paid admission')
-        else:
+            claim(f'owner{index} = owner0'); same('reserved_look',index)
+        claim(f'({reserved} : Nat) < {next_}')
+        claim(f'0 < ({wide(event["risk_denominator"])} : Nat)')
+        claim(f'rows{index}.length ≤ {natural(event["capacity"])}')
+        if event['family_count'] is not None: claim(f'0 < ({wide(event["family_count"])} : Nat)')
+        if validation or index >= 3:
             require(event['paid_look'] is not None, 'Missing native paid ordinal')
             claim(f'({wide(event["paid_look"])} : Nat) = {reserved}')
-        if index < 4:
-            require(event['selected_training'] is None and event['unscored'] is None, 'Premature training split')
-        claim(f'({reserved} : Nat) < {next_}')
+        else:
+            require(event['paid_look'] is None and event['family_count'] is None and event['issued_criterion'] is None,
+                    'Reservation must precede native paid admission')
+        require(event['collecting_validation'] is validation, 'Wrong intake phase')
+        if validation:
+            require(event['validation_from'] is not None, 'Missing physical selection frontier')
+        else:
+            require(event['validation_from'] is None, 'Unexpected selection frontier during training')
+            if index < 4:
+                require(event['selected_training'] is None and event['unscored'] is None, 'Premature training split')
 
-    declared, buffered, later, opened, boundary = events
-    require(not declared['rows'], 'Declaration already includes trial rows')
-    claim(f'reserve {wide(declared["reserved_look"])} owner0 = ({wide(declared["next_reservation"])}, buffer0.1)')
-    claim(f'({wide(buffered["next_reservation"])} : Nat) = {wide(declared["next_reservation"])}')
-    claim('appendBatch buffer0 rows1 = buffer1')
-    claim('buffer2 = buffer1')
-    claim(f'({wide(buffered["next_reservation"])} : Nat) ≤ {wide(later["next_reservation"])}')
-    claim('buffer3 = buffer2')
-    claim(f'({wide(opened["next_reservation"])} : Nat) = {wide(later["next_reservation"])}')
-    claim(f'({wide(boundary["next_reservation"])} : Nat) = {wide(opened["next_reservation"])}')
+    if validation:
+        selected, refused, received = events
+        # The attempted old row and its error are not exported. This checks
+        # preservation of the observed state, not the absent refusal decision.
+        same_state = lambda event: {k:v for k,v in event.items() if k not in ('kind','rows')}
+        for index in (1,2):
+            claim(f'({literal(same_state(events[index]))} : String) = {literal(same_state(selected))}')
+        claim('rows0 = []'); claim('buffer1 = buffer0')
+        require(len(received['rows']) == 1, 'Expected the first actual validation row')
+        require(selected['selected_training'] is not None and selected['family_count'] is not None,
+                'Missing selected training evidence')
+        claim(f'0 < ({natural(selected["selected_training"])} : Nat)')
+        frontier = selected['validation_from']
+        claim(f'({literal(frontier["lineage"])} : String) = {literal(selected["declaration_end"]["lineage"])}')
+        claim(f'({natural(selected["declaration_end"]["ordinal"])} : Nat) < {natural(frontier["ordinal"])}')
+        row = received['rows'][0]
+        # Encode the whole source + origin + lineage as ownership, so the
+        # exact admission theorem cannot silently forget a coordinate.
+        owner = lambda source, start, id_: literal(dict(source=source,origin=start,lineage=id_['lineage']))
+        lines += [f'def selectedDeclaration : Exact.Declaration String String String String := '
+            f'⟨{owner(selected["source"],selected["origin"],selected["declaration_end"])}, '
+            f'{natural(selected["origin"]["ordinal"])}, {natural(selected["declaration_end"]["ordinal"])}, '
+            f'{literal(selected["signature"])}, {literal(selected["address"])}, '
+            f'{literal(dict(criterion=selected["declared_criterion"],risk=selected["risk_denominator"]))}⟩',
+            f'def selectedBuffer : Exact.OwnedBuffer String String String String String := '
+            f'(({wide(selected["reserved_look"])}, selectedDeclaration), [])']
+        ordinal = natural(row['id']['ordinal'])
+        claim(f'(Exact.receiveValidation {natural(selected["capacity"])} {natural(frontier["ordinal"])} '
+            f'selectedBuffer {owner(row["source"],row["origin"],row["id"])} {ordinal} {literal(row)}).toOption = '
+            f'some (appendBatch selectedBuffer [({ordinal}, {literal(row)})])')
+        checked_rows = received['rows']; row_index = 2
+    else:
+        declared, buffered, later, opened, boundary = events
+        require(not declared['rows'], 'Declaration already includes trial rows')
+        require(opened['family_count'] is not None and opened['issued_criterion'] is not None,
+                'Missing materialized family or criterion')
+        same('family_count',4,3); same('issued_criterion',4,3)
+        claim(f'reserve {wide(declared["reserved_look"])} owner0 = ({wide(declared["next_reservation"])}, buffer0.1)')
+        same('next_reservation',1)
+        claim('appendBatch buffer0 rows1 = buffer1'); claim('buffer2 = buffer1')
+        claim(f'({wide(buffered["next_reservation"])} : Nat) ≤ {wide(later["next_reservation"])}')
+        claim('buffer3 = buffer2'); same('next_reservation',3,2); same('next_reservation',4,3)
+        selected = natural(boundary['selected_training'])
+        unscored = sequence(boundary['unscored'])
+        claim(f'({selected} : Nat) ≤ rows3.length')
+        claim(f'rows4 = rows3.take {selected}'); claim(f'rows4.length = {selected}')
+        original_ids = array(literal(row['id']) for row in opened['rows'])
+        claim(f'({array(literal(id_) for id_ in unscored)} : List String) = ({original_ids} : List String).drop {selected}')
+        checked_rows = buffered['rows']; row_index = 1
 
-    # Check every actual retained row against the frozen projection, and its
-    # source order. This cannot establish the omitted cut-layer computation.
-    rows = buffered['rows']
-    for field, expected, render, carrier in [
-        ('source', declared['source'], literal, 'String'),
-        ('origin', declared['origin']['ordinal'], natural, 'Nat'),
-    ]:
-        claim(f'({array(render(row[field]) for row in rows)} : List {carrier}) = '
-              f'List.replicate rows1.length {render(expected)}')
-    claim(f'({array(literal(row["id"]["lineage"]) for row in rows)} : List String) = '
-          f'List.replicate rows1.length {literal(declared["declaration_end"]["lineage"])}')
-    claim(f'({array(wide(row["context"]["epoch"]) for row in rows)} : List Nat) = '
-          f'List.replicate rows1.length {wide(declared["source"]["epoch"])}')
-    ordinals = [row['id']['ordinal'] for row in rows]
-    previous = [declared['declaration_end']['ordinal']]+ordinals
+    first = events[0]
+    for field in ('source','origin'):
+        claim(f'({array(literal(row[field]) for row in checked_rows)} : List String) = '
+              f'List.replicate rows{row_index}.length {literal(first[field])}')
+    claim(f'({array(literal(row["id"]["lineage"]) for row in checked_rows)} : List String) = '
+          f'List.replicate rows{row_index}.length {literal(first["declaration_end"]["lineage"])}')
+    claim(f'({array(wide(row["context"]["epoch"]) for row in checked_rows)} : List Nat) = '
+          f'List.replicate rows{row_index}.length {wide(first["source"]["epoch"])}')
+    ordinals = [row['id']['ordinal'] for row in checked_rows]
+    previous = [first['declaration_end']['ordinal']]+ordinals
     adjacent = array(f'({natural(before)}, {natural(after)})' for before,after in zip(previous,ordinals))
     claim(f'({adjacent} : List (Nat × Nat)).all (fun pair => decide (pair.1 < pair.2)) = true')
-    selected = natural(boundary['selected_training'])
-    unscored = sequence(boundary['unscored'])
-    for id_ in unscored: sample(id_)
-    claim(f'({selected} : Nat) ≤ rows3.length')
-    claim(f'rows4 = rows3.take {selected}')
-    claim(f'rows4.length = {selected}')
-    original_ids = array(literal(row['id']) for row in opened['rows'])
-    claim(f'({array(literal(id_) for id_ in unscored)} : List String) = ({original_ids} : List String).drop {selected}')
     lines += ['#print axioms '+name for name in claims]+['end FrozenObserverExport']
-    return '\n\n'.join(lines)+'\n', dict(claims=len(claims), snapshots=5,
-        buffered_rows=len(buffered['rows']), selected_rows=boundary['selected_training'], unscored_ids=len(unscored),
-        unchecked=['signature/family/criterion freeze', 'capacity/refusal transitions',
-            'independent cut source and context projection', 'other reservation identities',
-            'actual candidate selection and fresh validation', 'native affine ownership and whole-runtime refinement'],
-        scope=__doc__)
+    return '\n\n'.join(lines)+'\n', dict(claims=len(claims), snapshots=len(events),
+        buffered_rows=len(checked_rows), selected_rows=events[-1]['selected_training'],
+        unscored_ids=len(events[-1]['unscored']), validation=validation,
+        unchecked=['refused input and error absent from snapshots', 'independent cut input/action projection',
+            'issued criterion semantics and exact family cardinality', 'other reservation identities',
+            'native affine ownership and whole-runtime refinement'], scope=__doc__)
 
 
 if __name__ == '__main__':
