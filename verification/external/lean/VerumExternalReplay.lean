@@ -31,6 +31,7 @@ import VerumExternalReplay.FiniteCodeControls
 import VerumExternalReplay.FiniteExecutionControls
 import VerumExternalReplay.ObserverInterfaces
 import VerumExternalReplay.ObserverLifecycleControls
+import VerumExternalReplay.SignatureCatalogues
 import VerumExternalReplay.AcquiredObserverControls
 import VerumExternalReplay.CommonDescriptionCost
 import VerumExternalReplay.ObserverRetirementControls
