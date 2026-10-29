@@ -5886,6 +5886,19 @@ impl TypeChecker {
         // );
 
         for impl_decl in impl_blocks {
+            // Value scopes do not own type definitions. Lazy imports can run
+            // inside a generic body, so preserve every name they temporarily bind.
+            let impl_type_bindings: List<_> = impl_decl.generics.iter().filter_map(|param| {
+                use verum_ast::ty::GenericParamKind;
+                match &param.kind {
+                    GenericParamKind::Type { name, .. }
+                    | GenericParamKind::Meta { name, .. }
+                    | GenericParamKind::Const { name, .. } => Some(name.name.clone()),
+                    _ => None,
+                }
+            }).chain(std::iter::once(Text::from("Self")))
+                .map(|name| { let prior = self.ctx.type_defs.get(&name).cloned(); (name, prior) })
+                .collect();
             // CRITICAL FIX: Set up type parameter scope from the implement block.
             // This ensures that type parameters like `T` in `implement<T> List<T>`
             // are properly bound as fresh type variables when resolving method types.
@@ -5897,7 +5910,6 @@ impl TypeChecker {
 
             // Collect type variables and their names for later quantification
             let mut impl_type_vars: List<TypeVar> = List::new();
-            let mut impl_type_param_names: List<verum_common::Text> = List::new();
 
             // Register type parameters from the implement block
             for generic_param in &impl_decl.generics {
@@ -5908,7 +5920,6 @@ impl TypeChecker {
                         let name_text: verum_common::Text = name.name.clone();
                         self.ctx.define_type(name_text.clone(), Type::Var(type_var));
                         impl_type_vars.push(type_var);
-                        impl_type_param_names.push(name_text);
                     }
                     GenericParamKind::Meta { name, .. } => {
                         // Meta parameters (compile-time values like `MODE: meta AccessMode`)
@@ -5919,7 +5930,6 @@ impl TypeChecker {
                         let name_text: verum_common::Text = name.name.clone();
                         self.ctx.define_type(name_text.clone(), Type::Var(type_var));
                         impl_type_vars.push(type_var);
-                        impl_type_param_names.push(name_text);
                     }
                     GenericParamKind::Const { name, ty } => {
                         let name_text: verum_common::Text = name.name.clone();
@@ -6051,22 +6061,22 @@ impl TypeChecker {
                         }
                     }
 
+                    self.ctx.enter_scope();
+                    let method_type_bindings: List<_> = func.generics.iter().filter_map(|generic| {
+                        if let verum_ast::ty::GenericParamKind::Type { name, .. } = &generic.kind {
+                            Some((name.name.clone(), self.ctx.type_defs.get(&name.name).cloned()))
+                        } else { None }
+                    }).collect();
                     if is_static {
                         // A method owns its generic scope. Preserve the impl's
                         // variables even when a method reuses their spelling.
-                        self.ctx.enter_scope();
                         let mut ordered_vars = impl_type_vars.clone();
-                        let mut method_type_bindings = List::new();
                         let mut method_bounds = List::new();
                         for generic in &func.generics {
                             if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } =
                                 &generic.kind
                             {
                                 let fresh = TypeVar::fresh();
-                                method_type_bindings.push((
-                                    name.name.clone(),
-                                    self.ctx.lookup_type(name.name.as_str()).cloned(),
-                                ));
                                 self.ctx.define_type(name.name.clone(), Type::Var(fresh));
                                 ordered_vars.push(fresh);
                                 method_bounds.push((fresh, bounds));
@@ -6135,17 +6145,6 @@ impl TypeChecker {
                         if !method_type_bounds.is_empty() {
                             method_scheme = method_scheme.with_type_bounds(method_type_bounds);
                         }
-                        // Value scopes do not own type bindings. Restore a
-                        // shadowed impl parameter before registering its next method.
-                        for (name, prior) in method_type_bindings.into_iter().rev() {
-                            if let Some(ty) = prior {
-                                self.ctx.define_type(name, ty);
-                            } else {
-                                self.ctx.remove_type(&name);
-                            }
-                        }
-                        self.ctx.exit_scope();
-
                         // Collect for later registration (after scope exit)
                         if crate::ctor_trace_enabled() {
                             eprintln!(
@@ -6172,7 +6171,6 @@ impl TypeChecker {
                     } else {
                         // Register method-level generic type parameters FIRST
                         // This ensures type bounds like `F: fn(T) -> U` can be properly resolved
-                        let mut method_type_param_names = List::new();
                         let mut method_type_var_bounds: Map<TypeVar, List<Type>> = Map::new();
 
                         // #[cfg(debug_assertions)]
@@ -6195,7 +6193,6 @@ impl TypeChecker {
                                 let type_var = Type::Var(fresh_var);
                                 let name_text: Text = name.name.clone();
                                 self.ctx.define_type(name_text.clone(), type_var);
-                                method_type_param_names.push(name_text);
                                 method_type_params.push((name.clone(), fresh_var, bounds));
 
                                 // #[cfg(debug_assertions)]
@@ -6249,15 +6246,13 @@ impl TypeChecker {
                         let type_name_text = method_owner.clone();
                         let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
-                        // CRITICAL: Use generalize_ordered to preserve type parameter order
-                        // Combine impl type param names with method type param names
-                        let mut ordered_params: List<verum_common::Text> =
-                            impl_type_param_names.clone();
-                        for param in &method_type_param_names {
-                            ordered_params.push(param.clone());
-                        }
+                        // A method may shadow an impl parameter's spelling.
+                        // Quantify their identities, rather than looking up the
+                        // same name twice after the method has shadowed it.
+                        let mut ordered_vars = impl_type_vars.clone();
+                        ordered_vars.extend(method_type_params.iter().map(|(_, var, _)| *var));
                         let mut method_scheme =
-                            self.ctx.generalize_ordered(method_ty, &ordered_params);
+                            self.ctx.generalize_with_vars(method_ty, &ordered_vars);
 
                         // CRITICAL: Track how many type vars come from the implement block.
                         // This prevents method-level type vars (like F in modify<F>)
@@ -6269,11 +6264,6 @@ impl TypeChecker {
                         // CRITICAL: Add type bounds for closure type inference
                         if !method_type_var_bounds.is_empty() {
                             method_scheme = method_scheme.with_type_bounds(method_type_var_bounds);
-                        }
-
-                        // Clean up method-level generic type parameters
-                        for param_name in method_type_param_names {
-                            self.ctx.remove_type(&param_name);
                         }
 
                         // Guarded ONE write-path into the single-slot
@@ -6316,6 +6306,11 @@ impl TypeChecker {
                             func.name.name
                         );
                     }
+                    for (name, prior) in method_type_bindings.into_iter().rev() {
+                        if let Some(ty) = prior { self.ctx.define_type(name, ty); }
+                        else { self.ctx.remove_type(&name); }
+                    }
+                    self.ctx.exit_scope();
                 }
             }
 
@@ -6511,6 +6506,11 @@ impl TypeChecker {
 
             // Restore old self type before exiting scope
             self.set_current_self_type(old_self_type);
+
+            for (name, prior) in impl_type_bindings.into_iter().rev() {
+                if let Some(ty) = prior { self.ctx.define_type(name, ty); }
+                else { self.ctx.remove_type(&name); }
+            }
 
             // Exit the scope we entered for this impl block's type parameters
             self.ctx.exit_scope();
@@ -29397,3 +29397,7 @@ pub(super) fn refutable_pattern_kind(
 #[cfg(test)]
 #[path = "../../tests/unit/declaring_module_index.rs"]
 mod declaring_module_index_tests;
+
+#[cfg(test)]
+#[path = "../../tests/unit/imported_generic_scopes.rs"]
+mod imported_generic_scopes;
