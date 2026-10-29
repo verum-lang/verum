@@ -335,6 +335,63 @@ fn test_proof_by_trivial() {
     assert_parses("theorem t10() proof by trivial");
 }
 
+#[test]
+fn named_elimination_tactics_retain_following_evidence_and_item_boundaries() {
+    use verum_ast::decl::{ProofBody, ProofMethod, TacticExpr};
+    use verum_common::Maybe;
+    for tactic in [
+        "induction path",
+        "induction(path)",
+        "induction on path",
+        "cases path",
+        "cases(path)",
+    ] {
+        let source =
+            format!("theorem t() proof by {tactic}; exact(base); theorem next() proof by trivial;");
+        let module = parse_module(&source);
+        assert_eq!(module.items.len(), 2);
+        let ItemKind::Theorem(decl) = &module.items[0].kind else {
+            panic!("theorem")
+        };
+        let Maybe::Some(ProofBody::Tactic(TacticExpr::Seq(steps))) = &decl.proof else {
+            panic!("{:?}", decl.proof)
+        };
+        assert_eq!(steps.len(), 2);
+        assert!(matches!(
+            steps[0],
+            TacticExpr::InductionOn(_) | TacticExpr::CasesOn(_)
+        ));
+        assert!(matches!(steps[1], TacticExpr::Exact(_)));
+    }
+    let item = parse_first_item("theorem t() proof by intro(path); cases path; exact(base);");
+    let ItemKind::Theorem(decl) = item else {
+        panic!("theorem")
+    };
+    let Maybe::Some(ProofBody::Tactic(TacticExpr::Seq(steps))) = decl.proof else {
+        panic!("sequence")
+    };
+    assert_eq!(steps.len(), 3);
+    assert!(matches!(steps[1], TacticExpr::CasesOn(_)));
+    // Case blocks keep their method form and branch evidence.
+    for method in ["induction on n", "cases n"] {
+        let item = parse_first_item(&format!(
+            "theorem t(n:Int) proof by {method} {{ case 0 => {{ trivial; }} }};"
+        ));
+        let ItemKind::Theorem(decl) = item else {
+            panic!("theorem")
+        };
+        let Maybe::Some(ProofBody::ByMethod(method)) = decl.proof else {
+            panic!("method")
+        };
+        match method {
+            ProofMethod::Induction { cases, .. } | ProofMethod::Cases { cases, .. } => {
+                assert_eq!(cases.len(), 1)
+            }
+            _ => panic!("wrong method"),
+        }
+    }
+}
+
 // ============================================================================
 // SECTION 7: STRUCTURED PROOF STEPS
 // ============================================================================

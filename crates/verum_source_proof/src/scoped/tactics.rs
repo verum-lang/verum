@@ -6,6 +6,7 @@ use verum_common::List;
 enum Frame {
     Intro { id: BinderId, domain: Box<Ir> },
     Transport { motive: Box<Ir>, path: Box<Ir> },
+    IdentityInduction { motive: Box<Ir>, path: Box<Ir> },
 }
 
 impl Elab {
@@ -79,6 +80,14 @@ impl Elab {
                     frames.push(frame);
                     continue;
                 }
+                TacticExpr::CasesOn(name) | TacticExpr::InductionOn(name) => {
+                    let (next, frame) = self
+                        .identity_induction(name.as_str(), &goal)
+                        .map_err(|error| self.locate(error, name.span))?;
+                    goal = next;
+                    frames.push(frame);
+                    continue;
+                }
                 TacticExpr::Exact(expression) => self.expr(expression)?,
                 TacticExpr::Reflexivity => {
                     let Ir::Id { left, .. } = &goal else {
@@ -106,7 +115,7 @@ impl Elab {
                 }
                 _ => {
                     return Err(unsupported(
-                        "supported tactics are intro, rewrite, exact, assumption, reflexivity and sequences",
+                        "supported tactics are intro, rewrite, identity cases/induction, exact, assumption, reflexivity and sequences",
                     ));
                 }
             };
@@ -134,10 +143,62 @@ impl Elab {
                         base: Box::new(proof),
                         scrutinee: path,
                     },
+                    Frame::IdentityInduction { motive, path } => Ir::IdElim {
+                        motive,
+                        base: Box::new(proof),
+                        scrutinee: path,
+                    },
                 }));
         }
         Err(Error::Rejected(
             "tactic sequence leaves an unsolved goal".into(),
+        ))
+    }
+
+    fn identity_induction(&mut self, name: &str, goal: &Ir) -> Result<(Ir, Frame)> {
+        let path = self.lookup(name)?;
+        let path_type = self.infer(&path)?;
+        let Ir::Id {
+            carrier,
+            left,
+            right,
+        } = self.raise(&path_type, &mut self.frame())?
+        else {
+            return Err(unsupported(
+                "cases/induction in this profile requires an identity proof",
+            ));
+        };
+        let endpoint = self.fresh();
+        let evidence = self.fresh();
+        // Abstract the proof before its endpoint. Both placeholders are fresh;
+        // instantiating them cannot rewrite inside the supplied base point.
+        let (body, _) = replace(goal, &path, &Ir::Var(evidence));
+        let (body, _) = replace(&body, &right, &Ir::Var(endpoint));
+        let motive = Ir::Lam {
+            id: endpoint,
+            domain: carrier.clone(),
+            body: Box::new(Ir::Lam {
+                id: evidence,
+                domain: Box::new(Ir::Id {
+                    carrier,
+                    left: left.clone(),
+                    right: Box::new(Ir::Var(endpoint)),
+                }),
+                body: Box::new(body.clone()),
+            }),
+        };
+        // Fixed-loop elimination and dependent locals cannot be silently
+        // generalized: the family must type-check for every fresh endpoint.
+        self.infer(&motive)?;
+        let (base, _) = replace(&body, &Ir::Var(endpoint), &left);
+        let (base, _) = replace(&base, &Ir::Var(evidence), &Ir::Refl { value: left });
+        self.require_type(&base)?;
+        Ok((
+            base,
+            Frame::IdentityInduction {
+                motive: Box::new(motive),
+                path: Box::new(path),
+            },
         ))
     }
 
@@ -248,6 +309,15 @@ fn replace(term: &Ir, from: &Ir, to: &Ir) -> (Ir, bool) {
             base,
             scrutinee,
         } => Ir::J {
+            motive: child(motive),
+            base: child(base),
+            scrutinee: child(scrutinee),
+        },
+        Ir::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => Ir::IdElim {
             motive: child(motive),
             base: child(base),
             scrutinee: child(scrutinee),

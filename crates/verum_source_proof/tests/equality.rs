@@ -24,6 +24,7 @@ fn accepts(source: &str, declaration: &str) -> Certificate {
 
 const TRANSPORT: &str = include_str!("fixtures/transport.vr");
 const QUANTIFIED: &str = include_str!("fixtures/quantified_symmetry.vr");
+const IDENTITY_INDUCTION: &str = include_str!("fixtures/identity_induction.vr");
 const SYMMETRY: &str =
     "theorem t(a:Type,x:a,y:a,h:Path<a>(x,y)):y==x proof by rewrite(h); reflexivity;";
 const CHAIN: &str = "theorem t(a:Type,x:a,y:a,z:a,h:Path<a>(x,y),k:Path<a>(y,z)):x==z proof by { rewrite(h); { rewrite(k); reflexivity; } };";
@@ -35,6 +36,101 @@ fn proof_body(term: &mut Term) -> &mut Term {
     match term {
         Term::Lam(_, body) => proof_body(body),
         _ => term,
+    }
+}
+
+#[test]
+fn full_identity_induction_preserves_the_endpoint_and_proof_in_its_statement() {
+    let cert = accepts(IDENTITY_INDUCTION, "identity_induction");
+    // Independent oracle: A, x:A, family:(y:A)->Id(A,x,y)->Type,
+    // base:family(x,refl(x)), y:A, path:Id(A,x,y).
+    let app2 = |f, x, p| Term::app(Term::app(f, x), p);
+    let domains = [
+        Term::universe(0),
+        Term::var(0),
+        Term::pi(
+            Term::var(1),
+            Term::pi(
+                Term::id_ty(Term::var(2), Term::var(1), Term::var(0)),
+                Term::universe(0),
+            ),
+        ),
+        app2(Term::var(0), Term::var(1), Term::refl(Term::var(1))),
+        Term::var(3),
+        Term::id_ty(Term::var(4), Term::var(3), Term::var(0)),
+    ];
+    let expected = domains.iter().rev().fold(
+        app2(Term::var(3), Term::var(1), Term::var(0)),
+        |body, domain| Term::pi(domain.clone(), body),
+    );
+    assert_eq!(cert.claimed_type, expected);
+    let mut cloned = cert.clone();
+    assert!(matches!(proof_body(&mut cloned.term), Term::IdElim { .. }));
+    let cases = accepts(
+        &IDENTITY_INDUCTION.replace("induction path", "cases path"),
+        "identity_induction",
+    );
+    assert_eq!(cases.term, cert.term);
+    let renamed = IDENTITY_INDUCTION
+        .replace("family", "motive")
+        .replace("base", "seed")
+        .replace("path", "equality");
+    assert_eq!(accepts(&renamed, "identity_induction").term, cert.term);
+    accepts(
+        "theorem t<universe u,universe v>(a:Type(u),x:a,family:fn<y:meta a>(Path<a>(x,y))->Type(v),base:family(x,@builtin_refl(x)),y:a,path:Path<a>(x,y)):family(y,path) proof by induction path; assumption;",
+        "t",
+    );
+    accepts(
+        "theorem t(a:Type,x:a):forall y:a. forall path:Path<a>(x,y). y==x proof by intro(y,path); induction path; reflexivity;",
+        "t",
+    );
+    accepts(
+        "theorem t(a:Type,x:a):forall y:a. forall path:Path<a>(x,y). y==x proof by intro(y,path); cases path; reflexivity;",
+        "t",
+    );
+}
+
+#[test]
+fn identity_induction_rejects_k_wrong_fibres_and_untransported_locals() {
+    for source in [
+        "theorem t(a:Type,x:a,path:Path<a>(x,x)):path==@builtin_refl(x) proof by induction path; reflexivity;",
+        "theorem t(a:Type,x:a,y:a,path:Path<a>(x,y),other:Path<a>(x,y)):path==other proof by induction path; reflexivity;",
+        "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,path:Path<a>(x,y),value:p(y),f:fn<t:meta a>(p(t))->a):f(y,value)==f(y,value) proof by induction path; reflexivity;",
+        "theorem t(a:Type,x:a,y:a,path:Path<a>(x,y)):x==y proof by induction path;",
+        "theorem t(a:Type,x:a):x==x proof by exact(@builtin_refl());",
+        "theorem t(a:Type,x:a):x==x proof by exact(@builtin_refl(x,x));",
+    ] {
+        let report = check(source, "t");
+        assert_eq!(report.status, "rejected", "{source}\n{report:?}");
+        assert!(report.judgment.is_none());
+    }
+    let wrong = IDENTITY_INDUCTION
+        .replace("base: family(x, @builtin_refl(x)),", "")
+        .replace(
+            "path: Path<a>(x, y)",
+            "path: Path<a>(x, y), base: family(y, path)",
+        );
+    assert_eq!(check(&wrong, "identity_induction").status, "rejected");
+    for source in [
+        "theorem t(a:Type,x:a):x==x proof by induction x; reflexivity;",
+        "theorem t(a:Type,x:a):x==x proof by exact(@builtin_trust(x));",
+    ] {
+        assert_eq!(check(source, "t").status, "unsupported");
+    }
+    for tactic in [
+        "induction path",
+        "induction(path)",
+        "cases path",
+        "cases(path)",
+    ] {
+        let source = format!(
+            "theorem t(a:Type,x:a,path:Path<a>(x,x)):path==@builtin_refl(x) proof by {tactic}; reflexivity;"
+        );
+        let report = check(&source, "t");
+        assert_eq!(report.status, "rejected");
+        let span = report.diagnostic_span.unwrap();
+        assert_eq!(&source[span.start as usize..span.end as usize], "path");
+        assert_eq!(span.start as usize, source.rfind("path").unwrap());
     }
 }
 
@@ -181,6 +277,7 @@ fn independently_replay_source_transports_and_corrupted_certificates() {
     for (source, name) in [
         (TRANSPORT, "transport"),
         (QUANTIFIED, "symmetry"),
+        (IDENTITY_INDUCTION, "identity_induction"),
         (SYMMETRY, "t"),
         (CHAIN, "t"),
         (CONGRUENCE, "t"),

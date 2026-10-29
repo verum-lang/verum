@@ -1,0 +1,5 @@
+public theorem identity_induction(a: Type, x: a,
+    family: fn<y: meta a>(Path<a>(x, y)) -> Type,
+    base: family(x, @builtin_refl(x)),
+    y: a, path: Path<a>(x, y)): family(y, path)
+proof by induction path; exact(base);

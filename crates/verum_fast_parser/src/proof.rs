@@ -1225,11 +1225,40 @@ impl<'a> RecursiveParser<'a> {
         }))
     }
 
+    /// Distinguish a named elimination tactic from a method with a case block.
+    /// Probe the existing primary parser so operand spellings have one grammar.
+    fn starts_named_elimination_tactic(&mut self) -> bool {
+        if !matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Induction | TokenKind::Cases)
+        ) {
+            return false;
+        }
+        let saved = self.stream.position();
+        let named = matches!(
+            self.parse_tactic_primary(),
+            Ok(TacticExpr::InductionOn(_) | TacticExpr::CasesOn(_))
+        );
+        let boundary = matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Semicolon | TokenKind::Comma | TokenKind::RBrace | TokenKind::Eof)
+                | None
+        );
+        self.stream.reset_to(saved);
+        named && boundary
+    }
+
     /// Parse structured proof after 'proof' keyword.
     /// Handles: `proof by tactic`, `proof = term`, `proof { ... }`
     fn parse_structured_proof(&mut self) -> ParseResult<ProofBody> {
         // proof by method/tactic
         if self.stream.consume(&TokenKind::By).is_some() {
+            // A named induction/cases tactic without a case block belongs to
+            // the ordinary tactic sequence. Routing it through ProofMethod
+            // would discard subsequent tactics instead of preserving evidence.
+            if self.starts_named_elimination_tactic() {
+                return Ok(ProofBody::Tactic(self.parse_tactic_expr_with_commas()?));
+            }
             // Check if this is a proof method (induction, cases, contradiction) that has a body
             // vs a simple tactic (simp, ring, omega, etc.)
             match self.stream.peek_kind() {
@@ -2590,6 +2619,15 @@ impl<'a> RecursiveParser<'a> {
             }
             // Check if what follows the semicolon is a proof step keyword - if so, don't consume it
             // as the semicolon belongs to the proof step, not the tactic sequence
+            let structured_cases = if self.stream.peek_nth_kind(1) == Some(&TokenKind::Cases) {
+                let saved = self.stream.position();
+                self.stream.advance();
+                let structured = !self.starts_named_elimination_tactic();
+                self.stream.reset_to(saved);
+                structured
+            } else {
+                false
+            };
             let next_after_semi = self.stream.peek_nth_kind(1);
             let is_proof_step_or_item = matches!(
                 next_after_semi,
@@ -2599,7 +2637,6 @@ impl<'a> RecursiveParser<'a> {
                     | Some(TokenKind::Let)
                     | Some(TokenKind::Obtain)
                     | Some(TokenKind::Calc)
-                    | Some(TokenKind::Cases)
                     | Some(TokenKind::RBrace)
                     | Some(TokenKind::Qed)
                     // Top-level item keywords — stop tactic sequence at item boundaries
@@ -2637,7 +2674,7 @@ impl<'a> RecursiveParser<'a> {
                     )
                 );
 
-            if is_proof_step_or_item {
+            if is_proof_step_or_item || structured_cases {
                 break;
             }
 
@@ -3003,12 +3040,14 @@ impl<'a> RecursiveParser<'a> {
                 // Accept either `induction n` or `induction(n)`
                 let var = if self.stream.check(&TokenKind::LParen) {
                     self.stream.advance();
+                    let span = self.stream.current_span();
                     let name = self.consume_ident()?;
-                    let var = Ident::new(name, self.stream.current_span());
+                    let var = Ident::new(name, span);
                     self.stream.expect(TokenKind::RParen)?;
                     var
                 } else {
-                    Ident::new(self.consume_ident()?, self.stream.current_span())
+                    let span = self.stream.current_span();
+                    Ident::new(self.consume_ident()?, span)
                 };
                 Ok(TacticExpr::InductionOn(var))
             }
@@ -3019,8 +3058,9 @@ impl<'a> RecursiveParser<'a> {
                 // Accept `cases`, `cases n`, or `cases(n)` — argument is optional
                 let var = if self.stream.check(&TokenKind::LParen) {
                     self.stream.advance();
+                    let span = self.stream.current_span();
                     let name = self.consume_ident()?;
-                    let var = Ident::new(name, self.stream.current_span());
+                    let var = Ident::new(name, span);
                     self.stream.expect(TokenKind::RParen)?;
                     Maybe::Some(var)
                 } else if self
@@ -3028,10 +3068,8 @@ impl<'a> RecursiveParser<'a> {
                     .peek_kind()
                     .is_some_and(|k| matches!(k, TokenKind::Ident(_)))
                 {
-                    Maybe::Some(Ident::new(
-                        self.consume_ident()?,
-                        self.stream.current_span(),
-                    ))
+                    let span = self.stream.current_span();
+                    Maybe::Some(Ident::new(self.consume_ident()?, span))
                 } else {
                     Maybe::None
                 };

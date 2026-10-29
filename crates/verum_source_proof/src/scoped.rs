@@ -48,6 +48,11 @@ pub enum Ir {
         base: Box<Ir>,
         scrutinee: Box<Ir>,
     },
+    IdElim {
+        motive: Box<Ir>,
+        base: Box<Ir>,
+        scrutinee: Box<Ir>,
+    },
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -331,6 +336,20 @@ impl Elab {
             ExprKind::Paren(inner) => self.expr(inner),
             ExprKind::Path(p) => self.lookup(path_name(p)?),
             ExprKind::TypeExpr(t) => self.ty(t),
+            ExprKind::MetaFunction {
+                name,
+                args,
+                parenthesized,
+            } if name.as_str() == "builtin_refl" => {
+                if !parenthesized || args.len() != 1 {
+                    return Err(Error::Rejected(
+                        "@builtin_refl expects one explicit argument".into(),
+                    ));
+                }
+                Ok(Ir::Refl {
+                    value: Box::new(self.expr(&args[0])?),
+                })
+            }
             ExprKind::Call {
                 func,
                 type_args,
@@ -492,6 +511,15 @@ impl Elab {
                 base: Box::new(self.raise(base, frame)?),
                 scrutinee: Box::new(self.raise(scrutinee, frame)?),
             },
+            Term::IdElim {
+                motive,
+                base,
+                scrutinee,
+            } => Ir::IdElim {
+                motive: Box::new(self.raise(motive, frame)?),
+                base: Box::new(self.raise(base, frame)?),
+                scrutinee: Box::new(self.raise(scrutinee, frame)?),
+            },
             _ => return Err(unsupported("kernel type outside selected fragment")),
         })
     }
@@ -547,6 +575,15 @@ pub fn lower(t: &Ir, frame: &mut Vec<BinderId>) -> Result<Term> {
             base,
             scrutinee,
         } => Term::j(
+            lower(motive, frame)?,
+            lower(base, frame)?,
+            lower(scrutinee, frame)?,
+        ),
+        Ir::IdElim {
+            motive,
+            base,
+            scrutinee,
+        } => Term::id_elim(
             lower(motive, frame)?,
             lower(base, frame)?,
             lower(scrutinee, frame)?,

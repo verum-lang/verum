@@ -2870,6 +2870,7 @@ proof_justification = 'by' , ( tactic_expr | identifier ) ;
 tactic_expr =
     rewrite_tactic
     | intro_tactic
+    | ( 'cases' | 'induction' ) , identifier
     | 'exact' , expression
     | tactic_name , [ type_args ] , [ '(' , [ argument_list ] , ')' ]
     | tactic_expr , ';' , tactic_expr
