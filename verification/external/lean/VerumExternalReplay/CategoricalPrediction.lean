@@ -213,6 +213,146 @@ theorem other_context_unchanged [DecidableEq Context] (bank : Context → Histog
     (label : Fin (bank c).counts.length) (hne : other ≠ c) :
     observeContext bank c label other = bank other := by simp [observeContext, hne]
 
+variable {Context : Type}
+
+/-- A child partition changes which count cell is used, not its declared
+alphabet. This invariant survives every observation in any selected cell. -/
+def FixedSupport (bank : Context → Histogram) (size : Nat) : Prop :=
+  ∀ c, (bank c).counts.length = size
+
+theorem observe_fixed_support [DecidableEq Context] (bank : Context → Histogram)
+    (size : Nat) (fixed : FixedSupport bank size) (c : Context)
+    (label : Fin (bank c).counts.length) :
+    FixedSupport (observeContext bank c label) size := by
+  intro other
+  by_cases same : other = c
+  · subst other
+    rw [context_updated, alphabet_unchanged, fixed]
+  · rw [other_context_unchanged bank c other label same, fixed]
+
+/-- Context selection sees only the prefix, never the current label. The
+same ordered word can therefore be evaluated by different causal partitions. -/
+def contextPath [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past : List Nat) :
+    List Nat → Option (Fraction × (Context → Histogram))
+  | [] => some (one, bank)
+  | label :: rest =>
+      let c := choose past
+      if valid : label < (bank c).counts.length then
+        (contextPath choose (observeContext bank c ⟨label, valid⟩) (label :: past) rest).map
+          (fun (mass, final) => (mul (predict (bank c) ⟨label, valid⟩) mass, final))
+      else none
+
+theorem context_path_positive [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past labels : List Nat) (mass : Fraction) (final : Context → Histogram)
+    (accepted : contextPath choose bank past labels = some (mass, final)) :
+    0 < mass.numerator := by
+  induction labels generalizing bank past mass final with
+  | nil => cases accepted; decide
+  | cons label rest ih =>
+    simp only [contextPath] at accepted
+    split at accepted
+    · rename_i valid
+      cases tail : contextPath choose (observeContext bank (choose past) ⟨label, valid⟩)
+          (label :: past) rest with
+      | none => simp [tail] at accepted
+      | some result =>
+        rcases result with ⟨next, final'⟩
+        simp only [tail, Option.map_some, Option.some.injEq, Prod.mk.injEq] at accepted
+        rcases accepted with ⟨rfl, rfl⟩
+        exact Nat.mul_pos (predict_positive _ _) (ih _ _ _ _ tail)
+    · cases accepted
+
+theorem context_path_fixed_support [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past labels : List Nat) (size : Nat)
+    (fixed : FixedSupport bank size) (mass : Fraction) (final : Context → Histogram)
+    (accepted : contextPath choose bank past labels = some (mass, final)) :
+    FixedSupport final size := by
+  induction labels generalizing bank past mass final with
+  | nil => cases accepted; exact fixed
+  | cons label rest ih =>
+    simp only [contextPath] at accepted
+    split at accepted
+    · rename_i valid
+      cases tail : contextPath choose (observeContext bank (choose past) ⟨label, valid⟩)
+          (label :: past) rest with
+      | none => simp [tail] at accepted
+      | some result =>
+        rcases result with ⟨next, final'⟩
+        simp only [tail, Option.map_some, Option.some.injEq, Prod.mk.injEq] at accepted
+        rcases accepted with ⟨rfl, rfl⟩
+        exact ih _ _ (observe_fixed_support bank size fixed _ _) _ _ tail
+    · cases accepted
+
+/-- Exact domain equality, not merely normalization of two different trees.
+Every finite word in the frozen alphabet is accepted, and no other word is. -/
+theorem context_path_domain [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past labels : List Nat) (size : Nat)
+    (fixed : FixedSupport bank size) :
+    (contextPath choose bank past labels).isSome = labels.all (fun label => label < size) := by
+  induction labels generalizing bank past with
+  | nil => rfl
+  | cons label rest ih =>
+    simp only [contextPath, List.all_cons]
+    by_cases valid : label < (bank (choose past)).counts.length
+    · rw [dite_eq_left valid, Option.isSome_map,
+        ih _ _ (observe_fixed_support bank size fixed _ _)]
+      have bound : label < size := by simpa [fixed (choose past)] using valid
+      simp [bound]
+    · rw [dite_eq_right valid]
+      have outside : ¬ label < size := by simpa [fixed (choose past)] using valid
+      simp [outside]
+
+/-- Complete finite word space of a declared alphabet, including unseen labels. -/
+def words (size : Nat) : Nat → List (List Nat)
+  | 0 => [[]]
+  | n+1 => (List.ofFn (fun i : Fin size => i)).flatMap
+      (fun i => (words size n).map (i.val :: ·))
+
+def contextMass [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past labels : List Nat) : Fraction :=
+  ((contextPath choose bank past labels).map Prod.fst).getD zero
+
+theorem context_mass_cons [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past rest : List Nat) (label : Nat)
+    (valid : label < (bank (choose past)).counts.length) :
+    Equal (contextMass choose bank past (label :: rest))
+      (mul (predict (bank (choose past)) ⟨label,valid⟩)
+        (contextMass choose (observeContext bank (choose past) ⟨label,valid⟩) (label :: past) rest)) := by
+  unfold contextMass
+  simp only [contextPath, valid, ↓reduceDIte]
+  cases tail : contextPath choose (observeContext bank (choose past) ⟨label,valid⟩)
+      (label :: past) rest with
+  | none => exact eq_symm (mul_zero _)
+  | some result => exact eq_refl _
+
+/-- The sum is over the same explicit words for every fixed-support partition;
+it is the accepted path likelihood, not an unrelated normalization recurrence. -/
+theorem context_words_normalized [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past : List Nat) (size horizon : Nat)
+    (fixed : FixedSupport bank size) :
+    Equal (sum ((words size horizon).map (contextMass choose bank past))) one := by
+  induction horizon generalizing bank past with
+  | zero => exact add_zero _
+  | succ n ih =>
+      simp only [words, List.map_flatMap, List.map_map, Function.comp_def]
+      apply eq_trans (sum_flatMap _ _)
+      have branch (i : Fin size) :
+          Equal (sum ((words size n).map (fun rest => contextMass choose bank past (i.val :: rest))))
+            (predict (bank (choose past)) ⟨i.val,by rw [fixed]; exact i.isLt⟩) := by
+        have valid : i.val < (bank (choose past)).counts.length := by rw [fixed]; exact i.isLt
+        apply eq_trans (sum_congr _ _ _ (fun rest _ => context_mass_cons choose bank past rest i.val valid))
+        apply eq_trans (sum_scale (words size n)
+          (contextMass choose (observeContext bank (choose past) ⟨i.val,valid⟩) (i.val :: past))
+          (predict (bank (choose past)) ⟨i.val,valid⟩))
+        apply eq_trans (mul_congr_left _ (ih _ _ (observe_fixed_support bank size fixed _ _)))
+        exact mul_one _
+      apply eq_trans (sum_congr _ _ _ (fun i _ => branch i))
+      simp only [List.map_ofFn, Function.comp_def]
+      have size_eq := (fixed (choose past)).symm
+      subst size
+      exact distribution_normalized _
+
 def contextFutureMass [DecidableEq Context] (choose : List Nat → Context)
     (bank : Context → Histogram) (past : List Nat) : Nat → Fraction
   | 0 => one

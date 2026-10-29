@@ -112,6 +112,19 @@ def sum : List Fraction → Fraction
   | [] => zero
   | a :: tail => add a (sum tail)
 
+theorem sum_append (xs ys : List Fraction) :
+    Equal (sum (xs ++ ys)) (add (sum xs) (sum ys)) := by
+  induction xs with
+  | nil => exact eq_symm (eq_trans (add_comm _ _) (add_zero _))
+  | cons x xs ih => exact eq_trans (add_congr_left x ih) (eq_symm (add_assoc _ _ _))
+
+theorem sum_flatMap (xs : List α) (f : α → List Fraction) :
+    Equal (sum (xs.flatMap f)) (sum (xs.map (fun x => sum (f x)))) := by
+  induction xs with
+  | nil => exact eq_refl _
+  | cons x xs ih =>
+      exact eq_trans (sum_append _ _) (add_congr_left _ ih)
+
 theorem sum_congr (xs : List α) (f g : α → Fraction) (h : ∀ x ∈ xs, Equal (f x) (g x)) :
     Equal (sum (xs.map f)) (sum (xs.map g)) := by
   induction xs with
@@ -157,6 +170,33 @@ theorem sum_common_denominator (ns : List Nat) (d : Nat) (hd : 0 < d) :
 
 def divide (a b : Fraction) (hb : 0 < b.numerator) : Fraction :=
   ⟨a.numerator * b.denominator, a.denominator * b.numerator, Nat.mul_pos a.positive hb⟩
+
+theorem divide_positive (a b : Fraction) (ha : 0 < a.numerator)
+    (hb : 0 < b.numerator) : 0 < (divide a b hb).numerator :=
+  Nat.mul_pos ha b.positive
+
+theorem divide_congr {a b c d : Fraction} (h : Equal a b) (k : Equal c d)
+    (hc : 0 < c.numerator) (hd : 0 < d.numerator) :
+    Equal (divide a c hc) (divide b d hd) := by
+  have combined := congrArg (fun n => n * (d.numerator * c.denominator)) h
+  have reference := congrArg (fun n => (b.numerator * a.denominator) * n) k.symm
+  have combined := combined.trans reference
+  simpa only [Equal, divide, Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] using combined
+
+/-- Two compression scores can cancel their common positive reference.
+Equal reference values suffice; no reduction to a canonical fraction is needed. -/
+theorem divide_common_reference (new old reference : Fraction)
+    (oldPositive : 0 < old.numerator) (referencePositive : 0 < reference.numerator) :
+    Equal (divide (divide new reference referencePositive)
+      (divide old reference referencePositive) (divide_positive _ _ oldPositive referencePositive))
+      (divide new old oldPositive) := by
+  simp only [Equal, divide, Nat.mul_comm, Nat.mul_left_comm]
+
+theorem divide_products (a b c d : Fraction) (hb : 0 < b.numerator)
+    (hd : 0 < d.numerator) :
+    Equal (mul (divide a b hb) (divide c d hd))
+      (divide (mul a c) (mul b d) (Nat.mul_pos hb hd)) := by
+  simp only [Equal, divide, mul, Nat.mul_comm, Nat.mul_left_comm]
 
 /-- A shared positive mass factor can be cancelled before constructing a ratio.
 For wire models this avoids allocating the identical geometric length factor. -/
