@@ -32673,7 +32673,7 @@ impl VbcCodegen {
         self.scoped_callable_type_name(ty, None)
     }
 
-    fn scoped_callable_type_name(
+    pub(super) fn scoped_callable_type_name(
         &self, ty: &crate::types::TypeRef,
         scope: Option<&std::collections::HashMap<String, u16>>,
     ) -> Option<verum_common::Text> {

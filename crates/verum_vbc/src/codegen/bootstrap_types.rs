@@ -595,6 +595,16 @@ impl VbcCodegen {
                 let callable = super::formal_parameters::remapped_callable(function, &maps[mi]).or_else(|| {
                     info.callable_signature.as_ref().map(|ty| remap_type_ref_archive(ty, &maps[mi]))
                 });
+                // Pattern and overload lookup still consume a type spelling.
+                // Derive it from the remapped source signature, so an optional
+                // forward hint cannot lose or substitute the payload's owner.
+                let result_name = callable.as_ref().and_then(|signature| {
+                    let TypeRef::Function { return_type, .. } = signature else { return None };
+                    let scope = function.type_params.iter().filter_map(|parameter|
+                        module.strings.get(parameter.name).map(|name| (name.to_owned(), parameter.id.0)))
+                        .collect();
+                    self.scoped_callable_type_name(return_type, Some(&scope)).map(Text::into_string)
+                });
                 // A type re-export also names its declaration-owned methods.
                 // Keep their actual FunctionInfo identity and generic roster;
                 // synthesizing an external stub here would erase CallG witnesses.
@@ -636,6 +646,7 @@ impl VbcCodegen {
                         function.yield_type.as_ref()
                             .map(|ty| remap_type_ref_archive(ty, &maps[mi])),
                         callable,
+                        result_name,
                     ),
                 );
             }
@@ -692,19 +703,23 @@ impl VbcCodegen {
 // names that authoritative registration has since rebound to another ID.
 fn apply_function_signatures<'a>(
     functions: impl Iterator<Item = &'a mut FunctionInfo>,
-    signatures: &Map<FunctionId, (TypeRef, Option<TypeRef>, Option<TypeRef>)>,
+    signatures: &Map<FunctionId, (TypeRef, Option<TypeRef>, Option<TypeRef>, Option<String>)>,
 ) {
     if signatures.is_empty() {
         return;
     }
     for info in functions {
-        if let Some((result, yielded, callable)) = signatures.get(&info.id) {
+        if let Some((result, yielded, callable, result_name)) = signatures.get(&info.id) {
             info.return_type = Some(result.clone());
             info.yield_type = yielded.clone();
             // Preserve the source signature, including reference qualifiers,
             // while translating every nominal identity into the consumer pool.
             // Reconstructing it from ABI parameters would lose those qualifiers.
             info.callable_signature = callable.clone();
+            if let Some(name) = result_name {
+                info.return_type_name = Some(name.clone());
+                info.return_type_inner = None;
+            }
         }
     }
 }

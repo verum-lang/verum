@@ -473,86 +473,14 @@ impl<'s> CompilationPipeline<'s> {
         }
         self.pre_register_canonical_variant_constructors(&all_parsed_modules)?;
 
-        // ====================================================================
-        // STEP 3.7 (Task #47) — Pre-register every uniquely-named public
-        //                       free function globally as a stub
-        //                       FunctionInfo + a placeholder body slot.
-        // ====================================================================
-        //
-        // Closes the cross-module-Call-resolution defect class
-        // documented at `crates/verum_vbc/src/codegen/mod.rs:5687-5750`
-        // and re-diagnosed for the CSPRNG / Bloom / HyperLogLog /
-        // CountMin / AliasSampler family on 2026-05-23
-        // (`csprng_collections_cross_module_class.md` memory entry).
-        //
-        // **Two-part architectural fix** (the missing piece is part
-        // (b) at finalize-time — see `finalize_module_from_state`'s
-        // `emit_missing_stub_descriptors_with_callm(false)` call):
-        //
-        //  (a) Pre-register every public free fn with a globally-
-        //      unique simple name as a stub in
-        //      `global_function_registry`.  This makes
-        //      `lookup_function("fill_secure")` succeed at any
-        //      consumer's compile-time regardless of topo-sort
-        //      order, so consumer bodies emit clean
-        //      `Call(stub_id, args)` instead of being replaced by
-        //      lenient panic-stubs.
-        //
-        //  (b) At per-module `finalize_module_from_state`,
-        //      synthesise minimal extern-style FunctionDescriptors
-        //      for every stub id that the LOCAL bytecode actually
-        //      references via `Call`/`CallG`/`TailCall`/etc.  Each
-        //      descriptor carries the stub's NAME — the only
-        //      essential piece for the archive-load remap path.
-        //      The bytecode itself stays as `Call(stub_id)`; at
-        //      archive load time, `ArchiveBodyRemap::map_function`'s
-        //      Tier-2b name-fallback consults the descriptor's
-        //      name and resolves stub_id → real user-side
-        //      FunctionId via the archive-wide `archive_func_by_name`
-        //      index (populated by `archive_ctx_loader` for every
-        //      loaded archive function regardless of mount set).
-        //
-        // Per-module stub-descriptor count is bounded by the actual
-        // number of distinct cross-module free-fn IDs the module
-        // references — typically tens, never thousands.  The
-        // historical 134 MB explosion documented at codegen/mod.rs:
-        // 5687-5750 came from a different shape of pass that
-        // synthesised stubs for EVERY entry in `ctx.functions`
-        // including the >7000 transitively-imported entries; the
-        // current `emit_missing_stub_descriptors_with_callm(false)`
-        // filter at `codegen/mod.rs:14157` restricts to the
-        // `referenced` set extracted from emitted bytecode, which
-        // is per-module bounded.
-        //
-        // Collision discipline (preserved from earlier stages):
-        //   * Names with > 1 definition site are SKIPPED
-        //     (`monotonic_nanos`, `classify`, `new`, etc. —
-        //     platform-specific or intentionally-duplicated).
-        //   * Already-registered names (canonical static methods,
-        //     variant constructors) are NOT overwritten.
-        //   * Stub `FunctionInfo` carries the real `param_count`
-        //     recovered from the AST.  Real bodies' later
-        //     `register_function` calls overlay the stub via the
-        //     richer-info promotion at `context.rs:1950`
-        //     (`new_is_richer` / `new_is_real_over_stub` arms).
-        //
-        // Sentinel id range: `u32::MAX - 0x100_0000 ..`
-        // (distinct from stage-1's `u32::MAX - 0x40_0000` and
-        //  stage-2's `u32::MAX - 0xC0_0000`).  Mirrored in the
-        //  `is_in_stub_range` check below so the post-compile
-        //  global-registry update overwrites these stubs with
-        //  real bodies' info.
-        //
-        // Architectural rule pinned in-tree:  every public free fn
-        // with a GLOBALLY UNIQUE simple name across the stdlib MUST
-        // be addressable by bare name from any cross-module call
-        // site regardless of topo-sort cycle direction.
+        // Public free functions have source-qualified identities before any
+        // body is compiled. Unique leaf names also receive a convenience alias.
+        // Finalization emits descriptors only for referenced forward IDs;
+        // archive loading resolves those descriptors to their defining bodies.
         if config.verbose {
-            eprintln!(
-                "Phase 2.7 (task #47): Pre-registering uniquely-named public free functions globally..."
-            );
+            eprintln!("Phase 2.7: Pre-registering public free functions...");
         }
-        self.pre_register_unique_public_free_functions(&all_parsed_modules)?;
+        self.pre_register_public_free_functions(&all_parsed_modules)?;
 
         // Phase 2.8 (stage-4): same architectural rule for public
         // module-level CONSTS — uniquely-named consts must resolve
@@ -851,19 +779,9 @@ one module and therefore never seeded",
         // Cyclic core dependencies need declaration-owned signatures before a
         // provider's body exists. These modules are metadata only: scoped type
         // IDs pass through the normal importer, never into executable archives.
-        let mut declaration_interfaces = Vec::with_capacity(all_parsed_modules.len());
-        for (name, files) in &all_parsed_modules {
-            let mut declarations = VbcCodegen::with_config(
-                verum_vbc::codegen::CodegenConfig::new(name)
-                    .with_optimization_level(config.optimization_level)
-                    .with_target(target.clone()),
-            );
-            let sources: Vec<_> = files.iter().map(|(_, ast)| ast).collect();
-            declaration_interfaces.push(
-                declarations.collect_declaration_interface(&sources)
-                    .map_err(|error| anyhow::anyhow!("collecting interface for {name}: {error}"))?,
-            );
-        }
+        let declaration_interfaces = self.collect_core_declaration_interfaces(
+            &all_parsed_modules, &config, &target,
+        )?;
 
         for (idx, (module_name, ast_modules_with_paths)) in all_parsed_modules.iter().enumerate() {
             let module_start = std::time::Instant::now();
@@ -1603,10 +1521,68 @@ one module and therefore never seeded",
         Ok(())
     }
 
-    /// **Task #47 stage-3** — pre-register every public free function
-    /// whose simple name is GLOBALLY UNIQUE across the stdlib as a
-    /// stub `FunctionInfo` in `global_function_registry` BEFORE
-    /// per-module compilation.
+    /// Collect nominal identities first, then resolve foreign declaration
+    /// types through those identities. This metadata pass supports cycles;
+    /// executable bodies are still compiled exactly once.
+    fn collect_core_declaration_interfaces(
+        &self,
+        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+        config: &CoreConfig,
+        target: &verum_ast::cfg::TargetConfig,
+    ) -> Result<Vec<verum_vbc::VbcModule>> {
+        let collect = |available: &[&verum_vbc::VbcModule]| -> Result<Vec<verum_vbc::VbcModule>> {
+            let mut resolved = Vec::with_capacity(all_modules.len());
+            for (name, files) in all_modules {
+                let mut declarations = VbcCodegen::with_config(
+                    verum_vbc::codegen::CodegenConfig::new(name)
+                        .with_optimization_level(config.optimization_level)
+                        .with_target(target.clone()),
+                );
+                let sources: Vec<_> = files.iter().map(|(_, ast)| ast).collect();
+                if !available.is_empty() {
+                    self.import_core_nominal_dependencies(&mut declarations, &sources, available)
+                        .map_err(|error| anyhow::anyhow!("interface for {name}: {error}"))?;
+                }
+                resolved.push(declarations.collect_declaration_interface(&sources)
+                    .map_err(|error| anyhow::anyhow!("collecting interface for {name}: {error}"))?);
+            }
+            Ok(resolved)
+        };
+        let nominal_interfaces = collect(&[])?;
+        collect(&nominal_interfaces.iter().collect::<Vec<_>>())
+    }
+
+    fn import_core_nominal_dependencies(
+        &self,
+        codegen: &mut VbcCodegen,
+        sources: &[&verum_ast::Module],
+        available: &[&verum_vbc::VbcModule],
+    ) -> Result<()> {
+        // Source exports, including re-export aliases, choose the declaring
+        // descriptor. Archive bundle names are not namespace authority.
+        let source_registry = self.session.module_registry();
+        let source_registry = source_registry.read();
+        let source_resolver = verum_types::TypeChecker::new();
+        codegen.import_bootstrap_nominal_dependencies_with_resolver(
+            sources, available, |written| {
+                let (owner, name) = written.rsplit_once('.')?;
+                let (declaration, declared_owner) = source_resolver.resolve_public_source_type(
+                    owner, name, &source_registry,
+                )?;
+                let source = source_registry.get_by_path_aliased(&declared_owner)?;
+                let owner = VbcCodegen::resolve_full_module_path(&source.ast, &declared_owner)
+                    .unwrap_or_else(|| declared_owner.to_string());
+                Some(Text::from(verum_vbc::module::qualify_module_name(
+                    &owner, declaration.name.name.as_str(),
+                )))
+            },
+        ).map_err(|error| anyhow::anyhow!("importing nominal dependencies: {error}"))?;
+        Ok(())
+    }
+
+    /// Register every public free function under its declaring source path.
+    /// Only globally unique leaf names also receive a convenience alias.
+    /// Declaration interfaces and later bodies update the same function ID.
     ///
     /// Paired with `emit_missing_stub_descriptors_with_callm(false)`
     /// in `finalize_module_from_state` — the call site bytecode emits
@@ -1619,10 +1595,7 @@ one module and therefore never seeded",
     /// archive-wide `archive_func_by_name` index (populated for every
     /// loaded archive function regardless of mount set).
     ///
-    /// See the top-of-function comment in `compile_core` at the
-    /// "Phase 2.7 (task #47)" banner for full architectural rationale
-    /// and history.
-    fn pre_register_unique_public_free_functions(
+    fn pre_register_public_free_functions(
         &mut self,
         all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
     ) -> Result<()> {
@@ -1632,8 +1605,7 @@ one module and therefore never seeded",
         use verum_vbc::module::FunctionId;
 
         // Pass 1: count occurrences of each public free-fn simple name
-        // across the entire parsed stdlib.  Collision-prone names get
-        // skipped in pass 2.
+        // across the entire parsed stdlib. Only unique names get leaf aliases.
         let mut name_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for (_module_name, ast_modules) in all_modules {
@@ -1649,10 +1621,12 @@ one module and therefore never seeded",
             }
         }
 
-        // Pass 2: register only the uniquely-named functions.
+        // Pass 2: canonical identities survive collisions and compile order.
         let mut stubs_registered: usize = 0;
-        for (_module_name, ast_modules) in all_modules {
+        for (module_name, ast_modules) in all_modules {
             for (_file_path, ast_module) in ast_modules {
+                let owner = VbcCodegen::resolve_full_module_path(ast_module, module_name)
+                    .unwrap_or_else(|| module_name.clone());
                 for item in ast_module.items.iter() {
                     let func = match &item.kind {
                         ItemKind::Function(f) => f,
@@ -1662,17 +1636,8 @@ one module and therefore never seeded",
                         continue;
                     }
                     let name = func.name.name.to_string();
-                    // Skip cross-module collisions — bare-name
-                    // first-wins would arbitrarily lock in the wrong
-                    // platform / impl.  Per-module mount-resolution
-                    // continues to handle these.
-                    if name_counts.get(&name).copied().unwrap_or(0) != 1 {
-                        continue;
-                    }
-                    // Don't shadow earlier-stage stubs (canonical
-                    // static methods, variant constructors) — those
-                    // carry richer info that this stub would strip.
-                    if self.global_function_registry.contains_key(&name) {
+                    let qualified = verum_vbc::module::qualify_module_name(&owner, &name);
+                    if self.global_function_registry.contains_key(&qualified) {
                         continue;
                     }
                     let stub_id =
@@ -1707,14 +1672,17 @@ one module and therefore never seeded",
                         is_transparent_wrapper: false,
                         param_closure_return_type_names: Vec::new(),
                     };
-                    self.global_function_registry.insert(name, info);
+                    self.global_function_registry.insert(qualified, info.clone());
+                    if name_counts.get(&name) == Some(&1) {
+                        self.global_function_registry.entry(name).or_insert(info);
+                    }
                     stubs_registered += 1;
                 }
             }
         }
         if std::env::var("VERUM_TRACE_STUB").is_ok() {
             eprintln!(
-                "[task #47 stage-3] pre-registered {} uniquely-named public free-fn stubs",
+                "[stage-3] pre-registered {} source-qualified public free-fn stubs",
                 stubs_registered
             );
         }
@@ -2511,26 +2479,8 @@ one module and therefore never seeded",
                 && !self.compiled_stdlib_modules.contains_key(&interface.name)
         }));
         prior_modules.sort_by(|a, b| a.name.cmp(&b.name));
-        // Source exports, including re-export aliases, choose the declaring
-        // descriptor. Archive bundle names are not namespace authority.
-        let source_registry = self.session.module_registry();
-        let source_registry = source_registry.read();
-        let source_resolver = verum_types::TypeChecker::new();
-        codegen.import_bootstrap_nominal_dependencies_with_resolver(
-            ast_modules, &prior_modules, |written| {
-                let (owner, name) = written.rsplit_once('.')?;
-                let (declaration, declared_owner) = source_resolver.resolve_public_source_type(
-                    owner, name, &source_registry,
-                )?;
-                let source = source_registry.get_by_path_aliased(&declared_owner)?;
-                let owner = VbcCodegen::resolve_full_module_path(&source.ast, &declared_owner)
-                    .unwrap_or_else(|| declared_owner.to_string());
-                Some(Text::from(verum_vbc::module::qualify_module_name(
-                    &owner, declaration.name.name.as_str(),
-                )))
-            },
-        ).map_err(|error| anyhow::anyhow!("importing nominal dependencies for {}: {}", module.name, error))?;
-        drop(source_registry);
+        self.import_core_nominal_dependencies(&mut codegen, ast_modules, &prior_modules)
+            .map_err(|error| anyhow::anyhow!("{}: {error}", module.name))?;
 
         // Three-pass compilation within the module (cross-file two-phase collection)
         // ONE collector, the same one a user compile uses (T0692).
@@ -2983,3 +2933,7 @@ mod field_visibility_tests;
 #[cfg(test)]
 #[path = "../../tests/bootstrap/semver_requirements.rs"]
 mod semver_requirement_tests;
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/forward_results.rs"]
+mod forward_result_tests;
