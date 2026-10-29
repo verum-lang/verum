@@ -1,0 +1,10 @@
+{
+  "export_sha256": "73559f145f3e21877caf635c76a8d67f419fa221802c6a70e04f8b6992c77d9a",
+  "rust_binary_sha256": "9b61c899152f21f10a63915470472b7b7dd3e532614f4225945aea0164a2aa96",
+  "source_head": "5b07e16bb9a0053a3cddd523e318cd5f38f5873d",
+  "source_files_audited": 1532,
+  "producer_receipt_sha256": "97ff321ea7523527bd6675af84ffed5d94007869df73298ca4b913351a70703c",
+  "patch_sha256": "c7c02be9a9997c6b78fb2ea97ac57a1c5324ea5cb57ccc2c0e0ce20216ddb526",
+  "independent_replay_receipt_sha256": "ecb2319ebe0d9bc4167a8e201a38b3b3b79a6b5c6a970d9a83b6d11d24ea9f4a",
+  "scope": "Frozen actual service operations and boundary projections; six native courts independently passed. Exports match under bijective per-trace Arc identity renaming only. Complete VM payload, allocator, FIFO state and universal Rust refinement are outside this packet."
+}
