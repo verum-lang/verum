@@ -14833,9 +14833,12 @@ impl TypeChecker {
             decline!("source set non-empty but yielded no element")
         };
         let source_str = source.as_str();
-        let canonical = source_str
-            .strip_prefix("cog.")
-            .unwrap_or(source_str);
+        // Inline declarations retain their rooted source key. Stripping
+        // `cog` is an archive compatibility convention, not a change of
+        // identity for a module declared in this compilation unit.
+        let inline_owner = self.inline_module_mount_target(source_str);
+        let canonical = inline_owner.as_ref().map(|owner| owner.as_str())
+            .unwrap_or_else(|| source_str.strip_prefix("cog.").unwrap_or(source_str));
         if canonical.is_empty() || canonical == "cog" {
             decline!(format!("source {:?} carries no module path", source_str))
         }

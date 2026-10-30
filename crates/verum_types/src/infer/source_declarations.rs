@@ -100,6 +100,18 @@ impl TypeChecker {
         &self,
         name: &str,
     ) -> Option<(verum_ast::TypeDecl, Text)> {
+        // Inline and file modules own their local declarations equally. The
+        // registry contains file modules; inline bodies live in this source
+        // index and must not fall through to the consumer's flat bindings.
+        if let Some(module) = self.inline_modules.get(&self.current_module_path)
+            && let Some(items) = &module.items
+            && let Some(declaration) = items.iter().find_map(|item| match &item.kind {
+                verum_ast::ItemKind::Type(declaration) if declaration.name.name == name => Some(declaration),
+                _ => None,
+            })
+        {
+            return Some((declaration.clone(), self.current_module_path.clone()));
+        }
         let registry = self.module_registry.read();
         self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry)
             .and_then(|module| {
