@@ -205,12 +205,25 @@ impl ProjectContext {
             hash.update(captured.get(path).unwrap().as_bytes());
             hash.update([0]);
         }
-        // Incarnations distinguish close/reopen even when source and version repeat.
-        for (path, _, version, id, _) in &open {
-            hash.update(format!("{path:?}:{version}:{id:?}").as_bytes());
-        }
+        // A semantic generation depends on effective sources, not which editor
+        // tabs happen to be open. Document versions and incarnations remain
+        // independently guarded by DocumentStore when publishing results.
         let revision: Text = hex::encode(hash.finalize()).into();
-        if revision == self.revision {
+        let pending = open.iter().any(|(path, ..)| {
+            captured.contains_key(path)
+                && Url::from_file_path(path).ok().is_some_and(|uri| {
+                    documents.with_document(&uri, |doc| {
+                        doc.analysis_revision.as_deref() != Some(revision.as_str())
+                    }).unwrap_or(false)
+                })
+        });
+        if revision == self.revision && !pending {
+            // Open/close and version-only changes still update source receipts.
+            for identity in &mut self.identities {
+                identity.version = identity.uri.to_file_path().ok().and_then(|path| {
+                    open.iter().find(|(p, ..)| p == &path).map(|(_, _, version, ..)| *version)
+                });
+            }
             return Ok(false);
         }
         let mut sources = Map::new();
@@ -223,7 +236,7 @@ impl ProjectContext {
             } else if let Some(old) = self
                 .sources
                 .get(&path)
-                .filter(|old| old.text == text && old.version.is_none())
+                .filter(|old| old.text == text)
             {
                 (old.file_id, old.ast.clone(), None)
             } else {
@@ -326,6 +339,11 @@ impl ProjectContext {
                 continue;
             };
             let uri = Url::from_file_path(path).map_err(|_| anyhow::anyhow!("Source URI"))?;
+            if documents.with_document(&uri, |doc| {
+                doc.analysis_revision.as_deref() == Some(revision.as_str())
+            }).unwrap_or(false) {
+                continue;
+            }
             let info = registry
                 .read()
                 .get_by_path(source.owner.to_string().as_str());

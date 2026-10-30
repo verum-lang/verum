@@ -406,6 +406,7 @@ impl DocumentCache {
                 // profile handler must report (T1137).
                 last_parse_us: 0,
                 last_type_check_us: 0,
+                project_check_count: 0,
             }
         })
     }

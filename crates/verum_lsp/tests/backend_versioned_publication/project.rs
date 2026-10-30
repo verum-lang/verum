@@ -303,3 +303,42 @@ async fn library_artifact_identity_invalidates_project_generation() {
     assert_ne!(before["library_metadata"], after["library_metadata"]);
     assert!(!errors(&after).is_empty(), "{after:#}");
 }
+
+#[tokio::test]
+async fn tab_lifecycle_reuses_semantics_without_reusing_publication_incarnations() {
+    let project = Project::new();
+    let dependency = project.file("dependency.vr", DEP);
+    let main = project.open("main.vr", MAIN);
+    let before = project.snapshot(&main).await;
+    let backend = project.service.inner();
+    let checks = |uri: &Url| backend.documents.with_document(uri, |doc| doc.project_check_count).unwrap();
+    assert_eq!(checks(&main), 1);
+    backend.documents.open(dependency.clone(), DEP.into(), 1);
+    let opened = project.snapshot(&dependency).await;
+    assert_eq!(opened["project_revision"], before["project_revision"]);
+    assert_eq!(checks(&main), 1, "opening unchanged source must not recheck consumers");
+    assert_eq!(checks(&dependency), 1);
+    let old = backend.documents.diagnostic_snapshot(&dependency).unwrap();
+    backend.documents.close(&dependency);
+    let closed = project.snapshot(&main).await;
+    assert_eq!(closed["project_revision"], before["project_revision"]);
+    assert_eq!(checks(&main), 1);
+    let inventory = backend.handle_project_snapshot(json!({})).await.unwrap();
+    assert!(inventory["sources"].as_array().unwrap().iter()
+        .find(|s| s["uri"] == dependency.as_str()).unwrap()["version"].is_null());
+    backend.documents.open(dependency.clone(), DEP.into(), 1);
+    project.snapshot(&dependency).await;
+    assert!(!backend.documents.is_current_snapshot(&dependency, &old));
+    assert_eq!(checks(&main), 1);
+    assert_eq!(checks(&dependency), 1, "new incarnation must be checked independently");
+    backend.documents.try_update(&dependency, DEP.into(), 2).unwrap();
+    let unchanged = project.snapshot(&main).await;
+    assert_eq!(unchanged["project_revision"], before["project_revision"]);
+    assert_eq!(checks(&main), 1);
+    assert_eq!(checks(&dependency), 2, "new document version needs its own result");
+    backend.documents.try_update(&dependency, DEP.replace("-> Int { 42 }", "-> Bool { true }"), 3).unwrap();
+    let changed = project.snapshot(&main).await;
+    assert_ne!(changed["project_revision"], before["project_revision"]);
+    assert!(!errors(&changed).is_empty());
+    assert_eq!(checks(&main), 2, "real dependency changes invalidate consumers");
+}

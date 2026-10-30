@@ -2506,6 +2506,7 @@ impl Backend {
                     "total": total,
                     "parsing": parse_time,
                     "typeChecking": type_check_time,
+                    "projectChecks": doc.project_check_count,
                     "verification": verification_time,
                     "codegen": codegen_time,
                     "unit": "microseconds"

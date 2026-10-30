@@ -303,6 +303,8 @@ pub struct DocumentState {
     /// Wall time of the most recent type-check pass, in microseconds.
     /// Measured on the same terms as `last_parse_us`.
     pub last_type_check_us: u64,
+    /// Completed project checks in this document incarnation (not cache hits).
+    pub project_check_count: u64,
 }
 
 // Implement Debug manually since Type doesn't implement Debug
@@ -339,6 +341,7 @@ impl DocumentState {
             type_info: HashMap::new(),
             last_parse_us: 0,
             last_type_check_us: 0,
+            project_check_count: 0,
         };
         state.reparse();
         state
@@ -721,6 +724,7 @@ impl DocumentState {
         let started = std::time::Instant::now();
         self.check_module_types(module, checker);
         self.last_type_check_us = started.elapsed().as_micros() as u64;
+        self.project_check_count += 1;
     }
 
     fn check_module_types(&mut self, module: &Module, type_checker: &mut TypeChecker) {
