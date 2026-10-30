@@ -1,24 +1,13 @@
-//! LSP refinement validation extensions
+//! Cursor refinement operations over captured source revisions.
 //!
-//! This module implements the custom LSP methods for refinement validation:
-//! - `verum/validateRefinement`: Validate refinement at cursor position
-//! - `verum/promoteToChecked`: Promote &T to &checked T with escape analysis proof
-//! - `verum/inferRefinement`: Infer tightest refinement from usage
-//!
-//! LSP Refinement Validation Protocol Extensions:
-//! Three custom LSP methods extend the standard protocol:
-//! 1. `verum/validateRefinement` - validates refinement type at cursor position,
-//!  integrates with SMT solver for real-time feedback (<100ms latency),
-//!  returns diagnostics with concrete counterexamples showing violating values
-//! 2. `verum/promoteToChecked` - promotes &T to &checked T with escape analysis
-//!  proof, generates TextEdits and optional proof comments
-//! 3. `verum/inferRefinement` - infers tightest refinement from usage patterns,
-//!  returns inferred type with confidence level and suggested edits
-//!  Quick fixes provide 6 categories: runtime check wrapping, inline refinement,
-//!  sigma type conversion, runtime assertion, weaken refinement, promote to &checked.
+//! Validation checks the selected supported refinement with an SMT worker;
+//! missing obligations and inconclusive results are distinct from proofs.
+//! Promotion and inference return source edits for client review. These
+//! operations do not establish whole-program correctness.
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,6 +19,10 @@ use verum_ast::{Expr, FileId, ItemKind, Module, Type, TypeKind};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 use verum_smt::{RefinementVerifier as SmtRefinementVerifier, VerificationError, VerifyMode};
+
+#[cfg(test)]
+#[path = "../tests/refinement_snapshots/mod.rs"]
+mod snapshot_tests;
 
 // ==================== Data Structures ====================
 
@@ -139,9 +132,20 @@ pub use crate::lsp_config::ValidationMode;
 /// Result of validateRefinement request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidateRefinementResult {
+    pub status: RefinementStatus,
     pub valid: bool,
     pub diagnostics: List<RefinementDiagnostic>,
     pub performance_ms: u64,
+}
+
+/// A missing obligation or an inconclusive solver result is not a proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefinementStatus {
+    Valid,
+    Invalid,
+    Unknown,
+    NotApplicable,
 }
 
 /// Parameters for promoteToChecked request
@@ -196,6 +200,16 @@ pub struct CodeLocation {
 
 // ==================== Validation Cache ====================
 
+async fn read_source(uri: &Url) -> Result<Text, String> {
+    let path = uri
+        .to_file_path()
+        .map_err(|_| "Expected file URI".to_string())?;
+    tokio::fs::read_to_string(path)
+        .await
+        .map(Text::from)
+        .map_err(|error| format!("Failed to read source: {error}"))
+}
+
 /// Simple LRU cache for validation results
 pub struct ValidationCache {
     cache: Arc<RwLock<HashMap<String, CachedValidationResult>>>,
@@ -214,6 +228,7 @@ enum ValidationResult {
     Valid,
     Invalid { counterexample: CounterexampleData },
     Unknown,
+    NotApplicable,
 }
 
 impl ValidationCache {
@@ -474,6 +489,16 @@ impl RefinementValidator {
         &self,
         params: ValidateRefinementParams,
     ) -> Result<ValidateRefinementResult, String> {
+        let source = read_source(&params.text_document.uri).await?;
+        self.validate_source(params, &source).await
+    }
+
+    /// Validate one captured source; the LSP backend supplies its open buffer.
+    pub async fn validate_source(
+        &self,
+        params: ValidateRefinementParams,
+        source: &str,
+    ) -> Result<ValidateRefinementResult, String> {
         let start = Instant::now();
 
         // Extract document text and position
@@ -482,7 +507,15 @@ impl RefinementValidator {
         let mode = params.mode;
 
         // Build cache key
-        let cache_key = format!("{}:{}:{}", doc_uri, position.line, position.character);
+        let cache_key = format!(
+            "{}:{}:{}:{}:{:?}:{:?}",
+            doc_uri,
+            position.line,
+            position.character,
+            hex::encode(Sha256::digest(source.as_bytes())),
+            mode,
+            *self.config.read()
+        );
 
         // Honour `LspConfig.cache_validation_results`: when the
         // caller has disabled the validator cache (e.g. the user
@@ -513,7 +546,8 @@ impl RefinementValidator {
         };
 
         // Perform validation with timeout
-        let result = tokio::time::timeout(timeout, self.validate_impl(doc_uri, position)).await;
+        let result =
+            tokio::time::timeout(timeout, self.validate_impl(source, position, timeout)).await;
 
         let validation_result = match result {
             Ok(Ok(res)) => res,
@@ -524,7 +558,7 @@ impl RefinementValidator {
         };
 
         // Cache result when caching is active
-        if cache_enabled {
+        if cache_enabled && !matches!(validation_result, ValidationResult::Unknown) {
             self.cache.insert(cache_key, validation_result.clone());
         }
 
@@ -540,25 +574,15 @@ impl RefinementValidator {
     /// - Detailed counterexample extraction with execution traces
     async fn validate_impl(
         &self,
-        doc_uri: String,
+        source: &str,
         position: Position,
+        timeout: Duration,
     ) -> Result<ValidationResult, String> {
-        // Parse the URI to get file path
-        let url = Url::parse(&doc_uri).map_err(|e| format!("Invalid URI: {}", e))?;
-
-        // Read file content
-        let file_path = url
-            .to_file_path()
-            .map_err(|_| "Cannot convert URI to file path".to_string())?;
-
-        let source = std::fs::read_to_string(&file_path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-
         // Create a file ID for parsing
         let file_id = FileId::new(1);
 
         // Lex and parse the document
-        let lexer = Lexer::new(&source, file_id);
+        let lexer = Lexer::new(source, file_id);
         let parser = VerumParser::new();
 
         let module = parser
@@ -566,21 +590,28 @@ impl RefinementValidator {
             .map_err(|e| format!("Parse error: {:?}", e))?;
 
         // Convert position to byte offset
-        let offset = position_to_offset(&source, position);
+        let offset = verum_common::span_utils::lsp::lsp_position_to_offset(position, source)
+            .ok_or_else(|| "Invalid UTF-16 source position".to_string())?
+            as u32;
 
         // Find refinement type at position with full context
-        let refinement_context = self.find_refinement_at_position(&module, &source, offset);
+        let refinement_context = self.find_refinement_at_position(&module, source, offset);
 
         let refinement_ctx = match refinement_context {
             Some(ctx) => ctx,
-            None => return Ok(ValidationResult::Valid), // No refinement at position
+            None => return Ok(ValidationResult::NotApplicable),
         };
+
+        // This worker runs Z3. Do not relabel its result as another solver.
+        if !self.is_enabled() || self.config.read().smt_solver != SmtSolver::Z3 {
+            return Ok(ValidationResult::Unknown);
+        }
 
         // Collect all constraints in scope for the refinement. We don't
         // yet plumb them through the SMT worker — that needs a richer
         // request type — but we still collect so diagnostics can reference
         // them. See smt_worker.rs for the scope-aware extension point.
-        let _scope_constraints = self.collect_scope_constraints(&module, &source, offset);
+        let _scope_constraints = self.collect_scope_constraints(&module, source, offset);
 
         // Off-thread SMT round-trip. The worker owns the verifier; we
         // only move owned, Send-safe payloads (Type + Option<Expr> +
@@ -593,7 +624,7 @@ impl RefinementValidator {
                 refinement_ctx.ty.clone(),
                 refinement_ctx.context_expr.clone(),
                 VerifyMode::Proof,
-                Duration::from_millis(100),
+                timeout,
             )
             .await;
 
@@ -612,7 +643,7 @@ impl RefinementValidator {
                 // cost; full IDEs leave the default `true` and
                 // get the rich extraction.
                 let counterexample = if self.config.read().show_counterexamples {
-                    self.extract_counterexample(&refinement_ctx, &model, &source, position)
+                    self.extract_counterexample(&refinement_ctx, &model, source, position)
                 } else {
                     CounterexampleData {
                         variable: Text::from("<hidden>"),
@@ -694,15 +725,7 @@ impl RefinementValidator {
             }
         }
 
-        // Fallback: check all refinement types in module
-        self.find_refinement_type(module)
-            .map(|ty| RefinementContext {
-                ty,
-                var_name: Text::from("value"),
-                context_expr: None,
-                function_name: String::new(),
-                location: RefinementLocation::Expression,
-            })
+        None
     }
 
     /// Find refinement context in a block of statements
@@ -1079,236 +1102,6 @@ impl RefinementValidator {
         trace
     }
 
-    /// Find all refinement types in module
-    ///
-    /// Searches through the entire module AST to find refinement types in:
-    /// - Function parameters
-    /// - Function return types
-    /// - Local variable type annotations
-    /// - Type declaration bodies
-    /// - Protocol method signatures
-    /// - Constant type annotations
-    fn find_refinement_type(&self, module: &Module) -> Option<Type> {
-        use verum_ast::FunctionParamKind;
-
-        for item in &module.items {
-            match &item.kind {
-                ItemKind::Function(func) => {
-                    // Check function parameters
-                    for param in &func.params {
-                        if let FunctionParamKind::Regular { ty, .. } = &param.kind {
-                            if let Some(refined) = self.extract_refinement_type(ty) {
-                                return Some(refined);
-                            }
-                        }
-                    }
-
-                    // Check return type
-                    if let Maybe::Some(ret_ty) = &func.return_type {
-                        if let Some(refined) = self.extract_refinement_type(ret_ty) {
-                            return Some(refined);
-                        }
-                    }
-
-                    // Check function body for local variable type annotations
-                    if let Maybe::Some(body) = &func.body {
-                        if let verum_ast::decl::FunctionBody::Block(block) = body {
-                            if let Some(refined) = self.search_block_for_refined_types(block) {
-                                return Some(refined);
-                            }
-                        }
-                    }
-                }
-                ItemKind::Type(type_decl) => {
-                    // Check type declaration body for refinement types
-                    match &type_decl.body {
-                        verum_ast::decl::TypeDeclBody::Alias(ty) => {
-                            if let Some(refined) = self.extract_refinement_type(ty) {
-                                return Some(refined);
-                            }
-                        }
-                        verum_ast::decl::TypeDeclBody::Newtype(ty) => {
-                            if let Some(refined) = self.extract_refinement_type(ty) {
-                                return Some(refined);
-                            }
-                        }
-                        verum_ast::decl::TypeDeclBody::Record(fields) => {
-                            for field in fields {
-                                if let Some(refined) = self.extract_refinement_type(&field.ty) {
-                                    return Some(refined);
-                                }
-                            }
-                        }
-                        verum_ast::decl::TypeDeclBody::Variant(variants) => {
-                            for variant in variants {
-                                if let Maybe::Some(data) = &variant.data {
-                                    match data {
-                                        verum_ast::decl::VariantData::Tuple(types) => {
-                                            for ty in types {
-                                                if let Some(refined) =
-                                                    self.extract_refinement_type(ty)
-                                                {
-                                                    return Some(refined);
-                                                }
-                                            }
-                                        }
-                                        verum_ast::decl::VariantData::Record(fields) => {
-                                            for field in fields {
-                                                if let Some(refined) =
-                                                    self.extract_refinement_type(&field.ty)
-                                                {
-                                                    return Some(refined);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                ItemKind::Protocol(protocol) => {
-                    // Check protocol method signatures
-                    for item in &protocol.items {
-                        if let verum_ast::decl::ProtocolItemKind::Function { decl, .. } = &item.kind
-                        {
-                            // Check function parameters
-                            for param in &decl.params {
-                                if let FunctionParamKind::Regular { ty, .. } = &param.kind {
-                                    if let Some(refined) = self.extract_refinement_type(ty) {
-                                        return Some(refined);
-                                    }
-                                }
-                            }
-                            // Check function return type
-                            if let Maybe::Some(ret_ty) = &decl.return_type {
-                                if let Some(refined) = self.extract_refinement_type(ret_ty) {
-                                    return Some(refined);
-                                }
-                            }
-                        }
-                    }
-                }
-                ItemKind::Const(const_decl) => {
-                    // Check constant type annotation
-                    if let Some(refined) = self.extract_refinement_type(&const_decl.ty) {
-                        return Some(refined);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    /// Extract refinement type from a type, recursively checking nested types
-    fn extract_refinement_type(&self, ty: &Type) -> Option<Type> {
-        match &ty.kind {
-            TypeKind::Refined { .. } => Some(ty.clone()),
-            TypeKind::Reference { inner, .. } => self.extract_refinement_type(inner),
-            TypeKind::CheckedReference { inner, .. } => self.extract_refinement_type(inner),
-            TypeKind::UnsafeReference { inner, .. } => self.extract_refinement_type(inner),
-            TypeKind::Pointer { inner, .. } => self.extract_refinement_type(inner),
-            TypeKind::Array { element, .. } => self.extract_refinement_type(element),
-            TypeKind::Slice(inner) => self.extract_refinement_type(inner),
-            TypeKind::Tuple(types) => {
-                for t in types {
-                    if let Some(refined) = self.extract_refinement_type(t) {
-                        return Some(refined);
-                    }
-                }
-                None
-            }
-            TypeKind::Function {
-                params,
-                return_type,
-                ..
-            } => {
-                for param in params {
-                    if let Some(refined) = self.extract_refinement_type(param) {
-                        return Some(refined);
-                    }
-                }
-                self.extract_refinement_type(return_type)
-            }
-            TypeKind::Generic { base, args } => {
-                if let Some(refined) = self.extract_refinement_type(base) {
-                    return Some(refined);
-                }
-                for arg in args {
-                    if let verum_ast::ty::GenericArg::Type(t) = arg {
-                        if let Some(refined) = self.extract_refinement_type(t) {
-                            return Some(refined);
-                        }
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Search block for refinement types (for find_refinement_type)
-    fn search_block_for_refined_types(&self, block: &verum_ast::expr::Block) -> Option<Type> {
-        for stmt in &block.stmts {
-            if let verum_ast::StmtKind::Let { ty, value, .. } = &stmt.kind {
-                // Check type annotation
-                if let Maybe::Some(type_ann) = ty {
-                    if let Some(refined) = self.extract_refinement_type(type_ann) {
-                        return Some(refined);
-                    }
-                }
-                // Check init expression for nested blocks
-                if let Maybe::Some(init_expr) = value {
-                    if let Some(refined) = self.search_expr_for_refined_types(init_expr) {
-                        return Some(refined);
-                    }
-                }
-            }
-        }
-        // Check tail expression
-        if let Maybe::Some(tail) = &block.expr {
-            if let Some(refined) = self.search_expr_for_refined_types(tail) {
-                return Some(refined);
-            }
-        }
-        None
-    }
-
-    /// Search expression for refinement types (for find_refinement_type)
-    fn search_expr_for_refined_types(&self, expr: &Expr) -> Option<Type> {
-        match &expr.kind {
-            verum_ast::ExprKind::Block(block) => self.search_block_for_refined_types(block),
-            verum_ast::ExprKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                if let Some(refined) = self.search_block_for_refined_types(then_branch) {
-                    return Some(refined);
-                }
-                if let Maybe::Some(else_expr) = else_branch {
-                    return self.search_expr_for_refined_types(else_expr);
-                }
-                None
-            }
-            verum_ast::ExprKind::Match { arms, .. } => {
-                for arm in arms {
-                    if let Some(refined) = self.search_expr_for_refined_types(&arm.body) {
-                        return Some(refined);
-                    }
-                }
-                None
-            }
-            verum_ast::ExprKind::Closure { body, .. } => self.search_expr_for_refined_types(body),
-            verum_ast::ExprKind::For { body, .. } => self.search_block_for_refined_types(body),
-            verum_ast::ExprKind::While { body, .. } => self.search_block_for_refined_types(body),
-            verum_ast::ExprKind::Loop { body, .. } => self.search_block_for_refined_types(body),
-            _ => None,
-        }
-    }
-
     /// Convert ValidationResult to response
     fn result_to_response(
         &self,
@@ -1333,7 +1126,7 @@ impl RefinementValidator {
             ValidationResult::Invalid { counterexample } => {
                 List::from(vec![self.build_diagnostic(counterexample.clone(), elapsed)])
             }
-            ValidationResult::Unknown => List::new(),
+            ValidationResult::Unknown | ValidationResult::NotApplicable => List::new(),
         };
 
         if let Some(warn) = cost_warning {
@@ -1345,9 +1138,15 @@ impl RefinementValidator {
             diagnostics = with_warn;
         }
 
-        let valid = !matches!(&result, ValidationResult::Invalid { .. });
+        let status = match result {
+            ValidationResult::Valid => RefinementStatus::Valid,
+            ValidationResult::Invalid { .. } => RefinementStatus::Invalid,
+            ValidationResult::Unknown => RefinementStatus::Unknown,
+            ValidationResult::NotApplicable => RefinementStatus::NotApplicable,
+        };
         ValidateRefinementResult {
-            valid,
+            status,
+            valid: status == RefinementStatus::Valid,
             diagnostics,
             performance_ms: elapsed.as_millis() as u64,
         }
@@ -1420,11 +1219,8 @@ impl RefinementValidator {
             quick_fixes,
             related_information: List::new(),
             validation_time_ms: elapsed.as_millis() as u64,
-            // Honour the configured solver choice so diagnostics
-            // tag the actual backend that produced the verdict.
-            // Pre-fix this was hardcoded to Z3 regardless of the
-            // user's `verum.lsp.smtSolver` setting.
-            smt_solver: self.config.read().smt_solver,
+            // Identify the actual worker, even if settings changed in flight.
+            smt_solver: SmtSolver::Z3,
         }
     }
 
@@ -1479,20 +1275,20 @@ impl RefinementValidator {
         &self,
         params: PromoteToCheckedParams,
     ) -> Result<PromoteToCheckedResult, String> {
-        let uri = params.text_document.uri;
+        let source = read_source(&params.text_document.uri).await?;
+        self.promote_source(params, &source).await
+    }
+
+    pub async fn promote_source(
+        &self,
+        params: PromoteToCheckedParams,
+        source: &str,
+    ) -> Result<PromoteToCheckedResult, String> {
         let range = params.range;
         let include_proof = params.include_proof;
 
-        // Parse the document to get the AST
-        let file_path = uri
-            .to_file_path()
-            .map_err(|_| "Cannot convert URI to file path".to_string())?;
-
-        let source = std::fs::read_to_string(&file_path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-
         let file_id = FileId::new(1);
-        let lexer = Lexer::new(&source, file_id);
+        let lexer = Lexer::new(source, file_id);
         let parser = VerumParser::new();
 
         let module = parser
@@ -1500,8 +1296,9 @@ impl RefinementValidator {
             .map_err(|e| format!("Parse error: {:?}", e))?;
 
         // Convert range to byte offset
-        let start_offset = position_to_offset(&source, range.start);
-        let end_offset = position_to_offset(&source, range.end);
+        let span = verum_common::span_utils::lsp::lsp_range_to_span(range, source, file_id)
+            .ok_or_else(|| "Invalid UTF-16 source range".to_string())?;
+        let (start_offset, end_offset) = (span.start, span.end);
 
         // Find the reference expression in the AST
         let ref_context = self.find_reference_at_range(&module, start_offset, end_offset);
@@ -1520,7 +1317,7 @@ impl RefinementValidator {
         };
 
         // Perform escape analysis
-        let escape_analysis = self.analyze_reference_escape(&module, &ref_ctx, &source);
+        let escape_analysis = self.analyze_reference_escape(&module, &ref_ctx, source);
 
         if !escape_analysis.can_promote {
             return Ok(PromoteToCheckedResult {
@@ -1542,7 +1339,7 @@ impl RefinementValidator {
         let mut edits = List::new();
 
         // Extract the original reference text
-        let ref_text = source_range(&source, start_offset as usize, end_offset as usize);
+        let ref_text = source_range(source, start_offset as usize, end_offset as usize);
 
         // Generate the new checked reference text
         let new_text = if ref_text.starts_with("&mut ") {
@@ -1961,19 +1758,20 @@ impl RefinementValidator {
         &self,
         params: InferRefinementParams,
     ) -> Result<InferRefinementResult, String> {
+        let source = read_source(&params.text_document.uri).await?;
+        self.infer_source(params, &source).await
+    }
+
+    pub async fn infer_source(
+        &self,
+        params: InferRefinementParams,
+        source: &str,
+    ) -> Result<InferRefinementResult, String> {
         let uri = params.text_document.uri;
         let symbol = params.symbol;
 
-        // Parse the document
-        let file_path = uri
-            .to_file_path()
-            .map_err(|_| "Cannot convert URI to file path".to_string())?;
-
-        let source = std::fs::read_to_string(&file_path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-
         let file_id = FileId::new(1);
-        let lexer = Lexer::new(&source, file_id);
+        let lexer = Lexer::new(source, file_id);
         let parser = VerumParser::new();
 
         let module = parser
@@ -1981,14 +1779,14 @@ impl RefinementValidator {
             .map_err(|e| format!("Parse error: {:?}", e))?;
 
         // Find the symbol definition
-        let symbol_def = self.find_symbol_definition(&module, &symbol, &source);
+        let symbol_def = self.find_symbol_definition(&module, &symbol, source);
         let def = match symbol_def {
             Some(d) => d,
             None => return Err(format!("Symbol `{}` not found", symbol.as_str())),
         };
 
         // Find all usages of the symbol
-        let usages = self.find_symbol_usages(&module, &symbol, &uri, &source);
+        let usages = self.find_symbol_usages(&module, &symbol, &uri, source);
 
         // Collect constraints from each usage site
         let constraints = self.collect_usage_constraints(&module, &symbol, &usages);
@@ -1998,7 +1796,7 @@ impl RefinementValidator {
             self.compute_tightest_refinement(&def.base_type, &constraints);
 
         // Generate edit to add refinement to symbol declaration
-        let edits = self.generate_refinement_edits(&def, &inferred_refinement, &source);
+        let edits = self.generate_refinement_edits(&def, &inferred_refinement, source);
 
         // Convert usages to CodeLocations
         let usage_locations: List<CodeLocation> = usages
@@ -2892,62 +2690,13 @@ enum ConstraintInferenceKind {
 
 // ==================== Additional Helper Functions ====================
 
-/// Convert LSP Position to byte offset in source
-fn position_to_offset(source: &str, position: Position) -> u32 {
-    let mut offset = 0u32;
-    for (line_num, line) in source.lines().enumerate() {
-        if line_num == position.line as usize {
-            offset += position.character;
-            break;
-        }
-        offset += line.len() as u32 + 1; // +1 for newline
-    }
-    offset
-}
-
-/// Convert byte offset to line number
+/// Convert source positions through the same UTF-16 mapping as standard LSP.
 fn span_to_line(source: &str, offset: u32) -> u32 {
-    let mut current_offset = 0u32;
-    for (line_num, line) in source.lines().enumerate() {
-        if current_offset + line.len() as u32 >= offset {
-            return line_num as u32;
-        }
-        current_offset += line.len() as u32 + 1;
-    }
-    0
+    verum_common::span_utils::lsp::offset_to_lsp_position(offset as usize, source).line
 }
 
-/// Convert span to LSP Range
 fn span_to_range(source: &str, span: verum_ast::span::Span) -> Range {
-    let start_line = span_to_line(source, span.start);
-    let end_line = span_to_line(source, span.end);
-
-    // Calculate character positions
-    let start_char = calculate_character(source, span.start, start_line);
-    let end_char = calculate_character(source, span.end, end_line);
-
-    Range {
-        start: Position {
-            line: start_line,
-            character: start_char,
-        },
-        end: Position {
-            line: end_line,
-            character: end_char,
-        },
-    }
-}
-
-/// Calculate character position within a line
-fn calculate_character(source: &str, offset: u32, line: u32) -> u32 {
-    let mut current_offset = 0u32;
-    for (line_num, line_text) in source.lines().enumerate() {
-        if line_num == line as usize {
-            return offset - current_offset;
-        }
-        current_offset += line_text.len() as u32 + 1;
-    }
-    0
+    verum_common::span_utils::lsp::span_to_lsp_range(span, source)
 }
 
 /// Get line content at span

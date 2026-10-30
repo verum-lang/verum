@@ -1,6 +1,43 @@
 use super::*;
 
 #[tokio::test]
+async fn refinement_uses_the_open_buffer_and_refuses_stale_responses() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("draft.vr");
+    std::fs::write(&path, "invalid disk source").unwrap();
+    let uri = Url::from_file_path(&path).unwrap();
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend = service.inner();
+    backend
+        .documents
+        .open(uri.clone(), "fn main() {}".into(), 1);
+    let request = ValidateRefinementParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        position: Position::new(0, 3),
+        mode: crate::lsp_config::ValidationMode::Quick,
+    };
+    let response = backend
+        .handle_validate_refinement(request.clone())
+        .await
+        .unwrap();
+    assert_eq!(response["status"], "not_applicable");
+    assert_eq!(response["valid"], false);
+    let snapshot = backend.refinement_snapshot(&uri).unwrap();
+    backend
+        .documents
+        .try_update(&uri, "fn main(".into(), 2)
+        .unwrap();
+    assert!(backend.handle_validate_refinement(request).await.is_err());
+    assert_eq!(
+        backend
+            .refinement_response(&uri, &snapshot, Ok(response))
+            .unwrap_err()
+            .code,
+        tower_lsp::jsonrpc::ErrorCode::ContentModified
+    );
+}
+
+#[tokio::test]
 async fn old_revision_and_reopened_document_cannot_publish() {
     let (service, _socket) = tower_lsp::LspService::new(Backend::new);
     let backend = service.inner();

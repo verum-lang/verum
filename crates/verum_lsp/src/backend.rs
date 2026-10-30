@@ -2205,6 +2205,25 @@ fn contains_position(range: &Range, position: &Position) -> bool {
 // ==================== Custom LSP Methods ====================
 
 impl Backend {
+    fn refinement_snapshot(&self, uri: &Url) -> Result<DiagnosticSnapshot> {
+        self.documents
+            .diagnostic_snapshot(uri)
+            .ok_or_else(|| tower_lsp::jsonrpc::Error::invalid_params("Document is not open"))
+    }
+
+    fn refinement_response<T: serde::Serialize>(
+        &self,
+        uri: &Url,
+        snapshot: &DiagnosticSnapshot,
+        result: std::result::Result<T, String>,
+    ) -> Result<serde_json::Value> {
+        if !self.documents.is_current_snapshot(uri, snapshot) {
+            return Err(tower_lsp::jsonrpc::Error::content_modified());
+        }
+        let result = result.map_err(tower_lsp::jsonrpc::Error::invalid_params)?;
+        serde_json::to_value(result).map_err(|_| tower_lsp::jsonrpc::Error::internal_error())
+    }
+
     /// Handle verum/validateRefinement custom request
     pub async fn handle_validate_refinement(
         &self,
@@ -2216,17 +2235,13 @@ impl Backend {
             params.position.line
         );
 
-        match self.refinement_validator.validate_refinement(params).await {
-            Ok(result) => {
-                let json = serde_json::to_value(result)
-                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
-                Ok(json)
-            }
-            Err(e) => {
-                tracing::error!("Validation error: {}", e);
-                Err(tower_lsp::jsonrpc::Error::internal_error())
-            }
-        }
+        let uri = params.text_document.uri.clone();
+        let snapshot = self.refinement_snapshot(&uri)?;
+        let result = self
+            .refinement_validator
+            .validate_source(params, &snapshot.text)
+            .await;
+        self.refinement_response(&uri, &snapshot, result)
     }
 
     /// Handle verum/promoteToChecked custom request
@@ -2239,17 +2254,13 @@ impl Backend {
             params.text_document.uri
         );
 
-        match self.refinement_validator.promote_to_checked(params).await {
-            Ok(result) => {
-                let json = serde_json::to_value(result)
-                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
-                Ok(json)
-            }
-            Err(e) => {
-                tracing::error!("Promote to checked error: {}", e);
-                Err(tower_lsp::jsonrpc::Error::internal_error())
-            }
-        }
+        let uri = params.text_document.uri.clone();
+        let snapshot = self.refinement_snapshot(&uri)?;
+        let result = self
+            .refinement_validator
+            .promote_source(params, &snapshot.text)
+            .await;
+        self.refinement_response(&uri, &snapshot, result)
     }
 
     /// Handle verum/inferRefinement custom request
@@ -2259,17 +2270,13 @@ impl Backend {
     ) -> Result<serde_json::Value> {
         tracing::debug!("Infer refinement requested for symbol: {}", params.symbol);
 
-        match self.refinement_validator.infer_refinement(params).await {
-            Ok(result) => {
-                let json = serde_json::to_value(result)
-                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
-                Ok(json)
-            }
-            Err(e) => {
-                tracing::error!("Infer refinement error: {}", e);
-                Err(tower_lsp::jsonrpc::Error::internal_error())
-            }
-        }
+        let uri = params.text_document.uri.clone();
+        let snapshot = self.refinement_snapshot(&uri)?;
+        let result = self
+            .refinement_validator
+            .infer_source(params, &snapshot.text)
+            .await;
+        self.refinement_response(&uri, &snapshot, result)
     }
 
     /// Handle `verum/getEscapeAnalysis` — detailed CBGR escape-analysis report
