@@ -36,6 +36,12 @@ struct Source {
     ast: Option<Module>,
     version: Option<i32>,
     owner: ModulePath,
+    module_id: Option<ModuleId>,
+}
+struct AnalysisReceipt {
+    file_id: FileId,
+    revision: Text,
+    reads: verum_modules::ModuleObservations,
 }
 #[derive(Default)]
 pub struct ProjectContext {
@@ -44,6 +50,8 @@ pub struct ProjectContext {
     root: Option<PathBuf>,
     library_roots: Map<Text, PathBuf>,
     revision: Text,
+    configuration: Text,
+    analyses: Map<PathBuf, AnalysisReceipt>,
     sources: Map<PathBuf, Source>,
     pub identities: List<SourceIdentity>,
     pub issues: List<Text>,
@@ -67,6 +75,7 @@ impl ProjectContext {
         self.root = Some(root);
         self.library_roots.clear();
         self.revision = Text::new();
+        self.analyses.clear();
         if let Some(roots) = options
             .and_then(|o| o.get("libraryRoots"))
             .and_then(|v| v.as_object())
@@ -81,6 +90,7 @@ impl ProjectContext {
     }
     pub fn invalidate(&mut self, reason: &str) {
         self.revision = Text::new();
+        self.analyses.clear();
         self.identities.clear();
         self.issues = List::from_iter([Text::from(reason)]);
     }
@@ -208,6 +218,10 @@ impl ProjectContext {
         for (prefix, path) in &roots {
             hash.update(format!("{prefix}:{path:?}\0").as_bytes());
         }
+        let configuration: Text = hex::encode(hash.clone().finalize()).into();
+        if configuration != self.configuration {
+            self.analyses.clear();
+        }
         for path in &paths {
             hash.update(path.to_string_lossy().as_bytes());
             hash.update([0]);
@@ -239,16 +253,17 @@ impl ProjectContext {
         for path in paths {
             control.check()?;
             let text = captured.remove(&path).unwrap();
-            let (file_id, ast, version) = if let Some((_, _, version, id, ast)) =
-                open.iter().find(|(p, ..)| p == &path)
-            {
-                (*id, ast.clone(), Some(*version))
-            } else if let Some(old) = self
+            let opened = open.iter().find(|(p, ..)| p == &path);
+            // Compiler source identity is independent of an editor incarnation.
+            // Reopening identical text must not rewrite every imported AST span.
+            let (file_id, ast, version) = if let Some(old) = self
                 .sources
                 .get(&path)
                 .filter(|old| old.text == text)
             {
-                (old.file_id, old.ast.clone(), None)
+                (old.file_id, old.ast.clone(), opened.map(|(_, _, version, ..)| *version))
+            } else if let Some((_, _, version, id, ast)) = opened {
+                (*id, ast.clone(), Some(*version))
             } else {
                 let uri = Url::from_file_path(&path).map_err(|_| anyhow::anyhow!("Source URI"))?;
                 let id = documents.get_file_id(&uri);
@@ -266,6 +281,7 @@ impl ProjectContext {
                     ast,
                     version,
                     owner: owners.remove(&path).unwrap(),
+                    module_id: self.sources.get(&path).and_then(|old| old.module_id),
                 },
             );
         }
@@ -291,6 +307,17 @@ impl ProjectContext {
             .map(|library| library.registry.deep_clone())
             .unwrap_or_else(ModuleRegistry::new);
         registry.set_cog_name(cog.as_str());
+        // Retain source identities across generations so adding a module does
+        // not renumber unrelated declarations and their export provenance.
+        for source in sources.values() {
+            if let Some(id) = source.module_id { registry.reserve_id(id); }
+        }
+        let mut source_paths: List<_> = sources.keys().cloned().collect();
+        source_paths.sort();
+        for path in source_paths {
+            let source = sources.get_mut(&path).unwrap();
+            source.module_id.get_or_insert_with(|| registry.allocate_id());
+        }
         let mut module_sources = Map::new();
         let mut issues = List::new();
         let mut ordered: List<_> = sources.values().collect();
@@ -302,11 +329,11 @@ impl ProjectContext {
                 continue;
             };
             // All cogs use the compiler's candidate and collision rules.
-            if let Err(error) = loader.load_module(&source.owner, registry.allocate_id()) {
+            if let Err(error) = loader.load_module(&source.owner, source.module_id.unwrap()) {
                 issues.push(error.to_string().into());
                 continue;
             }
-            let id = registry.allocate_id();
+            let id = source.module_id.unwrap();
             ensure!(
                 registry
                     .get_by_path(source.owner.to_string().as_str())
@@ -344,8 +371,8 @@ impl ProjectContext {
             .all_modules()
             .map(|(id, info)| (*id, info.path.clone()))
             .collect();
-        let registry = SharedModuleRegistry::from_registry(registry);
-        for (path, _, _, _, _) in &open {
+        let base = std::sync::Arc::new(registry);
+        for (path, _, _, document_file_id, _) in &open {
             control.check()?;
             let Some(source) = sources.get(path) else {
                 continue;
@@ -356,9 +383,22 @@ impl ProjectContext {
             }).unwrap_or(false) {
                 continue;
             }
-            let info = registry
-                .read()
-                .get_by_path(source.owner.to_string().as_str());
+            if let Some(receipt) = self.analyses.get_mut(path) {
+                let reusable = documents.with_document(&uri, |doc| {
+                    doc.file_id == receipt.file_id
+                        && doc.analysis_revision.as_deref() == Some(receipt.revision.as_str())
+                }).unwrap_or(false) && receipt.reads.rebase_if_unchanged(base.clone());
+                if reusable {
+                    documents.with_document_mut(&uri, |doc| {
+                        doc.analysis_revision = Some(revision.clone());
+                    });
+                    receipt.revision = revision.clone();
+                    continue;
+                }
+            }
+            let (observed, reads) = base.observe_reads();
+            let registry = SharedModuleRegistry::from_registry(observed);
+            let info = registry.read().get_by_path(source.owner.to_string().as_str());
             let Some(info) = info else {
                 documents.with_document_mut(&uri, |doc| {
                     doc.analysis_revision = Some(revision.clone());
@@ -410,6 +450,8 @@ impl ProjectContext {
                                 imports.resolve_import(decl, info.id, &exports, &module_paths)
                             {
                                 for binding in import.items {
+                                    // Navigation and type displays share the same dependency receipt.
+                                    registry.read().get(binding.source_module);
                                     let definition = definition_location(
                                         &registry,
                                         &module_sources,
@@ -446,6 +488,9 @@ impl ProjectContext {
                 }
                 Ok(())
             }).transpose()?;
+            self.analyses.insert(path.clone(), AnalysisReceipt {
+                file_id: *document_file_id, revision: revision.clone(), reads,
+            });
         }
         control.check()?;
         self.identities = sources
@@ -458,6 +503,8 @@ impl ProjectContext {
             })
             .collect();
         self.identities.sort_by(|a, b| a.uri.cmp(&b.uri));
+        self.analyses.retain(|path, _| open.iter().any(|(p, ..)| p == path));
+        self.configuration = configuration;
         self.sources = sources;
         self.issues = issues;
         self.revision = revision;

@@ -365,3 +365,49 @@ async fn interrupted_project_has_no_stale_verdict_and_recovers_on_next_request()
     assert_eq!(recovered["project_revision"], before["project_revision"]);
     assert_eq!(recovered["bindings"], before["bindings"]);
 }
+
+#[tokio::test]
+async fn independent_edits_reuse_checked_modules_but_advance_publication_revision() {
+    let project = Project::new();
+    let dependency = project.file("dependency.vr", DEP);
+    let main = project.open("main.vr", MAIN);
+    let before = project.snapshot(&main).await;
+    let backend = project.service.inner();
+    let checks = || backend.documents.with_document(&main, |doc| doc.project_check_count).unwrap();
+    let old = backend.documents.diagnostic_snapshot(&main).unwrap();
+    // Opening a previously captured dependency gives it a new editor incarnation,
+    // but must preserve the compiler identity of its unchanged source.
+    backend.documents.open(dependency.clone(), DEP.into(), 1);
+    project.snapshot(&dependency).await;
+    // Insert before existing paths in lexical order: IDs must not be renumbered.
+    let independent = project.open("aaa.vr", "fn unrelated() -> Int { 1 }");
+    project.snapshot(&independent).await;
+    assert_eq!(checks(), 1);
+    let after = project.snapshot(&main).await;
+    assert_ne!(before["project_revision"], after["project_revision"]);
+    assert!(!backend.documents.is_current_snapshot(&main, &old));
+    assert_eq!(before["bindings"], after["bindings"]);
+    backend.documents.try_update(&independent, "fn unrelated() -> Int { true }".into(), 2).unwrap();
+    assert!(errors(&project.snapshot(&main).await).is_empty());
+    assert_eq!(checks(), 1);
+    backend.documents.close(&dependency);
+    std::fs::write(dependency.to_file_path().unwrap(), DEP.replace("-> Int { 42 }", "-> Bool { true }")).unwrap();
+    assert!(!errors(&project.snapshot(&main).await).is_empty());
+    assert_eq!(checks(), 2);
+}
+
+#[tokio::test]
+async fn reexport_changes_and_new_previously_missing_modules_invalidate_observations() {
+    let project = Project::new();
+    let dependency = project.file("dependency.vr", DEP);
+    project.file("facade.vr", "public mount dependency.*;");
+    let main = project.open("main.vr", &MAIN.replace("dependency", "facade"));
+    let initial = project.snapshot(&main).await;
+    assert!(errors(&initial).is_empty(), "{initial:#}");
+    std::fs::write(dependency.to_file_path().unwrap(), DEP.replace("-> Int { 42 }", "-> Bool { true }")).unwrap();
+    assert!(!errors(&project.snapshot(&main).await).is_empty());
+    std::fs::remove_file(dependency.to_file_path().unwrap()).unwrap();
+    assert!(!errors(&project.snapshot(&main).await).is_empty());
+    project.file("dependency.vr", DEP);
+    assert!(errors(&project.snapshot(&main).await).is_empty());
+}

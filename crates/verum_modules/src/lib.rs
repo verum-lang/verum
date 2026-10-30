@@ -117,6 +117,8 @@ pub mod cache;
 pub mod cog_resolver;
 pub mod coherence;
 pub mod dependency;
+mod observations;
+pub use observations::ModuleObservations;
 pub mod error;
 pub mod exports;
 pub mod imports;
@@ -320,6 +322,7 @@ pub struct ModuleRegistry {
     /// `ModuleLoader::cog_name` so that loader and registry agree on
     /// the same canonical form.
     cog_name: Option<String>,
+    observations: Option<std::sync::Arc<parking_lot::Mutex<observations::Reads>>>,
 }
 
 impl ModuleRegistry {
@@ -330,6 +333,7 @@ impl ModuleRegistry {
             path_aliases: Map::new(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(0)),
             cog_name: None,
+            observations: None,
         }
     }
 
@@ -348,6 +352,7 @@ impl ModuleRegistry {
     /// (loader for resolution, type-resolver for import lookup, CLI
     /// audits for path normalisation).
     pub fn register_path_alias(&mut self, alias: impl Into<Text>, canonical: impl Into<Text>) {
+        self.observe_mutation();
         self.path_aliases.insert(alias.into(), canonical.into());
     }
 
@@ -361,6 +366,7 @@ impl ModuleRegistry {
     /// Set the primary cog name (for path canonicalisation on
     /// register / get_by_path).
     pub fn set_cog_name(&mut self, cog_name: impl Into<String>) {
+        self.observe_mutation();
         self.cog_name = Some(cog_name.into());
     }
 
@@ -393,6 +399,14 @@ impl ModuleRegistry {
         ModuleId::new(id)
     }
 
+    /// Reserve an externally assigned identity before allocating new modules.
+    pub fn reserve_id(&self, id: ModuleId) {
+        self.next_id.fetch_max(
+            id.as_u32().checked_add(1).expect("module identity space exhausted"),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+
     /// Hand out the underlying Arc for the ModuleId allocator so other
     /// subsystems (ModuleLoader, Session, infer) can share the same
     /// monotonic counter. Without this, each subsystem's own
@@ -421,6 +435,8 @@ impl ModuleRegistry {
     /// created by the loader, exports filled in by a later pass)
     /// coalesce into a single authoritative record.
     pub fn register(&mut self, module: ModuleInfo) -> ModuleId {
+        self.observe_mutation();
+        self.reserve_id(module.id);
         let path_str = module.path.to_string();
         let canonical = self.canonical_key(&path_str);
         let path_key = Text::from(canonical);
@@ -453,6 +469,7 @@ impl ModuleRegistry {
 
     /// Get a module by ID
     pub fn get(&self, id: ModuleId) -> Maybe<Shared<ModuleInfo>> {
+        self.observe(|reads| { reads.ids.insert(id); });
         self.modules.get(&id).cloned()
     }
 
@@ -467,6 +484,11 @@ impl ModuleRegistry {
     /// catch the bare-key registration, then tries adding the `core.`
     /// prefix in the reverse direction.
     pub fn get_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
+        self.observe(|reads| { reads.paths.insert(path.into()); });
+        self.lookup_by_path(path)
+    }
+
+    fn lookup_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         let canonical = self.canonical_key(path);
         if let Some(id) = self.path_to_id.get(&Text::from(canonical.clone())) {
             return self.modules.get(id).cloned();
@@ -498,15 +520,20 @@ impl ModuleRegistry {
     /// subsystems route through one alias map — installed by the
     /// pipeline at startup, queried by every consumer.
     pub fn get_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
+        self.observe(|reads| { reads.aliases.insert(path.into()); });
+        self.lookup_by_path_aliased(path)
+    }
+
+    fn lookup_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         // 1. Direct lookup with canonical-key normalisation.
-        if let Maybe::Some(m) = self.get_by_path(path) {
+        if let Maybe::Some(m) = self.lookup_by_path(path) {
             return Maybe::Some(m);
         }
         // 2. Alias map. Two-level lookup (alias → canonical → ModuleInfo)
         //  rather than recursive — alias chains are forbidden by
         //  convention so we never need more than one hop.
         if let Some(canonical) = self.path_aliases.get(&Text::from(path)) {
-            if let Maybe::Some(m) = self.get_by_path(canonical.as_str()) {
+            if let Maybe::Some(m) = self.lookup_by_path(canonical.as_str()) {
                 return Maybe::Some(m);
             }
         }
@@ -515,6 +542,7 @@ impl ModuleRegistry {
 
     /// Get all modules
     pub fn all_modules(&self) -> impl Iterator<Item = (&ModuleId, &Shared<ModuleInfo>)> {
+        self.observe(|reads| reads.all = true);
         self.modules.iter()
     }
 
@@ -532,6 +560,7 @@ impl ModuleRegistry {
         target_id: ModuleId,
         source_exports: &exports::ExportTable,
     ) -> usize {
+        self.observe_mutation();
         let mut newly_added = 0usize;
         if let Some(existing) = self.modules.get(&target_id) {
             // Clone the existing ModuleInfo
@@ -564,11 +593,12 @@ impl ModuleRegistry {
 
     /// Check if a module exists
     pub fn contains(&self, id: ModuleId) -> bool {
-        self.modules.contains_key(&id)
+        self.get(id).is_some()
     }
 
     /// Clear all modules
     pub fn clear(&mut self) {
+        self.observe_mutation();
         self.modules.clear();
         self.path_to_id.clear();
     }
@@ -590,6 +620,7 @@ impl ModuleRegistry {
     /// passes (which see fewer exports → fewer name candidates →
     /// faster resolution).
     pub fn retain_paths(&mut self, keep: &std::collections::HashSet<String>) -> (usize, usize) {
+        self.observe_mutation();
         let pre_len = self.modules.len();
         // Build the surviving id-set in one pass over the small
         // `path_to_id` index (cheaper than walking every ModuleInfo).
@@ -615,11 +646,13 @@ impl ModuleRegistry {
 
     /// Get the number of registered modules
     pub fn len(&self) -> usize {
+        self.observe(|reads| reads.length = true);
         self.modules.len()
     }
 
     /// Check if the registry is empty
     pub fn is_empty(&self) -> bool {
+        self.observe(|reads| reads.empty = true);
         self.modules.is_empty()
     }
 }
@@ -755,6 +788,7 @@ impl ModuleRegistry {
             path_aliases: self.path_aliases.clone(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(max_id + 1)),
             cog_name: self.cog_name.clone(),
+            observations: self.observations.clone(),
         }
     }
 
