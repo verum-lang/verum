@@ -88,3 +88,4 @@ import VerumExternalReplay.ObservableLasso
 import VerumExternalReplay.ExactCardinality
 import VerumExternalReplay.CanonicalProduct
 import VerumExternalReplay.PersistentEvents
+import VerumExternalReplay.ClassifiedMass
