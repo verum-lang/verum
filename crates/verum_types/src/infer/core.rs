@@ -1403,8 +1403,9 @@ impl TypeChecker {
     /// Read a descriptor by its declaration identity. Older metadata can index
     /// a leaf declaration under its archive bundle or a root-stripped key;
     /// those keys are conveniences, never proof of another declaring owner.
-    /// Probe only the existing ordered index along the module's ancestors, so
-    /// a field lookup does not scan the complete archive.
+    /// Probe only the existing ordered index along the module's ancestors and
+    /// its bare lookup alias, so a field lookup does not scan the complete archive.
+    /// Every key must still carry the exact requested declaration owner.
     pub(super) fn metadata_type_with_declaring_key<'a>(
         metadata: &'a crate::core_metadata::CoreMetadata,
         declaring_key: &Text,
@@ -1426,7 +1427,7 @@ impl TypeChecker {
                 return Some(descriptor);
             }
             let Some((parent, _)) = module.rsplit_once('.') else {
-                return None;
+                return exact(&name.into());
             };
             module = parent;
             if let Some(descriptor) = exact(&format!("{module}.{name}").into()) {
@@ -2104,6 +2105,17 @@ impl TypeChecker {
             .map(|(ty, _)| ty)
     }
 
+    /// Importing a declaration requires public visibility. Internal field and
+    /// signature resolution uses the same loader without exporting private types.
+    pub(super) fn ensure_public_mounted_type_loaded_qualified(
+        &mut self,
+        name: &str,
+        canonical_module: &str,
+    ) -> Option<Type> {
+        self.load_mounted_type(name, canonical_module, true)
+            .map(|(ty, _)| ty)
+    }
+
     /// Keep the selected registration key with its template. A same-owner
     /// flat template and a separately loaded qualified template may contain
     /// different parameter variables even though they denote one declaration.
@@ -2111,6 +2123,15 @@ impl TypeChecker {
         &mut self,
         name: &str,
         canonical_module: &str,
+    ) -> Option<(Type, Text)> {
+        self.load_mounted_type(name, canonical_module, false)
+    }
+
+    fn load_mounted_type(
+        &mut self,
+        name: &str,
+        canonical_module: &str,
+        public_only: bool,
     ) -> Option<(Type, Text)> {
         let metadata = match &self.core_metadata {
             Maybe::Some(m) => m.clone(),
@@ -2126,6 +2147,9 @@ impl TypeChecker {
             .unwrap_or_else(|| (name.into(), canonical_module.into()));
         let owning_key: Text = format!("{declared_module}.{declared_name}").into();
         let desc = Self::metadata_type_with_declaring_key(&metadata, &owning_key)?.clone();
+        if public_only && !desc.is_public {
+            return None;
+        }
         self.register_metadata_record_shape(&desc);
 
         // Run the standard SIMPLE-name lazy load first (bounded

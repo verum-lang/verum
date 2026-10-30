@@ -1921,8 +1921,19 @@ impl TypeChecker {
                 }
                 let lo = Text::from(format!("{}.", m).as_str());
                 let hi = Text::from(format!("{}/", m).as_str());
-                md.functions.range(lo.clone()..hi.clone()).next().is_some()
-                    || md.types.range(lo..hi).next().is_some()
+                // Index aliases do not establish namespace ownership. A
+                // root-stripped key may belong to core.X, but an independent
+                // library's X must never be redirected into core.X.
+                let owns_namespace = |entry: &Text, origin: &Maybe<Text>| {
+                    let owner = origin.as_ref().filter(|owner| !owner.is_empty())
+                        .unwrap_or(entry).as_str();
+                    owner == candidate || owner.strip_prefix(candidate)
+                        .is_some_and(|suffix| suffix.starts_with('.'))
+                };
+                md.functions.range(lo.clone()..hi.clone()).any(|(_, descriptor)|
+                    owns_namespace(&descriptor.module_path, &descriptor.origin_module_path))
+                    || md.types.range(lo..hi).any(|(_, descriptor)|
+                        owns_namespace(&descriptor.module_path, &descriptor.origin_module_path))
             };
             // Some stdlib files declare `module sys.mmio;` without the cog
             // segment, so their descriptors are keyed without `core.` —
@@ -1993,46 +2004,13 @@ impl TypeChecker {
                         reg_canon,
                     );
                 }
-                // ORDER MATTERS, and it was established by measurement, not
-                // by preference — the other order regressed two specs.
-                //
-                // NOT FIXED HERE, and worth stating: a stdlib name still wins
-                // over a project module that shares it, because the metadata
-                // is asked first. That was true of the hardcoded list too —
-                // all 49 of its names shadowed any project module — so this
-                // change neither introduces nor removes the shadowing. Making
-                // the project module win is a separate change with its own
-                // controls; bundling it here is what caused the regression
-                // above.
-                //
-                // The ARCHIVE METADATA decides first, and answers with the
-                // `core.`-prefixed form — the spelling every consumer
-                // downstream keys on. It is what the list was standing in
-                // for, and strictly better: the list was short by six
-                // directories (`hash`, `id`, `mac`, `random`, `script`,
-                // `subtle`), so `mount id.snowflake.{X}` answered E402
-                // "module not found" — the path was never rewritten, and
-                // relative resolution, meaningless for a stdlib path,
-                // produced the name the error then reported.
-                //
-                // The registry comes SECOND, for paths the archive does not
-                // know — project modules. Answering from it FIRST was tried
-                // and REGRESSED two specs: `mount sys.mmio;` still resolved,
-                // but bound nothing (`E100: unbound variable: barrier`),
-                // because the registry's canonical path is not always the
-                // `core.`-prefixed form the binder expects. The lookup
-                // succeeded and the binding missed — the two paths have to
-                // be the same string, and the metadata's is the one that is.
-                //
-                // The list is GONE, and that is measured rather than assumed:
-                // with the instrument above extended to print
-                // `in_list && !reg_bare && !meta_core`, all 49 of its names
-                // came back false — every one already known to the registry or
-                // the metadata. The 49th, `cog`, produced no trace line at all,
-                // because `cog` is a KEYWORD that resets the path to the cog
-                // root (T1008): it could never have been reached as a path
-                // prefix. So the list was redundant on 48 names and unreachable
-                // on one.
+                // A declared exact module owns its spelling. Prefix aliases
+                // are considered only when no such module exists.
+                if let Some(found) = registry.get_by_path(path_str)
+                    && found.path.to_string() == path_str
+                {
+                    return path_str.into();
+                }
                 if meta_knows_core_form {
                     Text::from(core_form)
                 } else if let verum_common::Maybe::Some(found) =
@@ -2920,50 +2898,11 @@ impl TypeChecker {
                     // same short name cannot supply a missing export.
                     let mut value_bound_from_metadata = false;
                     if let Some((scheme, resolved_key)) = self
-                        .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
+                        .resolve_value_via_metadata_reexports(module_path.as_str(), item_name)
                     {
                         self.insert_fn_scheme_guarded(bind_name, scheme);
                         self.record_mount_binding(bind_name, &resolved_key);
                         value_bound_from_metadata = true;
-                    }
-
-                    // A MOUNTED CONST IS BOUND BY ITS MOUNT, NOT BY AMBIENT
-                    // LUCK (A141).
-                    //
-                    // `resolve_function_via_metadata_reexports` above returns
-                    // None for a const by design, so nothing here bound one —
-                    // and `mount core.sys.darwin.io.{MAX_EVENTS};` still
-                    // printed 256, because the eager registration in
-                    // `infer/env.rs` publishes every public const under its
-                    // BARE name whether or not anybody mounts it. The mount
-                    // was decorative, and the proof is the renamed form:
-                    // `{MAX_EVENTS as M}` has no ambient `M` to fall back on,
-                    // so it reached the E401 below with
-                    // `cannot find MAX_EVENTS in module core.sys.darwin.io`
-                    // — and the error aborts the whole mount statement, which
-                    // is why A141 recorded the rename as breaking the plain
-                    // name too.
-                    //
-                    // Consts live in `metadata.functions` lowered to zero-arg
-                    // entries carrying `is_const` (see FunctionDescriptor), so
-                    // the binding is the static one's twin: qualified key,
-                    // descriptor type, bound under `bind_name`.
-                    if !value_bound_from_metadata
-                        && let Maybe::Some(md) = &self.core_metadata.clone()
-                    {
-                        let ckey: Text =
-                            format!("{}.{}", module_path.as_str(), item_name).into();
-                        if let Some(fd) = md.functions.get(&ckey)
-                            && fd.is_const
-                        {
-                            let ty = crate::infer::helpers::parse_descriptor_type_string(
-                                fd.return_type.as_str(),
-                            );
-                            self.ctx
-                                .env
-                                .insert_value(bind_name, crate::context::TypeScheme::mono(ty));
-                            value_bound_from_metadata = true;
-                        }
                     }
 
                     // T0575 — the TYPE twin of the free-fn fallback
@@ -3013,7 +2952,7 @@ impl TypeChecker {
                         module_path.as_str(),
                     );
                     let type_bound_from_metadata = self
-                        .ensure_mounted_type_loaded_qualified(
+                        .ensure_public_mounted_type_loaded_qualified(
                             item_name,
                             module_path.as_str(),
                         )
@@ -3404,7 +3343,7 @@ impl TypeChecker {
                             // must not downgrade a builtin's poly scheme.
                             self.insert_fn_scheme_guarded(register_name, scheme);
                         } else if let Some((scheme, resolved_key)) = {
-                            let s = self.resolve_function_via_metadata_reexports(
+                            let s = self.resolve_value_via_metadata_reexports(
                                 resolved_module_path.as_str(),
                                 item_name,
                             );
@@ -3575,6 +3514,11 @@ impl TypeChecker {
                             self.ctx
                                 .env
                                 .insert_value(register_name, TypeScheme::mono(const_type));
+                        } else if let Some((scheme, key)) = self.resolve_value_via_metadata_reexports(
+                            resolved_module_path.as_str(), item_name,
+                        ) {
+                            self.ctx.env.insert_value(register_name, scheme);
+                            self.record_mount_binding(register_name, &key);
                         } else {
                             // Not found directly — follow re-export chain through submodules.
                             // This handles glob re-exports like `public mount atomic.*` in mod.vr
@@ -4081,7 +4025,7 @@ impl TypeChecker {
                 || occupant_is_ambient_builtin
             {
                 if let Some((scheme, resolved_key)) = self
-                    .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
+                    .resolve_value_via_metadata_reexports(module_path.as_str(), item_name)
                 {
                     self.insert_fn_scheme_guarded(bind_name, scheme);
                     self.record_mount_binding(bind_name, &resolved_key);
@@ -4104,7 +4048,7 @@ impl TypeChecker {
                         s.as_str() != module_path.as_str() || t.as_str() != item_name
                     })
                     && let Some((scheme, resolved_key)) =
-                        self.resolve_function_via_metadata_reexports(src.as_str(), true_name.as_str())
+                        self.resolve_value_via_metadata_reexports(src.as_str(), true_name.as_str())
                 {
                     self.insert_fn_scheme_guarded(bind_name, scheme);
                     self.record_mount_binding(bind_name, &resolved_key);
@@ -4200,42 +4144,11 @@ impl TypeChecker {
                         }
                     }
                     if let Some(ty) =
-                        self.ensure_mounted_type_loaded_qualified(&load_name, &canonical)
+                        self.ensure_public_mounted_type_loaded_qualified(&load_name, &canonical)
                     {
                         let bind = local_name.unwrap_or(item_name);
                         self.ctx.define_type(bind, ty);
                         return Ok(());
-                    }
-                    // A MOUNTED CONST DIES HERE TOO (A141, second site).
-                    //
-                    // The loader above answers for TYPES only, so a module
-                    // reaching this arm with a const in its surface raised
-                    // E401 naming an item its own diagnostic then LISTED:
-                    // `cannot find EAGAIN in module core.sys.darwin.errno`
-                    // followed by `exports 116 item(s); showing 10: …,
-                    // EAGAIN, …`. Measured 2026-09-13 — and the sibling
-                    // `core.sys.darwin.io.MAX_EVENTS` bound fine, because
-                    // that mount takes the OTHER arm, which already has the
-                    // const fallback. Two arms, one missing it.
-                    //
-                    // Consts live in `metadata.functions` lowered to zero-arg
-                    // entries carrying `is_const`; `canonical` / `load_name`
-                    // are already resolved through `module_reexports` above,
-                    // so the key is the one the archive files it under.
-                    if let Maybe::Some(md) = &self.core_metadata.clone() {
-                        let ckey: Text = format!("{}.{}", canonical, load_name).into();
-                        if let Some(fd) = md.functions.get(&ckey)
-                            && fd.is_const
-                        {
-                            let bind = local_name.unwrap_or(item_name);
-                            let ty = crate::infer::helpers::parse_descriptor_type_string(
-                                fd.return_type.as_str(),
-                            );
-                            self.ctx
-                                .env
-                                .insert_value(bind, crate::context::TypeScheme::mono(ty));
-                            return Ok(());
-                        }
                     }
                     return Err(TypeError::ImportItemNotFound {
                         item_name: Text::from(item_name),
@@ -4535,7 +4448,7 @@ impl TypeChecker {
     /// stdlib's inconsistent `module ...;` spelling: `core/sys/mmio.vr`
     /// declares `module sys.mmio;`, so its descriptors are keyed
     /// `sys.mmio.*` while users always mount `core.sys.mmio` (the same
-    /// mismatch `resolve_function_via_metadata_reexports` handles for a
+    /// mismatch `resolve_value_via_metadata_reexports` handles for a
     /// single named item).  Try the mount spelling, then the spelling
     /// with the leading cog segment dropped.
     /// Free functions a module declares, by RANGE query over the qualified
@@ -4650,7 +4563,7 @@ impl TypeChecker {
         // `module ...;` declarations — `core/sys/mmio.vr` declares
         // `module sys.mmio;`, so its descriptors are keyed `sys.mmio.*`
         // while users always mount `core.sys.mmio`. Same retry
-        // `resolve_function_via_metadata_reexports` does for one item.
+        // `resolve_value_via_metadata_reexports` does for one item.
         if let Some(stripped) = canonical.strip_prefix("core.") {
             self.own_surface_functions(stripped, &mut names);
             self.own_surface_contexts(stripped, &mut names);
@@ -5098,7 +5011,7 @@ impl TypeChecker {
                         // with the leaf would discard declaration/field authority.
                         // A failed source declaration keeps its own error path.
                         if !registered_successfully && !has_source_declaration {
-                            if let Some(ty) = self.ensure_mounted_type_loaded_qualified(
+                            if let Some(ty) = self.ensure_public_mounted_type_loaded_qualified(
                                 item_name,
                                 resolved_module_path.as_str(),
                             ) {
@@ -7838,8 +7751,8 @@ impl TypeChecker {
             .insert(Text::from(bare_name), resolved_key.clone());
     }
 
-    /// Returns the scheme AND the qualified key the descriptor was found
-    /// under (`<module_path>.<name>`), because the caller needs BOTH.
+    /// Resolve public metadata values with their declaration identity. Constants
+    /// carry their value type; functions carry their quantified callable scheme.
     ///
     /// MOUNT-BINDING-CARRY-1 (T0148): this function already establishes
     /// WHICH function a mounted name denotes — it probes the metadata and
@@ -7850,7 +7763,7 @@ impl TypeChecker {
     /// arriving through a re-export, so `mount core.prelude.{sqrt}` bound
     /// nothing and the call fell to bare-name resolution — 14 of the 20
     /// prelude math functions ran SQLite's SQL builtins.
-    fn resolve_function_via_metadata_reexports(
+    fn resolve_value_via_metadata_reexports(
         &mut self,
         module_path: &str,
         item_name: &str,
@@ -8029,6 +7942,9 @@ impl TypeChecker {
         };
 
         let fd = direct_fd.or(reexport_fd).or(onehop_fd)?;
+        if !fd.is_public {
+            return None;
+        }
         if let Ok(want) = std::env::var("VERUM_TRACE_FNSCHEME")
             && fd.name.as_str().contains(want.as_str())
         {
@@ -8056,9 +7972,11 @@ impl TypeChecker {
         }
 
         if fd.is_const {
-            // Const re-exports flow through the Const arm; refuse to
-            // synthesize a callable scheme here.
-            return None;
+            let ty = crate::infer::helpers::parse_descriptor_type_string(fd.return_type.as_str());
+            let owner = fd.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
+                .unwrap_or(&fd.module_path);
+            let key = verum_common::qualified_name::qualify_module_name(owner, fd.name.as_str());
+            return Some((TypeScheme::mono(ty), key));
         }
 
         let to_type =
@@ -8285,7 +8203,7 @@ impl TypeChecker {
     /// not re-export the name.
     ///
     /// This is the registry-recursion companion to
-    /// `resolve_function_via_metadata_reexports`: when the re-export source
+    /// `resolve_value_via_metadata_reexports`: when the re-export source
     /// is known but `metadata.functions` lacks its descriptor (the
     /// precompiled function table is keyed by declaring module and may omit
     /// e.g. `pure` leaf functions), the caller recurses into this source
@@ -8717,7 +8635,7 @@ impl TypeChecker {
         // `<module>.<item>` function descriptor; when present (a non-const
         // free fn — no parent type) the item is really a Function whose
         // kind defaulted to Type. Mirrors the direct-key probe in
-        // `resolve_function_via_metadata_reexports`. `core_metadata` only
+        // `resolve_value_via_metadata_reexports`. `core_metadata` only
         // ever holds stdlib descriptors, so this never misfires on user
         // modules (whose functions are resolved via their real AST above).
         if let Maybe::Some(metadata) = &self.core_metadata {
@@ -8726,7 +8644,7 @@ impl TypeChecker {
             // embedded stdlib is inconsistent about the leading `core.`
             // segment in `module ...;` decls (e.g. `module sys.mmio;`),
             // mirroring the dual probe in
-            // `resolve_function_via_metadata_reexports`.
+            // `resolve_value_via_metadata_reexports`.
             let fd_opt = metadata
                 .functions
                 .get(&Text::from(direct_key.as_str()))
@@ -17038,7 +16956,7 @@ impl TypeChecker {
         // This leg answers "what TYPE does this name have"; the identity
         // half is recorded too, keyed by the name the caller will write.
         if let Some((s, resolved_key)) =
-            self.resolve_function_via_metadata_reexports(canonical, name)
+            self.resolve_value_via_metadata_reexports(canonical, name)
         {
             self.record_mount_binding(name, &resolved_key);
             if crate::ctor_trace_enabled() {

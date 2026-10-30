@@ -57,6 +57,196 @@ fn module<'a>(modules: &'a [ModuleInfo], path: &str) -> &'a ModuleInfo {
 }
 
 #[test]
+fn bare_metadata_index_requires_exact_declaration_owner_when_mounted() {
+    use std::sync::Arc;
+    use verum_ast::FileId;
+    use verum_fast_parser::VerumParser;
+    use verum_modules::ModuleRegistry;
+    use verum_types::{TypeChecker, TypeError};
+
+    let mut metadata = CoreMetadata::default();
+    let mut descriptor = ty("Count", "portable.units", None, true);
+    descriptor.kind = TypeDescriptorKind::Alias {
+        target: "Int".into(),
+    };
+    metadata.types.insert("Count".into(), descriptor);
+    let mut registry = ModuleRegistry::new();
+    for info in project_modules(&metadata, None, |_| registry.allocate_id()).unwrap() {
+        registry.register(info);
+    }
+    let source = "mount portable.units.{Count as Local}; fn read(value: Local) -> Int { value }";
+    let ast = VerumParser::new()
+        .parse_module_str(source, FileId::new(1))
+        .unwrap();
+    for foreign_owner in [false, true] {
+        let mut candidate = metadata.clone();
+        if foreign_owner {
+            candidate
+                .types
+                .get_mut(&"Count".into())
+                .unwrap()
+                .module_path = "different.units".into();
+        }
+        let mut checker = TypeChecker::new_with_core(Arc::new(candidate));
+        checker.set_module_registry_direct(registry.deep_clone());
+        checker.set_current_module_path("consumer.main");
+        checker.register_builtins();
+        let mut errors = checker.prepare_module_declarations(&ast);
+        for item in &ast.items {
+            if let Err(error) = checker.check_item(item) {
+                errors.push(error);
+            }
+        }
+        errors.extend(checker.take_deferred_errors());
+        if foreign_owner {
+            assert!(
+                errors.iter().any(|error| matches!(error,
+                    TypeError::ImportItemNotFound { item_name, module_path, .. }
+                        if item_name == "Count" && module_path == "portable.units"
+                )),
+                "a public surface cannot authorize a foreign bare descriptor: {errors:?}"
+            );
+        } else {
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+    }
+}
+
+#[test]
+fn metadata_mount_fallbacks_preserve_declared_visibility() {
+    use std::sync::Arc;
+    use verum_ast::FileId;
+    use verum_fast_parser::VerumParser;
+    use verum_modules::ModuleRegistry;
+    use verum_types::{TypeChecker, TypeError};
+
+    for kind in ["type", "function", "constant", "static"] {
+        for public in [false, true] {
+            // The static metadata channel contains public declarations only.
+            if kind == "static" && !public {
+                continue;
+            }
+            for renamed in [false, true] {
+                for qualified_type_index in [false, true] {
+                    let mut metadata = CoreMetadata::default();
+                    if kind == "type" {
+                        let mut descriptor = ty("Entry", "portable.units", None, public);
+                        descriptor.kind = TypeDescriptorKind::Alias {
+                            target: "Int".into(),
+                        };
+                        let key = if qualified_type_index {
+                            "portable.units.Entry"
+                        } else {
+                            "Entry"
+                        };
+                        metadata.types.insert(key.into(), descriptor);
+                    } else if kind == "static" {
+                        metadata.statics.insert(
+                            "portable.units.Entry".into(),
+                            StaticDescriptor {
+                                name: "Entry".into(),
+                                module_path: "portable.units".into(),
+                                ty: "Int".into(),
+                                is_mut: false,
+                            },
+                        );
+                    } else {
+                        let mut descriptor = function("Entry", "portable.units", None, public);
+                        descriptor.is_const = kind == "constant";
+                        metadata
+                            .functions
+                            .insert("portable.units.Entry".into(), descriptor);
+                    }
+                    let mut registry = ModuleRegistry::new();
+                    for info in
+                        project_modules(&metadata, None, |_| registry.allocate_id()).unwrap()
+                    {
+                        registry.register(info);
+                    }
+                    let source = if renamed {
+                        "mount portable.units.{Entry as Local};"
+                    } else {
+                        "mount portable.units.{Entry};"
+                    };
+                    let ast = VerumParser::new()
+                        .parse_module_str(source, FileId::new(1))
+                        .unwrap();
+                    let mut checker = TypeChecker::new_with_core(Arc::new(metadata));
+                    checker.set_module_registry_direct(registry);
+                    checker.set_current_module_path("consumer.main");
+                    checker.register_builtins();
+                    let errors = checker.prepare_module_declarations(&ast);
+                    if public {
+                        assert!(errors.is_empty(), "{kind}, renamed={renamed}: {errors:?}");
+                        let binding = if renamed { "Local" } else { "Entry" };
+                        assert!(
+                            checker.resolved_type(binding).is_some()
+                                || checker.ctx_env_lookup(binding).is_some(),
+                            "unbound {kind} {binding}"
+                        );
+                    } else {
+                        assert!(
+                            errors.iter().any(|error| matches!(error,
+                                TypeError::ImportItemNotFound { item_name, module_path, .. }
+                                    if item_name == "Entry" && module_path == "portable.units"
+                            )),
+                            "private {kind}, renamed={renamed}: {errors:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn exact_library_namespace_wins_over_core_prefix_alias() {
+    use std::sync::Arc;
+    use verum_ast::FileId;
+    use verum_fast_parser::VerumParser;
+    use verum_modules::ModuleRegistry;
+    use verum_types::TypeChecker;
+    let mut metadata = CoreMetadata::default();
+    for (owner, target) in [("portable.units", "Int"), ("core.portable.units", "Bool")] {
+        let mut descriptor = ty("Count", owner, None, true);
+        descriptor.kind = TypeDescriptorKind::Alias {
+            target: target.into(),
+        };
+        metadata
+            .types
+            .insert(format!("{owner}.Count").into(), descriptor);
+    }
+    let mut registry = ModuleRegistry::new();
+    for info in project_modules(&metadata, None, |_| registry.allocate_id()).unwrap() {
+        registry.register(info);
+    }
+    for (owner, target, accepted) in [
+        ("portable.units", "Int", true),
+        ("core.portable.units", "Bool", true),
+        ("portable.units", "Bool", false),
+        ("core.portable.units", "Int", false),
+    ] {
+        let source =
+            format!("mount {owner}.{{Count}}; fn read(value: Count) -> {target} {{ value }}");
+        let ast = VerumParser::new()
+            .parse_module_str(&source, FileId::new(1))
+            .unwrap();
+        let mut checker = TypeChecker::new_with_core(Arc::new(metadata.clone()));
+        checker.set_module_registry_direct(registry.deep_clone());
+        checker.set_current_module_path("consumer.main");
+        checker.register_builtins();
+        let mut errors = checker.prepare_module_declarations(&ast);
+        for item in &ast.items {
+            if let Err(error) = checker.check_item(item) {
+                errors.push(error);
+            }
+        }
+        errors.extend(checker.take_deferred_errors());
+        assert_eq!(errors.is_empty(), accepted, "{source}: {errors:?}");
+    }
+}
+
+#[test]
 fn descriptor_identity_ignores_lookup_aliases_and_keeps_exact_source_owner() {
     let mut metadata = CoreMetadata::default();
     let descriptor = ty("Packet", "lib", Some("lib.source"), true);
@@ -81,6 +271,11 @@ fn descriptor_identity_ignores_lookup_aliases_and_keeps_exact_source_owner() {
     let modules = project(&metadata, None);
     let source = module(&modules, "lib.source");
     assert_eq!(source.exports.len(), 2);
+    assert_eq!(source.exports.module_path(), Some(&source.path));
+    assert!(source.exports.is_visible_from_path(
+        &"Packet".into(),
+        &verum_modules::ModulePath::from_str("consumer.main"),
+    ));
     assert_eq!(
         source.exports.get(&"Packet".into()).unwrap().source_module,
         source.id

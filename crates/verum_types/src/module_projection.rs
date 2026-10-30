@@ -209,14 +209,16 @@ pub fn project_modules(
         let Some(name) = local_name(&descriptor.name, module, &descriptor.module_path) else {
             continue;
         };
-        // Lowered constants retain this surface; descriptor.is_const carries
-        // their value contract to the archive-backed typechecker.
         insert(
             &mut surfaces,
             module,
             name,
             Declaration {
-                kind: ExportKind::Function,
+                kind: if descriptor.is_const {
+                    ExportKind::Const
+                } else {
+                    ExportKind::Function
+                },
                 visibility: visibility(descriptor.is_public),
                 owner: module.clone(),
                 original: name.into(),
@@ -237,7 +239,7 @@ pub fn project_modules(
             module,
             name,
             Declaration {
-                kind: ExportKind::Function,
+                kind: ExportKind::Static,
                 visibility: Visibility::Public,
                 owner: module.clone(),
                 original: name.into(),
@@ -313,6 +315,8 @@ pub fn project_modules(
         };
         let mut info =
             ModuleInfo::new(id, ModulePath::from_str(&module), ast, file_id, Text::new());
+        info.exports.set_module_id(id);
+        info.exports.set_module_path(info.path.clone());
         for (name, declaration) in surface {
             let source = *ids
                 .get(&declaration.owner)
