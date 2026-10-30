@@ -61,6 +61,23 @@ example : Periodic (word 3 1 alternating) 4 ∧ ¬ 4 ∣ 3 - 1 :=
   ⟨fun t => periodic_multiple (candidate_period (by decide) invisibleTransient) 2 t, by decide⟩
 example : Periodic (word 3 1 constant) 3 ∧ ¬ 3 ∣ 3 - 1 := ⟨fun _ => rfl, by decide⟩
 example : Candidate 1 0 constant 1 := ⟨by decide, by decide, fun _ _ => rfl⟩
+example (p : Nat) (positive : 0 < p) (h : Periodic (word 3 1 alternating) p) :
+    Candidate 3 1 alternating 2 :=
+  (pure_period_iff_full_candidate (by decide)).mp ⟨p, positive, h⟩
+example : ¬ ∃ p, 0 < p ∧ Periodic (word 3 1 visible) p := by
+  apply (exhaustion_reflects_nonperiodicity (by decide : 1 < 3)).mp
+  intro p positive bounded candidate
+  have mismatch := candidate.2.2 2 (by decide)
+  have options : p = 1 ∨ p = 2 := by omega
+  rcases options with one | two
+  · subst p; contradiction
+  · subst p; contradiction
+example : Periodic (word 3 1 constant) 2 :=
+  pure_period_implies_tail_period (by decide) (by decide : 0 < 3) (fun _ => rfl)
+example : ∀ d, Candidate 3 1 alternating d → 2 ≤ d :=
+  earlier_refusals_establish_minimum (fun d _ before valid => by
+    have bound := minimum d valid
+    omega)
 ''')
 
     def test_missing_premises_and_false_strengthenings_rejected(self):
@@ -87,7 +104,7 @@ example : Candidate 1 0 constant 1 := ⟨by decide, by decide, fun _ _ => rfl⟩
     def test_general_laws_have_checked_axioms(self):
         source = (ROOT / 'VerumExternalReplay/ObservableLasso.lean').read_text()
         names = re.findall(r'^theorem (\w+)', source, re.M)
-        self.assertEqual(len(names), 22)
+        self.assertEqual(len(names), 29)
         result = self.prove('\n'.join('#print axioms ObservableLasso.' + name for name in names))
         rosters = [d['data'] for d in result['diagnostics'] if d['severity'] == 'information']
         self.assertEqual(len(rosters), len(names))

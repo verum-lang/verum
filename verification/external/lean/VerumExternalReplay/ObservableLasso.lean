@@ -133,6 +133,70 @@ theorem period_labels (h : Periodic (word n r label) p) (within : i < n) :
   have bound : i % p < n := Nat.lt_of_le_of_lt (Nat.mod_le _ _) within
   simpa only [word, walk_initial within, walk_initial bound] using eq
 
+theorem walk_shift (same : walk n r a = walk n r b) (t : Nat) :
+    walk n r (a + t) = walk n r (b + t) := by
+  induction t with
+  | zero => simpa only [Nat.add_zero] using same
+  | succ t ih => exact congrArg (next n r) ih
+
+theorem walk_closure (closed : r < n) : walk n r n = walk n r r := by
+  have last : n = (n - 1) + 1 := by omega
+  calc
+    walk n r n = walk n r ((n - 1) + 1) := congrArg (walk n r) last
+    _ = next n r (n - 1) := congrArg (next n r) (walk_initial (by omega))
+    _ = r := ite_eq_right (by omega : ¬ n - 1 + 1 < n)
+    _ = walk n r r := (walk_initial closed).symm
+
+theorem eventual_tail_period (closed : r < n) (afterEntry : r ≤ t) :
+    word n r label (t + (n - r)) = word n r label t := by
+  have eq := walk_shift (walk_closure closed) (t - r)
+  have left : n + (t - r) = t + (n - r) := by omega
+  have right : r + (t - r) = t := by omega
+  rw [left, right] at eq
+  exact congrArg label eq
+
+-- Any pure period transports the eventual cycle equality back across the
+-- transient. This is needed before exhaustive rejection can be called an
+-- observable transient, rather than merely failure of one quotient family.
+theorem pure_period_implies_tail_period (closed : r < n) (positive : 0 < p)
+    (h : Periodic (word n r label) p) : Periodic (word n r label) (n - r) := by
+  intro t
+  have shift := periodic_multiple h r (t + (n - r))
+  have bound := Nat.mul_le_mul_right r (show 1 ≤ p by omega)
+  simp only [Nat.one_mul] at bound
+  have eventual := eventual_tail_period (label := label) closed
+    (show r ≤ t + p * r by omega)
+  have reorder : t + (n - r) + p * r = t + p * r + (n - r) := by omega
+  rw [reorder, eventual] at shift
+  exact shift.symm.trans (periodic_multiple h r t)
+
+theorem pure_period_iff_full_candidate (closed : r < n) :
+    (∃ p, 0 < p ∧ Periodic (word n r label) p) ↔ Candidate n r label (n - r) := by
+  constructor
+  · rintro ⟨p, positive, period⟩
+    have tail := pure_period_implies_tail_period closed positive period
+    exact ⟨by omega, Nat.dvd_refl _, fun _ within => period_labels tail within⟩
+  · intro h
+    exact ⟨n - r, h.1, candidate_period closed h⟩
+
+theorem exhaustion_reflects_nonperiodicity (closed : r < n) :
+    (∀ p, 0 < p → p ≤ n - r → ¬ Candidate n r label p) ↔
+      ¬ ∃ p, 0 < p ∧ Periodic (word n r label) p := by
+  constructor
+  · intro excluded pure
+    exact excluded (n - r) (Nat.sub_pos_of_lt closed) (Nat.le_refl _)
+      ((pure_period_iff_full_candidate closed).mp pure)
+  · intro absent p _ _ h
+    exact absent ⟨p, h.1, candidate_period closed h⟩
+
+theorem earlier_refusals_establish_minimum
+    (earlier : ∀ d, 0 < d → d < p → ¬ Candidate n r label d) :
+    ∀ d, Candidate n r label d → p ≤ d := by
+  intro d valid
+  by_cases before : d < p
+  · exact False.elim (earlier d valid.1 before valid)
+  · omega
+
 -- Minimality among checked candidates implies minimality among ALL positive
 -- observable periods, including periods not dividing the raw cycle length.
 theorem minimal_candidate_primitive (closed : r < n) (h : Candidate n r label p)
