@@ -486,7 +486,16 @@ impl VbcCodegen {
         } else {
             None
         };
+        // The annotation describes exactly this initializer, not awaits inside
+        // its arguments or nested blocks. Parentheses preserve that authority.
+        let saved_expected_span = self.ctx.expected_value_span.take();
+        self.ctx.expected_value_span = ty.and_then(|_| value).map(|value| {
+            let mut value = value;
+            while let verum_ast::ExprKind::Paren(inner) = &value.kind { value = inner; }
+            value.span
+        });
         let result = self.compile_let_inner(pattern, ty, value);
+        self.ctx.expected_value_span = saved_expected_span;
         if result.is_ok()
             && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
         {

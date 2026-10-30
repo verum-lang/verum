@@ -198,6 +198,8 @@ pub struct CodegenContext {
     pub current_return_type_full: Option<String>,
     /// Exact declaration type for a contextual generic result.
     pub expected_value_type: Option<TypeRef>,
+    /// Exact expression authorized to consume contextual declaration evidence.
+    pub expected_value_span: Option<verum_ast::Span>,
 
     /// Inner generic args of the current function's return type, when
     /// known.  For `fn f() -> Result<T, ConnectionError>` this carries
@@ -1032,6 +1034,8 @@ pub struct ClosureCompilationContext {
     pub current_return_type_full: Option<String>,
     /// Exact declaration type for a contextual generic result.
     pub expected_value_type: Option<TypeRef>,
+    /// Exact expression authorized to consume contextual declaration evidence.
+    pub expected_value_span: Option<verum_ast::Span>,
     /// Saved reference-binding names (for the `*reference` Deref lowering).
     pub reference_bindings: std::collections::HashSet<String>,
     /// Array layout facts belong to the saved function's declaration IDs.
@@ -1698,6 +1702,7 @@ impl CodegenContext {
             current_return_type_name: None,
             current_return_type_full: None,
             expected_value_type: None,
+            expected_value_span: None,
             current_impl_type_name: None,
             current_return_type_inner: None,
             constants: Vec::new(),
@@ -2792,6 +2797,7 @@ impl CodegenContext {
         self.clear_all_raw_pointers();
 
         self.expected_value_type = None;
+        self.expected_value_span = None;
         self.current_function = Some(name.to_string());
         self.in_function = true;
         self.return_type = return_type;
@@ -2820,6 +2826,7 @@ impl CodegenContext {
         self.current_return_type_name = None;
         self.current_return_type_full = None;
         self.expected_value_type = None;
+        self.expected_value_span = None;
         self.current_return_type_inner = None;
         self.current_impl_type_name = None;
 
@@ -2880,8 +2887,9 @@ impl CodegenContext {
     pub fn push_disambig_context(
         &mut self,
         new_name: Option<String>,
-    ) -> (Option<String>, Option<Vec<String>>, Option<TypeRef>) {
+    ) -> (Option<String>, Option<Vec<String>>, Option<TypeRef>, Option<verum_ast::Span>) {
         let prev_expected = self.expected_value_type.take();
+        let prev_span = self.expected_value_span.take();
         let prev_name = self.current_return_type_name.take();
         let prev_inner = self.current_return_type_inner.take();
         self.current_return_type_name = new_name;
@@ -2897,14 +2905,15 @@ impl CodegenContext {
         // the field is already bounded to its initializer by
         // `compile_let`, which is the only writer.
         self.current_return_type_full = None;
-        (prev_name, prev_inner, prev_expected)
+        (prev_name, prev_inner, prev_expected, prev_span)
     }
 
     /// Restore the variant-disambiguation context saved by
     /// [`push_disambig_context`](Self::push_disambig_context).
-    pub fn pop_disambig_context(&mut self, saved: (Option<String>, Option<Vec<String>>, Option<TypeRef>)) {
-        let (name, inner, expected) = saved;
+    pub fn pop_disambig_context(&mut self, saved: (Option<String>, Option<Vec<String>>, Option<TypeRef>, Option<verum_ast::Span>)) {
+        let (name, inner, expected, span) = saved;
         self.expected_value_type = expected;
+        self.expected_value_span = span;
         self.current_return_type_name = name;
         self.current_return_type_inner = inner;
     }
@@ -4758,6 +4767,7 @@ impl CodegenContext {
             current_return_type_name: self.current_return_type_name.clone(),
             current_return_type_full: self.current_return_type_full.clone(),
             expected_value_type: self.expected_value_type.clone(),
+            expected_value_span: self.expected_value_span,
             reference_bindings: self.reference_bindings.clone(),
             byte_array_vars: self.byte_array_vars.clone(),
             fixed_array_counts: self.fixed_array_counts.clone(),
@@ -4778,6 +4788,7 @@ impl CodegenContext {
         self.current_return_type_name = saved.current_return_type_name;
         self.current_return_type_full = saved.current_return_type_full;
         self.expected_value_type = saved.expected_value_type;
+        self.expected_value_span = saved.expected_value_span;
         self.labels = saved.labels;
         self.forward_jumps = saved.forward_jumps;
         self.loop_stack = saved.loop_stack;
@@ -5873,11 +5884,16 @@ mod tests {
     #[test]
     fn push_pop_disambig_context_round_trips_both_fields() {
         let mut ctx = CodegenContext::new();
+        let span = verum_ast::Span::new(10, 20, verum_ast::Span::dummy().file_id);
+        ctx.expected_value_type = Some(TypeRef::Concrete(crate::types::TypeId::INT));
+        ctx.expected_value_span = Some(span);
         ctx.current_return_type_name = Some("Result".to_string());
         ctx.current_return_type_inner =
             Some(vec!["Int".to_string(), "ConnectionError".to_string()]);
 
         let saved = ctx.push_disambig_context(Some("Maybe".to_string()));
+        assert!(ctx.expected_value_type.is_none());
+        assert!(ctx.expected_value_span.is_none());
         assert_eq!(ctx.current_return_type_name.as_deref(), Some("Maybe"));
         assert!(
             ctx.current_return_type_inner.is_none(),
@@ -5885,6 +5901,8 @@ mod tests {
         );
 
         ctx.pop_disambig_context(saved);
+        assert_eq!(ctx.expected_value_type, Some(TypeRef::Concrete(crate::types::TypeId::INT)));
+        assert_eq!(ctx.expected_value_span, Some(span));
         assert_eq!(ctx.current_return_type_name.as_deref(), Some("Result"));
         assert_eq!(
             ctx.current_return_type_inner.as_deref(),

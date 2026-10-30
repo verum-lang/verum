@@ -604,7 +604,10 @@ impl<'a> BytecodeSpecializer<'a> {
                     _ => {}
                 }
             }
-            I::TypeResource { type_ref, .. } | I::LoadT { type_ref, .. } | I::TypeLayout { type_ref, .. } => {
+            I::DropTyped { type_ref, .. }
+            | I::TypeResource { type_ref, .. }
+            | I::LoadT { type_ref, .. }
+            | I::TypeLayout { type_ref, .. } => {
                 *type_ref = self.substitution.apply(type_ref);
             }
             // NewG carries RUNTIME type-argument REGISTERS on the wire
@@ -809,6 +812,7 @@ impl<'a> BytecodeSpecializer<'a> {
     fn written_reg(instr: &crate::instruction::Instruction) -> Option<crate::instruction::Reg> {
         use crate::instruction::Instruction as I;
         match instr {
+            I::DropTyped { src, .. } => Some(*src),
             I::Mov { dst, .. }
             | I::LoadI { dst, .. }
             | I::TypeResource { dst, .. }

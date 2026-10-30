@@ -80,7 +80,10 @@ pub fn discover_call_instantiations(
     graph: &mut InstantiationGraph,
 ) -> Result<(), MonoPhaseError> {
     for instr in instructions {
-        if let Some((callee, args)) = concrete_call(module, instr, function_base) {
+        for (callee, args) in concrete_call(module, instr, function_base)
+            .into_iter()
+            .chain(concrete_drop_calls(module, instr))
+        {
             record_concrete_instantiation(
                 graph,
                 callee,
@@ -90,6 +93,29 @@ pub fn discover_call_instantiations(
         }
     }
     Ok(())
+}
+
+/// Destruction can call generic user glue even though it has no CallG operand.
+/// Deferred declarations are revisited after specialization; missing evidence
+/// remains a runtime/native refusal, not an invented monomorphization edge.
+pub(super) fn concrete_drop_calls(
+    module: &VbcModule,
+    instr: &Instruction,
+) -> Vec<(FunctionId, Vec<TypeRef>)> {
+    let Instruction::DropTyped { type_ref, .. } = instr else {
+        return Vec::new();
+    };
+    if !concrete(type_ref) {
+        return Vec::new();
+    }
+    crate::drop_plan::build(module, type_ref)
+        .map(|plan| {
+            plan.generic_calls()
+                .into_iter()
+                .map(|(id, args)| (id, args.into()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Initial sites and nested sites have the same fail-closed resource policy.

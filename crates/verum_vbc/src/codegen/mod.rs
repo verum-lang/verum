@@ -64,6 +64,7 @@ mod statements;
 mod value_uses;
 mod place_copies;
 mod formal_parameters;
+mod constructor_types;
 mod declaration_interface;
 mod field_visibility;
 
@@ -10175,126 +10176,64 @@ impl VbcCodegen {
                                 })
                                 .collect();
 
-                            // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1)
-                            // — CARRY the impl block's associated-type
-                            // bindings (`type Item = &T;`).  Resolve each
-                            // binding's AST type against the SAME
-                            // TypeParamId numbering the parent's method
-                            // descriptors use: parent `type_params` first
-                            // (mirrors `compile_function`'s
-                            // `method_generic_param_map` step 1), impl-block
-                            // generics after (sorted — mirrors the dice-6
-                            // fallback), so a binding's
-                            // `TypeRef::Generic(0)` IS the parent's first
-                            // generic param and the archive-driven
-                            // typechecker can substitute it from the
-                            // receiver's type args.  Pre-carry these
-                            // bindings were dropped at the VBC boundary —
-                            // `::Item<...>` projections over archive-loaded
-                            // iterator types could never resolve (E103 on
-                            // iterator-closure field access).
+                            // Associated bindings are expressed in the nominal owner's
+                            // binder scope. Recover that correspondence from the actual
+                            // impl receiver, never parameter spelling or declaration order.
                             let assoc_bindings: Vec<(StringId, crate::types::TypeRef)> = {
-                                let mut param_map: std::collections::HashMap<String, u16> =
-                                    std::collections::HashMap::new();
-                                let mut next_pid: u16 = 0;
-                                if let Some(&parent_tid) =
-                                    self.type_name_to_id.get(ty_name.as_str())
-                                {
-                                    if let Some(parent_desc) =
-                                        self.type_by_id(parent_tid)
-                                    {
-                                        for tp in parent_desc.type_params.iter() {
-                                            if let Some(n) =
-                                                self.ctx.strings.get(tp.name.0 as usize)
-                                            {
-                                                if !param_map.contains_key(n) {
-                                                    param_map.insert(n.clone(), next_pid);
-                                                    next_pid += 1;
-                                                }
-                                            }
+                                let resolved = (|| -> Option<Vec<(String, crate::types::TypeRef)>> {
+                                    use crate::types::{TypeParamId, TypeRef};
+                                    let parent_tid = *self.type_name_to_id.get(ty_name.as_str())?;
+                                    let parent = self.type_by_id(parent_tid)?;
+                                    let owner_ids: Vec<_> = parent.type_params.iter().map(|p| p.id).collect();
+                                    let owner_template = if owner_ids.is_empty() {
+                                        TypeRef::Concrete(parent_tid)
+                                    } else {
+                                        TypeRef::Instantiated { base: parent_tid,
+                                            args: owner_ids.iter().copied().map(TypeRef::Generic).collect() }
+                                    };
+                                    let mut param_map = std::collections::HashMap::new();
+                                    let mut used_ids: std::collections::HashSet<_> = owner_ids.iter().map(|id| id.0).collect();
+                                    for parameter in &parent.type_params {
+                                        let name = self.ctx.strings.get(parameter.name.0 as usize)?;
+                                        param_map.insert(name.clone(), parameter.id.0);
+                                    }
+                                    // The two scopes may reuse spellings; fresh internal
+                                    // IDs keep unbound impl parameters outside owner scope.
+                                    for generic in &impl_decl.generics {
+                                        if let verum_ast::ty::GenericParamKind::Type { name, .. } = &generic.kind {
+                                            let id = (0..=u16::MAX).find(|id| !used_ids.contains(id))?;
+                                            used_ids.insert(id);
+                                            param_map.insert(name.name.to_string(), id);
                                         }
                                     }
-                                }
-                                let mut impl_generics: Vec<String> = impl_decl
-                                    .generics
-                                    .iter()
-                                    .filter_map(|g| match &g.kind {
-                                        verum_ast::ty::GenericParamKind::Type {
-                                            name, ..
-                                        } => Some(name.name.to_string()),
-                                        _ => None,
-                                    })
-                                    .collect();
-                                impl_generics.sort_unstable();
-                                for g in impl_generics {
-                                    if !param_map.contains_key(&g) {
-                                        param_map.insert(g, next_pid);
-                                        next_pid += 1;
+                                    let declared_ids: Vec<_> = used_ids.into_iter().map(TypeParamId).collect();
+                                    let verum_ast::decl::ImplKind::Protocol { for_type, .. } = &impl_decl.kind else {
+                                        return None;
+                                    };
+                                    let receiver = self.semantic_formal_type(for_type, &param_map, &declared_ids)?;
+                                    let mut substitution = crate::mono::TypeSubstitution::empty();
+                                    if !crate::mono::match_declared_types(&receiver, &owner_template, &mut substitution) {
+                                        // A receiver constraint that cannot be represented
+                                        // by this unconditional owner-scoped table is absent
+                                        // evidence, not an invented free generic parameter.
+                                        return None;
                                     }
-                                }
-                                let resolved: Vec<(String, crate::types::TypeRef)> = impl_decl
-                                    .items
-                                    .iter()
-                                    .filter_map(|item| {
-                                        if let verum_ast::decl::ImplItemKind::Type {
-                                            name,
-                                            ty,
-                                            ..
-                                        } = &item.kind
-                                        {
-                                            let inner_ref =
-                                                self.resolve_field_type_ref(ty, &param_map);
-                                            // `resolve_field_type_ref` STRIPS
-                                            // reference wrappers (its param-
-                                            // descriptor convention) — but an
-                                            // assoc binding's `&` is LOAD-
-                                            // BEARING: `type Item = &T;` must
-                                            // round-trip as `&T`, or every
-                                            // for-loop element / iterator-
-                                            // closure param resolved through
-                                            // the carried binding types as the
-                                            // VALUE and `*a` fails "Cannot
-                                            // dereference non-reference type"
-                                            // (the meta/span + meta/contexts
-                                            // property-suite regression
-                                            // shape).  Re-wrap from the AST —
-                                            // the #41 scalar-&-param pattern.
-                                            let tref = match &ty.kind {
-                                                verum_ast::ty::TypeKind::Reference {
-                                                    mutable,
-                                                    ..
-                                                } => crate::types::TypeRef::Reference {
-                                                    inner: Box::new(inner_ref),
-                                                    mutability: if *mutable {
-                                                        crate::types::Mutability::Mutable
-                                                    } else {
-                                                        crate::types::Mutability::Immutable
-                                                    },
-                                                    tier: crate::types::CbgrTier::Tier0,
-                                                },
-                                                _ => inner_ref,
-                                            };
-                                            Some((name.name.to_string(), tref))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect();
+                                    Some(impl_decl.items.iter().filter_map(|item| {
+                                        let verum_ast::decl::ImplItemKind::Type { name, ty, .. } = &item.kind else {
+                                            return None;
+                                        };
+                                        let declared = self.semantic_formal_type(ty, &param_map, &declared_ids)?;
+                                        let normalized = substitution.apply(&declared);
+                                        formal_parameters::resolved(&normalized, &owner_ids, 0)
+                                            .then(|| (name.name.to_string(), normalized))
+                                    }).collect())
+                                })().unwrap_or_default();
                                 if std::env::var("VERUM_TRACE_ASSOC_ATTACH").is_ok() {
-                                    eprintln!(
-                                        "[assoc-attach] ty={} proto={} items={} resolved={:?}",
-                                        ty_name,
-                                        pn,
-                                        impl_decl.items.len(),
-                                        resolved
-                                    );
+                                    eprintln!("[assoc-attach] ty={} proto={} items={} resolved={:?}",
+                                        ty_name, pn, impl_decl.items.len(), resolved);
                                 }
-                                resolved
-                                    .into_iter()
-                                    .map(|(n, tref)| {
-                                        (StringId(self.ctx.intern_string_raw(&n)), tref)
-                                    })
-                                    .collect()
+                                resolved.into_iter().map(|(name, ty)|
+                                    (StringId(self.ctx.intern_string_raw(&name)), ty)).collect()
                             };
 
                             // Per-impl protocol type-args, source-rendered
@@ -13452,7 +13391,7 @@ impl VbcCodegen {
     /// (`implement MyAlloc<SIZE>` ⇒ ["SIZE"]).  Concrete literal args
     /// (`MyAlloc<17>`) contribute no name.  Used by
     /// [`Self::resolve_impl_generics`] for bare-impl param inheritance.
-    fn impl_target_arg_names(kind: &verum_ast::decl::ImplKind) -> Vec<String> {
+    pub fn impl_target_arg_names(kind: &verum_ast::decl::ImplKind) -> Vec<String> {
         use verum_ast::decl::ImplKind;
         let ty = match kind {
             ImplKind::Inherent(ty) => ty,
@@ -13620,7 +13559,10 @@ impl VbcCodegen {
         let mut shadow = std::collections::HashMap::new();
         let mut next_id = 0u16;
         for name in parent_names {
-            if !dense.contains_key(name) {
+            // Only declarations present in the actual impl scope are binders.
+            // A renamed/reordered receiver does not also declare its owner's
+            // spelling, and a concrete receiver declares no owner parameters.
+            if fallback_generics.contains(name) && !dense.contains_key(name) {
                 dense.insert(name.clone(), next_id);
                 next_id += 1;
             }
@@ -15728,9 +15670,14 @@ impl VbcCodegen {
                 // (`!prefer_existing_functions`). During stdlib loading we
                 // keep first-wins semantics so two stdlib modules defining
                 // the same nominal type do not clobber each other.
+                let type_id = self.claim_local_type_id(&type_name);
                 if !self.ctx.prefer_existing_functions {
                     self.ctx.clear_variants_for_type(&type_name);
-                } else if self.ctx.has_variants_for_type(&type_name) {
+                } else if self.ctx.has_variants_for_type(&type_name)
+                    && self.type_by_id(type_id).is_some_and(|declaration|
+                        declaration.kind == crate::types::TypeKind::Sum
+                            && !declaration.variants.is_empty())
+                {
                     // First-wins: a prior (user or stdlib) declaration has
                     // already populated the variant set for this nominal
                     // type. Skip re-registering under `prefer_existing`
@@ -15738,7 +15685,9 @@ impl VbcCodegen {
                     // would leak `None`/`Some` constructors into a user
                     // program that redeclared `type Maybe is Nothing |
                     // Just(Int)` and they would coexist in the function
-                    // table, producing nondeterministic dispatch.
+                    // table, producing nondeterministic dispatch. Constructor
+                    // stubs alone are not a source declaration: source mounts
+                    // must still produce their generic and payload metadata.
                     tracing::debug!(
                         "[variant] first-wins SKIP for type {} — variants already registered",
                         type_name
@@ -16001,7 +15950,6 @@ impl VbcCodegen {
                 // variant emission back to the legacy form. Now the
                 // descriptor IS pushed with kind=Sum + a complete
                 // variant table, so the typed path stays load-bearing.
-                let type_id = self.claim_local_type_id(&type_name);
                 // Capture generic parameters from the AST so the
                 // archive's TypeDescriptor preserves them.  Pre-fix
                 // `Maybe<T>` / `Result<T, E>` / etc. landed in VBC
@@ -18415,6 +18363,10 @@ impl VbcCodegen {
                 // shift down one slot.
                 let arg_refs: Vec<TypeRef> = args
                     .iter()
+                    // Lifetime arguments constrain source borrows but have no
+                    // runtime TypeRef slot. Erase them before numbering type
+                    // and const witnesses, including lifetime-only receivers.
+                    .filter(|arg| !matches!(arg, verum_ast::ty::GenericArg::Lifetime(_)))
                     .enumerate()
                     .map(|(i, arg)| {
                         Self::position_or_generic(i, match arg {
@@ -18440,6 +18392,7 @@ impl VbcCodegen {
                         })
                     })
                     .collect();
+                if arg_refs.is_empty() { return TypeRef::Concrete(base_id); }
                 return TypeRef::Instantiated {
                     base: base_id,
                     args: arg_refs,

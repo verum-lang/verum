@@ -27,7 +27,15 @@ extern "C" fn unexpected_exit(_code: u64) {
     std::process::abort();
 }
 
-extern "C" fn unexpected_panic(_message: *const u8, _length: u64, _file: *const u8, _line: u32) {
+extern "C" fn unexpected_assert(_message: *const u8) -> i32 {
+    eprintln!("native source assertion failed");
+    std::process::abort();
+}
+
+extern "C" fn unexpected_panic(message: *const u8, length: u64, _file: *const u8, _line: u32) {
+    // Generated panic calls carry a valid constant message extent.
+    let message = unsafe { std::slice::from_raw_parts(message, length as usize) };
+    eprintln!("native panic: {}", String::from_utf8_lossy(message));
     std::process::abort();
 }
 
@@ -52,6 +60,9 @@ fn with_native(
     );
     if lower.module().get_function("verum_panic").is_some() {
         ir.push_str("declare void @verum_panic(ptr, i64, ptr, i32)\n");
+    }
+    if lower.module().get_function("verum_internal_puts").is_some() {
+        ir.push_str("declare i32 @verum_internal_puts(ptr)\n");
     }
     for global in lower.module().get_globals() {
         ir.push_str(global.print_to_string().to_str().unwrap());
@@ -80,6 +91,9 @@ fn with_native(
             ir.push_str(adapter.print_to_string().to_str().expect("UTF-8 IR"));
         }
     }
+    if let Some(path) = std::env::var_os("TYPED_IR_DUMP") {
+        std::fs::write(path, ir.as_bytes()).unwrap();
+    }
     let executable = context
         .create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(
             ir.as_bytes(),
@@ -100,6 +114,9 @@ fn with_native(
     );
     if let Some(panic) = executable.get_function("verum_panic") {
         engine.add_global_mapping(&panic, unexpected_panic as *const () as usize);
+    }
+    if let Some(assert) = executable.get_function("verum_internal_puts") {
+        engine.add_global_mapping(&assert, unexpected_assert as *const () as usize);
     }
     check(&engine);
     STORAGE.with(|storage| storage.borrow_mut().clear());
@@ -398,6 +415,197 @@ fn specialize_closures(mut module: VbcModule) -> VbcModule {
     monomorphize_minimal(module, &graph).unwrap().module
 }
 
+// The generic disposal boundary is bytecode; constructors, Drop bodies and
+// counter observations are compiled source. This isolates backend cleanup from
+// select's separate source integration coverage.
+fn typed_cleanup_module(body: &str) -> VbcModule {
+    use verum_vbc::{Instruction, bytecode::encode_instruction, instruction::Reg};
+    let mut module = compile(&format!(r#"
+type Maybe<T> is None | Some(T);
+type Guard is {{ drops: &mut Int, marker: Int }};
+implement Drop for Guard {{ fn drop(&mut self) {{ *self.drops = *self.drops + 1; }} }}
+fn dispose<T>(value: T) {{}}
+{body}
+"#));
+    let id = module.find_function_by_name("dispose").unwrap();
+    let ty = module.get_function(id).unwrap().semantic_parameter_types().unwrap()[0].clone().unwrap();
+    let start = module.bytecode.len() as u32;
+    encode_instruction(&Instruction::DropTyped { src: Reg(0), type_ref: ty }, &mut module.bytecode);
+    encode_instruction(&Instruction::RetV, &mut module.bytecode);
+    let end = module.bytecode.len() as u32;
+    let function = module.functions.iter_mut().find(|function| function.id == id).unwrap();
+    function.bytecode_offset = start;
+    function.bytecode_length = end - start;
+    function.instructions = None;
+    let mut module = verum_vbc::deserialize::deserialize_module(&verum_vbc::serialize::serialize_module(&module).unwrap()).unwrap();
+    // The production vbc_mono phase materializes archive bodies before LLVM.
+    for function in &mut module.functions {
+        if function.instructions.is_none() && function.bytecode_length != 0 {
+            let start = function.bytecode_offset as usize;
+            let end = start + function.bytecode_length as usize;
+            function.instructions = Some(verum_vbc::bytecode::decode_instructions(&module.bytecode[start..end]).unwrap().into());
+        }
+    }
+    specialize_closures(module)
+}
+
+fn check_cleanup(body: &str, expected: i64) {
+    let module = typed_cleanup_module(body);
+    let entry = module.find_function_by_name("probe").unwrap();
+    assert_eq!(Interpreter::new(Arc::new(module.clone())).execute_function(entry).unwrap().as_i64(), expected);
+    with_native(&module, |engine| {
+        let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+        assert_eq!(actual, expected, "native typed destruction");
+    });
+}
+
+#[test]
+fn typed_cleanup_native_owned_generic_sum_and_record() {
+    check_cleanup(r#"
+type Packet<T> is Empty | Held(T);
+type Envelope<T> is { value: T };
+fn probe() -> Int {
+    let mut drops = 0;
+    dispose<Maybe<Guard>>(Maybe.Some(Guard { drops: &mut drops, marker: 17 }));
+    dispose<Packet<Envelope<Guard>>>(Packet.Held(Envelope { value: Guard { drops: &mut drops, marker: 29 } }));
+    drops
+}
+"#, 2);
+}
+
+#[test]
+fn typed_cleanup_native_borrowed_raw_and_inactive_variants() {
+    check_cleanup(r#"
+type Packet<T> is Number(Int) | Held(T);
+fn probe() -> Int {
+    let mut drops = 0;
+    let guard = Guard { drops: &mut drops, marker: 41 };
+    dispose<Maybe<&Guard>>(Maybe.Some(&guard));
+    dispose<Maybe<&unsafe Guard>>(Maybe.Some(&guard as &unsafe Guard));
+    dispose<Maybe<Guard>>(Maybe.None);
+    dispose<Packet<Guard>>(Packet.Number(27));
+    assert(drops == 0);
+    guard.marker
+}
+"#, 41);
+}
+
+#[test]
+fn typed_cleanup_native_generic_drop_body_is_discovered() {
+    check_cleanup(r#"
+type Envelope<T> is { drops: &mut Int, value: T };
+implement<T> Drop for Envelope<T> { fn drop(&mut self) { *self.drops = *self.drops + 1; } }
+fn probe() -> Int {
+    let mut drops = 0;
+    dispose<Maybe<Envelope<Int>>>(Maybe.Some(Envelope { drops: &mut drops, value: 23 }));
+    dispose<Maybe<Envelope<Bool>>>(Maybe.Some(Envelope { drops: &mut drops, value: true }));
+    drops
+}
+"#, 2);
+}
+
+#[test]
+fn typed_cleanup_native_missing_receipt_cannot_fall_back_to_a_named_body() {
+    let mut module = typed_cleanup_module(r#"
+type Envelope<T> is { drops: &mut Int, value: T };
+implement<T> Drop for Envelope<T> { fn drop(&mut self) { *self.drops = *self.drops + 1; } }
+fn probe() -> Int {
+    let mut drops = 0;
+    dispose<Maybe<Envelope<Int>>>(Maybe.Some(Envelope { drops: &mut drops, value: 23 }));
+    drops
+}
+
+"#);
+    let drop = module.find_function_by_name("Envelope.drop").unwrap();
+    let count = module.specializations.len();
+    module.specializations.retain(|receipt| receipt.generic_fn != drop);
+    assert_eq!(module.specializations.len() + 1, count);
+    let context = Context::create();
+    let mut lower = VbcToLlvmLowering::new(&context, LoweringConfig::debug("missing_drop").with_debug_info(false));
+    let error = lower.lower_module(&module).expect_err("missing receipt must refuse even with the body present");
+    assert!(error.to_string().contains("no exact native destructor specialization"), "{error}");
+}
+
+#[test]
+fn typed_cleanup_native_missing_payload_declaration_is_a_compile_error() {
+    let mut module = typed_cleanup_module(r#"
+fn probe() -> Int {
+    let mut drops = 0;
+    dispose<Maybe<Guard>>(Maybe.Some(Guard { drops: &mut drops, marker: 41 }));
+    drops
+}
+"#);
+    let owner = module.types.iter().find(|ty| module.get_string(ty.name) == Some("Maybe")).unwrap().id;
+    let payload = module.types.iter_mut().find(|ty| ty.id == owner).unwrap()
+        .variants.iter_mut().find(|variant| variant.arity == 1).unwrap();
+    payload.fields[0].declaration_type = None;
+    let context = Context::create();
+    let mut lower = VbcToLlvmLowering::new(&context, LoweringConfig::debug("missing_drop_field").with_debug_info(false));
+    let error = lower.lower_module(&module).expect_err("missing ownership evidence must refuse compilation");
+    assert!(error.to_string().contains("field lacks declaration evidence"), "{error}");
+}
+
+fn check_native_select_cleanup(body: &str, expected: i64) {
+    let module = compile(&format!(r#"
+type Poll<T> is Ready(T) | Pending;
+type Waker is {{ marker: Int }};
+type Context is {{ waker: &Waker }};
+implement Context {{ fn from_waker(waker: &Waker) -> Context {{ Context {{ waker: waker }} }} }}
+fn noop_waker() -> Waker {{ Waker {{ marker: 0 }} }}
+type Thread is ();
+implement Thread {{ fn yield_now() {{}} }}
+type Future is protocol {{ type Output; fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output>; }};
+{body}
+"#));
+    let entry = module.find_function_by_name("probe").unwrap();
+    assert_eq!(Interpreter::new(Arc::new(module.clone())).execute_function(entry).unwrap().as_i64(), expected);
+    with_native(&module, |engine| {
+        let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+        assert_eq!(actual, expected, "native select owned cleanup");
+    });
+}
+
+#[test]
+fn typed_cleanup_native_select_drops_temporary_futures_before_arm_body() {
+    check_native_select_cleanup(r#"
+type Tracked is { drops: &mut Int, pending: Bool };
+implement Drop for Tracked { fn drop(&mut self) { *self.drops = *self.drops + 1; } }
+implement Future for Tracked {
+    type Output = Int;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Int> {
+        if self.pending { Poll.Pending } else { Poll.Ready(5) }
+    }
+}
+async fn probe() -> Int {
+    let mut drops = 0;
+    select biased {
+        a = Tracked { drops: &mut drops, pending: true }.await => 1000,
+        b = Tracked { drops: &mut drops, pending: false }.await => drops,
+    }
+}
+"#, 2);
+}
+
+#[test]
+fn typed_cleanup_native_select_drops_nonmatching_owned_output() {
+    check_native_select_cleanup(r#"
+type Maybe<T> is None | Some(T);
+type Guard is { drops: &mut Int };
+implement Drop for Guard { fn drop(&mut self) { *self.drops = *self.drops + 1; } }
+type Maker is { drops: &mut Int };
+implement Future for Maker {
+    type Output = Maybe<Guard>;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Maybe<Guard>> {
+        Poll.Ready(Maybe.Some(Guard { drops: self.drops }))
+    }
+}
+async fn probe() -> Int {
+    let mut drops = 0;
+    select biased { Maybe.None = Maker { drops: &mut drops }.await => 1000, else => drops }
+}
+"#, 1);
+}
+
 #[test]
 fn escaping_nested_generic_closures_specialize_native_environments() {
     let module = specialize_closures(compile("fn make<T>(value: T) -> fn() -> T { || { let inner = || value; inner() } } fn probe() -> Int { let first = make(17); let second = make(true); if second() { first() } else { 0 } }"));
@@ -414,20 +622,6 @@ fn lexical_types_without_value_captures_specialize_native_scalar_abi() {
         let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> f64>("probe").unwrap().call() };
         assert_eq!(actual, 17.25);
     });
-}
-
-#[test]
-fn documented_shared_environments_execute_in_both_tiers() {
-    for (source, expected) in [
-        ("fn probe() -> Int { let value: Int = 7; let f = || value; f() }", 7),
-        ("fn probe() -> Int { let mut value: Int = 7; let f = || { value = value + 1; value }; f(); f() }", 9),
-    ] {
-        let module = compile(source);
-        assert_eq!(Interpreter::new(Arc::new(module.clone())).execute_function(module.find_function_by_name("probe").unwrap()).unwrap().as_i64(), expected);
-        with_native(&module, |engine| {
-            assert_eq!(unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() }, expected);
-        });
-    }
 }
 
 #[test]
@@ -450,6 +644,20 @@ fn generic_receiver_field_capture_preserves_its_native_declaration() {
         let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> f64>("probe").unwrap().call() };
         assert_eq!(actual, 17.25);
     });
+}
+
+#[test]
+fn documented_shared_environments_execute_in_both_tiers() {
+    for (source, expected) in [
+        ("fn probe() -> Int { let value: Int = 7; let f = || value; f() }", 7),
+        ("fn probe() -> Int { let mut value: Int = 7; let f = || { value = value + 1; value }; f(); f() }", 9),
+    ] {
+        let module = compile(source);
+        assert_eq!(Interpreter::new(Arc::new(module.clone())).execute_function(module.find_function_by_name("probe").unwrap()).unwrap().as_i64(), expected);
+        with_native(&module, |engine| {
+            assert_eq!(unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() }, expected);
+        });
+    }
 }
 
 #[test]

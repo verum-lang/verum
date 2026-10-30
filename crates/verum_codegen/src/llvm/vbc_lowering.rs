@@ -1256,7 +1256,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // A caller may already depend on this exact physical return.
                     // Never replace that body with the lenient zero-return stub.
                     if matches!(e, super::error::LlvmLoweringError::UnprovenArrayStorage(_)
-                        | super::error::LlvmLoweringError::UnprovenCallableEnvironment(_))
+                        | super::error::LlvmLoweringError::UnprovenCallableEnvironment(_)
+                        | super::error::LlvmLoweringError::UnprovenOwnedDestruction(_))
                         || self.functions.get(&func_desc.id.0)
                             .is_some_and(|target| self.array_returns.contains_key(target))
                     {

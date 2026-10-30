@@ -57,6 +57,7 @@ pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,
 };
 pub use merger::{FunctionMapping, MergeError, MergeStats, ModuleMerger};
+pub(crate) use method_calls::{match_declared_types, unify as unify_declared_types};
 pub use optimizer::{OptimizationStats, SpecializationOptimizer};
 pub use phase::{
     MonoPhaseConfig, MonoPhaseError, MonoPhaseResult, MonomorphizationPhase, monomorphize,

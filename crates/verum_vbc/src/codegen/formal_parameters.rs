@@ -185,6 +185,20 @@ impl VbcCodegen {
         declared_ids: &[TypeParamId],
     ) -> Option<TypeRef> {
         use verum_ast::ty::{GenericArg, TypeKind};
+        fn generic_projection_base(
+            ty: &verum_ast::Type,
+            scope: &std::collections::HashMap<String, u16>,
+            depth: usize,
+        ) -> bool {
+            if depth > 64 { return false; }
+            match &ty.kind {
+                TypeKind::Path(path) => path.is_single() && scope.contains_key(&path.to_string()),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1),
+                TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
+                    && generic_projection_base(self_ty, scope, depth + 1),
+                _ => false,
+            }
+        }
         fn supported(
             ty: &verum_ast::Type,
             depth: usize,
@@ -205,6 +219,9 @@ impl VbcCodegen {
                 | TypeKind::Unit
                 | TypeKind::Never => true,
                 TypeKind::Path(_) => cg.semantic_formal_path_is_declared(ty, scope),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1),
+                TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
+                    && generic_projection_base(self_ty, scope, depth + 1),
                 TypeKind::Reference { inner, .. }
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. }
@@ -217,8 +234,11 @@ impl VbcCodegen {
                         && matches!(cg.resolve_signature_type_ref(base, scope), TypeRef::Concrete(id)
                         if id != TypeId::PTR && id != TypeId::RESERVED)
                         && args.iter().all(|arg| {
-                            matches!(arg, GenericArg::Type(ty)
-                        if supported(ty, depth + 1, budget, cg, scope))
+                            match arg {
+                                GenericArg::Type(ty) => supported(ty, depth + 1, budget, cg, scope),
+                                GenericArg::Lifetime(_) => true,
+                                _ => false,
+                            }
                         })
                 }
                 TypeKind::Function {
@@ -330,6 +350,8 @@ pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize)
     match ty {
         TypeRef::Concrete(id) => concrete(*id),
         TypeRef::Generic(id) => declared_ids.contains(id),
+        TypeRef::AssociatedProjection { base, assoc } => !assoc.is_empty()
+            && resolved(base, declared_ids, depth + 1),
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => {
             resolved(inner, declared_ids, depth + 1)
         }

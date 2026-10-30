@@ -298,6 +298,12 @@ impl VbcEscapeAnalyzer {
                     provenance.insert(dst.0, RegisterProvenance::Unknown);
                 }
 
+                // Typed destruction consumes the old register and may call
+                // user glue. It cannot preserve the old source provenance.
+                Instruction::DropTyped { src, .. } => {
+                    provenance.insert(src.0, RegisterProvenance::Unknown);
+                }
+
                 // Ref/RefMut (and the Pillar-1 typed splits): the destination
                 // is a reference (not a value).  Mark as Unknown so
                 // references-to-references stay conservative.
@@ -337,6 +343,10 @@ impl VbcEscapeAnalyzer {
 
         for instr in instrs {
             match instr {
+                // Owned values enter user destruction code, like call arguments.
+                Instruction::DropTyped { src, .. } => {
+                    escaping.insert(src.0);
+                }
                 // Return escapes the function.
                 Instruction::Ret { value } => {
                     escaping.insert(value.0);

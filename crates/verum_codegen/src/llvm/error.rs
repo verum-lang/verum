@@ -28,6 +28,10 @@ pub enum LlvmLoweringError {
     #[error("Unproven callable environment: {0}")]
     UnprovenCallableEnvironment(Text),
 
+    /// Owned cleanup lacks an exact executable declaration or native ABI.
+    #[error("Unproven owned destruction: {0}")]
+    UnprovenOwnedDestruction(Text),
+
     /// Invalid register reference.
     #[error("Invalid register: r{0}")]
     InvalidRegister(u16),

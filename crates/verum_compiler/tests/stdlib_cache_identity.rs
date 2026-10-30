@@ -104,6 +104,21 @@ fn forward_declaration_witnesses_invalidate_the_archive_without_schema_changes()
 }
 
 #[test]
+fn selection_ownership_semantics_invalidate_the_archive_without_schema_changes() {
+    const PATH: &str = "crates/verum_vbc/src/codegen/select.rs";
+    const SOURCE: &str = include_str!("../../verum_vbc/src/codegen/select.rs");
+    let root = tempfile::tempdir().unwrap();
+    let owned = "let owned = Self::future_is_owned(inner);";
+    assert_eq!(SOURCE.matches(owned).count(), 1);
+    write(root.path(), PATH, SOURCE.replace(owned, "let owned = false;"));
+    let before = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), PATH, SOURCE);
+    let (after, dependencies) = key(root.path(), SCHEMA, CORE);
+    assert_ne!(before, after, "selection ownership changes the baked program");
+    assert_eq!(dependencies.iter().filter(|path| **path == root.path().join(PATH)).count(), 1);
+}
+
+#[test]
 fn missing_parser_input_is_tracked_and_differs_from_an_empty_file() {
     let root = tempfile::tempdir().unwrap();
     let (missing, dependencies) = key(root.path(), SCHEMA, CORE);

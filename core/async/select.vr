@@ -70,7 +70,7 @@ public type Either<A, B> is
 ///  Either.Right(network) => println("Got from network"),
 /// }
 /// ```
-public async fn select_either<A, B, FA: Future<Output>, FB: Future<Output>>(
+public async fn select_either<A, B, FA: Future<Output = A>, FB: Future<Output = B>>(
     fut_a: FA,
     fut_b: FB,
 ) -> Either<A, B> {
@@ -81,12 +81,12 @@ public async fn select_either<A, B, FA: Future<Output>, FB: Future<Output>>(
 }
 
 /// Future that completes when either of two futures completes.
-type SelectPair<A, B, FA: Future<Output>, FB: Future<Output>> is {
+type SelectPair<A, B, FA: Future<Output = A>, FB: Future<Output = B>> is {
     fut_a: Maybe<FA>,
     fut_b: Maybe<FB>,
 };
 
-implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for SelectPair<A, B, FA, FB> {
+implement<A, B, FA: Future<Output = A>, FB: Future<Output = B>> Future for SelectPair<A, B, FA, FB> {
     type Output = Either<A, B>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Either<A, B>> {
@@ -137,7 +137,7 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for SelectPair<A,
 ///  async { network.fetch(key).await }
 /// ).await;
 /// ```
-public async fn race<T, FA: Future<Output>, FB: Future<Output>>(
+public async fn race<T, FA: Future<Output = T>, FB: Future<Output = T>>(
     fut_a: FA,
     fut_b: FB,
 ) -> T {
@@ -219,17 +219,17 @@ public type SelectAllResult<T> is {
 /// let res = select_all(futures).await?;
 /// println(f"Server {res.index} responded first");
 /// ```
-public async fn select_all<T, F: Future<Output>>(
+public async fn select_all<T, F: Future<Output = T>>(
     mut futures: List<F>,
 ) -> Result<SelectAllResult<T>, SelectError> {
     SelectAll { futures: futures }.await
 }
 
-type SelectAll<T, F: Future<Output>> is {
+type SelectAll<T, F: Future<Output = T>> is {
     futures: List<F>,
 };
 
-implement<T, F: Future<Output>> Future for SelectAll<T, F> {
+implement<T, F: Future<Output = T>> Future for SelectAll<T, F> {
     type Output = Result<SelectAllResult<T>, SelectError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<SelectAllResult<T>, SelectError>> {
@@ -276,7 +276,7 @@ implement<T, F: Future<Output>> Future for SelectAll<T, F> {
 ///  fetch_posts(user_id),
 /// ).await;
 /// ```
-public async fn join<A, B, FA: Future<Output>, FB: Future<Output>>(
+public async fn join<A, B, FA: Future<Output = A>, FB: Future<Output = B>>(
     fut_a: FA,
     fut_b: FB,
 ) -> (A, B) {
@@ -288,14 +288,14 @@ public async fn join<A, B, FA: Future<Output>, FB: Future<Output>>(
     }.await
 }
 
-type JoinPair<A, B, FA: Future<Output>, FB: Future<Output>> is {
+type JoinPair<A, B, FA: Future<Output = A>, FB: Future<Output = B>> is {
     fut_a: Maybe<FA>,
     fut_b: Maybe<FB>,
     result_a: Maybe<A>,
     result_b: Maybe<B>,
 };
 
-implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for JoinPair<A, B, FA, FB> {
+implement<A, B, FA: Future<Output = A>, FB: Future<Output = B>> Future for JoinPair<A, B, FA, FB> {
     type Output = (A, B);
 
     fn poll(&mut self, cx: &mut Context) -> Poll<(A, B)> {
@@ -339,7 +339,7 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for JoinPair<A, B
 }
 
 /// Wait for three futures to complete.
-public async fn join3<A, B, C, FA: Future<Output>, FB: Future<Output>, FC: Future<Output>>(
+public async fn join3<A, B, C, FA: Future<Output = A>, FB: Future<Output = B>, FC: Future<Output = C>>(
     fut_a: FA,
     fut_b: FB,
     fut_c: FC,
@@ -353,10 +353,10 @@ public async fn join3<A, B, C, FA: Future<Output>, FB: Future<Output>, FC: Futur
 
 /// Wait for four futures to complete.
 public async fn join4<A, B, C, D,
-    FA: Future<Output>,
-    FB: Future<Output>,
-    FC: Future<Output>,
-    FD: Future<Output>>(
+    FA: Future<Output = A>,
+    FB: Future<Output = B>,
+    FC: Future<Output = C>,
+    FD: Future<Output = D>>(
     fut_a: FA,
     fut_b: FB,
     fut_c: FC,
@@ -370,11 +370,11 @@ public async fn join4<A, B, C, D,
 
 /// Wait for five futures to complete.
 public async fn join5<A, B, C, D, E,
-    FA: Future<Output>,
-    FB: Future<Output>,
-    FC: Future<Output>,
-    FD: Future<Output>,
-    FE: Future<Output>>(
+    FA: Future<Output = A>,
+    FB: Future<Output = B>,
+    FC: Future<Output = C>,
+    FD: Future<Output = D>,
+    FE: Future<Output = E>>(
     fut_a: FA,
     fut_b: FB,
     fut_c: FC,
@@ -490,23 +490,29 @@ public async fn join_all_settled<T, F: Future<Output = T>>(
 /// let futures = urls.iter().map(|url| fetch(url)).collect();
 /// let ress = join_all(futures).await;
 /// ```
-public async fn join_all<T, F: Future<Output>>(
+public async fn join_all<T, F: Future<Output = T>>(
     futures: List<F>,
 ) -> List<T> {
+    let count = futures.len();
+    let mut pending: List<Maybe<F>> = List.with_capacity(count);
+    for future in futures {
+        pending.push(Maybe.Some(future));
+    }
+    let results: List<Maybe<T>> = List.with_capacity(count);
     JoinAll {
-        futures: futures.iter().map(|f| Maybe.Some(f)).collect(),
-        results: List.with_capacity(futures.len()),
+        futures: pending,
+        results: results,
         completed: 0,
     }.await
 }
 
-type JoinAll<T, F: Future<Output>> is {
+type JoinAll<T, F: Future<Output = T>> is {
     futures: List<Maybe<F>>,
     results: List<Maybe<T>>,
     completed: Int,
 };
 
-implement<T, F: Future<Output>> Future for JoinAll<T, F> {
+implement<T, F: Future<Output = T>> Future for JoinAll<T, F> {
     type Output = List<T>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<List<T>> {
@@ -537,10 +543,11 @@ implement<T, F: Future<Output>> Future for JoinAll<T, F> {
             // counts up to `futures.len()` — each future-poll branch
             // above sets exactly one result slot before incrementing
             // `completed`.
-            let ress = self.results.iter()
-                .map(|opt| opt.take()
-                    .expect("JoinAll: every result slot is_some when completed == futures.len()"))
-                .collect();
+            let mut ress: List<T> = List.with_capacity(self.results.len());
+            for opt in self.results.iter_mut() {
+                ress.push(opt.take()
+                    .expect("JoinAll: every result slot is_some when completed == futures.len()"));
+            }
             Poll.Ready(ress)
         } else {
             Poll.Pending
@@ -590,7 +597,7 @@ implement Eq for SelectTimeoutError {
 ///  Result.Err(_) => println("Operation timed out"),
 /// }
 /// ```
-public async fn timeout<T, F: Future<Output>>(
+public async fn timeout<T, F: Future<Output = T>>(
     duration: Duration,
     future: F,
 ) -> Result<T, SelectTimeoutError> {
@@ -602,12 +609,12 @@ public async fn timeout<T, F: Future<Output>>(
     }.await
 }
 
-type SelectTimeout<T, F: Future<Output>> is {
+type SelectTimeout<T, F: Future<Output = T>> is {
     future: Maybe<F>,
     deadline: Instant,
 };
 
-implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
+implement<T, F: Future<Output = T>> Future for SelectTimeout<T, F> {
     type Output = Result<T, SelectTimeoutError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, SelectTimeoutError>> {

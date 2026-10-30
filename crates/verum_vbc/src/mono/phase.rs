@@ -323,17 +323,21 @@ impl MonomorphizationPhase {
                         }
                     })?;
                 for instruction in &instructions {
-                    let Some((callee, args)) =
+                    for (callee, args) in
                         super::discovery::concrete_call(&user_module, instruction, 0)
-                    else {
-                        continue;
-                    };
-                    super::discovery::record_concrete_instantiation(
-                        &mut graph,
-                        callee,
-                        args,
-                        self.config.max_instantiations,
-                    )?;
+                            .into_iter()
+                            .chain(super::discovery::concrete_drop_calls(
+                                &user_module,
+                                instruction,
+                            ))
+                    {
+                        super::discovery::record_concrete_instantiation(
+                            &mut graph,
+                            callee,
+                            args,
+                            self.config.max_instantiations,
+                        )?;
+                    }
                 }
             }
             specialized.extend(batch);

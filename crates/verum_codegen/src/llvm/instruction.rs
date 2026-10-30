@@ -27,6 +27,8 @@ use super::vbc_lowering::is_primitive_type_name;
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt};
 use verum_common::well_known_types::type_names as tn;
 
+mod drop_typed;
+
 /// Emit a diagnosable runtime abort for an operation that has no honest
 /// Tier-1 lowering.
 ///
@@ -2549,6 +2551,8 @@ fn lower_instruction_impl<'ctx>(
             ctx.set_pending_call_witness(type_args.to_vec());
             Ok(())
         }
+
+        Instruction::DropTyped { src, type_ref } => drop_typed::lower(ctx, *src, type_ref),
 
         Instruction::TypeResource { dst, type_ref } => {
             let module = ctx.vbc_module().or_internal("TypeResource requires declaration metadata")?;
@@ -31672,6 +31676,9 @@ fn lower_extended<'ctx>(
         }
         Some(ExtendedSubOpcode::NewClosureTyped | ExtendedSubOpcode::NewClosureWitnessed) => Err(LlvmLoweringError::unsupported(
             "typed NewClosure must be structurally decoded before lowering",
+        )),
+        Some(ExtendedSubOpcode::DropTyped) => Err(LlvmLoweringError::unsupported(
+            "DropTyped requires the canonical decoded instruction",
         )),
         Some(ExtendedSubOpcode::TypeResource) => Err(LlvmLoweringError::unsupported(
             "TypeResource requires the canonical decoded instruction",

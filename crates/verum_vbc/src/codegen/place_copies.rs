@@ -72,7 +72,7 @@ impl VbcCodegen {
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
                 Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
             ExprKind::Block(block) => self.ctx.declared_result_types.get(&block.span).cloned().flatten(),
-            ExprKind::Match { .. } => self.ctx.declared_result_types.get(&expr.span).cloned().flatten(),
+            ExprKind::Match { .. } | ExprKind::Select { .. } | ExprKind::Await(_) => self.ctx.declared_result_types.get(&expr.span).cloned().flatten(),
             ExprKind::If { then_branch, else_branch, .. } => join_result_types(
                 self.ctx.declared_result_types.get(&then_branch.span).cloned().flatten(),
                 else_branch.as_ref().map_or(Some(TypeRef::Concrete(crate::types::TypeId::UNIT)), |branch| nested(branch, None)),
@@ -89,6 +89,9 @@ impl VbcCodegen {
                 (fact.id == binding.binding_id).then(|| fact.declaration_type.clone()).flatten()
             }
             ExprKind::Record { path, .. } => {
+                if let Some(declared) = self.constructor_declaration(expr, None, None, depth + 1) {
+                    return Some(declared);
+                }
                 let ast = verum_ast::Type::new(verum_ast::ty::TypeKind::Path(path.clone()), expr.span);
                 self.semantic_formal_type(&ast, &self.ctx.current_generic_param_ids, &[])
             }

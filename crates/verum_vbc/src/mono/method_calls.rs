@@ -7,19 +7,30 @@ use crate::module::{FunctionDescriptor, VbcModule};
 use crate::types::{StringId, TypeId, TypeRef};
 use std::collections::HashMap;
 
-fn unify(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitution) -> bool {
+/// Match declarations after the caller has validated actual generic binder IDs.
+/// Pattern and actual generics belong to separate scopes; actuals remain intact.
+pub(crate) fn match_declared_types(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitution) -> bool {
+    match_types(pattern, actual, bindings, false)
+}
+
+/// Native monomorphization may bind only concrete actual declarations.
+pub(crate) fn unify(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitution) -> bool {
+    match_types(pattern, actual, bindings, true)
+}
+
+fn match_types(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitution, concrete_only: bool) -> bool {
     use TypeRef as T;
     match (pattern, actual) {
         (T::Generic(id), _) => match bindings.get(*id) {
             Some(bound) => bound == actual,
-            None if discovery::concrete(actual) => {
+            None if !concrete_only || discovery::concrete(actual) => {
                 bindings.bind(*id, actual.clone());
                 true
             }
             _ => false,
         },
         (T::Instantiated { base: p, args: pa }, T::Instantiated { base: a, args: aa }) => {
-            p == a && pa.len() == aa.len() && pa.iter().zip(aa).all(|(p, a)| unify(p, a, bindings))
+            p == a && pa.len() == aa.len() && pa.iter().zip(aa).all(|(p, a)| match_types(p, a, bindings, concrete_only))
         }
         (
             T::Reference {
@@ -32,9 +43,9 @@ fn unify(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitution) -
                 mutability: am,
                 tier: at,
             },
-        ) => pm == am && pt == at && unify(p, a, bindings),
+        ) => pm == am && pt == at && match_types(p, a, bindings, concrete_only),
         (T::Tuple(p), T::Tuple(a)) => {
-            p.len() == a.len() && p.iter().zip(a).all(|(p, a)| unify(p, a, bindings))
+            p.len() == a.len() && p.iter().zip(a).all(|(p, a)| match_types(p, a, bindings, concrete_only))
         }
         (
             T::Function {
@@ -50,8 +61,8 @@ fn unify(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitution) -
         ) => {
             pc == ac
                 && p.len() == a.len()
-                && p.iter().zip(a).all(|(p, a)| unify(p, a, bindings))
-                && unify(pr, ar, bindings)
+                && p.iter().zip(a).all(|(p, a)| match_types(p, a, bindings, concrete_only))
+                && match_types(pr, ar, bindings, concrete_only)
         }
         (
             T::Array {
@@ -62,11 +73,15 @@ fn unify(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitution) -
                 element: a,
                 length: al,
             },
-        ) => pl == al && unify(p, a, bindings),
-        (T::Slice(p), T::Slice(a)) => unify(p, a, bindings),
-        _ => pattern == actual && discovery::concrete(actual),
+        ) => pl == al && match_types(p, a, bindings, concrete_only),
+        (T::Slice(p), T::Slice(a)) => match_types(p, a, bindings, concrete_only),
+        _ => pattern == actual && (!concrete_only || discovery::concrete(actual)),
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/mono/declaration_matching.rs"]
+mod declaration_match_tests;
 
 // Unit/PTR are also the old producer's unknown-signature sentinels. They
 // cannot establish a receiver/argument fact for devirtualization by themselves.

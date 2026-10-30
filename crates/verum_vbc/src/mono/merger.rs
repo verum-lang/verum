@@ -29,6 +29,28 @@ use super::graph::InstantiationRequest;
 use super::resolver::{MonomorphizationResolver, ResolvedSpecialization};
 use super::specializer::SpecializedFunction;
 
+/// Preserve the entire declaration identity, using the canonical TypeRef wire
+/// representation rather than a second, inevitably incomplete type mangler.
+/// The callee ID and argument count frame the self-delimiting type encodings;
+/// hexadecimal is injective and keeps the bytes safe in a native symbol.
+fn specialization_name(name: &str, function: FunctionId, args: &[TypeRef]) -> String {
+    let mut identity = Vec::new();
+    crate::encoding::encode_varint(u64::from(function.0), &mut identity);
+    crate::encoding::encode_varint(args.len() as u64, &mut identity);
+    for argument in args {
+        crate::bytecode::encode_type_ref(argument, &mut identity);
+    }
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut symbol = String::with_capacity(name.len() + 6 + identity.len() * 2);
+    symbol.push_str(name);
+    symbol.push_str("$mono$");
+    for byte in identity {
+        symbol.push(HEX[usize::from(byte >> 4)] as char);
+        symbol.push(HEX[usize::from(byte & 15)] as char);
+    }
+    symbol
+}
+
 // ============================================================================
 // Merge Error
 // ============================================================================
@@ -418,28 +440,7 @@ impl ModuleMerger {
                     })
                 })
                 .unwrap_or_else(|| format!("mono_fn_{}", request.function_id.0));
-            fn mangle_tr(t: &TypeRef) -> String {
-                match t {
-                    TypeRef::Concrete(id) => id.0.to_string(),
-                    TypeRef::Instantiated { base, args } => {
-                        let inner: Vec<String> = args.iter().map(mangle_tr).collect();
-                        if inner.is_empty() {
-                            base.0.to_string()
-                        } else {
-                            format!("{}i{}", base.0, inner.join("_"))
-                        }
-                    }
-                    TypeRef::Generic(tp) => format!("g{}", tp.0),
-                    _ => "x".to_string(),
-                }
-            }
-            let mangle: String = request
-                .type_args
-                .iter()
-                .map(mangle_tr)
-                .collect::<Vec<_>>()
-                .join("_");
-            let spec_name = format!("{}$mono${}", generic_name, mangle);
+            let spec_name = specialization_name(&generic_name, request.function_id, &request.type_args);
             let name_id = output.intern_string(&spec_name);
             // The name filter answers only about names someone already
             // suspected — `poll_sync` and `ready`. Asking "was
@@ -940,7 +941,12 @@ impl ModuleMerger {
     fn reencode_bytecode(output: &mut VbcModule) {
         let old_blob = std::mem::take(&mut output.bytecode);
         let mut blob: Vec<u8> = Vec::with_capacity(old_blob.len());
+        // Receipts identify concrete bodies by their exact pre-encoding extent.
+        // Routing CallG to Call can change both a body's size and every later
+        // offset. Keep the association while those old extents still exist.
+        let mut rebased = HashMap::new();
         for f in output.functions.iter_mut() {
+            let old_extent = (f.bytecode_offset, f.bytecode_length);
             let new_off = blob.len() as u32;
             if let Some(instrs) = f.instructions.as_deref() {
                 let n = crate::bytecode::encode_instructions_with_fixup(instrs, &mut blob);
@@ -959,7 +965,28 @@ impl ModuleMerger {
                     f.bytecode_length = 0;
                 }
             }
+            if f.type_params.is_empty() && old_extent.1 > 0 {
+                let extent = (f.bytecode_offset, f.bytecode_length, f.register_count);
+                match rebased.entry(old_extent) {
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert((f.bytecode_length > 0).then_some(extent));
+                    }
+                    // Ambiguous old extents cannot establish a specific body.
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        entry.insert(None);
+                    }
+                }
+            }
         }
+        output.specializations.retain_mut(|receipt| {
+            let Some((offset, length, registers)) = rebased
+                .get(&(receipt.bytecode_offset, receipt.bytecode_length)).copied().flatten()
+            else { return false; };
+            receipt.bytecode_offset = offset;
+            receipt.bytecode_length = length;
+            receipt.register_count = registers;
+            true
+        });
         output.bytecode = blob;
     }
 
@@ -972,6 +999,10 @@ impl ModuleMerger {
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(test)]
+#[path = "../../tests/mono/specialization_identity.rs"]
+mod specialization_identity_tests;
 
 #[cfg(test)]
 mod tests {

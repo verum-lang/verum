@@ -35,7 +35,7 @@ use crate::module::FfiSymbolId;
 use crate::types::CbgrTier;
 use verum_common::method_to_protocol;
 use verum_common::well_known_types::{
-    WellKnownProtocol as WKP, WellKnownType as WKT, type_names,
+    WellKnownType as WKT, type_names,
     maybe_success_tag, result_success_tag,
     variant_tags,
     MAYBE_VARIANT_LAYOUT, RESULT_VARIANT_LAYOUT, ORDERING_VARIANT_LAYOUT,
@@ -46,6 +46,9 @@ use verum_ast::{
     BinOp, Block, ConditionKind, Expr, ExprKind, FieldInit, Literal, LiteralKind, Path,
     PathSegment, UnOp,
 };
+
+#[path = "select.rs"]
+mod selection;
 
 type FieldWriteback = (Reg, u32, bool, verum_common::Text);
 
@@ -404,43 +407,9 @@ impl VbcCodegen {
             );
         }
 
-        // **Canonical core-ADT fast-path** (Maybe / Result).
-        //
-        // `Maybe` (TypeId 515) and `Result` (TypeId 516) are well-known
-        // built-ins with FIXED canonical TypeIds whose descriptors are
-        // ALWAYS fully populated in the final VBC module. During the
-        // full-core precompile, however, the in-progress `self.types`
-        // snapshot can still hold an empty-`variants` placeholder for
-        // them (Pass-1.5 speculative id allocation) at the moment a
-        // *consuming* module body compiles — e.g. `core/time/instant.vr`
-        // building `Maybe.Some(Duration.from_nanos(...))` before
-        // `core/base/maybe.vr`'s descriptor variants land. The generic
-        // gate below then sees `desc.variants.is_empty()` and DEMOTES to
-        // the legacy synthetic-id `MakeVariant` (`0x8000+tag`).
-        //
-        // That demotion is the root cause of the Maybe-return collapse:
-        // a `Some` built by legacy `MakeVariant` is mis-read by the
-        // runtime — pattern-matched as `None` and method-dispatched as
-        // `runtime kind Int` — because synthetic-id variants are not
-        // recognised as the canonical `Maybe`/`Result` for match + CallM
-        // (only eq/hash/debug/arith handle them). Small single-module
-        // compiles dodge it (the descriptor is populated, so they emit
-        // the typed form and work).
-        //
-        // Fix: for these two canonical types, emit `MakeVariantTyped`
-        // with the FIXED canonical TypeId unconditionally. The final
-        // module always carries their fully-populated descriptors, so
-        // the runtime validator accepts the id, and the (tag,
-        // field_count) the variant-constructor resolution passes is the
-        // canonical layout (None=0/0, Some=1/1, Ok=0/1, Err=1/1). This
-        // closes the whole class of Maybe/Result-returning stdlib
-        // functions, not just `time`. Regression-pinned by the
-        // `core-tests/time/instant` `duration_since` suite.
-        // Gated on the exact canonical (tag, field_count) shapes so a
-        // malformed construction still falls through to the generic
-        // path rather than emitting a typed form the runtime validator
-        // would reject: Maybe = None(0,0) | Some(1,1); Result = Ok(0,1)
-        // | Err(1,1).
+        // Canonical core declarations can be consumed before their descriptors
+        // finish loading. Only their exact registered identities authorize the
+        // fixed-layout shortcut: a local homonym keeps its own nominal owner.
         if let Some(name) = parent_type_name {
             let canonical = match (name, tag, field_count) {
                 ("Maybe", 0, 0) | ("Maybe", 1, 1) => Some(crate::types::TypeId::MAYBE),
@@ -457,7 +426,7 @@ impl VbcCodegen {
                 }
                 _ => None,
             };
-            if let Some(tid) = canonical {
+            if let Some(tid) = canonical.filter(|tid| Some(*tid) == parent_type_id) {
                 self.ctx.emit(Instruction::MakeVariantTyped {
                     dst,
                     type_id: tid.0,
@@ -1317,7 +1286,7 @@ impl VbcCodegen {
 
             // === Async ===
             ExprKind::Async(block) => self.compile_async_block(block),
-            ExprKind::Await(inner) => self.compile_await(inner),
+            ExprKind::Await(inner) => self.compile_await(inner, demand, expr.span),
 
             // === Error Handling ===
             ExprKind::Try(inner) => self.compile_try(inner),
@@ -1389,7 +1358,7 @@ impl VbcCodegen {
 
             ExprKind::Inject { type_path } => self.compile_inject(type_path),
 
-            ExprKind::Select { biased, arms, .. } => self.compile_select(*biased, arms, demand),
+            ExprKind::Select { biased, arms, .. } => self.compile_select(*biased, arms, demand, expr.span),
 
             ExprKind::ForAwait {
                 label,
@@ -25551,7 +25520,7 @@ impl VbcCodegen {
         &mut self,
         type_name: &str,
         field_name: &str,
-    ) -> (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>) {
+    ) -> (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>, Option<verum_ast::Span>) {
         if let Some(ft) = self.field_access_type_name(type_name, field_name) {
             // Variant lookup uses the base; generic constructors require the
             // complete declared field type, including nested arguments.
@@ -25567,11 +25536,12 @@ impl VbcCodegen {
                 self.ctx.current_return_type_name.clone(),
                 self.ctx.current_return_type_inner.clone(),
                 self.ctx.expected_value_type.take(),
+                self.ctx.expected_value_span.take(),
             )
         }
     }
 
-    fn pop_field_type_context(&mut self, saved: (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>)) {
+    fn pop_field_type_context(&mut self, saved: (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>, Option<verum_ast::Span>)) {
         self.ctx.pop_disambig_context(saved);
     }
 
@@ -26894,7 +26864,21 @@ impl VbcCodegen {
     /// concurrency. The yield is bounded by `MAX_COOP_PUMP_DEPTH`
     /// at the handler level so recursive `.await` chains don't
     /// blow the stack. Full state-machine lowering is V2.
-    fn compile_await(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
+    fn compile_await(&mut self, inner: &Expr, demand: ResultDemand, span: verum_ast::Span) -> CodegenResult<Option<Reg>> {
+        let expected = if self.ctx.expected_value_span == Some(span) {
+            self.ctx.expected_value_type.clone().or_else(|| self.ctx.current_return_type_full.as_ref()
+                .and_then(|name| self.semantic_type_in_current_scope(name)))
+        } else if matches!(demand, ResultDemand::CallableReturn) {
+            self.ctx.function_return_type_name.as_ref().and_then(|name| self.semantic_type_in_current_scope(name))
+        } else { None };
+        if let Some(poll) = self.resolve_protocol_poll(inner, expected.as_ref())? {
+            self.ctx.declared_result_types.insert(span, Some(poll.output_type.clone()));
+            let owned = Self::future_is_owned(inner);
+            let future = if owned { self.compile_expr(inner)? }
+                else { self.compile_unary(UnOp::RefMut, inner)? }
+                .or_internal("Future await has no value")?;
+            return self.compile_protocol_future_await(future, poll, owned);
+        }
         let task_reg = self
             .compile_expr(inner)?
             .or_internal("await expr has no value")?;
@@ -26947,42 +26931,6 @@ impl VbcCodegen {
             let base = t.split('<').next().unwrap_or(t);
             base == "$TaskHandle" || base == "Future"
         };
-        if let Some(type_name) = self
-            .extract_expr_type_name(inner)
-            .or_else(|| self.infer_expr_type_name(inner))
-            && let verum_common::Maybe::Some(_) = self.future_implementation(&type_name)
-        {
-            // A protocol implementation is the authority. An unrelated
-            // inherent method named `poll` does not make a value a Future.
-            // ProtocolImpl method IDs imported from archives may still be
-            // archive-local (T0277). Resolve the implementing owner's poll
-            // in the current module; arity alone cannot establish identity.
-            let owner = self.resolve_type_alias(Self::strip_generic_args(&type_name));
-            let poll = self
-                .ctx
-                .lookup_function_in_scope(&format!("{owner}.poll"))
-                .filter(|info| info.param_count == 2)
-                .cloned()
-                .ok_or_else(|| {
-                    CodegenError::internal(format!(
-                        "Future implementation for `{type_name}` has no callable `{owner}.poll`"
-                    ))
-                })?;
-            // The poll declaration owns its result layout. Constructor aliases
-            // in the awaiting module are neither required nor authoritative;
-            // a local homonym can even assign Ready a different variant tag.
-            let poll_result = match poll.return_type {
-                Some(crate::types::TypeRef::Concrete(id))
-                | Some(crate::types::TypeRef::Instantiated { base: id, .. }) => id,
-                _ => {
-                    return Err(CodegenError::internal(format!(
-                        "Future implementation for `{type_name}` has no nominal poll result type"
-                    )));
-                }
-            };
-            return self.compile_protocol_future_await(task_reg, poll.id.0, poll_result);
-        }
-
         let needs_runtime_await = matches!(inner.kind, ExprKind::Spawn { .. })
             || self
                 .extract_expr_type_name(inner)
@@ -27005,7 +26953,7 @@ impl VbcCodegen {
     }
 
     /// Find the carried Future implementation, including aliases and generic instances.
-    fn future_implementation(
+    pub(super) fn future_implementation(
         &self,
         type_name: &str,
     ) -> verum_common::Maybe<&crate::types::ProtocolImpl> {
@@ -27014,115 +26962,15 @@ impl VbcCodegen {
         let Some(id) = self.type_name_to_id.get(base.as_str()) else {
             return Maybe::None;
         };
-        let Some(descriptor) = self.type_by_id(*id) else {
-            return Maybe::None;
-        };
-        descriptor
-            .protocols
-            .iter()
-            .find(|implementation| {
-                self.type_by_id(crate::types::TypeId(implementation.protocol.0))
-                    .and_then(|protocol| self.ctx.strings.get(protocol.name.0 as usize))
-                    .is_some_and(|name| {
-                        WKP::Future.matches(name.rsplit('.').next().unwrap_or(name))
-                    })
-            })
-            .map_or(Maybe::None, Maybe::Some)
+        self.future_implementation_for_type(*id)
     }
 
-    /// Carry the associated Output type to consumers of the awaited value.
-    fn future_output_type_name(&self, type_name: &str) -> verum_common::Maybe<verum_common::Text> {
-        use crate::types::TypeRef;
-        use verum_common::{List, Maybe, Set, Text};
-
-        // Imported descriptor graphs may contain cycles, including expanding
-        // ones (Grow<T>.Output -> Grow<Grow<T>>.Output). A repeated-name guard
-        // handles ordinary cycles; a depth bound also covers expanding ones.
-        // Failure keeps the output unknown instead of inventing a layout.
-        const MAX_OUTPUT_DEPTH: usize = 64;
-
-        fn render(
-            codegen: &VbcCodegen,
-            ty: &TypeRef,
-            args: &[String],
-            active: &mut Set<Text>,
-            depth: usize,
-        ) -> Maybe<Text> {
-            if depth >= MAX_OUTPUT_DEPTH {
-                return Maybe::None;
-            }
-            match ty {
-                TypeRef::Generic(parameter) => args
-                    .get(parameter.0 as usize)
-                    .map_or(Maybe::None, |name| Maybe::Some(Text::from(name.as_str()))),
-                TypeRef::Instantiated { base, args: inner } => {
-                    let Some(base_name) = codegen.type_ref_to_field_name(&TypeRef::Concrete(*base))
-                    else {
-                        return Maybe::None;
-                    };
-                    let mut names: List<Text> = List::new();
-                    for ty in inner {
-                        let Maybe::Some(name) = render(codegen, ty, args, active, depth + 1) else {
-                            return Maybe::None;
-                        };
-                        names.push(name);
-                    }
-                    Maybe::Some(Text::from(format!("{}<{}>", base_name, names.join(", "))))
-                }
-                TypeRef::AssociatedProjection { base, assoc } if assoc == "Output" => {
-                    // Resolve the base in the enclosing implementation's
-                    // parameter scope first. Its own Future implementation
-                    // supplies both the associated type and the new scope:
-                    // Wrapper<Ready<Int>>'s F.Output is Ready<Int>.Output.
-                    let Maybe::Some(base_name) = render(codegen, base, args, active, depth + 1)
-                    else {
-                        return Maybe::None;
-                    };
-                    resolve_output(codegen, base_name.as_str(), active, depth + 1)
-                }
-                _ => codegen
-                    .type_ref_to_field_name(ty)
-                    .map_or(Maybe::None, |name| Maybe::Some(Text::from(name))),
-            }
-        }
-
-        fn resolve_output(
-            codegen: &VbcCodegen,
-            type_name: &str,
-            active: &mut Set<Text>,
-            depth: usize,
-        ) -> Maybe<Text> {
-            if depth >= MAX_OUTPUT_DEPTH {
-                return Maybe::None;
-            }
-            let Maybe::Some(implementation) = codegen.future_implementation(type_name) else {
-                return Maybe::None;
-            };
-            let Some((_, output)) = implementation.associated_types.iter().find(|(name, _)| {
-                codegen
-                    .ctx
-                    .strings
-                    .get(name.0 as usize)
-                    .is_some_and(|name| name == "Output")
-            }) else {
-                return Maybe::None;
-            };
-            let key = Text::from(type_name);
-            if !active.insert(key.clone()) {
-                return Maybe::None;
-            }
-            let result = render(
-                codegen,
-                output,
-                &VbcCodegen::split_generic_args(type_name),
-                active,
-                depth + 1,
-            );
-            active.remove(&key);
-            result
-        }
-
-        resolve_output(self, type_name, &mut Set::new(), 0)
+    /// Render only after exact declaration substitution. Generic IDs belong to
+    /// their declared scope; they are never positional indexes into type text.
+    fn future_output_type_name(&self, type_name: &str) -> Option<verum_common::Text> {
+        let future = self.semantic_type_in_current_scope(type_name)?;
+        self.declaration_type_name(&self.associated_future_output(&future, 0)?, 0)
+            .map(Into::into)
     }
 
     /// One lowering for interpreter and AOT: poll, yield on Pending, return Ready's payload.
@@ -27130,8 +26978,8 @@ impl VbcCodegen {
     fn compile_protocol_future_await(
         &mut self,
         future: Reg,
-        poll_id: u32,
-        poll_result: crate::types::TypeId,
+        poll: selection::PollCall,
+        owned: bool,
     ) -> CodegenResult<Option<Reg>> {
         let resolve = |canonical: &str, short: &str| {
             self.ctx
@@ -27142,14 +26990,6 @@ impl VbcCodegen {
         };
         let noop_id = resolve("core.async.waker.noop_waker", "noop_waker")?;
         let context_id = resolve("core.async.waker.Context.from_waker", "Context.from_waker")?;
-        let ready_tag = self.lookup_stdlib_variant_tag(
-            "Ready",
-            "Poll.Ready",
-            "poll result",
-            Some(poll_result),
-            "Future await",
-        )?;
-
         let result = self.ctx.alloc_temp();
         let waker = self.ctx.alloc_temp();
         let context = self.ctx.alloc_temp();
@@ -27172,10 +27012,8 @@ impl VbcCodegen {
             func_id: context_id,
             args: RegRange::new(args, 1),
         });
-        self.ctx.emit(Instruction::RefMut {
-            dst: args,
-            src: future,
-        });
+        if owned { self.ctx.emit(Instruction::RefMut { dst: args, src: future }); }
+        else { self.ctx.emit(Instruction::Mov { dst: args, src: future }); }
         self.ctx.emit(Instruction::RefObj {
             dst: cx_arg,
             src: context,
@@ -27184,30 +27022,29 @@ impl VbcCodegen {
         let poll_label = self.ctx.new_label("await_poll");
         let ready_label = self.ctx.new_label("await_ready");
         self.ctx.define_label(&poll_label);
-        self.ctx.emit(Instruction::Call {
-            dst: polled,
-            func_id: poll_id,
-            args: RegRange::new(args, 2),
-        });
+        if poll.type_args.is_empty() {
+            self.ctx.emit(Instruction::Call { dst: polled, func_id: poll.function, args: RegRange::new(args, 2) });
+        } else {
+            self.ctx.emit(Instruction::CallG { dst: polled, func_id: poll.function, args: RegRange::new(args, 2), type_args: poll.type_args.to_vec() });
+        }
         self.ctx.emit(Instruction::IsVar {
             dst: ready,
             value: polled,
-            tag: ready_tag,
+            tag: poll.ready_tag,
         });
         self.ctx
             .emit_forward_jump(&ready_label, |offset| Instruction::JmpIf {
                 cond: ready,
                 offset,
             });
+        self.assert_poll_pending(polled, ready, poll.pending_tag);
+        self.ctx.emit(Instruction::DropRef { src: polled });
         self.ctx.emit(Instruction::AsyncYield);
         self.ctx
             .emit_backward_jump(&poll_label, |offset| Instruction::Jmp { offset })?;
         self.ctx.define_label(&ready_label);
-        self.ctx.emit(Instruction::GetVariantData {
-            dst: result,
-            variant: polled,
-            field: 0,
-        });
+        self.take_poll_output(polled, result, ready);
+        if owned { self.ctx.emit(Instruction::DropTyped { src: future, type_ref: poll.future_type.clone() }); }
 
         for reg in [future, waker, context, polled, ready, args, cx_arg] {
             self.ctx.free_temp(reg);
@@ -30567,6 +30404,9 @@ impl VbcCodegen {
             // free-fn shadowing for stdlib names like
             // `core.io.stdio.stdout`.
             ExprKind::Await(inner) => {
+                if let Some(Some(declared)) = self.ctx.declared_result_types.get(&expr.span) {
+                    return self.declaration_type_name(declared, 0);
+                }
                 let t = self.extract_expr_type_name(inner);
                 if let Some(ref name) = t
                     && self.future_implementation(name).is_some()
@@ -34768,137 +34608,6 @@ impl VbcCodegen {
             },
         });
         Ok(Some(dst))
-    }
-
-    /// Compiles select expression
-    ///
-    /// Waits on multiple futures and executes the body of the first one to complete.
-    /// Supports both biased (ordered priority) and fair (random) selection.
-    fn compile_select(
-        &mut self,
-        biased: bool,
-        arms: &verum_common::List<verum_ast::expr::SelectArm>,
-        demand: ResultDemand,
-    ) -> CodegenResult<Option<Reg>> {
-        let dest = self.ctx.alloc_temp();
-        // T1131: define the destination BEFORE the arms. A freshly
-        // allocated temp holds whatever the slot held, and when no arm
-        // matched the select's value was read out as that leftover —
-        // measured as `()` in one program and as a raw `0x7ffd…`
-        // TypeRef tag in the same program one statement later. The
-        // register is now Unit unless an arm writes it, so "no arm won"
-        // reads as a value nobody chose ONLY when that is true.
-        self.ctx.emit(Instruction::LoadNil { dst: dest });
-        let end_label = self.ctx.new_label("select_end");
-
-        // Collect all future registers and handler offsets
-        let mut future_regs = Vec::new();
-        let mut arm_labels = Vec::new();
-
-        // Compile each future expression
-        for (i, arm) in arms.iter().enumerate() {
-            let arm_label = self.ctx.new_label(&format!("select_arm_{}", i));
-            arm_labels.push(arm_label);
-
-            if let verum_common::Maybe::Some(ref future_expr) = arm.future {
-                let future_reg = self
-                    .compile_expr(future_expr)?
-                    .or_internal("select future has no value")?;
-                future_regs.push(future_reg);
-            } else {
-                // Default/else arm - use a special marker
-                let marker = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadNil { dst: marker });
-                future_regs.push(marker);
-            }
-        }
-
-        // Emit select instruction
-        // The select instruction returns the index of the completed future
-        let index_reg = self.ctx.alloc_temp();
-
-        // Build handlers vector (offsets will be patched)
-        let handlers: Vec<i32> = (0..arms.len()).map(|_| 0).collect();
-
-        self.ctx.emit(Instruction::Select {
-            dst: index_reg,
-            futures: future_regs.clone(),
-            handlers,
-        });
-
-        // If biased, we check futures in order; otherwise runtime selects fairly
-        let _ = biased; // Biased behavior is handled by runtime
-
-        // Generate code for each arm
-        for (i, arm) in arms.iter().enumerate() {
-            self.ctx.define_label(&arm_labels[i]);
-
-            // Check if this arm was selected
-            let cmp_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI {
-                dst: cmp_reg,
-                value: i as i64,
-            });
-            let match_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::CmpI {
-                op: CompareOp::Eq,
-                dst: match_reg,
-                a: index_reg,
-                b: cmp_reg,
-            });
-            self.ctx.free_temp(cmp_reg);
-
-            let next_label = if i + 1 < arms.len() {
-                arm_labels[i + 1].clone()
-            } else {
-                end_label.clone()
-            };
-
-            self.ctx
-                .emit_forward_jump(&next_label, |offset| Instruction::JmpNot {
-                    cond: match_reg,
-                    offset,
-                });
-            self.ctx.free_temp(match_reg);
-
-            // Bind pattern if present
-            self.ctx.enter_scope();
-            if let verum_common::Maybe::Some(ref pattern) = arm.pattern {
-                // The result of the future is in the future register
-                self.compile_pattern_bind(pattern, future_regs[i])?;
-            }
-
-            // Compile arm body
-            let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
-            if let Some(arm_reg) = arm_result {
-                self.ctx.emit(Instruction::Mov {
-                    dst: dest,
-                    src: arm_reg,
-                });
-                self.ctx.free_temp(arm_reg);
-            }
-
-            let (_, defers) = self.ctx.exit_scope(false);
-            for defer_instrs in defers {
-                for instr in defer_instrs {
-                    self.ctx.emit(instr);
-                }
-            }
-
-            // Jump to end
-            self.ctx
-                .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
-        }
-
-        // Clean up future registers
-        for reg in future_regs {
-            self.ctx.free_temp(reg);
-        }
-        self.ctx.free_temp(index_reg);
-
-        self.ctx.define_label(&end_label);
-
-        Ok(Some(dest))
     }
 
     /// Compiles nursery expression for structured concurrency

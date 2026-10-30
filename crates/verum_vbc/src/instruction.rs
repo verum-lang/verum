@@ -9809,6 +9809,8 @@ pub enum ExtendedSubOpcode {
     NewClosureTyped = 0x07,
     /// Closure with capture declarations and lexical generic arguments.
     NewClosureWitnessed = 0x08,
+    /// Declared destruction: `[0x1F][0x09][src:reg][TypeRef]`.
+    DropTyped = 0x09,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10064,6 +10066,7 @@ impl ExtendedSubOpcode {
             0x06 => Some(Self::TypeResource),
             0x07 => Some(Self::NewClosureTyped),
             0x08 => Some(Self::NewClosureWitnessed),
+            0x09 => Some(Self::DropTyped),
             0x10 => Some(Self::ProcessExit),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
@@ -10151,6 +10154,7 @@ impl ExtendedSubOpcode {
             Self::TypeResource => "EXT_TYPE_RESOURCE",
             Self::NewClosureTyped => "EXT_NEW_CLOSURE_TYPED",
             Self::NewClosureWitnessed => "EXT_NEW_CLOSURE_WITNESSED",
+            Self::DropTyped => "EXT_DROP_TYPED",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -11203,6 +11207,15 @@ pub enum Instruction {
     DropRef {
         /// Register holding the value to drop.
         src: Reg,
+    },
+    /// Destroy a value using its declaration-owned type and clear its register.
+    /// Generic arguments are resolved by the current frame or monomorphizer;
+    /// an erased runtime carrier never establishes payload ownership.
+    DropTyped {
+        /// Register whose owned value is consumed and replaced with Unit.
+        src: Reg,
+        /// Exact declared type, including reference qualifiers and arguments.
+        type_ref: TypeRef,
     },
 
     // ========================================================================

@@ -66,6 +66,10 @@ pub(crate) fn compute_archive_key<'a>(
         "crates/verum_vbc/src/codegen/array_coercions.rs",
         "crates/verum_vbc/src/codegen/array_elements.rs",
         "crates/verum_vbc/src/codegen/expressions.rs",
+        // Selection and protocol-await lowering share this producer module.
+        "crates/verum_vbc/src/codegen/select.rs",
+        "crates/verum_vbc/src/codegen/constructor_types.rs",
+        "crates/verum_vbc/src/mono/method_calls.rs",
         "crates/verum_vbc/src/codegen/statements.rs",
         // Error classification decides whether invalid source becomes a baked
         // panic stub or refuses compilation (including constructor ownership).

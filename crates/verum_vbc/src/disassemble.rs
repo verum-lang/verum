@@ -569,6 +569,7 @@ fn write_instruction(
         RefChecked { dst, src } => write!(out, "REF_CHK   {}, {}", r(dst), r(src)),
         RefUnsafe { dst, src } => write!(out, "REF_UNSAFE {}, {}", r(dst), r(src)),
         DropRef { src } => write!(out, "DROP_REF  {}", r(src)),
+        DropTyped { src, type_ref } => write!(out, "DROP_TYPED {}, {}", r(src), format_type_ref(module, type_ref)),
 
         // ── Pattern Matching + Variants ──
         IsVar { dst, value, tag } => write!(out, "IS_VAR    {}, {}, tag={}", r(dst), r(value), tag),

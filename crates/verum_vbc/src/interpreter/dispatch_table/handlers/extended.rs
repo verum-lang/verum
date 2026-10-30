@@ -163,6 +163,7 @@ pub(in super::super) fn handle_extended(
             state.set_reg(dst, crate::value::Value::from_i64(mode as u8 as i64));
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::DropTyped) => super::cbgr::handle_drop_typed(state),
         Some(ExtendedSubOpcode::TypeLayout) => {
             let dst = read_reg(state)?;
             let raw = read_u8(state)?;

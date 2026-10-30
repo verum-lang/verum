@@ -1291,11 +1291,16 @@ one module and therefore never seeded",
                                     | verum_ast::decl::FunctionParamKind::SelfRefUnsafeMut
                             )
                         );
-                        let impl_names: Vec<String> = impl_decl.generics.iter().filter_map(|p| match &p.kind {
-                            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.to_string()),
-                            _ => None,
-                        }).collect();
                         let parent_names = owner_generics.get(&target_type_name).and_then(|v| v.as_deref()).unwrap_or(&[]);
+                        let impl_names: Vec<String> = if impl_decl.generics.is_empty() {
+                            verum_vbc::codegen::VbcCodegen::impl_target_arg_names(&impl_decl.kind)
+                                .into_iter().filter(|name| parent_names.contains(name)).collect()
+                        } else {
+                            impl_decl.generics.iter().filter_map(|p| match &p.kind {
+                                verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.to_string()),
+                                _ => None,
+                            }).collect()
+                        };
                         let info = FunctionInfo {
                             has_source_body: func.body.is_some(),
                             callable_signature: None,

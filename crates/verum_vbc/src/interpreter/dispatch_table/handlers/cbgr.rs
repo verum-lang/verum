@@ -1303,6 +1303,101 @@ pub(in super::super) fn handle_ref_unsafe(
     Ok(DispatchResult::Continue)
 }
 
+/// Destroy an owned value using exact source declarations and current witnesses.
+pub(in super::super) fn handle_drop_typed(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    let src = read_reg(state)?;
+    let ty = read_type_ref(state)?;
+    let ty = state.resolve_generic_witness(&ty);
+    let plan = crate::drop_plan::build(&state.module, &ty)
+        .map_err(|message| InterpreterError::Panic { message: message.to_string() })?;
+    let value = state.get_reg(src);
+    validate_typed_drop(state, value, &plan)?;
+    // Consume the owner before a destructor can reenter the interpreter.
+    state.set_reg(src, Value::unit());
+    let absolute = state.reg_base() + u32::from(src.0);
+    state.registers.bump_generation(absolute);
+    execute_typed_drop(state, value, &plan)?;
+    Ok(DispatchResult::Continue)
+}
+
+fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate::drop_plan::DropPlan)
+    -> InterpreterResult<Option<(*mut Value, &'a [crate::drop_plan::DropPlan])>>
+{
+    use crate::drop_plan::DropPlan;
+    if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(None); }
+    let (owner, record, variants) = match plan {
+        DropPlan::Ignore => return Ok(None),
+        DropPlan::Glue { owner, .. } => (*owner, None, None),
+        DropPlan::Record { owner, fields } => (*owner, Some(fields.as_slice()), None),
+        DropPlan::Sum { owner, variants } => (*owner, None, Some(variants)),
+    };
+    if !value.is_regular_ptr() {
+        return Err(InterpreterError::Panic { message: "typed destruction value is not an owned object".into() });
+    }
+    let pointer = value.as_ptr::<heap::ObjectHeader>();
+    if !state.heap.contains(pointer) {
+        return Err(InterpreterError::Panic { message: "typed destruction value is not a live owned object".into() });
+    }
+    // SAFETY: exact allocation membership precedes all header/payload reads.
+    let header = unsafe { &*pointer };
+    if !header.is_valid() || header.type_id != owner {
+        return Err(InterpreterError::Panic { message: format!("typed destruction nominal owner mismatch: expected {owner:?}, found {:?}", header.type_id) });
+    }
+    if matches!(plan, DropPlan::Glue { .. }) {
+        let declaration = state.module.get_type(owner).expect("DropPlan carries a declared owner");
+        if !header.layout_matches_descriptor(declaration) {
+            return Err(InterpreterError::Panic { message: "typed destruction Drop receiver extent does not match its declaration".into() });
+        }
+        return Ok(None);
+    }
+    let mut offset = heap::OBJECT_HEADER_SIZE;
+    let fields = if let Some(variants) = variants {
+        if header.size < 8 { return Err(InterpreterError::Panic { message: "typed destruction sum is truncated".into() }); }
+        let tag = unsafe { heap::variant_tag(pointer.cast()) };
+        offset += 8;
+        variants.iter().find(|(declared, _)| *declared == tag).map(|(_, fields)| fields.as_slice())
+            .ok_or_else(|| InterpreterError::Panic { message: "typed destruction sum tag is not declared".into() })?
+    } else if let Some(fields) = record { fields } else { return Ok(None); };
+    let slots = if matches!(plan, DropPlan::Record { .. }) && owner != TypeId::TUPLE {
+        fields.len().max(1)
+    } else { fields.len() };
+    if header.size as usize != offset - heap::OBJECT_HEADER_SIZE + slots * std::mem::size_of::<Value>() {
+        return Err(InterpreterError::Panic { message: "typed destruction payload extent does not match its declaration".into() });
+    }
+    Ok(Some((unsafe { pointer.cast::<u8>().add(offset).cast() }, fields)))
+}
+
+fn validate_typed_drop(state: &InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
+    -> InterpreterResult<()>
+{
+    if let Some((payload, fields)) = typed_drop_fields(state, value, plan)? {
+        for (index, field) in fields.iter().enumerate() {
+            // SAFETY: typed_drop_fields checked the entire declared extent.
+            validate_typed_drop(state, unsafe { *payload.add(index) }, field)?;
+        }
+    }
+    Ok(())
+}
+
+fn execute_typed_drop(state: &mut InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
+    -> InterpreterResult<()>
+{
+    use crate::drop_plan::DropPlan;
+    if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(()); }
+    if let DropPlan::Glue { function, type_args, .. } = plan {
+        super::super::call_function_sync_with_witnesses(state, *function, &[value],
+            (!type_args.is_empty()).then(|| type_args.clone().into_boxed_slice()))?;
+    } else if let Some((payload, fields)) = typed_drop_fields(state, value, plan)? {
+        for (index, field) in fields.iter().enumerate() {
+            // SAFETY: the declared extent was checked, and each slot is moved
+            // out before invoking its destructor. Borrowed fields are ignored.
+            let component = unsafe { std::mem::replace(&mut *payload.add(index), Value::unit()) };
+            execute_typed_drop(state, component, field)?;
+        }
+    }
+    Ok(())
+}
+
 /// DropRef (0x77) - Drop a value/reference.
 ///
 /// If the value has a user-defined Drop implementation, calls the drop method first.
