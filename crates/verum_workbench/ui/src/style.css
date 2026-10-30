@@ -170,15 +170,10 @@ kbd {
   display: flex;
   align-items: center;
   gap: 10px;
-  text-decoration: none;
   color: var(--text);
   font-size: 13px;
+  font-weight: 600;
   white-space: nowrap;
-}
-.brand strong {
-  font-size: 21px;
-  font-weight: 750;
-  letter-spacing: -1px;
 }
 .brand-mark {
   display: block;
@@ -186,15 +181,6 @@ kbd {
   width: 32px;
   height: 32px;
   object-fit: contain;
-}
-.brand-divider {
-  height: 18px;
-  width: 1px;
-  background: var(--border);
-  margin: 0 3px;
-}
-.brand > span:last-child {
-  color: var(--muted);
 }
 .workspace-label {
   min-width: 0;
@@ -1216,16 +1202,9 @@ a {
   .brand {
     gap: 7px;
   }
-  .brand strong {
-    font-size: 19px;
-  }
-  .brand > span:last-child {
-    font-size: 11px;
-  }
   .brand-mark {
     width: 26px;
     height: 26px;
-    font-size: 21px;
   }
   .workspace-label {
     display: none;
@@ -1343,10 +1322,6 @@ a {
   #run-settings svg { display: block; }
   .topbar .connection { font-size: 0; gap: 0; }
   .editor-toolbar .button { padding-inline: 9px; }
-  .brand-divider,
-  .brand > span:last-child {
-    display: none;
-  }
   .history {
     width: 105px;
   }

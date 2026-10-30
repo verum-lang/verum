@@ -1,11 +1,10 @@
 # Verum brand assets
 
-`verum-emblem.png` is the approved detailed Vector Engine artwork, with transparency.
-Use it for large illustrations. `verum-mark.svg` is its symmetric geometric companion
-for navigation, application icons and favicons. `verum-mark-mono.svg` supplies the
-single-colour silhouette. Prefer the vector mark below 96 px.
+`verum-emblem.png` is the approved Vector Engine artwork, with transparency.
+It is the single logo for navigation, application icons, favicons and illustrations.
+Use the size-specific exports; do not substitute a simplified or monochrome mark.
 
-Keep the complete silhouette, preserve transparency and allow clear space. The SVG
-is actual editable geometry; it does not embed the raster artwork. PNG, WebP, ICO
-and PDF exports are in `exports/`. Website and extension copies derive from these
-masters; Studio embeds the compact SVG directly during its UI build.
+Keep the complete silhouette, preserve transparency and allow clear space. PNG,
+WebP, ICO and PDF exports are in `exports/`; the PDF preserves the raster artwork.
+Regenerate with `node scripts/brand/export.mjs`. Website and extension copies derive
+from these exports; Studio embeds the 128 px PNG during its UI build.
