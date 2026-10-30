@@ -1054,39 +1054,11 @@ mod tests {
 }
 
 impl CoreMetadata {
-    /// Function keys whose last dot-segment is `leaf`, in `functions` order.
-    /// `None` when the index cannot be trusted, so the caller falls back to
-    /// scanning. The index is built once and `functions` can gain entries
-    /// afterwards — a stale index does not merely slow things down, it
-    /// answers with a SMALLER candidate set and changes the program's
-    /// meaning. Measured while building it: `core/async/executor.vr` went
-    /// from 0 diagnostics to 9 with no candidate reported missing at the
-    /// moment of comparison, because the loss happened on a later call
-    /// against a table that had grown.
-    ///
-    /// The stored length is the cheapest honest witness: same length, same
-    /// table for this purpose; different length, do not trust it.
-    /// Function keys that start with `prefix.` and end with `.item`.
-    ///
-    /// The one-hop re-export search used to answer this by walking EVERY key
-    /// in `functions`, once per imported item and twice over. A glob mount
-    /// makes that items × keys — measured, `mount core.collections.*` on a
-    /// two-line program spent sixty-eight seconds there, against four for
-    /// the whole prelude.
-    ///
-    /// `functions` is a `BTreeMap`, so the keys sharing a prefix are already
-    /// CONTIGUOUS and a range query finds them in O(log n + hits). No index,
-    /// no second copy of the data, nothing to keep coherent when the table
-    /// grows, and no allocation.
-    ///
-    /// A side index was tried first and rejected on evidence, which is worth
-    /// recording because it looked obviously right: keyed by the item's last
-    /// segment, it produced provably identical candidate lists on all 11284
-    /// calls of one file — and the compiler then reported NINE diagnostics
-    /// on `core/async/executor.vr` where it reported none. Isolating build
-    /// from lookup showed the BUILD alone did it: materialising tens of
-    /// thousands of `Text` clones moves some global state. Filed separately;
-    /// the range query sidesteps it by not existing.
+    /// Keys starting with `prefix.` and ending with `.item`, in map order.
+    /// This range scan remains valid while callers mutate the declaration map.
+    /// Installed immutable snapshots use `MetadataNameIndex` to avoid scanning
+    /// an entire module subtree for each missing import. Derived indexes must
+    /// never be cached on this mutable wire representation.
     pub fn function_keys_between(&self, prefix: &str, item: &str) -> Vec<&Text> {
         let head = format!("{}.", prefix);
         let tail = format!(".{}", item);

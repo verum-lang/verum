@@ -1008,6 +1008,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
@@ -1162,6 +1163,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
@@ -1317,6 +1319,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
@@ -9859,9 +9862,10 @@ impl TypeChecker {
     /// Main entry point: infer type for an expression.
     pub fn infer(&mut self, expr: &Expr, mode: InferMode) -> Result<InferResult> {
         let start = Instant::now();
-        let result = self.infer_expr(expr, mode)?;
+        let result = self.infer_expr(expr, mode);
+        self.check_analysis_control()?;
         self.metrics.time_us += start.elapsed().as_micros() as u64;
-        Ok(result)
+        result
     }
 
     /// Check an expression against an expected type.
@@ -9869,10 +9873,11 @@ impl TypeChecker {
         let start = Instant::now();
         self.metrics.check_count += 1;
 
-        let result = self.check_expr(expr, &expected)?;
+        let result = self.check_expr(expr, &expected);
+        self.check_analysis_control()?;
 
         self.metrics.time_us += start.elapsed().as_micros() as u64;
-        Ok(result)
+        result
     }
 
     /// Type check in synthesis mode.
@@ -9883,7 +9888,9 @@ impl TypeChecker {
     /// Returns whether the statement diverges (has type Never).
     pub fn check_stmt(&mut self, stmt: &Stmt) -> Result<bool> {
         let _depth_guard = self.inc_inference_depth("check_stmt")?;
-        self.check_stmt_inner(stmt)
+        let outcome = self.check_stmt_inner(stmt);
+        self.check_analysis_control()?;
+        outcome
     }
 
     /// Inner implementation of check_stmt

@@ -1222,6 +1222,8 @@ pub struct TypeChecker {
     /// can hand it off without paying the 15ms cost of a 3MB deep
     /// clone.  Reads dereference the `Arc` transparently.
     core_metadata: Maybe<std::sync::Arc<crate::core_metadata::CoreMetadata>>,
+    /// Raw-name buckets belong to this immutable metadata allocation only.
+    metadata_names: std::cell::OnceCell<std::sync::Arc<crate::metadata_snapshot::MetadataNameIndex>>,
     /// Lazy exact-owner buckets for the installed immutable metadata snapshot.
     /// Values are positions in its implementation list, in declaration order.
     /// Replacing metadata invalidates this index and completed registration tails.

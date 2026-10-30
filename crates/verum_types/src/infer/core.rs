@@ -998,6 +998,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
@@ -1113,6 +1114,7 @@ impl TypeChecker {
     pub fn new_with_core_snapshot(snapshot: std::sync::Arc<crate::CoreMetadataSnapshot>) -> Self {
         let mut checker = Self::new_with_core(snapshot.metadata().clone());
         checker.metadata_impls_by_owner = Some(snapshot.implementations.clone());
+        checker.metadata_names = std::cell::OnceCell::from(snapshot.names.clone());
         checker
     }
 
@@ -1167,11 +1169,30 @@ impl TypeChecker {
     ) {
         self.install_metadata_nominal_identity(&metadata);
         self.core_metadata = Maybe::Some(metadata);
+        self.metadata_names = std::cell::OnceCell::new();
         self.metadata_own_surface = std::cell::RefCell::new(None);
         self.metadata_declaring_modules = std::cell::OnceCell::new();
         self.metadata_impls_by_owner = Maybe::None;
         self.metadata_impl_receipts.clear();
         self.stdlib_tail_registered.clear();
+    }
+
+    pub(super) fn metadata_name_index(
+        &self,
+    ) -> Result<std::sync::Arc<crate::metadata_snapshot::MetadataNameIndex>> {
+        self.check_analysis_control()?;
+        if let Some(index) = self.metadata_names.get() {
+            return Ok(index.clone());
+        }
+        let metadata = self.core_metadata.as_ref()
+            .expect("metadata lookup requires an installed snapshot");
+        let index = std::sync::Arc::new(crate::metadata_snapshot::MetadataNameIndex::prepare(
+            metadata,
+            self.analysis_control.as_ref(),
+        )?);
+        // Cancellation leaves the cell empty. No partial candidate set escapes.
+        let _ = self.metadata_names.set(index.clone());
+        Ok(index)
     }
 
     /// Retain exact metadata bindings and their declaration owners. This is a
@@ -4087,6 +4108,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,

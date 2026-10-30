@@ -121,7 +121,9 @@ impl TypeChecker {
         // holding the whole module call `register_declared_meta_macros`,
         // which covers the other order too.
         self.note_declared_meta_macros(item);
-        self.check_item_inner(item)
+        let outcome = self.check_item_inner(item);
+        self.check_analysis_control()?;
+        outcome
     }
 
     /// Record every `meta <name>(...)` declaration in `module`, including
@@ -1258,9 +1260,9 @@ impl TypeChecker {
     /// probes — a name it cannot find qualified is one this repair cannot
     /// help, so `seen_this_module` is part of the answer rather than an
     /// optimisation.
-    fn mounted_type_name_is_contested(&self, item_name: &str, module_path: &str) -> bool {
+    fn mounted_type_name_is_contested(&self, item_name: &str, module_path: &str) -> Result<bool> {
         let Maybe::Some(md) = &self.core_metadata else {
-            return false;
+            return Ok(false);
         };
         let suffix = format!(".{}", item_name);
         // DUAL-KEYED, like every other metadata probe in this file: the
@@ -1272,24 +1274,19 @@ impl TypeChecker {
         let stripped = module_path.strip_prefix("core.").unwrap_or(module_path);
         let this_key = format!("{}{}", module_path, suffix);
         let this_key_stripped = format!("{}{}", stripped, suffix);
-        let mut count = 0usize;
-        let mut seen_this_module = false;
-        for key in md.types.keys() {
-            let k = key.as_str();
-            if k.ends_with(suffix.as_str()) {
-                count += 1;
-                if k == this_key.as_str() || k == this_key_stripped.as_str() {
-                    seen_this_module = true;
-                }
-            }
+        let seen_this_module = md.types.contains_key(&Text::from(this_key))
+            || md.types.contains_key(&Text::from(this_key_stripped));
+        if !seen_this_module {
+            return Ok(false);
         }
+        let count = self.metadata_name_index()?.type_keys_ending_with(item_name).count();
         if std::env::var("VERUM_TRACE_TASK21").is_ok() {
             eprintln!(
                 "[task21] contested: mod='{}' item='{}' keys_ending={} this_module_seen={}",
                 module_path, item_name, count, seen_this_module,
             );
         }
-        count > 1 && seen_this_module
+        Ok(count > 1)
     }
 
     fn register_mount_item_alias(&mut self, item_name: &str, alias: &verum_ast::Ident) {
@@ -1773,7 +1770,9 @@ impl TypeChecker {
         current_module_path: &str,
         registry: &verum_modules::ModuleRegistry,
     ) -> Result<()> {
+        self.check_analysis_control()?;
         let outcome = self.process_import_inner(import, current_module_path, registry);
+        self.check_analysis_control()?;
         let Err(TypeError::ImportModuleNotFound {
             module_path,
             mut similar_modules,
@@ -2630,6 +2629,7 @@ impl TypeChecker {
         registry: &verum_modules::ModuleRegistry,
         import_span: Option<Span>,
     ) -> Result<()> {
+        self.check_analysis_control()?;
         if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
             eprintln!(
                 "[trace-import] inner entry: module='{}' item='{}' local='{:?}' span={}",
@@ -2950,7 +2950,7 @@ impl TypeChecker {
                     let contested = self.mounted_type_name_is_contested(
                         item_name,
                         module_path.as_str(),
-                    );
+                    )?;
                     let type_bound_from_metadata = self
                         .ensure_public_mounted_type_loaded_qualified(
                             item_name,
@@ -7888,6 +7888,10 @@ impl TypeChecker {
         let onehop_fd = if direct_fd.is_some() || reexport_fd.is_some() {
             None
         } else {
+            // Schemes remain checker-local. Only immutable raw key buckets are
+            // shared, with exact prefix/suffix and module-shape checks below.
+            // Cancellation is sticky and checked by the enclosing import/item.
+            let names = self.metadata_name_index().ok()?;
             let mut candidates: Vec<&Text> = Vec::new();
             for prefix in [Some(module_path), module_path.strip_prefix("core.")]
                 .into_iter()
@@ -7895,12 +7899,7 @@ impl TypeChecker {
             {
                 let head = format!("{}.", prefix);
                 let tail = format!(".{}", item_name);
-                // The keys sharing this prefix are contiguous in the
-                // metadata's BTreeMap, so a range query finds them without
-                // touching the rest of the table. This used to walk EVERY
-                // key, once per imported item and twice over — see
-                // `CoreMetadata::function_keys_between`.
-                let pool = metadata.function_keys_between(prefix, item_name);
+                let pool = names.function_keys_between(prefix, item_name);
                 for key in pool {
                     let k = key.as_str();
                     if k.starts_with(head.as_str())
@@ -29207,3 +29206,7 @@ mod declaring_module_index_tests;
 #[cfg(test)]
 #[path = "../../tests/unit/imported_generic_scopes.rs"]
 mod imported_generic_scopes;
+
+#[cfg(test)]
+#[path = "../../tests/unit/metadata_name_index.rs"]
+mod metadata_name_index_tests;
