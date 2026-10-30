@@ -81,3 +81,4 @@ import VerumExternalReplay.NumeralPrograms
 import VerumExternalReplay.CheckedNumerals
 import VerumExternalReplay.BinaryPartitionKT
 import VerumExternalReplay.SharedUpdates
+import VerumExternalReplay.AdditiveTraversal
