@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use verum_ast::decl::ItemKind;
 use verum_proof::{
-    admission::{self, Diagnostic, Judgment, Report},
+    admission::{self, Diagnostic, Judgment, ReplayOutcome, Report},
     proof_checker::Term,
 };
 
@@ -282,24 +282,7 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
         serde_json::to_vec(&judgment).expect("native judgment serialization is infallible");
     let native = admission::replay(&encoded);
     if !native.accepted {
-        let diagnostic = native
-            .diagnostic
-            .clone()
-            .expect("rejected native report has diagnostic");
-        let status = if matches!(diagnostic.code.as_str(), "structural_limit" | "byte_limit") {
-            "inconclusive"
-        } else {
-            "rejected"
-        };
-        let mut report = failure(
-            status,
-            &diagnostic.stage,
-            &diagnostic.code,
-            &diagnostic.message,
-            &source,
-        );
-        report.native = Some(native);
-        return report;
+        return native_refusal(native, &source);
     }
     let mut frame = Vec::new();
     let mut telescope = Vec::new();
@@ -347,3 +330,44 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
         diagnostic_span: None,
     }
 }
+
+// Preserve the native semantic category rather than recognizing a diagnostic
+// string whitelist. New resource kinds must not become invalid source proofs.
+fn native_refusal(native: Report, source: &SourceBinding) -> SourceReport {
+    let consistent = native.is_consistent() && native.outcome != ReplayOutcome::Accepted;
+    let status = if !consistent {
+        "inconclusive"
+    } else {
+        match native.outcome {
+            ReplayOutcome::Rejected => "rejected",
+            ReplayOutcome::Unsupported => "unsupported",
+            ReplayOutcome::ResourceExhausted | ReplayOutcome::Inconclusive => "inconclusive",
+            ReplayOutcome::Accepted => "inconclusive",
+        }
+    };
+    let diagnostic = if consistent {
+        native
+            .diagnostic
+            .clone()
+            .expect("non-accepted consistent report has diagnostic")
+    } else {
+        Diagnostic {
+            stage: "protocol".into(),
+            code: "invalid_native_report".into(),
+            message: "The native checker returned an inconsistent refusal.".into(),
+        }
+    };
+    let mut report = SourceReport::failure(
+        status,
+        &diagnostic.stage,
+        &diagnostic.code,
+        &diagnostic.message,
+    );
+    report.source = source.clone();
+    report.native = Some(native);
+    report
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/native_outcomes.rs"]
+mod native_outcomes;

@@ -1,7 +1,7 @@
-//! A bounded host worker for untrusted native proof terms.
-//! The executable and worker argument are deployment configuration, never input.
-//! Files rather than pipes keep either direction from blocking the supervisor.
-use crate::admission::{Diagnostic, MAX_BYTES, Report, checker_identity, profile_for};
+//! An isolated host worker for untrusted native proof terms.
+//! Executable, arguments and limits are verifier configuration, never proof input.
+use crate::admission::{Diagnostic, ReplayOutcome, Report, checker_identity, profile_for};
+use crate::limits::{InstalledLimits, ProcessLimits, ReplayLimits, WorkerReceipt};
 use crate::proof_checker::Foundation;
 use std::{
     io::{Read, Seek, SeekFrom, Write},
@@ -12,155 +12,269 @@ use std::{
 
 pub const WORKER_ARG: &str = "--internal-native-proof-worker";
 pub const EXTENSIONAL_WORKER_ARG: &str = "--internal-native-funext-proof-worker";
-pub const WALL_LIMIT: Duration = Duration::from_secs(5);
-pub const CPU_SECONDS: u64 = 3;
-pub const MEMORY_BYTES: u64 = 512 * 1024 * 1024;
-pub const OUTPUT_BYTES: u64 = 64 * 1024;
+pub const POLICY_ARG: &str = "--resource-policy";
+pub const WALL_LIMIT: Duration = Duration::from_millis(ProcessLimits::DEFAULT.wall_time_ms);
+pub const CPU_SECONDS: u64 = ProcessLimits::DEFAULT.cpu_seconds;
+pub const MEMORY_BYTES: u64 = ProcessLimits::DEFAULT.memory_bytes;
+pub const OUTPUT_BYTES: u64 = ProcessLimits::DEFAULT.output_bytes;
 
-fn refused(foundation: Foundation, code: &str, message: &str) -> Report {
-    Report {
-        profile: profile_for(foundation).into(),
-        checker: checker_identity(),
-        accepted: false,
-        diagnostic: Some(Diagnostic {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerFailure {
+    pub outcome: ReplayOutcome,
+    pub diagnostic: Diagnostic,
+}
+
+fn failure(outcome: ReplayOutcome, code: &str, message: &str) -> WorkerFailure {
+    WorkerFailure {
+        outcome,
+        diagnostic: Diagnostic {
             code: code.into(),
             stage: "process".into(),
             message: message.into(),
-        }),
+        },
     }
 }
 
-/// Limits must be installed in the single-threaded child, before decoding input.
-/// CPU/address-space/file/stack limits are OS limits, not proof-theoretic fuel.
-#[cfg(unix)]
-pub fn install_worker_limits() -> std::io::Result<()> {
-    use nix::sys::resource::{Resource, getrlimit, setrlimit};
-    for (resource, limit) in [
-        (Resource::RLIMIT_CORE, 0),
-        (Resource::RLIMIT_CPU, CPU_SECONDS),
-        #[cfg(not(target_os = "macos"))]
-        (Resource::RLIMIT_AS, MEMORY_BYTES),
-        (Resource::RLIMIT_STACK, 16 * 1024 * 1024),
-        (Resource::RLIMIT_FSIZE, OUTPUT_BYTES),
-    ] {
-        let (soft, hard) = getrlimit(resource).map_err(std::io::Error::from)?;
-        let bound = (limit as nix::sys::resource::rlim_t).min(hard).min(soft);
-        setrlimit(resource, bound, bound).map_err(std::io::Error::from)?;
-    }
-    Ok(())
+fn inconclusive(code: &str, message: &str) -> WorkerFailure {
+    failure(ReplayOutcome::Inconclusive, code, message)
 }
+
+fn exhausted(code: &str, message: &str) -> WorkerFailure {
+    failure(ReplayOutcome::ResourceExhausted, code, message)
+}
+
+fn report_failure(foundation: Foundation, limits: ReplayLimits, failure: WorkerFailure) -> Report {
+    let mut report = Report::refusal(
+        foundation,
+        limits.admission,
+        failure.outcome,
+        &failure.diagnostic.stage,
+        &failure.diagnostic.code,
+        &failure.diagnostic.message,
+    );
+    report.worker = Some(WorkerReceipt {
+        requested: limits,
+        installed: None,
+    });
+    report
+}
+
+/// Compute the actual inherited OS ceilings. The same calculation runs in the
+/// parent before launch and in the child before parsing; the receipt must match.
+#[cfg(unix)]
+fn effective_limits(limits: ProcessLimits) -> std::io::Result<InstalledLimits> {
+    use nix::sys::resource::{Resource, getrlimit};
+    let bound = |resource: Resource, requested: u64| -> std::io::Result<u64> {
+        let (soft, hard) = getrlimit(resource).map_err(std::io::Error::from)?;
+        Ok(requested.min(hard).min(soft))
+    };
+    Ok(InstalledLimits {
+        cpu_seconds: bound(Resource::RLIMIT_CPU, limits.cpu_seconds)?,
+        #[cfg(not(target_os = "macos"))]
+        address_space_bytes: Some(bound(Resource::RLIMIT_AS, limits.memory_bytes)?),
+        #[cfg(target_os = "macos")]
+        address_space_bytes: None,
+        stack_bytes: bound(Resource::RLIMIT_STACK, limits.stack_bytes)?,
+        output_bytes: bound(Resource::RLIMIT_FSIZE, limits.output_bytes)?,
+    })
+}
+
 #[cfg(not(unix))]
-pub fn install_worker_limits() -> std::io::Result<()> {
+fn effective_limits(_limits: ProcessLimits) -> std::io::Result<InstalledLimits> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "native proof worker needs supported process limits",
     ))
 }
 
-/// Call before initializing any async runtime. stdout is one bounded JSON report.
+#[cfg(unix)]
+fn install_limits(limits: ProcessLimits) -> std::io::Result<InstalledLimits> {
+    use nix::sys::resource::{Resource, setrlimit};
+    let installed = effective_limits(limits)?;
+    let mut resources = vec![
+        (Resource::RLIMIT_CORE, 0),
+        (Resource::RLIMIT_CPU, installed.cpu_seconds),
+        (Resource::RLIMIT_STACK, installed.stack_bytes),
+        (Resource::RLIMIT_FSIZE, installed.output_bytes),
+    ];
+    if let Some(bytes) = installed.address_space_bytes {
+        resources.push((Resource::RLIMIT_AS, bytes));
+    }
+    for (resource, bound) in resources {
+        setrlimit(resource, bound, bound).map_err(std::io::Error::from)?;
+    }
+    Ok(installed)
+}
+
+#[cfg(not(unix))]
+fn install_limits(limits: ProcessLimits) -> std::io::Result<InstalledLimits> {
+    effective_limits(limits)
+}
+
+/// Legacy worker entry point: retain the default OS ceilings.
+pub fn install_worker_limits() -> std::io::Result<()> {
+    install_limits(ProcessLimits::default()).map(|_| ())
+}
+
 pub fn worker() -> std::io::Result<()> {
     worker_with_foundation(Foundation::Intensional)
 }
 
-/// Worker policy is trusted launch configuration, not submitted metadata.
 pub fn worker_with_foundation(foundation: Foundation) -> std::io::Result<()> {
-    let report = if install_worker_limits().is_err() {
-        refused(
+    worker_with_limits(foundation, ReplayLimits::default())
+}
+
+/// Invoke only with the trusted launch policy, before starting other threads.
+pub fn worker_with_limits(foundation: Foundation, limits: ReplayLimits) -> std::io::Result<()> {
+    let mut installed = None;
+    let mut report = if !limits.is_valid() {
+        report_failure(
             foundation,
-            "sandbox_unavailable",
-            "The worker could not install its required process limits.",
+            limits,
+            inconclusive(
+                "invalid_limits",
+                "The resource policy cannot be represented safely.",
+            ),
         )
-    } else {
+    } else if let Ok(actual) = install_limits(limits.process) {
+        installed = Some(actual);
         let mut bytes = Vec::new();
         std::io::stdin()
-            .take(MAX_BYTES as u64 + 1)
+            .take(limits.admission.read_limit().unwrap())
             .read_to_end(&mut bytes)?;
-        crate::admission::replay_with_foundation(&bytes, foundation)
+        crate::admission::replay_with_limits(&bytes, foundation, limits.admission)
+    } else {
+        report_failure(
+            foundation,
+            limits,
+            inconclusive(
+                "sandbox_unavailable",
+                "The worker could not install its required process limits.",
+            ),
+        )
     };
+    report.worker = Some(WorkerReceipt {
+        requested: limits,
+        installed,
+    });
     serde_json::to_writer(std::io::stdout().lock(), &report).map_err(std::io::Error::other)
 }
 
 struct Running(Child);
 impl Drop for Running {
     fn drop(&mut self) {
-        // Reap on every error path as well as timeout. No orphan checkers.
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
 }
 
-/// Replay in a fresh worker, never in the caller's address space. A crash,
-/// timeout or protocol disagreement is inconclusive, not a false theorem.
 pub fn replay(executable: &Path, bytes: &[u8]) -> Report {
-    replay_with_deadline(executable, bytes, WALL_LIMIT)
+    replay_with_foundation(executable, bytes, Foundation::Intensional)
 }
 
-/// The caller may lower the wall budget but cannot raise the default ceiling.
+/// Compatibility API retains the original lowering-only deadline contract.
+/// Use replay_with_limits to select an explicit policy without a default clamp.
 pub fn replay_with_deadline(executable: &Path, bytes: &[u8], wall: Duration) -> Report {
-    replay_with_foundation_and_deadline(executable, bytes, Foundation::Intensional, wall)
+    let mut limits = ReplayLimits::default();
+    limits.process.wall_time_ms = wall.min(WALL_LIMIT).as_millis() as u64;
+    replay_with_limits(executable, bytes, Foundation::Intensional, limits)
 }
 
-/// Replay under an explicitly selected foundation in a resource-limited child.
 pub fn replay_with_foundation(executable: &Path, bytes: &[u8], foundation: Foundation) -> Report {
-    replay_with_foundation_and_deadline(executable, bytes, foundation, WALL_LIMIT)
+    replay_with_limits(executable, bytes, foundation, ReplayLimits::default())
 }
 
-fn replay_with_foundation_and_deadline(
+/// Replay using a caller-owned policy. A submitted judgment cannot change it.
+pub fn replay_with_limits(
     executable: &Path,
     bytes: &[u8],
     foundation: Foundation,
-    wall: Duration,
+    limits: ReplayLimits,
 ) -> Report {
+    if !limits.is_valid() {
+        return report_failure(
+            foundation,
+            limits,
+            inconclusive(
+                "invalid_limits",
+                "The resource policy cannot be represented safely.",
+            ),
+        );
+    }
+    let expected_installed = match effective_limits(limits.process) {
+        Ok(actual) => actual,
+        Err(_) => {
+            return report_failure(
+                foundation,
+                limits,
+                inconclusive(
+                    "sandbox_unavailable",
+                    "The supervisor could not determine the worker's inherited limits.",
+                ),
+            );
+        }
+    };
     let worker_arg = match foundation {
         Foundation::Intensional => WORKER_ARG,
         Foundation::FunctionExtensionality => EXTENSIONAL_WORKER_ARG,
     };
-    let response = match run_worker_with_deadline(executable, worker_arg, bytes, wall) {
+    let policy =
+        serde_json::to_string(&limits).expect("resource policy serialization is infallible");
+    let response = match run_worker_command(
+        executable,
+        &[worker_arg, POLICY_ARG, &policy],
+        bytes,
+        limits,
+    ) {
         Ok(bytes) => bytes,
-        Err(diagnostic) => {
-            return Report {
-                profile: profile_for(foundation).into(),
-                checker: checker_identity(),
-                accepted: false,
-                diagnostic: Some(diagnostic),
-            };
-        }
+        Err(error) => return report_failure(foundation, limits, error),
     };
-    let report: Report = match serde_json::from_slice(&response) {
+    match validate_worker_report(&response, foundation, limits, expected_installed) {
         Ok(report) => report,
-        Err(_) => {
-            return refused(
-                foundation,
-                "worker_protocol",
-                "The worker returned an invalid response.",
-            );
-        }
-    };
-    if report.profile != crate::admission::profile_for(foundation)
-        || report.checker != checker_identity()
-        || report.accepted == report.diagnostic.is_some()
-    {
-        return refused(
-            foundation,
+        Err(error) => report_failure(foundation, limits, error),
+    }
+}
+
+fn validate_worker_report(
+    response: &[u8],
+    foundation: Foundation,
+    limits: ReplayLimits,
+    expected_installed: InstalledLimits,
+) -> Result<Report, WorkerFailure> {
+    let report: Report = serde_json::from_slice(response).map_err(|_| {
+        inconclusive(
             "worker_protocol",
-            "The worker returned an inconsistent result or a different checker identity.",
-        );
+            "The worker returned an invalid response.",
+        )
+    })?;
+    let installed_matches = match report.worker {
+        Some(receipt) if receipt.requested == limits => match receipt.installed {
+            Some(installed) => installed == expected_installed,
+            None => {
+                report.outcome == ReplayOutcome::Inconclusive
+                    && report
+                        .diagnostic
+                        .as_ref()
+                        .is_some_and(|d| d.stage == "process" && d.code == "sandbox_unavailable")
+            }
+        },
+        _ => false,
+    };
+    if report.profile != profile_for(foundation)
+        || report.checker != checker_identity()
+        || report.limits != limits.admission
+        || !report.is_consistent()
+        || !installed_matches
+    {
+        return Err(inconclusive(
+            "worker_protocol",
+            "The worker returned a different checker, foundation, resource policy or inconsistent outcome.",
+        ));
     }
-    report
+    Ok(report)
 }
 
-fn failure(code: &str, message: &str) -> Diagnostic {
-    Diagnostic {
-        code: code.into(),
-        stage: "process".into(),
-        message: message.into(),
-    }
-}
-
-/// Run a trusted configured worker with untrusted bounded input. This does not
-/// interpret or authenticate its output: each protocol must validate that itself.
-/// Neither the executable nor its argument may come from submitted proof data.
-/// The worker must install `install_worker_limits` before parsing input.
+/// Generic legacy worker protocol. It must install the default limits itself.
 pub fn run_worker(
     executable: &Path,
     trusted_worker_arg: &str,
@@ -169,54 +283,99 @@ pub fn run_worker(
     run_worker_with_deadline(executable, trusted_worker_arg, bytes, WALL_LIMIT)
 }
 
-/// As `run_worker`, with a caller budget that can only lower the wall ceiling.
 pub fn run_worker_with_deadline(
     executable: &Path,
     trusted_worker_arg: &str,
     bytes: &[u8],
     wall: Duration,
 ) -> Result<Vec<u8>, Diagnostic> {
-    if bytes.len() > MAX_BYTES {
-        return Err(failure(
+    let mut limits = ReplayLimits::default();
+    limits.process.wall_time_ms = wall.min(WALL_LIMIT).as_millis() as u64;
+    run_worker_command(executable, &[trusted_worker_arg], bytes, limits)
+        .map_err(|error| error.diagnostic)
+}
+
+fn run_worker_command(
+    executable: &Path,
+    trusted_args: &[&str],
+    bytes: &[u8],
+    limits: ReplayLimits,
+) -> Result<Vec<u8>, WorkerFailure> {
+    if bytes.len() > limits.admission.max_bytes {
+        return Err(exhausted(
             "byte_limit",
             "Proof input exceeds the input byte budget.",
         ));
     }
-    let run = || -> std::io::Result<Result<Vec<u8>, Diagnostic>> {
+    // A zero wall budget does not race a fast worker into acceptance.
+    if limits.process.wall_time_ms == 0 {
+        return Err(exhausted(
+            "wall_limit",
+            "The isolated checker exhausted its wall-clock budget.",
+        ));
+    }
+    let run = || -> std::io::Result<Result<Vec<u8>, WorkerFailure>> {
         let mut input = tempfile::tempfile()?;
         input.write_all(bytes)?;
         input.seek(SeekFrom::Start(0))?;
         let mut output = tempfile::tempfile()?;
+        let start = Instant::now();
         let mut child = Running(
             Command::new(executable)
-                .arg(trusted_worker_arg)
+                .args(trusted_args)
                 .env_clear()
                 .stdin(Stdio::from(input))
                 .stdout(Stdio::from(output.try_clone()?))
                 .stderr(Stdio::null())
                 .spawn()?,
         );
-        let start = Instant::now();
         let pid = sysinfo::Pid::from_u32(child.0.id());
         let mut monitor = sysinfo::System::new();
         loop {
-            if let Some(status) = child.0.try_wait()? {
-                if !status.success() {
-                    return Ok(Err(failure(
-                        "worker_failed",
-                        "The isolated checker exited without a valid result; a resource limit or runtime failure may have interrupted it.",
-                    )));
-                }
-                break;
-            }
-            if start.elapsed() >= wall.min(WALL_LIMIT) {
-                return Ok(Err(failure(
+            if start.elapsed() >= Duration::from_millis(limits.process.wall_time_ms) {
+                return Ok(Err(exhausted(
                     "wall_limit",
                     "The isolated checker exhausted its wall-clock budget.",
                 )));
             }
-            // macOS does not enforce RLIMIT_AS. Sample RSS on every platform;
-            // this is a termination threshold, not an instantaneous allocation cap.
+            if let Some(status) = child.0.try_wait()? {
+                if !status.success() {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::process::ExitStatusExt;
+                        match status.signal() {
+                            Some(nix::libc::SIGXCPU) => {
+                                return Ok(Err(exhausted(
+                                    "cpu_limit",
+                                    "The worker exhausted its CPU budget.",
+                                )));
+                            }
+                            Some(nix::libc::SIGXFSZ) => {
+                                return Ok(Err(exhausted(
+                                    "output_limit",
+                                    "The worker exhausted its output budget.",
+                                )));
+                            }
+                            _ => {}
+                        }
+                    }
+                    return Ok(Err(inconclusive(
+                        "worker_failed",
+                        "The isolated checker exited without a valid result; a resource limit or runtime failure may have interrupted it.",
+                    )));
+                }
+                // The scheduling interval between checking the deadline and
+                // reaping a completed child belongs to the same wall budget.
+                if start.elapsed() >= Duration::from_millis(limits.process.wall_time_ms) {
+                    return Ok(Err(exhausted(
+                        "wall_limit",
+                        "The isolated checker exhausted its wall-clock budget.",
+                    )));
+                }
+                break;
+            }
+            // macOS does not enforce RLIMIT_AS; RSS is a termination threshold,
+            // not an instantaneous allocation cap.
             monitor.refresh_processes_specifics(
                 sysinfo::ProcessesToUpdate::Some(&[pid]),
                 true,
@@ -226,9 +385,9 @@ pub fn run_worker_with_deadline(
             );
             if monitor
                 .process(pid)
-                .is_some_and(|p| p.memory() > MEMORY_BYTES)
+                .is_some_and(|p| p.memory() > limits.process.memory_bytes)
             {
-                return Ok(Err(failure(
+                return Ok(Err(exhausted(
                     "memory_limit",
                     "The isolated checker exceeded its resident-memory termination threshold.",
                 )));
@@ -237,19 +396,25 @@ pub fn run_worker_with_deadline(
         }
         output.seek(SeekFrom::Start(0))?;
         let mut response = Vec::new();
-        output.take(OUTPUT_BYTES + 1).read_to_end(&mut response)?;
-        if response.len() as u64 > OUTPUT_BYTES {
-            return Ok(Err(failure(
-                "worker_protocol",
+        output
+            .take(limits.process.output_bytes + 1)
+            .read_to_end(&mut response)?;
+        if response.len() as u64 > limits.process.output_bytes {
+            return Ok(Err(exhausted(
+                "output_limit",
                 "The worker exceeded its output budget.",
             )));
         }
         Ok(Ok(response))
     };
     run().unwrap_or_else(|_| {
-        Err(failure(
+        Err(inconclusive(
             "worker_unavailable",
             "The isolated checker could not be started or its response could not be read.",
         ))
     })
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/worker_policy.rs"]
+mod worker_policy;

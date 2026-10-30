@@ -2,6 +2,7 @@
 //! A successful replay establishes exactly the supplied kernel judgment.
 #![forbid(unsafe_code)]
 pub mod admission;
+pub mod limits;
 #[cfg(feature = "process")]
 pub mod process;
 pub mod proof_checker;

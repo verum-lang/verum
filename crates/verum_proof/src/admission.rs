@@ -2,6 +2,8 @@
 //! Source-language elaboration, prose interpretation and SMT traces are not admitted here.
 //! Execute untrusted replay in a resource-limited worker; structural limits do not bound
 //! normalization cost or replace a wall-clock/process memory budget.
+pub use crate::limits::AdmissionLimits;
+use crate::limits::WorkerReceipt;
 use crate::proof_checker::{Certificate, CheckError, DataField, Foundation, Level, Term};
 use serde::{Deserialize, Serialize};
 
@@ -14,13 +16,13 @@ pub fn profile_for(foundation: Foundation) -> &'static str {
         Foundation::FunctionExtensionality => EXTENSIONAL_PROFILE,
     }
 }
-pub const MAX_BYTES: usize = 1024 * 1024;
+pub const MAX_BYTES: usize = AdmissionLimits::DEFAULT.max_bytes;
 // Structural bounds protect decoding and traversal, not normalization. General
 // dependent program proofs contain thousands of nodes even with shared local
 // definitions. The isolated worker independently retains its CPU, memory and
 // wall-clock ceilings; reaching those ceilings never counts as a proof verdict.
-pub const MAX_NODES: usize = 65_536;
-pub const MAX_DEPTH: usize = 128;
+pub const MAX_NODES: usize = AdmissionLimits::DEFAULT.max_nodes;
+pub const MAX_DEPTH: usize = AdmissionLimits::DEFAULT.max_depth;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,13 +39,78 @@ pub struct Diagnostic {
     pub stage: String,
     pub message: String,
 }
+/// Operational exhaustion and unsupported evidence are not invalid proofs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayOutcome {
+    Accepted,
+    Rejected,
+    Unsupported,
+    ResourceExhausted,
+    Inconclusive,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Report {
     pub profile: String,
     pub checker: String,
+    /// Compatibility flag; true exactly when outcome is Accepted.
     pub accepted: bool,
+    pub outcome: ReplayOutcome,
+    pub limits: AdmissionLimits,
+    pub worker: Option<WorkerReceipt>,
     pub diagnostic: Option<Diagnostic>,
+}
+
+impl Report {
+    pub(crate) fn refusal(
+        foundation: Foundation,
+        limits: AdmissionLimits,
+        outcome: ReplayOutcome,
+        stage: &str,
+        code: &str,
+        message: &str,
+    ) -> Self {
+        Self {
+            profile: profile_for(foundation).into(),
+            checker: checker_identity(),
+            accepted: false,
+            outcome,
+            limits,
+            worker: None,
+            diagnostic: Some(Diagnostic {
+                code: code.into(),
+                stage: stage.into(),
+                message: message.into(),
+            }),
+        }
+    }
+
+    pub fn is_consistent(&self) -> bool {
+        self.accepted == (self.outcome == ReplayOutcome::Accepted)
+            && self.accepted == self.diagnostic.is_none()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum AdmissionFailure {
+    Exhausted(&'static str),
+    Invalid(&'static str),
+}
+
+impl AdmissionFailure {
+    fn outcome(self) -> ReplayOutcome {
+        match self {
+            Self::Exhausted(_) => ReplayOutcome::ResourceExhausted,
+            Self::Invalid(_) => ReplayOutcome::Rejected,
+        }
+    }
+    fn code(self) -> &'static str {
+        match self {
+            Self::Exhausted(code) | Self::Invalid(code) => code,
+        }
+    }
 }
 
 /// Identity of this admission policy and the exact native checker implementations.
@@ -54,6 +121,9 @@ pub fn checker_identity() -> String {
         PROFILE,
         env!("CARGO_PKG_VERSION"),
         include_str!("admission.rs"),
+        include_str!("limits.rs"),
+        include_str!("process.rs"),
+        include_str!("main.rs"),
         include_str!("proof_checker.rs"),
         include_str!("proof_checker_nbe.rs"),
     ] {
@@ -81,7 +151,7 @@ fn code(error: &CheckError) -> &'static str {
         | CheckError::KernelV0StrictIntrinsicDisagreement { .. } => "unsupported_kernel_extension",
     }
 }
-fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
+fn admit_structure(judgment: &Judgment, limits: AdmissionLimits) -> Result<(), AdmissionFailure> {
     enum Node<'a> {
         Term(&'a Term, usize),
         Level(&'a Level),
@@ -91,11 +161,13 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
         (Node::Term(&judgment.certificate.term, 0), 0),
         (Node::Term(&judgment.certificate.claimed_type, 0), 0),
     ];
-    let mut count = 0;
+    let mut count = 0usize;
     while let Some((node, depth)) = queue.pop() {
-        count += 1;
-        if count > MAX_NODES || depth > MAX_DEPTH {
-            return Err("structural_limit");
+        count = count
+            .checked_add(1)
+            .ok_or(AdmissionFailure::Exhausted("structural_limit"))?;
+        if count > limits.max_nodes || depth > limits.max_depth {
+            return Err(AdmissionFailure::Exhausted("structural_limit"));
         }
         match node {
             Node::Term(t, binders) => match t {
@@ -119,13 +191,17 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
                     for (index, ty) in indices.iter().enumerate() {
                         queue.push((Node::Term(ty, binders + index), depth + 1));
                     }
-                    count += constructors.len();
+                    count = count
+                        .checked_add(constructors.len())
+                        .ok_or(AdmissionFailure::Exhausted("structural_limit"))?;
                     for fields in constructors {
                         for term in &fields.indices {
                             queue.push((Node::Term(term, binders + fields.len()), depth + 1));
                         }
                         for (index, field) in fields.iter().enumerate() {
-                            count += 1;
+                            count = count
+                                .checked_add(1)
+                                .ok_or(AdmissionFailure::Exhausted("structural_limit"))?;
                             match field {
                                 DataField::Value(ty) => {
                                     queue.push((Node::Term(ty, binders), depth + 1))
@@ -142,8 +218,8 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
                             }
                         }
                     }
-                    if count > MAX_NODES {
-                        return Err("structural_limit");
+                    if count > limits.max_nodes {
+                        return Err(AdmissionFailure::Exhausted("structural_limit"));
                     }
                 }
                 Term::Construct { data, args, .. } => {
@@ -166,7 +242,7 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
                 Term::Universe(l) => queue.push((Node::Level(l), depth + 1)),
                 Term::Var(index) => {
                     if *index >= binders {
-                        return Err("unbound_variable");
+                        return Err(AdmissionFailure::Invalid("unbound_variable"));
                     }
                 }
                 Term::Let { value: a, body: b }
@@ -220,9 +296,7 @@ fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
 // consecutive logical nodes, including field and index arrays. The
 // judgment envelope adds fewer than eight. Bound those containers before
 // recursive deserialization; the unchanged logical limits are checked next.
-const MAX_JSON_NESTING: usize = 8 * (MAX_DEPTH + 1) + 8;
-
-fn json_envelope(bytes: &[u8]) -> Result<(), &'static str> {
+fn json_envelope(bytes: &[u8], max_nesting: usize) -> Result<(), AdmissionFailure> {
     let mut containers = Vec::new();
     let mut quoted = false;
     let mut escaped = false;
@@ -240,22 +314,22 @@ fn json_envelope(bytes: &[u8]) -> Result<(), &'static str> {
         match byte {
             b'"' => quoted = true,
             b'{' | b'[' => {
-                if containers.len() == MAX_JSON_NESTING {
-                    return Err("json_depth_limit");
+                if containers.len() == max_nesting {
+                    return Err(AdmissionFailure::Exhausted("json_depth_limit"));
                 }
                 containers.push(*byte);
             }
             b'}' | b']' => {
                 let expected = if *byte == b'}' { b'{' } else { b'[' };
                 if containers.pop() != Some(expected) {
-                    return Err("invalid_certificate");
+                    return Err(AdmissionFailure::Invalid("invalid_certificate"));
                 }
             }
             _ => {}
         }
     }
     if quoted || !containers.is_empty() {
-        return Err("invalid_certificate");
+        return Err(AdmissionFailure::Invalid("invalid_certificate"));
     }
     Ok(())
 }
@@ -269,28 +343,43 @@ pub fn replay(bytes: &[u8]) -> Report {
 /// The verifier selects the foundation, and the judgment must name exactly
 /// that profile. A submitted artifact cannot silently strengthen its verifier.
 pub fn replay_with_foundation(bytes: &[u8], foundation: Foundation) -> Report {
-    let rejected = |stage: &str, code: &str, message: &str| Report {
-        profile: profile_for(foundation).into(),
-        checker: checker_identity(),
-        accepted: false,
-        diagnostic: Some(Diagnostic {
-            code: code.into(),
-            stage: stage.into(),
-            message: message.into(),
-        }),
+    replay_with_limits(bytes, foundation, AdmissionLimits::default())
+}
+
+/// Select structural admission resources independently of the submitted proof.
+/// This in-process entry point does not sandbox evaluation; untrusted inputs
+/// should use the isolated process API as well.
+pub fn replay_with_limits(bytes: &[u8], foundation: Foundation, limits: AdmissionLimits) -> Report {
+    let refusal = |outcome: ReplayOutcome, stage: &str, code: &str, message: &str| {
+        Report::refusal(foundation, limits, outcome, stage, code, message)
     };
-    if bytes.len() > MAX_BYTES {
-        return rejected(
+    if !limits.is_valid() {
+        return refusal(
+            ReplayOutcome::Inconclusive,
+            "policy",
+            "invalid_limits",
+            "Admission limits cannot be represented safely.",
+        );
+    }
+    if bytes.len() > limits.max_bytes {
+        return refusal(
+            ReplayOutcome::ResourceExhausted,
             "decode",
             "byte_limit",
             "Native judgment exceeds the input byte budget.",
         );
     }
-    if let Err(code) = json_envelope(bytes) {
-        return rejected(
+    if let Err(error) = json_envelope(bytes, limits.json_nesting_limit().unwrap()) {
+        return refusal(
+            error.outcome(),
             "decode",
-            code,
-            "Native judgment has malformed or excessive JSON nesting.",
+            error.code(),
+            match error {
+                AdmissionFailure::Exhausted(_) => {
+                    "Native judgment exceeds the JSON nesting budget."
+                }
+                AdmissionFailure::Invalid(_) => "Native judgment has malformed JSON nesting.",
+            },
         );
     }
     let mut decoder = serde_json::Deserializer::from_slice(bytes);
@@ -302,7 +391,8 @@ pub fn replay_with_foundation(bytes: &[u8], foundation: Foundation) -> Report {
     let judgment: Judgment = match decoded {
         Ok(j) => j,
         Err(_) => {
-            return rejected(
+            return refusal(
+                ReplayOutcome::Rejected,
                 "decode",
                 "invalid_certificate",
                 "Expected one strict native judgment JSON object; duplicate or unknown fields and malformed terms are rejected.",
@@ -310,51 +400,68 @@ pub fn replay_with_foundation(bytes: &[u8], foundation: Foundation) -> Report {
         }
     };
     if judgment.profile != profile_for(foundation) {
-        return rejected(
+        return refusal(
+            ReplayOutcome::Unsupported,
             "profile",
             "unsupported_profile",
             "The requested logical profile is not supported by this checker.",
         );
     }
-    if let Err(code) = admit_structure(&judgment) {
-        return rejected(
+    if let Err(error) = admit_structure(&judgment, limits) {
+        return refusal(
+            error.outcome(),
             "admission",
-            code,
-            if code == "unbound_variable" {
-                "A closed native judgment contains a variable outside its binder scope."
-            } else {
-                "Native judgment exceeds the node or depth budget."
+            error.code(),
+            match error {
+                AdmissionFailure::Invalid(_) => {
+                    "A closed native judgment contains a variable outside its binder scope."
+                }
+                AdmissionFailure::Exhausted(_) => {
+                    "Native judgment exceeds the node or depth budget."
+                }
             },
         );
     }
     if judgment.statement != judgment.certificate.claimed_type {
-        return rejected(
+        return refusal(
+            ReplayOutcome::Rejected,
             "statement",
             "statement_mismatch",
             "The certificate claims a different formal statement.",
         );
     }
+    let check_failure = |stage: &str, error: &CheckError| {
+        let outcome = match error {
+            CheckError::FoundationRequired(_)
+            | CheckError::UniverseOverflow { .. }
+            | CheckError::KernelV0ManifestUnclean { .. }
+            | CheckError::KernelV0MetaSoundnessExceeded
+            | CheckError::KernelV0StrictIntrinsicDisagreement { .. } => ReplayOutcome::Unsupported,
+            _ => ReplayOutcome::Rejected,
+        };
+        refusal(
+            outcome,
+            stage,
+            code(error),
+            "The native checker did not establish the judgment.",
+        )
+    };
     if let Err(e) = judgment.certificate.verify_with_foundation(foundation) {
-        return rejected(
-            "substitution",
-            code(&e),
-            "The native substitution checker rejected the judgment.",
-        );
+        return check_failure("substitution", &e);
     }
     if let Err(e) = crate::proof_checker_nbe::verify_certificate_with_foundation(
         &judgment.certificate,
         foundation,
     ) {
-        return rejected(
-            "normalization",
-            code(&e),
-            "The normalization checker rejected the judgment; no proof authority is granted.",
-        );
+        return check_failure("normalization", &e);
     }
     Report {
         profile: profile_for(foundation).into(),
         checker: checker_identity(),
         accepted: true,
+        outcome: ReplayOutcome::Accepted,
+        limits,
+        worker: None,
         diagnostic: None,
     }
 }
