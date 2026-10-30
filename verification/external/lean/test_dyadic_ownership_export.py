@@ -55,9 +55,7 @@ class DyadicOwnershipTests(unittest.TestCase):
 
     def test_complete_frozen_export(self):
         counts = self.replay(fixture())
-        self.assertEqual({k:v for k,v in counts.items() if k != 'claims'},
-                         dict(events=6124, segments=4, snapshots=456))
-        self.assertGreater(counts['claims'], 545)
+        self.assertEqual(counts, dict(events=6124, segments=4, snapshots=456, claims=637))
 
     def test_semantic_mutations_reach_kernel_rejection(self):
         for mutation in ('original_name', 'coordinates', 'family_count', 'work_accounting',

@@ -1,0 +1,14 @@
+{
+  "manifest_sha256": "ea977d9c5d8341451eb740fcf2765c01ae16f5312d2147fc0dfce4fe7e6aaba5",
+  "source_files_verified": 1572,
+  "binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r38/kan-courts",
+    "bytes": 58010896,
+    "sha256": "aeacd194752faa9eb6aa3a9c274cc746fbb25f1047cc3fa7c11de6b4cd57d2b8"
+  },
+  "export_sha256": "8f65318d20073b5540602299649dfbe024679e8d9518fec9e951a8e76db57fe6",
+  "compaction": "Whitespace only; exact parsed JSON equality verified; original bytes retained",
+  "raw_export_sha256": "d82b02487859c8ced59746adf135b5657acee3f24641a99b3c89b9eb6f3cbf77",
+  "schema": "synarc-dyadic-cumulative-ownership-v2",
+  "scope": "Explicit source/search/paid-look identity, initializer promotion, typed stops, capacity changes and denied retry projection. Candidate grammar/provenance authority and private execution receipts are absent."
+}
