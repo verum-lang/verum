@@ -181,16 +181,11 @@ kbd {
   letter-spacing: -1px;
 }
 .brand-mark {
-  font-family: Georgia, serif;
-  font-weight: bold;
-  font-size: 25px;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: var(--on-accent);
+  display: block;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
 }
 .brand-divider {
   height: 18px;

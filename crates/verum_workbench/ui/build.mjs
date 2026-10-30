@@ -8,7 +8,9 @@ const result = await build({
   target: ['es2022'], outfile: 'dist/app.js', metafile: true,
   legalComments: 'external', charset: 'utf8',
 });
-await copyFile('index.html', 'dist/index.html');
+const brand = await readFile(new URL('../../../assets/brand/verum-mark.svg', import.meta.url), 'utf8');
+const brandUri = `data:image/svg+xml,${encodeURIComponent(brand)}`;
+await writeFile('dist/index.html', (await readFile('index.html', 'utf8')).replaceAll('__VERUM_BRAND_URI__', brandUri));
 // Ship the licenses of every dependency actually included in the offline bundle.
 const packages = new Map();
 for (const input of Object.keys(result.metafile.inputs)) {
