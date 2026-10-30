@@ -1,0 +1,36 @@
+{
+  "scope": "Read-only frozen native helper audit against CanonicalProduct.lean; no native build, court or performance verdict",
+  "manifest_sha256": "c18dd08fe809963ee6847c3e5f8cc052eba128031949f6a760a5b5632c3d40a4",
+  "patch_sha256": "f1c5bbe08f979285ba381a42cc0353ad2296ff547ce2fa4a78e5d7c609610a62",
+  "sources": [
+    {
+      "path": "rust/crates/synarc-kan/src/exhaust/outcome_code/exact/normalization_courts.rs",
+      "before_sha256": null,
+      "after_sha256": "26c04dc0140d71195b72f27fc4dffdd9667635959d4ddc25e916a2cc18612b53"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/exhaust/outcome_code/exact/positive/courts.rs",
+      "before_sha256": null,
+      "after_sha256": "d211b278379db6268fc0c366762b7853111ec42d3159c14e61c0f185e7a7f5e6"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/exhaust/outcome_code/exact/positive.rs",
+      "before_sha256": null,
+      "after_sha256": "484e77352fc46a0811b2c214342e5d476d1372266bea454775c079721ec76c49"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/exhaust/outcome_code/exact.rs",
+      "before_sha256": "155db850e140a17b9280b71160f466ce0dcc551c3a2649c444b60f8ef195f9ae",
+      "after_sha256": "d93e7341d1feb9951ecbac8173a96d8a30e5b95acbc875093170168542b9af30"
+    }
+  ],
+  "correspondence": {
+    "constructor": "Positive owns a private Ratio; arbitrary pairs require numerator and denominator nonzero, then Ratio::new; normalize_exact/canonical/positive justify the invariant",
+    "product": "two exact cross gcds, divide before multiplying, Ratio::new_raw after canonical product theorem; h orientation follows gcd commutativity",
+    "gcd": "unit fast path, sorted initial pair, exact Euclidean remainder loop; native_gcd_exact proves value, euclidean_step proves decreasing remainder",
+    "mutation": "product computed before assignment; checked Positive owners only; caller work/phase and poison guard unchanged in source diff",
+    "scoring": "same KT and ML factors, same parent division/child multiplication/context multiplication and strict comparison integer expressions",
+    "excluded": "native execution/refusal replay, compiler correctness, allocation atomicity, wall-time or memory gain, checkpoint reconstruction and statistical admission validity"
+  },
+  "native_validation": "pending compiled frozen r44 and original/new court replay"
+}

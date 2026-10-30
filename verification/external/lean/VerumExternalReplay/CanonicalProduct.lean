@@ -9,6 +9,40 @@ namespace CanonicalProduct
 open ExactMass
 set_option warningAsError true
 
+/-- The native helper uses exact Euclidean remainders, not a different notion of gcd. -/
+def euclid (a b : Nat) : Nat :=
+  if _h : b = 0 then a else euclid b (a % b)
+termination_by b
+decreasing_by exact Nat.mod_lt a (Nat.pos_of_ne_zero _h)
+
+theorem euclidean_step (a b : Nat) (positive : 0 < b) :
+    Nat.gcd a b = Nat.gcd b (a % b) ∧ a % b < b := by
+  constructor
+  · rw [Nat.gcd_comm a b, Nat.gcd_rec b a, Nat.gcd_comm (a % b) b]
+  · exact Nat.mod_lt a positive
+
+theorem euclid_exact (a b : Nat) : euclid a b = Nat.gcd a b := by
+  induction b using Nat.strongRecOn generalizing a with
+  | ind b ih =>
+    by_cases zero : b = 0
+    · simp [euclid, zero]
+    · rw [euclid]
+      simp only [zero, ↓reduceDIte]
+      rw [ih (a % b) (Nat.mod_lt a (Nat.pos_of_ne_zero zero)) b]
+      exact (euclidean_step a b (Nat.pos_of_ne_zero zero)).1.symm
+
+/-- Unit fast path and initial sorting match the private native helper. -/
+def nativeGcd (a b : Nat) : Nat :=
+  if a = 1 ∨ b = 1 then 1 else if b ≤ a then euclid a b else euclid b a
+
+theorem native_gcd_exact (a b : Nat) : nativeGcd a b = Nat.gcd a b := by
+  by_cases unit : a = 1 ∨ b = 1
+  · rcases unit with unit | unit <;> simp [nativeGcd, unit]
+  · simp only [nativeGcd, unit, ↓reduceIte]
+    split
+    · exact euclid_exact a b
+    · exact (euclid_exact b a).trans (Nat.gcd_comm b a)
+
 def Canonical (a : Fraction) : Prop := Nat.Coprime a.numerator a.denominator
 instance (a : Fraction) : Decidable (Canonical a) := inferInstanceAs (Decidable (Nat.Coprime _ _))
 
@@ -97,6 +131,9 @@ def normalize (a : Fraction) : Fraction :=
 
 theorem normalize_canonical (a : Fraction) : Canonical (normalize a) :=
   Nat.gcd_div_gcd_div_gcd_of_pos_right a.positive
+
+theorem normalize_positive (a : Fraction) (positive : 0 < a.numerator) :
+    0 < (normalize a).numerator := Nat.div_gcd_pos_of_pos_left a.denominator positive
 
 theorem normalize_exact (a : Fraction) : Equal (normalize a) a := by
   let g := Nat.gcd a.numerator a.denominator

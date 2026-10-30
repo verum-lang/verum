@@ -1,5 +1,6 @@
 """Exact rational cross cancellation: values, canonicality and sealed accumulation."""
 from fractions import Fraction
+from math import gcd
 from pathlib import Path
 import re
 import tempfile
@@ -51,6 +52,12 @@ class CanonicalProductTests(unittest.TestCase):
                                   f'{fraction(a/b)} := by decide_cbv')
         self.prove('\n'.join(statements))
 
+    def test_euclidean_gcd_endpoints_and_large_inputs(self):
+        pairs = [(0,0),(0,7),(7,0),(0,1),(1,0),(1,1),(48,18),(18,48),
+                 (2**256,3),(2**256+1,2**128+1),(2**512-1,2**256-1)]
+        self.prove('\n'.join(
+            f'example : nativeGcd {a} {b} = {gcd(a,b)} := by decide_cbv' for a,b in pairs))
+
     def test_accumulation_and_raw_boundary(self):
         self.prove('''
 example : Equal (crossMul rawHalf rawThird) (mul rawHalf rawThird) := cross_mul_exact _ _
@@ -67,6 +74,10 @@ example : crossMul zero threeFifths = zero := by decide_cbv
 
     def test_false_canonicality_and_values_rejected(self):
         for claim in (
+            'nativeGcd 0 0 = 1',
+            'nativeGcd 0 7 = 0',
+            'nativeGcd 48 18 = 1',
+            'euclid 48 18 = 18',
             'Canonical rawHalf',
             'Canonical (crossMul rawHalf rawThird)',
             'crossMul rawHalf rawThird = normalize (mul rawHalf rawThird)',
@@ -88,7 +99,7 @@ example : crossMul zero threeFifths = zero := by decide_cbv
     def test_general_laws_have_checked_axioms(self):
         source = (ROOT / 'VerumExternalReplay/CanonicalProduct.lean').read_text()
         names = re.findall(r'^theorem (\w+)', source, re.M)
-        self.assertEqual(len(names), 17)
+        self.assertEqual(len(names), 21)
         result = self.prove('\n'.join('#print axioms CanonicalProduct.' + name for name in names))
         rosters = [d['data'] for d in result['diagnostics'] if d['severity'] == 'information']
         self.assertEqual(len(rosters), len(names))
