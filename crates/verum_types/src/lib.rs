@@ -134,6 +134,7 @@ pub mod capability; // Capability attenuation for contexts (Context system core:
 pub mod const_eval;
 pub mod context;
 pub mod core_metadata; // Stdlib type metadata definitions (Stdlib type metadata: definitions extracted from core .vr files during compilation pipeline — )
+pub mod module_projection;
 pub mod core_pipeline; // Dependency-ordered stdlib compilation (Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files — )
 // Strict-positivity check for user-declared inductive types
 // (AST-level, runs before kernel elaboration; mirrors verum_kernel's
