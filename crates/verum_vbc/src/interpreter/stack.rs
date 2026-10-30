@@ -181,6 +181,14 @@ impl CallStack {
         self.generic_witnesses.push((self.frames.len(), args));
     }
 
+    /// Remove evidence owned by the current frame before replacing its target.
+    /// Witnesses on suspended parent frames retain their original owners.
+    pub(crate) fn clear_current_generic_witnesses(&mut self) {
+        while self.generic_witnesses.last().is_some_and(|(depth, _)| *depth == self.frames.len()) {
+            self.generic_witnesses.pop();
+        }
+    }
+
     /// The generic-witness table of the CURRENT frame, if its call site
     /// delivered one via `CallG`.
     pub fn current_generic_witnesses(&self) -> Option<&[crate::types::TypeRef]> {

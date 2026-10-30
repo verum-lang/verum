@@ -1225,6 +1225,13 @@ pub(in super::super) fn handle_tail_call_op(
         .get_function(func_id)
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
+    // TailCall has no type-argument operand. The old frame's evidence belongs
+    // to its old declaration and cannot authorize a different generic target.
+    if !func.type_params.is_empty() {
+        return Err(InterpreterError::InvalidBytecode {
+            pc: state.pc() as usize, message: "generic tail call requires explicit type witnesses".into(),
+        });
+    }
     let reg_count = func.register_count;
     let current_base = state.reg_base();
 
@@ -1232,6 +1239,8 @@ pub(in super::super) fn handle_tail_call_op(
     let arg_values: Vec<Value> = (0..args.count as u16)
         .map(|i| state.registers.get(current_base, Reg(args.start.0 + i)))
         .collect();
+
+    state.call_stack.clear_current_generic_witnesses();
 
     // Update current frame to new function
     if let Some(frame) = state.call_stack.current_mut() {

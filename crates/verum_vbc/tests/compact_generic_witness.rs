@@ -265,3 +265,29 @@ fn direct_calls_discard_a_method_only_sidecar() {
         );
     }
 }
+
+#[test]
+fn tail_replacement_never_borrows_the_previous_declarations_witnesses() {
+    for target_ids in [vec![], vec![0]] {
+        let mut module = VbcModule::new("tail_witness".into());
+        add_function(&mut module, &[], &[
+            call(1, vec![TypeRef::Concrete(TypeId::INT)]),
+            Instruction::Ret { value: Reg(0) },
+        ]);
+        add_function(&mut module, &[0], &[Instruction::TailCall {
+            func_id: 2, args: RegRange::new(Reg(0), 0),
+        }]);
+        add_function(&mut module, &target_ids, &[
+            Instruction::TypeLayout { dst: Reg(0), type_ref: generic(0),
+                property: verum_vbc::instruction::LayoutProperty::Size },
+            Instruction::Ret { value: Reg(0) },
+        ]);
+        let error = Interpreter::new(Arc::new(module))
+            .execute_function(FunctionId(0)).unwrap_err().to_string();
+        if !target_ids.is_empty() {
+            assert!(error.contains("generic tail call requires explicit type witnesses"), "{error}");
+        } else {
+            assert!(error.contains("layout"), "{error}");
+        }
+    }
+}
