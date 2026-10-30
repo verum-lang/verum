@@ -8,14 +8,18 @@ from observer_export_replay import (array, boolean, fields, natural, require, se
 
 MODELS = module_closure(['PersistentEvents'])
 SCOPE = ('Finite exported append, cached lengths, exact node/input identity, indexing, '
-         'work refusal, retained owner/slot counts and capacity lower bounds. Origins are abstract bytes; physical '
-         'Cut ownership, allocator failure, panic semantics, balance bounds and whole '
+         'work refusal, retained owner/slot counts and capacity lower bounds. Explicit v2 '
+         'also checks sequential returned-owner lifetimes, work-meter unwind poison and '
+         'mixed iterator boundaries. Origins are abstract bytes; physical Cut ownership, '
+         'allocator failure, arbitrary panic semantics, balance bounds and whole '
          'Automatic engine refinement are not certified.')
 
 
 def emit(data):
     fields(data, 'schema index_bits scope identity histories nodes calls retained')
-    require(data['schema'] == 'synarc.native-prefix-history.v1', 'Unknown history schema')
+    require(data['schema'] in ('synarc.native-prefix-history.v1',
+                              'synarc.native-prefix-history.v2'), 'Unknown history schema')
+    edge = data['schema'] == 'synarc.native-prefix-history.v2'
     require(type(data['index_bits']) is int and data['index_bits'] in (32, 64), 'Invalid index width')
     maximum = 2**data['index_bits'] - 1
     for key in ('scope', 'identity'):
@@ -111,8 +115,9 @@ def emit(data):
         for j in range(len(h['events']) + 1):
             claim(f'{name}.get {j} = ({es} : List Nat)[{j}]?')
 
-    def state(s):
-        fields(s, 'origin previous copied_roots roots carry suffix_len shape complete poisoned stopped')
+    def state(s, rich=False):
+        fields(s, 'origin previous copied_roots roots carry suffix_len shape complete poisoned stopped'
+               + (' suffix carry_shape' if rich else ''))
         if s['origin'] is not None: natural(s['origin'], 255)
         for k in ('previous', 'complete'):
             if s[k] is not None: index(s[k], histories)
@@ -124,15 +129,57 @@ def emit(data):
             for x in s['shape']: natural(x, maximum)
         boolean(s['poisoned'])
         require(s['stopped'] in (None, 'ForeignOrigin', 'Overflow', 'Poisoned'), 'Unknown sticky refusal')
+        if rich:
+            if s['suffix'] is not None: events(s['suffix'])
+            equal(s['suffix_len'], None if s['suffix'] is None else len(s['suffix']))
+            if s['carry_shape'] is not None:
+                require(len(sequence(s['carry_shape'])) == 2, 'Invalid carry shape')
+                for value in s['carry_shape']: natural(value, maximum)
+            equal(s['carry_shape'], None if s['carry'] is None else
+                  [nodes[s['carry']]['rank'], nodes[s['carry']]['event_len']])
+        return s
+
+    def evidence(s, current):
+        if current['rich']:
+            s['suffix'] = None if s['suffix_len'] is None else current['suffix']
+            s['carry_shape'] = None if s['carry'] is None else [
+                nodes[s['carry']]['rank'], nodes[s['carry']]['event_len']]
+        return s
+
+    def terminal(current):
+        return (current['finished'] or current['last']['stopped'] is not None
+                or (edge and current['last']['poisoned'] and current['retained']))
+
+    def live(case, rich=False):
+        # v2 exports a sequential move-only cursor, not an owner ID. Labels
+        # repeat and can change mid-lifetime; only begin/finish delimit owners.
+        key = cursor if edge else case
+        require(key in active and not active[key]['finished'], 'Operation without live append')
+        current = active[key]
+        require(not rich or (edge and current['rich']), 'Missing v2 owner evidence')
+        return current
+
+    def reader_state(s, end):
+        fields(s, 'front back len size_hint')
+        for key in ('front', 'back', 'len'): natural(s[key], maximum)
+        require(s['front'] <= s['back'] <= end, 'Invalid iterator bounds')
+        require(len(sequence(s['size_hint'])) == 2, 'Invalid iterator size hint')
+        for value in s['size_hint']: natural(value, maximum)
+        equal(s['len'], s['back'] - s['front'])
+        equal(s['size_hint'], [s['len'], s['len']])
         return s
 
     active, published, allocated, completed = {}, set(), set(), set()
+    cursor, reader = None, None
     for row in rows:
         require(type(row) is dict and type(row.get('case')) is str, 'Missing case')
         case, op = row['case'], row.get('operation')
         if op == 'begin_append':
             fields(row, 'case operation origin previous suffix after')
-            require(case not in active, 'Repeated append case')
+            if edge:
+                require(cursor is None or terminal(active[cursor]), 'Overlapping append lifetimes')
+                cursor = len(active)
+            else: require(case not in active, 'Repeated append case')
             natural(row['origin'], 255); events(row['suffix'])
             old = row['previous']
             if old is not None:
@@ -140,12 +187,15 @@ def emit(data):
             expected = dict(origin=row['origin'], previous=None if old is None else old['id'],
                 copied_roots=0, roots=[], carry=None, suffix_len=len(row['suffix']), shape=None,
                 complete=None, poisoned=False, stopped=None)
-            equal(state(row['after']), expected)
-            active[case] = dict(last=row['after'], old=old, suffix=row['suffix'], finished=False)
+            rich = edge and type(row['after']) is dict and 'suffix' in row['after']
+            current = dict(last=row['after'], old=old, suffix=row['suffix'], finished=False,
+                           rich=rich, retained=False)
+            equal(state(row['after'], rich), evidence(expected, current))
+            active[cursor if edge else case] = current
         elif op == 'advance':
             fields(row, 'case operation capacity grant spent remaining before returned after')
-            require(case in active and not active[case]['finished'], 'Advance without live append')
-            current = active[case]; before, after = state(row['before']), state(row['after'])
+            current = live(case)
+            before, after = state(row['before'], current['rich']), state(row['after'], current['rich'])
             equal(before, current['last']); expected = copy.deepcopy(before)
             for k in ('capacity', 'grant', 'spent', 'remaining'): natural(row[k], maximum)
             result, reason, spent = 'Pending', None, 0
@@ -198,11 +248,34 @@ def emit(data):
                 expected['stopped'] = reason
             equal(row['returned'], dict(kind='Refused', reason=reason) if reason else dict(kind=result))
             equal(row['spent'], spent); equal(row['remaining'], row['grant'] - spent)
-            equal(after, expected); current['last'] = after
+            equal(after, evidence(expected, current)); current['last'] = after
+            current['retained'] = False
+        elif op == 'advance_unwind':
+            fields(row, 'case operation capacity before returned meter_calls_entered spent scope after')
+            current = live(case, rich=True)
+            before, after = state(row['before'], True), state(row['after'], True)
+            equal(before, current['last'])
+            require(not before['poisoned'] and before['stopped'] is None
+                    and before['complete'] is None, 'Unwind without entering work meter')
+            natural(row['capacity'], maximum); natural(row['meter_calls_entered'], maximum)
+            require(row['spent'] is None, 'Unwind has no successful charge receipt')
+            require(type(row['scope']) is str, 'Missing unwind scope')
+            equal(row['meter_calls_entered'], 1); equal(row['returned'], dict(kind='Unwind'))
+            expected = copy.deepcopy(before); expected['poisoned'] = True
+            equal(after, expected); current['last'] = after; current['retained'] = False
+        elif op == 'finish_retained':
+            fields(row, 'case operation before returned after')
+            current = live(case, rich=True)
+            before, after = state(row['before'], True), state(row['after'], True)
+            equal(before, current['last'])
+            require(before['complete'] is None, 'Completed append cannot return its owner')
+            equal(row['returned'], dict(kind='Owner')); equal(after, before)
+            current['last'] = after; current['retained'] = True
         elif op == 'finish':
-            fields(row, 'case operation returned')
-            require(case in active and not active[case]['finished'], 'Finish without live append')
-            current = active[case]; require(current['last']['complete'] is not None, 'Premature finish')
+            current = live(case)
+            fields(row, 'case operation returned' + (' before' if current['rich'] else ''))
+            if current['rich']: equal(state(row['before'], True), current['last'])
+            require(current['last']['complete'] is not None, 'Premature finish')
             history(row['returned']); equal(row['returned']['id'], current['last']['complete'])
             published.add(row['returned']['id']); current['finished'] = True
         elif op == 'iter':
@@ -211,6 +284,33 @@ def emit(data):
             es = histories[row['history']]['events']; events(row['items']); events(row['reverse'])
             boolean(row['end_get_is_none']); equal(row['items'], es); equal(row['reverse'], es[::-1])
             equal(row['end_get_is_none'], True)
+        elif op == 'begin_iter':
+            require(edge, 'Iterator edges require v2')
+            fields(row, 'case operation history front back size_hint')
+            require(reader is None or reader['last']['front'] == reader['last']['back'],
+                    'Overlapping iterator lifetimes')
+            index(row['history'], histories); require(row['history'] in published, 'Unpublished iteration')
+            natural(row['front'], maximum); natural(row['back'], maximum)
+            require(row['back'] <= histories[row['history']]['end'], 'Prefix beyond snapshot end')
+            require(len(sequence(row['size_hint'])) == 2, 'Invalid iterator size hint')
+            for value in row['size_hint']: natural(value, maximum)
+            equal(row['front'], 0); equal(row['size_hint'], [row['back'], row['back']])
+            reader = dict(history=row['history'], end=row['back'], last=dict(
+                front=0, back=row['back'], len=row['back'], size_hint=[row['back'], row['back']]))
+        elif op in ('next', 'next_back'):
+            require(edge and reader is not None, 'Read without v2 iterator')
+            fields(row, 'case operation history before returned after')
+            index(row['history'], histories); equal(row['history'], reader['history'])
+            before, after = reader_state(row['before'], reader['end']), reader_state(row['after'], reader['end'])
+            equal(before, reader['last']); expected = copy.deepcopy(before)
+            result = None
+            if before['front'] < before['back']:
+                position = before['front'] if op == 'next' else before['back'] - 1
+                result = histories[reader['history']]['events'][position]
+                expected['front' if op == 'next' else 'back'] += 1 if op == 'next' else -1
+                expected['len'] -= 1; expected['size_hint'] = [expected['len']] * 2
+            if row['returned'] is not None: event(row['returned'])
+            equal(row['returned'], result); equal(after, expected); reader['last'] = after
         elif op == 'shape':
             fields(row, 'case operation old_len old_chunks suffix_len returned scope')
             require(type(row['scope']) is str, 'Missing shape scope')
@@ -220,8 +320,9 @@ def emit(data):
         else: raise ValueError('Unknown history operation')
     require(published == set(range(len(histories))), 'Missing snapshot publication')
     require(allocated == set(range(len(nodes))), 'Unobserved node allocation')
-    require(all(s['finished'] or s['last']['stopped'] is not None for s in active.values()),
-            'Truncated append lifecycle')
+    require(all(terminal(s) for s in active.values()), 'Truncated append lifecycle')
+    require(reader is None or reader['last']['front'] == reader['last']['back'],
+            'Truncated iterator lifecycle')
     retained = fields(data['retained'], 'tree_nodes chunks event_slots event_capacity snapshot_roots snapshot_root_capacity')
     for value in retained.values(): natural(value)
     reachable = set()

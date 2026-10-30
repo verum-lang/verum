@@ -1,0 +1,32 @@
+{
+  "scope": "Finite sequential HistoryAppend and iterator edge projection with abstract u8 origins; exact exported node/input identities, retained returned-owner contents, work-meter unwind poison and refusal, no physical Cut or Automatic engine theorem",
+  "export_sha256": "e5da5f1c823b911446db74986475a7fb102ad48b944a26e84c3e102f51ba2dad",
+  "native_manifest_sha256": "a2311a82e70b64bc4f3804baefd2cf42b744a629ff26043a662d90732f61ab8d",
+  "native_source_manifest_sha256": "7e69fd0a104cb06e42429889fe31687fe5381dd056d571c129de2ce66e83ae7e",
+  "native_source_files_verified": 1590,
+  "native_binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r47/kan-courts",
+    "bytes": 59607856,
+    "sha256": "2d50b5ffbf2af77646f6682b50023e6e21d8db14682fd27fdebde11739e29483"
+  },
+  "native_replay": {
+    "receipt_sha256": "c1c1d1d086f7cecf282d2ca0cd51e528403e9dd00683f7b0eb8ec2c880a2b4b7",
+    "status": "passed",
+    "scope": "Frozen native chunk-forest history courts; exported finite append operations; no physical Cut or Automatic-only full engine theorem",
+    "stages": [
+      {
+        "binary": {
+          "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r47/kan-courts",
+          "bytes": 59607856,
+          "sha256": "2d50b5ffbf2af77646f6682b50023e6e21d8db14682fd27fdebde11739e29483"
+        },
+        "test": "program::observer::acquisition::history::",
+        "status": "passed",
+        "peak_owned_rss_bytes": 81379328,
+        "seconds": 0.5364691249560565,
+        "log_sha256": "bbee63e2131d7247b70cf444e0610aedcbeb1bd70e503f4c28e6d16cfb56735a"
+      }
+    ]
+  },
+  "uncovered": "No allocator failures, arbitrary panic sites, native move-address identity, simultaneous unlabelled cursor lifetimes, physical Driver/VM, universal work or space bounds. Capacity fields have lower-bound checks only."
+}
