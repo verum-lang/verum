@@ -93,7 +93,7 @@ example : Equal (eventMass children p (anyHit []) 3 root) zero := by decide_cbv
     def test_all_universal_laws_have_only_standard_foundations(self):
         source = (ROOT / 'VerumExternalReplay/FiniteRisk.lean').read_text()
         names = re.findall(r'^theorem (\w+)', source, re.M)
-        self.assertEqual(len(names), 10)
+        self.assertEqual(len(names), 13)
         result = self.prove('\n'.join('#print axioms FiniteRisk.' + n for n in names))
         rows = [d['data'] for d in result['diagnostics'] if d['severity'] == 'information']
         self.assertEqual(len(rows), len(names))
@@ -101,6 +101,23 @@ example : Equal (eventMass children p (anyHit []) 3 root) zero := by decide_cbv
             self.assertTrue(row.endswith(('does not depend on any axioms',
                                           'depends on axioms: [propext]',
                                           'depends on axioms: [propext, Quot.sound]')), row)
+
+    def test_delayed_publication_retains_a_genuine_prefix_crossing(self):
+        self.prove('''
+def delayed (path : List Node) := path.any hit && decide (5 ≤ path.length)
+example (horizon : Nat) : AtMost (selectedMass children p delayed horizon [] root) quarter := by
+  apply selected_crossing_bound children p q p quarter p_flow q_flow root
+    (le_refl _) (fun _ => le_refl _) delayed
+  intro path accepted
+  cases h : path.any hit <;> simp_all [delayed, hit]
+example : Equal (selectedMass children p delayed 2 [] root) zero := by decide_cbv
+example : Equal (selectedMass children p delayed 4 [] root) quarter := by decide_cbv
+-- A retained past hit differs from requiring a hit at the publication boundary.
+def earlier (h : Node) := decide (h = left)
+example : Equal (selectedMass children p (fun path => path.any earlier) 2 [] root) half := by decide_cbv
+example : Equal (selectedMass children p (fun path => decide (path.getLast? = some left))
+    2 [] root) zero := by decide_cbv
+''')
 
     def test_invalid_flow_envelope_allocation_and_stopping_claims_refuse(self):
         claims = {
@@ -121,6 +138,12 @@ example : Equal (eventMass children p (anyHit []) 3 root) zero := by decide_cbv
             'equality_is_a_crossing': 'hit a = false',
             'null_zero_threshold_is_defined':
                 'crosses zero (fun _ : Node => zero) (fun _ => zero) a = false',
+            'uncovered_publication_has_no_crossing_bound':
+                'AtMost (selectedMass children p (fun path => decide (5 ≤ path.length)) 4 [] root) quarter',
+            'a_receipt_cannot_invent_a_past_hit': '([root, left, b] : List Node).any hit = true',
+            'current_hit_is_not_historical_hit':
+                'Equal (selectedMass children p (fun path => path.any (fun h => decide (h = left))) 2 [] root) '
+                '(selectedMass children p (fun path => decide (path.getLast? = some left)) 2 [] root)',
         }
         for name, claim in claims.items():
             with self.subTest(name=name):

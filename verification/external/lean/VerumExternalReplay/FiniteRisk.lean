@@ -166,4 +166,56 @@ theorem envelope_family_bound {I : Type} (children : H → List H) (p : H → Fr
   exact le_trans (eq_le (sum_scale family weight alpha))
     (le_trans (mul_mono_left alpha allocated) (eq_le (mul_one alpha)))
 
+/-- Mass of complete finite paths selected after observing their entire history.
+The selector may delay publication; it may not invent or change a prior crossing. -/
+def selectedMass (children : H → List H) (mass : H → Fraction)
+    (selected : List H → Bool) : Nat → List H → H → Fraction
+  | 0, past, h => if selected (past ++ [h]) then mass h else zero
+  | n + 1, past, h => sum ((children h).map
+      (selectedMass children mass selected n (past ++ [h])))
+
+theorem selected_mass_mono (children : H → List H) (mass : H → Fraction)
+    (a b : List H → Bool) (covered : ∀ path, a path = true → b path = true)
+    (n : Nat) (past : List H) (h : H) :
+    AtMost (selectedMass children mass a n past h)
+      (selectedMass children mass b n past h) := by
+  induction n generalizing past h with
+  | zero =>
+    cases ha : a (past ++ [h])
+    · simp only [selectedMass, ha, Bool.false_eq_true, ite_false]; exact zero_le _
+    · simp only [selectedMass, ha, covered _ ha, ite_true]; exact le_refl _
+  | succ n ih => exact sum_mono _ _ _ (fun child _ => ih _ child)
+
+theorem selected_hit_is_event (children : H → List H) (mass : H → Fraction)
+    (hit : H → Bool) (n : Nat) (past : List H) (h : H) :
+    Equal (selectedMass children mass (fun path => path.any hit) n past h)
+      (eventMass children mass (fun x => past.any hit || hit x) n h) := by
+  induction n generalizing past h with
+  | zero => simp only [selectedMass, eventMass, List.any_append, List.any_cons,
+                      List.any_nil, Bool.or_false]; exact eq_refl _
+  | succ n ih =>
+    simp only [selectedMass, eventMass]
+    apply sum_congr _ _ _
+    intro child _
+    have same : (fun x => (past ++ [h]).any hit || hit x) =
+        (fun x => (past.any hit || hit h) || (past.any hit || hit x)) := by
+      funext x
+      simp only [List.any_append, List.any_cons, List.any_nil, Bool.or_false]
+      cases past.any hit <;> cases hit h <;> cases hit x <;> rfl
+    rw [← same]
+    exact ih _ child
+
+/-- Any delayed or selectively published event covered by a genuine crossing
+has the same finite bound. This does not establish the coverage premise for a
+runtime, nor allow retrospective changes to predictors, envelopes or risk. -/
+theorem selected_crossing_bound (children : H → List H) (p q envelope : H → Fraction)
+    (risk : Fraction) (pflow : Flow children p) (qflow : Subflow children q)
+    (root : H) (initial : AtMost (q root) one)
+    (dominates : ∀ h, AtMost (p h) (envelope h)) (selected : List H → Bool)
+    (covered : ∀ path, selected path = true → path.any (crosses risk q envelope) = true)
+    (horizon : Nat) : AtMost (selectedMass children p selected horizon [] root) risk :=
+  le_trans (selected_mass_mono children p selected _ covered horizon [] root)
+    (le_trans (eq_le (selected_hit_is_event children p _ horizon [] root))
+      (envelope_crossing_bound children p q envelope risk pflow qflow root initial dominates horizon))
+
 end FiniteRisk
