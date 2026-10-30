@@ -277,3 +277,32 @@ fn installing_new_metadata_invalidates_position_receipts() {
         Some(Type::Text)
     );
 }
+
+#[test]
+fn prepared_snapshot_reuses_index_without_sharing_checker_admissions() {
+    use verum_types::{AnalysisControl, CoreMetadataSnapshot};
+    let data = Arc::new(metadata((0..4096).map(|_| descriptor()).collect()));
+    let snapshot =
+        Arc::new(CoreMetadataSnapshot::prepare(data, &AnalysisControl::default()).unwrap());
+    let mut first = TypeChecker::new_with_core_snapshot(snapshot.clone());
+    let mut second = TypeChecker::new_with_core_snapshot(snapshot.clone());
+    load(&mut first, "Container");
+    assert_eq!(item(&second, "Container"), None);
+    load(&mut second, "Container");
+    assert_eq!(item(&second, "Container"), Some(Type::Int));
+    assert_eq!(first.metrics().metadata_impl_index_entries, 0);
+    assert_eq!(second.metrics().metadata_impl_index_entries, 0);
+    assert_eq!(first.metrics().metadata_impl_candidates, 1);
+    assert_eq!(second.metrics().metadata_impl_candidates, 1);
+    let mut changed = descriptor();
+    changed
+        .associated_types
+        .insert("Item".into(), "Bool".into());
+    second.set_core_metadata(Arc::new(metadata(List::from_iter([changed]))));
+    // Installing another artifact must discard the paired old position index.
+    load(&mut second, "exports.First");
+    assert_eq!(second.metrics().metadata_impl_index_entries, 1);
+    let cancelled = AnalysisControl::default();
+    cancelled.cancel();
+    assert!(CoreMetadataSnapshot::prepare(snapshot.metadata().clone(), &cancelled).is_err());
+}

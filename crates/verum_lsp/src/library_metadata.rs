@@ -16,7 +16,7 @@ pub struct LibraryIdentity {
 }
 
 pub struct LibraryMetadata {
-    pub(crate) core: Arc<CoreMetadata>,
+    pub(crate) snapshot: Arc<verum_types::CoreMetadataSnapshot>,
     pub(crate) registry: verum_modules::ModuleRegistry,
     pub identity: LibraryIdentity,
 }
@@ -42,13 +42,17 @@ impl LibraryMetadata {
         })? {
             registry.register(module);
         }
+        let core = Arc::new(core);
+        let snapshot = Arc::new(verum_types::CoreMetadataSnapshot::prepare(
+            core.clone(), &verum_types::AnalysisControl::default(),
+        )?);
         Ok(Arc::new(Self {
             registry,
             identity: LibraryIdentity {
                 sha256: hex::encode(Sha256::digest(bytes)).into(),
                 format_version: core.version,
             },
-            core: Arc::new(core),
+            snapshot,
         }))
     }
 
@@ -60,6 +64,6 @@ impl LibraryMetadata {
     }
 
     pub fn metadata(&self) -> &CoreMetadata {
-        &self.core
+        self.snapshot.metadata()
     }
 }

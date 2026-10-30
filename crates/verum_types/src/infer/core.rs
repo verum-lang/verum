@@ -1108,6 +1108,14 @@ impl TypeChecker {
         checker
     }
 
+    /// Share only indexes paired with their owning immutable metadata snapshot.
+    /// Protocol registrations and admission receipts remain checker-local.
+    pub fn new_with_core_snapshot(snapshot: std::sync::Arc<crate::CoreMetadataSnapshot>) -> Self {
+        let mut checker = Self::new_with_core(snapshot.metadata().clone());
+        checker.metadata_impls_by_owner = Some(snapshot.implementations.clone());
+        checker
+    }
+
     /// One-shot scan of `metadata.implementations` that mirrors
     /// `verum_compiler::stdlib_coercion_registry::scan_protocol_implementations`
     /// — but for the USER-SIDE typecheck path that doesn't re-walk
@@ -1406,7 +1414,7 @@ impl TypeChecker {
         out
     }
 
-    pub(super) fn metadata_declaring_key(descriptor: &crate::core_metadata::TypeDescriptor) -> Text {
+    pub(crate) fn metadata_declaring_key(descriptor: &crate::core_metadata::TypeDescriptor) -> Text {
         let owner = descriptor.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
             .unwrap_or(&descriptor.module_path);
         if owner.is_empty() || owner.as_str() == "cog" {
@@ -2655,26 +2663,13 @@ impl TypeChecker {
             .map(Self::metadata_declaring_key)
             .unwrap_or_else(|| type_name.clone());
         if self.metadata_impls_by_owner.is_none() {
-            let mut index: Map<Text, List<usize>> = Map::new();
-            // Archives repeat imported declarations. Only full descriptor
-            // equality permits reuse; protocol/target keys omit constraints.
-            let mut declarations = Set::new();
-            for (position, implementation) in metadata.implementations.iter().enumerate() {
-                if self.check_analysis_control().is_err() {
-                    return proto_deps;
-                }
-                self.metrics.metadata_impl_index_entries += 1;
-                if !declarations.insert(implementation) {
-                    continue;
-                }
-                let owner = metadata
-                    .types
-                    .get(&implementation.target_type)
-                    .map(Self::metadata_declaring_key)
-                    .unwrap_or_else(|| implementation.target_type.clone());
-                index.entry(owner).or_default().push(position);
-            }
-            self.metadata_impls_by_owner = Some(index);
+            let index = crate::metadata_snapshot::implementation_index(
+                &metadata,
+                self.analysis_control.as_ref(),
+                &mut self.metrics.metadata_impl_index_entries,
+            );
+            let Ok(index) = index else { return proto_deps; };
+            self.metadata_impls_by_owner = Some(std::sync::Arc::new(index));
         }
         let index = self.metadata_impls_by_owner.as_ref().expect("completed metadata index");
         // Clone only this ordered bucket so registration can borrow self mutably.

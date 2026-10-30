@@ -1225,7 +1225,7 @@ pub struct TypeChecker {
     /// Lazy exact-owner buckets for the installed immutable metadata snapshot.
     /// Values are positions in its implementation list, in declaration order.
     /// Replacing metadata invalidates this index and completed registration tails.
-    metadata_impls_by_owner: Maybe<Map<Text, List<usize>>>,
+    metadata_impls_by_owner: Maybe<std::sync::Arc<crate::metadata_snapshot::ImplementationIndex>>,
     /// Successful exact target spellings for descriptor positions in the
     /// installed metadata. A different descriptor never inherits this evidence.
     metadata_impl_receipts: Map<usize, Set<Text>>,

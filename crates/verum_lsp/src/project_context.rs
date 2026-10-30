@@ -377,7 +377,7 @@ impl ProjectContext {
                 continue;
             };
             let mut checker = if let Some(library) = &self.library {
-                let mut checker = TypeChecker::new_with_core(library.core.clone());
+                let mut checker = TypeChecker::new_with_core_snapshot(library.snapshot.clone());
                 checker.set_module_registry(registry.as_inner().clone());
                 checker
             } else {
@@ -388,7 +388,7 @@ impl ProjectContext {
             checker.register_builtins();
             if let Some(library) = &self.library {
                 checker.register_stdlib_types_for_module(&info.ast);
-                for (name, declaration) in &library.core.context_decl_nodes {
+                for (name, declaration) in &library.metadata().context_decl_nodes {
                     control.check()?;
                     checker.register_protocol_as_context(name.clone());
                     checker.register_stdlib_context_full(name.clone(), declaration.clone());

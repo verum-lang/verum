@@ -252,3 +252,7 @@ impl Session {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/language/cancellation.rs"]
+mod cancellation_tests;

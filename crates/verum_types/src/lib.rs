@@ -129,6 +129,8 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+pub mod metadata_snapshot;
+pub use metadata_snapshot::CoreMetadataSnapshot;
 pub mod analysis_control;
 pub use analysis_control::AnalysisControl;
 
