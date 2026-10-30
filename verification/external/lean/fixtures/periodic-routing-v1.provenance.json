@@ -67,5 +67,20 @@
         "settled_leases": 12
       }
     }
+  },
+  "additional_native_replay": {
+    "version": "r50",
+    "source_files": 1596,
+    "source_manifest_sha256": "a961aaa4aeda99f221f3b3521ff3f3d514be74c4ee26e203667d52fa3559ee77",
+    "patch_sha256": "c0fdba8d8b5428a08efb6f3a7ad6426d96c922e0ae1f3cc64db603bc39f4fc1f",
+    "binary_sha256": "e1871117c5398161ebe55bb750bec15651e2efc1ad81257f512570eab0e961c9",
+    "selector": "automatic::periodic_courts::",
+    "passed": 4,
+    "failed": 0,
+    "ignored": 0,
+    "log_sha256": "eef5f852b62746f1b9ba77b2dd889c92397dc57659ef5066a70154b2574b2d46",
+    "incumbent_export_sha256": "20d3706ee741870973114dcc29927c8382b22d1eaf888628686fc73946da1bbd",
+    "scope": "Finite actual acquired General incumbent, native retention refusal, execution and periodic standing; not periodic General MDL invalidation or universal refinement",
+    "other_exports": "Paused materializer and sticky refusal identical to r49; zero entitlement differs only by 236 authority leaves advancing from 2 to 3 and passes the same finite checker."
   }
 }

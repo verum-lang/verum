@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import unittest
-from check_periodic_routing_export import check
+from check_periodic_routing_export import check, check_incumbent
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 
@@ -21,6 +21,26 @@ class PeriodicRouting(unittest.TestCase):
                 raw = payload(name)
                 self.assertEqual(hashlib.sha256(raw).hexdigest(), expected['sha256'])
                 self.assertEqual(check(json.loads(raw)), expected['summary'])
+
+    def test_acquired_incumbent_boundaries(self):
+        raw = gzip.decompress((FIXTURES / 'routing-incumbent-v1.json.gz').read_bytes())
+        provenance = json.loads((FIXTURES / 'periodic-routing-v1.provenance.json').read_text())
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         provenance['additional_native_replay']['incumbent_export_sha256'])
+        data = json.loads(raw)
+        self.assertEqual(check_incumbent(data), {'periodic_boundaries': 3, 'cut_commits': 3})
+        for path, value in [(['cut', 'owner'], 1), (['cut', 'definition'], 1),
+                            (['cut', 'state'], 4), (['halted'], False),
+                            (['first_refused', 'ordinal'], 431), (['requests'], '431'),
+                            (['captured_receipts'], 1), (['sitting'], 5),
+                            (['ordinal'], 1295), (['probation_left'], 1),
+                            (['execution_window'], [])]:
+            with self.subTest(path=path):
+                changed = json.loads(raw)
+                target = changed['events'][-1]
+                for key in path[:-1]: target = target[key]
+                target[path[-1]] = value
+                with self.assertRaises(ValueError): check_incumbent(changed)
 
     def test_discriminating_mutations(self):
         cases = [

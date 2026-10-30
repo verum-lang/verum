@@ -20,6 +20,48 @@ def natural(value):
     return result
 
 
+def check_incumbent(data):
+    """Check only exported periodic boundaries, not the private VM transition.
+
+    The native court separately asserts actual acquisition, source/floor ownership
+    and absence of legacy acquisition. Those fields are not exported here and
+    cannot be inferred from a cut's current value or a successful test name.
+    """
+    require(data['schema'] == 'synarc.native-routing-incumbent.v1', 'unsupported schema')
+    initial, *boundaries = data['events']
+    require(initial['kind'] == 'AcquiredIncumbent' and boundaries, 'missing acquired execution')
+    window = natural(initial['window'])
+    require(window > 0, 'zero physical window')
+    require(natural(initial['candidate']) > 0 and natural(initial['look']) > 0,
+            'missing acquisition identity')
+    numerator, denominator = map(natural, initial['mass'])
+    require(0 < numerator <= denominator, 'invalid acquired mass')
+    ordinal, sitting = natural(initial['ordinal']), natural(initial['sitting'])
+    cut = initial['cut']
+    refusal = boundaries[0]['first_refused']
+    require(natural(refusal['ordinal']) == ordinal, 'refusal moved beyond acquisition')
+    probation = None
+    for event in boundaries:
+        require(event['kind'] == 'PhysicalPeriodicBoundary', 'foreign transition')
+        ordinal += window
+        sitting += 1
+        require(natural(event['ordinal']) == ordinal and natural(event['sitting']) == sitting,
+                'missing or duplicate physical boundary')
+        require(event['halted'] is True and event['first_refused'] == refusal,
+                'refusal changed or resumed')
+        require(natural(event['fresh']) == 0 and natural(event['captured_receipts']) == 0,
+                'boundary phase or acquisition lease changed')
+        require(natural(event['requests']) == natural(initial['ordinal']), 'acquisition resumed')
+        current = event['cut']
+        require(all(current[key] == cut[key] for key in ('definition', 'owner')), 'cut owner replaced')
+        require(natural(current['state']) == natural(cut['state']) + 1, 'missing native cut commit')
+        remaining = natural(event['probation_left'])
+        require(probation is None or remaining == max(0, probation - 1), 'probation lifecycle')
+        require(bool(event['execution_window']) and bool(event['chronicle']), 'missing execution record')
+        cut, probation = current, remaining
+    return {'periodic_boundaries': len(boundaries), 'cut_commits': len(boundaries)}
+
+
 def ledger(state):
     value = state['ledger']
     receipts = value['settled_receipts']
