@@ -153,3 +153,5 @@ async fn invalid_and_closed_documents_remove_stale_exports() {
             .is_empty()
     );
 }
+
+mod project;

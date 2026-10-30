@@ -391,6 +391,8 @@ impl DocumentCache {
         documents.get(uri).map(|doc| {
             crate::document::DocumentState {
                 text: doc.source.clone(),
+                analysis_revision: None,
+                project_bindings: verum_common::List::new(),
                 module: doc.ast.clone(),
                 diagnostics: doc.parse_errors.clone(),
                 version: doc.version,

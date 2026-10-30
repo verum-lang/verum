@@ -116,6 +116,10 @@ pub fn complete_at_position(document: &DocumentState, position: Position) -> Lis
     let line = document.get_line(position.line);
     let trigger_context = line.and_then(|l| get_trigger_context(l, position.character));
 
+    let include_bindings = matches!(
+        trigger_context,
+        Some(TriggerContext::Type | TriggerContext::Expression) | None
+    );
     match trigger_context {
         Some(TriggerContext::Attribute {
             partial_name,
@@ -157,6 +161,20 @@ pub fn complete_at_position(document: &DocumentState, position: Position) -> Lis
         }
     }
 
+    if include_bindings {
+        for binding in &document.project_bindings {
+            if !completions
+                .iter()
+                .any(|item| item.label == binding.name.as_str())
+            {
+                completions.push(CompletionItem {
+                    label: binding.name.to_string(),
+                    detail: Some(binding.type_display.to_string()),
+                    ..Default::default()
+                });
+            }
+        }
+    }
     completions
 }
 

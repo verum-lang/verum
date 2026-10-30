@@ -1499,9 +1499,15 @@ impl TypeChecker {
         }
     }
 
-    /// Lookup a type in context (for testing/debugging)
+    /// Inspect the resolved type namespace without parsing or inventing a signature.
+    /// Compiler clients use this after declaration preparation to project named types.
+    pub fn resolved_type(&self, name: &str) -> Option<&Type> {
+        self.ctx.lookup_type(name)
+    }
+
+    /// Lookup a type in context (for testing/debugging).
     pub fn lookup_type_for_testing(&self, name: &str) -> Option<Type> {
-        self.ctx.lookup_type(name).cloned()
+        self.resolved_type(name).cloned()
     }
 
     /// The payload types each of a variant type's constructors carries,

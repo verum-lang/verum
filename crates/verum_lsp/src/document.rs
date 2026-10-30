@@ -12,7 +12,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 use verum_ast::{Attribute, FileId, ItemKind, LiteralKind, Module};
-use verum_common::List;
+use verum_common::{List, Text};
 use verum_diagnostics::Diagnostic;
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
@@ -38,6 +38,7 @@ pub enum DocumentUpdateError {
 /// Diagnostics and source captured under one document lock.
 #[derive(Debug, Clone)]
 pub struct DiagnosticSnapshot {
+    pub analysis_revision: Option<Text>,
     pub text: String,
     pub diagnostics: List<Diagnostic>,
     pub version: i32,
@@ -276,6 +277,8 @@ impl CbgrCostInfo {
 
 /// Stores the parsed and analyzed state of a document
 pub struct DocumentState {
+    pub analysis_revision: Option<Text>,
+    pub project_bindings: List<crate::project_context::ProjectBinding>,
     /// The full text content of the document
     pub text: String,
     /// The parsed AST (if parsing succeeded)
@@ -323,6 +326,8 @@ impl DocumentState {
     /// Create a new document state from text
     pub fn new(text: String, version: i32, file_id: FileId) -> Self {
         let mut state = Self {
+            analysis_revision: None,
+            project_bindings: List::new(),
             text,
             module: None,
             diagnostics: List::new(),
@@ -411,6 +416,8 @@ impl DocumentState {
 
     /// Reparse the document and update diagnostics
     fn reparse(&mut self) {
+        self.analysis_revision = None;
+        self.project_bindings.clear();
         self.diagnostics.clear();
         self.symbols.clear();
         self.type_info.clear();
@@ -696,6 +703,30 @@ impl DocumentState {
         // and built-in functions like print, assert, panic
         type_checker.register_builtins();
 
+        self.check_module_types(module, &mut type_checker);
+    }
+
+    pub(crate) fn check_project(
+        &mut self,
+        checker: &mut TypeChecker,
+        module: &Module,
+        revision: Text,
+    ) {
+        self.analysis_revision = Some(revision);
+        self.project_bindings.clear();
+        self.diagnostics.clear();
+        let started = std::time::Instant::now();
+        self.check_module_types(module, checker);
+        self.last_type_check_us = started.elapsed().as_micros() as u64;
+    }
+
+    fn check_module_types(&mut self, module: &Module, type_checker: &mut TypeChecker) {
+        for error in type_checker.prepare_module_declarations(module) {
+            self.diagnostics
+                .push(error.to_diagnostic_with_span(Some(|span| {
+                    verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
+                })));
+        }
         // Type check each item in the module
         for item in module.items.iter() {
             match type_checker.check_item(item) {
@@ -715,6 +746,24 @@ impl DocumentState {
         // Statement recovery, exhaustiveness and ambiguity checks report via
         // the checker's diagnostic channel even when check_item returns Ok.
         // Render its source errors with this revision, as the compiler does.
+        for error in type_checker.take_deferred_errors() {
+            self.diagnostics
+                .push(error.to_diagnostic_with_span(Some(|span| {
+                    verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
+                })));
+        }
+        for (name, symbol) in &mut self.symbols {
+            symbol.ty = if symbol.kind.meta().is_type_introducing {
+                type_checker.resolved_type(name).cloned()
+            } else {
+                None
+            }
+            .or_else(|| {
+                type_checker
+                    .ctx_env_lookup(name)
+                    .map(|scheme| scheme.ty.clone())
+            });
+        }
         let sources = type_checker.diagnostic_sources();
         if sources.len() == type_checker.diagnostics().len() {
             for error in sources {
@@ -801,7 +850,7 @@ impl DocumentStore {
     }
 
     /// Get or create a file ID for a URL
-    fn get_file_id(&self, _uri: &Url) -> FileId {
+    pub(crate) fn get_file_id(&self, _uri: &Url) -> FileId {
         let mut next_id = self.next_file_id.write();
         let id = *next_id;
         *next_id += 1;
@@ -868,6 +917,7 @@ impl DocumentStore {
 
     pub fn diagnostic_snapshot(&self, uri: &Url) -> Option<DiagnosticSnapshot> {
         self.with_document(uri, |doc| DiagnosticSnapshot {
+            analysis_revision: doc.analysis_revision.clone(),
             text: doc.text.clone(),
             diagnostics: doc.diagnostics.clone(),
             version: doc.version,
@@ -877,7 +927,9 @@ impl DocumentStore {
 
     pub fn is_current_snapshot(&self, uri: &Url, snapshot: &DiagnosticSnapshot) -> bool {
         self.with_document(uri, |doc| {
-            doc.version == snapshot.version && doc.file_id == snapshot.file_id
+            doc.version == snapshot.version
+                && doc.file_id == snapshot.file_id
+                && doc.analysis_revision == snapshot.analysis_revision
         })
         .unwrap_or(false)
     }

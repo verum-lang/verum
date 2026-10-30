@@ -25,6 +25,7 @@ pub struct Declaration {
     pub id: Text,
     pub name: Text,
     pub kind: &'static str,
+    pub type_display: Option<Text>,
     pub range: Range,
     pub selection_range: Range,
     pub requirements: List<Requirement>,
@@ -41,6 +42,8 @@ pub struct DocumentSnapshot {
     pub version: i32,
     pub source_hash: Text,
     pub parsed: bool,
+    pub project_revision: Option<Text>,
+    pub bindings: List<crate::project_context::ProjectBinding>,
     pub analysis_scope: &'static str,
     pub diagnostics: List<Diagnostic>,
     pub declarations: List<Declaration>,
@@ -95,6 +98,10 @@ impl DocumentSnapshot {
                     id: format!("{}#{}:{}:{}", uri, item.span.start, item.span.end, kind).into(),
                     name: name.as_str().into(),
                     kind,
+                    type_display: doc
+                        .get_symbol(name.as_str())
+                        .and_then(|symbol| symbol.ty.as_ref())
+                        .map(|ty| ty.to_string().into()),
                     range: ast_span_to_range(&item.span, &doc.text),
                     selection_range: ast_span_to_range(&name.span, &doc.text),
                     requirements,
@@ -107,7 +114,13 @@ impl DocumentSnapshot {
             version: doc.version,
             source_hash: hex::encode(Sha256::digest(doc.text.as_bytes())).into(),
             parsed: doc.module.is_some(),
-            analysis_scope: "single-module-with-builtins",
+            project_revision: doc.analysis_revision.clone(),
+            bindings: doc.project_bindings.clone(),
+            analysis_scope: if doc.analysis_revision.is_some() {
+                "project-sources-with-builtins"
+            } else {
+                "single-module-with-builtins"
+            },
             diagnostics: convert_diagnostics(doc.diagnostics.clone(), &doc.text, uri).into(),
             declarations,
             mounts,
@@ -120,18 +133,23 @@ impl Backend {
         &self,
         _: serde_json::Value,
     ) -> jsonrpc::Result<serde_json::Value> {
+        let _guard = self.project_gate.lock().await;
+        self.refresh_project();
+        let project = self.project.lock();
         let mut documents = self.documents.flat_collect_from_documents(|uri, doc| {
             vec![DocumentSnapshot::from_document(uri, doc)]
         });
         documents.sort_by(|left, right| left.uri.cmp(&right.uri));
         serde_json::to_value(serde_json::json!({
-            "schema":"verum-project-analysis/1", "coverage":"analyzed-documents-only", "documents":documents
+            "schema":"verum-project-analysis/1", "coverage":"open-documents-and-source-dependencies", "project_revision":project.revision(), "sources":project.identities, "issues":project.issues, "documents":documents
         })).map_err(|_| jsonrpc::Error::internal_error())
     }
     pub async fn handle_document_snapshot(
         &self,
         params: SnapshotParams,
     ) -> jsonrpc::Result<serde_json::Value> {
+        let _guard = self.project_gate.lock().await;
+        self.refresh_project();
         self.documents
             .with_document(&params.text_document.uri, |doc| {
                 if doc.version != params.version {

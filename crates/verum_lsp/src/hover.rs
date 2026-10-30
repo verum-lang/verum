@@ -59,6 +59,20 @@ pub fn hover_at_position(
         });
     }
 
+    if let Some(binding) = document
+        .project_bindings
+        .iter()
+        .find(|binding| binding.name == word.as_str())
+    {
+        return Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(format!(
+                "{}: {}",
+                binding.name, binding.type_display
+            ))),
+            range: None,
+        });
+    }
+
     // Try to find information about this symbol from AST
     if let Some(info) = get_symbol_info(document, &word) {
         return Some(Hover {

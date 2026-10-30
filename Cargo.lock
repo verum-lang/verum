@@ -5539,6 +5539,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "toml",
  "tower-lsp",
  "tracing",
  "tracing-subscriber",

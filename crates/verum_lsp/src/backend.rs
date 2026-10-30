@@ -27,6 +27,8 @@ use crate::workspace_index::WorkspaceIndex;
 
 /// The main LSP backend.
 pub struct Backend {
+    pub(crate) project: parking_lot::Mutex<crate::project_context::ProjectContext>,
+    pub(crate) project_gate: tokio::sync::Mutex<()>,
     /// The LSP client (for sending messages back)
     client: Client,
     /// Document store (tracks open documents)
@@ -55,6 +57,8 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         let config = Arc::new(SharedLspConfig::new());
         Self {
+            project: parking_lot::Mutex::new(Default::default()),
+            project_gate: tokio::sync::Mutex::new(()),
             client,
             documents: DocumentStore::new(),
             document_gates: dashmap::DashMap::new(),
@@ -70,6 +74,37 @@ impl Backend {
     /// Shared config accessor — used by test harnesses and outside callers.
     pub fn config(&self) -> &Arc<SharedLspConfig> {
         &self.config
+    }
+
+    pub(crate) fn refresh_project(&self) {
+        let result = self.project.lock().refresh(&self.documents);
+        if let Err(error) = result {
+            self.project.lock().invalidate(&error.to_string());
+            let uris = self
+                .documents
+                .flat_collect_from_documents(|uri, _| vec![uri.clone()]);
+            for uri in uris {
+                self.documents.with_document_mut(&uri, |doc| {
+                    doc.analysis_revision = None;
+                    doc.project_bindings.clear();
+                    doc.diagnostics =
+                        verum_common::List::from_iter([verum_diagnostics::DiagnosticBuilder::new(
+                            verum_diagnostics::Severity::Error,
+                        )
+                        .message(format!("Project analysis unavailable: {error}"))
+                        .build()]);
+                });
+            }
+        }
+    }
+
+    async fn publish_project_diagnostics(&self) {
+        let uris = self
+            .documents
+            .flat_collect_from_documents(|uri, _| vec![uri.clone()]);
+        for uri in uris {
+            self.publish_diagnostics(uri).await;
+        }
     }
 
     fn document_gate(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>> {
@@ -224,6 +259,9 @@ impl LanguageServer for Backend {
         if let Some(root_uri) = params.root_uri.as_ref() {
             if let Ok(root_path) = root_uri.to_file_path() {
                 self.workspace_index.initialize(&root_path);
+                self.project
+                    .lock()
+                    .configure(root_path, params.initialization_options.as_ref());
             }
         } else if let Some(root_path_str) = {
             #[allow(deprecated)]
@@ -231,6 +269,9 @@ impl LanguageServer for Backend {
         } {
             let root_path = std::path::PathBuf::from(root_path_str);
             self.workspace_index.initialize(&root_path);
+            self.project
+                .lock()
+                .configure(root_path, params.initialization_options.as_ref());
         }
 
         // Merge every `initializationOptions` key the client sends into the
@@ -435,6 +476,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let _project_guard = self.project_gate.lock().await;
         tracing::debug!("Document opened: {}", params.text_document.uri);
         let gate = self.document_gate(&params.text_document.uri);
         let guard = gate.lock().await;
@@ -447,10 +489,12 @@ impl LanguageServer for Backend {
         // Index document in workspace index
         self.index_document_in_workspace(&params.text_document.uri);
         drop(guard);
-        self.publish_diagnostics(params.text_document.uri).await;
+        self.refresh_project();
+        self.publish_project_diagnostics().await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let _project_guard = self.project_gate.lock().await;
         tracing::debug!("Document changed: {}", params.text_document.uri);
         let gate = self.document_gate(&params.text_document.uri);
         let guard = gate.lock().await;
@@ -466,19 +510,23 @@ impl LanguageServer for Backend {
         // Re-index document in workspace index
         self.index_document_in_workspace(&params.text_document.uri);
         drop(guard);
-        self.publish_diagnostics(params.text_document.uri).await;
+        self.refresh_project();
+        self.publish_project_diagnostics().await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let _project_guard = self.project_gate.lock().await;
         tracing::debug!("Document saved: {}", params.text_document.uri);
 
         // Re-index on save
         self.index_document_in_workspace(&params.text_document.uri);
 
-        self.publish_diagnostics(params.text_document.uri).await;
+        self.refresh_project();
+        self.publish_project_diagnostics().await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let _project_guard = self.project_gate.lock().await;
         tracing::debug!("Document closed: {}", params.text_document.uri);
         let gate = self.document_gate(&params.text_document.uri);
         let _guard = gate.lock().await;
@@ -493,9 +541,14 @@ impl LanguageServer for Backend {
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], version)
             .await;
+        drop(_guard);
+        self.refresh_project();
+        self.publish_project_diagnostics().await;
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let _guard = self.project_gate.lock().await;
+        self.refresh_project();
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -532,6 +585,8 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let _guard = self.project_gate.lock().await;
+        self.refresh_project();
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -554,14 +609,20 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         tracing::debug!("Go to definition requested at {}:{}", uri, position.line);
-
-        // Use cross-file navigation via workspace index
-        Ok(crate::workspace_index::goto_definition_cross_file(
-            &self.documents,
-            &self.workspace_index,
-            &uri,
-            position,
-        ))
+        let _guard = self.project_gate.lock().await;
+        self.refresh_project();
+        Ok(self
+            .documents
+            .with_document(&uri, |doc| {
+                crate::goto_definition::goto_definition(doc, position, &uri).or_else(|| {
+                    let word = doc.word_at_position(position)?;
+                    doc.project_bindings
+                        .iter()
+                        .find(|binding| binding.name == word.as_str())
+                        .map(|binding| GotoDefinitionResponse::Scalar(binding.definition.clone()))
+                })
+            })
+            .flatten())
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -1784,12 +1845,9 @@ impl LanguageServer for Backend {
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         tracing::debug!("Watched files changed: {} changes", params.changes.len());
-        // When .vr files change on disk, revalidate open documents
-        // that might depend on them
-        let uris: Vec<Url> = self.documents.document_uris();
-        for uri in uris {
-            self.publish_diagnostics(uri).await;
-        }
+        let _guard = self.project_gate.lock().await;
+        self.refresh_project();
+        self.publish_project_diagnostics().await;
     }
 
     // No `execute_command` handler: code-lens commands are dispatched entirely
@@ -1882,6 +1940,8 @@ impl LanguageServer for Backend {
     ) -> Result<DocumentDiagnosticReportResult> {
         let uri = params.text_document.uri;
         tracing::debug!("Diagnostic pull requested for: {}", uri);
+        let _guard = self.project_gate.lock().await;
+        self.refresh_project();
 
         let diagnostics = if let Some(text) = self.documents.get_text(&uri) {
             let verum_diags = self.documents.get_diagnostics(&uri);

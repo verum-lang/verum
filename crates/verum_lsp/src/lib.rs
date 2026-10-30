@@ -111,3 +111,5 @@ pub use script::{
     suggest_completion,
 };
 pub use semantic_tokens::SemanticTokenProvider;
+
+mod project_context;
