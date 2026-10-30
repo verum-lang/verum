@@ -5,7 +5,7 @@ import type { Pane } from './layout';
 import { languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, hasToken, installToken } from './api';
-import { STARTER, IDENTITY, sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt } from './model';
+import { STARTER, IDENTITY, sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
 
 initializeLanguage();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => {
@@ -77,6 +77,7 @@ document.addEventListener('scroll', event => {
 }, { capture: true, passive: true });
 function dirty() { return savedSource === null || editor.source() !== savedSource; }
 function updateDocumentState() {
+  $('execution-plan').hidden = true;
   setText($('current-path'), currentPath);
   setText($('agent-context'), currentPath);
   $('dirty-marker').hidden = !dirty();
@@ -325,17 +326,32 @@ document.addEventListener('keydown', event => {
 window.addEventListener('beforeunload', event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
 
 let starting = false;
-async function startOperation(kind: Receipt['kind']) {
-  if (starting) return;
+function operationRequest(kind: Receipt['kind']) {
   const source = editor.source(), path = currentPath;
   const seconds = Number(input('timeout').value);
   if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300) throw new Error(t(m('Choose a time budget between 1 and 300 seconds.')));
   const declaration = input('declaration').value.trim();
   if (kind === 'proof' && !declaration) { $('execution-settings').hidden = false; input('declaration').focus(); throw new Error(t(m('Enter the logical declaration to check.'))); }
+  const permissions = $<HTMLSelectElement>('run-permissions').value as RunPermissions;
+  return { kind, source, path, ...(kind === 'proof' ? { declaration } : {}), ...(kind === 'run' ? { permissions } : {}), timeout_ms: Math.round(seconds * 1000) };
+}
+for (const id of ['run-permissions', 'timeout', 'declaration']) $(id).addEventListener('input', () => { $('execution-plan').hidden = true; });
+bind('preview-run', async () => {
+  const request = operationRequest('run'), revision = documentRevision();
+  const plan = await api<ExecutionPlan>('operation.plan', request);
+  if (!sameDocumentRevision(revision, documentRevision()) || JSON.stringify(request) !== JSON.stringify(operationRequest('run'))) {
+    throw new Error(t(m('Source or execution settings changed. Preview again.')));
+  }
+  $('execution-plan-content').textContent = pretty(plan); $('execution-plan').hidden = false;
+  announce(m('Run plan ready; no process started.'));
+});
+async function startOperation(kind: Receipt['kind']) {
+  if (starting) return;
+  const request = operationRequest(kind);
   starting = true; ['run', 'check', 'prove'].forEach(id => { $<HTMLButtonElement>(id).disabled = true; });
   try {
-    const result = await api<{ id: string }>('operation.start', { kind, source, path, ...(kind === 'proof' ? { declaration } : {}), timeout_ms: Math.round(seconds * 1000) });
-    selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path }));
+    const result = await api<{ id: string }>('operation.start', request);
+    selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path: request.path }));
   } finally { starting = false; ['run', 'check', 'prove'].forEach(id => { $<HTMLButtonElement>(id).disabled = false; }); }
 }
 bind('run', () => startOperation('run')); bind('check', () => startOperation('check')); bind('prove', () => startOperation('proof'));
@@ -411,6 +427,10 @@ function renderResults() {
   copy.dataset.focusKey = 'copy'; heading.append(copy);
   detail.append(heading, node('p', 'result-meta', receipt.exit_code == null ? m('{path} · {seconds}s · {hash}', { path: receipt.path, seconds: elapsed(receipt) / 1000, hash: receipt.source_hash.slice(0, 12) }) : m('{path} · {seconds}s · exit {code} · {hash}', { path: receipt.path, seconds: elapsed(receipt) / 1000, code: receipt.exit_code, hash: receipt.source_hash.slice(0, 12) })));
   if (receipt.timeout_ms) detail.append(node('p', 'muted', m(receipt.evidence_path ? 'Wall budget {seconds}s · source and receipt retained locally' : 'Wall budget {seconds}s', { seconds: receipt.timeout_ms / 1000 })));
+  if (receipt.kind === 'run') {
+    const label = receipt.permissions === 'source' ? 'Source / CLI defaults' : receipt.permissions === 'deny-all' ? 'Deny all grants' : receipt.permissions === 'allow-all' ? 'Allow all grants' : 'Not recorded';
+    detail.append(node('p', 'result-meta', m('Script permissions: {policy}', { policy: m(label) })));
+  }
   if (receipt.termination) detail.append(node('p', 'termination', receipt.termination));
   if (receipt.kind === 'proof') {
     const proof = node('div', 'proof-outcome');

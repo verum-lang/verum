@@ -605,7 +605,8 @@ kbd {
   font-size: 10px;
   color: var(--muted);
 }
-.execution-settings label input {
+.execution-settings label input,
+.execution-settings label select {
   font-size: 12px;
   width: 100%;
 }
@@ -614,6 +615,8 @@ kbd {
   font-size: 11px;
   color: var(--muted);
 }
+.execution-settings details { width: 100%; min-width: 0; }
+.execution-settings pre { max-height: 200px; overflow: auto; font-size: 11px; }
 .editor {
   flex: 1;
   min-height: 0;

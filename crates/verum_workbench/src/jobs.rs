@@ -1,6 +1,7 @@
 //! Bounded, cancellable child execution. No shell, and no compiler in the UI host.
 use crate::workspace::{SOURCE_LIMIT, digest, private_dir};
-use anyhow::{Context, Result, ensure};
+use crate::execution::{ExecutionPlan, OperationKind};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -21,17 +22,14 @@ const OUTPUT_LIMIT: usize = 256 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Receipt {
     pub id: Text,
-    pub kind: Text,
-    pub path: Text,
-    pub source_hash: Text,
+    #[serde(flatten)]
+    pub plan: ExecutionPlan,
     pub status: Text,
     pub stdout: Text,
     pub stderr: Text,
     pub exit_code: Option<i32>,
     pub elapsed_ms: u64,
     pub proof: Option<Value>,
-    pub executable: PathBuf,
-    pub timeout_ms: u64,
     pub evidence_path: PathBuf,
     pub started_unix_ms: u64,
     pub termination: Text,
@@ -70,7 +68,7 @@ impl Jobs {
             let Ok(source) = std::fs::read(entry.path().join("source.vr")) else {
                 continue;
             };
-            if source.len() > SOURCE_LIMIT || digest(&source) != receipt.source_hash {
+            if source.len() > SOURCE_LIMIT || digest(&source) != receipt.plan.source_hash {
                 continue;
             }
             receipt.evidence_path = entry.path();
@@ -97,19 +95,13 @@ impl Jobs {
         }
         Ok(())
     }
+    pub fn plan(&self, params: &Value) -> Result<ExecutionPlan> {
+        ExecutionPlan::parse(params, &self.verum, &self.proof)
+    }
     pub fn start(&mut self, params: &Value, source_path: PathBuf) -> Result<Value> {
-        let kind = params["kind"].as_str().context("Expected operation kind")?;
-        ensure!(
-            matches!(kind, "run" | "check" | "proof"),
-            "Unknown operation"
-        );
+        let plan = self.plan(params)?;
         let source = params["source"].as_str().context("Expected source")?;
-        ensure!(source.len() <= SOURCE_LIMIT, "Source exceeds limit");
-        let timeout = params["timeout_ms"].as_u64().unwrap_or(60000);
-        ensure!(
-            (1..=300000).contains(&timeout),
-            "Timeout must be 1..300000 milliseconds"
-        );
+        let timeout = plan.timeout_ms;
         if self.jobs.len() == 128 {
             let index = self
                 .jobs
@@ -125,15 +117,10 @@ impl Jobs {
             .tempfile_in(source_path.parent().context("Source parent")?)?;
         snapshot.write_all(source.as_bytes())?;
         snapshot.as_file().sync_all()?;
-        let executable = if kind == "proof" {
-            &self.proof
-        } else {
-            &self.verum
-        };
         let id: Text = uuid::Uuid::new_v4().to_string().into();
         let evidence_path = private_dir(&self.root, &[".verum-studio", "runs", &id])?;
         std::fs::write(evidence_path.join("source.vr"), source)?;
-        let mut command = Command::new(executable);
+        let mut command = Command::new(&plan.executable);
         command
             .current_dir(&self.root)
             .env("NO_COLOR", "1")
@@ -147,19 +134,19 @@ impl Jobs {
             use std::os::unix::process::CommandExt;
             command.as_std_mut().process_group(0);
         }
-        let input = if kind == "proof" {
-            let declaration = params["declaration"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .context("Choose a theorem declaration")?;
+        let input = if plan.kind == OperationKind::Proof {
             command.arg("--worker");
             Some(List::from(serde_json::to_vec(
-                &json!({"profile":"verum-source-pi-id/1", "source":source,"declaration":declaration}),
+                &json!({"profile":"verum-source-pi-id/1", "source":source,"declaration":plan.declaration}),
             )?))
-        } else if kind == "run" {
+        } else if plan.kind == OperationKind::Run {
             // The CLI stdin entry selects script syntax without inventing a
             // wrapper or a second compiler in Studio.
-            command.args(["run", "--interp", "-"]);
+            command.args(["run", "--interp"]);
+            if let Some(flag) = plan.permissions.and_then(|policy| policy.cli_flag()) {
+                command.arg(flag);
+            }
+            command.arg("-");
             Some(source.as_bytes().iter().copied().collect())
         } else {
             command.arg("check").arg(snapshot.path());
@@ -167,20 +154,16 @@ impl Jobs {
         };
         let child = command
             .spawn()
-            .with_context(|| format!("Start {}", executable.display()))?;
+            .with_context(|| format!("Start {}", plan.executable.display()))?;
         let receipt = Arc::new(Mutex::new(Receipt {
             id: id.clone(),
-            kind: kind.into(),
-            path: params["path"].as_str().unwrap_or("scratch.vr").into(),
-            source_hash: digest(source.as_bytes()),
+            plan,
             status: "running".into(),
             stdout: Text::new(),
             stderr: Text::new(),
             exit_code: None,
             elapsed_ms: 0,
             proof: None,
-            executable: executable.clone(),
-            timeout_ms: timeout,
             evidence_path,
             started_unix_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
@@ -303,7 +286,7 @@ async fn execute(
             tokio::try_join!(async { Ok::<_, anyhow::Error>(child.wait().await?) }, io)?;
         Ok::<_, anyhow::Error>(status)
     };
-    let proof_job = receipt.lock().await.kind == "proof";
+    let proof_job = receipt.lock().await.plan.kind == OperationKind::Proof;
     let (state, exit, reason) = tokio::select! {
         result = work => match result { Ok(s) => (process_status(s,proof_job), s.code(),Text::from(format!("Process {s}"))), Err(e) => (if e.is::<OutputBudget>() {"exhausted"} else {"inconclusive"},None,Text::from(e.to_string())) },
         _ = tokio::time::sleep(timeout) => ("exhausted",None,Text::from("Wall-time budget exceeded")),
@@ -318,10 +301,10 @@ async fn execute(
     record.elapsed_ms = started.elapsed().as_millis() as u64;
     record.termination = reason;
     record.version += 1;
-    if record.kind == "proof" && state == "succeeded" {
+    if record.plan.kind == OperationKind::Proof && state == "succeeded" {
         match serde_json::from_str::<Value>(&record.stdout) {
             Ok(proof)
-                if proof["source"]["sha256"].as_str() == Some(record.source_hash.as_str()) =>
+                if proof["source"]["sha256"].as_str() == Some(record.plan.source_hash.as_str()) =>
             {
                 record.status = match proof["status"].as_str() {
                     Some("verified") => "succeeded",

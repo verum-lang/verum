@@ -1,6 +1,17 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Script permissions': 'Разрешения скрипта',
+  'Source / CLI defaults': 'Из исходника / настройки CLI',
+  'Deny all grants': 'Запретить все разрешения',
+  'Allow all grants': 'Предоставить все разрешения',
+  'Interpreter permission checks are not OS isolation. Source defaults can permit unrestricted execution. Run trusted code only.': 'Проверки разрешений интерпретатора не изолируют процесс от ОС. Настройки исходника могут допускать выполнение без ограничений. Запускайте только доверенный код.',
+  'Inspect run plan': 'Посмотреть план запуска',
+  'Execution plan': 'План выполнения',
+  'Source or execution settings changed. Preview again.': 'Исходник или настройки выполнения изменились. Запросите план заново.',
+  'Run plan ready; no process started.': 'План запуска готов; процесс не запущен.',
+  'Script permissions: {policy}': 'Разрешения скрипта: {policy}',
+  'Not recorded': 'Не зафиксированы',
   'Structure': 'Структура',
   'Project files': 'Файлы проекта',
   'Refresh project': 'Обновить проект',

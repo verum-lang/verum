@@ -55,6 +55,7 @@ test('only declared Verum tools offer approval; shell/file bypasses refuse', () 
   assert.equal(approvalKind('item/tool/call', { tool: 'verum_propose' }), 'source');
   assert.equal(approvalKind('item/tool/call', { tool: 'verum_run' }), 'execution');
   assert.equal(approvalKind('item/tool/call', { tool: 'verum_read' }), 'read');
+  assert.equal(approvalKind('item/tool/call', { tool: 'verum_plan' }), 'read');
   assert.equal(approvalKind('item/tool/call', { tool: 'run_shell' }), 'unsupported');
   assert.equal(approvalKind('item/commandExecution/requestApproval', {}), 'unsupported');
   assert.equal(approvalKind('item/fileChange/requestApproval', {}), 'unsupported');

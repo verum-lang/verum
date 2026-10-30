@@ -240,6 +240,8 @@ fn ensure_io(valid: bool) -> std::io::Result<()> {
 }
 pub fn tools() -> Value {
     let source = json!({"type":"string","description":"Complete Verum source for this revision"});
+    let permissions = json!({"type":"string","enum":["source","deny-all","allow-all"],"description":"Script permission mode: source follows CLI/frontmatter defaults; deny-all clears grants; allow-all grants all kinds. Not an OS sandbox."});
+    let timeout = json!({"type":"integer","minimum":1,"maximum":300000,"description":"Wall time budget in milliseconds; default 60000"});
     let mut tools = List::new();
     for (name, description, properties, required) in [
         (
@@ -267,21 +269,27 @@ pub fn tools() -> Value {
             json!(["path", "source", "expected_hash"]),
         ),
         (
+            "verum_plan",
+            "Inspect the exact execution contract without launching a process or writing run evidence. Run permission overrides apply only to scripts.",
+            json!({"kind":{"type":"string","enum":["run","check","proof"]},"path":{"type":"string"},"source":source,"permissions":permissions,"timeout_ms":timeout,"declaration":{"type":"string"}}),
+            json!(["kind", "path", "source"]),
+        ),
+        (
             "verum_run",
             "Run exact source with Verum interpreter after user approval",
-            json!({"path":{"type":"string"},"source":source}),
+            json!({"path":{"type":"string"},"source":source,"permissions":permissions,"timeout_ms":timeout}),
             json!(["path", "source"]),
         ),
         (
             "verum_check",
             "Type-check exact Verum source after user approval",
-            json!({"path":{"type":"string"},"source":source}),
+            json!({"path":{"type":"string"},"source":source,"timeout_ms":timeout}),
             json!(["path", "source"]),
         ),
         (
             "verum_proof",
             "Check one closed logical theorem using verum-source-pi-id/1; not a runtime refinement proof",
-            json!({"path":{"type":"string"},"source":source,"declaration":{"type":"string"}}),
+            json!({"path":{"type":"string"},"source":source,"declaration":{"type":"string"},"timeout_ms":timeout}),
             json!(["path", "source", "declaration"]),
         ),
     ] {

@@ -1,5 +1,6 @@
 //! Verum Studio: one local operation service, with browser and provider adapters.
 pub mod codex;
+pub mod execution;
 pub mod jobs;
 pub mod language;
 pub mod server;
@@ -76,9 +77,12 @@ impl Studio {
                     params["expected_hash"].as_str(),
                 )
             }
-            "operation.start" => {
+            "operation.plan" | "operation.start" => {
                 let path = self.workspace.lock().await.path(field(&params, "path")?)?;
                 let mut jobs = self.jobs.lock().await;
+                if method == "operation.plan" {
+                    return Ok(serde_json::to_value(jobs.plan(&params)?)?);
+                }
                 let running = jobs
                     .list()
                     .await
@@ -187,6 +191,10 @@ impl Studio {
         let tool = field(params, "tool")?;
         let mut args = params["arguments"].clone();
         match tool {
+            "verum_plan" => {
+                self.workspace.lock().await.path(field(&args, "path")?)?;
+                Ok(serde_json::to_value(self.jobs.lock().await.plan(&args)?)?)
+            }
             "verum_project" => self.project().await,
             "verum_analyze" => self.language_request(&args).await,
             "verum_read" => self.workspace.lock().await.read(field(&args, "path")?),

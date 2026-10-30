@@ -35,6 +35,69 @@ fn start(jobs: &mut Jobs, source: &str, timeout: u64) -> Value {
     )
     .unwrap()
 }
+
+#[tokio::test]
+async fn plans_permissions_and_receipts_describe_the_actual_child_arguments() {
+    for (policy, flag) in [("source", None), ("deny-all", Some("--deny-all")), ("allow-all", Some("--allow-all"))] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut jobs = runner(dir.path(), "printf '%s\\n' \"$@\"\ncat >/dev/null");
+        let request = json!({"kind":"run","path":"lesson.vr","source":"print(42);","permissions":policy,"timeout_ms":3000});
+        let plan = serde_json::to_value(jobs.plan(&request).unwrap()).unwrap();
+        assert!(jobs.jobs.is_empty());
+        assert!(!dir.path().join(".verum-studio").exists(), "planning must not create run evidence");
+        jobs.start(&request, dir.path().join("lesson.vr")).unwrap();
+        let receipt = done(&jobs).await;
+        assert_eq!(receipt["status"], "succeeded", "{receipt}");
+        let expected = format!("run\n--interp\n{}-\n", flag.map(|value| format!("{value}\n")).unwrap_or_default());
+        assert_eq!(receipt["stdout"], expected);
+        for (key, value) in plan.as_object().unwrap() {
+            assert_eq!(&receipt[key], value, "{key} must be the executed plan");
+        }
+        let mut restored = runner(dir.path(), "exit 0");
+        restored.restore().unwrap();
+        assert_eq!(restored.list().await[0]["permissions"], policy);
+    }
+}
+
+#[tokio::test]
+async fn invalid_policies_and_budgets_are_rejected_before_creating_or_running_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut jobs = runner(dir.path(), "touch executed");
+    let base = json!({"kind":"run","path":"lesson.vr","source":"print(42);"});
+    for (key, value) in [("permissions", json!("deny-al")), ("permissions", Value::Null),
+        ("permissions", json!({"allow":"*"})), ("timeout_ms", json!("1000")),
+        ("timeout_ms", json!(0)), ("timeout_ms", json!(300001)), ("declaration", json!("unused"))] {
+        let mut request = base.clone();
+        request[key] = value;
+        assert!(jobs.plan(&request).is_err(), "{request}");
+        assert!(jobs.start(&request, dir.path().join("lesson.vr")).is_err(), "{request}");
+    }
+    for kind in ["check", "proof"] {
+        let mut request = base.clone();
+        request["kind"] = json!(kind);
+        request["permissions"] = json!("deny-all");
+        assert!(jobs.start(&request, dir.path().join("lesson.vr")).is_err());
+    }
+    assert!(jobs.jobs.is_empty());
+    assert!(!dir.path().join(".verum-studio").exists());
+    assert!(!dir.path().join("executed").exists());
+}
+
+#[tokio::test]
+async fn legacy_receipts_do_not_fabricate_a_permission_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut jobs = runner(dir.path(), "cat >/dev/null");
+    start(&mut jobs, "print(42);", 1000);
+    let mut receipt = done(&jobs).await;
+    assert_eq!(receipt["permissions"], "source");
+    receipt.as_object_mut().unwrap().remove("permissions");
+    receipt.as_object_mut().unwrap().remove("declaration");
+    let path = Path::new(receipt["evidence_path"].as_str().unwrap()).join("receipt.json");
+    std::fs::write(path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+    let mut restored = runner(dir.path(), "exit 0");
+    restored.restore().unwrap();
+    assert_eq!(restored.list().await[0]["permissions"], Value::Null);
+}
 #[tokio::test]
 async fn drains_both_pipes_and_runs_an_immutable_entry_snapshot() {
     let dir = tempfile::tempdir().unwrap();

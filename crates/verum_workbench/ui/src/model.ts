@@ -1,9 +1,15 @@
+export type RunPermissions = 'source' | 'deny-all' | 'allow-all';
+export type ExecutionPlan = {
+  kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
+  executable: string; timeout_ms: number; permissions: RunPermissions | null; declaration: string | null;
+};
 export type Receipt = {
   id: string; kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
   status: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'exhausted' | 'inconclusive';
   stdout: string; stderr: string; exit_code: number | null; elapsed_ms: number; proof?: unknown;
   timeout_ms?: number; evidence_path?: string; version?: number;
   started_unix_ms?: number; termination?: string;
+  permissions?: RunPermissions | null; declaration?: string | null;
 };
 
 export const STARTER = 'let answer = 6 * 7;\nprint(answer);\n';
@@ -49,7 +55,7 @@ export function relativeVerumPath(value: string): string | null {
 export function approvalKind(method: string, params: Record<string, unknown>): 'source' | 'execution' | 'read' | 'unsupported' {
   if (method === 'item/tool/call') {
     if (params.tool === 'verum_propose' || params.tool === 'propose_source') return 'source';
-    if (params.tool === 'verum_read' || params.tool === 'verum_analyze' || params.tool === 'verum_project') return 'read';
+    if (['verum_read', 'verum_analyze', 'verum_project', 'verum_plan'].includes(String(params.tool))) return 'read';
     if (['verum_run', 'verum_check', 'verum_proof'].includes(String(params.tool))) return 'execution';
     return 'unsupported';
   }
