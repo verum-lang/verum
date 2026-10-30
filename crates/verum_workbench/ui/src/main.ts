@@ -1,5 +1,7 @@
 import './style.css';
 import { makeEditor } from './editor';
+import { installPanels } from './panels';
+import type { Pane } from './layout';
 import { api, hasToken, installToken } from './api';
 import { STARTER, IDENTITY, sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt } from './model';
 
@@ -24,14 +26,7 @@ function button(label: string, action: () => unknown | Promise<unknown>, classNa
   const element = node('button', className, label); element.type = 'button';
   element.addEventListener('click', () => { Promise.resolve().then(action).catch(fail); }); return element;
 }
-function setPane(pane: string) {
-  $('app').dataset.pane = pane;
-  document.querySelectorAll<HTMLButtonElement>('.mobile-nav button').forEach(button => {
-    if (button.dataset.pane === pane) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
-  });
-  if (pane === 'editor') editor.view.requestMeasure();
-}
-document.querySelectorAll<HTMLButtonElement>('.mobile-nav button').forEach(button => button.addEventListener('click', () => setPane(button.dataset.pane!)));
+function setPane(pane: Pane) { panels.show(pane); }
 bind('notice-close', () => { $('notice').hidden = true; });
 
 const themeChoice = localStorage.getItem('verum.studio.theme') || 'dark';
@@ -66,6 +61,15 @@ const documentRevision = () => ({ path: currentPath, editVersion });
 const editor = makeEditor($('editor'), STARTER, () => { editVersion++; updateDocumentState(); scheduleHash(); }, (line, column) => {
   $('cursor-position').textContent = `Ln ${line}, Col ${column}`;
 });
+const panels = installPanels(() => editor.view.requestMeasure());
+const scrolling = new WeakMap<HTMLElement, number>();
+document.addEventListener('scroll', event => {
+  if (!(event.target instanceof HTMLElement)) return;
+  const target = event.target;
+  window.clearTimeout(scrolling.get(target));
+  target.dataset.scrolling = '';
+  scrolling.set(target, window.setTimeout(() => { delete target.dataset.scrolling; scrolling.delete(target); }, 900));
+}, { capture: true, passive: true });
 function dirty() { return savedSource === null || editor.source() !== savedSource; }
 function updateDocumentState() {
   $('current-path').textContent = currentPath;
@@ -105,6 +109,8 @@ async function refreshFiles() {
   renderFiles();
 }
 function renderFiles() {
+  $('files-rail-status').textContent = String(files.length);
+  $('files-restore').title = `Expand explorer · ${files.length} Verum files`;
   const filter = input('file-filter').value.toLowerCase();
   const list = $('file-list'); list.replaceChildren();
   const visible = files.filter(file => file.path.toLowerCase().includes(filter));
@@ -188,6 +194,13 @@ bind('lesson-script', () => newDocument(STARTER, 'first-experiment.vr'));
 bind('lesson-proof', () => newDocument(IDENTITY, 'identity.vr'));
 input('file-filter').addEventListener('input', renderFiles);
 bind('run-settings', () => { $('execution-settings').hidden = !$('execution-settings').hidden; $('run-settings').setAttribute('aria-expanded', String(!$('execution-settings').hidden)); });
+function closeSettings() { $('execution-settings').hidden = true; $('run-settings').setAttribute('aria-expanded', 'false'); }
+document.addEventListener('pointerdown', event => {
+  if (event.target instanceof Node && !$('execution-settings').contains(event.target) && !$('run-settings').contains(event.target)) closeSettings();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('execution-settings').hidden) { event.preventDefault(); closeSettings(); $('run-settings').focus(); }
+});
 window.addEventListener('beforeunload', event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
 
 let starting = false;
@@ -222,23 +235,37 @@ const resultLabel = (kind: string) => kind === 'proof' ? 'Proof check' : kind ==
 const elapsed = (receipt: Receipt) => receipt.status === 'running' && receipt.started_unix_ms ? Math.max(0, Date.now() - receipt.started_unix_ms) : receipt.elapsed_ms;
 let detailSignature = '';
 let historySignature = '';
+function restoreFocusAfterRender(container: HTMLElement) {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !container.contains(active)) return () => {};
+  const key = active.dataset.focusKey;
+  return () => {
+    const replacement = [...container.querySelectorAll<HTMLElement>('[data-focus-key]')].find(item => item.dataset.focusKey === key);
+    if (replacement) replacement.focus({ preventScroll: true });
+    else { container.tabIndex = -1; container.focus({ preventScroll: true }); }
+  };
+}
 function renderResults() {
   $('result-count').textContent = String(receipts.length); $('mobile-result-count').textContent = receipts.length ? String(receipts.length) : '';
   const running = receipts.filter(receipt => receipt.status === 'running').length;
   $('running-count').textContent = running ? `${running} running` : '';
   const nextHistory = JSON.stringify(receipts.map(receipt => ({ id: receipt.id, kind: receipt.kind, path: receipt.path, status: receipt.status, seconds: Math.floor(elapsed(receipt) / 1000) }))) + selectedReceipt;
   if (nextHistory !== historySignature) {
+    const restoreFocus = restoreFocusAfterRender($('history'));
     historySignature = nextHistory; $('history').replaceChildren();
     for (const receipt of [...receipts].reverse()) {
     const entry = button('', () => { selectedReceipt = receipt.id; renderResults(); }, 'history-item');
+    entry.dataset.focusKey = receipt.id;
     entry.setAttribute('aria-current', String(receipt.id === selectedReceipt));
     const row = node('span', 'history-row'); row.append(node('span', '', receipt.kind === 'proof' ? '∀ Proof' : receipt.kind === 'check' ? '✓ Check' : '▶ Run'), node('span', `badge ${receipt.status}`, receipt.status));
     entry.append(row, node('span', 'history-path', receipt.path), node('span', 'history-path', `${Math.max(0, elapsed(receipt) / 1000).toFixed(1)}s · ${receipt.source_hash.slice(0, 7)}`));
     entry.title = `${resultLabel(receipt.kind)} · ${receipt.path} · ${receipt.status}`;
       $('history').append(entry);
     }
+    restoreFocus();
   }
   const receipt = receipts.find(receipt => receipt.id === selectedReceipt);
+  $('result-summary').textContent = receipt ? `${resultLabel(receipt.kind)} · ${receipt.status}` : 'No operations yet';
   if (!receipt) return;
   const nextDetail = JSON.stringify(receipt) + currentPath + currentHash + Math.floor(elapsed(receipt) / 1000);
   if (detailSignature === nextDetail) return;
@@ -248,14 +275,19 @@ function renderResults() {
   const oldId = detail.dataset.receipt;
   const expanded = new Set([...detail.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.key));
   const scroll = detail.scrollTop;
+  const restoreFocus = restoreFocusAfterRender(detail);
   detail.replaceChildren(); detail.dataset.receipt = receipt.id;
   const heading = node('div', 'result-heading'); heading.append(node('strong', '', resultLabel(receipt.kind)), node('span', `badge ${receipt.status}`, receipt.status));
   if (isStale(receipt, currentPath, currentHash)) {
     const badge = node('span', 'badge stale', currentHash === null && currentPath === receipt.path ? 'Checking revision' : 'Different revision');
     badge.title = 'This result does not describe the current editor source.'; heading.append(badge);
   } else heading.append(node('span', 'badge', 'Current source'));
-  if (receipt.status === 'running') heading.append(button('Cancel', async () => { await api('operation.cancel', { id: receipt.id }); await refreshOperations(); }, 'quiet-button'));
-  heading.append(button('Copy receipt', async () => { await navigator.clipboard.writeText(pretty(receipt)); announce('Receipt copied'); }, 'quiet-button'));
+  if (receipt.status === 'running') {
+    const cancel = button('Cancel', async () => { await api('operation.cancel', { id: receipt.id }); await refreshOperations(); }, 'quiet-button');
+    cancel.dataset.focusKey = 'cancel'; heading.append(cancel);
+  }
+  const copy = button('Copy receipt', async () => { await navigator.clipboard.writeText(pretty(receipt)); announce('Receipt copied'); }, 'quiet-button');
+  copy.dataset.focusKey = 'copy'; heading.append(copy);
   detail.append(heading, node('p', 'result-meta', `${receipt.path} · ${(elapsed(receipt) / 1000).toFixed(2)}s${receipt.exit_code == null ? '' : ` · exit ${receipt.exit_code}`} · ${receipt.source_hash.slice(0, 12)}`));
   if (receipt.timeout_ms) detail.append(node('p', 'muted', `Wall budget ${(receipt.timeout_ms / 1000).toFixed(0)}s${receipt.evidence_path ? ' · source and receipt retained locally' : ''}`));
   if (receipt.termination) detail.append(node('p', 'termination', receipt.termination));
@@ -270,20 +302,22 @@ function renderResults() {
   } else if (receipt.kind === 'run') detail.append(node('p', 'muted', 'Observed execution for this source revision; not a proof of all behaviors.'));
   if (receipt.stdout) {
     if (receipt.kind === 'proof' && receipt.proof) {
-      const stream = node('details'); stream.dataset.key = 'raw-proof'; stream.append(node('summary', '', 'Raw checker output'), node('pre', '', receipt.stdout)); detail.append(stream);
+      const stream = node('details'); stream.dataset.key = 'raw-proof'; const summary = node('summary', '', 'Raw checker output'); summary.dataset.focusKey = 'raw-proof'; stream.append(summary, node('pre', '', receipt.stdout)); detail.append(stream);
     } else appendStream(detail, 'Standard output', receipt.stdout, 'stdout');
   }
   if (receipt.stderr) appendStream(detail, 'Diagnostics / standard error', receipt.stderr, 'stderr');
   if (!receipt.stdout && !receipt.stderr) detail.append(node('p', 'muted', receipt.status === 'running' ? 'Waiting for process output…' : 'The process produced no text output.'));
   appendDetails(detail, 'Full operation receipt', receipt, 'receipt');
   if (oldId === receipt.id) { detail.querySelectorAll<HTMLDetailsElement>('details').forEach(item => { item.open = expanded.has(item.dataset.key); }); detail.scrollTop = scroll; }
+  restoreFocus();
 }
 function appendStream(parent: HTMLElement, label: string, text: string, className: string) {
   const stream = node('div', `result-stream ${className}`); stream.append(node('span', 'stream-label', label), node('pre', '', text)); parent.append(stream);
 }
 function appendDetails(parent: HTMLElement, label: string, value: unknown, key: string, open = false) {
   const details = node('details'); details.dataset.key = key; details.open = open;
-  details.append(node('summary', '', label), node('pre', '', pretty(value))); parent.append(details);
+  const summary = node('summary', '', label); summary.dataset.focusKey = key;
+  details.append(summary, node('pre', '', pretty(value))); parent.append(details);
 }
 
 let connected = false;
@@ -320,6 +354,8 @@ function agentState() {
   $('agent-stop').hidden = !busy;
   $('agent-progress').textContent = pendingApprovals ? `${pendingApprovals} request${pendingApprovals === 1 ? '' : 's'} awaiting review` : busy ? 'Codex is working…' : connected ? authenticated ? 'Connected · edits and tools require review' : 'Local provider ready · sign in to start a conversation' : '';
   $('approval-count').textContent = pendingApprovals ? String(pendingApprovals) : '';
+  $('agent-rail-status').textContent = pendingApprovals ? `${pendingApprovals} review` : busy ? 'Working' : authenticated ? 'Ready' : connected ? 'Sign in' : 'Offline';
+  $('agent-rail').dataset.attention = String(pendingApprovals > 0);
 }
 function accountLabel(value: unknown): string {
   const record = parseArguments(value);
@@ -502,40 +538,16 @@ bind('theme', async () => {
 });
 bind('help', async () => {
   const content = node('div', 'shortcut-list');
-  for (const [label, shortcut] of [['Save source', '⌘ / Ctrl S'], ['Run source', '⌘ / Ctrl Enter'], ['Check source', '⌘ / Ctrl Shift Enter'], ['Find in source', '⌘ / Ctrl F'], ['Send agent message', '⌘ / Ctrl Enter'], ['Leave editor with Tab', 'Esc, then Tab']]) content.append(node('span', '', label), node('kbd', '', shortcut));
+  for (const [label, shortcut] of [['Save source', '⌘ / Ctrl S'], ['Run source', '⌘ / Ctrl Enter'], ['Check source', '⌘ / Ctrl Shift Enter'], ['Find in source', '⌘ / Ctrl F'], ['Toggle explorer', '⌘ / Ctrl B'], ['Toggle collaborator', '⌘ / Ctrl Shift B'], ['Toggle results', '⌘ / Ctrl J'], ['Resize focused divider', 'Arrow keys · Home / End'], ['Collapse focused divider', 'Enter'], ['Send agent message', '⌘ / Ctrl Enter'], ['Leave editor with Tab', 'Esc, then Tab']]) content.append(node('span', '', label), node('kbd', '', shortcut));
   await dialog('Keyboard shortcuts', content, [{ value: 'close', label: 'Done', primary: true }]);
 });
 document.addEventListener('keydown', event => {
   if ($<HTMLDialogElement>('dialog').open || !(event.ctrlKey || event.metaKey)) return;
-  if (event.key.toLowerCase() === 's') { event.preventDefault(); save().catch(fail); }
+  if (event.key.toLowerCase() === 'b') { event.preventDefault(); panels.toggle(event.shiftKey ? 'agent' : 'files'); }
+  else if (event.key.toLowerCase() === 'j') { event.preventDefault(); panels.toggle('results'); }
+  else if (event.key.toLowerCase() === 's') { event.preventDefault(); save().catch(fail); }
   else if (event.key === 'Enter' && event.target !== $('agent-input')) { event.preventDefault(); startOperation(event.shiftKey ? 'check' : 'run').catch(fail); }
 });
-function resizer(id: string, property: string, orientation: 'x' | 'y', invert: boolean, min: number, max: number, initial: number) {
-  const element = $(id), root = $('app');
-  let size = Number(localStorage.getItem(`verum.studio.${id}`)) || initial;
-  function update(value: number) {
-    size = Math.round(Math.max(min, Math.min(max, value))); root.style.setProperty(property, `${size}px`); element.setAttribute('aria-valuenow', String(size));
-    localStorage.setItem(`verum.studio.${id}`, String(size)); editor.view.requestMeasure();
-  }
-  if (localStorage.getItem(`verum.studio.${id}`)) update(size);
-  element.addEventListener('keydown', event => {
-    const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -15 : event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 15 : 0;
-    if (delta) { event.preventDefault(); update(size + delta * (invert ? -1 : 1)); }
-    if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); update(event.key === 'Home' ? min : max); }
-  });
-  element.addEventListener('pointerdown', event => {
-    const coordinate = orientation === 'x' ? event.clientX : event.clientY;
-    const actual = parseFloat(getComputedStyle(root).getPropertyValue(property)); const start = Number.isFinite(actual) ? actual : size;
-    element.setPointerCapture(event.pointerId); element.classList.add('dragging');
-    const move = (next: PointerEvent) => update(start + ((orientation === 'x' ? next.clientX : next.clientY) - coordinate) * (invert ? -1 : 1));
-    const stop = () => { element.classList.remove('dragging'); element.removeEventListener('pointermove', move); element.removeEventListener('pointerup', stop); element.removeEventListener('pointercancel', stop); };
-    element.addEventListener('pointermove', move); element.addEventListener('pointerup', stop); element.addEventListener('pointercancel', stop);
-  });
-}
-resizer('files-divider', '--files-width', 'x', false, 170, 380, 230);
-resizer('agent-divider', '--agent-width', 'x', true, 290, 600, 370);
-resizer('results-divider', '--results-height', 'y', true, 140, 600, 270);
-
 async function initialize() {
   const initialRevision = documentRevision();
   if (!hasToken()) {
