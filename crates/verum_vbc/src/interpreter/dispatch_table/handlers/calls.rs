@@ -1292,9 +1292,11 @@ fn create_closure(state: &mut InterpreterState, typed: bool) -> InterpreterResul
     state.module.validate_closure_captures(types.as_deref(), capture_count,
         |ty| state.resolve_generic_witness(ty))
         .map_err(|message| InterpreterError::Panic { message })?;
+    // Formation admits the environment, just as LoadFn forms a reference
+    // without executing its target. Resolve available names now, but require
+    // an executable body only at invocation; declaration-only dependencies
+    // can otherwise make an unused callable abort module initialization.
     let func_id = state.module.resolve_band_id(func_id).unwrap_or(FunctionId(func_id));
-    state.module.get_function(func_id)
-        .ok_or(InterpreterError::FunctionNotFound(func_id))?;
     let func_id = func_id.0;
 
     // Allocate closure object on heap.

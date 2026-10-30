@@ -6,7 +6,7 @@ use verum_vbc::{
     codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen},
     deserialize::deserialize_module,
     interpreter::Interpreter,
-    module::VbcModule,
+    module::{FunctionId, VbcModule},
     serialize::serialize_module,
     types::{TypeId, TypeParamId, TypeRef},
 };
@@ -225,7 +225,6 @@ fn capture_declarations_remap_with_the_creation_instruction() {
         Instruction,
         bytecode_remap::{IdRemap, rewrite_instruction_ids},
         instruction::Reg,
-        module::FunctionId,
     };
     struct Relocate;
     impl IdRemap for Relocate {
@@ -276,5 +275,45 @@ fn nested_generic_environment_does_not_invent_missing_lexical_witnesses() {
             error.contains("capture 0 requires unrestricted ownership; found Unknown"),
             "{error}"
         );
+    }
+}
+
+#[test]
+fn environment_formation_does_not_invoke_a_declared_target() {
+    use verum_vbc::{
+        bytecode::{decode_instructions, encode_instructions},
+        instruction::Instruction,
+    };
+    for bootstrap in [false, true] {
+        for invoke in [false, true] {
+            let tail = if invoke { "call()" } else { "7" };
+            let source =
+                format!("fn probe() -> Int {{ let value: Int = 7; let call = || value; {tail} }}");
+            let mut module = compile(&source, bootstrap);
+            assert!(module.functions.len() < 127);
+            let mut instructions = decode_instructions(&module.bytecode).unwrap();
+            let mut changed = 0;
+            for instruction in &mut instructions {
+                if let Instruction::NewClosure { func_id, .. } = instruction {
+                    *func_id = 127;
+                    changed += 1;
+                }
+            }
+            assert_eq!(changed, 1);
+            let original_length = module.bytecode.len();
+            module.bytecode.clear();
+            encode_instructions(&instructions, &mut module.bytecode);
+            assert_eq!(
+                module.bytecode.len(),
+                original_length,
+                "keep function offsets unchanged"
+            );
+            let result = execute(module);
+            if invoke {
+                assert_eq!(result.unwrap_err(), "Function 127 not found");
+            } else {
+                assert_eq!(result.unwrap(), 7);
+            }
+        }
     }
 }
