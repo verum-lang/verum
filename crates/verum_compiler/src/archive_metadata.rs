@@ -153,6 +153,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
     // is ambiguous (two modules disagree) and must stay opaque.
     // See `resolve_opaque_type_ids_in_alias_targets` for what it fixes.
     let mut archive_type_names: HashMap<u32, Option<String>> = HashMap::new();
+    let mut declarations = std::collections::BTreeMap::new();
     for entry in sorted_index {
         let module = match archive.load_module(&entry.name) {
             Ok(m) => m,
@@ -180,12 +181,43 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
                 archive_type_names.insert(t.id.0, Some(n.to_string()));
             }
         }
-        register_module_metadata(&module, &entry.name, &mut meta);
+        register_module_metadata(&module, &entry.name, &mut meta, &mut declarations);
     }
+    reconcile_type_declarations(&mut meta, &declarations);
     resolve_opaque_type_ids_in_alias_targets(&mut meta, &archive_type_names);
     attach_declared_methods(&mut meta);
 
     meta
+}
+
+/// Imported carriers can precede their source declaration, including inside
+/// the owning bundle. Every binding of one declaration must expose the same
+/// signature; a qualified spelling is not evidence of greater authority.
+/// Keep the existing binding keys (and homonym policy), but select their body
+/// from the declaration's owner using the same order as bootstrap linking.
+fn reconcile_type_declarations(
+    meta: &mut CoreMetadata,
+    declarations: &std::collections::BTreeMap<Text, TypeDescriptor>,
+) {
+    for ty in meta.types.values_mut() {
+        if let Some(declaration) = declarations.get(&type_declaration_key(ty))
+            && type_declaration_priority(declaration) > type_declaration_priority(ty)
+        {
+            ty.clone_from(declaration);
+        }
+    }
+}
+
+fn type_declaration_key(ty: &TypeDescriptor) -> Text {
+    let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
+    verum_common::qualified_name::qualify_module_name(owner.as_str(), ty.name.as_str())
+}
+
+fn type_declaration_priority(ty: &TypeDescriptor) -> u8 {
+    let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
+    verum_common::qualified_name::declaration_priority(
+        ty.module_path.as_str(), owner.as_str(), ty.name.as_str(),
+    )
 }
 
 /// Assemble rosters after every declaration has arrived. Imported descriptors
@@ -348,6 +380,7 @@ fn register_module_metadata(
     module: &VbcModule,
     module_name: &str,
     meta: &mut CoreMetadata,
+    declarations: &mut std::collections::BTreeMap<Text, TypeDescriptor>,
 ) {
     let type_id_to_name: HashMap<u32, String> = module
         .types
@@ -967,6 +1000,16 @@ fn register_module_metadata(
                 && field_fidelity(&incoming.kind) > 0
         };
         let incoming_rank = rank(&descriptor.kind, &type_name);
+        // Capture source authority before any compatibility binding can
+        // discard a candidate. The ambient simple slot may belong to a
+        // homonym while a qualified slot already contains an imported copy.
+        let declaration_key = type_declaration_key(&descriptor);
+        let score = |ty: &TypeDescriptor| (
+            type_declaration_priority(ty), rank(&ty.kind, &ty.name), field_fidelity(&ty.kind),
+        );
+        if declarations.get(&declaration_key).is_none_or(|known| score(&descriptor) > score(known)) {
+            declarations.insert(declaration_key, descriptor.clone());
+        }
         let qualified_key: Text =
             format!("{}.{}", module_name, type_name).into();
         let insert_qualified = match meta.types.get(&qualified_key) {
