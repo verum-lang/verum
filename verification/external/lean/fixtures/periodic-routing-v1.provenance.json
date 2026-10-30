@@ -1,0 +1,71 @@
+{
+  "scope": "Finite empty-incumbent Automatic routing, sticky first refusal and actual settled leases; not populated incumbent retention, physical private VM or whole-engine refinement",
+  "frozen": {
+    "r49": {
+      "head": "8adced62185eb6406ffa160d8c9264d7a1e476f6",
+      "files": 1595,
+      "binary": {
+        "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r49/kan-courts",
+        "bytes": 60511664,
+        "sha256": "e2f0a5eb24da65048d7a828dce97cd319ab7393cbcfd0a82630bf3ae7953bbe5"
+      },
+      "source_manifest_sha256": "bf16c3dd74e1608843de02fd2e936babaf423075044a1bcfdb54cd289c864d54",
+      "patch_sha256": "eb38e3512844db4c70afb63fa4a80586c2b5cdafe3d6278af2532e5048b9c546",
+      "tree": "/private/tmp/synarc-cumulative-source-v90/r49"
+    }
+  },
+  "native_replay": {
+    "status": "passed",
+    "scope": "Frozen Automatic periodic refusal, exhaustion and zero-entitlement controls; empty incumbent floors, not incumbent retention/harm or whole engine theorem",
+    "stages": [
+      {
+        "binary": {
+          "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r49/kan-courts",
+          "bytes": 60511664,
+          "sha256": "e2f0a5eb24da65048d7a828dce97cd319ab7393cbcfd0a82630bf3ae7953bbe5"
+        },
+        "test": "automatic::periodic_courts::",
+        "status": "passed",
+        "peak_owned_rss_bytes": 97452032,
+        "seconds": 0.5366265419870615,
+        "log_sha256": "03115e6b43719d95cf259ccc5ca7b4995747376350a0f4638bd5fbf27cb13dce"
+      }
+    ]
+  },
+  "native_receipt_sha256": "14aba9f5976ef88e34b7868484caa9a9b5841856f393ac15111e03d0378a0eda",
+  "audited_source": {
+    "rust/crates/synarc-kan/src/organism.rs": "0cbddc7a0d293f3deb90012c8221ddb9faf934bba038b6377afbcfab730d40f8",
+    "rust/crates/synarc-kan/src/organism/acquisition_budget.rs": "c3115a8c177d8d9c04d0e5a77c6785e1c485be2c6810a7ab4a08522797f8e190",
+    "rust/crates/synarc-kan/src/organism/observer_acceptance.rs": "8b8445499ce5d9540ca80168495a60a7fa027b4ce00bc758e33d0f18f4b23baa",
+    "rust/crates/synarc-kan/src/organism/observer_acceptance/automatic/periodic_courts.rs": "6856b7e20601d77a3f4906c8d3d61ca798fbe49833e4bfd3164f91101198e784"
+  },
+  "cases": {
+    "paused-materializer": {
+      "sha256": "7da3d64c5fb64df9644abbd174a186a031a852acf654c7532ecd3dfc4fa0f0ed",
+      "summary": {
+        "physical_actions": 12,
+        "explicit_services": 1,
+        "periodic_windows": 4,
+        "settled_leases": 13
+      }
+    },
+    "sticky-retention-refusal": {
+      "sha256": "cc73506504b254a08032f831c50a63357eebc34b3390695f2c554ab9cc318eea",
+      "summary": {
+        "physical_actions": 12,
+        "explicit_services": 0,
+        "periodic_windows": 4,
+        "settled_leases": 2
+      }
+    },
+    "zero-entitlement": {
+      "sha256": "b5e0ee0f23fecfc2938a9f8ab1e77ebf875b6b8576fed680c882fc9f375aae08",
+      "summary": {
+        "physical_actions": 12,
+        "explicit_services": 0,
+        "periodic_windows": 4,
+        "settled_leases": 12
+      }
+    }
+  }
+}
