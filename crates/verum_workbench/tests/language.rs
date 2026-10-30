@@ -51,7 +51,10 @@ async fn actual_lsp_session_shares_revision_diagnostics_architecture_and_navigat
     assert!(restored["version"].as_i64().unwrap() > error["version"].as_i64().unwrap());
     assert_eq!(restored["result"]["diagnostics"], json!([]));
     let project = studio.call("project.inspect", json!({})).await.unwrap();
-    assert_eq!(project["analysis"]["coverage"], "analyzed-documents-only");
+    assert_eq!(
+        project["analysis"]["coverage"],
+        "open-documents-and-source-dependencies"
+    );
     assert_eq!(
         project["analysis"]["documents"][0]["source_hash"],
         restored["source_hash"]
@@ -132,4 +135,51 @@ async fn saved_source_analysis_and_submitted_drafts_share_one_service_without_wr
             .any(|tool| tool["name"] == "verum_analyze")
     );
     let _: Value = from_disk;
+}
+
+#[tokio::test]
+async fn project_dependency_edits_reach_the_same_studio_and_agent_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("Verum.toml"),
+        "[cog]\nname='workspace-demo'\n",
+    )
+    .unwrap();
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    let dependency = "public fn answer() -> Int { 42 }";
+    std::fs::write(root.path().join("src/dependency.vr"), dependency).unwrap();
+    let studio = studio(root.path());
+    let args = json!({"path":"src/main.vr","source":"mount workspace_demo.dependency.{answer}; fn main() -> Int { answer() }"});
+    let first = studio.call("language.request", args.clone()).await.unwrap();
+    assert_eq!(first["result"]["diagnostics"], json!([]), "{first:#}");
+    assert_eq!(first["result"]["bindings"][0]["name"], "answer");
+    studio
+        .call(
+            "language.request",
+            json!({"path":"src/dependency.vr","source":"public fn answer() -> Bool { true }"}),
+        )
+        .await
+        .unwrap();
+    let after = studio.call("language.request", args).await.unwrap();
+    assert_eq!(after["version"], first["version"]);
+    assert_ne!(
+        after["result"]["project_revision"],
+        first["result"]["project_revision"]
+    );
+    assert!(
+        !after["result"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let project = studio.call("project.inspect", json!({})).await.unwrap();
+    assert_eq!(
+        project["analysis"]["project_revision"],
+        after["result"]["project_revision"]
+    );
+    assert_eq!(project["analysis"]["sources"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("src/dependency.vr")).unwrap(),
+        dependency
+    );
 }

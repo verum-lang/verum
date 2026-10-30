@@ -194,6 +194,7 @@ async function newDocument(source = '', suggestion = 'experiment.vr') {
   } finally { switching = false; }
 }
 bind('save', save); bind('refresh-files', refreshFiles); bind('new-file', () => newDocument());
+let analysisGeneration = 0;
 let analysisTimer = 0, analysisBusy = false, analysisPending = false;
 const languageRevision = (): DocumentRevision => ({ path: currentPath, source: editor.source() });
 function sourceView() {
@@ -202,14 +203,15 @@ function sourceView() {
   editor.view.requestMeasure();
 }
 function showRange(range: Range) { sourceView(); setPane('editor'); editor.select(range); }
-editor.connectLanguage({ revision: languageRevision, failure: fail, navigate: async location => {
+async function navigateDefinition(location: { uri: string; range: Range }) {
   const url = new URL(location.uri), root = $('workspace-root').textContent || '';
   const path = decodeURIComponent(url.pathname);
   if (url.protocol !== 'file:' || !path.startsWith(root + '/')) throw new Error(t(m('Definition is outside this workspace.')));
   const relative = path.slice(root.length + 1);
   if (relative !== currentPath) await openFile(relative);
   if (relative === currentPath) showRange(location.range);
-} });
+}
+editor.connectLanguage({ revision: languageRevision, failure: fail, navigate: navigateDefinition });
 bind('architecture-toggle', async () => {
   if (!$('architecture').hidden) { sourceView(); return; }
   $('architecture').hidden = false; $('editor').hidden = true;
@@ -217,16 +219,19 @@ bind('architecture-toggle', async () => {
   await inspectProject();
 });
 async function inspectProject() {
-  const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: { documents: Array<Analysis & { uri: string }> } }>('project.inspect');
+  const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: { sources?: Array<{ uri: string; source_hash: string }>; issues?: string[]; documents: Array<Analysis & { uri: string }> } }>('project.inspect');
   const list = $('project-content'); list.replaceChildren();
+  for (const issue of project.analysis.issues ?? []) list.append(node('p', 'muted', issue));
   for (const file of project.workspace.files) {
     const snapshot = project.analysis.documents.find(document => decodeURIComponent(new URL(document.uri).pathname) === `${project.workspace.root}/${file.path}`);
+    const indexed = project.analysis.sources?.find(source => decodeURIComponent(new URL(source.uri).pathname) === `${project.workspace.root}/${file.path}`);
     const entry = button('', () => openFile(file.path), 'project-file');
-    entry.append(node('span', '', file.path), node('span', 'muted', snapshot ? snapshot.source_hash.slice(0, 10) : m('Not analyzed')));
+    entry.append(node('span', '', file.path), node('span', 'muted', snapshot ? snapshot.source_hash.slice(0, 10) : indexed ? m('Indexed source') : m('Not analyzed')));
     list.append(entry);
   }
 }
-bind('project-refresh', inspectProject);
+bind('project-refresh', async () => { scheduleAnalysis(); await inspectProject(); });
+window.addEventListener('focus', scheduleAnalysis);
 function resultView(diagnostics: boolean) {
   $('operations-panel').hidden = diagnostics; $('diagnostics-panel').hidden = !diagnostics;
   $('operations-tab').setAttribute('aria-selected', String(!diagnostics)); $('diagnostics-tab').setAttribute('aria-selected', String(diagnostics));
@@ -234,6 +239,7 @@ function resultView(diagnostics: boolean) {
 bind('operations-tab', () => resultView(false)); bind('diagnostics-tab', () => resultView(true));
 bind('language-status', () => { resultView(true); setPane('results'); });
 function scheduleAnalysis() {
+  ++analysisGeneration;
   window.clearTimeout(analysisTimer);
   editor.diagnostics(editor.source(), []);
   setText($('language-status'), m('Analyzing…'));
@@ -245,13 +251,13 @@ function scheduleAnalysis() {
 async function analyzeSource() {
   if (analysisBusy || !hasToken()) return;
   analysisBusy = true; analysisPending = false;
-  const revision = languageRevision();
+  const revision = languageRevision(), generation = analysisGeneration;
   try {
     const reply = await languageRequest<Analysis>(revision);
-    if (!sameRevision(revision, languageRevision())) return;
+    if (generation !== analysisGeneration || !sameRevision(revision, languageRevision())) return;
     renderAnalysis(reply.result);
   } catch (error) {
-    if (sameRevision(revision, languageRevision())) {
+    if (generation === analysisGeneration && sameRevision(revision, languageRevision())) {
       setText($('language-status'), m('Analysis unavailable'));
       const message = m('Analysis failed: {error}', { error: errorText(error) });
       $('diagnostics-list').replaceChildren(node('p', 'muted', message));
@@ -264,7 +270,7 @@ function renderAnalysis(snapshot: Analysis) {
   const count = snapshot.diagnostics.length;
   setText($('language-status'), count ? m('{count} diagnostics', { count }) : m('No module diagnostics'));
   setText($('diagnostics-count'), String(count));
-  setText($('analysis-scope'), m('Single-module analysis with builtins. Imported modules and whole-project contracts require a project check.'));
+  setText($('analysis-scope'), snapshot.project_revision ? m('Project source analysis with resolved imports. Build and proof checks remain separate.') : m('Single-module analysis with builtins. Imported modules and whole-project contracts require a project check.'));
   const diagnostics = $('diagnostics-list'); diagnostics.replaceChildren();
   for (const diagnostic of snapshot.diagnostics) {
     const entry = button('', () => showRange(diagnostic.range), 'diagnostic-item');
@@ -273,17 +279,26 @@ function renderAnalysis(snapshot: Analysis) {
   }
   if (!count) diagnostics.append(node('p', 'muted', m('No module diagnostics')));
   const structure = $('architecture-content'); structure.replaceChildren();
-  structure.append(node('p', 'result-meta', `${currentPath} · ${snapshot.source_hash.slice(0, 12)}`));
+  structure.append(node('p', 'result-meta', `${currentPath} · ${snapshot.source_hash.slice(0, 12)}${snapshot.project_revision ? ` · ${snapshot.project_revision.slice(0, 12)}` : ''}`));
   if (!snapshot.declarations.length) structure.append(node('p', 'muted', m('No declarations available for this revision.')));
   for (const declaration of snapshot.declarations) {
     const card = node('article', 'declaration-card');
     const heading = button(declaration.name, () => showRange(declaration.selection_range), 'declaration-name');
     card.append(node('span', 'badge', declaration.kind), heading);
+    if (declaration.type_display) card.append(node('code', 'muted', declaration.type_display));
     if (declaration.requirements.length) {
       card.append(node('p', 'muted', m('Context requirements')));
       for (const requirement of declaration.requirements) card.append(button(requirement.source, () => showRange(requirement.range), 'context-requirement'));
     }
     structure.append(card);
+  }
+  if (snapshot.bindings?.length) {
+    structure.append(node('h3', '', m('Resolved imports')));
+    for (const binding of snapshot.bindings) {
+      const entry = button(binding.name, () => navigateDefinition(binding.definition), 'context-requirement');
+      entry.title = `${binding.type_display} · ${binding.definition.uri}`;
+      structure.append(entry);
+    }
   }
   if (snapshot.mounts.length) {
     structure.append(node('h3', '', m('Mounts')));

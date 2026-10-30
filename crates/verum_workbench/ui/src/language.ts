@@ -1,8 +1,9 @@
 export type Position = { line: number; character: number };
 export type Range = { start: Position; end: Position };
 export type Diagnostic = { range: Range; severity?: number; message: string; source?: string; code?: string | number };
-export type Declaration = { id: string; name: string; kind: string; range: Range; selection_range: Range; requirements: Array<{ source: string; range: Range }> };
-export type Analysis = { source_hash: string; version: number; parsed: boolean; analysis_scope: string; diagnostics: Diagnostic[]; declarations: Declaration[]; mounts: Array<{ source: string; range: Range }> };
+export type Declaration = { id: string; name: string; kind: string; type_display?: string | null; range: Range; selection_range: Range; requirements: Array<{ source: string; range: Range }> };
+export type Binding = { name: string; type_display: string; definition: { uri: string; range: Range } };
+export type Analysis = { project_revision?: string | null; bindings?: Binding[]; source_hash: string; version: number; parsed: boolean; analysis_scope: string; diagnostics: Diagnostic[]; declarations: Declaration[]; mounts: Array<{ source: string; range: Range }> };
 export type DocumentRevision = { path: string; source: string };
 export type LanguageReply<T> = { source_hash: string; version: number; result: T };
 export const sameRevision = (left: DocumentRevision, right: DocumentRevision) => left.path === right.path && left.source === right.source;
