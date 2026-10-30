@@ -295,8 +295,11 @@ function renderAnalysis(snapshot: Analysis) {
   if (snapshot.bindings?.length) {
     structure.append(node('h3', '', m('Resolved imports')));
     for (const binding of snapshot.bindings) {
-      const entry = button(binding.name, () => navigateDefinition(binding.definition), 'context-requirement');
-      entry.title = `${binding.type_display} · ${binding.definition.uri}`;
+      const definition = binding.definition;
+      const entry = definition
+        ? button(binding.name, () => navigateDefinition(definition), 'context-requirement')
+        : node('span', 'context-requirement', binding.name);
+      entry.title = `${binding.type_display} · ${definition?.uri ?? binding.source_module ?? ''}`;
       structure.append(entry);
     }
   }
