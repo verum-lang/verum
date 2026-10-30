@@ -80,3 +80,4 @@ import VerumExternalReplay.AdaptiveObservation
 import VerumExternalReplay.NumeralPrograms
 import VerumExternalReplay.CheckedNumerals
 import VerumExternalReplay.BinaryPartitionKT
+import VerumExternalReplay.SharedUpdates
