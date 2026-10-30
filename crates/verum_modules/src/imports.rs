@@ -50,8 +50,8 @@ pub fn path_to_module_path(path: &Path) -> ModulePath {
     ModulePath::new(segments)
 }
 
-/// Convert an AST `Path` to a `ModulePath` that has had `super.` /
-/// `self.` resolved against the importing module's actual location.
+/// Convert an AST `Path` to a `ModulePath`, resolving explicit relative
+/// markers against the importing module's actual location.
 /// This is the canonical entry point for relative-path resolution
 /// during import processing — internally it delegates to
 /// [`ModulePath::resolve_import`] which does the depth-aware peeling.
@@ -65,14 +65,20 @@ pub fn path_to_module_path(path: &Path) -> ModulePath {
 /// imports `mount super.rules.k_var.{k_var_sound}` and the loader
 /// reported "module exports: introduce_var" with k_var_sound dropped.
 ///
-/// Returns `None` if the path resolution fails (e.g., super from
-/// root); callers should fall back to the unresolved
-/// `path_to_module_path` form so the existing diagnostic path
-/// (ModuleNotFound / ItemNotFound) fires correctly.
+/// Bare names and explicit `cog` paths retain their absolute identity.
+/// If resolution fails (e.g., super from root), retain the unresolved
+/// form so the existing ModuleNotFound / ItemNotFound diagnostic fires.
 pub fn path_to_module_path_resolved(
     path: &Path,
     importing_module_path: &ModulePath,
 ) -> ModulePath {
+    if matches!(path.segments.first(), Some(PathSegment::Relative)) {
+        let mut resolved = importing_module_path.clone();
+        for segment in path_to_module_path(path).into_segments() {
+            resolved.push(segment);
+        }
+        return resolved;
+    }
     // Build the dotted-string form of the AST path so we can route
     // it through `ModulePath::resolve_import` (which is string-based).
     let mut parts: Vec<String> = Vec::with_capacity(path.segments.len());

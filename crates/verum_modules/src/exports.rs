@@ -1697,111 +1697,16 @@ fn collect_glob_links(
     }
 }
 
-/// Resolve a link path relative to the current module.
-///
-/// Handles:
-/// - `super.core` -> parent module's `core` submodule
-/// - `.package` -> current module's `package` submodule (relative link)
-/// - `std.core` -> absolute path
+/// Resolve re-export paths through the same authority as ordinary imports.
+/// Bare paths are absolute; only explicit relative markers change the owner.
 fn resolve_link_path(
     path: &verum_ast::Path,
     current_module: &crate::path::ModulePath,
 ) -> Option<Text> {
-    use verum_ast::ty::PathSegment;
-
-    // Get name segments (filter out special markers)
-    let name_segments: verum_common::List<&str> = path
-        .segments
-        .iter()
-        .filter_map(|seg| match seg {
-            PathSegment::Name(ident) => Some(ident.name.as_str()),
-            PathSegment::Super => None, // Handle specially
-            PathSegment::SelfValue => None,
-            PathSegment::Cog => None,
-            PathSegment::Relative => None, // Handle specially
-        })
-        .collect();
-
-    // Check if path starts with `super`
-    let has_super = path
-        .segments
-        .first()
-        .is_some_and(|seg| matches!(seg, PathSegment::Super));
-
-    // Check if path starts with leading dot (relative import)
-    let has_relative = path
-        .segments
-        .first()
-        .is_some_and(|seg| matches!(seg, PathSegment::Relative));
-
-    if has_super {
-        // Count number of `super` prefixes
-        let super_count = path
-            .segments
-            .iter()
-            .take_while(|seg| matches!(seg, PathSegment::Super))
-            .count();
-
-        // Get parent path by going up `super_count` levels
-        let mut parent = current_module.clone();
-        for _ in 0..super_count {
-            if let Some(p) = parent.parent() {
-                parent = p;
-            }
-        }
-
-        // Append remaining segments
-        let remaining: verum_common::List<&str> = path
-            .segments
-            .iter()
-            .skip(super_count)
-            .filter_map(|seg| match seg {
-                PathSegment::Name(ident) => Some(ident.name.as_str()),
-                _ => None,
-            })
-            .collect();
-
-        if remaining.is_empty() {
-            let parent_str = parent.to_string();
-            Some(Text::from(parent_str.as_str()))
-        } else {
-            let joined = remaining.iter().copied().collect::<Vec<_>>().join(".");
-            let child = parent.join(joined.as_str());
-            let child_str = child.to_string();
-            Some(Text::from(child_str.as_str()))
-        }
-    } else if has_relative {
-        // Relative import: `.maybe` means `current_module.maybe`
-        if name_segments.is_empty() {
-            // Just `.` means current module
-            let current_str = current_module.to_string();
-            Some(Text::from(current_str.as_str()))
-        } else {
-            // `.submodule` means `current_module.submodule`
-            let joined = name_segments.iter().copied().collect::<Vec<_>>().join(".");
-            let child = current_module.join(joined.as_str());
-            let child_str = child.to_string();
-            Some(Text::from(child_str.as_str()))
-        }
-    } else if name_segments.is_empty() {
-        None
-    } else {
-        // No explicit prefix (no super, no leading dot).
-        // Treat as relative to current module first (e.g., `arithmetic` in `std.intrinsics`
-        // means `std.intrinsics.arithmetic`), unless the first segment is a known root.
-        let first = name_segments[0];
-        let is_absolute = matches!(first, "std" | "core" | "cog" | "self");
-        if is_absolute {
-            let path_str = name_segments.iter().copied().collect::<Vec<_>>().join(".");
-            Some(Text::from(path_str.as_str()))
-        } else {
-            // Relative to current module
-            let joined = name_segments.iter().copied().collect::<Vec<_>>().join(".");
-            let child = current_module.join(joined.as_str());
-            let child_str = child.to_string();
-            Some(Text::from(child_str.as_str()))
-        }
+    if path.segments.is_empty() {
+        return None;
     }
+    Some(crate::imports::path_to_module_path_resolved(path, current_module).to_string().into())
 }
 
 /// Convert AST visibility to module visibility
