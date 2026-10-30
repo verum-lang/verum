@@ -250,6 +250,8 @@ jobs:
             --report finite-execution-acceptance.json
           python3 verification/external/lean/check_observer_lifecycle.py \
             --report observer-lifecycle-acceptance.json
+          python3 -m unittest discover -s verification/external/lean -p test_resource_ledger_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_resource_ledger.py
           python3 verification/external/lean/check_common_description_cost.py \
             --report common-description-cost-acceptance.json
           python3 verification/external/lean/check_observer_retirement.py \
