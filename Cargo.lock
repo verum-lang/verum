@@ -5528,6 +5528,7 @@ name = "verum_lsp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode 1.3.3",
  "criterion",
  "dashmap 6.2.1",
  "hex",

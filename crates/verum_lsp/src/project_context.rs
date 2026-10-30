@@ -18,7 +18,8 @@ use verum_types::TypeChecker;
 pub struct ProjectBinding {
     pub name: Text,
     pub type_display: Text,
-    pub definition: Location,
+    pub source_module: Text,
+    pub definition: Option<Location>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct SourceIdentity {
@@ -38,6 +39,7 @@ struct Source {
 }
 #[derive(Default)]
 pub struct ProjectContext {
+    library: Option<std::sync::Arc<crate::library_metadata::LibraryMetadata>>,
     root: Option<PathBuf>,
     library_roots: Map<Text, PathBuf>,
     revision: Text,
@@ -46,6 +48,17 @@ pub struct ProjectContext {
     pub issues: List<Text>,
 }
 impl ProjectContext {
+    pub fn with_library(
+        library: Option<std::sync::Arc<crate::library_metadata::LibraryMetadata>>,
+    ) -> Self {
+        Self {
+            library,
+            ..Self::default()
+        }
+    }
+    pub fn library_identity(&self) -> Option<&crate::library_metadata::LibraryIdentity> {
+        self.library.as_ref().map(|library| &library.identity)
+    }
     pub fn configure(&mut self, root: PathBuf, options: Option<&serde_json::Value>) {
         self.root = Some(root);
         self.library_roots.clear();
@@ -177,6 +190,10 @@ impl ProjectContext {
         let mut paths: List<_> = captured.keys().cloned().collect();
         paths.sort();
         let mut hash = Sha256::new();
+        if let Some(library) = &self.library {
+            hash.update(library.identity.sha256.as_bytes());
+        }
+        hash.update([0]);
         hash.update(configuration.as_bytes());
         roots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
         for (prefix, path) in &roots {
@@ -245,7 +262,11 @@ impl ProjectContext {
             }
         }
         loader.set_cog_resolver(cogs);
-        let mut registry = ModuleRegistry::new();
+        let mut registry = self
+            .library
+            .as_ref()
+            .map(|library| library.registry.deep_clone())
+            .unwrap_or_else(ModuleRegistry::new);
         registry.set_cog_name(cog.as_str());
         let mut module_sources = Map::new();
         let mut issues = List::new();
@@ -262,6 +283,13 @@ impl ProjectContext {
                 continue;
             }
             let id = registry.allocate_id();
+            ensure!(
+                registry
+                    .get_by_path(source.owner.to_string().as_str())
+                    .is_none(),
+                "Source module {} conflicts with an installed library module",
+                source.owner
+            );
             let mut ast = ast.clone();
             ast.items = loader.cfg_evaluator().filter_items(&ast.items);
             let mut info = ModuleInfo::new(
@@ -304,6 +332,7 @@ impl ProjectContext {
             let Some(info) = info else {
                 documents.with_document_mut(&uri, |doc| {
                     doc.analysis_revision = Some(revision.clone());
+                    doc.library_metadata = self.library_identity().cloned();
                     doc.project_bindings.clear();
                     if doc.module.is_some() {
                         doc.diagnostics =
@@ -317,14 +346,29 @@ impl ProjectContext {
                 });
                 continue;
             };
-            let mut checker = TypeChecker::with_shared_registry(registry.clone());
+            let mut checker = if let Some(library) = &self.library {
+                let mut checker = TypeChecker::new_with_core(library.core.clone());
+                checker.set_module_registry(registry.as_inner().clone());
+                checker
+            } else {
+                TypeChecker::with_shared_registry(registry.clone())
+            };
+            checker.seed_module_properties(&info.ast.items);
             checker.register_builtins();
+            if let Some(library) = &self.library {
+                checker.register_stdlib_types_for_module(&info.ast);
+                for (name, declaration) in &library.core.context_decl_nodes {
+                    checker.register_protocol_as_context(name.clone());
+                    checker.register_stdlib_context_full(name.clone(), declaration.clone());
+                }
+            }
             checker.set_user_code_phase();
             checker.set_current_cog(cog.clone());
             checker.set_current_module(info.id);
             checker.set_current_module_path(info.path.to_string());
             documents.with_document_mut(&uri, |doc| {
                 doc.check_project(&mut checker, &info.ast, revision.clone());
+                doc.library_metadata = self.library_identity().cloned();
                 let mut imports = ImportResolver::new();
                 {
                     for item in &info.ast.items {
@@ -333,16 +377,14 @@ impl ProjectContext {
                                 imports.resolve_import(decl, info.id, &exports, &module_paths)
                             {
                                 for binding in import.items {
-                                    let Some(definition) = definition_location(
+                                    let definition = definition_location(
                                         &registry,
                                         &module_sources,
                                         &exports,
                                         &module_paths,
                                         binding.source_module,
                                         binding.original_name,
-                                    ) else {
-                                        continue;
-                                    };
+                                    );
                                     let ty = if binding.kind == verum_modules::ExportKind::Type {
                                         checker.resolved_type(binding.name.as_str()).cloned()
                                     } else {
@@ -358,6 +400,10 @@ impl ProjectContext {
                                     doc.project_bindings.push(ProjectBinding {
                                         name: binding.name,
                                         type_display,
+                                        source_module: module_paths
+                                            .get(&binding.source_module)
+                                            .map(|path| path.to_string().into())
+                                            .unwrap_or_default(),
                                         definition,
                                     });
                                 }

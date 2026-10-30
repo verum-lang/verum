@@ -28,6 +28,12 @@ static EMBEDDED_RUNTIME_METADATA: &[u8] =
 /// cost; every subsequent reader gets `Arc::clone`.
 static RUNTIME_METADATA: OnceLock<Option<Arc<CoreMetadata>>> = OnceLock::new();
 
+/// Exact release artifact for consumers that do not depend on LLVM/compiler
+/// internals. Empty means this compiler was built without library metadata.
+pub fn runtime_metadata_bytes() -> &'static [u8] {
+    EMBEDDED_RUNTIME_METADATA
+}
+
 /// Return the embedded stdlib `CoreMetadata`, or `None` when the
 /// compiler binary was built without one.  Decoded once per
 /// process via `OnceLock`; subsequent calls are O(1) `Arc::clone`.

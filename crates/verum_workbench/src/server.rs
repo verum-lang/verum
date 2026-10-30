@@ -13,8 +13,15 @@ use tokio::net::TcpListener;
 use verum_common::Text;
 
 pub async fn serve(config: Config) -> Result<()> {
+    serve_with_library(config, None).await
+}
+
+pub async fn serve_with_library(
+    config: Config,
+    library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+) -> Result<()> {
     let port = config.port;
-    let studio = Arc::new(Studio::open(config)?);
+    let studio = Arc::new(Studio::open_with_library(config, library)?);
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let host: Text = listener.local_addr()?.to_string().into();
     let token: Text = uuid::Uuid::new_v4().to_string().into();

@@ -1279,57 +1279,6 @@ impl<'s> CompilationPipeline<'s> {
         })
     }
 
-    /// `true` when there is no scope at all (load everything) or
-    /// `module_path` is inside it.  The `None` case is the unscoped
-    /// caller, not "nothing is in scope".
-    fn path_in_scope(
-        scope: &Option<std::collections::HashSet<String>>,
-        module_path: &str,
-    ) -> bool {
-        scope.as_ref().is_none_or(|s| s.contains(module_path))
-    }
-
-    /// The mount closure, plus every UMBRELLA module on the way to one of
-    /// its members.
-    ///
-    /// Exact membership against the raw closure is the wrong test, because
-    /// the two sides spell modules at different granularity.
-    /// `compute_reachable_stdlib_modules` filters its result through the
-    /// stdlib index, so it names modules that resolve to a `.vr` FILE
-    /// (`core.base.maybe`).  The metadata shards types and functions under
-    /// the archive ENTRY module — the directory, `core.base` — as well as
-    /// under the precise origin module, and the entry module is what
-    /// `mount core.base.{Maybe}` looks up.  Dropping `core.base` because
-    /// only `core.base.maybe` was named would turn a correct mount into
-    /// "module not found".
-    ///
-    /// The reverse direction is deliberately NOT included.  Admitting every
-    /// DESCENDANT of a closure member would be wrong twice over: the glob
-    /// expansion in `compute_reachable_stdlib_modules` already puts the
-    /// files of a `mount core.text.*` into the closure, so it buys nothing —
-    /// and a single `core` seed (the prelude reaches `core/mod.vr`) would
-    /// then admit the entire stdlib and silently disable the scope.
-    ///
-    /// Segment-boundary splitting, not `starts_with`, is what keeps
-    /// `core.text` from being read as an ancestor of `core.textual`.
-    fn scope_with_umbrellas(
-        scope: &std::collections::HashSet<String>,
-    ) -> std::collections::HashSet<String> {
-        let mut out =
-            std::collections::HashSet::with_capacity(scope.len() * 2);
-        for module in scope {
-            out.insert(module.clone());
-            let mut prefix = module.as_str();
-            while let Some(cut) = prefix.rfind('.') {
-                prefix = &prefix[..cut];
-                if !out.insert(prefix.to_string()) {
-                    break; // this ancestor chain is already recorded
-                }
-            }
-        }
-        out
-    }
-
     /// Populate the module registry from the embedded CoreMetadata.
     ///
     /// Called when no filesystem stdlib directory is found (external-project
@@ -1350,9 +1299,6 @@ impl<'s> CompilationPipeline<'s> {
         &mut self,
         scope: Option<&std::collections::HashSet<String>>,
     ) -> Result<()> {
-        use verum_ast::{decl::Visibility, Span};
-        use verum_modules::{ExportKind, ExportTable, ExportedItem};
-
         let start = std::time::Instant::now();
 
         let metadata = match self.stdlib_metadata.get() {
@@ -1391,390 +1337,30 @@ impl<'s> CompilationPipeline<'s> {
             std::process::exit(0);
         }
 
-        // STDLIB-LOAD-COST-1: the mount closure, widened to the umbrella
-        // modules its members hang under.  Computed ONCE, here, because the
-        // grouping loops below are where the per-symbol `String`s are
-        // allocated — filtering only at the registration loop would still
-        // pay for all ~44 000 of them and then throw the surplus away.
-        let scope_expanded = scope.map(Self::scope_with_umbrellas);
-        let in_scope = |module_path: &str| -> bool {
-            Self::path_in_scope(&scope_expanded, module_path)
-        };
-
-        // Collect the set of all unique module paths declared in the metadata.
-        // We group types, protocols, and functions by their module_path.
-        //
-        // Shard: module_path → (types, protocols, functions)
-        let mut module_map: std::collections::BTreeMap<
-            String,                         // module_path (sorted for determinism)
-            (Vec<String>, Vec<String>, Vec<String>), // (types, protocols, functions)
-        > = std::collections::BTreeMap::new();
-
-        for (name, td) in metadata.types.iter() {
-            let mp = td.module_path.as_str();
-            if !in_scope(mp)
-                && !matches!(&td.origin_module_path,
-                    verum_common::Maybe::Some(om) if in_scope(om.as_str()))
-            {
-                continue;
-            }
-            let mp = mp.to_string();
-            // v2.12 TYPE-ORIGIN-MODULE (T0555): `module_path` is the archive
-            // ENTRY (directory) module; a type declared in a FILE submodule
-            // carries the precise path in `origin_module_path`. The
-            // synthesized registry must expose the type on BOTH — the entry
-            // umbrella keeps working, and the file submodule stops reporting
-            // only its re-export leaves (the probed-exports E401: mounting
-            // `ext.hooks.{AaInsert}` saw a 5-entry surface because every own
-            // type had been sharded under `...ext`).
-            let mut paths: Vec<String> = Vec::new();
-            if !mp.is_empty() {
-                paths.push(mp);
-            }
-            if let verum_common::Maybe::Some(om) = &td.origin_module_path {
-                let om = om.as_str().to_string();
-                if !om.is_empty() && !paths.contains(&om) {
-                    paths.push(om);
-                }
-            }
-            for path in paths {
-                if !in_scope(&path) {
-                    continue;
-                }
-                let shard = module_map.entry(path).or_default();
-                shard.0.push(name.as_str().to_string());
-                // Also export variant constructors so `Ok`, `Some`, `None`, etc.
-                // are in scope after `mount core.base.*`.
-                if let verum_types::core_metadata::TypeDescriptorKind::Variant { cases } =
-                    &td.kind
-                {
-                    for case in cases {
-                        shard.0.push(case.name.as_str().to_string());
-                    }
-                }
-            }
-        }
-        // v2.13 FN-ORIGIN-MODULE — the value-namespace twin of the type
-        // loop above, and the whole reason `mount core.prelude.*` could
-        // not deliver a free function.
-        //
-        // Publishing on the entry path ALONE meant a file submodule's
-        // export table held its types (rescued onto the origin path by
-        // the loop above) and NONE of its functions: `core.base.iterator`
-        // was published with 21 types and 0 of its 13 free functions.
-        // A glob mount ENUMERATES this table — `import_all_from_module`
-        // walks `public_exports()` — so it never named `range` and the
-        // bare call died E100, while `mount core.base.iterator.range;`
-        // worked because the NAMED path looks a name up and has a
-        // by-name metadata rescue an enumeration can never reach.
-        //
-        // The type namespace hid its half of the hole behind
-        // `ensure_stdlib_type_loaded` (lookup-on-miss by bare name);
-        // there is no such loader for functions, so here it was fatal.
-        // Both kinds now publish on BOTH paths, exactly as types do.
-        let publish = |module_map: &mut std::collections::BTreeMap<
-            String,
-            (Vec<String>, Vec<String>, Vec<String>),
-        >,
-                       entry_path: &str,
-                       origin: &verum_common::Maybe<verum_common::Text>,
-                       name: &str,
-                       shard: usize| {
-            let mut paths: Vec<String> = Vec::new();
-            if !entry_path.is_empty() {
-                paths.push(entry_path.to_string());
-            }
-            if let verum_common::Maybe::Some(om) = origin {
-                let om = om.as_str().to_string();
-                if !om.is_empty() && !paths.contains(&om) {
-                    paths.push(om);
-                }
-            }
-            // STDLIB-LOAD-COST-1: same filter as the type loop, applied
-            // before the per-symbol `String` is allocated rather than after.
-            for path in paths {
-                if !Self::path_in_scope(&scope_expanded, &path) {
-                    continue;
-                }
-                let e = module_map.entry(path).or_default();
-                match shard {
-                    1 => e.1.push(name.to_string()),
-                    _ => e.2.push(name.to_string()),
-                }
-            }
-        };
-        for (_key, pd) in metadata.protocols.iter() {
-            publish(
-                &mut module_map,
-                pd.module_path.as_str(),
-                &pd.origin_module_path,
-                pd.name.as_str(),
-                1,
-            );
-        }
-        // Functions publish the map KEY under the ENTRY path.
-        //
-        // MEASURED REVERT (2026-08-09): the v2.13 origin carry does NOT
-        // belong here. Publishing `fd.name` on both paths, with or
-        // without a method filter, cost 26 tests in intrinsics/arithmetic
-        // (`unbound variable: wrapping_shl`), while reverting this loop
-        // AND the reduction below restored 147/0 there and left
-        // text/text at 465/0 — i.e. the glob-mount win comes from the
-        // OTHER legs (origin in metadata, precompile glob_matches), not
-        // from this publication. Four selective repairs each failed to
-        // reproduce that, so the loop stays as it was.
-        for (name, fd) in metadata.functions.iter() {
-            let mp = fd.module_path.as_str().to_string();
-            if !mp.is_empty() {
-                module_map.entry(mp).or_default().2.push(name.as_str().to_string());
-            }
-        }
-
-        // MODULE-LEVEL STATICS (T1088) — published here for the same reason
-        // the three families above are: THIS surface is the one the
-        // probed-exports E401 gate consults. Measured 2026-09-03, with the
-        // instrument that already existed:
-        //
-        //     [modsurface] site=probed-exports module=core.mem.epoch
-        //                  item=GLOBAL_EPOCH surface=probed_module_info.exports
-        //                  count=21
-        //
-        // 21 entries, no static among them — and a repair that added statics
-        // to `own_surface_functions` in verum_types was INERT, because that
-        // is a different surface. The trace named the deciding one; reading
-        // the code had pointed at the other.
-        //
-        // A `static` needed a channel of its own (`CoreMetadata::statics`)
-        // because it is the one public declaration form with no proxy: a
-        // `const` reaches `metadata.functions` by being LOWERED to a
-        // zero-argument function, and a `static` cannot take that route —
-        // the constant-function path re-executes the initialiser on every
-        // read, so a write from one frame would be invisible to the next.
-        // Codegen gives it a TLS slot instead, and the slot is a
-        // codegen-time structure no wire format carries.
-        //
-        // Published into the FUNCTION bucket, and that is not laziness: a
-        // `const` already arrives in that bucket by the lowering above, so
-        // a static landing anywhere else would make two spellings of one
-        // idea answer differently to the same question.
-        // The SIMPLE name, not the map key. The registration below extracts
-        // a leaf with `rsplit("::")` and its dot-based `or_else` arm is
-        // documented there as unreachable — `rsplit` on a string without the
-        // separator yields the whole string — so a dotted key would be
-        // published verbatim and `mount M.{X}` would still not find `X`.
-        // Measured: publishing the key took the surface from 21 entries to
-        // 22 and left the mount failing exactly as before; the entry was
-        // there under the wrong spelling. Function keys survive that path
-        // only because bare duplicates exist alongside the qualified ones.
-        for sd in metadata.statics.values() {
-            let mp = sd.module_path.as_str().to_string();
-            if !mp.is_empty() {
-                module_map.entry(mp).or_default().2.push(sd.name.as_str().to_string());
-            }
-        }
-
-        // T0693 RE-EXPORT LEAVES — the synthesized surface must carry what
-        // `public mount .sub.{X as Y};` publishes.
-        //
-        // `module_reexports[M] = [(local_name, original_name, source_module)]`
-        // is the ONLY record of a renamed re-export. The three descriptor
-        // families above carry the TARGET (`X`, under `source_module`) and
-        // never the name the PARENT publishes (`Y`, under `M`) — so the
-        // registry surface and `metadata_known_module_items` answered
-        // "does M export Y" differently, and the probed-exports E401 gate
-        // in `verum_types::infer::modules` consults the registry one.
-        // `mount core.term.layout.{Constraint};` therefore failed against a
-        // 263-entry surface that legitimately lacked only the leaves.
-        //
-        // The kind is READ OFF THE TARGET, never assumed: `module_map`
-        // already records, per module, which names are types, protocols and
-        // functions, and this fold runs after all three publication loops.
-        // A leaf whose target names no descriptor is SKIPPED — publishing
-        // it under a guessed kind would seed a wrong entry into a surface
-        // that glob mounts ENUMERATE, and a glob has no by-name rescue to
-        // correct it.
-        // The three descriptor families the synthesized surface is built from.
-        // Named rather than numbered: `module_map`'s tuple is positional, and a
-        // fourth family added later must fail to compile here instead of
-        // silently landing in whichever arm a `_` pattern happened to cover.
-        #[derive(Clone, Copy)]
-        enum SurfaceKind {
-            Type,
-            Protocol,
-            Function,
-        }
-        let mut reexport_pubs: Vec<(String, String, SurfaceKind)> = Vec::new();
-        for (module, leaves) in metadata.module_reexports.iter() {
-            let mp = module.as_str();
-            if mp.is_empty() {
-                continue;
-            }
-            for (local_name, original_name, source_module) in leaves.iter() {
-                let Some((src_types, src_protos, src_fns)) =
-                    module_map.get(source_module.as_str())
-                else {
-                    continue;
-                };
-                let target = original_name.as_str();
-                let kind = if src_types.iter().any(|n| n == target) {
-                    SurfaceKind::Type
-                } else if src_protos.iter().any(|n| n == target) {
-                    SurfaceKind::Protocol
-                } else if src_fns.iter().any(|n| n == target) {
-                    SurfaceKind::Function
-                } else {
-                    continue;
-                };
-                reexport_pubs.push((mp.to_string(), local_name.as_str().to_string(), kind));
-            }
-        }
-        for (module, local_name, kind) in reexport_pubs {
-            let entry = module_map.entry(module).or_default();
-            let bucket = match kind {
-                SurfaceKind::Type => &mut entry.0,
-                SurfaceKind::Protocol => &mut entry.1,
-                SurfaceKind::Function => &mut entry.2,
-            };
-            if !bucket.iter().any(|n| n == &local_name) {
-                bucket.push(local_name);
-            }
-        }
-
-        // STDLIB-LOAD-COST-1, second stop line: the module→(types, protocols,
-        // functions) grouping is complete, no `ModuleInfo` / `ExportTable`
-        // has been built yet.  Together with the decode-only stop above this
-        // splits the fixed cost three ways — decode, grouping, registration —
-        // which is what decides WHICH of them is worth removing.
+        let projection_scope = scope.map(|paths| paths.iter().map(|path| Text::from(path.as_str())).collect::<verum_common::Set<_>>());
+        let module_registry = self.session.module_registry();
+        let existing_ids: Map<Text, ModuleId> = module_registry.read().all_modules()
+            .map(|(id, info)| (info.path.to_string().into(), *id)).collect();
+        let projected = verum_types::module_projection::project_modules(
+            &metadata,
+            projection_scope.as_ref(),
+            |path| existing_ids.get(&Text::from(path.to_string())).copied()
+                .unwrap_or_else(|| module_registry.read().allocate_id()),
+        )?;
+        // Retain the cost probe, naming its new boundary accurately: projection
+        // now includes export records, while session insertion is still pending.
         if std::env::var_os("VERUM_PROBE_STDLIB_GROUP_ONLY").is_some() {
-            let symbols: usize = module_map.values().map(|(t, p, f)| t.len() + p.len() + f.len()).sum();
-            eprintln!(
-                "[stdlib-probe] group-only stop: {} modules, {} grouped symbols",
-                module_map.len(),
-                symbols
-            );
+            let symbols: usize = projected.iter().map(|module| module.exports.len()).sum();
+            eprintln!("[stdlib-probe] projection-only stop: {} modules, {} symbols", projected.len(), symbols);
             std::process::exit(0);
         }
-
         let mut registered = 0usize;
-        let mut skipped = 0usize;
-        let module_registry = self.session.module_registry();
-
-        for (mp_str, (types, protocols, fns)) in &module_map {
-            // STDLIB-LOAD-COST-1: outside the user's mount closure this
-            // module's `ModuleInfo` + `ExportTable` would be built, held,
-            // and then dropped by the post-hoc prune the callers already
-            // run.  Not building it is the same answer for less.
-            //
-            // The closure is authoritative here for the same reason it is
-            // authoritative in `register_modules_for_cross_file_resolution_filtered`,
-            // which prunes against this very set: it is the transitive mount
-            // reachability of the user file ⋃ the implicit prelude.
-            if let Some(scope) = scope_expanded.as_ref()
-                && !scope.contains(mp_str.as_str())
-            {
-                skipped += 1;
-                continue;
-            }
-
-            let module_path_text = Text::from(mp_str.as_str());
-
-            // Skip if already in our modules map (populated by a previous call).
-            if self.modules.contains_key(&module_path_text) {
-                continue;
-            }
-
-            let module_path = ModulePath::from_str(mp_str.as_str());
-            let module_id = module_registry.read().allocate_id();
-            let file_id = FileId::new(0);
-
-            // Build a synthetic empty Module AST — the typechecker uses
-            // CoreMetadata (already loaded) for actual type resolution; the
-            // AST is only needed by the module registry for export tables.
-            let synthetic_module = verum_ast::Module {
-                items: verum_common::List::new(),
-                attributes: verum_common::List::new(),
-                file_id,
-                span: Span::dummy(),
-            };
-
-            // Build exports table from metadata records.
-            let mut export_table = ExportTable::new();
-            let dummy_span = Span::dummy();
-            for type_name in types {
-                let _ = export_table.add_export(ExportedItem::new(
-                    type_name.as_str(),
-                    ExportKind::Type,
-                    Visibility::Public,
-                    module_id,
-                    dummy_span,
-                ));
-            }
-            for proto_name in protocols {
-                let _ = export_table.add_export(ExportedItem::new(
-                    proto_name.as_str(),
-                    ExportKind::Protocol,
-                    Visibility::Public,
-                    module_id,
-                    dummy_span,
-                ));
-            }
-            for fn_name in fns {
-                // Reduce a qualified function name to the bare name a mount
-                // can write.
-                //
-                // The previous chain was
-                //   `rsplit("::").next().or_else(|| rsplit('.').next())`
-                // and the `or_else` arm was UNREACHABLE: `rsplit` on a
-                // separator the string does not contain still yields one
-                // item — the whole string — so the first `.next()` is
-                // always `Some`. Every dotted name therefore reached the
-                // export table VERBATIM, and `core.base.iterator` published
-                // a function literally named `core.base.iterator.range`.
-                // A glob mount enumerates these names, so it asked for a
-                // dotted name, got nothing, and `range(0, 3)` died E100 —
-                // while a NAMED mount worked, because it looks the name up
-                // and has a by-name metadata rescue an enumeration cannot
-                // reach.
-                //
-                // The replacement strips the OWNING MODULE PATH structurally
-                // instead of guessing at the last separator: the bare name
-                // is exactly what remains after removing this module's own
-                // prefix, and only when a single segment remains. A leftover
-                // dot means a `Type.method` spelling (`I.into_iter`), which
-                // is an inherent/default method — not a module-level
-                // mountable name — and must not be published bare.
-                // Strip the module path prefix from qualified function
-                // names. NOTE: the `or_else` arm is unreachable — `rsplit`
-                // on an absent separator still yields the whole string —
-                // so a dotted name reaches the table verbatim. That is a
-                // real defect, but fixing it HERE regressed
-                // intrinsics/arithmetic by 26; it must be re-attempted
-                // with a full-suite check before the commit, not after.
-                let bare = fn_name
-                    .rsplit("::")
-                    .next()
-                    .or_else(|| fn_name.rsplit('.').next())
-                    .unwrap_or(fn_name.as_str());
-                let _ = export_table.add_export(ExportedItem::new(
-                    bare,
-                    ExportKind::Function,
-                    Visibility::Public,
-                    module_id,
-                    dummy_span,
-                ));
-            }
-
-            let mut module_info = ModuleInfo::new(
-                module_id,
-                module_path.clone(),
-                synthetic_module.clone(),
-                file_id,
-                Text::from(""),
-            );
-            module_info.exports = export_table;
-
+        for module_info in projected {
+            let path: Text = module_info.path.to_string().into();
+            if self.modules.contains_key(&path) { continue; }
+            let ast = Arc::new(module_info.ast.clone());
             module_registry.write().register(module_info);
-            self.modules.insert(module_path_text, Arc::new(synthetic_module));
+            self.modules.insert(path, ast);
             registered += 1;
         }
 
@@ -1804,20 +1390,11 @@ impl<'s> CompilationPipeline<'s> {
             elapsed.as_secs_f64() * 1000.0
         );
         if std::env::var_os("VERUM_TRACE_PHASES").is_some() {
-            // Report the SCOPE, not a "skipped" tally.  The grouping loops
-            // above already drop out-of-scope symbols before they reach
-            // `module_map`, so a skip counter on the registration loop can
-            // only ever read 0 — and a 0 that cannot rise reads as
-            // "nothing was excluded", which is the opposite of the truth.
-            // What is honest here is how wide the closure was and how much
-            // of it turned into modules.
             match scope {
                 Some(s) => eprintln!(
-                    "[stdlib-registry] scoped closure={} modules, umbrellas widened to {}, built={} (late-filtered={}) in {:.2}ms",
+                    "[stdlib-registry] scoped closure={} modules, built={} in {:.2}ms",
                     s.len(),
-                    scope_expanded.as_ref().map_or(0, |e| e.len()),
                     registered,
-                    skipped,
                     elapsed.as_secs_f64() * 1000.0
                 ),
                 None => eprintln!(

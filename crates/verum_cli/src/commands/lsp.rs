@@ -12,7 +12,34 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tower_lsp::Server;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use verum_lsp::service::service as build_verum_service;
+fn build_verum_service() -> Result<(
+    tower_lsp::LspService<verum_lsp::Backend>,
+    tower_lsp::ClientSocket,
+)> {
+    Ok(verum_lsp::service::service_with_library(release_library()?))
+}
+
+pub(crate) fn release_library()
+-> Result<Option<std::sync::Arc<verum_lsp::library_metadata::LibraryMetadata>>> {
+    static LIBRARY: std::sync::OnceLock<
+        std::result::Result<
+            Option<std::sync::Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+            String,
+        >,
+    > = std::sync::OnceLock::new();
+    LIBRARY
+        .get_or_init(|| {
+            let bytes = verum_compiler::embedded_stdlib_metadata::runtime_metadata_bytes();
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            verum_lsp::library_metadata::LibraryMetadata::decode(bytes)
+                .map(Some)
+                .map_err(|error| error.to_string())
+        })
+        .clone()
+        .map_err(CliError::Custom)
+}
 
 /// LSP transport mode
 #[derive(Debug, Clone, Copy)]
@@ -97,9 +124,7 @@ fn run_stdio_server() -> Result<()> {
         .build()
         .map_err(|e| CliError::Custom(format!("Failed to create async runtime: {}", e)))?;
 
-    runtime.block_on(async {
-        run_lsp_server().await;
-    });
+    runtime.block_on(run_lsp_server())?;
 
     ui::info("Verum Language Server stopped");
     Ok(())
@@ -126,16 +151,17 @@ fn init_logging() {
 }
 
 /// Run the LSP server asynchronously
-async fn run_lsp_server() {
+async fn run_lsp_server() -> Result<()> {
     tracing::info!("Starting Verum Language Server via CLI");
 
-    let (service, socket) = build_verum_service();
+    let (service, socket) = build_verum_service()?;
 
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
         .serve(service)
         .await;
 
     tracing::info!("Verum Language Server stopped");
+    Ok(())
 }
 
 /// Run LSP server with TCP socket transport
@@ -208,7 +234,7 @@ where
 {
     let (read, write) = tokio::io::split(stream);
 
-    let (service, socket) = build_verum_service();
+    let (service, socket) = build_verum_service().map_err(std::io::Error::other)?;
 
     Server::new(read, write, socket).serve(service).await;
 
@@ -311,7 +337,7 @@ async fn run_lsp_server_pipe() {
 async fn handle_lsp_pipe_connection(stream: tokio::net::UnixStream) -> std::io::Result<()> {
     let (read, write) = tokio::io::split(stream);
 
-    let (service, socket) = build_verum_service();
+    let (service, socket) = build_verum_service().map_err(std::io::Error::other)?;
 
     Server::new(read, write, socket).serve(service).await;
 
@@ -393,7 +419,7 @@ async fn handle_lsp_pipe_connection_windows(
 ) -> std::io::Result<()> {
     let (read, write) = tokio::io::split(stream);
 
-    let (service, socket) = build_verum_service();
+    let (service, socket) = build_verum_service().map_err(std::io::Error::other)?;
 
     Server::new(read, write, socket).serve(service).await;
 

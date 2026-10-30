@@ -43,6 +43,7 @@ pub struct DocumentSnapshot {
     pub source_hash: Text,
     pub parsed: bool,
     pub project_revision: Option<Text>,
+    pub library_metadata: Option<crate::library_metadata::LibraryIdentity>,
     pub bindings: List<crate::project_context::ProjectBinding>,
     pub analysis_scope: &'static str,
     pub diagnostics: List<Diagnostic>,
@@ -115,8 +116,11 @@ impl DocumentSnapshot {
             source_hash: hex::encode(Sha256::digest(doc.text.as_bytes())).into(),
             parsed: doc.module.is_some(),
             project_revision: doc.analysis_revision.clone(),
+            library_metadata: doc.library_metadata.clone(),
             bindings: doc.project_bindings.clone(),
-            analysis_scope: if doc.analysis_revision.is_some() {
+            analysis_scope: if doc.analysis_revision.is_some() && doc.library_metadata.is_some() {
+                "project-sources-with-library-metadata"
+            } else if doc.analysis_revision.is_some() {
                 "project-sources-with-builtins"
             } else {
                 "single-module-with-builtins"
@@ -141,7 +145,7 @@ impl Backend {
         });
         documents.sort_by(|left, right| left.uri.cmp(&right.uri));
         serde_json::to_value(serde_json::json!({
-            "schema":"verum-project-analysis/1", "coverage":"open-documents-and-source-dependencies", "project_revision":project.revision(), "sources":project.identities, "issues":project.issues, "documents":documents
+            "schema":"verum-project-analysis/1", "coverage":"open-documents-and-source-dependencies", "project_revision":project.revision(), "library_metadata":project.library_identity(), "sources":project.identities, "issues":project.issues, "documents":documents
         })).map_err(|_| jsonrpc::Error::internal_error())
     }
     pub async fn handle_document_snapshot(

@@ -27,6 +27,7 @@ serde_json = { workspace = true }
 sha2.workspace = true
 toml.workspace = true
 hex = "0.4"
+bincode.workspace = true
 
 # Verum compiler crates
 verum_common = { workspace = true, features = ["lsp"] }

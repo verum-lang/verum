@@ -9,8 +9,13 @@ struct Project {
 }
 impl Project {
     fn new() -> Self {
+        Self::with_library(None)
+    }
+    fn with_library(
+        library: Option<std::sync::Arc<crate::library_metadata::LibraryMetadata>>,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let (service, socket) = crate::service::service();
+        let (service, socket) = crate::service::service_with_library(library);
         service
             .inner()
             .project
@@ -217,4 +222,84 @@ async fn glob_reexports_preserve_types_and_omit_disabled_declarations() {
     assert!(errors(&snapshot).is_empty(), "{snapshot:#}");
     assert_eq!(snapshot["bindings"].as_array().unwrap().len(), 1);
     assert_eq!(snapshot["bindings"][0]["name"], "answer");
+}
+
+fn library_fixture(target: &str) -> std::sync::Arc<crate::library_metadata::LibraryMetadata> {
+    use verum_common::{List, Maybe, ResourceDiscipline};
+    use verum_types::core_metadata::*;
+    let mut metadata = CoreMetadata::default();
+    for (name, is_public) in [("Count", true), ("Hidden", false)] {
+        metadata.types.insert(
+            name.into(),
+            TypeDescriptor {
+                name: name.into(),
+                module_path: "portable.units".into(),
+                origin_module_path: Maybe::None,
+                generic_params: List::new(),
+                kind: TypeDescriptorKind::Alias {
+                    target: target.into(),
+                },
+                size: Maybe::None,
+                alignment: Maybe::None,
+                methods: List::new(),
+                implements: List::new(),
+                decl_span: Maybe::None,
+                is_transparent_wrapper: false,
+                resource_discipline: ResourceDiscipline::default(),
+                is_public,
+            },
+        );
+    }
+    let library = crate::library_metadata::LibraryMetadata::decode(
+        &bincode::serialize(&metadata).unwrap(),
+    )
+    .unwrap();
+    let units = library.registry.get_by_path("portable.units").unwrap();
+    assert!(units.exports.get(&"Count".into()).is_some());
+    assert!(units.exports.get(&"Hidden".into()).is_none());
+    library
+}
+
+#[tokio::test]
+async fn release_metadata_supplies_import_types_without_inventing_source_locations() {
+    let library = library_fixture("Int");
+    let project = Project::with_library(Some(library.clone()));
+    let uri = project.open(
+        "main.vr",
+        "mount portable.units.{Count}; fn read(value: Count) -> Int { value }",
+    );
+    let snapshot = project.snapshot(&uri).await;
+    assert!(errors(&snapshot).is_empty(), "{snapshot:#}");
+    assert_eq!(
+        snapshot["analysis_scope"],
+        "project-sources-with-library-metadata"
+    );
+    assert_eq!(
+        snapshot["library_metadata"]["sha256"],
+        library.identity.sha256.as_str()
+    );
+    assert_eq!(snapshot["bindings"][0]["type_display"], "Int");
+    assert_eq!(snapshot["bindings"][0]["source_module"], "portable.units");
+    assert!(snapshot["bindings"][0]["definition"].is_null());
+    let private = project.open("private.vr", "mount portable.units.{Hidden}; fn main() {} ");
+    assert!(!errors(&project.snapshot(&private).await).is_empty());
+}
+
+#[tokio::test]
+async fn library_artifact_identity_invalidates_project_generation() {
+    let project = Project::with_library(Some(library_fixture("Int")));
+    let uri = project.open(
+        "main.vr",
+        "mount portable.units.{Count}; fn read(value: Count) -> Int { value }",
+    );
+    let before = project.snapshot(&uri).await;
+    assert!(errors(&before).is_empty(), "{before:#}");
+    let mut context =
+        crate::project_context::ProjectContext::with_library(Some(library_fixture("Bool")));
+    context.configure(project.root.path().to_path_buf(), None);
+    *project.service.inner().project.lock() = context;
+    let after = project.snapshot(&uri).await;
+    assert_ne!(before["project_revision"], after["project_revision"]);
+    assert_ne!(before["library_metadata"], after["library_metadata"]);
+    assert!(!errors(&after).is_empty(), "{after:#}");
 }

@@ -390,6 +390,7 @@ impl DocumentCache {
         let documents = self.documents.read();
         documents.get(uri).map(|doc| {
             crate::document::DocumentState {
+                library_metadata: None,
                 text: doc.source.clone(),
                 analysis_revision: None,
                 project_bindings: verum_common::List::new(),

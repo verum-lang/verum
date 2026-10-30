@@ -55,9 +55,16 @@ pub struct Backend {
 impl Backend {
     /// Create a new backend
     pub fn new(client: Client) -> Self {
+        Self::with_library(client, None)
+    }
+
+    pub fn with_library(
+        client: Client,
+        library: Option<Arc<crate::library_metadata::LibraryMetadata>>,
+    ) -> Self {
         let config = Arc::new(SharedLspConfig::new());
         Self {
-            project: parking_lot::Mutex::new(Default::default()),
+            project: parking_lot::Mutex::new(crate::project_context::ProjectContext::with_library(library)),
             project_gate: tokio::sync::Mutex::new(()),
             client,
             documents: DocumentStore::new(),
@@ -86,6 +93,7 @@ impl Backend {
             for uri in uris {
                 self.documents.with_document_mut(&uri, |doc| {
                     doc.analysis_revision = None;
+                    doc.library_metadata = None;
                     doc.project_bindings.clear();
                     doc.diagnostics =
                         verum_common::List::from_iter([verum_diagnostics::DiagnosticBuilder::new(
@@ -619,7 +627,8 @@ impl LanguageServer for Backend {
                     doc.project_bindings
                         .iter()
                         .find(|binding| binding.name == word.as_str())
-                        .map(|binding| GotoDefinitionResponse::Scalar(binding.definition.clone()))
+                        .and_then(|binding| binding.definition.clone())
+                        .map(GotoDefinitionResponse::Scalar)
                 })
             })
             .flatten())

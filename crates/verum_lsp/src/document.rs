@@ -278,6 +278,7 @@ impl CbgrCostInfo {
 /// Stores the parsed and analyzed state of a document
 pub struct DocumentState {
     pub analysis_revision: Option<Text>,
+    pub library_metadata: Option<crate::library_metadata::LibraryIdentity>,
     pub project_bindings: List<crate::project_context::ProjectBinding>,
     /// The full text content of the document
     pub text: String,
@@ -327,6 +328,7 @@ impl DocumentState {
     pub fn new(text: String, version: i32, file_id: FileId) -> Self {
         let mut state = Self {
             analysis_revision: None,
+            library_metadata: None,
             project_bindings: List::new(),
             text,
             module: None,
@@ -417,6 +419,7 @@ impl DocumentState {
     /// Reparse the document and update diagnostics
     fn reparse(&mut self) {
         self.analysis_revision = None;
+        self.library_metadata = None;
         self.project_bindings.clear();
         self.diagnostics.clear();
         self.symbols.clear();

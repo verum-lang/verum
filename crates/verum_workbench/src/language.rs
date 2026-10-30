@@ -26,6 +26,12 @@ pub struct Language {
 }
 impl Language {
     pub fn start(root: PathBuf) -> Result<Self> {
+        Self::start_with_library(root, None)
+    }
+    pub fn start_with_library(
+        root: PathBuf,
+        library: Option<std::sync::Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+    ) -> Result<Self> {
         let (requests, mut receiver) = mpsc::channel::<Command>(8);
         std::thread::Builder::new()
             .name("studio-language".into())
@@ -40,7 +46,7 @@ impl Language {
                     return;
                 };
                 runtime.block_on(async move {
-                    let mut session = Session::new(root).await;
+                    let mut session = Session::new(root, library).await;
                     while let Some(command) = receiver.recv().await {
                         if command.reply.is_closed() {
                             continue;
@@ -107,8 +113,11 @@ struct Session {
     capabilities: Value,
 }
 impl Session {
-    async fn new(root: PathBuf) -> Result<Self> {
-        let (service, socket) = verum_lsp::service::service();
+    async fn new(
+        root: PathBuf,
+        library: Option<std::sync::Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+    ) -> Result<Self> {
+        let (service, socket) = verum_lsp::service::service_with_library(library);
         tokio::spawn(async move {
             let (mut incoming, mut outgoing) = socket.split();
             while let Some(request) = incoming.next().await {

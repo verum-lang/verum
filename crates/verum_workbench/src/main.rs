@@ -12,10 +12,11 @@ async fn main() -> Result<()> {
         port: 0,
     };
     let mut args = std::env::args().skip(1);
+    let mut library = None;
     while let Some(arg) = args.next() {
         if matches!(arg.as_str(), "--help" | "-h") {
             println!(
-                "Verum Studio\nverum-studio [--workspace DIR] [--verum EXE] [--proof EXE] [--codex EXE] [--port PORT]\nOpen the printed local URL. Codex uses its own Studio ChatGPT sign-in. No API key is requested."
+                "Verum Studio\nverum-studio [--workspace DIR] [--verum EXE] [--proof EXE] [--codex EXE] [--port PORT] [--stdlib-metadata FILE]\nUse the .core_metadata artifact from the matching Verum release for library analysis.\nOpen the printed local URL. Codex uses its own Studio ChatGPT sign-in. No API key is requested."
             );
             return Ok(());
         }
@@ -26,8 +27,13 @@ async fn main() -> Result<()> {
             "--proof" => config.proof = value.into(),
             "--codex" => config.codex = value.into(),
             "--port" => config.port = value.parse()?,
+            "--stdlib-metadata" => {
+                library = Some(verum_lsp::library_metadata::LibraryMetadata::load(
+                    std::path::Path::new(&value),
+                )?)
+            }
             _ => bail!("Unknown option {arg}"),
         }
     }
-    verum_workbench::server::serve(config).await
+    verum_workbench::server::serve_with_library(config, library).await
 }

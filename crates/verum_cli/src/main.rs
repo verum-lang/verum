@@ -3645,9 +3645,9 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Studio { workspace, port, codex, proof } => {
             let runtime = tokio::runtime::Runtime::new().map_err(|e| CliError::Custom(e.to_string()))?;
             let verum = std::env::current_exe().map_err(|e| CliError::Custom(e.to_string()))?;
-            runtime.block_on(verum_workbench::server::serve(verum_workbench::Config {
+            runtime.block_on(verum_workbench::server::serve_with_library(verum_workbench::Config {
                 workspace, port, codex, proof, verum,
-            })).map_err(|e| CliError::Custom(e.to_string()))
+            }, commands::lsp::release_library()?)).map_err(|e| CliError::Custom(e.to_string()))
         },
         Commands::Playbook {
             file,

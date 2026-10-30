@@ -26,7 +26,10 @@ pub struct Studio {
     pub config: Config,
 }
 impl Studio {
-    pub fn open(mut config: Config) -> Result<Self> {
+    pub fn open(config: Config) -> Result<Self> {
+        Self::open_with_library(config, None)
+    }
+    pub fn open_with_library(mut config: Config, library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>) -> Result<Self> {
         for executable in [&mut config.verum, &mut config.proof, &mut config.codex] {
             if executable.is_relative() && executable.components().count() > 1 {
                 *executable = std::env::current_dir()?.join(&*executable);
@@ -42,7 +45,7 @@ impl Studio {
         };
         jobs.restore()?;
         Ok(Self {
-            language: language::Language::start(workspace.root.clone())?,
+            language: language::Language::start_with_library(workspace.root.clone(), library)?,
             workspace: Mutex::new(workspace),
             jobs: Mutex::new(jobs),
             agent: Mutex::new(None),
@@ -137,7 +140,7 @@ impl Studio {
                 if method == "thread/start" {
                     let model = args.get("model").cloned();
                     args = json!({"cwd":self.config.workspace,"sandbox":"read-only","approvalPolicy":"untrusted",
-                        "baseInstructions":"You are the Verum Studio research assistant. Work only in Verum. Use verum_analyze for revision-bound diagnostics, declarations and context requirements from the same language service as the editor. This analysis is single-module with builtins, not a whole-project check. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
+                        "baseInstructions":"You are the Verum Studio research assistant. Work only in Verum. Use verum_analyze for revision-bound diagnostics, declarations and context requirements from the same language service as the editor. Read the reported analysis_scope and library_metadata identity: captured dependency declarations and available release metadata inform open-document checks; unopened dependency bodies are not whole-program verification. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
                         "dynamicTools":codex::tools()});
                     if let Some(model) = model {
                         args["model"] = model;

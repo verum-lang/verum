@@ -47,7 +47,13 @@ macro_rules! boxed_handler {
 /// so the three transport entry points (stdio / TCP / named-pipe) stay in
 /// sync and no method leaks as `MethodNotFound` at runtime.
 pub fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
-    LspService::build(Backend::new)
+    service_with_library(None)
+}
+
+pub fn service_with_library(
+    library: Option<std::sync::Arc<crate::library_metadata::LibraryMetadata>>,
+) -> (LspService<Backend>, tower_lsp::ClientSocket) {
+    LspService::build(move |client| Backend::with_library(client, library.clone()))
         .custom_method(
             "verum/validateRefinement",
             boxed_handler!(handle_validate_refinement, ValidateRefinementParams),
