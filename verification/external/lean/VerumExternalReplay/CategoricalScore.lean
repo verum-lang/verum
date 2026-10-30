@@ -53,10 +53,17 @@ structure Score where
   samples : Nat
   deriving DecidableEq
 
+-- One arithmetic consumer for both full rows and retained count banks.
+-- Admission, support and count conservation are separate obligations.
+def fromCounts (alphabet : Nat) (parent : List Nat) (children : List (List Nat))
+    (samples : Nat) : Score :=
+  let child := (children.map (kt alphabet)).foldr mul one
+  ⟨div child (kt alphabet parent), div child (parentML parent), samples⟩
+
 def contextScore (c : Context) : Score :=
-  let child := (children c).foldr mul one
-  let parent := counts c.alphabet c.rows
-  ⟨div child (kt c.alphabet parent), div child (parentML parent), c.rows.length⟩
+  fromCounts c.alphabet (counts c.alphabet c.rows)
+    ((c.rows.map Row.reading).eraseDups.map (fun key =>
+      counts c.alphabet (c.rows.filter (fun r => r.reading == key)))) c.rows.length
 
 def score (contexts : List Context) : Option Score :=
   if contexts.all (fun c => c.alphabet > 0 && c.rows.all (fun r => r.label < c.alphabet)) then
