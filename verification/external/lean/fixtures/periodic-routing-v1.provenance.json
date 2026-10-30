@@ -178,5 +178,186 @@
       }
     },
     "priority_v3_export_sha256": "76cff0459dc4e216b82334fc3279c8d04e55bdf2009d345be782ee3bb80f218d"
+  },
+  "sealed_prefix_r59_replay": {
+    "archive_sha256": "529b7d5eab0f3a92b8e0f0288800d7b4c1344c82d1938a192dec717781ab36bb",
+    "identity": {
+      "archive_manifest_sha256": "8aa4d84988a6df94f6312a69dafa9357fd5d5d8c93ba220aa52a1791a31917b3",
+      "source_files": 1603,
+      "source_commit": "9980b8e39",
+      "binaries": {
+        "/private/tmp/synarc-recovery-runtime-v69/cleanup-r59/synarc_kan-courts": {
+          "path": "/private/tmp/synarc-recovery-runtime-v69/cleanup-r59/synarc_kan-courts",
+          "bytes": 61271024,
+          "sha256": "2ea6fd94ef937742ff24d4872f5612471a4d2556dd936a1f68d331b492fed757"
+        },
+        "/private/tmp/synarc-recovery-runtime-v69/cleanup-r59/arena-courts": {
+          "path": "/private/tmp/synarc-recovery-runtime-v69/cleanup-r59/arena-courts",
+          "bytes": 16228976,
+          "sha256": "5ac169caf51fd7f93982baacda11640ac5015648591b112a156a0851fce12196"
+        }
+      }
+    },
+    "native": {
+      "automatic": {
+        "receipt_sha256": "685dfa2c3a7295de35a3046929378838c664552123ceee525d5c4bf0867531a4",
+        "status": "passed",
+        "stages": [
+          {
+            "test": "automatic::periodic_courts::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 1620738048,
+            "seconds": 22.16447816696018,
+            "log_sha256": "59ed764552ec56c766b3e789686fff7bef5ef79c52d9c8960bd3cc0045615538"
+          },
+          {
+            "test": "program::observer::acquisition::joint::source::priority::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 308183040,
+            "seconds": 4.5819593330379575,
+            "log_sha256": "13501022222ee0209a79454ab855aa97774d759d2b34c0decbd43ce32d3f8cc6"
+          },
+          {
+            "test": "automatic::cumulative::courts",
+            "status": "passed",
+            "peak_owned_rss_bytes": 87359488,
+            "seconds": 0.5652248749975115,
+            "log_sha256": "ccdfc7ffd5140a45ae5d5d430a1045ad725f3f0b21605b75f03ba0dec09ee7b2"
+          }
+        ]
+      },
+      "ownership_with_4_gib_cap": {
+        "receipt_sha256": "c8217c077babc72443a6baab594eccf9af6e3ff56968a77a3aa3da6c732f7317",
+        "status": "failed",
+        "stages": [
+          {
+            "test": "program::observer::acquisition::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 1033486336,
+            "seconds": 20.949914457974955,
+            "log_sha256": "2cf4b265f0c09b2873bf3ce701f651a57337c0c328bb225f5b5a7d9ace9401b4"
+          },
+          {
+            "test": "organism::typed_context_courts::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 87457792,
+            "seconds": 0.584399415878579,
+            "log_sha256": "a72a2f138a23aec939e7fe87ef4be2b7387935a1117a88bb2bb7577b0be6176b"
+          },
+          {
+            "test": "organism::observer_acquired::structural_source::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 87490560,
+            "seconds": 0.5751865420024842,
+            "log_sha256": "3559df118c09efe1456594454c0b20a8513164f6531fbc02014f433e87fefc18"
+          },
+          {
+            "test": "organism::observer_acquired::nat_courts::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 87474176,
+            "seconds": 0.5995364999398589,
+            "log_sha256": "22264b8c3220dea027dd34f27e386fa957927671237acc458c2964ad6c6ba15e"
+          },
+          {
+            "test": "organism::action_courts::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 87474176,
+            "seconds": 0.5879889170173556,
+            "log_sha256": "5fcae78904167e148ce6053461f38cab29e44600c6e7bdf8041af261e64a0e50"
+          },
+          {
+            "test": "organism::terminal_outcome_courts::",
+            "status": "running",
+            "peak_owned_rss_bytes": 4315660288
+          }
+        ]
+      },
+      "terminal_with_original_producer_limits": {
+        "receipt_sha256": "5a6e229aa7f2c6e979eef81f267068efe1165bd5d08115970332c6050d9a4c23",
+        "status": "passed",
+        "stages": [
+          {
+            "test": "organism::terminal_outcome_courts::",
+            "status": "passed",
+            "peak_owned_rss_bytes": 5241962496,
+            "seconds": 85.1695105000399,
+            "log_sha256": "f3dda3ea8ba1674f0145834ba2b683d0c8494657d92bb6b1cc595683d5b84f3f"
+          }
+        ]
+      }
+    },
+    "periodic_projection": {
+      "paused-materializer.json": {
+        "sha256": "7da3d64c5fb64df9644abbd174a186a031a852acf654c7532ecd3dfc4fa0f0ed",
+        "summary": {
+          "physical_actions": 12,
+          "explicit_services": 1,
+          "periodic_windows": 4,
+          "settled_leases": 13
+        }
+      },
+      "sticky-retention-refusal.json": {
+        "sha256": "cc73506504b254a08032f831c50a63357eebc34b3390695f2c554ab9cc318eea",
+        "summary": {
+          "physical_actions": 12,
+          "explicit_services": 0,
+          "periodic_windows": 4,
+          "settled_leases": 2
+        }
+      },
+      "zero-entitlement.json": {
+        "sha256": "c34a984a071210f3578dcaac87632e98891fd673855c90d8e9b6a6c97ebbf419",
+        "summary": {
+          "physical_actions": 12,
+          "explicit_services": 0,
+          "periodic_windows": 4,
+          "settled_leases": 12
+        }
+      },
+      "incumbent.json": {
+        "sha256": "6685c58c62df1bc323bbae5d9c5c8e39c0785fda432345530b6d3026a4dadcdf",
+        "summary": {
+          "periodic_boundaries": 3,
+          "cut_commits": 3
+        }
+      }
+    },
+    "proofs": {
+      "prefix-history": {
+        "export_sha256": "24fcf1e06e5d6b38dd4fcc78427b0cf3a297768c303e4316d09a958285f0ac8a",
+        "report_sha256": "62b4b0262c771344e312a054382aa16120fab209b4cdd676b0fa7867879ca799",
+        "counts": {
+          "calls": 44,
+          "snapshots": 5,
+          "nodes": 5,
+          "claims": 107
+        },
+        "lean_version": "Lean (version 4.35.0, arm64-apple-darwin24.6.0, commit eb6cafb7290e8bd5f2937522d8d804f58f02bafc, Release)"
+      },
+      "prefix-history-edge-v2": {
+        "export_sha256": "e5da5f1c823b911446db74986475a7fb102ad48b944a26e84c3e102f51ba2dad",
+        "report_sha256": "405db4a0f58524ee7ea4ac53b3f54274ef63b7d41011024e595cd9f4cda63cb6",
+        "counts": {
+          "calls": 122,
+          "snapshots": 9,
+          "nodes": 15,
+          "claims": 250
+        },
+        "lean_version": "Lean (version 4.35.0, arm64-apple-darwin24.6.0, commit eb6cafb7290e8bd5f2937522d8d804f58f02bafc, Release)"
+      },
+      "dyadic-lifecycle.compact": {
+        "export_sha256": "24265cbf867e74f6feab0ddd4faff903ad5535871e4a7792f0220959d409648a",
+        "report_sha256": "7da0b2329e793d7614a1e3cdd801058a1fd0cd59e77920c59d0563537f794207",
+        "counts": {
+          "events": 6150,
+          "segments": 4,
+          "snapshots": 811,
+          "claims": 669
+        },
+        "lean_version": "Lean (version 4.35.0, arm64-apple-darwin24.6.0, commit eb6cafb7290e8bd5f2937522d8d804f58f02bafc, Release)"
+      }
+    },
+    "scope": "Finite Automatic-only routing, retained ownership and history projections. Direct replay remains legitimate for declared/imported sources; Shared refuses wrong-engine use. The terminal court exceeded the inherited 4 GiB cap; its separate replay passed under the original producer 25,000,000,000-byte/1800-second bounds.",
+    "uncovered": "No full Rust/private VM refinement, acquisition liveness, aggregate memory bound, autonomous finite recurrence, or learned-model-to-action-consumer implication. Typed priority v3 and private Guide transitions remain outside the independent adapter."
   }
 }
