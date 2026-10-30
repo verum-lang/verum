@@ -95,6 +95,7 @@ fn contextual_output_and_field_values_use_distinct_owner_and_caller_binders() {
 async fn choose<X, P, T>(x: X, value: T) -> Maybe<P> {
     Tagged { value: value }.await
 }
+
 async fn probe() -> Int {
     match choose<Int, Bool, Int>(0, 7).await { Maybe.None => 37, Maybe.Some(_) => 0 }
 }
@@ -279,4 +280,46 @@ async fn probe() -> Int {
 "#,
         37,
     );
+}
+
+#[test]
+fn future_output_resolves_nested_associated_members_of_its_declared_receiver() {
+    run(r#"
+type Stream is protocol { type Item; };
+type AsyncIterator is protocol { type Item; };
+type Source<T> is { value: T };
+implement<T> Stream for Source<T> { type Item = T; }
+implement<T> AsyncIterator for Source<T> { type Item = T; }
+type Next<S: Stream> is { source: &mut S };
+implement<S: Stream> Future for Next<S> {
+    type Output = Maybe<S.Item>;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Maybe<S.Item>> { Poll.Ready(Maybe.None) }
+}
+async fn probe() -> Int {
+    let mut source = Source { value: 7 };
+    let result: Maybe<Int> = Next { source: &mut source }.await;
+    match result { Maybe.None => 37, Maybe.Some(_) => 0 }
+}
+"#, 37);
+}
+
+#[test]
+fn conflicting_associated_members_cannot_authorize_future_output() {
+    refuse(r#"
+type Stream is protocol { type Item; };
+type Other is protocol { type Item; };
+type Source<T> is { value: T };
+implement<T> Stream for Source<T> { type Item = T; }
+implement<T> Other for Source<T> { type Item = Bool; }
+type Next<S: Stream> is { source: &mut S };
+implement<S: Stream> Future for Next<S> {
+    type Output = Maybe<S.Item>;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Maybe<S.Item>> { Poll.Ready(Maybe.None) }
+}
+async fn probe() -> Int {
+    let mut source = Source { value: 7 };
+    let result: Maybe<Int> = Next { source: &mut source }.await;
+    37
+}
+"#, "Future.Output has no ownership declaration");
 }

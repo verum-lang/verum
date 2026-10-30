@@ -74,6 +74,43 @@ fn relative_mounts_preserve_the_source_nominal_owner() {
 }
 
 #[test]
+fn wildcard_mounts_preserve_exact_public_type_authority() {
+    let owner = producer("core.handles", "module core.handles; public type Handle is { raw: Int };");
+    let stranger = producer("unrelated", "module unrelated; public type Handle is { raw: Bool };");
+    for mount in ["core.handles.*", "super.super.handles.*", "cog.handles.*"] {
+        let module = import(&format!("module core.provider.file; mount {mount}; fn accept(x: Handle) -> Int {{ 7 }}"), &[&stranger, &owner]);
+        let function = module.functions.iter().find(|f| module.strings.get(f.name).is_some_and(|n| n.ends_with(".accept"))).unwrap();
+        let ty = function.semantic_parameter_types().unwrap()[0].as_ref().unwrap_or_else(|| panic!("{mount}: no declaration"));
+        let declaration = module.get_type(ty.base_type_id().unwrap()).unwrap();
+        assert_eq!(module.strings.get(declaration.origin_module.unwrap()), Some("core.handles"));
+    }
+}
+
+#[test]
+fn wildcard_ambiguity_and_private_names_never_become_ownership_evidence() {
+    let left = producer("left", "module left; public type Handle is { raw: Int }; type Hidden is { raw: Int };");
+    let right = producer("right", "module right; public type Handle is { raw: Bool };");
+    for (mount, ty) in [("mount left.*; mount right.*;", "Handle"), ("mount left.*;", "Hidden")] {
+        let module = import(&format!("module consumer; {mount} fn accept(x: {ty}) -> Int {{ 7 }}"), &[&left, &right]);
+        let function = module.functions.iter().find(|f| module.strings.get(f.name).is_some_and(|n| n.ends_with(".accept"))).unwrap();
+        assert!(function.semantic_parameter_types().unwrap()[0].is_none(), "{mount} {ty}");
+    }
+}
+
+#[test]
+fn explicit_mount_and_local_declaration_override_wildcard_ambiguity() {
+    let left = producer("left", "module left; public type Handle is { raw: Int };");
+    let right = producer("right", "module right; public type Handle is { raw: Bool };");
+    for (declaration, owner) in [("mount left.Handle;", "left"), ("type Handle is { raw: Text };", "consumer")] {
+        let module = import(&format!("module consumer; mount left.*; mount right.*; {declaration} fn accept(x: Handle) -> Int {{ 7 }}"), &[&left, &right]);
+        let function = module.functions.iter().find(|f| module.strings.get(f.name).is_some_and(|n| n.ends_with(".accept"))).unwrap();
+        let ty = function.semantic_parameter_types().unwrap()[0].as_ref().unwrap();
+        let declaration = module.get_type(ty.base_type_id().unwrap()).unwrap();
+        assert_eq!(module.strings.get(declaration.origin_module.unwrap()), Some(owner));
+    }
+}
+
+#[test]
 fn nested_nominal_function_signature_survives_bootstrap_import() {
     let dependency = producer(
         "alpha",

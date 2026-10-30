@@ -407,28 +407,50 @@ impl VbcCodegen {
                     .is_some_and(|name| name == "Output")
             })?;
         let output = TypeSubstitution::new(&declaration.type_params, args).apply(output);
-        self.resolve_future_projections(&output, depth + 1)
+        self.resolve_declared_projections(&output, depth + 1)
     }
 
-    fn resolve_future_projections(&self, ty: &TypeRef, depth: usize) -> Option<TypeRef> {
+    fn resolve_declared_projections(&self, ty: &TypeRef, depth: usize) -> Option<TypeRef> {
         if depth >= 64 {
             return None;
         }
         Some(match ty {
-            TypeRef::AssociatedProjection { base, assoc } if assoc == "Output" => {
-                self.associated_future_output(base, depth + 1)?
+            TypeRef::AssociatedProjection { base, assoc } => {
+                let base = self.resolve_declared_projections(base, depth + 1)?;
+                let (owner, args) = match &base {
+                    TypeRef::Concrete(id) => (*id, &[][..]),
+                    TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+                    _ => return None,
+                };
+                let declaration = self.type_by_id(owner)?;
+                if declaration.type_params.len() != args.len() {
+                    return None;
+                }
+                let mut bindings = declaration.protocols.iter()
+                    .flat_map(|implementation| &implementation.associated_types)
+                    .filter(|(name, _)| self.ctx.strings.get(name.0 as usize)
+                        .is_some_and(|name| name == assoc));
+                let (_, binding) = bindings.next()?;
+                // An unqualified projection is known when every applicable
+                // declaration agrees in this exact owner's binder scope.
+                // Conflicting members require protocol-qualified evidence.
+                if bindings.any(|(_, other)| other != binding) {
+                    return None;
+                }
+                let declared = TypeSubstitution::new(&declaration.type_params, args).apply(binding);
+                self.resolve_declared_projections(&declared, depth + 1)?
             }
             TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
                 base: *base,
                 args: args
                     .iter()
-                    .map(|arg| self.resolve_future_projections(arg, depth + 1))
+                    .map(|arg| self.resolve_declared_projections(arg, depth + 1))
                     .collect::<Option<_>>()?,
             },
             TypeRef::Tuple(parts) => TypeRef::Tuple(
                 parts
                     .iter()
-                    .map(|part| self.resolve_future_projections(part, depth + 1))
+                    .map(|part| self.resolve_declared_projections(part, depth + 1))
                     .collect::<Option<_>>()?,
             ),
             _ => ty.clone(),

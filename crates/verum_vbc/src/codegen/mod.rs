@@ -1072,7 +1072,8 @@ pub struct VbcCodegen {
     /// files share one bootstrap unit. Empty entries prevent a source with no
     /// mounts from inheriting the last sibling's bindings. Keep these tables
     /// through body compilation, which revisits each source after collection.
-    source_type_mounts: Map<Text, Map<Text, Text>>,
+    // None is an ambiguous glob binding, not permission to use a bare alias.
+    source_type_mounts: Map<Text, Map<Text, Option<Text>>>,
 
     /// SIBLING-IMPL-MATERIALIZATION-1 (#51): per-qualified-name count
     /// of impl-block method registrations.  The FIRST `implement`
@@ -1834,7 +1835,7 @@ impl VbcCodegen {
         let owner = self.ctx.current_source_module.as_deref()
             .unwrap_or(&self.config.module_name);
         match self.source_type_mounts.get(&Text::from(owner)) {
-            Some(mounts) => mounts.get(&Text::from(name)).map(Text::as_str),
+            Some(mounts) => mounts.get(&Text::from(name)).and_then(Option::as_ref).map(Text::as_str),
             None => self.ctx.mounted_types.get(name).map(|path| path.as_str()),
         }
     }
@@ -9093,11 +9094,7 @@ impl VbcCodegen {
     /// Items are filtered based on @cfg attributes to prevent cross-platform
     /// conflicts (e.g., Linux imports being processed when targeting macOS).
     pub fn compile_function_bodies(&mut self, module: &Module) -> CodegenResult<VbcModule> {
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.compile_item(item)?;
-            }
-        }
+        self.compile_module_items(module)?;
 
         // Compile pending constants (non-inlineable constants like struct literals).
         // These are compiled as zero-argument functions that return the constant value.
@@ -10386,6 +10383,20 @@ impl VbcCodegen {
             // and record field layouts for proper field indexing
             ItemKind::Type(type_decl) => {
                 self.register_type_constructors(type_decl)?;
+                // Descriptor constructors default to public. The source
+                // declaration owns export policy, including glob imports.
+                let (visibility, _) = self.lower_field_visibility(&type_decl.visibility)?;
+                let owner = self.ctx.current_source_module.as_deref()
+                    .unwrap_or(&self.config.module_name);
+                let qualified = format!("{owner}.{}", type_decl.name.name);
+                if let Some(id) = self.type_name_to_id.get(&qualified)
+                    .or_else(|| self.type_name_to_id.get(type_decl.name.name.as_str())).copied()
+                    && let Some(declaration) = self.types.iter_mut().find(|ty| ty.id == id
+                        && self.ctx.strings.get(ty.name.0 as usize).is_some_and(|name|
+                            name == type_decl.name.name.as_str() || name == &qualified))
+                {
+                    declaration.visibility = visibility;
+                }
                 // A NAMED refinement — `type Positive is Int{ it > 0 };`
                 // parses as an Alias whose target is `Refined`. Register
                 // the predicate under the type's own name so the assert
@@ -12287,7 +12298,7 @@ impl VbcCodegen {
                     let owner = self.ctx.current_source_module.as_deref()
                         .unwrap_or(&self.config.module_name);
                     self.source_type_mounts.entry(owner.into()).or_default()
-                        .insert(alias_name.as_str().into(), mount_path.as_str().into());
+                        .insert(alias_name.as_str().into(), Some(mount_path.as_str().into()));
                     self.ctx
                         .mounted_types
                         .insert(alias_name.clone(), mount_path);

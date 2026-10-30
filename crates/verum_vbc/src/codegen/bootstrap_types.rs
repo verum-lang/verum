@@ -26,10 +26,8 @@ pub(super) fn declaration_priority(module: &VbcModule, ty: &TypeDescriptor) -> u
     let owner = ty.origin_module
         .and_then(|id| module.strings.get(id))
         .unwrap_or(&module.name);
-    let local = owner == module.name || owner.strip_prefix(module.name.as_str())
-        .is_some_and(|suffix| suffix.starts_with('.'));
-    let direct = module.strings.get(ty.name).is_some_and(|name| !name.contains('.'));
-    u8::from(local) * 2 + u8::from(direct)
+    let name = module.strings.get(ty.name).unwrap_or("");
+    verum_common::qualified_name::declaration_priority(&module.name, owner, name)
 }
 
 // Shadowed imports retain their fully qualified declared name. Normalize only
@@ -336,16 +334,56 @@ impl VbcCodegen {
                 codegen: self,
             };
             let mut bindings = HashMap::new();
+            let mut globs = Vec::new();
             for item in &source.items {
                 if !self.should_compile_item(item) { continue; }
                 paths.visit_item(item);
                 if let ItemKind::Mount(decl) = &item.kind {
                     mounts(&decl.tree, "", decl.alias.as_ref(), &mut bindings);
+                    globs.extend(Self::extract_glob_mount_paths(&decl.tree, &[])
+                        .into_iter().map(|parts| {
+                            Self::resolve_module_path_head_in_scope(&parts, &owner)
+                                .unwrap_or(parts).join(".")
+                        }));
                 }
             }
             names.extend(bindings.values().cloned().map(&qualify));
             for name in paths.names {
                 let (head, tail) = name.split_once('.').unwrap_or((&name, ""));
+                if !bindings.contains_key(head) && !globs.is_empty() {
+                    // Resolve only the written glob's public exports. Retain
+                    // its source authority so semantic signatures see the
+                    // same binding while collecting and compiling this file.
+                    let candidates: BTreeSet<_> = globs.iter().filter_map(|glob| {
+                        let written = format!("{glob}.{head}");
+                        let declared = resolve_export(&written)
+                            .or_else(|| resolve_export(&format!("core.{written}")))?;
+                        let key = if catalog.contains_key(declared.as_str()) {
+                            declared.into_string()
+                        } else {
+                            format!("core.{declared}")
+                        };
+                        let &(mi, ti) = catalog.get(&key)?;
+                        matches!(available[mi].types[ti].visibility, crate::types::Visibility::Public)
+                            .then_some(key)
+                    }).collect();
+                    if !candidates.is_empty() {
+                        let selected = (candidates.len() == 1)
+                            .then(|| candidates.first().unwrap().clone());
+                        self.source_type_mounts.entry(owner.as_str().into()).or_default()
+                            .insert(head.into(), selected.clone().map(Text::from));
+                        if let Some(selected) = selected {
+                            names.insert(if tail.is_empty() { selected }
+                                else { format!("{selected}.{tail}") });
+                        }
+                        continue;
+                    }
+                    if tail.is_empty() {
+                        // A glob miss cannot borrow an unrelated globally
+                        // unique leaf. Local declarations are collected later.
+                        continue;
+                    }
+                }
                 names.insert(qualify(match bindings.get(head) {
                     Some(owner) if tail.is_empty() => owner.clone(),
                     Some(owner) => format!("{owner}.{tail}"),
@@ -686,6 +724,13 @@ impl VbcCodegen {
                 Self::canonical_sum_type_id(owner, leaf)
             })
         };
+        let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+        if self.source_type_mounts.get(&Text::from(owner))
+            .and_then(|bindings| bindings.get(&Text::from(name))) == Some(&None)
+            && !self.type_name_to_id.contains_key(&format!("{owner}.{name}"))
+        {
+            return None;
+        }
         if !self.local_concrete_types.contains(name)
             && let Some(mounted) = self.mounted_type_path(name)
         {
