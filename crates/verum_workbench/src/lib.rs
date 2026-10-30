@@ -1,6 +1,7 @@
 //! Verum Studio: one local operation service, with browser and provider adapters.
 pub mod codex;
 pub mod jobs;
+pub mod language;
 pub mod server;
 pub mod workspace;
 
@@ -20,6 +21,7 @@ pub struct Config {
 pub struct Studio {
     pub workspace: Mutex<workspace::Workspace>,
     pub jobs: Mutex<jobs::Jobs>,
+    language: language::Language,
     agent: Mutex<Option<Arc<codex::Codex>>>,
     pub config: Config,
 }
@@ -40,6 +42,7 @@ impl Studio {
         };
         jobs.restore()?;
         Ok(Self {
+            language: language::Language::start(workspace.root.clone())?,
             workspace: Mutex::new(workspace),
             jobs: Mutex::new(jobs),
             agent: Mutex::new(None),
@@ -56,6 +59,8 @@ impl Studio {
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         match method {
             "workspace.list" => self.workspace.lock().await.list(),
+            "language.request" => self.language_request(&params).await,
+            "project.inspect" => self.project().await,
             "workspace.read" => self.workspace.lock().await.read(field(&params, "path")?),
             "workspace.write" => {
                 ensure!(
@@ -132,7 +137,7 @@ impl Studio {
                 if method == "thread/start" {
                     let model = args.get("model").cloned();
                     args = json!({"cwd":self.config.workspace,"sandbox":"read-only","approvalPolicy":"untrusted",
-                        "baseInstructions":"You are the Verum Studio research assistant. Work only in Verum. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
+                        "baseInstructions":"You are the Verum Studio research assistant. Work only in Verum. Use verum_analyze for revision-bound diagnostics, declarations and context requirements from the same language service as the editor. This analysis is single-module with builtins, not a whole-project check. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
                         "dynamicTools":codex::tools()});
                     if let Some(model) = model {
                         args["model"] = model;
@@ -179,6 +184,8 @@ impl Studio {
         let tool = field(params, "tool")?;
         let mut args = params["arguments"].clone();
         match tool {
+            "verum_project" => self.project().await,
+            "verum_analyze" => self.language_request(&args).await,
             "verum_read" => self.workspace.lock().await.read(field(&args, "path")?),
             "verum_propose" => {
                 ensure!(
@@ -220,6 +227,39 @@ impl Studio {
             }
             _ => bail!("Unknown Verum tool"),
         }
+    }
+    async fn language_request(&self, params: &Value) -> Result<Value> {
+        let (path, source) = {
+            let workspace = self.workspace.lock().await;
+            let relative = field(params, "path")?;
+            let path = workspace.path(relative)?;
+            let source = match params.get("source") {
+                Some(value) => value.as_str().context("Expected source text")?.into(),
+                None => field(&workspace.read(relative)?, "source")?.into(),
+            };
+            (path, source)
+        };
+        self.language
+            .request(
+                path,
+                source,
+                params["method"].as_str().unwrap_or("analyze"),
+                params["position"].clone(),
+            )
+            .await
+    }
+    async fn project(&self) -> Result<Value> {
+        let files = self.workspace.lock().await.list()?;
+        let analysis = self
+            .language
+            .request(
+                self.config.workspace.clone(),
+                Text::new(),
+                "project",
+                Value::Null,
+            )
+            .await?;
+        Ok(json!({"workspace":files,"analysis":analysis}))
     }
 }
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {

@@ -4743,6 +4743,7 @@ dependencies = [
  "pin-project-lite",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -4831,6 +4832,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -5528,10 +5530,12 @@ dependencies = [
  "anyhow",
  "criterion",
  "dashmap 6.2.1",
+ "hex",
  "parking_lot",
  "proptest",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -5869,6 +5873,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "futures",
  "hex",
  "http-body-util",
  "hyper",
@@ -5879,8 +5884,11 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tokio",
+ "tower 0.4.13",
+ "tower-lsp",
  "uuid",
  "verum_common",
+ "verum_lsp",
 ]
 
 [[package]]

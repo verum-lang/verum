@@ -49,7 +49,7 @@ export function relativeVerumPath(value: string): string | null {
 export function approvalKind(method: string, params: Record<string, unknown>): 'source' | 'execution' | 'read' | 'unsupported' {
   if (method === 'item/tool/call') {
     if (params.tool === 'verum_propose' || params.tool === 'propose_source') return 'source';
-    if (params.tool === 'verum_read') return 'read';
+    if (params.tool === 'verum_read' || params.tool === 'verum_analyze' || params.tool === 'verum_project') return 'read';
     if (['verum_run', 'verum_check', 'verum_proof'].includes(String(params.tool))) return 'execution';
     return 'unsupported';
   }

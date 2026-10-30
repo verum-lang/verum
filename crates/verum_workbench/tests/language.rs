@@ -1,0 +1,135 @@
+use serde_json::{Value, json};
+use verum_workbench::{Config, Studio};
+
+fn studio(root: &std::path::Path) -> Studio {
+    Studio::open(Config {
+        workspace: root.to_path_buf(),
+        verum: "verum".into(),
+        proof: "verum-source-replay".into(),
+        codex: "codex".into(),
+        port: 0,
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn actual_lsp_session_shares_revision_diagnostics_architecture_and_navigation() {
+    let root = tempfile::tempdir().unwrap();
+    let studio = studio(root.path());
+    let source = "type Point is { x: Int, y: Int };\nfn identity(x: Int) -> Int { x }\nfn main() { let value = identity(42); }\n";
+    let args = json!({"path":"main.vr", "source":source});
+    let analysis = studio.call("language.request", args.clone()).await.unwrap();
+    assert_eq!(analysis["result"]["parsed"], true);
+    assert_eq!(analysis["result"]["source_hash"], analysis["source_hash"]);
+    assert_eq!(
+        analysis["result"]["declarations"].as_array().unwrap().len(),
+        3
+    );
+    assert_eq!(analysis["result"]["diagnostics"], json!([]));
+    let mut request = args.clone();
+    request["method"] = json!("textDocument/definition");
+    request["position"] = json!({"line":2,"character":28});
+    let definition = studio.call("language.request", request).await.unwrap();
+    assert_eq!(definition["source_hash"], analysis["source_hash"]);
+    assert!(!definition["result"].is_null(), "{definition}");
+    let error = studio
+        .call(
+            "language.request",
+            json!({"path":"main.vr","source":"fn main() { let value: Int = true; }"}),
+        )
+        .await
+        .unwrap();
+    assert!(error["version"].as_i64().unwrap() > analysis["version"].as_i64().unwrap());
+    assert!(
+        !error["result"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let restored = studio.call("language.request", args).await.unwrap();
+    assert_eq!(restored["source_hash"], analysis["source_hash"]);
+    assert!(restored["version"].as_i64().unwrap() > error["version"].as_i64().unwrap());
+    assert_eq!(restored["result"]["diagnostics"], json!([]));
+    let project = studio.call("project.inspect", json!({})).await.unwrap();
+    assert_eq!(project["analysis"]["coverage"], "analyzed-documents-only");
+    assert_eq!(
+        project["analysis"]["documents"][0]["source_hash"],
+        restored["source_hash"]
+    );
+    assert_eq!(
+        project["analysis"]["documents"][0]["version"],
+        restored["version"]
+    );
+}
+
+#[tokio::test]
+async fn context_requirements_are_projected_from_the_same_ast_and_exact_source_ranges() {
+    let root = tempfile::tempdir().unwrap();
+    let studio = studio(root.path());
+    let source = "context Logger { fn log(message: Text); }\nfn report(value: Int) using [Logger] { print(value); }";
+    let result = studio
+        .call(
+            "language.request",
+            json!({"path":"contexts.vr","source":source}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["result"]["parsed"], true, "{result}");
+    let declarations = result["result"]["declarations"].as_array().unwrap();
+    assert_eq!(declarations[0]["kind"], "context");
+    assert_eq!(declarations[1]["requirements"][0]["source"], "Logger");
+    assert_eq!(
+        declarations[1]["requirements"][0]["range"]["start"]["line"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn saved_source_analysis_and_submitted_drafts_share_one_service_without_writes() {
+    let root = tempfile::tempdir().unwrap();
+    let saved = "fn saved() -> Int { 7 }";
+    std::fs::write(root.path().join("saved.vr"), saved).unwrap();
+    let studio = studio(root.path());
+    let from_disk = studio
+        .call("language.request", json!({"path":"saved.vr"}))
+        .await
+        .unwrap();
+    let draft = studio
+        .call(
+            "language.request",
+            json!({"path":"saved.vr","source":"fn draft() -> Int { 9 }"}),
+        )
+        .await
+        .unwrap();
+    assert_ne!(from_disk["source_hash"], draft["source_hash"]);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("saved.vr")).unwrap(),
+        saved
+    );
+    for path in ["../escape.vr", "/escape.vr", ".hidden.vr"] {
+        assert!(
+            studio
+                .call("language.request", json!({"path":path,"source":saved}))
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        studio
+            .call(
+                "language.request",
+                json!({"path":"saved.vr","method":"workspace/executeCommand","source":saved})
+            )
+            .await
+            .is_err()
+    );
+    let tools = verum_workbench::codex::tools();
+    assert!(
+        tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "verum_analyze")
+    );
+    let _: Value = from_disk;
+}

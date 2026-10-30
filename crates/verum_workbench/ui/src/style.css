@@ -664,6 +664,29 @@ kbd {
   border-top: 1px solid var(--subtle-border);
   white-space: nowrap;
 }
+.status-action {
+  color: var(--muted);
+  font-size: 10px;
+  max-width: 28%;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-action:hover { color: var(--accent-text); }
+.architecture { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
+.architecture-intro { max-width: 640px; margin-bottom: 20px; }
+.architecture-intro p { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.project-inspector { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; }
+.project-inspector summary { cursor: pointer; font-size: 12px; }
+#project-content { max-height: 220px; overflow: auto; }
+.project-file { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 8px 0; }
+.project-file span:first-child { overflow-wrap: anywhere; min-width: 0; }
+.declaration-card { border: 1px solid var(--border); padding: 12px; margin: 8px 0; border-radius: 6px; }
+.declaration-name { font-family: monospace; padding: 0 8px; color: var(--accent-text); }
+.declaration-card p { margin-top: 10px; }
+.context-requirement { display: block; font-family: monospace; text-align: left; color: var(--accent-text); padding: 8px 0; overflow-wrap: anywhere; }
+.language-hover { max-width: min(440px, 80vw); max-height: 280px; overflow: auto; padding: 12px; }
 #source-status {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -695,6 +718,17 @@ kbd {
   min-height: 0;
   flex: 1;
 }
+.results-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.result-tabs { display: flex; flex: 0 0 32px; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--subtle-border); }
+.result-tabs button { font-size: 11px; padding: 0 0 2px; color: var(--muted); border-bottom: 2px solid transparent; }
+.result-tabs button[aria-selected=true] { color: var(--accent-text); border-color: var(--accent-text); }
+.diagnostics-panel { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+#analysis-scope { margin-bottom: 10px; }
+.diagnostic-item { display: flex; align-items: baseline; gap: 10px; text-align: left; width: 100%; padding: 10px 0; border-top: 1px solid var(--subtle-border); }
+.diagnostic-item:hover { background: var(--hover); }
+.diagnostic-message { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.diagnostic-marker { color: var(--warning); }
+.severity-1 { color: var(--danger); }
 .history {
   width: 132px;
   flex-shrink: 0;

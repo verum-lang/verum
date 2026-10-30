@@ -24,6 +24,8 @@ tower-lsp = "0.20"
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2.workspace = true
+hex = "0.4"
 
 # Verum compiler crates
 verum_common = { workspace = true, features = ["lsp"] }

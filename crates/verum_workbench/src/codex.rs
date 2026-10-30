@@ -243,6 +243,18 @@ pub fn tools() -> Value {
     let mut tools = List::new();
     for (name, description, properties, required) in [
         (
+            "verum_project",
+            "Inspect workspace source inventory and revision-bound analyzed documents shared with Studio. Coverage is analyzed documents only, not a whole-project build or proof.",
+            json!({}),
+            json!([]),
+        ),
+        (
+            "verum_analyze",
+            "Inspect exact source through the same LSP analysis as Studio: versioned diagnostics, declarations and context requirements. Single-module analysis with builtins, not a whole-project or runtime proof. Omit source to read the saved file.",
+            json!({"path":{"type":"string"},"source":source}),
+            json!(["path"]),
+        ),
+        (
             "verum_read",
             "Read a .vr source in the open workspace",
             json!({"path":{"type":"string"}}),

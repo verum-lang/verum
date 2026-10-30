@@ -2,6 +2,7 @@ import './style.css';
 import { makeEditor } from './editor';
 import { installPanels } from './panels';
 import type { Pane } from './layout';
+import { languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, hasToken, installToken } from './api';
 import { STARTER, IDENTITY, sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt } from './model';
@@ -61,7 +62,7 @@ let isSaving = false;
 let switching = false;
 let editVersion = 0;
 const documentRevision = () => ({ path: currentPath, editVersion });
-const editor = makeEditor($('editor'), STARTER, () => { editVersion++; updateDocumentState(); scheduleHash(); }, (line, column) => {
+const editor = makeEditor($('editor'), STARTER, () => { editVersion++; updateDocumentState(); scheduleHash(); scheduleAnalysis(); }, (line, column) => {
   setText($('cursor-position'), m('Ln {line}, Col {column}', { line, column }));
 });
 const panels = installPanels(() => editor.view.requestMeasure());
@@ -103,7 +104,7 @@ function scheduleHash() {
 function loadDocument(path: string, source: string, hash: string | null) {
   editVersion++;
   currentPath = path; savedSource = hash === null ? null : source; savedHash = hash;
-  editor.replace(source); scheduleHash(); updateDocumentState(); renderFiles(); setPane('editor'); editor.view.focus();
+  editor.replace(source); scheduleHash(); scheduleAnalysis(); updateDocumentState(); renderFiles(); setPane('editor'); sourceView(); editor.view.focus();
 }
 async function refreshFiles() {
   const result = await api<{ root: string; files: FileRecord[] }>('workspace.list');
@@ -193,6 +194,102 @@ async function newDocument(source = '', suggestion = 'experiment.vr') {
   } finally { switching = false; }
 }
 bind('save', save); bind('refresh-files', refreshFiles); bind('new-file', () => newDocument());
+let analysisTimer = 0, analysisBusy = false, analysisPending = false;
+const languageRevision = (): DocumentRevision => ({ path: currentPath, source: editor.source() });
+function sourceView() {
+  $('architecture').hidden = true; $('editor').hidden = false;
+  setText($('architecture-toggle'), m('Structure')); $('architecture-toggle').setAttribute('aria-expanded', 'false');
+  editor.view.requestMeasure();
+}
+function showRange(range: Range) { sourceView(); setPane('editor'); editor.select(range); }
+editor.connectLanguage({ revision: languageRevision, failure: fail, navigate: async location => {
+  const url = new URL(location.uri), root = $('workspace-root').textContent || '';
+  const path = decodeURIComponent(url.pathname);
+  if (url.protocol !== 'file:' || !path.startsWith(root + '/')) throw new Error(t(m('Definition is outside this workspace.')));
+  const relative = path.slice(root.length + 1);
+  if (relative !== currentPath) await openFile(relative);
+  if (relative === currentPath) showRange(location.range);
+} });
+bind('architecture-toggle', async () => {
+  if (!$('architecture').hidden) { sourceView(); return; }
+  $('architecture').hidden = false; $('editor').hidden = true;
+  setText($('architecture-toggle'), m('Source')); $('architecture-toggle').setAttribute('aria-expanded', 'true');
+  await inspectProject();
+});
+async function inspectProject() {
+  const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: { documents: Array<Analysis & { uri: string }> } }>('project.inspect');
+  const list = $('project-content'); list.replaceChildren();
+  for (const file of project.workspace.files) {
+    const snapshot = project.analysis.documents.find(document => decodeURIComponent(new URL(document.uri).pathname) === `${project.workspace.root}/${file.path}`);
+    const entry = button('', () => openFile(file.path), 'project-file');
+    entry.append(node('span', '', file.path), node('span', 'muted', snapshot ? snapshot.source_hash.slice(0, 10) : m('Not analyzed')));
+    list.append(entry);
+  }
+}
+bind('project-refresh', inspectProject);
+function resultView(diagnostics: boolean) {
+  $('operations-panel').hidden = diagnostics; $('diagnostics-panel').hidden = !diagnostics;
+  $('operations-tab').setAttribute('aria-selected', String(!diagnostics)); $('diagnostics-tab').setAttribute('aria-selected', String(diagnostics));
+}
+bind('operations-tab', () => resultView(false)); bind('diagnostics-tab', () => resultView(true));
+bind('language-status', () => { resultView(true); setPane('results'); });
+function scheduleAnalysis() {
+  window.clearTimeout(analysisTimer);
+  editor.diagnostics(editor.source(), []);
+  setText($('language-status'), m('Analyzing…'));
+  setText($('diagnostics-count'), '…');
+  $('diagnostics-list').replaceChildren(node('p', 'muted', m('Waiting for current source analysis…')));
+  $('architecture-content').replaceChildren(node('p', 'muted', m('Waiting for current source analysis…')));
+  analysisPending = true; analysisTimer = window.setTimeout(analyzeSource, 350);
+}
+async function analyzeSource() {
+  if (analysisBusy || !hasToken()) return;
+  analysisBusy = true; analysisPending = false;
+  const revision = languageRevision();
+  try {
+    const reply = await languageRequest<Analysis>(revision);
+    if (!sameRevision(revision, languageRevision())) return;
+    renderAnalysis(reply.result);
+  } catch (error) {
+    if (sameRevision(revision, languageRevision())) {
+      setText($('language-status'), m('Analysis unavailable'));
+      const message = m('Analysis failed: {error}', { error: errorText(error) });
+      $('diagnostics-list').replaceChildren(node('p', 'muted', message));
+      $('architecture-content').replaceChildren(node('p', 'muted', message));
+    }
+  } finally { analysisBusy = false; if (analysisPending) analysisTimer = window.setTimeout(analyzeSource, 100); }
+}
+function renderAnalysis(snapshot: Analysis) {
+  editor.diagnostics(editor.source(), snapshot.diagnostics);
+  const count = snapshot.diagnostics.length;
+  setText($('language-status'), count ? m('{count} diagnostics', { count }) : m('No module diagnostics'));
+  setText($('diagnostics-count'), String(count));
+  setText($('analysis-scope'), m('Single-module analysis with builtins. Imported modules and whole-project contracts require a project check.'));
+  const diagnostics = $('diagnostics-list'); diagnostics.replaceChildren();
+  for (const diagnostic of snapshot.diagnostics) {
+    const entry = button('', () => showRange(diagnostic.range), 'diagnostic-item');
+    entry.append(node('span', `diagnostic-marker severity-${diagnostic.severity}`, diagnostic.severity === 1 ? '●' : '◇'), node('span', 'diagnostic-message', diagnostic.message), node('span', 'muted', `${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}`));
+    diagnostics.append(entry);
+  }
+  if (!count) diagnostics.append(node('p', 'muted', m('No module diagnostics')));
+  const structure = $('architecture-content'); structure.replaceChildren();
+  structure.append(node('p', 'result-meta', `${currentPath} · ${snapshot.source_hash.slice(0, 12)}`));
+  if (!snapshot.declarations.length) structure.append(node('p', 'muted', m('No declarations available for this revision.')));
+  for (const declaration of snapshot.declarations) {
+    const card = node('article', 'declaration-card');
+    const heading = button(declaration.name, () => showRange(declaration.selection_range), 'declaration-name');
+    card.append(node('span', 'badge', declaration.kind), heading);
+    if (declaration.requirements.length) {
+      card.append(node('p', 'muted', m('Context requirements')));
+      for (const requirement of declaration.requirements) card.append(button(requirement.source, () => showRange(requirement.range), 'context-requirement'));
+    }
+    structure.append(card);
+  }
+  if (snapshot.mounts.length) {
+    structure.append(node('h3', '', m('Mounts')));
+    for (const mount of snapshot.mounts) structure.append(button(mount.source, () => showRange(mount.range), 'context-requirement'));
+  }
+}
 bind('reload-source', reloadSource);
 bind('lesson-script', () => newDocument(STARTER, 'first-experiment.vr'));
 bind('lesson-proof', () => newDocument(IDENTITY, 'identity.vr'));
@@ -220,7 +317,7 @@ async function startOperation(kind: Receipt['kind']) {
   starting = true; ['run', 'check', 'prove'].forEach(id => { $<HTMLButtonElement>(id).disabled = true; });
   try {
     const result = await api<{ id: string }>('operation.start', { kind, source, path, ...(kind === 'proof' ? { declaration } : {}), timeout_ms: Math.round(seconds * 1000) });
-    selectedReceipt = result.id; await refreshOperations(); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path }));
+    selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path }));
   } finally { starting = false; ['run', 'check', 'prove'].forEach(id => { $<HTMLButtonElement>(id).disabled = false; }); }
 }
 bind('run', () => startOperation('run')); bind('check', () => startOperation('check')); bind('prove', () => startOperation('proof'));
@@ -492,7 +589,7 @@ async function showApproval(id: string | number, method: string, params: Record<
   const key = `${typeof id}:${id}`; if (approvalIds.has(key)) return; approvalIds.add(key);
   const kind = approvalKind(method, params), args = parseArguments(params.arguments);
   const card = node('section', 'approval'); card.setAttribute('aria-label', 'Agent request awaiting review');
-  card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'read' ? m('Review a workspace read') : m('Unsupported agent request')));
+  card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Review language analysis') : m('Review a workspace read') : m('Unsupported agent request')));
   const content = node('div', 'approval-content');
   let reviewAvailable = true;
   content.append(node('p', '', kind === 'unsupported' ? m('This request is outside the Verum tool boundary. Decline it to let the agent continue.') : `${String(params.tool || method)}${typeof args.path === 'string' ? ` · ${args.path}` : ''}`));
@@ -533,7 +630,7 @@ async function showApproval(id: string | number, method: string, params: Record<
     } catch (error) { status.append(node('p', '', m('Refresh unavailable: {error}', { error: errorText(error) }))); }
   }
   actions.append(button(m('Decline'), () => respond(false)));
-  if (kind !== 'unsupported' && reviewAvailable) actions.append(button(kind === 'source' ? m('Accept edit') : kind === 'read' ? m('Allow read') : m('Approve operation'), () => respond(true), 'button primary'));
+  if (kind !== 'unsupported' && reviewAvailable) actions.append(button(kind === 'source' ? m('Accept edit') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read') : m('Approve operation'), () => respond(true), 'button primary'));
   card.append(content, actions, status); $('agent-welcome').hidden = true; $('agent-messages').append(card); pendingApprovals++; agentState();
   announce(m('Agent request awaiting your review'));
 }
@@ -544,7 +641,7 @@ bind('theme', async () => {
 });
 bind('help', async () => {
   const content = node('div', 'shortcut-list');
-  for (const [label, shortcut] of [[m('Save source'), '⌘ / Ctrl S'], [m('Run source'), '⌘ / Ctrl Enter'], [m('Check source'), '⌘ / Ctrl Shift Enter'], [m('Find in source'), '⌘ / Ctrl F'], [m('Toggle explorer'), '⌘ / Ctrl B'], [m('Toggle collaborator'), '⌘ / Ctrl Shift B'], [m('Toggle results'), '⌘ / Ctrl J'], [m('Resize focused divider'), m('Arrow keys · Home / End')], [m('Collapse focused divider'), 'Enter'], [m('Send agent message'), '⌘ / Ctrl Enter'], [m('Leave editor with Tab'), m('Esc, then Tab')]]) content.append(node('span', '', label), node('kbd', '', shortcut));
+  for (const [label, shortcut] of [[m('Save source'), '⌘ / Ctrl S'], [m('Run source'), '⌘ / Ctrl Enter'], [m('Check source'), '⌘ / Ctrl Shift Enter'], [m('Find in source'), '⌘ / Ctrl F'], [m('Go to definition'), 'F12'], [m('Toggle explorer'), '⌘ / Ctrl B'], [m('Toggle collaborator'), '⌘ / Ctrl Shift B'], [m('Toggle results'), '⌘ / Ctrl J'], [m('Resize focused divider'), m('Arrow keys · Home / End')], [m('Collapse focused divider'), 'Enter'], [m('Send agent message'), '⌘ / Ctrl Enter'], [m('Leave editor with Tab'), m('Esc, then Tab')]]) content.append(node('span', '', label), node('kbd', '', shortcut));
   await dialog(m('Keyboard shortcuts'), content, [{ value: 'close', label: m('Done'), primary: true }]);
 });
 document.addEventListener('keydown', event => {
@@ -571,6 +668,7 @@ async function initialize() {
     if (!switching && sameDocumentRevision(initialRevision, documentRevision())) loadDocument(file.path, file.source, file.hash);
   }
   await refreshOperations();
+  scheduleAnalysis();
 }
 updateDocumentState(); scheduleHash();
 initialize().catch(fail);
