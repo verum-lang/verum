@@ -245,6 +245,18 @@ pub fn tools() -> Value {
     let mut tools = List::new();
     for (name, description, properties, required) in [
         (
+            "verum_files",
+            "Browse a project directory lazily (path defaults to the root), or search project file paths with query. Includes source and supporting files; hidden, generated and symlink paths are excluded. Search reports truncation explicitly.",
+            json!({"path":{"type":"string"},"query":{"type":"string"}}),
+            json!([]),
+        ),
+        (
+            "verum_changes",
+            "Inspect read-only Git status with separate index and working-tree states. To review a patch, supply path and side (index or worktree). Does not stage, commit, reset or change files.",
+            json!({"path":{"type":"string"},"side":{"type":"string","enum":["index","worktree"]}}),
+            json!([]),
+        ),
+        (
             "verum_project",
             "Inspect workspace source inventory and revision-bound analyzed documents shared with Studio. Coverage is analyzed documents only, not a whole-project build or proof.",
             json!({}),

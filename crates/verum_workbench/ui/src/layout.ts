@@ -19,9 +19,9 @@ export function readLayout(value: unknown): LayoutPreferences {
   for (const panel of ['files', 'agent', 'results'] as const) {
     const size = record.sizes?.[panel], limit = layoutLimits[panel];
     sizes[panel] = typeof size === 'number' && Number.isFinite(size) ? clamp(size, limit.min, limit.max) : limit.initial;
-    collapsed[panel] = record.collapsed?.[panel] === true;
+    collapsed[panel] = typeof record.collapsed?.[panel] === 'boolean' ? record.collapsed[panel] : panel !== 'files';
   }
-  return { sizes, collapsed, priority: record.priority === 'files' ? 'files' : 'agent' };
+  return { sizes, collapsed, priority: record.priority === 'agent' ? 'agent' : 'files' };
 }
 
 /** Preferences survive viewport pressure. Only explicit user actions change them. */

@@ -1,13 +1,16 @@
 import './style.css';
 import { makeEditor } from './editor';
 import { installPanels } from './panels';
+import { installExplorer } from './explorer';
+import { icon, installIcons } from './icons';
+import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
 import { languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, hasToken, installToken } from './api';
 import { STARTER, IDENTITY, sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
 
-initializeLanguage();
+installIcons(); initializeLanguage();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Missing interface element: ${id}`);
@@ -50,6 +53,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
 type FileRecord = { path: string; hash?: string };
 type SourceFile = { path: string; source: string; hash: string };
 let files: FileRecord[] = [];
+let explorer: ReturnType<typeof installExplorer> | null = null;
 let currentPath = 'experiment.vr';
 let savedSource: string | null = null;
 let savedHash: string | null = null;
@@ -59,6 +63,7 @@ let hashTimer = 0;
 let receipts: Receipt[] = [];
 let selectedReceipt: string | null = null;
 let isSaving = false;
+let starting = false;
 let switching = false;
 let editVersion = 0;
 const documentRevision = () => ({ path: currentPath, editVersion });
@@ -66,6 +71,10 @@ const editor = makeEditor($('editor'), STARTER, () => { editVersion++; updateDoc
   setText($('cursor-position'), m('Ln {line}, Col {column}', { line, column }));
 });
 const panels = installPanels(() => editor.view.requestMeasure());
+explorer = installExplorer({ open: openFile, review: reviewChanges, failure: fail, listed: (root, entries, directory) => {
+  files = [...files.filter(file => parentPath(file.path) !== directory), ...entries.filter(entry => entry.kind === 'file')];
+  setText($('workspace-root'), root.split('/').pop() || root); $('workspace-root').dataset.root = root; setAttribute($('workspace-root'), 'title', root);
+} });
 document.querySelector('.skip-link')?.addEventListener('click', event => { event.preventDefault(); setPane('editor'); editor.view.focus(); });
 const scrolling = new WeakMap<HTMLElement, number>();
 document.addEventListener('scroll', event => {
@@ -86,6 +95,12 @@ function updateDocumentState() {
   setText($('source-status'), currentHash ? m('{state} · {hash}', { state: m(dirty() ? 'Unsaved' : 'Saved'), hash: currentHash.slice(0, 10) }) : m('Calculating source revision…'));
   setAttribute($('source-status'), 'title', currentHash ? m('SHA-256 {hash}', { hash: currentHash }) : m('Source hashing in progress'));
   document.title = `${dirty() ? '• ' : ''}${currentPath.split('/').pop()} · Verum Studio`;
+  explorer?.current(currentPath, dirty());
+  const verum = currentPath.endsWith('.vr');
+  for (const id of ['run', 'check', 'prove']) $<HTMLButtonElement>(id).disabled = !verum || starting;
+  for (const id of ['run-settings', 'architecture-toggle']) $<HTMLButtonElement>(id).disabled = !verum;
+  setText($('document-kind'), verum ? 'vr' : '·');
+  setText($('document-language'), verum ? 'Verum' : m('Plain text'));
 }
 async function sha256(source: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
@@ -105,28 +120,40 @@ function scheduleHash() {
 function loadDocument(path: string, source: string, hash: string | null) {
   editVersion++;
   currentPath = path; savedSource = hash === null ? null : source; savedHash = hash;
-  editor.replace(source); scheduleHash(); scheduleAnalysis(); updateDocumentState(); renderFiles(); setPane('editor'); sourceView(); editor.view.focus();
+  editor.document(path); editor.replace(source); scheduleHash(); scheduleAnalysis(); updateDocumentState();
+  explorer?.reveal(path).catch(fail); setPane('editor'); sourceView(); editor.view.focus();
 }
 async function refreshFiles() {
-  const result = await api<{ root: string; files: FileRecord[] }>('workspace.list');
-  files = result.files.filter(file => file.path.endsWith('.vr')).sort((a, b) => a.path.localeCompare(b.path));
-  setText($('workspace-root'), result.root); setAttribute($('workspace-root'), 'title', result.root);
+  await explorer!.refresh();
   $('connection').classList.add('online'); $('connection').replaceChildren(node('span', 'status-dot'), node('span', '', m('Local service')));
-  renderFiles();
 }
-function renderFiles() {
-  setText($('files-rail-status'), String(files.length));
-  setAttribute($('files-restore'), 'title', m('Expand explorer · {count} Verum files', { count: files.length }));
-  const filter = input('file-filter').value.toLowerCase();
-  const list = $('file-list'); list.replaceChildren();
-  const visible = files.filter(file => file.path.toLowerCase().includes(filter));
-  if (!visible.length) { list.append(node('p', 'muted empty-note', filter ? m('No matching Verum files.') : m('No Verum files yet. Start an experiment below.'))); return; }
-  for (const file of visible) {
-    const entry = button('', () => openFile(file.path), 'file-entry');
-    entry.setAttribute('aria-current', String(file.path === currentPath)); setAttribute(entry, 'title', file.path);
-    entry.append(node('span', 'file-icon', 'vr'), node('span', '', file.path));
-    const wrapper = node('div'); wrapper.setAttribute('role', 'listitem'); wrapper.append(entry); list.append(wrapper);
+async function reviewChanges(change: GitChange) {
+  const content = node('div', 'change-review');
+  content.append(node('p', 'muted', m('Git compares saved files. Unsaved editor changes are separate.')));
+  if (change.original_path) content.append(node('p', 'result-meta', `${change.original_path} → ${change.path}`));
+  const tabs = node('div', 'change-review-tabs'), patch = node('pre', 'git-patch'); content.append(tabs, patch);
+  let generation = 0;
+  async function show(side: 'index' | 'worktree') {
+    const revision = ++generation; setText(patch, m('Loading changes…'));
+    for (const tab of tabs.querySelectorAll('button')) tab.setAttribute('aria-pressed', String(tab.dataset.side === side));
+    try {
+      if (change.index === '?' && change.worktree === '?') {
+        const file = await api<SourceFile>('document.read', { path: change.path });
+        if (generation === revision) setText(patch, file.source);
+      } else {
+        const result = await api<{ patch: string }>('workspace.diff', { path: change.path, side });
+        if (generation === revision) setText(patch, result.patch || m('No patch on this side. Refresh if the file changed.'));
+      }
+    } catch (error) { if (generation === revision) setText(patch, errorText(error)); }
   }
+  for (const [side, label] of [['index', m('Staged')], ['worktree', m('Working tree')]] as const) {
+    const tab = button(label, () => show(side), 'quiet-button'); tab.dataset.side = side;
+    tab.disabled = change.index === '?' ? side === 'index' : change[side] === ' '; tabs.append(tab);
+  }
+  if (change.index === '?') content.prepend(node('p', 'muted', m('Untracked file · complete saved content')));
+  void show(change.index !== ' ' && change.index !== '?' ? 'index' : 'worktree');
+  await dialog(m('Changes · {path}', { path: change.path }), content, [{ value: 'close', label: m('Done'), primary: true }]);
+  ++generation;
 }
 type Choice = { value: string; label: Content; primary?: boolean };
 function dialog(title: Content, content: HTMLElement, choices: Choice[]): Promise<string> {
@@ -151,7 +178,7 @@ async function mayReplace() {
 async function openFile(path: string) {
   if (path === currentPath && savedHash !== null) { setPane('editor'); return; }
   if (switching) return; switching = true;
-  try { if (await mayReplace()) { const file = await api<SourceFile>('workspace.read', { path }); loadDocument(file.path, file.source, file.hash); } }
+  try { if (await mayReplace()) { const file = await api<SourceFile>('document.read', { path }); loadDocument(file.path, file.source, file.hash); } }
   finally { switching = false; }
 }
 async function save() {
@@ -159,7 +186,7 @@ async function save() {
   const source = editor.source(), path = currentPath, expected_hash = savedHash;
   isSaving = true; updateDocumentState();
   try {
-    const result = await api<SourceFile>('workspace.write', { path, source, expected_hash });
+    const result = await api<SourceFile>('document.write', { path, source, expected_hash });
     // Saving is versioned: typing while the request is in flight stays unsaved.
     if (path === currentPath) { savedSource = result.source; savedHash = result.hash; updateDocumentState(); }
     await refreshFiles(); announce(m('Saved {path}', { path }));
@@ -169,7 +196,7 @@ async function reloadSource() {
   if (switching || savedHash === null) return; switching = true;
   try {
     const path = currentPath;
-    const file = await api<SourceFile>('workspace.read', { path });
+    const file = await api<SourceFile>('document.read', { path });
     if (dirty()) {
       const content = node('div', 'source-review');
       content.append(node('p', '', m('Compare your draft with the saved source. Replacing the editor discards this draft; copy it first if you want to preserve both versions.')), button(m('Copy editor draft'), async () => { await navigator.clipboard.writeText(editor.source()); announce(m('Editor draft copied')); }, 'quiet-button'));
@@ -205,7 +232,7 @@ function sourceView() {
 }
 function showRange(range: Range) { sourceView(); setPane('editor'); editor.select(range); }
 async function navigateDefinition(location: { uri: string; range: Range }) {
-  const url = new URL(location.uri), root = $('workspace-root').textContent || '';
+  const url = new URL(location.uri), root = $('workspace-root').dataset.root || '';
   const path = decodeURIComponent(url.pathname);
   if (url.protocol !== 'file:' || !path.startsWith(root + '/')) throw new Error(t(m('Definition is outside this workspace.')));
   const relative = path.slice(root.length + 1);
@@ -243,6 +270,13 @@ function scheduleAnalysis() {
   ++analysisGeneration;
   window.clearTimeout(analysisTimer);
   editor.diagnostics(editor.source(), []);
+  if (!currentPath.endsWith('.vr')) {
+    analysisPending = false;
+    setText($('language-status'), m('Plain text · no Verum analysis'));
+    setText($('diagnostics-count'), '0'); setText($('analysis-scope'), '');
+    $('diagnostics-list').replaceChildren(node('p', 'muted', m('Plain text · no Verum analysis')));
+    $('architecture-content').replaceChildren(); closeSettings(); return;
+  }
   setText($('language-status'), m('Analyzing…'));
   setText($('diagnostics-count'), '…');
   $('diagnostics-list').replaceChildren(node('p', 'muted', m('Waiting for current source analysis…')));
@@ -314,7 +348,6 @@ bind('lesson-script', () => newDocument(STARTER, 'first-experiment.vr'));
 bind('lesson-proof', () => newDocument(IDENTITY, 'identity.vr'));
 $<HTMLSelectElement>('language').value = currentLocale();
 $('language').addEventListener('change', () => { setLocale($<HTMLSelectElement>('language').value as Locale); editor.language(); editor.view.requestMeasure(); });
-input('file-filter').addEventListener('input', renderFiles);
 bind('run-settings', () => { $('execution-settings').hidden = !$('execution-settings').hidden; $('run-settings').setAttribute('aria-expanded', String(!$('execution-settings').hidden)); });
 function closeSettings() { $('execution-settings').hidden = true; $('run-settings').setAttribute('aria-expanded', 'false'); }
 document.addEventListener('pointerdown', event => {
@@ -325,8 +358,8 @@ document.addEventListener('keydown', event => {
 });
 window.addEventListener('beforeunload', event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
 
-let starting = false;
 function operationRequest(kind: Receipt['kind']) {
+  if (!currentPath.endsWith('.vr')) throw new Error(t(m('Select a Verum source file to run, check or prove.')));
   const source = editor.source(), path = currentPath;
   const seconds = Number(input('timeout').value);
   if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300) throw new Error(t(m('Choose a time budget between 1 and 300 seconds.')));
@@ -352,7 +385,7 @@ async function startOperation(kind: Receipt['kind']) {
   try {
     const result = await api<{ id: string }>('operation.start', request);
     selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path: request.path }));
-  } finally { starting = false; ['run', 'check', 'prove'].forEach(id => { $<HTMLButtonElement>(id).disabled = false; }); }
+  } finally { starting = false; updateDocumentState(); }
 }
 bind('run', () => startOperation('run')); bind('check', () => startOperation('check')); bind('prove', () => startOperation('proof'));
 let operationsBusy = false;
@@ -394,7 +427,7 @@ function renderResults() {
     const entry = button('', () => { selectedReceipt = receipt.id; renderResults(); }, 'history-item');
     entry.dataset.focusKey = receipt.id;
     entry.setAttribute('aria-current', String(receipt.id === selectedReceipt));
-    const row = node('span', 'history-row'); row.append(node('span', '', receipt.kind === 'proof' ? m('∀ Proof') : receipt.kind === 'check' ? m('✓ Check') : m('▶ Run')), node('span', `badge ${receipt.status}`, m(receipt.status)));
+    const row = node('span', 'history-row'); row.append(icon(receipt.kind === 'proof' ? 'proof' : receipt.kind === 'check' ? 'check' : 'run'), node('span', '', resultLabel(receipt.kind)), node('span', `badge ${receipt.status}`, m(receipt.status)));
     entry.append(row, node('span', 'history-path', receipt.path), node('span', 'history-path', m('{seconds}s · {hash}', { seconds: Math.max(0, elapsed(receipt) / 1000), hash: receipt.source_hash.slice(0, 7) })));
     setAttribute(entry, 'title', m('{kind} · {path} · {status}', { kind: resultLabel(receipt.kind), path: receipt.path, status: m(receipt.status) }));
       $('history').append(entry);
@@ -426,12 +459,14 @@ function renderResults() {
   const copy = button(m('Copy receipt'), async () => { await navigator.clipboard.writeText(pretty(receipt)); announce(m('Receipt copied')); }, 'quiet-button');
   copy.dataset.focusKey = 'copy'; heading.append(copy);
   detail.append(heading, node('p', 'result-meta', receipt.exit_code == null ? m('{path} · {seconds}s · {hash}', { path: receipt.path, seconds: elapsed(receipt) / 1000, hash: receipt.source_hash.slice(0, 12) }) : m('{path} · {seconds}s · exit {code} · {hash}', { path: receipt.path, seconds: elapsed(receipt) / 1000, code: receipt.exit_code, hash: receipt.source_hash.slice(0, 12) })));
-  if (receipt.timeout_ms) detail.append(node('p', 'muted', m(receipt.evidence_path ? 'Wall budget {seconds}s · source and receipt retained locally' : 'Wall budget {seconds}s', { seconds: receipt.timeout_ms / 1000 })));
+  const context = node('details'); context.dataset.key = 'context';
+  const contextHeading = node('summary', '', m('Execution context')); contextHeading.dataset.focusKey = 'context'; context.append(contextHeading);
+  if (receipt.timeout_ms) context.append(node('p', 'muted', m(receipt.evidence_path ? 'Wall budget {seconds}s · source and receipt retained locally' : 'Wall budget {seconds}s', { seconds: receipt.timeout_ms / 1000 })));
   if (receipt.kind === 'run') {
     const label = receipt.permissions === 'source' ? 'Source / CLI defaults' : receipt.permissions === 'deny-all' ? 'Deny all grants' : receipt.permissions === 'allow-all' ? 'Allow all grants' : 'Not recorded';
-    detail.append(node('p', 'result-meta', m('Script permissions: {policy}', { policy: m(label) })));
+    context.append(node('p', 'result-meta', m('Script permissions: {policy}', { policy: m(label) })));
   }
-  if (receipt.termination) detail.append(node('p', 'termination', receipt.termination));
+  if (receipt.termination) context.append(node('p', 'termination', receipt.termination));
   if (receipt.kind === 'proof') {
     const proof = node('div', 'proof-outcome');
     const report = parseArguments(receipt.proof), source = parseArguments(report.source), diagnostic = parseArguments(report.diagnostic);
@@ -440,7 +475,7 @@ function renderResults() {
     if (typeof diagnostic.message === 'string') proof.append(node('p', '', diagnostic.message));
     proof.append(node('p', '', m('This judgment applies to the selected logical declaration and source revision. Runtime implementation correspondence is a separate obligation.'))); detail.append(proof);
     if (receipt.proof !== undefined && receipt.proof !== null) appendDetails(detail, m('Full checker report'), receipt.proof, 'proof');
-  } else if (receipt.kind === 'run') detail.append(node('p', 'muted', m('Observed execution for this source revision; not a proof of all behaviors.')));
+  } else if (receipt.kind === 'run') context.append(node('p', 'muted', m('Observed execution for this source revision; not a proof of all behaviors.')));
   if (receipt.stdout) {
     if (receipt.kind === 'proof' && receipt.proof) {
       const stream = node('details'); stream.dataset.key = 'raw-proof'; const summary = node('summary', '', m('Raw checker output')); summary.dataset.focusKey = 'raw-proof'; stream.append(summary, node('pre', '', receipt.stdout)); detail.append(stream);
@@ -448,7 +483,7 @@ function renderResults() {
   }
   if (receipt.stderr) appendStream(detail, m('Diagnostics / standard error'), receipt.stderr, 'stderr');
   if (!receipt.stdout && !receipt.stderr) detail.append(node('p', 'muted', receipt.status === 'running' ? m('Waiting for process output…') : m('The process produced no text output.')));
-  appendDetails(detail, m('Full operation receipt'), receipt, 'receipt');
+  detail.append(context); appendDetails(detail, m('Full operation receipt'), receipt, 'receipt');
   if (oldId === receipt.id) { detail.querySelectorAll<HTMLDetailsElement>('details').forEach(item => { item.open = expanded.has(item.dataset.key); }); detail.scrollTop = scroll; }
   restoreFocus();
 }
@@ -701,8 +736,11 @@ async function initialize() {
   // A returning workspace opens its existing default file, never a colliding new draft.
   // Both async boundaries must preserve the initial document revision: typing, opening
   // another file or entering a document-switch dialog revokes this automatic restore.
-  if (!switching && sameDocumentRevision(initialRevision, documentRevision()) && files.some(file => file.path === initialRevision.path)) {
-    const file = await api<SourceFile>('workspace.read', { path: initialRevision.path });
+  const initialPath = files.find(file => file.path === initialRevision.path)?.path
+    ?? files.find(file => file.path.toLowerCase() === 'readme.md')?.path
+    ?? files.find(file => file.path.endsWith('.vr'))?.path;
+  if (!switching && sameDocumentRevision(initialRevision, documentRevision()) && initialPath) {
+    const file = await api<SourceFile>('document.read', { path: initialPath });
     if (!switching && sameDocumentRevision(initialRevision, documentRevision())) loadDocument(file.path, file.source, file.hash);
   }
   await refreshOperations();
@@ -719,3 +757,4 @@ window.setInterval(() => {
   });
 }, 1200);
 window.setInterval(() => { pollEvents().catch(error => { const text = errorText(error); if (text !== lastPollError) { lastPollError = text; notice(m('Agent event stream: {error}', { error: text })); } }); }, 700);
+window.setInterval(() => { if (hasToken() && document.visibilityState === 'visible') explorer?.refresh().catch(fail); }, 5000);

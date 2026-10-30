@@ -55,13 +55,13 @@ const verum = StreamLanguage.define({
 
 const theme = new Compartment();
 const language = new Compartment();
-function editorLanguage() {
+function editorLanguage(verumEnabled = true) {
   const phrases = currentLocale() === 'ru' ? {
     ...translations,
     'replaced match on line $': translations['replaced match on line {line}'].replace('{line}', '$'),
     'replaced $ matches': translations['replaced {count} matches'].replace('{count}', '$'),
   } : {};
-  return [EditorState.phrases.of(phrases), EditorView.contentAttributes.of({ 'aria-label': t(m('Verum source code')), spellcheck: 'false' })];
+  return [EditorState.phrases.of(phrases), EditorView.contentAttributes.of({ 'aria-label': t(m(verumEnabled ? 'Verum source code' : 'Project text')), spellcheck: 'false' })];
 }
 function editorTheme(dark: boolean) {
   return [EditorView.theme({
@@ -84,8 +84,10 @@ function editorTheme(dark: boolean) {
 
 export function makeEditor(parent: HTMLElement, source: string, onChange: (source: string) => void, onSelection: (line: number, column: number) => void) {
   let hooks: LanguageHooks | null = null;
+  let verumEnabled = true;
+  const syntax = new Compartment();
   async function definition() {
-    if (!hooks) return;
+    if (!hooks || !verumEnabled) return;
     const revision = hooks.revision();
     const reply = await languageRequest<Location | Location[] | null>(revision, 'textDocument/definition', positionAt(revision.source, view.state.selection.main.head));
     if (!sameRevision(revision, hooks.revision())) return;
@@ -94,11 +96,11 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
   }
   const stateFor = (source: string) => EditorState.create({ doc: source, extensions: [
       lineNumbers(), lintGutter(), highlightActiveLineGutter(), history(), drawSelection(), rectangularSelection(),
-      highlightActiveLine(), highlightSelectionMatches(), bracketMatching(), indentOnInput(), verum,
+      highlightActiveLine(), highlightSelectionMatches(), bracketMatching(), indentOnInput(), syntax.of(verumEnabled ? verum : []),
       autocompletion({ override: [async context => {
         const word = context.matchBefore(/[\p{L}_][\p{L}\p{N}_]*/u);
         if (!word || (!context.explicit && word.from === word.to)) return null;
-        if (!hooks) return null;
+        if (!hooks || !verumEnabled) return null;
         const revision = hooks.revision();
         try {
           const reply = await languageRequest<CompletionItem[] | { items: CompletionItem[] } | null>(revision, 'textDocument/completion', positionAt(revision.source, context.pos));
@@ -118,7 +120,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
       }] }),
       keymap.of([{ key: 'F12', run: () => { definition().catch(error => hooks?.failure(error)); return true; } }, ...defaultKeymap, ...historyKeymap, ...searchKeymap, ...completionKeymap]),
       hoverTooltip(async (_view, position) => {
-        if (!hooks) return null;
+        if (!hooks || !verumEnabled) return null;
         const revision = hooks.revision();
         try {
           const reply = await languageRequest<{ contents: unknown; range?: Range } | null>(revision, 'textDocument/hover', positionAt(revision.source, position));
@@ -133,7 +135,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
         } catch { return null; }
       }),
       EditorState.tabSize.of(4),
-      language.of(editorLanguage()),
+      language.of(editorLanguage(verumEnabled)),
       theme.of(editorTheme(document.documentElement.dataset.theme === 'dark')),
       EditorView.updateListener.of(update => {
         if (update.docChanged) onChange(update.state.doc.toString());
@@ -149,6 +151,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
     view,
     source: () => view.state.doc.toString(),
     connectLanguage(value: LanguageHooks) { hooks = value; },
+    document(path: string) { verumEnabled = path.endsWith('.vr'); view.dispatch({ effects: [syntax.reconfigure(verumEnabled ? verum : []), language.reconfigure(editorLanguage(verumEnabled))] }); },
     definition,
     diagnostics(source: string, diagnostics: Diagnostic[]) {
       if (view.state.doc.toString() !== source) return;
@@ -180,7 +183,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
         })) });
         closeSearchPanel(view);
       }
-      view.dispatch({ effects: language.reconfigure(editorLanguage()) });
+      view.dispatch({ effects: language.reconfigure(editorLanguage(verumEnabled)) });
       if (searchOpen) {
         openSearchPanel(view);
         if (searchFocused && fieldName) view.dom.querySelector<HTMLInputElement>(`.cm-search input[name="${fieldName}"]`)?.focus();

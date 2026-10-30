@@ -7,7 +7,7 @@
   --input:#fff;
   --text:#20272c;
   --muted:#66747e;
-  --gutter:#9ca7ae;
+  --scroll-thumb:#9ca7ae;
   --border:#dce3e7;
   --subtle-border:#edf1f3;
   --hover:#edf2f4;
@@ -32,7 +32,7 @@
   --input:#1b2329;
   --text:#dce4e9;
   --muted:#8c9aa5;
-  --gutter:#5c6b76;
+  --scroll-thumb:#5c6b76;
   --border:#2a343c;
   --subtle-border:#202b32;
   --hover:#222d35;

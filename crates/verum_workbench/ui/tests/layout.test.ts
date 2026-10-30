@@ -4,7 +4,7 @@ import { layoutLimits, readLayout, resolveLayout } from '../src/layout.ts';
 
 test('viewport pressure preserves a usable editor and never overwrites restoration preferences', () => {
   for (const files of [180, 224, 380]) for (const agent of [300, 344, 600]) {
-    const preferences = readLayout({ sizes: { files, agent, results: 600 } });
+    const preferences = readLayout({ sizes: { files, agent, results: 600 }, collapsed: { files: false, agent: false, results: false } });
     const saved = structuredClone(preferences);
     for (let width = layoutLimits.mobile + 1; width <= 1800; width += 17) for (const height of [300, 372, 600, 900]) {
       const layout = resolveLayout(preferences, width, height);
@@ -24,7 +24,9 @@ test('viewport pressure preserves a usable editor and never overwrites restorati
 });
 
 test('explicit expansion wins scarce space; returning to a wide viewport restores both panes', () => {
-  const preferences = readLayout(null);
+  const defaults = readLayout(null);
+  assert.deepEqual(defaults.collapsed, { files: false, agent: true, results: true });
+  const preferences = readLayout({ collapsed: { files: false, agent: false, results: false }, priority: 'agent' });
   assert.deepEqual(resolveLayout(preferences, 900, 800).collapsed, { files: true, agent: false, results: false });
   preferences.priority = 'files';
   assert.deepEqual(resolveLayout(preferences, 900, 800).collapsed, { files: false, agent: true, results: false });

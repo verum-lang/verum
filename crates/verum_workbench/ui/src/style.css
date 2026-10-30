@@ -4,14 +4,14 @@
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-*:hover, *:focus-visible, [data-scrolling] { scrollbar-color: var(--gutter) transparent; }
+*:hover, *:focus-visible, [data-scrolling] { scrollbar-color: var(--scroll-thumb) transparent; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb { background: transparent; border-radius: 8px; }
 *:hover::-webkit-scrollbar-thumb, *:focus-visible::-webkit-scrollbar-thumb,
-[data-scrolling]::-webkit-scrollbar-thumb { background: var(--gutter); }
+[data-scrolling]::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-@media (hover: none) { * { scrollbar-color: var(--gutter) transparent; } }
+@media (hover: none) { * { scrollbar-color: var(--scroll-thumb) transparent; } }
 @media (forced-colors: active) { * { scrollbar-color: auto; } }
 body {
   margin: 0;
@@ -380,6 +380,40 @@ kbd {
   padding: 0 7px;
   min-height: 48px;
 }
+.icon { flex: 0 0 auto; vertical-align: middle; }
+.quiet-button:has(.icon) { display: inline-flex; align-items: center; gap: 6px; }
+.explorer-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 8px; border-bottom: 1px solid var(--subtle-border); }
+.explorer-toolbar [aria-pressed=true] { background: var(--accent-soft); color: var(--accent-text); }
+.file-search-status { padding: 8px 12px; font-size: 11px; color: var(--muted); }
+.tree-entry { display: flex; align-items: center; gap: 6px; min-height: 29px; padding: 3px 7px 3px calc(2px + var(--depth) * 14px); font-size: 12px; border-radius: 4px; cursor: pointer; user-select: none; }
+.tree-entry:hover { background: var(--hover); }
+.tree-entry[aria-selected=true] { background: var(--accent-soft); color: var(--accent-text); }
+.tree-entry:focus-visible { outline-offset: -2px; }
+.tree-chevron { width: 13px; display: flex; align-items: center; flex: 0 0 auto; color: var(--muted); }
+.tree-chevron .icon { width: 13px; height: 13px; }
+.tree-entry[aria-expanded=true] .tree-chevron { transform: rotate(90deg); }
+.tree-entry > .icon { width: 16px; height: 16px; color: var(--muted); }
+.tree-entry > .tree-file-icon { color: var(--accent-text); }
+.tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.git-badge { font: 10px ui-monospace, monospace; letter-spacing: 1px; padding: 1px 3px; border-radius: 3px; color: var(--warning); white-space: nowrap; }
+.git-badge:hover { background: var(--warning-bg); }
+.git-badge[data-conflict=true] { color: var(--danger); background: var(--danger-bg); }
+.tree-change-count { color: var(--muted); font: 10px ui-monospace, monospace; }
+.draft-dot { font-size: 8px; color: var(--accent); }
+.learn-section > summary { font-size: 11px; color: var(--muted); cursor: pointer; }
+.learn-section[open] > summary { margin-bottom: 8px; }
+.learn-section .lesson-symbol { width: 18px; height: 18px; }
+.sidebar-footer { gap: 7px; }
+#git-status { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sidebar-footer .icon { width: 14px; height: 14px; }
+.workspace-label { margin-left: 8px; margin-right: auto; color: var(--text); }
+.topbar-end { margin-left: auto; }
+.change-review-tabs { display: flex; gap: 8px; margin-block: 10px; }
+.change-review-tabs [aria-pressed=true] { background: var(--accent-soft); color: var(--accent-text); }
+.git-patch { max-height: 60dvh; overflow: auto; padding: 12px; background: var(--editor); border: 1px solid var(--border); border-radius: 5px; white-space: pre; font-size: 12px; }
+dialog:has(.change-review) { max-width: min(900px, calc(100vw - 32px)); }
+dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
+.history-row > .icon { width: 13px; height: 13px; }
 .file-entry {
   width: 100%;
   text-align: left;
@@ -565,7 +599,7 @@ kbd {
   padding: 0 var(--gutter);
   border-bottom: 1px solid var(--subtle-border);
 }
-#run-settings svg { display: none; }
+#run-settings svg { display: block; }
 .execution-settings {
   position: absolute;
   top: calc(var(--pane-heading-height) + 48px);

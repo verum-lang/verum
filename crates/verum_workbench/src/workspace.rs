@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
 };
 use verum_common::{List, Text};
@@ -46,11 +46,21 @@ impl Workspace {
         Ok(Self { root })
     }
     pub fn path(&self, relative: &str) -> Result<PathBuf> {
-        let relative = Path::new(relative);
         ensure!(
-            relative.extension().is_some_and(|e| e == "vr"),
+            Path::new(relative).extension().is_some_and(|e| e == "vr"),
             "Select a .vr source file"
         );
+        let path = self.document_path(relative)?;
+        ensure!(
+            path.parent().is_some_and(Path::is_dir),
+            "Parent directory does not exist"
+        );
+        Ok(path)
+    }
+    /// Shared path boundary for project text, directory browsing and Git views.
+    pub fn document_path(&self, relative: &str) -> Result<PathBuf> {
+        ensure!(!relative.is_empty(), "Expected a workspace-relative path");
+        let relative = Path::new(relative);
         ensure!(
             relative
                 .components()
@@ -74,27 +84,62 @@ impl Workspace {
                 Err(e) => return Err(e.into()),
             }
         }
-        ensure!(
-            path.parent().is_some_and(Path::is_dir),
-            "Parent directory does not exist"
-        );
         Ok(path)
     }
     pub fn read(&self, relative: &str) -> Result<Value> {
-        let path = self.path(relative)?;
+        self.path(relative)?;
+        self.read_document(relative)
+    }
+    pub fn read_document(&self, relative: &str) -> Result<Value> {
+        let path = self.document_path(relative)?;
+        ensure!(path.metadata()?.is_file(), "Select a regular text file");
         ensure!(
             path.metadata()?.len() <= SOURCE_LIMIT as u64,
             "Source exceeds editor limit"
         );
-        let source = std::fs::read_to_string(path)?;
+        // The standard I/O boundary requires a Vec; retain Text in the model.
+        let mut bytes = vec![];
+        std::fs::File::open(path)?
+            .take(SOURCE_LIMIT as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        let source = Text::from_utf8(bytes)?;
         ensure!(source.len() <= SOURCE_LIMIT, "Source exceeds editor limit");
+        ensure!(
+            !source.contains("\0"),
+            "Binary files cannot be edited as text"
+        );
         Ok(json!({"path":relative, "hash":digest(source.as_bytes()), "source":source}))
     }
     pub fn write(&self, relative: &str, source: &str, expected: Option<&str>) -> Result<Value> {
+        self.path(relative)?;
+        self.write_document(relative, source, expected)
+    }
+    pub fn write_document(
+        &self,
+        relative: &str,
+        source: &str,
+        expected: Option<&str>,
+    ) -> Result<Value> {
         ensure!(source.len() <= SOURCE_LIMIT, "Source exceeds editor limit");
-        let path = self.path(relative)?;
-        let actual = match std::fs::read(&path) {
-            Ok(bytes) => Some(digest(&bytes)),
+        ensure!(
+            !source.contains('\0'),
+            "Binary files cannot be edited as text"
+        );
+        let path = self.document_path(relative)?;
+        ensure!(
+            path.parent().is_some_and(Path::is_dir),
+            "Parent directory does not exist"
+        );
+        if path.exists() {
+            ensure!(path.is_file(), "Select a regular text file");
+        }
+        let actual = match std::fs::File::open(&path) {
+            Ok(file) => {
+                let mut bytes = vec![];
+                file.take(SOURCE_LIMIT as u64 + 1).read_to_end(&mut bytes)?;
+                ensure!(bytes.len() <= SOURCE_LIMIT, "Source exceeds editor limit");
+                Some(digest(&bytes))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e.into()),
         };

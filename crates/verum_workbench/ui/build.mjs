@@ -24,7 +24,7 @@ for (const input of Object.keys(result.metafile.inputs)) {
     directory = dirname(directory);
   }
 }
-const notices = ['Verum Workbench — bundled third-party notices\n'];
+const notices = ['Verum Workbench — bundled third-party notices\n', await readFile('HUGEICONS-LICENSE.txt', 'utf8')];
 for (const [, { directory, pkg }] of [...packages].sort()) {
   const licenseFiles = (await readdir(directory)).filter(name => /^(license|copying)(\.|$)/i.test(name));
   if (!licenseFiles.length) throw new Error(`Missing license file for ${pkg.name}`);

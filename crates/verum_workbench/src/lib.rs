@@ -3,6 +3,8 @@ pub mod codex;
 pub mod execution;
 pub mod jobs;
 pub mod language;
+pub mod project_files;
+pub mod project_git;
 pub mod server;
 pub mod workspace;
 
@@ -30,7 +32,10 @@ impl Studio {
     pub fn open(config: Config) -> Result<Self> {
         Self::open_with_library(config, None)
     }
-    pub fn open_with_library(mut config: Config, library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>) -> Result<Self> {
+    pub fn open_with_library(
+        mut config: Config,
+        library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+    ) -> Result<Self> {
         for executable in [&mut config.verum, &mut config.proof, &mut config.codex] {
             if executable.is_relative() && executable.components().count() > 1 {
                 *executable = std::env::current_dir()?.join(&*executable);
@@ -62,19 +67,30 @@ impl Studio {
     }
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         match method {
+            "workspace.browse" | "workspace.search" | "workspace.changes" | "workspace.diff" => {
+                self.project_files(method, params).await
+            }
+            "document.read" => self
+                .workspace
+                .lock()
+                .await
+                .read_document(field(&params, "path")?),
+            "document.write" => {
+                self.workspace.lock().await.write_document(
+                    field(&params, "path")?,
+                    field(&params, "source")?,
+                    expected_hash(&params)?,
+                )
+            }
             "workspace.list" => self.workspace.lock().await.list(),
             "language.request" => self.language_request(&params).await,
             "project.inspect" => self.project().await,
             "workspace.read" => self.workspace.lock().await.read(field(&params, "path")?),
             "workspace.write" => {
-                ensure!(
-                    params.get("expected_hash").is_some(),
-                    "expected_hash is required (null only for a new file)"
-                );
                 self.workspace.lock().await.write(
                     field(&params, "path")?,
                     field(&params, "source")?,
-                    params["expected_hash"].as_str(),
+                    expected_hash(&params)?,
                 )
             }
             "operation.plan" | "operation.start" => {
@@ -191,6 +207,28 @@ impl Studio {
         let tool = field(params, "tool")?;
         let mut args = params["arguments"].clone();
         match tool {
+            "verum_files" => {
+                self.project_files(
+                    if args.get("query").is_some() {
+                        "workspace.search"
+                    } else {
+                        "workspace.browse"
+                    },
+                    args,
+                )
+                .await
+            }
+            "verum_changes" => {
+                self.project_files(
+                    if args.get("path").is_some() {
+                        "workspace.diff"
+                    } else {
+                        "workspace.changes"
+                    },
+                    args,
+                )
+                .await
+            }
             "verum_plan" => {
                 self.workspace.lock().await.path(field(&args, "path")?)?;
                 Ok(serde_json::to_value(self.jobs.lock().await.plan(&args)?)?)
@@ -199,14 +237,10 @@ impl Studio {
             "verum_analyze" => self.language_request(&args).await,
             "verum_read" => self.workspace.lock().await.read(field(&args, "path")?),
             "verum_propose" => {
-                ensure!(
-                    args.get("expected_hash").is_some(),
-                    "Proposal requires expected_hash"
-                );
                 self.workspace.lock().await.write(
                     field(&args, "path")?,
                     field(&args, "source")?,
-                    args["expected_hash"].as_str(),
+                    expected_hash(&args)?,
                 )
             }
             "verum_run" | "verum_check" | "verum_proof" => {
@@ -272,9 +306,42 @@ impl Studio {
             .await?;
         Ok(json!({"workspace":files,"analysis":analysis}))
     }
+    async fn project_files(&self, method: &str, params: Value) -> Result<Value> {
+        let root = self.workspace.lock().await.root.clone();
+        match method {
+            "workspace.changes" => Ok(serde_json::to_value(project_git::changes(&root).await)?),
+            "workspace.diff" => Ok(
+                json!({"path":field(&params,"path")?,"side":field(&params,"side")?,"patch":project_git::diff(&root, field(&params,"path")?, field(&params,"side")?).await?}),
+            ),
+            _ => {
+                let search = method == "workspace.search";
+                tokio::task::spawn_blocking(move || {
+                    let workspace = workspace::Workspace::open(&root)?;
+                    let result = if search {
+                        workspace.search_files(field(&params, "query")?)?
+                    } else {
+                        workspace.browse(
+                            params
+                                .get("path")
+                                .map(|_| field(&params, "path"))
+                                .transpose()?
+                                .unwrap_or(""),
+                        )?
+                    };
+                    Ok(serde_json::to_value(result)?)
+                })
+                .await?
+            }
+        }
+    }
 }
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value[name]
         .as_str()
         .with_context(|| format!("Expected {name}"))
+}
+fn expected_hash(value: &Value) -> Result<Option<&str>> {
+    let expected = value.get("expected_hash").context("expected_hash is required (null only for a new file)")?;
+    if expected.is_null() { Ok(None) }
+    else { Ok(Some(expected.as_str().context("expected_hash must be a string or null")?)) }
 }
