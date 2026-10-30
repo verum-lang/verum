@@ -65,6 +65,10 @@ def resetStep (s : SearchState Nat Nat) (action : SearchAction Nat) : SearchStat
         'revisions_cannot_starve_frontier': '(searchTrace Nat.succ search revisions).frontier = 7',
         'not_every_declaration_advances_frontier': '(searchStep Nat.succ search .declaration).frontier = 8',
         'frontier_fallback_cannot_skip': '(searchStep Nat.succ { search with revisit := none } .declaration).frontier = 9',
+        'base_first_odd_turn_not_rounded_down': '(searchTrace Nat.succ { search with revisitTurn := false } [.declaration, .suspended, .revision 0, .declaration, .declaration]).frontier = 8',
+        'revisit_first_odd_turn_not_rounded_up': '(searchTrace Nat.succ search [.declaration, .suspended, .declaration, .declaration]).frontier = 9',
+        'exact_count_requires_available_partner': '(searchTrace Nat.succ { search with revisit := none, revisitTurn := false } [.declaration, .declaration]).frontier = 8',
+        'suspension_does_not_rotate_turn': '(searchStep Nat.succ search .suspended).revisitTurn = false',
         'reset_policy_has_no_progress_guarantee': '7 < (revisions.foldl resetStep search).frontier',
     }
     with tempfile.TemporaryDirectory(prefix='verum-acquisition-scheduling-') as directory:
@@ -93,6 +97,14 @@ example (s : SearchState Nat Nat) (trace : List (SearchAction Nat))
     (completed : completedDeclarations trace = 2) :
   s.frontier < (searchTrace Nat.succ s trace).frontier :=
   two_declarations_advance_frontier Nat.succ id (fun _ => rfl) s trace completed
+example (s : SearchState Nat Nat) (trace : List (SearchAction Nat))
+    (available : s.revisit.isSome = true) (baseFirst : s.revisitTurn = false) :
+  (searchTrace Nat.succ s trace).frontier = s.frontier + (completedDeclarations trace + 1) / 2 :=
+  base_first_completed_declarations Nat.succ id (fun _ => rfl) s available baseFirst trace
+example : (searchTrace Nat.succ { search with revisitTurn := false }
+    [.declaration, .suspended, .revision 0, .declaration, .declaration]).frontier = 9 := by decide_cbv
+example : (searchTrace Nat.succ search
+    [.declaration, .suspended, .declaration, .declaration]).frontier = 8 := by decide_cbv
 ''' + '\n'.join('#print axioms ' + n for n in names) + '\n')
         audit = check(positive)
         rosters = [d['data'] for d in audit['diagnostics'] if d['severity'] == 'information']

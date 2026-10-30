@@ -320,6 +320,71 @@ theorem two_declarations_advance_frontier (advance : C → C) (rank : C → Nat)
   rw [completed] at progress
   exact progress
 
+/-- Exact alternation requires an available revisit cursor. Without one the
+    existing fallback performs additional frontier work, so only the lower
+    bound above applies. Revisions and suspensions do not consume a turn. -/
+theorem search_step_retains_revisit (advance : C → C) (s : SearchState O C)
+    (available : s.revisit.isSome = true) (action : SearchAction C) :
+    (searchStep advance s action).revisit.isSome = true := by
+  cases action with
+  | revision _ => rfl
+  | suspended => exact available
+  | declaration =>
+    cases s with
+    | mk owner frontier revisit turn =>
+      cases turn <;> cases revisit <;> simp_all [searchStep]
+
+theorem frontier_step_potential_exact (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (available : s.revisit.isSome = true)
+    (action : SearchAction C) :
+    frontierPotential rank (searchStep advance s action) =
+      frontierPotential rank s + completedDeclarations [action] := by
+  cases action with
+  | revision _ => rfl
+  | suspended => rfl
+  | declaration =>
+    cases s with
+    | mk owner frontier revisit turn =>
+      cases turn <;> cases revisit <;>
+        simp_all [searchStep, frontierPotential, completedDeclarations] <;> omega
+
+theorem frontier_trace_potential_exact (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (available : s.revisit.isSome = true)
+    (events : List (SearchAction C)) :
+    frontierPotential rank (searchTrace advance s events) =
+      frontierPotential rank s + completedDeclarations events := by
+  induction events generalizing s with
+  | nil => rfl
+  | cons event rest ih =>
+    have head := frontier_step_potential_exact advance rank successor s available event
+    have tail := ih (searchStep advance s event)
+      (search_step_retains_revisit advance s available event)
+    change frontierPotential rank (searchTrace advance (searchStep advance s event) rest) = _
+    cases event <;> simp only [completedDeclarations] at * <;> omega
+
+/-- The exact count depends on the retained initial phase, not on the number
+    of calls, revisions, zero grants or pauses. It is not a work bound. -/
+theorem completed_declarations_exact_frontier (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (available : s.revisit.isSome = true)
+    (events : List (SearchAction C)) :
+    rank (searchTrace advance s events).frontier = rank s.frontier +
+      (completedDeclarations events + if s.revisitTurn then 0 else 1) / 2 := by
+  have exactCount := frontier_trace_potential_exact advance rank successor s available events
+  simp only [frontierPotential] at exactCount
+  split at exactCount <;> split at exactCount <;> simp_all <;> omega
+
+theorem base_first_completed_declarations (advance : C → C) (rank : C → Nat)
+    (successor : ∀ cursor, rank (advance cursor) = rank cursor + 1)
+    (s : SearchState O C) (available : s.revisit.isSome = true)
+    (baseFirst : s.revisitTurn = false) (events : List (SearchAction C)) :
+    rank (searchTrace advance s events).frontier =
+      rank s.frontier + (completedDeclarations events + 1) / 2 := by
+  simpa only [baseFirst, Bool.false_eq_true, ↓reduceIte] using
+    completed_declarations_exact_frontier advance rank successor s available events
+
 inductive Event (S : Type) where
   | opening (source : S)
   | resource (source : S)
