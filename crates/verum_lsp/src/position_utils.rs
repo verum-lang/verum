@@ -25,7 +25,7 @@ pub fn ast_span_to_range(span: &Span, text: &str) -> Range {
 /// # Arguments
 ///
 /// * `span` - Diagnostic span with line/column info
-/// * `_text` - Source text (unused but kept for API consistency)
-pub fn verum_span_to_range(span: &LineColSpan, _text: &str) -> Range {
-    line_col_span_to_lsp_range(span)
+/// * `text` - Source text of the same file and revision, for UTF-16 columns
+pub fn verum_span_to_range(span: &LineColSpan, text: &str) -> Range {
+    line_col_span_to_lsp_range_with_text(span, text)
 }

@@ -18,6 +18,33 @@ use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 use verum_types::{Type, TypeChecker};
 
+/// A refused edit leaves both the source and its analyzed revision unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DocumentUpdateError {
+    #[error("document is not open")]
+    NotOpen,
+    #[error("document version {incoming} does not follow current version {current}")]
+    StaleVersion { current: i32, incoming: i32 },
+    #[error("change {index} has an invalid UTF-16 range")]
+    InvalidRange { index: usize },
+    #[error("change {index} range length {declared} differs from its UTF-16 length {actual}")]
+    InvalidRangeLength {
+        index: usize,
+        declared: u32,
+        actual: usize,
+    },
+}
+
+/// Diagnostics and source captured under one document lock.
+#[derive(Debug, Clone)]
+pub struct DiagnosticSnapshot {
+    pub text: String,
+    pub diagnostics: List<Diagnostic>,
+    pub version: i32,
+    /// Distinguishes a reopened document even when its version starts over.
+    pub file_id: FileId,
+}
+
 /// Information about a symbol in the document
 #[derive(Debug, Clone)]
 pub struct SymbolInfo {
@@ -312,53 +339,74 @@ impl DocumentState {
 
     /// Update the document text and reparse
     pub fn update(&mut self, text: String, version: i32) {
-        self.text = text;
-        self.version = version;
-        self.reparse();
+        if let Err(error) = self.try_update(text, version) {
+            tracing::warn!(%error, "Refused document update");
+        }
+    }
+
+    pub fn try_update(&mut self, text: String, version: i32) -> Result<(), DocumentUpdateError> {
+        self.try_apply_changes(
+            vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text,
+            }],
+            version,
+        )
     }
 
     /// Apply incremental changes to the document
     pub fn apply_changes(&mut self, changes: Vec<TextDocumentContentChangeEvent>, version: i32) {
-        self.version = version;
+        if let Err(error) = self.try_apply_changes(changes, version) {
+            tracing::warn!(%error, "Refused document changes");
+        }
+    }
 
-        for change in changes {
+    /// Validate the complete batch before committing it. Ranges in a batch
+    /// refer to the document produced by the preceding change, as LSP requires.
+    pub fn try_apply_changes(
+        &mut self,
+        changes: Vec<TextDocumentContentChangeEvent>,
+        version: i32,
+    ) -> Result<(), DocumentUpdateError> {
+        if version <= self.version {
+            return Err(DocumentUpdateError::StaleVersion {
+                current: self.version,
+                incoming: version,
+            });
+        }
+        let mut text = self.text.clone();
+        for (index, change) in changes.into_iter().enumerate() {
             if let Some(range) = change.range {
-                // Incremental change
-                let start_offset = self.position_to_offset(range.start) as usize;
-                let end_offset = self.position_to_offset(range.end) as usize;
-                self.text
-                    .replace_range(start_offset..end_offset, &change.text);
+                let span =
+                    verum_common::span_utils::lsp::lsp_range_to_span(range, &text, self.file_id)
+                        .ok_or(DocumentUpdateError::InvalidRange { index })?;
+                let range = span.start as usize..span.end as usize;
+                if let Some(declared) = change.range_length {
+                    let actual = text[range.clone()].encode_utf16().count();
+                    if declared as usize != actual {
+                        return Err(DocumentUpdateError::InvalidRangeLength {
+                            index,
+                            declared,
+                            actual,
+                        });
+                    }
+                }
+                text.replace_range(range, &change.text);
             } else {
-                // Full document sync
-                self.text = change.text;
+                text = change.text;
             }
         }
-
+        self.text = text;
+        self.version = version;
         self.reparse();
+        Ok(())
     }
 
     /// Convert LSP Position to byte offset
     pub fn position_to_offset(&self, position: Position) -> u32 {
-        let mut offset: u32 = 0;
-        let mut current_line: u32 = 0;
-        let mut current_char: u32 = 0;
-
-        for ch in self.text.chars() {
-            if current_line == position.line && current_char == position.character {
-                return offset;
-            }
-
-            if ch == '\n' {
-                current_line += 1;
-                current_char = 0;
-            } else {
-                current_char += 1;
-            }
-
-            offset += ch.len_utf8() as u32;
-        }
-
-        offset
+        verum_common::span_utils::lsp::lsp_position_to_offset(position, &self.text)
+            .unwrap_or(self.text.len()) as u32
     }
 
     /// Reparse the document and update diagnostics
@@ -403,6 +451,9 @@ impl DocumentState {
 
                     let diagnostic = DiagnosticBuilder::new(Severity::Error)
                         .message(error.to_string())
+                        .span(verum_common::span_utils::span_to_line_col_span(
+                            error.span, &self.text, "",
+                        ))
                         .build();
 
                     self.diagnostics.push(diagnostic);
@@ -653,11 +704,32 @@ impl DocumentState {
                 }
                 Err(type_error) => {
                     // Convert to diagnostic and store
-                    let diagnostic = type_error.to_diagnostic();
+                    let diagnostic = type_error.to_diagnostic_with_span(Some(|span| {
+                        verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
+                    }));
                     self.diagnostics.push(diagnostic);
                 }
             }
         }
+
+        // Statement recovery, exhaustiveness and ambiguity checks report via
+        // the checker's diagnostic channel even when check_item returns Ok.
+        // Render its source errors with this revision, as the compiler does.
+        let sources = type_checker.diagnostic_sources();
+        if sources.len() == type_checker.diagnostics().len() {
+            for error in sources {
+                self.diagnostics
+                    .push(error.to_diagnostic_with_span(Some(|span| {
+                        verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
+                    })));
+            }
+        } else {
+            self.diagnostics
+                .extend(type_checker.diagnostics().iter().cloned());
+        }
+        let mut seen = std::collections::HashSet::new();
+        self.diagnostics
+            .retain(|diagnostic| seen.insert(diagnostic.compute_dedup_key()));
     }
 
     /// Get symbol info by name
@@ -766,6 +838,48 @@ impl DocumentStore {
         if let Some(entry) = self.documents.get(uri) {
             entry.write().apply_changes(changes, version);
         }
+    }
+
+    pub fn try_update(
+        &self,
+        uri: &Url,
+        text: String,
+        version: i32,
+    ) -> Result<(), DocumentUpdateError> {
+        let entry = self
+            .documents
+            .get(uri)
+            .ok_or(DocumentUpdateError::NotOpen)?;
+        entry.write().try_update(text, version)
+    }
+
+    pub fn try_apply_changes(
+        &self,
+        uri: &Url,
+        changes: Vec<TextDocumentContentChangeEvent>,
+        version: i32,
+    ) -> Result<(), DocumentUpdateError> {
+        let entry = self
+            .documents
+            .get(uri)
+            .ok_or(DocumentUpdateError::NotOpen)?;
+        entry.write().try_apply_changes(changes, version)
+    }
+
+    pub fn diagnostic_snapshot(&self, uri: &Url) -> Option<DiagnosticSnapshot> {
+        self.with_document(uri, |doc| DiagnosticSnapshot {
+            text: doc.text.clone(),
+            diagnostics: doc.diagnostics.clone(),
+            version: doc.version,
+            file_id: doc.file_id,
+        })
+    }
+
+    pub fn is_current_snapshot(&self, uri: &Url, snapshot: &DiagnosticSnapshot) -> bool {
+        self.with_document(uri, |doc| {
+            doc.version == snapshot.version && doc.file_id == snapshot.file_id
+        })
+        .unwrap_or(false)
     }
 
     /// Get diagnostics for a document

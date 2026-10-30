@@ -12,7 +12,7 @@ use crate::cbgr_hints::CbgrHintProvider;
 use crate::code_actions;
 use crate::completion;
 use crate::diagnostics;
-use crate::document::{DocumentStore, SymbolKind as VerumSymbolKind};
+use crate::document::{DiagnosticSnapshot, DocumentStore, SymbolKind as VerumSymbolKind};
 use crate::formatting;
 use crate::hover;
 use crate::lsp_config::SharedLspConfig;
@@ -25,12 +25,15 @@ use crate::selection_range;
 use crate::semantic_tokens::SemanticTokenProvider;
 use crate::workspace_index::WorkspaceIndex;
 
-/// The main LSP backend
+/// The main LSP backend.
 pub struct Backend {
     /// The LSP client (for sending messages back)
     client: Client,
     /// Document store (tracks open documents)
-    documents: DocumentStore,
+    pub(crate) documents: DocumentStore,
+    /// Orders mutation/close and diagnostic publication for each URI. Entries
+    /// survive close so a late analysis cannot race a reopened document.
+    document_gates: dashmap::DashMap<Url, Arc<tokio::sync::Mutex<()>>>,
     /// Refinement validator
     refinement_validator: RefinementValidator,
     /// CBGR hints provider
@@ -54,6 +57,7 @@ impl Backend {
         Self {
             client,
             documents: DocumentStore::new(),
+            document_gates: dashmap::DashMap::new(),
             refinement_validator: RefinementValidator::new(),
             cbgr_hints: CbgrHintProvider::new(),
             semantic_provider: SemanticTokenProvider::new(),
@@ -68,11 +72,43 @@ impl Backend {
         &self.config
     }
 
+    fn document_gate(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(self.document_gates.entry(uri.clone()).or_default().value())
+    }
+
+    async fn publish_snapshot(
+        &self,
+        uri: &Url,
+        snapshot: &DiagnosticSnapshot,
+        diagnostics: Vec<Diagnostic>,
+    ) -> bool {
+        let gate = self.document_gate(uri);
+        let _guard = gate.lock().await;
+        if !self.documents.is_current_snapshot(uri, snapshot) {
+            return false;
+        }
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, Some(snapshot.version))
+            .await;
+        true
+    }
+
+    async fn snapshot_matches_disk(uri: &Url, snapshot: &DiagnosticSnapshot) -> bool {
+        let Ok(path) = uri.to_file_path() else {
+            return false;
+        };
+        tokio::fs::read_to_string(path)
+            .await
+            .is_ok_and(|text| text == snapshot.text)
+    }
+
     /// Index a document in the workspace index
     fn index_document_in_workspace(&self, uri: &Url) {
         self.documents.with_document(uri, |doc| {
             if let Some(module) = &doc.module {
                 self.workspace_index.index_document(uri, module, &doc.text);
+            } else {
+                self.workspace_index.clear_document(uri);
             }
         });
     }
@@ -131,28 +167,31 @@ impl Backend {
     ///  project's `verum.toml` so the same config and output
     ///  schema as CI / pre-commit drives the editor experience.
     ///
-    /// Both streams are merged into one `publish_diagnostics`
-    /// notification so the editor sees them as a unified
-    /// problems-pane entry per file. Lint failures never block the
-    /// compiler stream — if the lint subprocess errors, we publish
-    /// only the compiler diagnostics.
+    /// Publish compiler diagnostics immediately, then merge disk lint only
+    /// while the buffer still matches that source revision on disk.
     async fn publish_diagnostics(&self, uri: Url) {
-        let verum_diagnostics = self.documents.get_diagnostics(&uri);
-
-        if let Some(text) = self.documents.get_text(&uri) {
-            let mut lsp_diagnostics =
-                diagnostics::convert_diagnostics(verum_diagnostics, &text, &uri);
-
-            let lint_settings = self.lint_settings();
-            if lint_settings.enabled {
-                let lint_diagnostics =
-                    crate::lint_diagnostics::lint_diagnostics(&uri, &lint_settings).await;
-                lsp_diagnostics.extend(lint_diagnostics);
+        let Some(snapshot) = self.documents.diagnostic_snapshot(&uri) else {
+            return;
+        };
+        let mut lsp_diagnostics =
+            diagnostics::convert_diagnostics(snapshot.diagnostics.clone(), &snapshot.text, &uri);
+        // Compiler diagnostics must not wait for the optional disk-based linter.
+        if !self
+            .publish_snapshot(&uri, &snapshot, lsp_diagnostics.clone())
+            .await
+        {
+            return;
+        }
+        let lint_settings = self.lint_settings();
+        if lint_settings.enabled && Self::snapshot_matches_disk(&uri, &snapshot).await {
+            let lint = crate::lint_diagnostics::lint_diagnostics(&uri, &lint_settings).await;
+            // Disk lint has no overlay protocol. Never attach its result to an
+            // unsaved buffer or a revision that changed while lint was running.
+            if Self::snapshot_matches_disk(&uri, &snapshot).await && !lint.is_empty() {
+                lsp_diagnostics.extend(lint);
+                self.publish_snapshot(&uri, &snapshot, lsp_diagnostics)
+                    .await;
             }
-
-            self.client
-                .publish_diagnostics(uri, lsp_diagnostics, None)
-                .await;
         }
     }
 
@@ -375,7 +414,9 @@ impl LanguageServer for Backend {
 
         // Scan workspace under a progress spinner so large projects
         // show feedback in the editor status bar.
-        if let Ok(cwd) = std::env::current_dir() {
+        if !self.workspace_index.is_initialized()
+            && let Ok(cwd) = std::env::current_dir()
+        {
             let idx = &self.workspace_index;
             self.with_progress("Indexing Verum workspace", "verum/index", || async {
                 idx.initialize(&cwd);
@@ -395,7 +436,8 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         tracing::debug!("Document opened: {}", params.text_document.uri);
-
+        let gate = self.document_gate(&params.text_document.uri);
+        let guard = gate.lock().await;
         self.documents.open(
             params.text_document.uri.clone(),
             params.text_document.text,
@@ -404,22 +446,26 @@ impl LanguageServer for Backend {
 
         // Index document in workspace index
         self.index_document_in_workspace(&params.text_document.uri);
-
+        drop(guard);
         self.publish_diagnostics(params.text_document.uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         tracing::debug!("Document changed: {}", params.text_document.uri);
-
-        self.documents.apply_changes(
+        let gate = self.document_gate(&params.text_document.uri);
+        let guard = gate.lock().await;
+        if let Err(error) = self.documents.try_apply_changes(
             &params.text_document.uri,
             params.content_changes,
             params.text_document.version,
-        );
+        ) {
+            tracing::warn!(%error, uri = %params.text_document.uri, "Refused document change");
+            return;
+        }
 
         // Re-index document in workspace index
         self.index_document_in_workspace(&params.text_document.uri);
-
+        drop(guard);
         self.publish_diagnostics(params.text_document.uri).await;
     }
 
@@ -434,11 +480,18 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         tracing::debug!("Document closed: {}", params.text_document.uri);
+        let gate = self.document_gate(&params.text_document.uri);
+        let _guard = gate.lock().await;
+        let version = self
+            .documents
+            .with_document(&params.text_document.uri, |doc| doc.version);
         self.documents.close(&params.text_document.uri);
+        self.workspace_index
+            .clear_document(&params.text_document.uri);
 
         // Clear diagnostics
         self.client
-            .publish_diagnostics(params.text_document.uri, vec![], None)
+            .publish_diagnostics(params.text_document.uri, vec![], version)
             .await;
     }
 
@@ -2419,3 +2472,7 @@ impl Backend {
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/backend_versioned_publication/mod.rs"]
+mod versioned_publication_tests;

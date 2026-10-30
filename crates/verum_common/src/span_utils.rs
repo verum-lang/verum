@@ -211,11 +211,27 @@ pub mod lsp {
     /// assert_eq!(pos.character, 0);
     /// ```
     pub fn offset_to_lsp_position(offset: usize, text: &str) -> Position {
-        let (line, character) = super::offset_to_line_col(offset, text);
-        Position {
-            line: line as u32,
-            character: character as u32,
+        let mut position = Position::new(0, 0);
+        let mut chars = text.char_indices().peekable();
+        while let Some((byte, ch)) = chars.next() {
+            if byte + ch.len_utf8() > offset {
+                break;
+            }
+            if ch == '\r' || ch == '\n' {
+                if ch == '\r' && matches!(chars.peek(), Some((_, '\n'))) {
+                    // The interior of CRLF is still the preceding line's end.
+                    if chars.peek().is_some_and(|(byte, _)| *byte >= offset) {
+                        break;
+                    }
+                    chars.next();
+                }
+                position.line += 1;
+                position.character = 0;
+            } else {
+                position.character += ch.len_utf16() as u32;
+            }
         }
+        position
     }
 
     /// Convert a byte-offset Span to LSP Range.
@@ -267,6 +283,21 @@ pub mod lsp {
         Range { start, end }
     }
 
+    /// Convert compiler scalar columns to the UTF-16 columns used by LSP.
+    /// The source must belong to the span's file and revision.
+    pub fn line_col_span_to_lsp_range_with_text(span: &LineColSpan, text: &str) -> Range {
+        let convert = |line: usize, column: usize| {
+            let offset =
+                super::line_col_to_offset(line.saturating_sub(1), column.saturating_sub(1), text);
+            offset.map(|offset| offset_to_lsp_position(offset, text))
+        };
+        let fallback = line_col_span_to_lsp_range(span);
+        Range {
+            start: convert(span.line, span.column).unwrap_or(fallback.start),
+            end: convert(span.end_line(), span.end_column).unwrap_or(fallback.end),
+        }
+    }
+
     /// Convert LSP Position to byte offset.
     ///
     /// # Arguments
@@ -278,7 +309,39 @@ pub mod lsp {
     ///
     /// The byte offset, or `None` if the position is out of bounds.
     pub fn lsp_position_to_offset(position: Position, text: &str) -> Option<usize> {
-        super::line_col_to_offset(position.line as usize, position.character as usize, text)
+        let mut line = 0;
+        let mut start = 0;
+        let mut end = text.len();
+        let mut chars = text.char_indices().peekable();
+        while let Some((byte, ch)) = chars.next() {
+            if ch == '\r' || ch == '\n' {
+                if line == position.line {
+                    end = byte;
+                    break;
+                }
+                start = byte + ch.len_utf8();
+                if ch == '\r' && matches!(chars.peek(), Some((_, '\n'))) {
+                    start = chars.next()?.0 + 1;
+                }
+                line += 1;
+            }
+        }
+        if line != position.line {
+            return None;
+        }
+        let mut units = 0;
+        for (byte, ch) in text[start..end].char_indices() {
+            if units == position.character {
+                return Some(start + byte);
+            }
+            units += ch.len_utf16() as u32;
+            if units > position.character {
+                // Never split the surrogate pair representing a scalar value.
+                return None;
+            }
+        }
+        // LSP specifies that a column beyond the line length means line end.
+        Some(end)
     }
 
     /// Convert LSP Range to a byte-offset Span.
@@ -293,8 +356,18 @@ pub mod lsp {
     ///
     /// A Span, or `None` if the range is out of bounds.
     pub fn lsp_range_to_span(range: Range, text: &str, file_id: FileId) -> Option<Span> {
+        if (range.start.line, range.start.character) > (range.end.line, range.end.character) {
+            return None;
+        }
         let start = lsp_position_to_offset(range.start, text)?;
         let end = lsp_position_to_offset(range.end, text)?;
-        Some(Span::new(start as u32, end as u32, file_id))
+        if start > end {
+            return None;
+        }
+        Some(Span::new(
+            start.try_into().ok()?,
+            end.try_into().ok()?,
+            file_id,
+        ))
     }
 }

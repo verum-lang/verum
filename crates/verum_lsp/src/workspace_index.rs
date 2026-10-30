@@ -73,6 +73,17 @@ impl WorkspaceIndex {
         }
     }
 
+    pub fn is_initialized(&self) -> bool {
+        self.workspace_root.read().is_some()
+    }
+
+    /// Remove facts derived from an old open-document revision. The file's
+    /// module path may remain discoverable, but its declarations are unknown.
+    pub fn clear_document(&self, uri: &Url) {
+        self.remove_exports_for_uri(uri);
+        self.mount_graph.remove(uri);
+    }
+
     /// Initialize the workspace index by scanning for .vr files
     pub fn initialize(&self, workspace_root: &Path) {
         *self.workspace_root.write() = Some(workspace_root.to_path_buf());
@@ -178,16 +189,12 @@ impl WorkspaceIndex {
 
     /// Remove all exported symbols from a specific URI
     fn remove_exports_for_uri(&self, uri: &Url) {
-        let mut to_remove = Vec::new();
-        for mut entry in self.exports.iter_mut() {
-            entry.value_mut().retain(|loc| &loc.uri != uri);
-            if entry.value().is_empty() {
-                to_remove.push(entry.key().clone());
-            }
-        }
-        for key in to_remove {
-            self.exports.remove(&key);
-        }
+        // Retain and remove under the same shard lock; a concurrent indexer
+        // must not lose a same-named export between these two operations.
+        self.exports.retain(|_, locations| {
+            locations.retain(|location| &location.uri != uri);
+            !locations.is_empty()
+        });
     }
 
     /// Resolve a mount path to a file URI
@@ -305,6 +312,9 @@ impl WorkspaceIndex {
         }
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
+            if entry.file_type()?.is_symlink() {
+                continue;
+            }
             let path = entry.path();
             if path.is_dir() {
                 // Skip hidden directories and common non-source directories
