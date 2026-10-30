@@ -87,3 +87,4 @@ import VerumExternalReplay.SealedAppend
 import VerumExternalReplay.ObservableLasso
 import VerumExternalReplay.ExactCardinality
 import VerumExternalReplay.CanonicalProduct
+import VerumExternalReplay.PersistentEvents
