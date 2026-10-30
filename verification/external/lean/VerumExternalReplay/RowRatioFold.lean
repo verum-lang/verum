@@ -164,8 +164,9 @@ theorem open_row_invariant (L : Positive) (q : Q) (a : A) (ps : List Factor) :
     (advanceMany (beginRow L q a) ps).row = some (fold (initial L) ps) := by
   rw [advance_many_state]; rfl
 
-/-- Publication receives the completed row, while the row's factors saw frozen q. -/
-theorem close_publishes_completed_row (publish : Q → Fraction → Q)
+/-- Publication receives the accumulated prefix. The caller must separately prove
+row completion: this state has no completion witness and permits early close. -/
+theorem close_publishes_row_accumulator (publish : Q → Fraction → Q)
     (L : Positive) (q : Q) (a : A) (ps : List Factor) :
     close publish (advanceMany (beginRow L q a) ps) =
       ⟨publish q (fold (initial L) ps), none, a⟩ := by
@@ -238,9 +239,9 @@ theorem absolute_consumer_unchanged (observe : A → O) (publish : Q → Fractio
 /-- info: 'RowRatioFold.open_row_invariant' does not depend on any axioms -/
 #guard_msgs in
 #print axioms open_row_invariant
-/-- info: 'RowRatioFold.close_publishes_completed_row' does not depend on any axioms -/
+/-- info: 'RowRatioFold.close_publishes_row_accumulator' does not depend on any axioms -/
 #guard_msgs in
-#print axioms close_publishes_completed_row
+#print axioms close_publishes_row_accumulator
 /-- info: 'RowRatioFold.closed_steps_do_not_publish' does not depend on any axioms -/
 #guard_msgs in
 #print axioms closed_steps_do_not_publish
