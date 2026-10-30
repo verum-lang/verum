@@ -28,5 +28,31 @@
       }
     ]
   },
-  "uncovered": "No allocator failures, arbitrary panic sites, native move-address identity, simultaneous unlabelled cursor lifetimes, physical Driver/VM, universal work or space bounds. Capacity fields have lower-bound checks only."
+  "uncovered": "No allocator failures, arbitrary panic sites, native move-address identity, simultaneous unlabelled cursor lifetimes, physical Driver/VM, universal work or space bounds. Capacity fields have lower-bound checks only.",
+  "independent_replay": {
+    "receipt_sha256": "c7db489633d5c91e88450175609d7cb0c336bdb8e5d580f1a72ca1dc4aa476f7",
+    "status": "passed",
+    "manifest_sha256": "c3e527a9a7c4cd5c8c47376010b6c8749f6c587b16a49c57d41866bff9140a1f",
+    "script_sha256": "414a655ed21a785abbf11d30d39f2104342447955e5d904f54d1772b61b51bdb",
+    "scope": "Ordered persistent history universal laws and actual native v1+v2 finite projection, byte-identical r47; full private Rust refinement, balancing and RSS outside scope",
+    "clean_manifest_only_build": true,
+    "universal_laws": 23,
+    "false_controls": 17,
+    "native_claims": 357,
+    "native_negative_controls": 61,
+    "command": [
+      "/Users/taaliman/.pyenv/versions/3.12.8/bin/python3",
+      "-m",
+      "unittest",
+      "test_persistent_events",
+      "test_persistent_history_export",
+      "test_persistent_history_export_v2",
+      "-v"
+    ],
+    "peak_owned_rss_bytes": 1478737920,
+    "seconds": 51.732890129089355,
+    "log_sha256": "cb375cf992962a6d4fe6b4b50a70e56f66f52d8af6152d239a4549760b5d65a9",
+    "source_files_verified": 14,
+    "log_hash_verified": true
+  }
 }
