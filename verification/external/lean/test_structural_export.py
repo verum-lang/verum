@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import structural_export
+from acquired_export_codec import LEGACY, SENSORY
 from check_typed_programs import ROOT, check, require_success, run
 from observer_export_replay import batches
 
@@ -81,6 +82,28 @@ end FrozenObserverExport
         for roster in rosters:
             self.assertTrue(roster.endswith('depends on axioms: [propext]') or
                             roster.endswith('depends on axioms: [propext, Quot.sound]'))
+
+    def test_grammar_uses_one_explicit_version_for_operations_values_and_calls(self):
+        child = dict(steps=[dict(operation=dict(Primitive='Succ'),
+                                 arguments=[dict(Literal=dict(kind='Nat', value=7))])],
+                     output=0, library=[])
+        grammar = dict(owner=0, inputs=0, extent=dict(kind='Finite', steps=1),
+                       operations=[dict(primitive='Succ', arity=1)],
+                       literals=[dict(kind='Bytes', value=[0, 255])],
+                       calls=[dict(arity=0, program=child)])
+        for field in ('operations', 'literals', 'calls'):
+            isolated = dict(grammar, operations=[], literals=[], calls=[])
+            isolated[field] = grammar[field]
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                structural_export.grammar(isolated, decoder=LEGACY)
+        encoded = structural_export.grammar(grammar, decoder=SENSORY)
+        self.compile(HEADER + f'''
+def extended : Grammar Op Value := {encoded}
+example : extended.operations = [(.succ, 1)] := rfl
+example : extended.literals = [.bytes [0, 255]] := rfl
+example : extended.calls.map Prod.snd = [{SENSORY.code(child)}] := rfl
+end FrozenObserverExport
+''')
 
     def test_false_codec_claims_are_rejected(self):
         false = {

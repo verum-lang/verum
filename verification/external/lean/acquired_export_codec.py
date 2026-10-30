@@ -135,6 +135,11 @@ class AcquiredDecoder:
         return '(.outcome (' + out + '))'
 
 
+    def primitive(self, item):
+        """Decode the selected adapter's closed primitive vocabulary."""
+        allowed = OPS + POSE_OPS + list(self.primitive_extensions) + (['EventSensory', 'QuerySensory'] if self.sensory else [])
+        return tag(item, allowed)
+
     def code(self, item, depth=0):
         require(depth <= 64, 'Code tree exceeds extraction depth limit')
         fields(item, 'steps output library')
@@ -143,8 +148,7 @@ class AcquiredDecoder:
             fields(step, 'operation arguments')
             kind, payload = variant(step['operation'])
             require(kind in ('Primitive', 'Call'), 'Unknown operation form')
-            allowed = OPS + POSE_OPS + list(self.primitive_extensions) + (['EventSensory', 'QuerySensory'] if self.sensory else [])
-            operation = '.primitive ' + tag(payload, allowed) if kind == 'Primitive' else '.call ' + natural(payload)
+            operation = '.primitive ' + self.primitive(payload) if kind == 'Primitive' else '.call ' + natural(payload)
             args = []
             for operand in sequence(step['arguments']):
                 k, data = variant(operand)

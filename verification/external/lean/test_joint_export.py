@@ -74,6 +74,68 @@ class JointExtractionTests(unittest.TestCase):
     def test_joint_model_replays(self):
         self.replay(joint_fixture())
 
+    def test_explicit_v3_executes_successor_with_ordinary_ports(self):
+        data = joint_fixture()
+        data['definition']['semantics']['kind'] = 'AcquiredV3'
+        data['definition']['initial']['value'] = 1
+        initialization = data['initialization']
+        initialization['program']['steps'].append(dict(
+            operation=dict(Primitive='Succ'), arguments=[dict(Register=0)]))
+        initialization['program']['output'] = 1
+        initialization['report']['registers'].append(dict(kind='Nat', value=1))
+        initialization['report'].update(dispatch_attempts=2, expanded_attempts=2)
+        for cut in data['transition'].values():
+            if 'value' in cut:
+                cut['value']['value'] += 1
+        data['replay']['value']['value'] += 1
+        self.replay(data)
+        # The same observed computation must not be silently reinterpreted as V2.
+        data['definition']['semantics']['kind'] = 'AcquiredV2'
+        with self.assertRaisesRegex(ValueError, 'Unknown variant: Succ'):
+            emit(data)
+
+    def test_correlated_declarations_cannot_mix_with_other_name_families(self):
+        for data in (joint_fixture(), structural_fixture()):
+            with self.subTest(structural='structural_code_words' in data['candidate']):
+                original = emit(data)
+                data['candidate']['declared_triples'] = None
+                self.assertEqual(emit(data), original)
+                for declaration in ([], {}, False, [0, 1, 2]):
+                    data['candidate']['declared_triples'] = declaration
+                    with self.assertRaisesRegex(ValueError, 'correlated declaration'):
+                        emit(data)
+
+    def test_v3_sensory_history_and_byte_cuts_preserve_observations(self):
+        data = joint_fixture()
+        definition = data['definition']
+        definition['semantics']['kind'] = 'AcquiredV3'
+        definition['initial'] = dict(kind='Bytes', value=[])
+        definition['update_binding']['interface']['sensory'] = True
+        definition['update']['steps'] = [
+            dict(operation=dict(Primitive='EventSensory'), arguments=[dict(Input=1)]),
+            dict(operation=dict(Primitive='Second'), arguments=[dict(Register=0)])]
+        initial = data['initialization']
+        initial['program']['steps'] = [dict(operation=dict(Primitive='Identity'),
+            arguments=[dict(Literal=copy.deepcopy(definition['initial']))])]
+        initial['report']['registers'] = [copy.deepcopy(definition['initial'])]
+        for row in [*data['history']['events'], data['transition']['input']]:
+            row['interface']['sensory'] = True
+            row['values'][0]['value']['sensory'] = dict(schema=[], body=[7])
+        for cut in [*(data['transition'][k] for k in
+                     ('before', 'fork_before', 'fork_after', 'live_after')), data['replay']]:
+            cut['value'] = dict(kind='Bytes', value=[7])
+        self.replay(data)
+        for change in ('payload', 'presence', 'retained_value'):
+            altered = copy.deepcopy(data)
+            if change == 'payload':
+                altered['history']['events'][0]['values'][0]['value']['sensory']['body'] = [8]
+            elif change == 'presence':
+                del altered['history']['events'][0]['interface']['sensory']
+            else:
+                altered['transition']['before']['value']['value'] = [8]
+            with self.subTest(change=change):
+                self.replay(altered, 'Tactic `rfl` failed:')
+
     def test_current_uniform_and_kraft_naming(self):
         for kraft, large in ((False, False), (False, True), (True, True)):
             with self.subTest(kraft=kraft, large=large):

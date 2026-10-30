@@ -5,6 +5,7 @@ import json
 import re
 import check_lifecycle_export as lifecycle
 import structural_export
+from acquired_export_codec import LEGACY, SENSORY
 from observer_export_replay import array, fields, natural, require, sequence, main as replay_main
 
 
@@ -50,11 +51,17 @@ def emit(data):
     require(data['schema'] in ('synarc-joint-observer-v1', 'synarc-joint-observer-v2'), 'Unknown joint export schema')
     witnessed = data['schema'] == 'synarc-joint-observer-v2'
     definition = data['definition']
-    require(lifecycle.validate_adapter({'definitions': [definition], 'joint': data}) == 'AcquiredV2',
-            'Joint production replay requires explicit AcquiredV2')
+    require(type(definition) is dict and type(definition.get('semantics')) is dict,
+            'Missing semantic adapter')
+    fields(definition['semantics'], 'kind max_trace')
+    version = definition['semantics']['kind']
+    require(version in ('AcquiredV2', 'AcquiredV3'), 'Joint replay requires an explicit supported adapter')
+    decoder = SENSORY if version == 'AcquiredV3' else LEGACY
+    require(lifecycle.validate_adapter({'definitions': [definition], 'joint': data}, decoder=decoder) == version,
+            'Joint semantic adapter mismatch')
     base = dict(schema='synarc-observer-lifecycle-v1', definitions=[definition],
                 ownership=[], naming=[], installation=[], refusals=[])
-    source, counts = lifecycle.emit(base)
+    source, counts = lifecycle.emit(base, decoder=decoder)
     require(counts['claims'] == 0, 'Unexpected base observations')
     lines = ['import VerumExternalReplay.StructuralNames', source.removesuffix('end FrozenObserverExport\n')]
     names = []
@@ -69,7 +76,9 @@ def emit(data):
     modern = 'structural_code_words' in candidate
     require(not witnessed or modern, 'Structural schema requires current exact naming metadata')
     fields(candidate, 'owner definition grammar index syntax_indices family_count evidence_look comparison_count provenance' +
-           (' structural_code_words' if modern else '') + (' structural_witnesses' if witnessed else ''))
+           (' structural_code_words' if modern else '') + (' structural_witnesses' if witnessed else '') +
+           (' declared_triples' if 'declared_triples' in candidate else ''))
+    require(candidate.get('declared_triples') is None, 'Joint structural/indexed replay cannot carry a correlated declaration')
     natural(candidate['owner'])  # Nominal token; no semantic-equivalence inference.
     same(candidate['definition'], definition['identity'])
     grammar = candidate['grammar']
@@ -148,44 +157,46 @@ def emit(data):
     prefix = 'd' + natural(definition['identity']); cap = natural(definition['semantics']['max_trace'])
     initialization = data['initialization']; fields(initialization, 'program report observation')
     require(initialization['observation'] is None, 'Detailed initialization trace needs an explicit model')
-    lines.append(f'def joint_initial : FiniteCode.Code Op Value := {lifecycle.code(initialization["program"])}')
+    lines.append(f'def joint_initial : FiniteCode.Code Op Value := {decoder.code(initialization["program"])}')
     lines.append(f'def joint_execution := FiniteExecution.execute (apply {cap}) joint_initial ⟨none, 2^64-1⟩ []')
-    claim(f'joint_execution.observation = {lifecycle.report(initialization["report"])}',
+    claim(f'joint_execution.observation = {decoder.report(initialization["report"])}',
           'unfold joint_execution joint_initial\n  reduce_execution')
     claim(f'FiniteCode.run (fun op args => (apply {cap} op args).toOption) joint_initial [] = some {prefix}_initial',
           f'unfold joint_initial {prefix}_initial\n  reduce_finite_code')
 
-    structural_bindings = structural_export.emit_witnesses(data, lines, claim) if witnessed else 0
+    structural_bindings = structural_export.emit_witnesses(data, lines, claim, decoder=decoder) if witnessed else 0
 
     transition = data['transition']; fields(transition, 'input before fork_before fork_after live_after')
-    register, _, _ = lifecycle.cut_registry({definition['identity']: definition}, claim)
+    register, _, _ = lifecycle.cut_registry({definition['identity']: definition}, claim, decoder=decoder)
     before, fork_before, fork_after, live, replay = (
         transition['before'], transition['fork_before'], transition['fork_after'], transition['live_after'], data['replay'])
     for cut in (before, fork_before, fork_after, live, replay): register(cut)
-    claim(f'ObserverOwnership.fork ({lifecycle.cut(before)} : ObserverOwnership.Cut Nat Nat Nat) '
-          f'{natural(fork_before["owner"])} = {lifecycle.cut(fork_before)}')
+    claim(f'ObserverOwnership.fork ({decoder.cut(before)} : ObserverOwnership.Cut Nat Nat Nat) '
+          f'{natural(fork_before["owner"])} = {decoder.cut(fork_before)}')
     distinct(before['owner'], fork_before['owner'])
     same(fork_before['owner'], fork_after['owner']); same(before['owner'], live['owner'])
     for old in (before, fork_before): distinct(replay['owner'], old['owner'])
     for position, new in enumerate((fork_after, live, replay)):
         for old in (before, *(fork_after, live, replay)[:position]): distinct(new['state'], old['state'])
 
-    history = data['history']; lifecycle.history(history)
+    history = data['history']; decoder.history(history)
     rows = sequence(history['events']); require(rows, 'Joint transition requires a retained physical event')
     events = []
     for row in rows:
-        source, values = lifecycle.input_row(row)  # Gaps cannot supply an observed transition.
+        source, values = decoder.input_row(row)  # Gaps cannot supply an observed transition.
         require(len(row['values']) == 1 and row['values'][0].get('kind') == 'Event',
                 'Native joint history requires one complete Event per row')
         event = row['values'][0]['value']
         event_source = {key: event[key] for key in ('epoch', 'raw_space', 'owner')}
         event_source['shape'] = 'Event'
-        claim(f'({source} : Source) = {lifecycle.source(event_source)}')
+        if 'sensory' in event:
+            event_source['sensory'] = True
+        claim(f'({source} : Source) = {decoder.source(event_source)}')
         claim(f'({lifecycle.wide(row["interface"]["epoch"])} : Nat) = {lifecycle.wide(history["origin"]["epoch"])}')
         if row['interface']['owner'] is not None:
             claim(f'({lifecycle.lineage(row["interface"]["owner"])} : Lineage) = {lifecycle.lineage(history["origin"]["lineage"])}')
         events.append(f'({source}, {values})')
-    source, values = lifecycle.input_row(transition['input']); actual = f'({source}, {values})'
+    source, values = decoder.input_row(transition['input']); actual = f'({source}, {values})'
     claim(f'({events[-1]} : Source × List Value) = {actual}')
 
     def fold(name, entries, initial, result):
@@ -197,12 +208,12 @@ def emit(data):
         if not entries: proof += '  rfl'
         else:
             proof += f'  reduce_observer_fold {len(entries)}'
-        claim(f'{name} = some {lifecycle.value(result)}', proof)
+        claim(f'{name} = some {decoder.value(result)}', proof)
     fold('joint_before', events[:-1], f'{prefix}_initial', before['value'])
-    fold('joint_transition', [actual], lifecycle.value(before['value']), fork_after['value'])
+    fold('joint_transition', [actual], decoder.value(before['value']), fork_after['value'])
     fold('joint_replay', events, f'{prefix}_initial', replay['value'])
-    claim(f'({lifecycle.value(fork_after["value"])} : Value) = {lifecycle.value(live["value"])}')
-    claim(f'({lifecycle.value(live["value"])} : Value) = {lifecycle.value(replay["value"])}')
+    claim(f'({decoder.value(fork_after["value"])} : Value) = {decoder.value(live["value"])}')
+    claim(f'({decoder.value(live["value"])} : Value) = {decoder.value(replay["value"])}')
     lines += ['#print axioms ' + name for name in names] + ['end FrozenObserverExport']
     return '\n\n'.join(lines) + '\n', {'joint_producers': 1, 'history_events': len(rows), 'structural_words': len(words),
         'structural_program_bindings': structural_bindings, 'claims': len(names)}

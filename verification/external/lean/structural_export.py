@@ -17,7 +17,7 @@ def address(value):
     return '⟨' + natural(value['owner']) + ', ' + array(rows) + ', ' + natural(value['output']) + '⟩'
 
 
-def grammar(value):
+def grammar(value, *, decoder=life.LEGACY):
     fields(value, 'owner inputs extent operations literals calls')
     extent = value['extent']
     require(type(extent) is dict, 'Expected structural extent')
@@ -28,16 +28,16 @@ def grammar(value):
     operations = []
     for row in sequence(value['operations']):
         fields(row, 'primitive arity')
-        operations.append('(' + life.tag(row['primitive'], life.OPS + life.POSE_OPS) + ', ' + natural(row['arity']) + ')')
-    literals = array(life.value(v) for v in sequence(value['literals']))
+        operations.append('(' + decoder.primitive(row['primitive']) + ', ' + natural(row['arity']) + ')')
+    literals = array(decoder.value(v) for v in sequence(value['literals']))
     calls = []
     for row in sequence(value['calls']):
-        fields(row, 'arity program'); calls.append('(' + natural(row['arity']) + ', ' + life.code(row['program']) + ')')
+        fields(row, 'arity program'); calls.append('(' + natural(row['arity']) + ', ' + decoder.code(row['program']) + ')')
     return '⟨' + ', '.join((natural(value['owner']), natural(value['inputs']), limit,
                             array(operations), literals, array(calls))) + '⟩'
 
 
-def emit_witnesses(data, lines, claim):
+def emit_witnesses(data, lines, claim, *, decoder=life.LEGACY):
     candidate = data['candidate']
     witnesses = candidate['structural_witnesses']
     if candidate['grammar']['source_order'] == 'legacy-indexed-v1':
@@ -53,7 +53,7 @@ def emit_witnesses(data, lines, claim):
     for i, witness in enumerate(witnesses):
         fields(witness, 'language address word decoded_address consumed_bits materialized decoded_materialized audit')
         g, original, decoded = witness['language'], witness['address'], witness['decoded_address']
-        encoded_grammar = grammar(g)
+        encoded_grammar = grammar(g, decoder=decoder)
         name = 'structural' + str(i)
         lines += [f'def {name}_grammar : StructuralNames.Grammar Op Value := {encoded_grammar}',
                   f'def {name}_address : StructuralNames.Address := {address(original)}',
@@ -65,8 +65,8 @@ def emit_witnesses(data, lines, claim):
         claim(f'({literal(prior)} : String) = {literal(g)}')
         claim(f'({natural(g["inputs"])} : Nat) = {natural(widths[i])}')
         claim(f'(0 : Nat) < {len(g["operations"]) + len(g["calls"])}', 'decide')
-        ops = array(life.tag(o['primitive'], life.OPS + life.POSE_OPS) for o in g['operations'])
-        vals = array(life.value(v) for v in g['literals'])
+        ops = array(decoder.primitive(o['primitive']) for o in g['operations'])
+        vals = array(decoder.value(v) for v in g['literals'])
         claim(f'({ops} : List Op).Nodup', 'decide')
         claim(f'({vals} : List Value).Nodup', 'decide')
         claim(f'{name}_word = ({word(candidate["structural_code_words"][i])} : List Bool)')
@@ -77,10 +77,10 @@ def emit_witnesses(data, lines, claim):
         claim(f'StructuralNames.decode {name}_grammar {name}_word = some {name}_decoded')
         claim(f'StructuralNames.encode {name}_grammar {name}_address = some {name}_word')
         claim(f'{name}_decoded = {name}_address')
-        claim(f'StructuralNames.materialize {name}_grammar {name}_address = some {life.code(witness["materialized"])}')
-        claim(f'StructuralNames.materialize {name}_grammar {name}_decoded = some {life.code(witness["decoded_materialized"])}')
-        claim(f'({life.code(witness["materialized"])} : FiniteCode.Code Op Value) = {life.code(programs[i])}')
-        claim(f'({life.code(witness["decoded_materialized"])} : FiniteCode.Code Op Value) = {life.code(programs[i])}')
+        claim(f'StructuralNames.materialize {name}_grammar {name}_address = some {decoder.code(witness["materialized"])}')
+        claim(f'StructuralNames.materialize {name}_grammar {name}_decoded = some {decoder.code(witness["decoded_materialized"])}')
+        claim(f'({decoder.code(witness["materialized"])} : FiniteCode.Code Op Value) = {decoder.code(programs[i])}')
+        claim(f'({decoder.code(witness["decoded_materialized"])} : FiniteCode.Code Op Value) = {decoder.code(programs[i])}')
         audit = witness['audit']; fields(audit, 'allowance decode_work materialize_work decoded_materialize_work')
         for k in ('decode_work', 'materialize_work', 'decoded_materialize_work'):
             claim(f'(0 : Nat) < {natural(audit[k])} ∧ {natural(audit[k])} ≤ {natural(audit["allowance"])}', 'decide')
