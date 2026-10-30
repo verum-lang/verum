@@ -1,0 +1,55 @@
+{
+  "scope": "General finite DAG recurrence and exact completed nominal memo preservation; source alignment and four frozen native courts, not universal native enumeration or latency refinement",
+  "manifest_sha256": "e0ab38b956a37c9d95e99331399f80f097c1509bd609355fada223efe298dc2c",
+  "binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r41/kan-courts",
+    "bytes": 58097056,
+    "sha256": "8919e59e931054b1df7e58f836be98b620f547efb888a4a08f0292aa49a4fab5"
+  },
+  "source_sha256": {
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural.rs": "ce33f19e8069597c57f5a645dc2ddaae6f4c99847ff10e54f1a1ded200d04187",
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/composition.rs": "641220c2e0ad5918ee874ce08421a9125c23bfbdb8c5e090da0bf8eb81979b2b",
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/cardinality_courts.rs": "467ff418be92d5357cd8206a0a77915ab6d418283763bcab9d535c52d9bb8216",
+    "rust/crates/synarc-kan/src/organism/observer_acquired/structural_source.rs": "12b9e80e618b4f47fce906405484226dad87c47a1acfd8c9d764d3bf914f5776"
+  },
+  "receipt_sha256": "c8c3357ff241aa0f56a1dc5c003641966dd80df02350667c951c681b1901c83a",
+  "native_courts": [
+    {
+      "test": "construction::family::syntax::structural::cardinality_courts::shared_children_keep_independent_choices_but_reuse_only_the_actual_owner_count",
+      "status": "passed",
+      "peak_owned_rss_bytes": 83886080,
+      "seconds": 0.5416688330005854,
+      "log_sha256": "1c3e1b543d7b03025a00d20450d85ec0f5723e2761f78d628b2d45a0a8144cfb"
+    },
+    {
+      "test": "construction::family::syntax::structural::cardinality_courts::reachable_repeated_dag_is_counted_once_per_owner_without_merging_names",
+      "status": "passed",
+      "peak_owned_rss_bytes": 83951616,
+      "seconds": 0.5367614580318332,
+      "log_sha256": "a0cb8eaafaf8049bbe36f354abd960d6c6a5f50550c72fa2e19ef69bda4e09a7"
+    },
+    {
+      "test": "construction::family::syntax::structural::cardinality_courts::unreachable_control_is_skipped_only_when_every_position_has_no_operands",
+      "status": "passed",
+      "peak_owned_rss_bytes": 84049920,
+      "seconds": 0.5360319998580962,
+      "log_sha256": "e6f2c186823010b0b75c00acceb9c7f803248c7cc0c593d3954018aa5effb5fd"
+    },
+    {
+      "test": "organism::observer_acquired::structural_source::courts::closed_nested_production_envelopes_keep_exact_uniform_count_without_unfolded_recounts",
+      "status": "passed",
+      "peak_owned_rss_bytes": 84099072,
+      "seconds": 0.5476067911367863,
+      "log_sha256": "d36d1c374f2de48278b1f571807a5a5278f046d0569ec6937f02bf33580fb33d"
+    }
+  ],
+  "correspondence": {
+    "pool": "initialPool=inputs+literals.len; position i adds i earlier registers",
+    "factors": "primitive/fixed call=1; Branch multiplies both child counts even for the same owner; Fold uses one child",
+    "count": "B0=1; B(i+1)=B(i)*sum_a(pool(i)^arity(a)*factor(a)); total=sum_i(i+1)*B(i+1)",
+    "memo": "request-local retained Language.owner Arc identity; completed values only; nonempty owners published after reserve; empty extent immediate0 without insertion",
+    "prune": "limit0 or positive arity and pool(limit-1)=0; no semantic deduplication",
+    "preconditions": "immutable nominal declarations, finite acyclic child graph, exact arithmetic; native checked host overflow and refusal paths are separate",
+    "limits": "completion-level publication history, not native microstep refinement, universal enumerator bijection, one-evaluation complexity bound or bigint/allocation preemption"
+  }
+}
