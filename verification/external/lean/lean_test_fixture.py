@@ -35,7 +35,7 @@ class IsolatedLeanTest(unittest.TestCase):
                                 '-o', str(output), f'VerumExternalReplay/{name}.lean',
                                 timeout=60, cwd=cls.snapshot))
 
-    def prove(self, source, *, failure=False):
+    def prove(self, source, *, failure=False, expected_error=FALSE):
         path = self.snapshot / 'Check.lean'
         path.write_text(source)
         result = run('lake', 'env', 'lean', '-M', '1024', '--json', str(path),
@@ -46,7 +46,7 @@ class IsolatedLeanTest(unittest.TestCase):
         if failure:
             self.assertEqual(result.returncode, 1, diagnostics)
             self.assertEqual(len(errors), 1, diagnostics)
-            self.assertTrue(errors[0]['data'].startswith(FALSE), errors)
+            self.assertTrue(errors[0]['data'].startswith(expected_error), errors)
         else:
             self.assertEqual(result.returncode, 0, diagnostics)
             self.assertEqual(errors, [], diagnostics)
