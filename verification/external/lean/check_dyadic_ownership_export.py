@@ -10,7 +10,8 @@ MODELS = ['RectangularNames', 'AdditiveTraversal']
 SCOPE = ('Finite exported dyadic naming and issued-owner conservation. V1 covers initializer '
          'equivalence before promotion, projected pause and Unknown transfer. V2 additionally '
          'checks retained source/search/look identities, initializer promotion, typed stops, '
-         'capacity changes and denied retries. Candidate grammar/provenance authority, look '
+         'capacity changes and denied retries. V3 additionally binds grammar and provenance '
+         'authority through promotion. Exact provenance-object/Definition linkage, look '
          'allocation/payment and private invocation receipts remain unexported; no full VM, '
          'publication authority or cost refinement.')
 
@@ -27,8 +28,10 @@ def load_export(path):
 def emit(data):
     fields(data, 'schema identity_policy scope semantics support_sizes events')
     require(data['schema'] in ('synarc-dyadic-cumulative-ownership-v1',
-                              'synarc-dyadic-cumulative-ownership-v2'), 'Unknown dyadic ownership schema')
-    rich = data['schema'] == 'synarc-dyadic-cumulative-ownership-v2'
+                              'synarc-dyadic-cumulative-ownership-v2',
+                              'synarc-dyadic-cumulative-ownership-v3'), 'Unknown dyadic ownership schema')
+    authority_bound = data['schema'] == 'synarc-dyadic-cumulative-ownership-v3'
+    rich = data['schema'] != 'synarc-dyadic-cumulative-ownership-v1'
     for key in ('identity_policy', 'scope'):
         require(type(data[key]) is str, 'Expected scope text')
     require(data['semantics'] == {'Identity': 'arity1 returns sole argument',
@@ -103,6 +106,16 @@ def emit(data):
     if rich:
         materializer_fields += ' source_owner paid_look'
         candidate_fields += ' initializer_owner paid_look'
+    if authority_bound:
+        materializer_fields += ' source_authority provenance_authority'
+        candidate_fields += ' source_owner source_authority provenance_authority'
+
+    grammar_authorities = {}
+
+    def grammar(o):
+        source, authority = natural(o['source_owner']), natural(o['source_authority'])
+        if source in grammar_authorities: eq(authority, grammar_authorities[source])
+        else: grammar_authorities[source] = authority
 
     def look(p):
         fields(p, 'authority index denominator')
@@ -126,6 +139,15 @@ def emit(data):
             look(o['paid_look']); eq(wide(o['look']), wide(o['paid_look']['index']))
             if materializer: natural(o['source_owner'])
             else: natural(o['initializer_owner'])
+        if authority_bound:
+            grammar(o)
+            provenance = o['provenance_authority']
+            if materializer:
+                require((provenance is None) == (o['provenance_name'] is None), 'Partial provenance identity')
+                if o['initializer_owner'] is not None or o['invocation_retained'] or o['evaluated_retained']:
+                    require(provenance is not None, 'Initialized work lacks provenance')
+            else: require(provenance is not None, 'Candidate lacks provenance authority')
+            if provenance is not None: eq(natural(provenance), natural(o['source_authority']))
         if materializer:
             flags = sequence(o['programs_ready']); words = sequence(o['encoded_words'])
             require(len(flags) == len(words) == 3, 'Expected three program projections')
@@ -143,7 +165,8 @@ def emit(data):
 
     def snapshot(s):
         fields(s, 'enumeration materializing materialized unknown members' +
-               (' owner source_owner paid_look capacity materializer_stop' if rich else ''))
+               (' owner source_owner paid_look capacity materializer_stop' if rich else '') +
+               (' source_authority' if authority_bound else ''))
         encoded = json.dumps(s, sort_keys=True, separators=(',', ':'))
         if encoded in checked: return
         checked.add(encoded)
@@ -170,12 +193,14 @@ def emit(data):
             require(e['pending_original_name'] is None, 'Completed enumeration retains pending name')
         if rich:
             natural(s['owner']); natural(s['source_owner']); look(s['paid_look'])
+            if authority_bound: grammar(s)
             cap = s['capacity']; fields(cap, 'address_cells members rows')
             for v in cap.values(): natural(v)
             claim(f'({issued} : Nat) ≤ {cap["members"]}')
             for o in projected_owners(s):
                 same_look(s['paid_look'], o['paid_look'])
                 if 'source_owner' in o: eq(natural(s['source_owner']), natural(o['source_owner']))
+                if authority_bound: eq(natural(s['source_authority']), natural(o['source_authority']))
             if s['materializer_stop'] is not None:
                 require(s['materializing'] is not None, 'Stop lacks retained materializer')
                 reason(s['materializer_stop'])
@@ -189,6 +214,7 @@ def emit(data):
                 eq(natural(a['initializer_owner']), natural(b['initializer_owner']))
             if 'source_owner' in a and 'source_owner' in b:
                 eq(natural(a['source_owner']), natural(b['source_owner']))
+            if authority_bound: eq(natural(a['source_authority']), natural(b['source_authority']))
 
     def projected_owners(s):
         return ([s[k] for k in ('materializing', 'materialized') if s[k] is not None]
@@ -199,7 +225,7 @@ def emit(data):
         f'(AdditiveTraversal.boundedOrdinals {s})' for s in sizes) + f' {horizon}',
         'List (Nat × Nat × Nat)')
     previous, segments, issued_coordinates, issued_owners, owner_rosters = None, 0, [], {}, {}
-    initializers = {}
+    initializers, provenances = {}, {}
     for row in rows:
         operation = row.get('operation')
         require(operation in (('advance', 'extend_capacity', 'retry_materialization') if rich else
@@ -219,6 +245,7 @@ def emit(data):
             issued_coordinates = []
             issued_owners = {}
             initializers = {}
+            provenances = {}
             if rich:
                 require(before['owner'] not in owner_rosters, 'Reused search owner at new segment')
                 owner_rosters[before['owner']] = before
@@ -327,6 +354,7 @@ def emit(data):
                 eq(reason(stop_reason), reason(after['unknown'][-1]['reason']), 'String')
         if rich:
             for key in ('owner', 'source_owner'): eq(natural(before[key]), natural(after[key]))
+            if authority_bound: eq(natural(before['source_authority']), natural(after['source_authority']))
             same_look(before['paid_look'], after['paid_look'])
             if operation != 'extend_capacity':
                 for k in ('address_cells', 'members', 'rows'):
@@ -343,6 +371,12 @@ def emit(data):
                     require(identity is not None, 'Erased learned initializer identity')
                     eq(natural(identity), natural(initializers[name]))
                 elif identity is not None: initializers[name] = identity
+            if authority_bound:
+                name, authority = o['original_name'], o['provenance_authority']
+                if name in provenances:
+                    require(authority is not None, 'Erased learned provenance authority')
+                    eq(natural(authority), natural(provenances[name]))
+                elif authority is not None: provenances[name] = authority
         previous = row
     lines.append('end FrozenObserverExport')
     return '\n\n'.join(lines) + '\n', dict(events=len(rows), segments=segments,

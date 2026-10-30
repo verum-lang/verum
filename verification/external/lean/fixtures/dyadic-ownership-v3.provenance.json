@@ -1,0 +1,15 @@
+{
+  "manifest_sha256": "e0ab38b956a37c9d95e99331399f80f097c1509bd609355fada223efe298dc2c",
+  "source_manifest_sha256": "c66c41015237d502fc18fd2484b8817a69b086901c09c211d4f43ee0b2403815",
+  "source_files_verified": 1573,
+  "binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r41/kan-courts",
+    "bytes": 58097056,
+    "sha256": "8919e59e931054b1df7e58f836be98b620f547efb888a4a08f0292aa49a4fab5"
+  },
+  "raw_export_sha256": "4d2b86c9e0bd0b44bc408274dff1521010faeba31a2b606a9845bcc9be729967",
+  "export_sha256": "ebd1ff79bb9032084023cd09f37a5d253bbbd3dc84a541d76de4090ba5fad160",
+  "compaction": "Whitespace only; exact parsed JSON equality verified; original bytes retained",
+  "schema": "synarc-dyadic-cumulative-ownership-v3",
+  "scope": "Exact grammar/source and provenance authority through promotion. Exact provenance object/Definition linkage, private invocation/execution receipts and look allocation/payment remain absent."
+}
