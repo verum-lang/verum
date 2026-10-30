@@ -1,0 +1,15 @@
+{
+  "manifest_sha256": "f5c6919cdb2aaff5dbb9a699ec4ce87adb7de0c953d27a54870e45e7d5976020",
+  "source_files_verified": 1568,
+  "binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r37/kan-courts",
+    "bytes": 57384256,
+    "sha256": "7ecc46919628004765f6e1592a27b890058699638507aa369a75baba6f700a1f"
+  },
+  "export_sha256": "a53770d8c75fa3b7eef32210d891338a2f839720f84adba69d49676a953e74e4",
+  "schema": "synarc-dyadic-cumulative-ownership-v1",
+  "source_manifest_sha256": "fe522bf650783cb84868adfeda6ff8d3dec6b11d45da149e6e97550cdb24cb59",
+  "native_replay_receipt_sha256": "bacd3dae0f1de1e738eaf88561d4911e9abcf612893bab4767337ab07dc212b6",
+  "native_replay_test": "program::observer::acquisition::joint::cumulative::courts::lifecycle_export::dyadic::dyadic_export_separates_service_cursor_retained_work_and_original_limits",
+  "scope": "Frozen native projection, not private VM/count-bank refinement or proof of publication/source authority. Missing candidate initializer identity, active stop, denied retry operations, actual capacity and authority identities remain correspondence obligations."
+}
