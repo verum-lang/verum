@@ -82,5 +82,101 @@
     "incumbent_export_sha256": "20d3706ee741870973114dcc29927c8382b22d1eaf888628686fc73946da1bbd",
     "scope": "Finite actual acquired General incumbent, native retention refusal, execution and periodic standing; not periodic General MDL invalidation or universal refinement",
     "other_exports": "Paused materializer and sticky refusal identical to r49; zero entitlement differs only by 236 authority leaves advancing from 2 to 3 and passes the same finite checker."
+  },
+  "latest_native_replay": {
+    "version": "r54",
+    "scope": "Independent 27 native courts: periodic4, priority16 including Guide6, driver7. Existing finite routing/incumbent checkers pass. Priority v3 native assertions pass but no independent adapter or private Guide refinement is claimed.",
+    "frozen": {
+      "head": "d6ec29b7e19cdebcccc01f4bccf4bfd5cf10e095",
+      "files": 1601,
+      "binary": {
+        "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r54/kan-courts",
+        "bytes": 61080992,
+        "sha256": "a8e8baffa949174c2f596cb517762af54e8c5ac8d6fd2ad9f1559d6e7c54def4"
+      },
+      "source_manifest_sha256": "2f1df633405ce9bd58d1ff2a2a8282f5217dcbca2cda2d3c3144bfae54b25f54",
+      "patch_sha256": "f755ed3104de19a51b413e5346fdd3dcb424f463d2e66443c3c05d92be494122",
+      "tree": "/private/tmp/synarc-cumulative-source-v96/r54"
+    },
+    "resource_limits": {
+      "owned_rss_bytes": 4294967296,
+      "seconds_per_scope": 120
+    },
+    "receipt_sha256": "f29a1a9e20772077e2bc88df8dbb0c38fd26dcb9ce0109551528be3ab09cf6d8",
+    "stages": [
+      {
+        "binary": {
+          "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r54/kan-courts",
+          "bytes": 61080992,
+          "sha256": "a8e8baffa949174c2f596cb517762af54e8c5ac8d6fd2ad9f1559d6e7c54def4"
+        },
+        "test": "automatic::periodic_courts::",
+        "status": "passed",
+        "peak_owned_rss_bytes": 1736048640,
+        "seconds": 7.543880624929443,
+        "log_sha256": "9028797136b2731790dbd0a7969ed8eb04ab9c834820d470307fee137b2b25f8"
+      },
+      {
+        "binary": {
+          "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r54/kan-courts",
+          "bytes": 61080992,
+          "sha256": "a8e8baffa949174c2f596cb517762af54e8c5ac8d6fd2ad9f1559d6e7c54def4"
+        },
+        "test": "program::observer::acquisition::joint::source::priority::",
+        "status": "passed",
+        "peak_owned_rss_bytes": 216072192,
+        "seconds": 1.6093339999206364,
+        "log_sha256": "ed2ad7e3a1ca02d160c6fede3293ca2e604847e05de555abc086096894b973b2"
+      },
+      {
+        "binary": {
+          "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r54/kan-courts",
+          "bytes": 61080992,
+          "sha256": "a8e8baffa949174c2f596cb517762af54e8c5ac8d6fd2ad9f1559d6e7c54def4"
+        },
+        "test": "automatic::cumulative::courts",
+        "status": "passed",
+        "peak_owned_rss_bytes": 91766784,
+        "seconds": 0.5384595419745892,
+        "log_sha256": "e39dc26d62a518c9273f92ca201d6b69da5d24f7a28745d1e494ecbf73fc2dd2"
+      }
+    ],
+    "exports": {
+      "paused-materializer.json": {
+        "sha256": "7da3d64c5fb64df9644abbd174a186a031a852acf654c7532ecd3dfc4fa0f0ed",
+        "summary": {
+          "physical_actions": 12,
+          "explicit_services": 1,
+          "periodic_windows": 4,
+          "settled_leases": 13
+        }
+      },
+      "zero-entitlement.json": {
+        "sha256": "c34a984a071210f3578dcaac87632e98891fd673855c90d8e9b6a6c97ebbf419",
+        "summary": {
+          "physical_actions": 12,
+          "explicit_services": 0,
+          "periodic_windows": 4,
+          "settled_leases": 12
+        }
+      },
+      "sticky-retention-refusal.json": {
+        "sha256": "cc73506504b254a08032f831c50a63357eebc34b3390695f2c554ab9cc318eea",
+        "summary": {
+          "physical_actions": 12,
+          "explicit_services": 0,
+          "periodic_windows": 4,
+          "settled_leases": 2
+        }
+      }
+    },
+    "incumbent": {
+      "sha256": "6685c58c62df1bc323bbae5d9c5c8e39c0785fda432345530b6d3026a4dadcdf",
+      "summary": {
+        "periodic_boundaries": 3,
+        "cut_commits": 3
+      }
+    },
+    "priority_v3_export_sha256": "76cff0459dc4e216b82334fc3279c8d04e55bdf2009d345be782ee3bb80f218d"
   }
 }
