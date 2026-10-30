@@ -1,5 +1,5 @@
 {
-  "scope": "Read-only frozen native helper audit against CanonicalProduct.lean; no native build, court or performance verdict",
+  "scope": "Frozen private canonical helper source audit, strict independent Lean replay and independently executed native exact-scorer courts; no performance or universal runtime verdict",
   "manifest_sha256": "c18dd08fe809963ee6847c3e5f8cc052eba128031949f6a760a5b5632c3d40a4",
   "patch_sha256": "f1c5bbe08f979285ba381a42cc0353ad2296ff547ce2fa4a78e5d7c609610a62",
   "sources": [
@@ -30,7 +30,35 @@
     "gcd": "unit fast path, sorted initial pair, exact Euclidean remainder loop; native_gcd_exact proves value, euclidean_step proves decreasing remainder",
     "mutation": "product computed before assignment; checked Positive owners only; caller work/phase and poison guard unchanged in source diff",
     "scoring": "same KT and ML factors, same parent division/child multiplication/context multiplication and strict comparison integer expressions",
-    "excluded": "native execution/refusal replay, compiler correctness, allocation atomicity, wall-time or memory gain, checkpoint reconstruction and statistical admission validity"
+    "excluded": "universal native/compiler correctness, arbitrary allocator panic/latency, wall-time or memory gain, checkpoint reconstruction and statistical admission validity"
   },
-  "native_validation": "pending compiled frozen r44 and original/new court replay"
+  "native_validation": {
+    "status": "passed",
+    "manifest_sha256": "7d9627644e9317a3e9b749932d671e42fc2cc41c0887a6510f5382ead0b35f5e",
+    "source_manifest_sha256": "ce1c30c9e36351abcd36086120d9f9c3f3a3dc2f7c68fc842948c386fd4cc4a2",
+    "source_files_verified": 1583,
+    "binary": {
+      "path": "/private/tmp/synarc-recovery-runtime-v69/integration-r45/kan-courts",
+      "bytes": 59756528,
+      "sha256": "1f94310f226d6985da44b604c829d8a742872f490adeb0fb7012625c5ffa88e1"
+    },
+    "source_alignment": "All three production/original Positive-court files match the staged source exactly; normalization_courts.rs changes only oracle let mut t = 0 to 0u64.",
+    "test_scope": "exhaust::outcome_code::exact::",
+    "passed": 17,
+    "failed": 0,
+    "ignored": 0,
+    "seconds": 0.5337314161006361,
+    "peak_owned_rss_bytes": 90423296,
+    "resource_ceiling_bytes": 4294967296,
+    "receipt_sha256": "5d3b4d60b13db9986346732e0e1c6c4fc349ea95f5677028b26a7835e34e1ce9",
+    "log_sha256": "0990d87cac105fd502e8b9e9ce6e2937829f8723cd429d938b65a5cbdc9460e5",
+    "limitations": "Concrete arithmetic, prefix/decision oracle and grant-partition controls only; full Automatic/typed-priority lifecycle, global VM refinement and performance remain separate."
+  },
+  "independent_lean": {
+    "manifest_sha256": "c4534ed21ee937c83c98ac09ebf52f76bd44561108e5f868c126240ff0ac132b",
+    "receipt_sha256": "8839065a26fa26d0546739b18225f3ef8f8741bdc1b6a86236308e39f611091b",
+    "laws": 21,
+    "false_controls": 16,
+    "source_and_log_hashes_verified": true
+  }
 }
