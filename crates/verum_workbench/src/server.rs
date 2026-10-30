@@ -132,6 +132,16 @@ async fn handle(
             "text/plain; charset=utf-8",
             include_bytes!("../ui/dist/licenses.txt"),
         ),
+        (&hyper::Method::GET, "/fonts/InterVariable.woff2") => (
+            StatusCode::OK,
+            "font/woff2",
+            include_bytes!("../ui/fonts/InterVariable.woff2"),
+        ),
+        (&hyper::Method::GET, "/fonts/JetBrainsMono-Regular.woff2") => (
+            StatusCode::OK,
+            "font/woff2",
+            include_bytes!("../ui/fonts/JetBrainsMono-Regular.woff2"),
+        ),
         _ => (StatusCode::NOT_FOUND, "text/plain", b"Not found"),
     };
     Ok(response(status, mime, body.to_vec()))

@@ -74,7 +74,7 @@ export function initializeLanguage() {
       textBindings.set(node, { key, values: {}, whitespace: [value.match(/^\s*/)?.[0] || '', value.match(/\s*$/)?.[0] || ''] });
     }
   }
-  for (const element of document.querySelectorAll('*')) for (const attribute of ['title', 'aria-label', 'placeholder']) {
+  for (const element of document.querySelectorAll('*')) for (const attribute of ['title', 'data-tooltip', 'aria-label', 'placeholder']) {
     const key = element.getAttribute(attribute);
     if (key && known(key)) setAttribute(element, attribute, { key, values: {} });
   }

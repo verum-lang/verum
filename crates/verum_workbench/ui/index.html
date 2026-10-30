@@ -14,9 +14,16 @@
 <a class="skip-link" href="#editor-pane">Skip to editor</a>
 <div id="app" data-pane="editor">
   <header class="topbar">
-    <div class="brand" aria-label="Verum Studio"><img class="brand-mark" src="__VERUM_BRAND_URI__" alt="" width="32" height="32"><span>Studio</span></div>
-    <div class="workspace-label" id="workspace-root" title="Workspace">Local workspace</div>
-    <div class="topbar-end"><span class="connection" id="connection"><span class="status-dot"></span>Connecting</span><select id="language" class="language-switch" aria-label="Interface language" title="Interface language"><option value="en" lang="en">English</option><option value="ru" lang="ru">Русский</option></select><button id="help" class="icon-button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts"><span data-icon="keyboard"></span></button><button id="theme" class="icon-button" aria-label="Change color theme" title="Color theme"><span data-icon="theme"></span></button></div>
+    <div class="brand" aria-label="Verum Studio"><img class="brand-mark" src="__VERUM_BRAND_URI__" alt="" width="28" height="28"></div>
+    <button id="project-search" class="icon-button" aria-label="Find a project file · ⌘/Ctrl P" title="Find a project file · ⌘/Ctrl P"><span data-icon="search"></span></button>
+    <div class="topbar-end" role="toolbar" aria-label="Workspace layout">
+      <button class="icon-button" data-toggle-panel="files" aria-label="Toggle explorer" title="Toggle explorer"><span data-icon="files"></span></button>
+      <button class="icon-button" data-toggle-panel="results" aria-label="Toggle results" title="Toggle results"><span data-icon="results"></span></button>
+      <button class="icon-button" data-toggle-panel="agent" aria-label="Toggle collaborator" title="Toggle collaborator"><span data-icon="agent"></span></button>
+      <span class="toolbar-divider" aria-hidden="true"></span>
+      <button id="theme" class="icon-button" aria-label="Change color theme" title="Change color theme"><span data-icon="theme"></span></button>
+      <button id="settings" class="icon-button" aria-label="Settings" title="Settings"><span data-icon="settings"></span></button>
+    </div>
   </header>
   <div id="notice" class="notice" hidden role="alert"><span id="notice-text"></span><button id="notice-close" aria-label="Dismiss notification"><span data-icon="close"></span></button></div>
   <main id="workspace" class="workspace">
@@ -32,8 +39,8 @@
     <div class="divider column-divider" id="files-divider" role="separator" tabindex="0" aria-label="Resize explorer" aria-orientation="vertical" aria-valuemin="170" aria-valuemax="380" aria-valuenow="230"></div>
     <section class="centre">
       <section id="editor-pane" class="editor-pane pane" tabindex="-1" aria-label="Verum editor">
-        <div class="editor-tabbar"><div class="file-tab"><span id="document-kind" class="file-icon">vr</span><span id="current-path">experiment.vr</span><span id="dirty-marker" title="Unsaved changes" aria-label="Unsaved changes">●</span></div><div class="button-row"><button id="architecture-toggle" class="quiet-button" aria-expanded="false" aria-controls="architecture">Structure</button><button id="reload-source" class="quiet-button" title="Review the saved file before reloading" disabled>Reload</button><button id="save" class="quiet-button" title="Save · ⌘/Ctrl S">Save</button></div></div>
-        <div class="editor-toolbar"><div class="button-row"><button id="run" class="button primary" title="Run locally · ⌘/Ctrl Enter"><span data-icon="run"></span><span>Run</span></button><button id="check" class="button" title="Type-check a Verum module · ⌘/Ctrl Shift Enter"><span data-icon="check"></span><span>Check module</span></button><button id="prove" class="button" title="Check a logical declaration"><span data-icon="proof"></span><span>Prove</span></button></div><button id="run-settings" class="quiet-button" aria-expanded="false" aria-controls="execution-settings" aria-label="Options" title="Options"><span data-icon="settings"></span><span>Options</span></button></div>
+        <div class="editor-tabbar"><div class="file-tab"><span id="document-kind" class="file-icon">vr</span><span id="current-path">experiment.vr</span><span id="dirty-marker" title="Unsaved changes" aria-label="Unsaved changes">●</span></div><div class="button-row"><button id="architecture-toggle" aria-expanded="false" aria-controls="architecture" class="icon-button" aria-label="Source architecture" title="Source architecture"><span data-icon="structure"></span></button><button id="reload-source" disabled class="icon-button" aria-label="Review the saved file before reloading" title="Review the saved file before reloading"><span data-icon="refresh"></span></button><button id="save" class="icon-button" aria-label="Save · ⌘/Ctrl S" title="Save · ⌘/Ctrl S"><span data-icon="save"></span></button></div></div>
+        <div class="editor-toolbar" role="toolbar" aria-label="Source actions"><div class="button-row"><button id="run" class="icon-button primary" aria-label="Run locally · ⌘/Ctrl Enter" title="Run locally · ⌘/Ctrl Enter"><span data-icon="run"></span></button><button id="check" class="icon-button" aria-label="Type-check a Verum module · ⌘/Ctrl Shift Enter" title="Type-check a Verum module · ⌘/Ctrl Shift Enter"><span data-icon="check"></span></button><button id="prove" class="icon-button" aria-label="Check a logical declaration" title="Check a logical declaration"><span data-icon="proof"></span></button></div><button id="run-settings" aria-expanded="false" aria-controls="execution-settings" class="icon-button" aria-label="Execution options" title="Execution options"><span data-icon="settings"></span></button></div>
         <div id="execution-settings" class="execution-settings" hidden>
           <label>Proof declaration<input id="declaration" value="identity" spellcheck="false" placeholder="identity"></label>
           <label>Time budget (seconds)<input id="timeout" type="number" min="1" max="300" value="60"></label>
@@ -66,6 +73,14 @@
   </main>
   <nav class="mobile-nav" aria-label="Workbench panes"><button data-pane="files" aria-controls="files-pane">Files</button><button data-pane="editor" aria-controls="editor-pane" aria-current="page">Editor</button><button data-pane="results" aria-controls="results-pane">Results <span id="mobile-result-count"></span></button><button data-pane="agent" aria-controls="agent-pane">Agent <span id="approval-count"></span></button></nav>
 </div>
+<dialog id="settings-dialog" aria-labelledby="settings-title">
+  <div class="settings-heading"><h2 id="settings-title">Settings</h2><button id="settings-close" class="icon-button" aria-label="Close settings" title="Close settings"><span data-icon="close"></span></button></div>
+  <section class="settings-section"><h3>Appearance</h3>
+    <label for="language">Interface language</label><select id="language"><option value="en" lang="en">English</option><option value="ru" lang="ru">Русский</option></select>
+  </section>
+  <section class="settings-section"><h3>Workspace connection</h3><dl><dt>Workspace</dt><dd id="workspace-root"></dd><dt>Endpoint</dt><dd id="connection-endpoint"></dd><dt>Status</dt><dd id="connection" class="connection">Connecting</dd></dl></section>
+  <button id="help" class="quiet-button"><span data-icon="keyboard"></span><span>Keyboard shortcuts</span></button>
+</dialog>
 <dialog id="dialog"><form method="dialog"><h2 id="dialog-title"></h2><div id="dialog-body"></div><div id="dialog-actions" class="dialog-actions"></div></form></dialog>
 <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
 </body>

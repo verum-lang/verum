@@ -2,7 +2,8 @@ import './style.css';
 import { makeEditor } from './editor';
 import { installPanels } from './panels';
 import { installExplorer } from './explorer';
-import { icon, installIcons } from './icons';
+import { icon, installIcons, type IconName } from './icons';
+import { installTooltips } from './tooltips';
 import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
 import { languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
@@ -10,7 +11,7 @@ import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribu
 import { api, hasToken, installToken } from './api';
 import { STARTER, IDENTITY, sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
 
-installIcons(); initializeLanguage();
+installIcons(); installTooltips(); initializeLanguage();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Missing interface element: ${id}`);
@@ -32,6 +33,10 @@ function button(label: Content, action: () => unknown | Promise<unknown>, classN
   const element = node('button', className, label); element.type = 'button';
   element.addEventListener('click', () => { Promise.resolve().then(action).catch(fail); }); return element;
 }
+function iconButton(name: IconName, label: Content, action: () => unknown | Promise<unknown>) {
+  const element = button('', action, 'icon-button'); element.append(icon(name));
+  setAttribute(element, 'aria-label', label); setAttribute(element, 'data-tooltip', label); return element;
+}
 function setPane(pane: Pane) { panels.show(pane); }
 bind('notice-close', () => { $('notice').hidden = true; });
 
@@ -41,7 +46,8 @@ function applyTheme(choice: string) {
   const dark = choice === 'dark' || (choice === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   localStorage.setItem('verum.studio.theme', choice);
-  setAttribute($('theme'), 'title', m('Theme: {theme}. Change color theme', { theme: m(choice as 'dark' | 'light' | 'system') }));
+  $('theme').replaceChildren(icon(choice === 'system' ? 'system' : choice === 'light' ? 'sun' : 'theme'));
+  setAttribute($('theme'), 'data-tooltip', m('Theme: {theme}. Change color theme', { theme: m(choice as 'dark' | 'light' | 'system') }));
   setAttribute($('theme'), 'aria-label', m('Color theme: {theme}. Change theme', { theme: m(choice as 'dark' | 'light' | 'system') }));
   return dark;
 }
@@ -73,7 +79,7 @@ const editor = makeEditor($('editor'), STARTER, () => { editVersion++; updateDoc
 const panels = installPanels(() => editor.view.requestMeasure());
 explorer = installExplorer({ open: openFile, review: reviewChanges, failure: fail, listed: (root, entries, directory) => {
   files = [...files.filter(file => parentPath(file.path) !== directory), ...entries.filter(entry => entry.kind === 'file')];
-  setText($('workspace-root'), root.split('/').pop() || root); $('workspace-root').dataset.root = root; setAttribute($('workspace-root'), 'title', root);
+  setText($('workspace-root'), root); $('workspace-root').dataset.root = root;
 } });
 document.querySelector('.skip-link')?.addEventListener('click', event => { event.preventDefault(); setPane('editor'); editor.view.focus(); });
 const scrolling = new WeakMap<HTMLElement, number>();
@@ -125,7 +131,13 @@ function loadDocument(path: string, source: string, hash: string | null) {
 }
 async function refreshFiles() {
   await explorer!.refresh();
-  $('connection').classList.add('online'); $('connection').replaceChildren(node('span', 'status-dot'), node('span', '', m('Local service')));
+  connectionStatus(true);
+}
+function connectionStatus(connected: boolean) {
+  $('connection').classList.toggle('online', connected);
+  $('connection').replaceChildren(node('span', 'status-dot'), node('span', '', connected ? m('Connected') : m('Disconnected')));
+  if (connected) delete $('settings').dataset.attention;
+  else $('settings').dataset.attention = 'true';
 }
 async function reviewChanges(change: GitChange) {
   const content = node('div', 'change-review');
@@ -227,7 +239,8 @@ let analysisTimer = 0, analysisBusy = false, analysisPending = false;
 const languageRevision = (): DocumentRevision => ({ path: currentPath, source: editor.source() });
 function sourceView() {
   $('architecture').hidden = true; $('editor').hidden = false;
-  setText($('architecture-toggle'), m('Structure')); $('architecture-toggle').setAttribute('aria-expanded', 'false');
+  setAttribute($('architecture-toggle'), 'aria-label', m('Source architecture')); $('architecture-toggle').setAttribute('aria-expanded', 'false');
+  setAttribute($('architecture-toggle'), 'data-tooltip', m('Source architecture'));
   editor.view.requestMeasure();
 }
 function showRange(range: Range) { sourceView(); setPane('editor'); editor.select(range); }
@@ -243,7 +256,8 @@ editor.connectLanguage({ revision: languageRevision, failure: fail, navigate: na
 bind('architecture-toggle', async () => {
   if (!$('architecture').hidden) { sourceView(); return; }
   $('architecture').hidden = false; $('editor').hidden = true;
-  setText($('architecture-toggle'), m('Source')); $('architecture-toggle').setAttribute('aria-expanded', 'true');
+  setAttribute($('architecture-toggle'), 'aria-label', m('Return to source')); $('architecture-toggle').setAttribute('aria-expanded', 'true');
+  setAttribute($('architecture-toggle'), 'data-tooltip', m('Return to source'));
   await inspectProject();
 });
 async function inspectProject() {
@@ -453,10 +467,10 @@ function renderResults() {
     setAttribute(badge, 'title', m('This result does not describe the current editor source.')); heading.append(badge);
   } else heading.append(node('span', 'badge', m('Current source')));
   if (receipt.status === 'running') {
-    const cancel = button(m('Cancel'), async () => { await api('operation.cancel', { id: receipt.id }); await refreshOperations(); }, 'quiet-button');
+    const cancel = iconButton('close', m('Cancel'), async () => { await api('operation.cancel', { id: receipt.id }); await refreshOperations(); });
     cancel.dataset.focusKey = 'cancel'; heading.append(cancel);
   }
-  const copy = button(m('Copy receipt'), async () => { await navigator.clipboard.writeText(pretty(receipt)); announce(m('Receipt copied')); }, 'quiet-button');
+  const copy = iconButton('copy', m('Copy receipt'), async () => { await navigator.clipboard.writeText(pretty(receipt)); announce(m('Receipt copied')); });
   copy.dataset.focusKey = 'copy'; heading.append(copy);
   detail.append(heading, node('p', 'result-meta', receipt.exit_code == null ? m('{path} · {seconds}s · {hash}', { path: receipt.path, seconds: elapsed(receipt) / 1000, hash: receipt.source_hash.slice(0, 12) }) : m('{path} · {seconds}s · exit {code} · {hash}', { path: receipt.path, seconds: elapsed(receipt) / 1000, code: receipt.exit_code, hash: receipt.source_hash.slice(0, 12) })));
   const context = node('details'); context.dataset.key = 'context';
@@ -708,18 +722,25 @@ async function showApproval(id: string | number, method: string, params: Record<
   announce(m('Agent request awaiting your review'));
 }
 
-bind('theme', async () => {
-  const selected = await dialog(m('Appearance'), node('p', '', m('Choose a color scheme for your workspace.')), [{ value: 'system', label: m('Follow system') }, { value: 'light', label: m('Light') }, { value: 'dark', label: m('Dark'), primary: true }]);
-  if (selected !== 'cancel') editor.theme(applyTheme(selected));
+bind('theme', () => {
+  const modes = ['system', 'light', 'dark'];
+  const next = modes[(modes.indexOf(localStorage.getItem('verum.studio.theme') || 'dark') + 1) % modes.length];
+  editor.theme(applyTheme(next));
 });
+bind('settings', () => { setText($('connection-endpoint'), location.origin); $<HTMLDialogElement>('settings-dialog').showModal(); });
+bind('settings-close', () => $<HTMLDialogElement>('settings-dialog').close());
+function findProjectFile() { setPane('files'); input('file-filter').focus(); input('file-filter').select(); }
+bind('project-search', findProjectFile);
 bind('help', async () => {
+  $<HTMLDialogElement>('settings-dialog').close();
   const content = node('div', 'shortcut-list');
-  for (const [label, shortcut] of [[m('Save source'), '⌘ / Ctrl S'], [m('Run source'), '⌘ / Ctrl Enter'], [m('Check source'), '⌘ / Ctrl Shift Enter'], [m('Find in source'), '⌘ / Ctrl F'], [m('Go to definition'), 'F12'], [m('Toggle explorer'), '⌘ / Ctrl B'], [m('Toggle collaborator'), '⌘ / Ctrl Shift B'], [m('Toggle results'), '⌘ / Ctrl J'], [m('Resize focused divider'), m('Arrow keys · Home / End')], [m('Collapse focused divider'), 'Enter'], [m('Send agent message'), '⌘ / Ctrl Enter'], [m('Leave editor with Tab'), m('Esc, then Tab')]]) content.append(node('span', '', label), node('kbd', '', shortcut));
+  for (const [label, shortcut] of [[m('Save source'), '⌘ / Ctrl S'], [m('Run source'), '⌘ / Ctrl Enter'], [m('Check source'), '⌘ / Ctrl Shift Enter'], [m('Find a project file'), '⌘ / Ctrl P'], [m('Find in source'), '⌘ / Ctrl F'], [m('Go to definition'), 'F12'], [m('Toggle explorer'), '⌘ / Ctrl B'], [m('Toggle collaborator'), '⌘ / Ctrl Shift B'], [m('Toggle results'), '⌘ / Ctrl J'], [m('Resize focused divider'), m('Arrow keys · Home / End')], [m('Collapse focused divider'), 'Enter'], [m('Send agent message'), '⌘ / Ctrl Enter'], [m('Leave editor with Tab'), m('Esc, then Tab')]]) content.append(node('span', '', label), node('kbd', '', shortcut));
   await dialog(m('Keyboard shortcuts'), content, [{ value: 'close', label: m('Done'), primary: true }]);
 });
 document.addEventListener('keydown', event => {
-  if ($<HTMLDialogElement>('dialog').open || !(event.ctrlKey || event.metaKey)) return;
-  if (event.key.toLowerCase() === 'b') { event.preventDefault(); panels.toggle(event.shiftKey ? 'agent' : 'files'); }
+  if (document.querySelector('dialog[open]') || !(event.ctrlKey || event.metaKey)) return;
+  if (event.key.toLowerCase() === 'p') { event.preventDefault(); findProjectFile(); }
+  else if (event.key.toLowerCase() === 'b') { event.preventDefault(); panels.toggle(event.shiftKey ? 'agent' : 'files'); }
   else if (event.key.toLowerCase() === 'j') { event.preventDefault(); panels.toggle('results'); }
   else if (event.key.toLowerCase() === 's') { event.preventDefault(); save().catch(fail); }
   else if (event.key === 'Enter' && event.target !== $('agent-input')) { event.preventDefault(); startOperation(event.shiftKey ? 'check' : 'run').catch(fail); }
@@ -751,9 +772,9 @@ initialize().catch(fail);
 let lastPollError = '';
 window.setInterval(() => {
   if (!hasToken()) return;
-  refreshOperations().then(() => { if (lastPollError) { lastPollError = ''; $('connection').classList.add('online'); } }).catch(error => {
-    $('connection').classList.remove('online');
-    const text = errorText(error); if (text !== lastPollError) { lastPollError = text; notice(m('Local service: {error}', { error: text })); }
+  refreshOperations().then(() => { if (lastPollError) { lastPollError = ''; connectionStatus(true); } }).catch(error => {
+    connectionStatus(false);
+    const text = errorText(error); if (text !== lastPollError) { lastPollError = text; notice(m('Connection: {error}', { error: text })); }
   });
 }, 1200);
 window.setInterval(() => { pollEvents().catch(error => { const text = errorText(error); if (text !== lastPollError) { lastPollError = text; notice(m('Agent event stream: {error}', { error: text })); } }); }, 700);

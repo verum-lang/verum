@@ -21,8 +21,8 @@ export async function api<T = unknown>(method: string, params: Record<string, un
     body: JSON.stringify({ method, params }), cache: 'no-store', credentials: 'omit', redirect: 'error',
   });
   let body: { result?: T; error?: string };
-  try { body = await response.json(); } catch { throw new Error(t(m('Local service returned HTTP {status} without a JSON response.', { status: response.status }))); }
-  if (!response.ok || body.error !== undefined) throw new Error(body.error || t(m('Local service returned HTTP {status}.', { status: response.status })));
-  if (!('result' in body)) throw new Error(t(m('Local service returned an incomplete response.')));
+  try { body = await response.json(); } catch { throw new Error(t(m('Server returned HTTP {status} without a JSON response.', { status: response.status }))); }
+  if (!response.ok || body.error !== undefined) throw new Error(body.error || t(m('Server returned HTTP {status}.', { status: response.status })));
+  if (!('result' in body)) throw new Error(t(m('Server returned an incomplete response.')));
   return body.result as T;
 }

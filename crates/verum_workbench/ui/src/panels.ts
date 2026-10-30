@@ -43,7 +43,7 @@ export function installPanels(measureEditor: () => void) {
         const labels = { files: ['Expand explorer', 'Collapse explorer'], agent: ['Expand collaborator', 'Collapse collaborator'], results: ['Expand results', 'Collapse results'] } as const;
         const label = m(labels[panel][collapsed ? 0 : 1]);
         toggle.setAttribute('aria-expanded', String(!collapsed));
-        setAttribute(toggle, 'aria-label', label); setAttribute(toggle, 'title', label);
+        setAttribute(toggle, 'aria-label', label); setAttribute(toggle, 'data-tooltip', label);
       }
       const separator = element(`${panel}-divider`);
       separator.setAttribute('aria-valuemin', String(collapsed ? layoutLimits.rail : layoutLimits[panel].min));

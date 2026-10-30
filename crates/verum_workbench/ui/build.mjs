@@ -7,6 +7,7 @@ const result = await build({
   entryPoints: ['src/main.ts'], bundle: true, minify: true,
   target: ['es2022'], outfile: 'dist/app.js', metafile: true,
   legalComments: 'external', charset: 'utf8',
+  external: ['/fonts/*'],
 });
 const brand = await readFile(new URL('../../../assets/brand/exports/verum-emblem-128.png', import.meta.url));
 const brandUri = `data:image/png;base64,${brand.toString('base64')}`;
@@ -25,10 +26,11 @@ for (const input of Object.keys(result.metafile.inputs)) {
   }
 }
 const notices = ['Verum Workbench — bundled third-party notices\n', await readFile('HUGEICONS-LICENSE.txt', 'utf8')];
+for (const name of ['Inter', 'JetBrainsMono']) notices.push(await readFile(`fonts/${name}-LICENSE.txt`, 'utf8'));
 for (const [, { directory, pkg }] of [...packages].sort()) {
   const licenseFiles = (await readdir(directory)).filter(name => /^(license|copying)(\.|$)/i.test(name));
   if (!licenseFiles.length) throw new Error(`Missing license file for ${pkg.name}`);
   notices.push(`${pkg.name} ${pkg.version} (${pkg.license ?? 'see license'})\n${'='.repeat(72)}`);
   for (const file of licenseFiles) notices.push(await readFile(join(directory, file), 'utf8'));
 }
-await writeFile('dist/licenses.txt', notices.join('\n\n'));
+await writeFile('dist/licenses.txt', notices.join('\n\n').replace(/[ \t]+$/gm, ''));

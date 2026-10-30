@@ -1,4 +1,15 @@
 @import "./theme.css";
+@font-face { font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/InterVariable.woff2') format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); }
+:root {
+  --font-ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-code: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --control-size: 28px;
+}
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
@@ -15,13 +26,7 @@
 @media (forced-colors: active) { * { scrollbar-color: auto; } }
 body {
   margin: 0;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--font-ui);
   font-size: 13px;
   line-height: 1.5;
   background: var(--bg);
@@ -53,16 +58,15 @@ button {
 button:focus-visible,
 a:focus-visible,
 summary:focus-visible,
-[tabindex]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role=treeitem]:focus-visible,
+[role=button]:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
-input:focus,
-textarea:focus,
-select:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
+.pane:focus { outline: none; }
 input,
 textarea,
 select {
@@ -99,11 +103,7 @@ pre,
 code,
 kbd,
 .cm-editor {
-  font-family:
-    "SFMono-Regular",
-    Consolas,
-    "Liberation Mono",
-    monospace;
+  font-family: var(--font-code);
 }
 pre {
   white-space: pre-wrap;
@@ -154,49 +154,37 @@ kbd {
   --agent-width:344px;
   --results-height:240px;
   --pane-heading-height:40px;
-  --gutter:12px;
+  --gutter:var(--space-3);
 }
 .topbar {
-  height: 48px;
+  height: 44px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 0 12px;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
 }
 .brand-mark {
   display: block;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
-}
-.workspace-label {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: 11px;
-  margin-left: auto;
 }
 .topbar-end {
   display: flex;
-  gap: 10px;
+  gap: var(--space-1);
   align-items: center;
 }
-.language-switch { font-size: 11px; padding: 4px 6px; max-width: 95px; }
+.toolbar-divider { height: 16px; width: 1px; background: var(--border); margin-inline: var(--space-1); }
+#settings[data-attention] { color: var(--warning); }
 .connection {
   display: flex;
   gap: 6px;
@@ -220,8 +208,10 @@ kbd {
 .icon-button {
   font-size: 17px;
   border-radius: 5px;
-  width: 28px;
-  height: 28px;
+  width: var(--control-size);
+  height: var(--control-size);
+  padding: 0;
+  flex: 0 0 auto;
   display: inline-grid;
   place-items: center;
 }
@@ -253,12 +243,14 @@ kbd {
 .button:hover {
   background: var(--hover);
 }
-.button.primary {
+.button.primary,
+.icon-button.primary {
   background: var(--accent);
   color: var(--on-accent);
   border-color: var(--accent);
 }
-.button.primary:hover {
+.button.primary:hover,
+.icon-button.primary:hover {
   filter: brightness(1.08);
 }
 .button.danger {
@@ -315,7 +307,6 @@ kbd {
   color: var(--muted);
 }
 .rail-restore:hover { background: var(--hover); color: var(--text); }
-.rail-restore:focus-visible { outline-offset: -3px; }
 .rail-label { writing-mode: vertical-rl; font-size: 11px; letter-spacing: .04em; }
 .rail-status { font-size: 10px; writing-mode: vertical-rl; margin-top: auto; }
 .panel-rail[data-attention=true] .rail-status { color: var(--warning); }
@@ -388,17 +379,16 @@ kbd {
 .tree-entry { display: flex; align-items: center; gap: 6px; min-height: 29px; padding: 3px 7px 3px calc(2px + var(--depth) * 14px); font-size: 12px; border-radius: 4px; cursor: pointer; user-select: none; }
 .tree-entry:hover { background: var(--hover); }
 .tree-entry[aria-selected=true] { background: var(--accent-soft); color: var(--accent-text); }
-.tree-entry:focus-visible { outline-offset: -2px; }
 .tree-chevron { width: 13px; display: flex; align-items: center; flex: 0 0 auto; color: var(--muted); }
 .tree-chevron .icon { width: 13px; height: 13px; }
 .tree-entry[aria-expanded=true] .tree-chevron { transform: rotate(90deg); }
 .tree-entry > .icon { width: 16px; height: 16px; color: var(--muted); }
 .tree-entry > .tree-file-icon { color: var(--accent-text); }
 .tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.git-badge { font: 10px ui-monospace, monospace; letter-spacing: 1px; padding: 1px 3px; border-radius: 3px; color: var(--warning); white-space: nowrap; }
+.git-badge { font: 10px var(--font-code); letter-spacing: 1px; padding: 1px 3px; border-radius: 3px; color: var(--warning); white-space: nowrap; }
 .git-badge:hover { background: var(--warning-bg); }
 .git-badge[data-conflict=true] { color: var(--danger); background: var(--danger-bg); }
-.tree-change-count { color: var(--muted); font: 10px ui-monospace, monospace; }
+.tree-change-count { color: var(--muted); font: 10px var(--font-code); }
 .draft-dot { font-size: 8px; color: var(--accent); }
 .learn-section > summary { font-size: 11px; color: var(--muted); cursor: pointer; }
 .learn-section[open] > summary { margin-bottom: 8px; }
@@ -529,8 +519,9 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   z-index: 3;
   touch-action: none;
 }
+.divider:focus { outline: none; }
 .divider:hover,
-.divider:focus,
+.divider:focus-visible,
 .divider.dragging {
   background: var(--accent);
 }
@@ -648,6 +639,8 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 }
 .cm-scroller {
   overflow: auto;
+  font-family: var(--font-code) !important;
+  font-variant-ligatures: none;
 }
 .cm-content {
   padding: 12px 0;
@@ -660,7 +653,7 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   padding-top: 0;
   border-right: none !important;
   background: var(--editor) !important;
-  color: var(--gutter) !important;
+  color: var(--muted) !important;
 }
 .cm-lineNumbers .cm-gutterElement {
   padding: 0 12px 0 18px;
@@ -701,10 +694,10 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .project-file { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 8px 0; }
 .project-file span:first-child { overflow-wrap: anywhere; min-width: 0; }
 .declaration-card { border: 1px solid var(--border); padding: 12px; margin: 8px 0; border-radius: 6px; }
-.declaration-name { font-family: monospace; padding: 0 8px; color: var(--accent-text); }
+.declaration-name { font-family: var(--font-code); padding: 0 8px; color: var(--accent-text); }
 .declaration-card p { margin-top: 10px; }
 .declaration-card > code { display: block; margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
-.context-requirement { display: block; font-family: monospace; text-align: left; color: var(--accent-text); padding: 8px 0; overflow-wrap: anywhere; }
+.context-requirement { display: block; font-family: var(--font-code); text-align: left; color: var(--accent-text); padding: 8px 0; overflow-wrap: anywhere; }
 .language-hover { max-width: min(440px, 80vw); max-height: 280px; overflow: auto; padding: 12px; }
 #source-status {
   overflow: hidden;
@@ -839,7 +832,7 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   margin-left: auto;
 }
 .result-meta {
-  font-family: monospace;
+  font-family: var(--font-code);
   font-size: 10px;
   color: var(--muted);
   margin-bottom: 10px;
@@ -1154,8 +1147,8 @@ dialog {
   max-width: min(520px, calc(100vw - 32px));
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 25px;
+  border-radius: 8px;
+  padding: var(--space-4);
   background: var(--surface);
   color: var(--text);
   box-shadow: 0 20px 90px #0004;
@@ -1178,9 +1171,9 @@ dialog::backdrop {
   backdrop-filter: blur(2px);
 }
 dialog h2 {
-  font-size: 19px;
-  letter-spacing: -.3px;
-  margin-bottom: 13px;
+  font-size: 14px;
+  letter-spacing: 0;
+  margin-bottom: var(--space-3);
 }
 dialog p {
   margin-bottom: 12px;
@@ -1202,6 +1195,14 @@ dialog input {
   margin-top: 20px;
   flex-wrap: wrap;
 }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
+.settings-heading h2 { margin: 0; }
+.settings-section { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--space-3); border-top: 1px solid var(--border); padding-block: var(--space-4); }
+.settings-section h3 { grid-column: 1 / -1; font-size: 12px; font-weight: 600; }
+.settings-section dl { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; font-size: 11px; }
+.settings-section dt { color: var(--muted); }
+.settings-section dd { margin: 0; overflow-wrap: anywhere; }
+.control-tooltip { position: fixed; z-index: 100; pointer-events: none; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 5px var(--space-2); border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font-size: 11px; font-weight: 400; line-height: 1.5; box-shadow: 0 3px 12px #0002; }
 .shortcut-list {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1229,19 +1230,11 @@ a {
 }
 @media (max-width: 769px) {
   .topbar {
-    height: 48px;
-    padding: 0 12px;
-    gap: 10px;
-  }
-  .brand {
-    gap: 7px;
+    height: 44px;
   }
   .brand-mark {
     width: 26px;
     height: 26px;
-  }
-  .workspace-label {
-    display: none;
   }
   .topbar-end {
     margin-left: auto;
@@ -1343,19 +1336,11 @@ a {
   .execution-settings label input {
     font-size: 16px;
   }
-  .topbar .connection {
-    max-width: 105px;
-    overflow: hidden;
-  }
   .approval-content pre {
     max-height: 200px;
   }
 }
 @media (max-width: 400px) {
-  #run-settings span { display: none; }
-  #run-settings svg { display: block; }
-  .topbar .connection { font-size: 0; gap: 0; }
-  .editor-toolbar .button { padding-inline: 9px; }
   .history {
     width: 105px;
   }
