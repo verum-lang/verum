@@ -10,6 +10,9 @@ use verum_error::unified::VerumError;
 impl From<TypeError> for VerumError {
     fn from(err: TypeError) -> Self {
         match err {
+            TypeError::AnalysisCancelled => VerumError::Other {
+                message: "Analysis cancelled or deadline exceeded; no verdict is available".into(),
+            },
             // Direct mappings to VerumError variants
             TypeError::LanguageLaw { code, message, .. } => VerumError::Other {
                 message: verum_common::Text::from(format!("{code}: {message}")),

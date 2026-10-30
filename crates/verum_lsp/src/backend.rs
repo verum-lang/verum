@@ -83,6 +83,12 @@ impl Backend {
         &self.config
     }
 
+    /// Hosts serialize a request's document synchronization and analysis under
+    /// one control. Clearing it restores the shared per-refresh budget.
+    pub fn set_analysis_control(&self, control: Option<crate::AnalysisControl>) {
+        self.project.lock().set_analysis_control(control);
+    }
+
     pub(crate) fn refresh_project(&self) {
         let result = self.project.lock().refresh(&self.documents);
         if let Err(error) = result {
@@ -95,6 +101,10 @@ impl Backend {
                     doc.analysis_revision = None;
                     doc.library_metadata = None;
                     doc.project_bindings.clear();
+                    doc.type_info.clear();
+                    for symbol in doc.symbols.values_mut() {
+                        symbol.ty = None;
+                    }
                     doc.diagnostics =
                         verum_common::List::from_iter([verum_diagnostics::DiagnosticBuilder::new(
                             verum_diagnostics::Severity::Error,

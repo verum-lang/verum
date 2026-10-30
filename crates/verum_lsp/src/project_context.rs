@@ -39,6 +39,7 @@ struct Source {
 }
 #[derive(Default)]
 pub struct ProjectContext {
+    control: Option<crate::AnalysisControl>,
     library: Option<std::sync::Arc<crate::library_metadata::LibraryMetadata>>,
     root: Option<PathBuf>,
     library_roots: Map<Text, PathBuf>,
@@ -55,6 +56,9 @@ impl ProjectContext {
             library,
             ..Self::default()
         }
+    }
+    pub fn set_analysis_control(&mut self, control: Option<crate::AnalysisControl>) {
+        self.control = control;
     }
     pub fn library_identity(&self) -> Option<&crate::library_metadata::LibraryIdentity> {
         self.library.as_ref().map(|library| &library.identity)
@@ -84,6 +88,10 @@ impl ProjectContext {
         &self.revision
     }
     pub fn refresh(&mut self, documents: &DocumentStore) -> Result<bool> {
+        let control = self.control.clone().unwrap_or_else(|| {
+            crate::AnalysisControl::with_deadline(std::time::Instant::now() + crate::ANALYSIS_TIMEOUT)
+        });
+        control.check()?;
         let Some(root) = self.root.clone() else {
             return Ok(false);
         };
@@ -139,6 +147,7 @@ impl ProjectContext {
                 &mut captured,
                 &mut owners,
                 &mut bytes,
+                &control,
             )?;
         }
         // Project compilation and editor analysis share the same source identity.
@@ -228,6 +237,7 @@ impl ProjectContext {
         }
         let mut sources = Map::new();
         for path in paths {
+            control.check()?;
             let text = captured.remove(&path).unwrap();
             let (file_id, ast, version) = if let Some((_, _, version, id, ast)) =
                 open.iter().find(|(p, ..)| p == &path)
@@ -286,6 +296,7 @@ impl ProjectContext {
         let mut ordered: List<_> = sources.values().collect();
         ordered.sort_by(|a, b| a.path.cmp(&b.path));
         for source in ordered {
+            control.check()?;
             let Some(ast) = &source.ast else {
                 issues.push(format!("Cannot parse {}", source.path.display()).into());
                 continue;
@@ -335,6 +346,7 @@ impl ProjectContext {
             .collect();
         let registry = SharedModuleRegistry::from_registry(registry);
         for (path, _, _, _, _) in &open {
+            control.check()?;
             let Some(source) = sources.get(path) else {
                 continue;
             };
@@ -371,11 +383,13 @@ impl ProjectContext {
             } else {
                 TypeChecker::with_shared_registry(registry.clone())
             };
+            checker.set_analysis_control(control.clone());
             checker.seed_module_properties(&info.ast.items);
             checker.register_builtins();
             if let Some(library) = &self.library {
                 checker.register_stdlib_types_for_module(&info.ast);
                 for (name, declaration) in &library.core.context_decl_nodes {
+                    control.check()?;
                     checker.register_protocol_as_context(name.clone());
                     checker.register_stdlib_context_full(name.clone(), declaration.clone());
                 }
@@ -384,8 +398,9 @@ impl ProjectContext {
             checker.set_current_cog(cog.clone());
             checker.set_current_module(info.id);
             checker.set_current_module_path(info.path.to_string());
-            documents.with_document_mut(&uri, |doc| {
-                doc.check_project(&mut checker, &info.ast, revision.clone());
+            control.check()?;
+            documents.with_document_mut(&uri, |doc| -> verum_types::Result<()> {
+                doc.check_project(&mut checker, &info.ast, revision.clone())?;
                 doc.library_metadata = self.library_identity().cloned();
                 let mut imports = ImportResolver::new();
                 {
@@ -429,8 +444,10 @@ impl ProjectContext {
                         }
                     }
                 }
-            });
+                Ok(())
+            }).transpose()?;
         }
+        control.check()?;
         self.identities = sources
             .values()
             .map(|source| SourceIdentity {
@@ -474,12 +491,14 @@ fn capture(
     sources: &mut Map<PathBuf, Text>,
     owners: &mut Map<PathBuf, ModulePath>,
     bytes: &mut usize,
+    control: &crate::AnalysisControl,
 ) -> Result<()> {
     ensure!(
         directory.strip_prefix(root)?.components().count() <= 64,
         "Project directory depth exceeded"
     );
     for entry in std::fs::read_dir(directory)? {
+        control.check()?;
         let entry = entry?;
         let path = entry.path();
         let kind = entry.file_type()?;
@@ -491,7 +510,7 @@ fn capture(
             continue;
         }
         if kind.is_dir() {
-            capture(root, &path, prefix, sources, owners, bytes)?;
+            capture(root, &path, prefix, sources, owners, bytes, control)?;
         } else if kind.is_file() && path.extension().is_some_and(|ext| ext == "vr") {
             ensure!(sources.len() < 4096, "Project source limit exceeded");
             let size = entry.metadata()?.len();

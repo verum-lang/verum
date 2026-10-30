@@ -854,6 +854,7 @@ impl TypeChecker {
     /// after panics or early returns.
     #[inline]
     pub(super) fn inc_inference_depth(&self, context: &str) -> Result<InferenceDepthGuard> {
+        self.check_analysis_control()?;
         let depth = self.inference_depth.get() + 1;
         self.inference_depth.set(depth);
         if depth > MAX_INFERENCE_DEPTH {
@@ -998,6 +999,8 @@ impl TypeChecker {
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
             metadata_impls_by_owner: Maybe::None,
+            metadata_impl_receipts: Map::new(),
+            analysis_control: None,
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -1048,6 +1051,18 @@ impl TypeChecker {
                 out
             },
         ));
+    }
+
+    /// An interrupted checker cannot be rearmed: its partially populated
+    /// inference state must be discarded, never reused as a complete result.
+    pub fn set_analysis_control(&mut self, control: crate::AnalysisControl) {
+        if self.analysis_control.as_ref().is_none_or(|old| !old.is_cancelled()) {
+            self.analysis_control = Some(control);
+        }
+    }
+
+    pub fn check_analysis_control(&self) -> Result<()> {
+        self.analysis_control.as_ref().map_or(Ok(()), |control| control.check())
     }
 
     /// Create a new type checker with stdlib metadata loaded from stdlib.vbc.
@@ -1147,6 +1162,7 @@ impl TypeChecker {
         self.metadata_own_surface = std::cell::RefCell::new(None);
         self.metadata_declaring_modules = std::cell::OnceCell::new();
         self.metadata_impls_by_owner = Maybe::None;
+        self.metadata_impl_receipts.clear();
         self.stdlib_tail_registered.clear();
     }
 
@@ -1259,6 +1275,9 @@ impl TypeChecker {
         let mut already: std::collections::HashSet<Text> =
             std::collections::HashSet::new();
         while let Some(name) = to_load.pop() {
+            if self.check_analysis_control().is_err() {
+                return;
+            }
             if !already.insert(name.clone()) {
                 continue;
             }
@@ -2590,14 +2609,36 @@ impl TypeChecker {
         implementation: crate::protocol::ProtocolImpl,
         target: &Text,
         metadata: &crate::core_metadata::CoreMetadata,
+        position: Option<usize>,
     ) {
-        for key in Self::metadata_impl_target_keys(target, metadata) {
-            let mut implementation = implementation.clone();
-            if let Type::Named { path, .. } = &mut implementation.for_type {
-                *path = Self::text_to_path(&key);
+        let keys: List<_> = Self::metadata_impl_target_keys(target, metadata)
+            .into_iter()
+            .filter(|key| {
+                !position
+                    .and_then(|position| self.metadata_impl_receipts.get(&position))
+                    .is_some_and(|registered| registered.contains(key))
+            })
+            .collect();
+        let Some((last, initial)) = keys.split_last() else {
+            return;
+        };
+        let mut register = |mut current: crate::protocol::ProtocolImpl, key: &Text| {
+            if let Type::Named { path, .. } = &mut current.for_type {
+                *path = Self::text_to_path(key);
             }
-            let _ = self.protocol_checker.write().register_impl(implementation);
+            let accepted = self.protocol_checker.write().register_impl(current).is_ok();
+            if accepted && let Some(position) = position {
+                self.metadata_impl_receipts
+                    .entry(position)
+                    .or_default()
+                    .insert(key.clone());
+            }
+        };
+        for key in initial {
+            register(implementation.clone(), key);
         }
+        // The final registration consumes the value, even for a single owner.
+        register(implementation, last);
     }
 
     fn register_stdlib_impls_for_target(&mut self, type_name: &Text) -> Vec<Text> {
@@ -2613,10 +2654,19 @@ impl TypeChecker {
             .get(type_name)
             .map(Self::metadata_declaring_key)
             .unwrap_or_else(|| type_name.clone());
-        let index = self.metadata_impls_by_owner.get_or_insert_with(|| {
+        if self.metadata_impls_by_owner.is_none() {
             let mut index: Map<Text, List<usize>> = Map::new();
+            // Archives repeat imported declarations. Only full descriptor
+            // equality permits reuse; protocol/target keys omit constraints.
+            let mut declarations = Set::new();
             for (position, implementation) in metadata.implementations.iter().enumerate() {
+                if self.check_analysis_control().is_err() {
+                    return proto_deps;
+                }
                 self.metrics.metadata_impl_index_entries += 1;
+                if !declarations.insert(implementation) {
+                    continue;
+                }
                 let owner = metadata
                     .types
                     .get(&implementation.target_type)
@@ -2624,13 +2674,17 @@ impl TypeChecker {
                     .unwrap_or_else(|| implementation.target_type.clone());
                 index.entry(owner).or_default().push(position);
             }
-            index
-        });
+            self.metadata_impls_by_owner = Some(index);
+        }
+        let index = self.metadata_impls_by_owner.as_ref().expect("completed metadata index");
         // Clone only this ordered bucket so registration can borrow self mutably.
         // Alias spellings share a bucket only when their descriptors prove the
         // same declaring owner; no simple-name or suffix fallback participates.
         let candidates = index.get(&requested_owner).cloned().unwrap_or_default();
         for position in candidates {
+            if self.check_analysis_control().is_err() {
+                return proto_deps;
+            }
             self.metrics.metadata_impl_candidates += 1;
             let impl_desc = &metadata.implementations[position];
             if impl_desc.protocol.as_str().is_empty() {
@@ -2641,59 +2695,18 @@ impl TypeChecker {
             // when this protocol was already loaded earlier.
             self.register_stdlib_protocol_for_name(&impl_desc.protocol, &metadata);
 
-            // Idempotent guard: skip if THIS IMPL — this protocol
-            // INSTANTIATION for this target type — was already
-            // registered.  Re-registration is common (the stdlib
-            // lazy-loader re-enters this per load call) and the skip
-            // spares the repeated allocation.
-            //
-            // The question has to be asked at instantiation granularity.
-            // It used to be asked at bare-name granularity: the guard
-            // compared `i.protocol.as_ident()` against
-            // `impl_desc.protocol` and never looked at the arguments.
-            // `core/time/instant.vr` declares
-            //
-            //     implement Sub<Duration> for Instant { Output = Instant }
-            //     implement Sub<Instant>  for Instant { Output = Duration }
-            //
-            // so the second one looked like a duplicate of the first and
-            // was dropped here, before `register_impl` — which keys on
-            // the full instantiation and would have kept both — ever saw
-            // it.  `instant - instant` then resolved through the only
-            // `Sub for Instant` the checker knew about and typed as
-            // `Instant` instead of `Duration` (T0756).
-            //
-            // `implements_instantiation` composes the key from the same
-            // two helpers `register_impl` uses, so this guard and the
-            // index cannot disagree about what "already registered"
-            // means.
-            //
-            // It is a FAST PATH, not the authority.  `register_impl`
-            // short-circuits on the same key, so being wrong here can
-            // only cost work, never admit a duplicate.  Note one place
-            // it deliberately under-fires: for a GENERIC target the
-            // registration below rebuilds `for_type` with positional
-            // args (`__generic_0..k`) while this probe uses the argless
-            // form, and `make_type_key` includes args — so the probe
-            // misses and the loop falls through to `register_impl`,
-            // which recognises the duplicate and returns. Check every
-            // descriptor-proven spelling before taking this fast path.
-            let protocol_path = Self::text_to_path(&impl_desc.protocol);
-            let protocol_args = Self::parse_impl_protocol_args(impl_desc);
-            {
-                let pc = self.protocol_checker.read();
-                if Self::metadata_impl_target_keys(&impl_desc.target_type, &metadata)
-                    .iter()
-                    .all(|key| {
-                        let target = Type::Named {
-                            path: Self::text_to_path(key),
-                            args: List::new(),
-                        };
-                        pc.implements_instantiation(&target, &protocol_path, &protocol_args)
-                    }) {
-                    proto_deps.push(impl_desc.protocol.clone());
-                    continue;
-                }
+            // Reuse only successful admissions of this exact installed descriptor.
+            // A protocol/target lookup is insufficient: it drops constraints and
+            // associated assignments, and its argless receiver misses generics.
+            if self.metadata_impl_receipts.get(&position).is_some_and(
+                |registered| {
+                    Self::metadata_impl_target_keys(&impl_desc.target_type, &metadata)
+                        .iter()
+                        .all(|key| registered.contains(key))
+                },
+            ) {
+                proto_deps.push(impl_desc.protocol.clone());
+                continue;
             }
 
             // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — parse
@@ -2818,7 +2831,12 @@ impl TypeChecker {
                         .collect::<Vec<_>>()
                 );
             }
-            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, &metadata);
+            self.register_metadata_impl(
+                protocol_impl,
+                &impl_desc.target_type,
+                &metadata,
+                Some(position),
+            );
             proto_deps.push(impl_desc.protocol.clone());
         }
         proto_deps
@@ -4075,6 +4093,8 @@ impl TypeChecker {
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
             metadata_impls_by_owner: Maybe::None,
+            metadata_impl_receipts: Map::new(),
+            analysis_control: None,
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -4549,7 +4569,7 @@ impl TypeChecker {
                 type_param_fn_bounds: verum_common::Map::new(),
             };
             // Ignore coherence errors during metadata loading.
-            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, metadata);
+            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, metadata, None);
         }
 
         // Register inductive constructors for pattern matching

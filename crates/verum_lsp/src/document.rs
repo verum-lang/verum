@@ -717,14 +717,24 @@ impl DocumentState {
         checker: &mut TypeChecker,
         module: &Module,
         revision: Text,
-    ) {
-        self.analysis_revision = Some(revision);
+    ) -> verum_types::Result<()> {
+        self.analysis_revision = None;
         self.project_bindings.clear();
         self.diagnostics.clear();
         let started = std::time::Instant::now();
         self.check_module_types(module, checker);
         self.last_type_check_us = started.elapsed().as_micros() as u64;
+        if let Err(error) = checker.check_analysis_control() {
+            self.type_info.clear();
+            for symbol in self.symbols.values_mut() {
+                symbol.ty = None;
+            }
+            self.diagnostics.clear();
+            return Err(error);
+        }
+        self.analysis_revision = Some(revision);
         self.project_check_count += 1;
+        Ok(())
     }
 
     fn check_module_types(&mut self, module: &Module, type_checker: &mut TypeChecker) {
@@ -736,6 +746,9 @@ impl DocumentState {
         }
         // Type check each item in the module
         for item in module.items.iter() {
+            if type_checker.check_analysis_control().is_err() {
+                return;
+            }
             match type_checker.check_item(item) {
                 Ok(()) => {
                     // Type checking succeeded for this item

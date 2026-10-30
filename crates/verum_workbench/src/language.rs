@@ -15,12 +15,21 @@ use verum_common::{Map, Text};
 use verum_lsp::Backend;
 
 struct Command {
+    control: verum_lsp::AnalysisControl,
     path: PathBuf,
     source: Text,
     method: Text,
     position: Value,
     reply: oneshot::Sender<Result<Value>>,
 }
+// Dropping a timed-out or disconnected caller also cancels synchronous work
+// on the analysis thread. The session itself finishes synchronization so its
+// document-version ledger cannot diverge from the language server.
+struct CancelOnDrop(verum_lsp::AnalysisControl);
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) { self.0.cancel(); }
+}
+
 pub struct Language {
     requests: mpsc::Sender<Command>,
 }
@@ -48,11 +57,16 @@ impl Language {
                 runtime.block_on(async move {
                     let mut session = Session::new(root, library).await;
                     while let Some(command) = receiver.recv().await {
-                        if command.reply.is_closed() {
+                        if command.reply.is_closed() || command.control.is_cancelled() {
                             continue;
                         }
                         let result = match &mut session {
-                            Ok(session) => session.call(&command).await,
+                            Ok(session) => {
+                                session.service.inner().set_analysis_control(Some(command.control.clone()));
+                                let result = session.call(&command).await;
+                                session.service.inner().set_analysis_control(None);
+                                result
+                            },
                             Err(error) => {
                                 Err(anyhow::anyhow!("Language service unavailable: {error}"))
                             }
@@ -85,9 +99,14 @@ impl Language {
             ),
             "Unsupported language operation"
         );
+        let control = verum_lsp::AnalysisControl::with_deadline(
+            std::time::Instant::now() + verum_lsp::ANALYSIS_TIMEOUT,
+        );
+        let _cancel_on_drop = CancelOnDrop(control.clone());
         let (reply, response) = oneshot::channel();
         self.requests
             .try_send(Command {
+                control,
                 path,
                 source,
                 method: method.into(),
@@ -99,7 +118,7 @@ impl Language {
                     "Language service busy or unavailable; retry after the current analysis"
                 )
             })?;
-        tokio::time::timeout(std::time::Duration::from_secs(30), response)
+        tokio::time::timeout(verum_lsp::ANALYSIS_TIMEOUT, response)
             .await
             .context("Language analysis timed out")?
             .context("Language worker stopped")?
@@ -165,8 +184,11 @@ impl Session {
         }
     }
     async fn call(&mut self, command: &Command) -> Result<Value> {
+        command.control.check()?;
         if command.method == "project" {
-            return self.rpc("verum/projectSnapshot", json!({}), true).await;
+            let result = self.rpc("verum/projectSnapshot", json!({}), true).await?;
+            command.control.check()?;
+            return Ok(result);
         }
         let uri = Url::from_file_path(&command.path).map_err(|_| anyhow::anyhow!("Source URI"))?;
         let key = Text::from(uri.as_str());
@@ -200,6 +222,7 @@ impl Session {
             }
         };
         self.documents.insert(key, (hash.clone(), version));
+        command.control.check()?;
         let result = if command.method == "analyze" {
             self.rpc(
                 "verum/documentSnapshot",
@@ -223,6 +246,7 @@ impl Session {
             )
             .await?
         };
+        command.control.check()?;
         Ok(
             json!({"source_hash":hash,"version":version,"result":result,"server":self.capabilities["serverInfo"]}),
         )

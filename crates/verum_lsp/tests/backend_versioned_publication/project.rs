@@ -342,3 +342,26 @@ async fn tab_lifecycle_reuses_semantics_without_reusing_publication_incarnations
     assert!(!errors(&changed).is_empty());
     assert_eq!(checks(&main), 2, "real dependency changes invalidate consumers");
 }
+
+#[tokio::test]
+async fn interrupted_project_has_no_stale_verdict_and_recovers_on_next_request() {
+    let project = Project::new();
+    project.file("dependency.vr", DEP);
+    let main = project.open("main.vr", MAIN);
+    let before = project.snapshot(&main).await;
+    assert!(errors(&before).is_empty());
+    let backend = project.service.inner();
+    let control = crate::AnalysisControl::default();
+    control.cancel();
+    backend.set_analysis_control(Some(control));
+    let interrupted = project.snapshot(&main).await;
+    assert!(interrupted["project_revision"].is_null());
+    assert!(interrupted["bindings"].as_array().unwrap().is_empty());
+    assert!(interrupted["declarations"].as_array().unwrap().iter().all(|d| d["type_display"].is_null()));
+    assert!(errors(&interrupted).iter().any(|d| d["message"].as_str().unwrap().contains("cancelled")));
+    backend.set_analysis_control(None);
+    let recovered = project.snapshot(&main).await;
+    assert!(errors(&recovered).is_empty(), "{recovered:#}");
+    assert_eq!(recovered["project_revision"], before["project_revision"]);
+    assert_eq!(recovered["bindings"], before["bindings"]);
+}

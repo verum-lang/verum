@@ -129,6 +129,9 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+pub mod analysis_control;
+pub use analysis_control::AnalysisControl;
+
 pub mod attr; // Attribute registry and validation (Attribute registry: validation rules for @derive, @verify, @cfg, @repr and other compile-time attributes — )
 pub mod capability; // Capability attenuation for contexts (Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0)
 pub mod const_eval;
@@ -553,6 +556,9 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 /// - E500-E509: Concurrency errors (data race, Send/Sync)
 #[derive(Debug, Error)]
 pub enum TypeError {
+    #[error("Analysis cancelled or deadline exceeded; no verdict is available")]
+    AnalysisCancelled,
+
     /// LANGUAGE LAWS E430/E431/E432 (docs/architecture/
     /// language-law-visibility-and-boolean-clarity.md). One variant for
     /// the whole family — the code rides in the payload so the strict
@@ -2141,7 +2147,7 @@ impl TypeError {
             // Inline assembly errors
             InvalidAsmConstType { span, .. } => *span,
             AsmOutputNotLvalue { span } => *span,
-            RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
+            AnalysisCancelled | RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
             OtherWithCodeSpanned { span, .. } => *span,
             PositivityViolation { span, .. } => *span,
             UnknownVariantConstructor { span, .. } => *span,
@@ -3390,6 +3396,9 @@ impl TypeError {
                 builder.build()
             }
 
+            AnalysisCancelled => DiagnosticBuilder::warning()
+                .message("Analysis cancelled or deadline exceeded; no verdict is available")
+                .build(),
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
 
             OtherWithCode { code, msg } => DiagnosticBuilder::error()

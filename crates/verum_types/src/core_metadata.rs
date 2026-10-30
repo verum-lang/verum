@@ -331,7 +331,7 @@ pub struct DeclSpan {
 }
 
 /// Generic parameter descriptor
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GenericParam {
     /// Parameter name (e.g., "T", "K", "V")
     pub name: Text,
@@ -789,7 +789,7 @@ pub struct FunctionDescriptor {
 }
 
 /// Implementation descriptor (impl Protocol for Type)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImplementationDescriptor {
     /// Protocol being implemented
     pub protocol: Text,
@@ -826,6 +826,35 @@ pub struct ImplementationDescriptor {
     /// produced by an older precompile.
     #[serde(default)]
     pub protocol_args: List<Text>,
+}
+
+impl std::hash::Hash for ImplementationDescriptor {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        use std::hash::Hash;
+        // Exhaustive destructuring makes a new carried field require a decision
+        // here. Hash equality must never erase bounds or associated assignments.
+        let Self {
+            protocol,
+            target_type,
+            generic_params,
+            where_clause,
+            associated_types,
+            methods,
+            protocol_args,
+        } = self;
+        protocol.hash(state);
+        target_type.hash(state);
+        generic_params.hash(state);
+        where_clause.hash(state);
+        // OrderedMap iterates in key order, independent of insertion history.
+        associated_types.len().hash(state);
+        for (name, value) in associated_types {
+            name.hash(state);
+            value.hash(state);
+        }
+        methods.hash(state);
+        protocol_args.hash(state);
+    }
 }
 
 /// Pre-monomorphized type

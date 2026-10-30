@@ -51,6 +51,10 @@
 #![allow(clippy::unnecessary_filter_map)]
 #![allow(clippy::redundant_guards)]
 
+pub use verum_types::AnalysisControl;
+/// Shared editor analysis budget, including queued Studio/agent requests.
+pub const ANALYSIS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub mod ast_format; // Shared AST formatting utilities
 pub mod backend;
 pub mod backend_incremental;

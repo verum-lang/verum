@@ -568,6 +568,7 @@ pub struct FunctionContract {
 
 /// The main type checker.
 pub struct TypeChecker {
+    analysis_control: Option<crate::AnalysisControl>,
     /// Type context
     pub(crate) ctx: TypeContext,
     /// Unifier
@@ -1225,6 +1226,9 @@ pub struct TypeChecker {
     /// Values are positions in its implementation list, in declaration order.
     /// Replacing metadata invalidates this index and completed registration tails.
     metadata_impls_by_owner: Maybe<Map<Text, List<usize>>>,
+    /// Successful exact target spellings for descriptor positions in the
+    /// installed metadata. A different descriptor never inherits this evidence.
+    metadata_impl_receipts: Map<usize, Set<Text>>,
     /// Names whose always-run stdlib registration tail has already executed.
     ///
     /// `ensure_stdlib_type_loaded` is called **66_846 times** while checking a
