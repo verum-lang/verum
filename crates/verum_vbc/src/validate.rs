@@ -725,6 +725,7 @@ impl<'a> Validator<'a> {
                 dst,
                 func_id,
                 captures,
+                ..
             } => {
                 if *func_id >= function_count {
                     self.errors.push(VbcError::InvalidFunctionId(*func_id));
@@ -1158,6 +1159,7 @@ mod tests {
             dst: Reg(0),
             func_id: 42,
             captures: vec![],
+            capture_types: None,
         };
         let module = build_module_with_instr(bad_closure, 4, 1);
         let err = validate_module(&module).expect_err("must reject");

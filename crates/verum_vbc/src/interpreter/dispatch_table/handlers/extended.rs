@@ -146,6 +146,7 @@ pub(in super::super) fn handle_extended(
 ) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     match ExtendedSubOpcode::from_byte(sub_op_byte) {
+        Some(ExtendedSubOpcode::NewClosureTyped) => super::calls::handle_new_closure_typed(state),
         Some(ExtendedSubOpcode::Reserved) => {
             // Forward-compat anchor. Encoders MUST NOT emit this
             // sub-op; decoders accept it as a no-op so a future

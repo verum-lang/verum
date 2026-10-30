@@ -12,6 +12,37 @@ impl VbcModule {
     pub fn resource_discipline(&self, ty: &TypeRef) -> ResourceDiscipline {
         resource_discipline_with(ty, |id| self.get_type(id))
     }
+
+    /// Ordinary function values share their environment. Admission checks the
+    /// original captured declarations, including mutable cell contents, before
+    /// allocation. ABI slots and runtime object tags supply no such authority.
+    /// Capture type parameters belong to the creating function's binder.
+    pub fn validate_closure_captures(
+        &self,
+        types: Option<&[Option<TypeRef>]>,
+        count: usize,
+        resolve: impl Fn(&TypeRef) -> TypeRef,
+    ) -> Result<(), String> {
+        let Some(types) = types else {
+            return if count == 0 { Ok(()) } else {
+                Err("shared callable requires declared capture types; legacy environment has no ownership evidence".into())
+            };
+        };
+        if types.len() != count {
+            return Err(format!("shared callable capture arity mismatch: declared {}, supplied {count}", types.len()));
+        }
+        for (index, ty) in types.iter().enumerate() {
+            let Some(ty) = ty else {
+                return Err(format!("shared callable capture {index} has no declaration type"));
+            };
+            let ty = resolve(ty);
+            let discipline = self.resource_discipline(&ty);
+            if discipline != ResourceDiscipline::Unrestricted {
+                return Err(format!("shared callable capture {index} requires unrestricted ownership; found {discipline:?} for {ty:?}"));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The same bounded query used by a complete module and by source production.
@@ -66,10 +97,12 @@ fn resource_discipline_inner<'a>(
         TypeRef::Array { element, .. } => {
             return resource_discipline_inner(element, resolve, active, memo, remaining, depth + 1);
         }
+        // The closure constructors in both tiers check the entire environment
+        // before creating an ordinary function value. Parameters/results do
+        // not belong to that environment and grant no capture permission.
+        TypeRef::Function { .. } | TypeRef::Rank2Function { .. } => return Unrestricted,
         TypeRef::Generic(_)
         | TypeRef::AssociatedProjection { .. }
-        | TypeRef::Function { .. }
-        | TypeRef::Rank2Function { .. }
         | TypeRef::ConstValue(_) => return Unknown,
     };
     // Intrinsic primitives have a language-defined discipline. Registering

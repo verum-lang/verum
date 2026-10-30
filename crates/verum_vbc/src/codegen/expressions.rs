@@ -2288,6 +2288,7 @@ impl VbcCodegen {
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
+                            capture_types: Some(vec![]),
                         });
                         return Ok(Some(dest));
                     }
@@ -8530,7 +8531,7 @@ impl VbcCodegen {
     /// this, literal-argument calls emitted plain `Call` (no witness
     /// table) and every `T.zero()`-style static in the callee loaded
     /// nil.
-    fn literal_default_type_name(expr: &Expr) -> Option<String> {
+    pub(super) fn literal_default_type_name(expr: &Expr) -> Option<String> {
         use verum_ast::expr::ExprKind;
         use verum_ast::literal::{FloatSuffix, LiteralKind};
         let ExprKind::Literal(lit) = &expr.kind else {
@@ -24176,6 +24177,7 @@ impl VbcCodegen {
                         dst: dest,
                         func_id: func_info.id.0,
                         captures: vec![],
+                        capture_types: Some(vec![]),
                     });
                 }
                 return Ok(Some(dest));
@@ -24236,6 +24238,7 @@ impl VbcCodegen {
                         dst: dest,
                         func_id: func_info.id.0,
                         captures: vec![],
+                        capture_types: Some(vec![]),
                     });
                 }
                 return Ok(Some(dest));
@@ -24303,6 +24306,7 @@ impl VbcCodegen {
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
+                            capture_types: Some(vec![]),
                         });
                     }
                     return Ok(Some(dest));
@@ -24396,6 +24400,7 @@ impl VbcCodegen {
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
+                            capture_types: Some(vec![]),
                         });
                     }
                     return Ok(Some(dest));
@@ -24806,6 +24811,7 @@ impl VbcCodegen {
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
+                            capture_types: Some(vec![]),
                         });
                     }
                     return Ok(Some(dest));
@@ -24827,6 +24833,7 @@ impl VbcCodegen {
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
+                            capture_types: Some(vec![]),
                         });
                     }
                     return Ok(Some(dest));
@@ -24906,6 +24913,7 @@ impl VbcCodegen {
                         dst: dest,
                         func_id: info.id.0,
                         captures: vec![],
+                        capture_types: Some(vec![]),
                     });
                     return Ok(Some(dest));
                 }
@@ -32909,11 +32917,17 @@ impl VbcCodegen {
         // should NOT be added as capture parameters.
         let mut capture_regs = Vec::with_capacity(free_vars.len());
         let mut captures_with_mut: Vec<(String, bool)> = Vec::with_capacity(free_vars.len());
+        let mut capture_types = Vec::with_capacity(free_vars.len());
         for var_name in &free_vars {
             if let Some(info) = self.ctx.lookup_var(var_name) {
                 let is_mut = info.is_mutable;
                 let var_reg = info.reg;
                 let already_cell = info.is_cell;
+                // Snapshot the declaration before mutable-cell boxing. The
+                // cell representation must not turn owned data into a borrow.
+                capture_types.push(self.ctx.registers.value_uses.active.get(&var_reg)
+                    .filter(|fact| fact.id == info.binding_id)
+                    .and_then(|fact| fact.declaration_type.clone()));
 
                 if is_mut && !already_cell {
                     // Mutable capture: allocate a heap cell to share state between
@@ -32980,6 +32994,7 @@ impl VbcCodegen {
         // The closure function has captures as first params, then user params
         let closure_func_id = self.compile_closure_body_with_patterns(
             &captures_with_mut,
+            &capture_types,
             &param_names,
             &param_type_names,
             &param_type_refs,
@@ -33000,6 +33015,7 @@ impl VbcCodegen {
             dst: result,
             func_id: closure_func_id,
             captures: capture_regs,
+            capture_types: Some(capture_types),
         });
 
         Ok(Some(result))
@@ -33079,6 +33095,7 @@ impl VbcCodegen {
     fn compile_closure_body_with_patterns(
         &mut self,
         captures: &[(String, bool)],
+        capture_types: &[Option<crate::types::TypeRef>],
         params: &[String],
         param_type_names: &[Option<String>],
         param_type_refs: &[Option<crate::types::TypeRef>],
@@ -33214,6 +33231,14 @@ impl VbcCodegen {
         // Begin closure function compilation
         self.ctx.begin_function(&closure_name, &all_params, closure_return_type_ref.clone());
         self.ctx.bind_captured_array_facts(captured_arrays);
+        for ((name, _), ty) in captures.iter().zip(capture_types) {
+            if let (Some(binding), Some(ty)) = (self.ctx.lookup_var(name), ty) {
+                let reg = binding.reg;
+                let discipline = crate::resource_discipline::resource_discipline_with(ty,
+                    |id| self.type_index_of(id).and_then(|i| self.types.get(i)));
+                self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
+            }
+        }
 
         // CLOSURE-CAPTURE-TYPE-1: re-instate the captures' types on the
         // far side of the clear, so the body resolves field indices

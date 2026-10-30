@@ -1255,6 +1255,16 @@ pub(in super::super) fn handle_tail_call_op(
 pub(in super::super) fn handle_new_closure(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    create_closure(state, false)
+}
+
+pub(in super::super) fn handle_new_closure_typed(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    create_closure(state, true)
+}
+
+fn create_closure(state: &mut InterpreterState, typed: bool) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let func_id = read_varint(state)? as u32;
     let capture_count = read_varint(state)? as usize;
@@ -1263,6 +1273,29 @@ pub(in super::super) fn handle_new_closure(
     for _ in 0..capture_count {
         capture_regs.push(read_reg(state)?);
     }
+
+    let types = if typed {
+        let count = read_varint(state)? as usize;
+        if count > u16::MAX as usize {
+            return Err(InterpreterError::Panic { message: "excessive closure capture type count".into() });
+        }
+        let mut types = Vec::with_capacity(count.min(16));
+        for _ in 0..count {
+            types.push(match super::bytecode_io::read_u8(state)? {
+                0 => None,
+                1 => Some(super::bytecode_io::read_type_ref(state)?),
+                _ => return Err(InterpreterError::Panic { message: "invalid closure capture type presence".into() }),
+            });
+        }
+        Some(types)
+    } else { None };
+    state.module.validate_closure_captures(types.as_deref(), capture_count,
+        |ty| state.resolve_generic_witness(ty))
+        .map_err(|message| InterpreterError::Panic { message })?;
+    let func_id = state.module.resolve_band_id(func_id).unwrap_or(FunctionId(func_id));
+    state.module.get_function(func_id)
+        .ok_or(InterpreterError::FunctionNotFound(func_id))?;
+    let func_id = func_id.0;
 
     // Allocate closure object on heap.
     // Layout: [ObjectHeader][func_id:u32][capture_count:u32][captures:Value...]

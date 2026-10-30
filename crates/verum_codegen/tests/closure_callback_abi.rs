@@ -55,6 +55,14 @@ const SOURCE: &str = r#"
 fn with_source_ir(check: impl FnOnce(&Context, &str)) {
     let ast = Parser::new(SOURCE).parse_module().expect("source parses");
     let vbc = VbcCodegen::new().compile_module(&ast).expect("source VBC");
+    for function in &vbc.functions {
+        let body = verum_vbc::bytecode::decode_instructions(&vbc.bytecode[function.bytecode_offset as usize..(function.bytecode_offset + function.bytecode_length) as usize]).unwrap();
+        for instruction in body {
+            if let verum_vbc::Instruction::NewClosure { capture_types: Some(types), .. } = instruction {
+                assert!(types.iter().all(Option::is_some), "capture declarations in {:?}: {types:?}", vbc.get_string(function.name));
+            }
+        }
+    }
     let context = Context::create();
     let mut lower = VbcToLlvmLowering::new(
         &context,

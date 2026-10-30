@@ -451,6 +451,7 @@ fn write_instruction(
             dst,
             func_id,
             captures,
+            ..
         } => {
             let caps: Vec<String> = captures.iter().map(r).collect();
             write!(

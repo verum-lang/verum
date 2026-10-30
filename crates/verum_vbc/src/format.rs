@@ -119,7 +119,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Legacy coarse flags cannot authorize access when that policy is absent.
 /// Version 2.26 adds TypeResource, preserving generic ownership declarations.
 /// Version 2.27 retains declaration-owned semantic function results.
-pub const VERSION_MINOR: u16 = 27;
+/// Version 2.28 retains checked closure environment declarations.
+pub const VERSION_MINOR: u16 = 28;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

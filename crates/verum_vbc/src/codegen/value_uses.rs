@@ -503,6 +503,11 @@ impl super::VbcCodegen {
                 | TypeKind::UnsafeReference { inner, .. }
                 | TypeKind::Slice(inner) => supported(inner, depth + 1),
                 TypeKind::Tuple(parts) => parts.iter().all(|p| supported(p, depth + 1)),
+                TypeKind::Function { params, return_type, contexts, calling_convention, .. }
+                    if contexts.requirements.is_empty() && calling_convention.is_none() => {
+                        params.iter().all(|p| supported(p, depth + 1))
+                            && supported(return_type, depth + 1)
+                    }
                 TypeKind::Generic { base, args } => {
                     supported(base, depth + 1)
                         && args
@@ -529,6 +534,10 @@ impl super::VbcCodegen {
                     resolved(inner, depth + 1)
                 }
                 TypeRef::Tuple(parts) => parts.iter().all(|t| resolved(t, depth + 1)),
+                TypeRef::Function { params, return_type, .. } => {
+                    params.iter().all(|p| resolved(p, depth + 1))
+                        && resolved(return_type, depth + 1)
+                }
                 TypeRef::Instantiated { base, args } => {
                     *base != crate::types::TypeId::PTR
                         && args.iter().all(|t| resolved(t, depth + 1))

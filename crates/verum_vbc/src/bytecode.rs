@@ -2183,11 +2183,24 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             dst,
             func_id,
             captures,
+            capture_types,
         } => {
-            output.push(Opcode::NewClosure.to_byte());
+            if capture_types.is_some() {
+                output.push(Opcode::Extended.to_byte());
+                output.push(ExtendedSubOpcode::NewClosureTyped.to_byte());
+            } else {
+                output.push(Opcode::NewClosure.to_byte());
+            }
             encode_reg(*dst, output);
             encode_varint(*func_id as u64, output);
             encode_reg_vec(captures, output);
+            if let Some(types) = capture_types {
+                encode_varint(types.len() as u64, output);
+                for ty in types {
+                    output.push(ty.is_some() as u8);
+                    if let Some(ty) = ty { encode_type_ref(ty, output); }
+                }
+            }
         }
 
         // ====================================================================
@@ -3671,6 +3684,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 dst,
                 func_id,
                 captures,
+                capture_types: None,
             })
         }
 
@@ -5108,6 +5122,24 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             // `Instruction::Extended { sub_op, operands: vec![] }`.
             let sub_op = decode_u8(data, offset)?;
             match ExtendedSubOpcode::from_byte(sub_op) {
+                Some(ExtendedSubOpcode::NewClosureTyped) => {
+                    let dst = decode_reg(data, offset)?;
+                    let func_id = decode_varint(data, offset)? as u32;
+                    let captures = decode_reg_vec(data, offset)?;
+                    let count = decode_varint(data, offset)? as usize;
+                    if count > u16::MAX as usize {
+                        return Err(VbcError::Deserialization("excessive closure capture type count".into()));
+                    }
+                    let mut types = Vec::with_capacity(count.min(16));
+                    for _ in 0..count {
+                        types.push(match decode_u8(data, offset)? {
+                            0 => None,
+                            1 => Some(decode_type_ref(data, offset)?),
+                            _ => return Err(VbcError::Deserialization("invalid closure capture type presence".into())),
+                        });
+                    }
+                    Ok(Instruction::NewClosure { dst, func_id, captures, capture_types: Some(types) })
+                }
                 Some(ExtendedSubOpcode::TypeResource) => {
                     let dst = decode_reg(data, offset)?;
                     let type_ref = decode_type_ref(data, offset)?;
@@ -8231,6 +8263,7 @@ mod tests {
             dst: Reg(0),
             func_id: 42,
             captures: vec![],
+            capture_types: None,
         });
 
         // Single capture
@@ -8238,6 +8271,7 @@ mod tests {
             dst: Reg(0),
             func_id: 100,
             captures: vec![Reg(1)],
+            capture_types: None,
         });
 
         // Multiple captures
@@ -8245,6 +8279,7 @@ mod tests {
             dst: Reg(0),
             func_id: 12345,
             captures: vec![Reg(1), Reg(2), Reg(3), Reg(4), Reg(5)],
+            capture_types: None,
         });
 
         // Large func_id and many captures
@@ -8252,6 +8287,7 @@ mod tests {
             dst: Reg(255),
             func_id: u32::MAX / 2,
             captures: (0..20).map(Reg).collect(),
+            capture_types: None,
         });
     }
 
@@ -8293,6 +8329,7 @@ mod tests {
                 dst: Reg(1),
                 func_id: 0,
                 captures: vec![Reg(0)],
+                capture_types: None,
             },
             // Load argument for closure call
             Instruction::LoadI {
@@ -8342,18 +8379,21 @@ mod tests {
                 dst: Reg(10),
                 func_id: 100,
                 captures: vec![Reg(0)],
+                capture_types: None,
             },
             // Inner closure captures r0, r1
             Instruction::NewClosure {
                 dst: Reg(11),
                 func_id: 101,
                 captures: vec![Reg(0), Reg(1)],
+                capture_types: None,
             },
             // Combined closure captures all three
             Instruction::NewClosure {
                 dst: Reg(12),
                 func_id: 102,
                 captures: vec![Reg(0), Reg(1), Reg(2)],
+                capture_types: None,
             },
         ];
 

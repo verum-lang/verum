@@ -476,6 +476,9 @@ impl<'a> BytecodeSpecializer<'a> {
     fn specialize_instr_value(&mut self, instr: &mut crate::instruction::Instruction) {
         use crate::instruction::Instruction as I;
         match instr {
+            I::NewClosure { capture_types: Some(types), .. } => {
+                for ty in types.iter_mut().flatten() { *ty = self.substitution.apply(ty); }
+            }
             I::CallG {
                 dst,
                 func_id,

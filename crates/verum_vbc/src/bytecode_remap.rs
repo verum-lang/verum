@@ -79,6 +79,12 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
             *func_id = remap.map_function(FunctionId(*func_id)).0;
             for ty in type_args { rewrite_type_ref_ids(ty, remap); }
         }
+        Instruction::NewClosure { func_id, capture_types, .. } => {
+            *func_id = remap.map_function(FunctionId(*func_id)).0;
+            if let Some(types) = capture_types {
+                for ty in types.iter_mut().flatten() { rewrite_type_ref_ids(ty, remap); }
+            }
+        }
         // --- Constant pool index ---
         Instruction::LoadK { const_id, .. } => {
             *const_id = remap.map_const(ConstId(*const_id)).0;
@@ -89,7 +95,6 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
         // --- Function table index ---
         Instruction::Call { func_id, .. }
         | Instruction::TailCall { func_id, .. }
-        | Instruction::NewClosure { func_id, .. }
         | Instruction::Spawn { func_id, .. }
         | Instruction::GenCreate { func_id, .. } => {
             *func_id = remap.map_function(FunctionId(*func_id)).0;

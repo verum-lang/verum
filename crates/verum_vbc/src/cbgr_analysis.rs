@@ -645,6 +645,7 @@ mod tests {
                 dst: Reg(2),
                 func_id: 1,
                 captures: vec![Reg(1)],
+                capture_types: None,
             },
             Instruction::RetV,
         ];

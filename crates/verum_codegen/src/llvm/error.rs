@@ -24,6 +24,10 @@ pub enum LlvmLoweringError {
     #[error("Unproven native array storage: {0}")]
     UnprovenArrayStorage(Text),
 
+    /// A captured callable lacks an executable target with its declared environment.
+    #[error("Unproven callable environment: {0}")]
+    UnprovenCallableEnvironment(Text),
+
     /// Invalid register reference.
     #[error("Invalid register: r{0}")]
     InvalidRegister(u16),

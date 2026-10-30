@@ -74,6 +74,7 @@ fn build_module(callable: Callable, body: Body) -> Arc<VbcModule> {
             dst: Reg(1),
             func_id: 2,
             captures: vec![],
+            capture_types: None,
         },
     };
     let main_body = encode(&[

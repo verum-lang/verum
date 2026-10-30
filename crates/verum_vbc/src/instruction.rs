@@ -9805,6 +9805,8 @@ pub enum ExtendedSubOpcode {
     TypeLayout = 0x05,
     /// Declared resource query: `[0x1F][0x06][dst:reg][TypeRef]`.
     TypeResource = 0x06,
+    /// Closure creation with declaration-owned capture types in creator scope.
+    NewClosureTyped = 0x07,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10058,6 +10060,7 @@ impl ExtendedSubOpcode {
             0x02 => Some(Self::SetCallWitness),
             0x05 => Some(Self::TypeLayout),
             0x06 => Some(Self::TypeResource),
+            0x07 => Some(Self::NewClosureTyped),
             0x10 => Some(Self::ProcessExit),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
@@ -10143,6 +10146,7 @@ impl ExtendedSubOpcode {
             Self::SetCallWitness => "EXT_SET_CALL_WITNESS",
             Self::TypeLayout => "EXT_TYPE_LAYOUT",
             Self::TypeResource => "EXT_TYPE_RESOURCE",
+            Self::NewClosureTyped => "EXT_NEW_CLOSURE_TYPED",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10954,6 +10958,9 @@ pub enum Instruction {
         func_id: u32,
         /// Registers containing captured values.
         captures: Vec<Reg>,
+        /// Original capture declarations in this creation site's generic scope.
+        /// None is legacy evidence; only empty legacy environments are shareable.
+        capture_types: Option<Vec<Option<TypeRef>>>,
     },
 
     // ========================================================================

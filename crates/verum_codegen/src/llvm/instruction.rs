@@ -3747,7 +3747,22 @@ fn lower_instruction_impl<'ctx>(
             dst,
             func_id,
             captures,
+            capture_types,
         } => {
+            let vbc_mod = ctx.vbc_module().or_internal("NewClosure requires VBC module")?;
+            if let Err(message) = vbc_mod.validate_closure_captures(
+                capture_types.as_deref(), captures.len(), Clone::clone,
+            ) {
+                // Refuse on the executing path, including an erased generic
+                // body. A lowering error can be converted into a fallback
+                // body by the module driver; it must not erase this check.
+                emit_runtime_abort(ctx, &message, "capture_ownership")?;
+                ctx.builder().build_unreachable().or_llvm_err()?;
+                let dead = ctx.llvm_context().append_basic_block(ctx.function(), "capture_dead");
+                ctx.builder().position_at_end(dead);
+                ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+                return Ok(());
+            }
             // `0x7FFFFFFF` (i32::MAX) is the codegen-emitted sentinel
             // for an unresolved function reference — same pattern as
             // the regular Call lowering (see #106 Path B.1, commit
@@ -3756,13 +3771,10 @@ fn lower_instruction_impl<'ctx>(
             // function. Subsequent CallClosure on a null closure will
             // hit the safety-net default-return.
             const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
-            if *func_id == UNRESOLVED_FN_ID {
+            if *func_id == UNRESOLVED_FN_ID && captures.is_empty() {
                 ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
                 return Ok(());
             }
-            let vbc_mod = ctx
-                .vbc_module()
-                .or_internal("NewClosure requires VBC module")?;
             // XMOD-BAND-RESOLVE (#38, NewClosure arm): mirror lower_call's
             // recovery — a cross-module closure target re-homed into the XMOD
             // id band [0x2000_0000, 0x4000_0000) is not a table index; recover
@@ -3802,7 +3814,12 @@ fn lower_instruction_impl<'ctx>(
             let effective_fn_id = xmod_closure_fid.map(|f| f.0).unwrap_or(*func_id);
             let func_desc = match vbc_mod.get_function(FunctionId(effective_fn_id)) {
                 Some(d) => d,
-                None if is_by_name_ref => {
+                None if !captures.is_empty() => {
+                    return Err(LlvmLoweringError::UnprovenCallableEnvironment(
+                        format!("captured closure target {func_id} has no declaration").into(),
+                    ));
+                }
+                None if is_by_name_ref && captures.is_empty() => {
                     // Unresolvable by-name closure target: mirror the
                     // 0x7FFFFFFF leg — null closure + WARN, never a
                     // whole-function skip (a skipped __tls_init_* ctor
@@ -3822,10 +3839,11 @@ fn lower_instruction_impl<'ctx>(
                 }
             };
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
-            let llvm_fn = ctx.get_module().get_function(func_name).or_internal_else(|| format!(
-                    "NewClosure: function '{}' not found in LLVM module",
-                    func_name
-                ))?;
+            let llvm_fn = ctx.get_module().get_function(func_name).ok_or_else(|| {
+                let message = format!("NewClosure: function '{func_name}' not found in LLVM module");
+                if captures.is_empty() { LlvmLoweringError::internal(message) }
+                else { LlvmLoweringError::UnprovenCallableEnvironment(message.into()) }
+            })?;
 
             // Preserve the existing generated closure-body environment
             // convention. Adapt the exact declared LLVM signature, including
@@ -31641,6 +31659,9 @@ fn lower_extended<'ctx>(
             // No-op anchor — encoders shouldn't emit, but tolerate.
             Ok(())
         }
+        Some(ExtendedSubOpcode::NewClosureTyped) => Err(LlvmLoweringError::unsupported(
+            "NewClosureTyped must be structurally decoded before lowering",
+        )),
         Some(ExtendedSubOpcode::TypeResource) => Err(LlvmLoweringError::unsupported(
             "TypeResource requires the canonical decoded instruction",
         )),

@@ -1451,7 +1451,19 @@ impl VbcCodegen {
         };
         // Capture before destination shadowing or subsequent emissions.
         let inferred_copy_type = value.zip(init_reg).and_then(|(expr, reg)|
-            self.copy_source_type(expr, reg, copy_start, self.ctx.instructions.len()));
+            self.copy_source_type(expr, reg, copy_start, self.ctx.instructions.len()))
+            .or_else(|| {
+                // An unannotated literal binding has its language-default or
+                // suffix-declared type. Publish that exact source fact before
+                // later captures; contextual literals at other value boundaries
+                // must not acquire a default from this binding-only rule.
+                if ty.is_some() { return None; }
+                let expr = Self::normalized_place(value?);
+                if !matches!(expr.kind, verum_ast::ExprKind::Literal(_)) { return None; }
+                let name = self.infer_expr_type_name(expr)
+                    .or_else(|| Self::literal_default_type_name(expr))?;
+                self.semantic_type_in_current_scope(&name)
+            });
         // Block locals and callable bodies establish result types during
         // compilation. Consume those facts after the initializer, rather
         // than retaining a pre-compilation guess or generic placeholder.

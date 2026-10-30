@@ -27,6 +27,10 @@ extern "C" fn unexpected_exit(_code: u64) {
     std::process::abort();
 }
 
+extern "C" fn unexpected_panic(_message: *const u8, _length: u64, _file: *const u8, _line: u32) {
+    std::process::abort();
+}
+
 fn compile(source: &str) -> VbcModule {
     let ast = Parser::new(source).parse_module().expect("parse source");
     VbcCodegen::new().compile_module(&ast).expect("source VBC")
@@ -46,6 +50,17 @@ fn with_native(
     let mut ir = Text::from(
         "declare ptr @verum_checked_malloc(i64)\ndeclare void @verum_internal_exit_i64(i64)\n",
     );
+    if lower.module().get_function("verum_panic").is_some() {
+        ir.push_str("declare void @verum_panic(ptr, i64, ptr, i32)\n");
+    }
+    for global in lower.module().get_globals() {
+        ir.push_str(global.print_to_string().to_str().unwrap());
+        ir.push('\n');
+    }
+    if let Some(memset) = lower.module().get_function("verum_internal_memset") {
+        ir.push_str(memset.print_to_string().to_str().unwrap());
+        ir.push('\n');
+    }
     for descriptor in &module.functions {
         let name = module.get_string(descriptor.name).expect("function name");
         let function = lower.module().get_function(name).expect(name);
@@ -83,6 +98,9 @@ fn with_native(
         &executable.get_function("verum_internal_exit_i64").unwrap(),
         unexpected_exit as *const () as usize,
     );
+    if let Some(panic) = executable.get_function("verum_panic") {
+        engine.add_global_mapping(&panic, unexpected_panic as *const () as usize);
+    }
     check(&engine);
     STORAGE.with(|storage| storage.borrow_mut().clear());
 }
@@ -321,6 +339,7 @@ fn adapter_preserves_target_calling_convention_and_exposes_slot_convention() {
                 dst: Reg(0),
                 func_id: 0,
                 captures: Default::default(),
+                capture_types: None,
             },
         )
         .expect("emit callable");
@@ -334,5 +353,82 @@ fn adapter_preserves_target_calling_convention_and_exposes_slot_convention() {
         let ir = adapter.print_to_string();
         assert!(ir.to_str().unwrap().contains("call fastcc"), "{ir}");
         native.verify().expect("valid calling-convention IR");
+    }
+}
+
+#[test]
+fn shared_capture_ownership_refuses_before_native_allocation_in_lenient_mode() {
+    for discipline in ["affine", "linear"] {
+        for mutable in ["", "mut "] {
+            let source = format!("type {discipline} Token is {{ value: Int }}; fn probe() -> Int {{ let {mutable}token: Token = Token {{ value: 7 }}; let call = || token.value; call() }}");
+            let module = compile(&source);
+            let context = Context::create();
+            let mut lower = VbcToLlvmLowering::new(&context, LoweringConfig::debug("capture_refusal").with_debug_info(false));
+            lower.lower_module(&module).unwrap();
+            let probe = lower.module().get_function("probe").unwrap();
+            assert!(probe.verify(true));
+            let ir = probe.print_to_string().to_string();
+            assert!(ir.contains("call void @verum_panic"), "missing executable refusal: {ir}");
+            let entry = probe.get_basic_blocks().iter().map(|block| block.get_instructions().map(|i| i.print_to_string().to_string()).collect::<Vec<_>>().join("\n")).find(|block| block.contains("call void @verum_panic")).unwrap();
+            assert!(entry.contains("unreachable"), "refusal must terminate before closure allocation: {entry}");
+            assert!(!ir.contains("$closure$"), "no callable may be constructed before refusal: {ir}");
+        }
+    }
+}
+
+#[test]
+fn generic_creator_uses_specialized_capture_ownership_in_native_code() {
+    use verum_vbc::mono::{InstantiationGraph, discover_call_instantiations, monomorphize_minimal};
+    let mut module = compile("fn make<T>(value: T) -> fn() -> T { || value } fn probe() -> Int { let first = make(7); let second = make(13); first() + second() }");
+    let mut graph = InstantiationGraph::new();
+    for function in &mut module.functions { function.is_generic = !function.type_params.is_empty(); }
+    for function in &module.functions {
+        let body = verum_vbc::bytecode::decode_instructions(&module.bytecode[function.bytecode_offset as usize..(function.bytecode_offset + function.bytecode_length) as usize]).unwrap();
+        discover_call_instantiations(&module, &body, function.func_id_base, &mut graph).unwrap();
+    }
+    assert!(!graph.is_empty());
+    let module = monomorphize_minimal(module, &graph).unwrap().module;
+    with_native(&module, |engine| {
+        let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+        assert_eq!(actual, 20);
+    });
+}
+
+#[test]
+fn documented_shared_environments_execute_in_both_tiers() {
+    for (source, expected) in [
+        ("fn probe() -> Int { let value: Int = 7; let f = || value; f() }", 7),
+        ("fn probe() -> Int { let mut value: Int = 7; let f = || { value = value + 1; value }; f(); f() }", 9),
+    ] {
+        let module = compile(source);
+        assert_eq!(Interpreter::new(Arc::new(module.clone())).execute_function(module.find_function_by_name("probe").unwrap()).unwrap().as_i64(), expected);
+        with_native(&module, |engine| {
+            assert_eq!(unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() }, expected);
+        });
+    }
+}
+
+#[test]
+fn captured_missing_targets_cannot_become_lenient_fallback_bodies() {
+    for target in [0x7FFF_FFFF, 0x2000_0000] {
+        let mut module = compile("fn probe() -> Int { let value: Int = 7; let f = || value; f() }");
+        let original = std::mem::take(&mut module.bytecode);
+        for function in &mut module.functions {
+            let mut body = verum_vbc::bytecode::decode_instructions(&original[function.bytecode_offset as usize..(function.bytecode_offset + function.bytecode_length) as usize]).unwrap();
+            for instruction in &mut body {
+                if let verum_vbc::Instruction::NewClosure { func_id, captures, .. } = instruction {
+                    if !captures.is_empty() { *func_id = target; }
+                }
+            }
+            verum_vbc::bytecode::fixup_jump_offsets(&mut body);
+            function.bytecode_offset = module.bytecode.len() as u32;
+            for instruction in &body { verum_vbc::bytecode::encode_instruction(instruction, &mut module.bytecode); }
+            function.bytecode_length = module.bytecode.len() as u32 - function.bytecode_offset;
+            function.instructions = Some(body);
+        }
+        let context = Context::create();
+        let mut lower = VbcToLlvmLowering::new(&context, LoweringConfig::debug("missing_capture_target").with_debug_info(false));
+        let error = lower.lower_module(&module).unwrap_err();
+        assert!(matches!(error, verum_codegen::llvm::LlvmLoweringError::UnprovenCallableEnvironment(_)), "{error}");
     }
 }
