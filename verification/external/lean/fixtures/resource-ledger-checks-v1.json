@@ -1,0 +1,12 @@
+{
+  "archive": "resource-ledger-checks-v1.tar.gz",
+  "sha256": "f6935685cbe951605cefbda20e41563ebf469dbb21d778610bf757d3a167b381",
+  "scope": "Final scoped model/native replay, semantic counterfactuals, independent earlier-model replay. No full Rust or whole-heap refinement.",
+  "files": {
+    "VerumExternalReplay/ResourceLedgerControls.lean": "abd1aee2df43ac59ee138b1d25e53c5d63480b14a088758b83d689e1f2669704",
+    "VerumExternalReplay/ResourceLedgerAxioms.lean": "6051bd36337afd6c4f8705fe10ad1b46cc19269ddd719fce60fce5c7c45921c2",
+    "VerumExternalReplay/ResourceLedger.lean": "ab6b7edc67d0efe4978e41d9796d38d97795663b7ba4a7638f82d6f5d4f86353",
+    "check_resource_ledger_export.py": "9d3ca28730dabedad684a87589670655adf88ec26774ad4d7fcff1bcf9de77d1",
+    "test_resource_ledger_export.py": "92f289e5c76937b546ccb7cb75ddcd210e24f1d351d96d120616de7c3b0d0423"
+  }
+}

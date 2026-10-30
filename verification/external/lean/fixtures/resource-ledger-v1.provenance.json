@@ -1,0 +1,106 @@
+{
+  "export_sha256": "981e8848fd64c0b5542c66b125cd7d8000537d5069c7cf01303fecfca8b909ae",
+  "scope": "Native shallow account court from r121; not the newly edited source-time/dormant/MemoryBox code. Overall run interrupted; named store stage passed. No full-suite/Rust refinement claim.",
+  "native_head": "eebaaa226b9ad9380c304690573bf749e0e1ba9d",
+  "source": {
+    "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-store/src/memory.rs",
+    "bytes": 22569,
+    "sha256": "581c171fea646c4ff203a1fd68dde5d8b4d1bc20445f5a022aeaaa78a2bfef47"
+  },
+  "store_stage": {
+    "name": "build-store-test",
+    "command": [
+      "cargo",
+      "test",
+      "--manifest-path",
+      "/Users/taaliman/projects/oldman/synarcai/omega/rust/Cargo.toml",
+      "--locked",
+      "--offline",
+      "--target-dir",
+      "/Users/taaliman/projects/oldman/synarcai/omega/.diagnostics/2026-10-09/depth-contract/target",
+      "--jobs",
+      "4",
+      "--profile",
+      "dev",
+      "-p",
+      "synarc-store",
+      "--lib",
+      "memory::",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "cwd": "/Users/taaliman/projects/oldman/synarcai/omega",
+    "status": "passed",
+    "started_at": 1793397500.712275,
+    "timeout_seconds": 1800,
+    "slot": "/tmp/heavy.slots.build/slot1.d",
+    "pid": 19836,
+    "latest_resource": {
+      "at": 1793397510.945045,
+      "reserve_gib": 40.187255859375,
+      "raw_gib": 12.287811279296875,
+      "purgeable_gib": 0.9287567138671875,
+      "file_backed_gib": 28.129928588867188,
+      "reclaimable_gib": 28.129928588867188,
+      "swapouts": 0,
+      "memory_basis": "darwin-cache-aware-lower-union-v2",
+      "legacy_queue_estimate_gib": 4.669670104980469,
+      "disk_free_gib": 23.501689910888672,
+      "pressure_dispatch_level": 1,
+      "owned_rss_bytes": 339476480
+    },
+    "peak_owned_rss_bytes": 969965568,
+    "returncode": 0,
+    "native_reports": [
+      {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 66
+      }
+    ],
+    "counts": {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 66
+    },
+    "process_group_cleanup": {
+      "pgid": 19836,
+      "started_at": 1793397513.0948522,
+      "observations": [
+        {
+          "at": 1793397513.141999,
+          "members": []
+        },
+        {
+          "at": 1793397513.1881,
+          "members": []
+        }
+      ],
+      "signals": [],
+      "complete": true,
+      "parent_returncode": 0,
+      "survivors": [],
+      "zombies": [],
+      "unexpected_children_after_parent_exit": false,
+      "finished_at": 1793397513.190322
+    },
+    "seconds": 12.479716062545776,
+    "log": {
+      "path": "/private/tmp/synarc-recovery-runtime-v69/memory-r121/build-store-test.log",
+      "bytes": 13483,
+      "sha256": "02f03626b21bebf883217b23cdeab0fd208c4700018fb21271a0b0abe9d2368a"
+    },
+    "slot_released": true
+  },
+  "original_receipt": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/memory-r121/receipt.json",
+    "bytes": 916666,
+    "sha256": "5654775e0d06a2b2334859df15209012649fe2d80f30b9748463aa9323daac93"
+  },
+  "historical_archive": "synarcai/omega reference/research/2026-10-28-shared-learning/owned-memory-v173.tar.gz"
+}
