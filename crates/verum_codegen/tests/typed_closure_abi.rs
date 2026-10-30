@@ -431,6 +431,28 @@ fn documented_shared_environments_execute_in_both_tiers() {
 }
 
 #[test]
+fn nested_closure_parameter_capture_keeps_its_declared_native_type() {
+    let module = specialize_closures(compile("fn make<T>() -> fn(T) -> T { |value: T| -> T { let inner = || value; inner() } } fn probe() -> Float { let f = make<Float>(); f(17.25) }"));
+    let entry = module.find_function_by_name("probe").unwrap();
+    assert_eq!(Interpreter::new(Arc::new(module.clone())).execute_function(entry).unwrap().as_f64(), 17.25);
+    with_native(&module, |engine| {
+        let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> f64>("probe").unwrap().call() };
+        assert_eq!(actual, 17.25);
+    });
+}
+
+#[test]
+fn generic_receiver_field_capture_preserves_its_native_declaration() {
+    let module = specialize_closures(compile("type Cell<T> is { value: T }; implement<T> Cell<T> { fn make(&self) -> fn() -> T { let value = self.value; || value } } fn probe() -> Float { let cell: Cell<Float> = Cell { value: 17.25 }; let f = cell.make(); f() }"));
+    let entry = module.find_function_by_name("probe").unwrap();
+    assert_eq!(Interpreter::new(Arc::new(module.clone())).execute_function(entry).unwrap().as_f64(), 17.25);
+    with_native(&module, |engine| {
+        let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> f64>("probe").unwrap().call() };
+        assert_eq!(actual, 17.25);
+    });
+}
+
+#[test]
 fn captured_missing_targets_cannot_become_lenient_fallback_bodies() {
     for target in [0x7FFF_FFFF, 0x2000_0000] {
         let mut module = compile("fn probe() -> Int { let value: Int = 7; let f = || value; f() }");

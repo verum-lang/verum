@@ -17,11 +17,12 @@
 //!
 //! ## Handle lifetime
 //!
-//! `script_engine_new` / `script_engine_eval` allocate a `Box` and return its
-//! raw pointer as an opaque `*const Byte` Value.  Ownership transfers to the
-//! script; the `core.script` `Engine` / `Outcome` wrappers free it via the
-//! matching `*_free` op (typically from their `Drop`).  Each pointer is freed
-//! exactly once.
+//! Engines use interpreter-owned, monotonic opaque IDs and checked leases.
+//! Their IDs are integer Values, so legacy pointer-based Session/Outcome/World
+//! handlers reject an engine handle before dereferencing it. The other handle
+//! kinds retain their existing boxed-pointer representation.
+
+use std::sync::{Arc, Mutex, MutexGuard, atomic::{AtomicU64, Ordering}};
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
@@ -33,8 +34,44 @@ use crate::interpreter::script_engine::{
     HandleMagic, ScriptEngine, ScriptError, ScriptOutcome, ScriptSession, ScriptValueOwned,
     ScriptWorld,
 };
-use crate::module::FunctionId;
 use crate::value::Value;
+
+static NEXT_ENGINE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn engine_error(message: &str) -> InterpreterError {
+    InterpreterError::Panic { message: message.into() }
+}
+
+fn next_engine_id(counter: &AtomicU64) -> InterpreterResult<u64> {
+    counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |id|
+        (id <= crate::value::MAX_SMALL_INT as u64).then(|| id + 1))
+        .map_err(|_| engine_error("script engine handle space exhausted"))
+}
+
+fn alloc_engine(state: &mut InterpreterState, engine: ScriptEngine) -> InterpreterResult<Value> {
+    let id = next_engine_id(&NEXT_ENGINE_ID)?;
+    state.script_engines.insert(id, Arc::new(Mutex::new(engine)));
+    Ok(Value::from_i64(id as i64))
+}
+
+fn engine_id(value: Value) -> InterpreterResult<u64> {
+    if !value.is_inline_int() || value.as_i64() <= 0 {
+        return Err(engine_error("invalid script engine handle"));
+    }
+    Ok(value.as_i64() as u64)
+}
+
+fn engine_owner(state: &InterpreterState, value: Value) -> InterpreterResult<Arc<Mutex<ScriptEngine>>> {
+    state.script_engines.get(&engine_id(value)?).cloned()
+        .ok_or_else(|| engine_error("script engine handle is foreign or expired"))
+}
+
+fn lease_engine(owner: &Arc<Mutex<ScriptEngine>>) -> InterpreterResult<MutexGuard<'_, ScriptEngine>> {
+    owner.try_lock().map_err(|error| match error {
+        std::sync::TryLockError::WouldBlock => engine_error("script engine is active"),
+        std::sync::TryLockError::Poisoned(_) => engine_error("script engine lease is poisoned"),
+    })
+}
 
 /// Read an opaque outcome handle from a register, erroring on null.
 fn read_outcome_ptr(
@@ -44,15 +81,10 @@ fn read_outcome_ptr(
     checked_handle_ptr::<ScriptOutcome>(state.get_reg(reg)).map(|p| p as *const _)
 }
 
-/// Validate that a register value is a live-looking opaque handle before it is
-/// dereferenced as one. A handle is created via `Value::from_ptr` (pointer tag),
-/// so a value that is NOT pointer-tagged (e.g. a script passing an arbitrary
-/// `Int`) must be rejected — otherwise `as_ptr` masks it to an attacker-chosen
-/// address and the caller dereferences (or frees) that address. This closes the
-/// arbitrary-address read/write/free primitive on the whole handle surface.
-/// For the typed persistent handles (Engine/Session/World), prefer
-/// [`checked_typed_handle_ptr`], which additionally rejects a wrong-type or
-/// freed handle via its magic word.
+/// Check the legacy pointer carrier before interpreting a Session/Outcome/World
+/// handle. This rejects integers, including checked Engine IDs. A pointer tag
+/// does not establish ownership or allocation liveness; those legacy handle
+/// kinds still rely on their caller's lifetime contract.
 fn checked_handle_ptr<T>(value: crate::value::Value) -> InterpreterResult<*mut T> {
     if !value.is_ptr() || value.is_nil() {
         return Err(InterpreterError::NullPointer);
@@ -64,20 +96,14 @@ fn checked_handle_ptr<T>(value: crate::value::Value) -> InterpreterResult<*mut T
     Ok(ptr)
 }
 
-/// Like [`checked_handle_ptr`] but for a typed handle that carries a
-/// [`HandleMagic`] word at offset 0: after the pointer-tag check, reads the
-/// magic and rejects the handle unless it equals `T::MAGIC`. This closes the
-/// residual type-confusion (a real handle of the wrong type — e.g. an `Engine`
-/// passed where a `Session` is expected) and, because a freed handle's magic is
-/// zeroed on free, best-effort double-free / use-after-free.
+/// Check the kind marker of a legacy handle whose allocation must still be
+/// live. The marker distinguishes Session/World kinds, not expired pointers.
 fn checked_typed_handle_ptr<T: HandleMagic>(
     value: crate::value::Value,
 ) -> InterpreterResult<*mut T> {
     let ptr = checked_handle_ptr::<T>(value)?;
-    // SAFETY: `ptr` is non-null and pointer-tag-validated, so it addresses a
-    // heap object of at least 8 bytes (a boxed handle, or an interpreter object
-    // with a 24-byte ObjectHeader); reading its first u64 (the magic, kept at
-    // offset 0 by `#[repr(C)]`) is in-bounds.
+    // SAFETY: the legacy handle lifetime contract requires a live allocation
+    // of at least eight bytes; its #[repr(C)] marker occupies the first word.
     let magic = unsafe { *(ptr as *const u64) };
     if magic != T::MAGIC {
         return Err(InterpreterError::NullPointer);
@@ -90,28 +116,21 @@ pub(in super::super) fn handle_script_engine_new(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
-    let engine = Box::into_raw(Box::new(ScriptEngine::new()));
-    state.set_reg(dst, Value::from_ptr(engine as *mut u8));
+    let engine = alloc_engine(state, ScriptEngine::new())?;
+    state.set_reg(dst, engine);
     Ok(DispatchResult::Continue)
 }
 
-/// `script_engine_free(engine)`. Drops the engine box.
+/// `script_engine_free(engine)`. Releases an idle engine owner exactly once.
 pub(in super::super) fn handle_script_engine_free(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let engine_reg = read_reg(state)?;
-    // Validate it's actually a handle pointer before freeing — a non-pointer
-    // (e.g. a script passing `free(1)`) must not be turned into a wild free.
-    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: `ptr` originates from `Box::into_raw` in
-        // `handle_script_engine_new` and is freed exactly once (the
-        // `core.script` `Engine` wrapper's Drop). Zero the magic first so a
-        // double-free's second deref is rejected by `checked_typed_handle_ptr`.
-        unsafe {
-            (*ptr).invalidate();
-            drop(Box::from_raw(ptr));
-        }
-    }
+    let value = state.get_reg(engine_reg);
+    let owner = engine_owner(state, value)?;
+    let lease = lease_engine(&owner)?;
+    state.script_engines.remove(&engine_id(value)?);
+    drop(lease);
     Ok(DispatchResult::Continue)
 }
 
@@ -124,21 +143,15 @@ pub(in super::super) fn handle_script_engine_eval(
     let engine_reg = read_reg(state)?;
     let src_reg = read_reg(state)?;
 
-    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let mut engine = lease_engine(&owner)?;
     let src_val = state.get_reg(src_reg);
     let source =
         super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
 
-    // Pass the host interpreter's state address so the script can call back
-    // into host-registered functions (it re-enters this same state). The host
-    // is paused here for the whole nested run, so the address stays valid.
-    let host_addr = state as *mut InterpreterState as usize;
-
-    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle. The nested
-    // evaluation runs on its own interpreter state, distinct from `state`;
-    // host-function callbacks re-enter `state` transactionally via
-    // `call_function_sync` (see `handle_script_host_call_int`).
-    let outcome = unsafe { (*engine_ptr).eval_to_outcome_with_host(&source, host_addr) };
+    // The lease remains outside the borrowed Engine across host re-entry.
+    // Reentrant free/eval/mutation refuses without touching the active engine.
+    let outcome = engine.eval_to_outcome_with_host(&source, Some(state));
     let outcome_ptr = Box::into_raw(Box::new(outcome));
     state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
     Ok(DispatchResult::Continue)
@@ -156,7 +169,8 @@ pub(in super::super) fn handle_script_engine_call(
     let src_reg = read_reg(state)?;
     let fn_reg = read_reg(state)?;
 
-    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let mut engine = lease_engine(&owner)?;
     let src_val = state.get_reg(src_reg);
     let source =
         super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
@@ -164,12 +178,7 @@ pub(in super::super) fn handle_script_engine_call(
     let fn_name =
         super::path_ops_runtime::extract_string_if_text(state, &fn_val).unwrap_or_default();
 
-    let host_addr = state as *mut InterpreterState as usize;
-
-    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle; see
-    // `handle_script_engine_eval` for the host-re-entry safety contract.
-    let outcome =
-        unsafe { (*engine_ptr).call_named_with_host(&source, &fn_name, host_addr) };
+    let outcome = engine.call_named_with_host(&source, &fn_name, Some(state));
     let outcome_ptr = Box::into_raw(Box::new(outcome));
     state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
     Ok(DispatchResult::Continue)
@@ -188,7 +197,8 @@ pub(in super::super) fn handle_script_engine_call_args(
     let fn_reg = read_reg(state)?;
     let args_reg = read_reg(state)?;
 
-    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let mut engine = lease_engine(&owner)?;
     let src_val = state.get_reg(src_reg);
     let source =
         super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
@@ -198,13 +208,7 @@ pub(in super::super) fn handle_script_engine_call_args(
     let args_val = state.get_reg(args_reg);
     let arg_values = state.list_elements(args_val).unwrap_or_default();
 
-    let host_addr = state as *mut InterpreterState as usize;
-
-    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle; see
-    // `handle_script_engine_eval` for the host-re-entry safety contract.
-    let outcome = unsafe {
-        (*engine_ptr).call_named_args_with_host(&source, &fn_name, &arg_values, host_addr)
-    };
+    let outcome = engine.call_named_args_with_host(&source, &fn_name, &arg_values, Some(state));
     let outcome_ptr = Box::into_raw(Box::new(outcome));
     state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
     Ok(DispatchResult::Continue)
@@ -223,7 +227,8 @@ pub(in super::super) fn handle_script_engine_link2(
     let a_reg = read_reg(state)?;
     let b_reg = read_reg(state)?;
 
-    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let mut engine = lease_engine(&owner)?;
     let a_val = state.get_reg(a_reg);
     let src_a =
         super::path_ops_runtime::extract_string_if_text(state, &a_val).unwrap_or_default();
@@ -231,8 +236,7 @@ pub(in super::super) fn handle_script_engine_link2(
     let src_b =
         super::path_ops_runtime::extract_string_if_text(state, &b_val).unwrap_or_default();
 
-    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle.
-    let handle = match unsafe { (*engine_ptr).link2(&src_a, &src_b) } {
+    let handle = match engine.link2(&src_a, &src_b) {
         Ok(session) => Box::into_raw(Box::new(session)) as *mut u8,
         Err(_) => std::ptr::null_mut(),
     };
@@ -249,7 +253,8 @@ pub(in super::super) fn handle_script_engine_link(
     let engine_reg = read_reg(state)?;
     let sources_reg = read_reg(state)?;
 
-    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let mut engine = lease_engine(&owner)?;
     let sources_val = state.get_reg(sources_reg);
     let source_values = state.list_elements(sources_val).unwrap_or_default();
     let sources: Vec<String> = source_values
@@ -258,8 +263,7 @@ pub(in super::super) fn handle_script_engine_link(
         .collect();
     let source_refs: Vec<&str> = sources.iter().map(|s| s.as_str()).collect();
 
-    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle.
-    let handle = match unsafe { (*engine_ptr).link_n(&source_refs) } {
+    let handle = match engine.link_n(&source_refs) {
         Ok(session) => Box::into_raw(Box::new(session)) as *mut u8,
         Err(_) => std::ptr::null_mut(),
     };
@@ -268,19 +272,15 @@ pub(in super::super) fn handle_script_engine_link(
 }
 
 /// `script_engine_stdout(engine) -> Text` — the stdout captured during the
-/// engine's most recent `eval`/`call` (empty before any run, or for a bad
-/// handle). Surfaces the otherwise-unreachable captured output — the `.vr`
+/// engine's most recent `eval`/`call` (empty before any run). Surfaces the otherwise-unreachable captured output — the `.vr`
 /// `eval`/`call` free the outcome (which carries stdout) without exposing it.
 pub(in super::super) fn handle_script_engine_stdout(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let engine_reg = read_reg(state)?;
-    let out = match checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: a validated, live `Box<ScriptEngine>` handle.
-        Ok(ptr) => unsafe { (*ptr).last_stdout().to_string() },
-        Err(_) => String::new(),
-    };
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let out = lease_engine(&owner)?.last_stdout().to_string();
     let value = alloc_string_value(state, &out)?;
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
@@ -294,11 +294,8 @@ pub(in super::super) fn handle_script_engine_last_error(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let engine_reg = read_reg(state)?;
-    let msg = match checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: a validated, live `Box<ScriptEngine>` handle.
-        Ok(ptr) => unsafe { (*ptr).last_error().to_string() },
-        Err(_) => String::new(),
-    };
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let msg = lease_engine(&owner)?.last_error().to_string();
     let value = alloc_string_value(state, &msg)?;
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
@@ -312,11 +309,8 @@ pub(in super::super) fn handle_script_engine_last_error_kind(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let engine_reg = read_reg(state)?;
-    let code = match checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: a validated, live `Box<ScriptEngine>` handle.
-        Ok(ptr) => unsafe { (*ptr).last_error_kind() },
-        Err(_) => 0,
-    };
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    let code = lease_engine(&owner)?.last_error_kind();
     state.set_reg(dst, Value::from_i64(code));
     Ok(DispatchResult::Continue)
 }
@@ -716,8 +710,8 @@ pub(in super::super) fn handle_script_engine_new_sandboxed(
     let mem = state.get_reg(mem_reg).as_i64().max(0) as usize;
     let instr = state.get_reg(instr_reg).as_i64().max(0) as u64;
     let time = state.get_reg(time_reg).as_i64().max(0) as u64;
-    let engine = Box::into_raw(Box::new(ScriptEngine::sandboxed(mem, instr, time)));
-    state.set_reg(dst, Value::from_ptr(engine as *mut u8));
+    let engine = alloc_engine(state, ScriptEngine::sandboxed(mem, instr, time))?;
+    state.set_reg(dst, engine);
     Ok(DispatchResult::Continue)
 }
 
@@ -746,10 +740,8 @@ pub(in super::super) fn handle_script_engine_set_global_int(
     let name = read_name_arg(state)?;
     let value_reg = read_reg(state)?;
     let value = state.get_reg(value_reg).as_i64();
-    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: `ptr` is a live `Box<ScriptEngine>` handle.
-        unsafe { (*ptr).set_global(name, ScriptValueOwned::Int(value)) };
-    }
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    lease_engine(&owner)?.set_global(name, ScriptValueOwned::Int(value));
     Ok(DispatchResult::Continue)
 }
 
@@ -762,10 +754,8 @@ pub(in super::super) fn handle_script_engine_set_global_text(
     let value_reg = read_reg(state)?;
     let value_val = state.get_reg(value_reg);
     let text = extract_string_if_text(state, &value_val).unwrap_or_default();
-    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: see `handle_script_engine_set_global_int`.
-        unsafe { (*ptr).set_global(name, ScriptValueOwned::Text(text)) };
-    }
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    lease_engine(&owner)?.set_global(name, ScriptValueOwned::Text(text));
     Ok(DispatchResult::Continue)
 }
 
@@ -777,10 +767,8 @@ pub(in super::super) fn handle_script_engine_set_global_bool(
     let name = read_name_arg(state)?;
     let value_reg = read_reg(state)?;
     let value = state.get_reg(value_reg).as_bool();
-    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: see `handle_script_engine_set_global_int`.
-        unsafe { (*ptr).set_global(name, ScriptValueOwned::Bool(value)) };
-    }
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    lease_engine(&owner)?.set_global(name, ScriptValueOwned::Bool(value));
     Ok(DispatchResult::Continue)
 }
 
@@ -792,10 +780,8 @@ pub(in super::super) fn handle_script_engine_set_global_float(
     let name = read_name_arg(state)?;
     let value_reg = read_reg(state)?;
     let value = state.get_reg(value_reg).as_f64();
-    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: see `handle_script_engine_set_global_int`.
-        unsafe { (*ptr).set_global(name, ScriptValueOwned::Float(value)) };
-    }
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    lease_engine(&owner)?.set_global(name, ScriptValueOwned::Float(value));
     Ok(DispatchResult::Continue)
 }
 
@@ -813,10 +799,8 @@ pub(in super::super) fn handle_script_engine_set_global_value(
     // Marshal the host value into an owned form (its borrow of `state` ends here,
     // before the engine deref below) — reuses the same deep marshaler as results.
     let owned = crate::interpreter::script_engine::extract_owned(state, value);
-    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        // SAFETY: see `handle_script_engine_set_global_int`.
-        unsafe { (*ptr).set_global(name, owned) };
-    }
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    lease_engine(&owner)?.set_global(name, owned);
     Ok(DispatchResult::Continue)
 }
 
@@ -928,26 +912,9 @@ pub(in super::super) fn handle_script_global_float(
 // =============================================================================
 // Host-function callbacks (Phase 1): a script calls back into functions the
 // host registered on the engine. The host function runs RE-ENTRANTLY on the
-// host interpreter's state (call_function_sync), so it sees the host's module,
+// host interpreter's state (call_closure_sync), so it sees the host's module,
 // heap and globals. Int -> Int signature for now.
 // =============================================================================
-
-/// Extract the underlying `FunctionId` from a function value — either a
-/// zero-capture closure (the form a bare `fn` argument compiles to) or a bare
-/// function reference.
-fn function_id_of(v: &Value) -> Option<FunctionId> {
-    if v.is_ptr() && !v.is_nil() {
-        let ptr = v.as_ptr::<u8>();
-        if ptr.is_null() {
-            return None;
-        }
-        // SAFETY: a pointer-tagged non-null function value is a closure object
-        // whose header carries (func_id, capture_count) at the canonical offset.
-        let (raw_fid, _captures) = unsafe { crate::interpreter::heap::closure_header(ptr) };
-        return Some(FunctionId(raw_fid));
-    }
-    None
-}
 
 /// `script_engine_register(engine, name, fn)` — host registers a callback.
 pub(in super::super) fn handle_script_engine_register(
@@ -956,13 +923,9 @@ pub(in super::super) fn handle_script_engine_register(
     let engine_reg = read_reg(state)?;
     let name = read_name_arg(state)?;
     let fn_reg = read_reg(state)?;
-    let func_id = function_id_of(&state.get_reg(fn_reg));
-    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
-        if let Some(fid) = func_id {
-            // SAFETY: `ptr` is a live `Box<ScriptEngine>` handle.
-            unsafe { (*ptr).register(name, fid) };
-        }
-    }
+    let callable = state.get_reg(fn_reg);
+    let owner = engine_owner(state, state.get_reg(engine_reg))?;
+    lease_engine(&owner)?.register_callable(name, callable, state)?;
     Ok(DispatchResult::Continue)
 }
 
@@ -974,35 +937,33 @@ pub(in super::super) fn handle_script_host_call_int(
     let dst = read_reg(state)?;
     let name = read_name_arg(state)?;
     let arg_reg = read_reg(state)?;
-    let arg = state.get_reg(arg_reg).as_i64();
-
-    // Resolve the host function + host state from the script's bridge.
-    let resolved = state.host_call_ctx.as_ref().and_then(|ctx| {
-        if ctx.host_state_addr == 0 {
-            return None;
-        }
-        ctx.host_fns.get(&name).map(|fid| (ctx.host_state_addr, *fid))
-    });
-
-    let result = match resolved {
-        Some((addr, fid)) => {
-            // SAFETY: `addr` points to the live host `InterpreterState` — the
-            // host is paused inside `script_engine_eval` for the whole nested
-            // run — and is a DISTINCT object from `state` (the script interp),
-            // so this does not alias the script's `&mut`. The host function
-            // runs transactionally (push frame → run → pop), leaving the host
-            // state consistent on return.
-            let host_state =
-                unsafe { &mut *(addr as *mut InterpreterState) };
-            let host_arg = Value::from_i64(arg);
-            match super::super::call_function_sync(host_state, fid, &[host_arg]) {
-                Ok(v) => v.as_i64(),
-                Err(_) => 0,
-            }
-        }
-        None => 0,
-    };
-    state.set_reg(dst, Value::from_i64(result));
+    let arg = state.get_reg(arg_reg);
+    if !arg.is_int() {
+        return Err(InterpreterError::TypeMismatch {
+            expected: "Int", got: "non-Int", operation: "script_host_call_int argument",
+        });
+    }
+    let (addr, callable) = state.host_call_ctx.as_ref()
+        .and_then(|ctx| ctx.host_fns.get(&name).map(|f| (ctx.host_state_addr, f.clone())))
+        .ok_or_else(|| InterpreterError::Panic {
+            message: format!("script host callback '{name}' is unavailable"),
+        })?;
+    if addr == 0 || addr == state as *mut InterpreterState as usize {
+        return Err(InterpreterError::Panic { message: "invalid script host re-entry context".into() });
+    }
+    // SAFETY: only ScriptEngine::run_with_host installs this private context,
+    // borrowing a distinct, live host exclusively for the synchronous run.
+    // The callback's origin is checked before any host heap dereference.
+    let host = unsafe { &mut *(addr as *mut InterpreterState) };
+    let callable = callable.resolve(host)?;
+    let result = super::super::call_closure_sync(host, callable, &[Value::from_i64(arg.as_i64())])?;
+    if !result.is_int() {
+        return Err(InterpreterError::TypeMismatch {
+            expected: "Int", got: "non-Int", operation: "script_host_call_int result",
+        });
+    }
+    // Only the integer result crosses the boundary; the environment stays on the host.
+    state.set_reg(dst, Value::from_i64(result.as_i64()));
     Ok(DispatchResult::Continue)
 }
 
@@ -1077,4 +1038,24 @@ pub(in super::super) fn handle_script_set_value(
     let owned = crate::interpreter::script_engine::extract_owned(state, value);
     state.shared_writes.insert(name, owned);
     Ok(DispatchResult::Continue)
+}
+
+#[cfg(test)]
+mod engine_handle_tests {
+    use super::*;
+
+    #[test]
+    fn engine_ids_roundtrip_and_exhaust_without_wrap() {
+        let max = crate::value::MAX_SMALL_INT as u64;
+        let counter = AtomicU64::new(max - 1);
+        for expected in [max - 1, max] {
+            let id = next_engine_id(&counter).unwrap();
+            assert_eq!(id, expected);
+            let value = Value::from_i64(id as i64);
+            assert!(value.is_inline_int());
+            assert_eq!(engine_id(value).unwrap(), id);
+        }
+        for _ in 0..2 { assert!(next_engine_id(&counter).is_err()); }
+        assert_eq!(counter.load(Ordering::Relaxed), max + 1);
+    }
 }

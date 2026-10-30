@@ -31,13 +31,13 @@ module core.intrinsics.runtime.scripting;
 // =============================================================================
 // SECTION 1: Opaque Handles
 // =============================================================================
-// Host-owned, heap-allocated Rust objects surfaced to Verum as opaque
-// pointers (same pattern as the async runtime's Raw*Opaque handles).  Each is
-// created by an intrinsic and must be released by the matching `*_free`
-// intrinsic exactly once — the `core.script` wrappers do this from Drop.
+// Host-owned resources surfaced through opaque handles. Engines use checked
+// integer IDs; outcomes and sessions retain their pointer representation.
+// Each handle is created by an intrinsic and released by its matching `*_free`
+// intrinsic — the `core.script` wrappers manage these lifetimes.
 
-/// Opaque handle to a host-owned `ScriptEngine`.
-public type RawScriptEngine is (*const Byte);
+/// Opaque, non-reusable ID of an engine owned by the current interpreter.
+public type RawScriptEngine is (Int);
 
 /// Opaque handle to a host-owned `ScriptOutcome` (a script's result + stdout).
 public type RawScriptOutcome is (*const Byte);

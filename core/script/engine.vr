@@ -77,8 +77,8 @@ public type ErrorKind is
 
 /// An isolated script-execution world.  Owns a host-side `ScriptEngine`
 /// handle; freed automatically when the `Engine` goes out of scope.
-// `affine`: an Engine uniquely owns a boxed native handle freed by its Drop, so
-// it must be move-only — copying it would free the same handle twice.
+// `affine`: an Engine uniquely owns a checked engine ID released by Drop,
+// so copying it would duplicate release authority.
 public type affine Engine is {
     raw: RawScriptEngine,
 };

@@ -370,7 +370,7 @@ impl Default for GpuContext {
 /// The host-function bridge a running script uses to call back into its host.
 ///
 /// Host functions execute **re-entrantly on the host interpreter's state**
-/// (via `call_function_sync`), so they see the host's module, heap and globals.
+/// (via `call_closure_sync`), so they see the host's module, heap and globals.
 /// The host is paused inside the `script_engine_eval` intrinsic for the whole
 /// nested run, so its state stays valid throughout.
 pub struct HostCallContext {
@@ -378,9 +378,9 @@ pub struct HostCallContext {
     /// re-entry available).  Stored as `usize` rather than `*mut` so
     /// `InterpreterState`'s thread-safety profile is unchanged; cast back at
     /// the call site under the validity invariant above.
-    pub host_state_addr: usize,
-    /// Functions the host registered on the engine: name → host-module id.
-    pub host_fns: HashMap<String, crate::module::FunctionId>,
+    pub(crate) host_state_addr: usize,
+    /// Complete callables retained by the engine, with their host authority.
+    pub(crate) host_fns: HashMap<String, super::script_engine::HostCallable>,
 }
 
 /// Mutable execution state of one interpreter instance: registers, frames, heap, contexts and the CBGR bookkeeping shared by every dispatch handler.
@@ -427,6 +427,10 @@ pub struct InterpreterState {
     /// `Some` only while a script runs that was launched with a host context;
     /// `None` for ordinary execution.
     pub host_call_ctx: Option<HostCallContext>,
+    /// Stable across moves, invalidated when this state's heap is reset or dropped.
+    pub(crate) host_callable_lifetime: Arc<()>,
+    /// Opaque script engine owners. IDs never repeat across interpreter lifetimes.
+    pub(crate) script_engines: HashMap<u64, Arc<std::sync::Mutex<super::script_engine::ScriptEngine>>>,
 
     /// Owned snapshots of the values a script wrote via `script_set_*`,
     /// captured AT WRITE TIME (while the heap value is valid). A `ScriptWorld`
@@ -2621,6 +2625,8 @@ impl InterpreterState {
             modules,
             host_globals: HashMap::new(),
             host_call_ctx: None,
+            host_callable_lifetime: Arc::new(()),
+            script_engines: HashMap::new(),
             shared_writes: HashMap::new(),
             registers: RegisterFile::new(),
             call_stack: CallStack::with_max_depth(config.max_stack_depth),
@@ -3113,6 +3119,9 @@ impl InterpreterState {
     /// method cache, output buffers, nurseries, exception handlers, TLS slots)
     /// to prevent unbounded memory growth across repeated executions.
     pub fn reset(&mut self) {
+        self.host_callable_lifetime = Arc::new(());
+        self.host_call_ctx = None;
+        self.script_engines.clear();
         self.registers.clear();
         self.call_stack.clear();
         unsafe { self.heap.clear() };

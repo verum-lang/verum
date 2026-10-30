@@ -34,13 +34,14 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Weak};
 
 use crate::module::VbcModule;
 use crate::module::FunctionId;
 use crate::value::Value;
 
 use super::state::{HostCallContext, InterpreterConfig, InterpreterState};
+use super::error::{InterpreterError, InterpreterResult};
 use super::Interpreter;
 
 /// An installable source→VBC compiler.
@@ -202,30 +203,17 @@ impl ScriptCaps {
     }
 }
 
-/// A boxed script handle that carries a type-unique magic word as its first
-/// field (`#[repr(C)]`, offset 0). A handle deref reads offset 0 and compares it
-/// to the expected `MAGIC` before trusting the pointer — rejecting a wrong-type
-/// handle (a `Session` passed where an `Engine` is expected) or a freed one
-/// (whose magic was zeroed). Defense-in-depth beyond `checked_handle_ptr`'s
-/// pointer-tag check, closing the residual raw-`@intrinsic` type-confusion /
-/// double-free. Reading offset 0 is always in-bounds: any pointer-tagged value a
-/// script can pass addresses a heap object of at least 8 bytes (a boxed handle,
-/// or an interpreter object with a 24-byte `ObjectHeader`).
+/// Legacy Session/World handles carry a type marker in their live allocation.
+/// This marker distinguishes kinds; it is not proof of allocation liveness.
+/// Engines instead use interpreter-owned IDs and checked external leases.
 pub trait HandleMagic {
     /// The type's unique, high-entropy magic. High byte `0x53` keeps it clear of
     /// any interpreter `ObjectHeader`'s first 8 bytes (a small type-id + size).
     const MAGIC: u64;
-    /// Zero the magic so a later deref rejects this freed handle (best-effort
-    /// double-free / use-after-free detection).
+    /// Invalidate the marker before the owning allocation is released.
     fn invalidate(&mut self);
 }
 
-impl HandleMagic for ScriptEngine {
-    const MAGIC: u64 = 0x53435F454E470001; // "SC_ENG\0\x01"
-    fn invalidate(&mut self) {
-        self.magic = 0;
-    }
-}
 impl HandleMagic for ScriptSession {
     const MAGIC: u64 = 0x53435F5345530002; // "SC_SES\0\x02"
     fn invalidate(&mut self) {
@@ -239,18 +227,75 @@ impl HandleMagic for ScriptWorld {
     }
 }
 
-#[repr(C)]
+/// A callable stays in its host heap. Only scalar arguments/results cross the
+/// scripting boundary; an origin token prevents replay in another host or after
+/// reset, even if an allocator reuses the original state/object addresses.
+#[derive(Clone)]
+pub(crate) struct HostCallable {
+    value: Value,
+    origin: Option<HostCallableOrigin>,
+}
+
+#[derive(Clone)]
+struct HostCallableOrigin {
+    lifetime: Weak<()>,
+    module: Weak<VbcModule>,
+    allocation: Option<(u32, u16)>,
+}
+
+impl HostCallable {
+    fn invalid(message: &str) -> InterpreterError {
+        InterpreterError::Panic { message: message.into() }
+    }
+
+    /// Validate membership before touching a possible closure header. The
+    /// common callable validator then checks the bounded lexical trailer.
+    fn inspect(host: &InterpreterState, value: Value) -> InterpreterResult<Option<(u32, u16)>> {
+        let (function, allocation, captures) = if value.is_func_ref() {
+            (value.as_func_id(), None, 0)
+        } else if value.is_ptr() && !value.is_nil()
+            && host.heap.contains(value.as_ptr::<super::heap::ObjectHeader>()) {
+            // SAFETY: exact live allocation membership precedes every read.
+            let header = unsafe { &*value.as_ptr::<super::heap::ObjectHeader>() };
+            if header.type_id != crate::types::TypeId(0xC000) || header.size < 8 || !header.is_valid() {
+                return Err(Self::invalid("script host callback is not a live closure"));
+            }
+            let (function, captures) = unsafe { super::heap::closure_header(value.as_ptr()) };
+            (FunctionId(function), Some((header.generation, header.epoch)), captures as usize)
+        } else {
+            return Err(Self::invalid("script host callback does not belong to this host heap"));
+        };
+        host.closure_generic_witnesses(value, function)?;
+        let descriptor = host.get_function(function).ok_or(InterpreterError::FunctionNotFound(function))?;
+        if captures + 1 > descriptor.register_count as usize {
+            return Err(Self::invalid("script host callback has no argument register"));
+        }
+        Ok(allocation)
+    }
+
+    pub(crate) fn resolve(&self, host: &InterpreterState) -> InterpreterResult<Value> {
+        if let Some(origin) = &self.origin {
+            if !origin.lifetime.ptr_eq(&Arc::downgrade(&host.host_callable_lifetime))
+                || origin.lifetime.upgrade().is_none()
+                || !origin.module.ptr_eq(&Arc::downgrade(&host.module)) {
+                return Err(Self::invalid("script host callback belongs to a different or expired host"));
+            }
+            if Self::inspect(host, self.value)? != origin.allocation {
+                return Err(Self::invalid("script host callback allocation has expired"));
+            }
+        } else {
+            Self::inspect(host, self.value)?;
+        }
+        Ok(self.value)
+    }
+}
+
 /// Embeddable script engine: owns a VBC module plus the interpreter state used by the host-facing script API.
 pub struct ScriptEngine {
-    /// Type-unique magic word at offset 0 (see [`HandleMagic`]) — a handle deref
-    /// reads it to reject a wrong-type or freed handle before trusting the
-    /// pointer. MUST stay the first field for the offset-0 read to be valid.
-    magic: u64,
     config: InterpreterConfig,
     globals: HashMap<String, ScriptValueOwned>,
-    /// Host functions the host registered for scripts to call back into,
-    /// by name → host-module FunctionId.
-    host_fns: HashMap<String, FunctionId>,
+    /// Host callables retain their environments and lexical type evidence.
+    host_fns: HashMap<String, HostCallable>,
     /// Capability grants enforced on each run (see [`ScriptCaps`]).
     caps: ScriptCaps,
     cancel: Arc<AtomicBool>,
@@ -281,7 +326,6 @@ impl ScriptEngine {
         let cancel = Arc::new(AtomicBool::new(false));
         config.cancel_flag = Some(cancel.clone());
         Self {
-            magic: <Self as HandleMagic>::MAGIC,
             config,
             globals: HashMap::new(),
             host_fns: HashMap::new(),
@@ -314,7 +358,25 @@ impl ScriptEngine {
     /// Register a host function (by host-module [`FunctionId`]) that scripts
     /// can call back into via the `script_host_call_*` intrinsics.
     pub fn register(&mut self, name: impl Into<String>, func_id: FunctionId) {
-        self.host_fns.insert(name.into(), func_id);
+        self.host_fns.insert(name.into(), HostCallable {
+            value: Value::from_function(func_id), origin: None,
+        });
+    }
+
+    /// Register a callable owned by `host`. The engine retains its value, not
+    /// the host itself; invocation requires the same live host and module.
+    pub fn register_callable(
+        &mut self, name: impl Into<String>, callable: Value, host: &InterpreterState,
+    ) -> InterpreterResult<()> {
+        let allocation = HostCallable::inspect(host, callable)?;
+        self.host_fns.insert(name.into(), HostCallable {
+            value: callable,
+            origin: Some(HostCallableOrigin {
+                lifetime: Arc::downgrade(&host.host_callable_lifetime),
+                module: Arc::downgrade(&host.module), allocation,
+            }),
+        });
+        Ok(())
     }
 
     /// Create a sandboxed engine with resource limits.  Each limit is `0` for
@@ -875,26 +937,20 @@ impl ScriptEngine {
     /// `ScriptOutcome { error: Some(_), .. }`.  This is the form the scripting
     /// intrinsics use, since the host reads success/failure through accessors.
     pub fn eval_to_outcome(&mut self, source: &str) -> ScriptOutcome {
-        self.eval_to_outcome_with_host(source, 0)
+        self.eval_to_outcome_with_host(source, None)
     }
 
     /// Like [`eval_to_outcome`](Self::eval_to_outcome) but installs a host
-    /// re-entry context: `host_state_addr` is the address of the host
-    /// interpreter's `InterpreterState`, so the script's `script_host_call_*`
-    /// intrinsics can call back into the host functions registered via
-    /// [`register`](Self::register).  Pass `0` for no host re-entry.
-    ///
-    /// # Safety contract
-    /// `host_state_addr`, when non-zero, must point to a live `InterpreterState`
-    /// that stays valid for the whole run — which holds when the caller is the
-    /// `script_engine_eval` intrinsic handler (the host is paused there).
+    /// re-entry context. The exclusive host borrow spans the entire synchronous
+    /// run; only the fresh script interpreter executes while the host is paused.
+    /// Pass `None` when no host re-entry is available.
     pub fn eval_to_outcome_with_host(
         &mut self,
         source: &str,
-        host_state_addr: usize,
+        host: Option<&mut InterpreterState>,
     ) -> ScriptOutcome {
         let outcome = match self.compile(source) {
-            Ok(module) => self.run_with_host(module, "main", &[], host_state_addr),
+            Ok(module) => self.run_with_host(module, "main", &[], host),
             Err(error) => ScriptOutcome {
                 value: ScriptValueOwned::Nil,
                 error: Some(error),
@@ -919,9 +975,9 @@ impl ScriptEngine {
         &mut self,
         source: &str,
         fn_name: &str,
-        host_state_addr: usize,
+        host: Option<&mut InterpreterState>,
     ) -> ScriptOutcome {
-        self.call_named_args_with_host(source, fn_name, &[], host_state_addr)
+        self.call_named_args_with_host(source, fn_name, &[], host)
     }
 
     /// [`call_named_with_host`](Self::call_named_with_host) passing positional
@@ -934,10 +990,10 @@ impl ScriptEngine {
         source: &str,
         fn_name: &str,
         args: &[Value],
-        host_state_addr: usize,
+        host: Option<&mut InterpreterState>,
     ) -> ScriptOutcome {
         let outcome = match self.compile(source) {
-            Ok(module) => self.run_with_host(module, fn_name, args, host_state_addr),
+            Ok(module) => self.run_with_host(module, fn_name, args, host),
             Err(error) => ScriptOutcome {
                 value: ScriptValueOwned::Nil,
                 error: Some(error),
@@ -959,17 +1015,17 @@ impl ScriptEngine {
         entry: &str,
         args: &[Value],
     ) -> ScriptOutcome {
-        self.run_with_host(module, entry, args, 0)
+        self.run_with_host(module, entry, args, None)
     }
 
     /// [`run_to_outcome`](Self::run_to_outcome) with a host re-entry context
     /// (see [`eval_to_outcome_with_host`](Self::eval_to_outcome_with_host)).
-    fn run_with_host(
+    pub fn run_with_host(
         &mut self,
         module: Arc<VbcModule>,
         entry: &str,
         args: &[Value],
-        host_state_addr: usize,
+        host: Option<&mut InterpreterState>,
     ) -> ScriptOutcome {
         let func_id = match module
             .find_function_by_name(entry)
@@ -996,9 +1052,9 @@ impl ScriptEngine {
         };
         // Install the host-function bridge so the script's `script_host_call_*`
         // intrinsics can call back into the host's registered functions.
-        if host_state_addr != 0 || !self.host_fns.is_empty() {
+        if let Some(host) = host {
             interp.state.host_call_ctx = Some(HostCallContext {
-                host_state_addr,
+                host_state_addr: host as *mut InterpreterState as usize,
                 host_fns: self.host_fns.clone(),
             });
         }
@@ -1033,6 +1089,8 @@ impl ScriptEngine {
         // `ScriptOutcome.stdout` — an embedded engine owns the script's output.
         interp.state.capture_output = true;
         let result = interp.execute_function_with_args(func_id, args);
+        // No borrowed host address survives the synchronous script execution.
+        interp.state.host_call_ctx = None;
         let stdout = interp.state.get_stdout().to_string();
         self.last_stdout = stdout.clone();
 

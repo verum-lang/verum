@@ -78,7 +78,12 @@ impl VbcCodegen {
                 else_branch.as_ref().map_or(Some(TypeRef::Concrete(crate::types::TypeId::UNIT)), |branch| nested(branch, None)),
             ),
             ExprKind::Path(path) => {
-                let binding = self.ctx.lookup_var(path.as_ident()?.name.as_str())?;
+                let name = match path.segments.as_slice() {
+                    [verum_ast::PathSegment::Name(name)] => name.name.as_str(),
+                    [verum_ast::PathSegment::SelfValue] => "self",
+                    _ => return None,
+                };
+                let binding = self.ctx.lookup_var(name)?;
                 if binding.is_cell || binding.is_pattern_alias { return None; }
                 let fact = self.ctx.registers.value_uses.active.get(&binding.reg)?;
                 (fact.id == binding.binding_id).then(|| fact.declaration_type.clone()).flatten()
@@ -86,6 +91,28 @@ impl VbcCodegen {
             ExprKind::Record { path, .. } => {
                 let ast = verum_ast::Type::new(verum_ast::ty::TypeKind::Path(path.clone()), expr.span);
                 self.semantic_formal_type(&ast, &self.ctx.current_generic_param_ids, &[])
+            }
+            ExprKind::Field { expr: receiver, field } => {
+                // The receiver's semantic declaration owns this projection.
+                // A layout offset or a same-named field on another type cannot
+                // supply its ownership or replace missing archive evidence.
+                let mut receiver = nested(receiver, None)?;
+                while let TypeRef::Reference { inner, .. } = receiver { receiver = *inner; }
+                let (id, arguments) = match receiver {
+                    TypeRef::Concrete(id) => (id, Vec::new()),
+                    TypeRef::Instantiated { base, args } => (base, args),
+                    _ => return None,
+                };
+                let declaration = self.type_by_id(id)?;
+                if declaration.kind != crate::types::TypeKind::Record
+                    || declaration.type_params.len() != arguments.len() { return None; }
+                let member = declaration.fields.iter().find(|member|
+                    self.ctx.strings.get(member.name.0 as usize)
+                        .is_some_and(|name| name == field.name.as_str()))?;
+                let ty = member.declaration_type.as_ref()?;
+                let ids: verum_common::List<_> = declaration.type_params.iter().map(|p| p.id).collect();
+                if !super::formal_parameters::resolved(ty, &ids, 0) { return None; }
+                Some(crate::mono::TypeSubstitution::new(&declaration.type_params, &arguments).apply(ty))
             }
             ExprKind::Unary { op: UnOp::Deref, expr: inner } => {
                 let input = emitted.and_then(|(reg, start, end)| {
@@ -124,7 +151,7 @@ impl VbcCodegen {
                 let (reg, start, end) = emitted?;
                 self.copy_selected_call_result(reg, start, end)
             }
-            // Projection layouts, raw pointers, dynamic calls and unresolved
+            // Raw pointers, dynamic calls and unresolved
             // expressions cannot establish the missing declaration authority.
             _ => None,
         }

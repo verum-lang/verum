@@ -33366,6 +33366,15 @@ impl VbcCodegen {
             self.ctx.register_variable_type(pname, var_type);
         }
         for (name, ty) in params.iter().zip(param_type_refs) {
+            // Parameters own the same declaration evidence as captured values.
+            // Nested closures must retain this evidence even when the parameter
+            // has no local initializer from which to infer its ownership shape.
+            if let (Some(binding), Some(ty)) = (self.ctx.lookup_var(name), ty) {
+                let reg = binding.reg;
+                let discipline = crate::resource_discipline::resource_discipline_with(ty,
+                    |id| self.type_index_of(id).and_then(|i| self.types.get(i)));
+                self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
+            }
             if matches!(ty, Some(crate::types::TypeRef::Reference { .. })) {
                 self.ctx.reference_bindings.insert(name.clone());
             }

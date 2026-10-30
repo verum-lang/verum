@@ -20124,6 +20124,9 @@ impl VbcCodegen {
         let (mut caller_generics, caller_shadows) = self.function_generic_param_maps(
             func, impl_type_name.map(|name| name.as_str()), &inherited_generics,
         );
+        let receiver_generics = caller_generics.clone();
+        let declared_ids: verum_common::List<_> = caller_generics.values()
+            .chain(caller_shadows.values()).copied().map(crate::types::TypeParamId).collect();
         caller_generics.extend(caller_shadows);
         self.ctx.current_generic_param_ids = caller_generics;
 
@@ -20162,11 +20165,16 @@ impl VbcCodegen {
         // Common source/bootstrap producer: preserve semantic parameter facts
         // after this declaration owns its exact generic roster, before any
         // current prologue operation is observed (T1599).
-        for param in &func.params {
-            if let verum_ast::FunctionParamKind::Regular { pattern, ty, .. } = &param.kind {
-                if let Some((name, _)) = self.extract_pattern_name_and_mutable(pattern) {
-                    self.publish_binding_type(&name, ty);
-                }
+        let parameter_types = self.source_semantic_parameters(
+            func, &self.ctx.current_generic_param_ids, &receiver_generics, &declared_ids,
+        );
+        for (param, ty) in func.params.iter().zip(parameter_types) {
+            if let (Some((name, _)), Some(ty)) = (self.extract_param_name_and_mutable(param), ty)
+                && let Some(reg) = self.ctx.lookup_var(&name).map(|binding| binding.reg) {
+                let discipline = crate::resource_discipline::resource_discipline_with(
+                    &ty, |id| self.type_by_id(id),
+                );
+                self.ctx.registers.value_uses.set_type(reg, ty, discipline);
             }
         }
 

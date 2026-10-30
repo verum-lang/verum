@@ -812,6 +812,57 @@ pub(crate) fn load_constant(
     }
 }
 
+/// A synchronous invocation owns only the frames/scopes it creates. Caller
+/// exception handlers stay outside this boundary: a nested Throw/Panic returns
+/// an error to the embedding operation before caller bytecode can handle it.
+fn run_sync_frame(
+    state: &mut InterpreterState,
+    function: FunctionId,
+    register_count: u16,
+    initialize: impl FnOnce(&mut InterpreterState, u32),
+) -> InterpreterResult<Value> {
+    let depth = state.call_stack.depth();
+    let reg_top = state.registers.top();
+    let caller_base = state.reg_base();
+    let return_pc = state.pc();
+    let saved_r0 = state.registers.get(caller_base, Reg(0));
+    let handlers = std::mem::take(&mut state.exception_handlers);
+    let exception = state.current_exception.take();
+    let pending_witness = state.pending_call_witness.take();
+    let result = (|| {
+        let base = state.call_stack.push_frame(function, register_count, return_pc, Reg(0))?;
+        state.registers.try_push_frame(register_count)
+            .map_err(|new_top| InterpreterError::StackOverflow {
+                depth: new_top, max_depth: crate::interpreter::registers::MAX_SIZE,
+            })?;
+        initialize(state, base);
+        state.set_pc(0);
+        dispatch_loop_table_with_entry_depth(state, depth)
+    })();
+    if result.is_err() {
+        while state.call_stack.depth() > depth {
+            let departing_depth = state.call_stack.depth();
+            // Depth was checked; popping also removes this frame's witnesses.
+            let frame = state.call_stack.pop_frame().expect("live synchronous callee frame");
+            state.context_stack.end_scope(departing_depth);
+            state.registers.pop_frame(frame.reg_base);
+        }
+        if state.registers.top() > reg_top {
+            state.registers.pop_frame(reg_top as u32);
+        }
+        state.context_stack.end_scope(depth + 1);
+    }
+    state.exception_handlers = handlers;
+    state.current_exception = exception;
+    state.pending_call_witness = pending_witness;
+    if state.call_stack.depth() == depth {
+        // do_return uses r0 as the return destination; this API returns Value
+        // directly and must preserve the caller's actual r0 on either path.
+        state.registers.set(caller_base, Reg(0), saved_r0);
+    }
+    result
+}
+
 /// Call a closure synchronously, returning its result.
 /// Sets up a call frame for the closure and runs a nested dispatch loop.
 pub(crate) fn call_closure_sync(
@@ -849,74 +900,19 @@ pub(crate) fn call_closure_sync(
 
     let reg_count = func.register_count;
     let witnesses = state.closure_generic_witnesses(closure_val, func_id)?;
-    let return_pc = state.pc();
-    let entry_depth = state.call_stack.depth();
-
-    // **CALLSYNC-R0-CLOBBER-1, the CLOSURE twin (T1274).** The same
-    // hazard `call_function_sync` documents twenty lines below, in the
-    // helper beside it, unguarded: `do_return` writes the callee's
-    // return value into the caller frame's `return_reg`, this helper has
-    // no real destination, and the `Reg(0)` placeholder therefore
-    // overwrites the caller's r0 — `self` in any method frame.
-    //
-    // Measured casualty: `List.retain`'s intercept calls this once per
-    // element, so
-    //
-    //     fn drop_evens(&mut self) { self.items.retain(|x| *x % 2 == 1); }
-    //
-    // returned with `self` replaced by the closure's last Bool, and the
-    // caller's own write-back `SetF { obj: Reg(0), field_idx: 0 }` —
-    // the instruction that commits a mutated field back into its record
-    // — refused it as a null pointer. `truncate`, `reverse`, `sort` and
-    // even `sort_by` through the same field all work: they emit the
-    // IDENTICAL write-back and simply never reach this helper.
-    //
-    // The result is the dispatch loop's return value, not the register
-    // side-channel, so saving and restoring r0 costs one read and one
-    // conditional write per closure call.
-    let caller_base = state.reg_base();
-    let saved_r0 = state.registers.get(caller_base, Reg(0));
-
-    let new_base = state
-        .call_stack
-        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
-    state
-        .registers
-        .try_push_frame(reg_count)
-        .map_err(|new_top| InterpreterError::StackOverflow {
-            depth: new_top,
-            max_depth: crate::interpreter::registers::MAX_SIZE,
-        })?;
-
-    if !witnesses.is_empty() { state.call_stack.set_generic_witnesses(witnesses); }
-
-    // Copy captured values. SAFETY: capture_count was just read
-    // from the same closure header — every index i < capture_count
-    // is in-bounds.
-    unsafe {
-        for i in 0..capture_count {
-            let val = std::ptr::read(super::heap::closure_captures_ptr(base_ptr, i));
-            state.registers.set(new_base, Reg(i as u16), val);
+    run_sync_frame(state, func_id, reg_count, |state, base| {
+        if !witnesses.is_empty() { state.call_stack.set_generic_witnesses(witnesses); }
+        // The common callable validator checked the capture prefix bounds.
+        unsafe {
+            for i in 0..capture_count {
+                let value = std::ptr::read(super::heap::closure_captures_ptr(base_ptr, i));
+                state.registers.set(base, Reg(i as u16), value);
+            }
         }
-    }
-
-    // Copy arguments after captures
-    for (i, val) in args.iter().enumerate() {
-        state
-            .registers
-            .set(new_base, Reg((capture_count + i) as u16), *val);
-    }
-
-    state.set_pc(0);
-    let result = dispatch_loop_table_with_entry_depth(state, entry_depth);
-    // Restore the caller's r0 whether the callee succeeded or not — on
-    // the error path the frames above `entry_depth` have already been
-    // unwound by the dispatch loop's error handling. Same guard as the
-    // twin below.
-    if state.call_stack.depth() == entry_depth {
-        state.registers.set(caller_base, Reg(0), saved_r0);
-    }
-    result
+        for (i, value) in args.iter().enumerate() {
+            state.registers.set(base, Reg((capture_count + i) as u16), *value);
+        }
+    })
 }
 
 /// Execute a function by FunctionId synchronously, returning its result.
@@ -954,52 +950,12 @@ pub(crate) fn call_function_sync_with_witnesses(
 
     let reg_count = func.register_count;
 
-    let return_pc = state.pc();
-    let entry_depth = state.call_stack.depth();
-
-    // **CALLSYNC-R0-CLOBBER-1**: `do_return` unconditionally writes the
-    // callee's return value into the caller frame's `return_reg`.  This
-    // synchronous-call helper has no real destination register, and the
-    // historical `Reg(0)` placeholder CLOBBERED the caller's r0 — which
-    // in any method frame is `self`.  Concrete casualty: the
-    // ITER_TYPE_PROTOCOL leg of IterNext calling `Drain.next` from
-    // inside `ThreadHazardRecord.reclaim` overwrote `self` with the
-    // returned `Maybe`, so the subsequent `self.retired = …` SetF
-    // targeted a `Maybe` object ("field write out of bounds: field
-    // index 2 … type='Maybe'").  Save the caller's r0 before the nested
-    // dispatch and restore it after — the function's result is the
-    // dispatch loop's return value, not the register side-channel.
-    let caller_base = state.reg_base();
-    let saved_r0 = state.registers.get(caller_base, Reg(0));
-
-    let new_base = state
-        .call_stack
-        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
-    state
-        .registers
-        .try_push_frame(reg_count)
-        .map_err(|new_top| InterpreterError::StackOverflow {
-            depth: new_top,
-            max_depth: crate::interpreter::registers::MAX_SIZE,
-        })?;
-
-    for (i, val) in args.iter().enumerate() {
-        state.registers.set(new_base, Reg(i as u16), *val);
-    }
-
-    if let Some(witnesses) = witnesses {
-        state.call_stack.set_generic_witnesses(witnesses);
-    }
-
-    state.set_pc(0);
-    let result = dispatch_loop_table_with_entry_depth(state, entry_depth);
-    // Restore the caller's r0 whether the callee succeeded or not — on
-    // the error path the frames above `entry_depth` have already been
-    // unwound by the dispatch loop's error handling.
-    if state.call_stack.depth() == entry_depth {
-        state.registers.set(caller_base, Reg(0), saved_r0);
-    }
-    result
+    run_sync_frame(state, func_id, reg_count, |state, base| {
+        for (i, value) in args.iter().enumerate() {
+            state.registers.set(base, Reg(i as u16), *value);
+        }
+        if let Some(witnesses) = witnesses { state.call_stack.set_generic_witnesses(witnesses); }
+    })
 }
 
 /// Execute a pending task from the task queue.
@@ -2205,5 +2161,77 @@ mod tests {
 
         let result = dispatch_loop_table(&mut state).unwrap();
         assert!((result.as_f64() - 0.0).abs() < 1e-10);
+    }
+}
+
+#[cfg(test)]
+mod script_sync_boundary_tests {
+    use super::*;
+    use crate::{Instruction, bytecode::encode_instruction,
+        module::{FunctionDescriptor, VbcModule},
+        types::{TypeRef, TypeParamId, TypeParamDescriptor}};
+    use super::super::state::ExceptionHandler;
+    use std::sync::Arc;
+
+    #[test]
+    fn failed_sync_calls_preserve_parent_witness_handler_context_and_registers() {
+        for closure in [false, true] {
+            let mut module = VbcModule::new("sync_boundary".into());
+            for (name, id, body) in [
+                ("parent", 42, vec![Instruction::RetV]),
+                ("fails", 7, vec![
+                    Instruction::LoadI { dst: Reg(0), value: 17 },
+                    Instruction::CtxProvide { ctx_type: 55, value: Reg(0), body_offset: 0 },
+                    Instruction::Throw { error: Reg(0) },
+                ]),
+                ("healthy", 0, vec![Instruction::LoadI { dst: Reg(0), value: 42 }, Instruction::Ret { value: Reg(0) }]),
+            ] {
+                let mut descriptor = FunctionDescriptor::new(module.intern_string(name));
+                descriptor.id = FunctionId(module.functions.len() as u32);
+                descriptor.register_count = 8;
+                if id != 0 { descriptor.type_params.push(TypeParamDescriptor { id: TypeParamId(id), ..Default::default() }); }
+                descriptor.bytecode_offset = module.bytecode.len() as u32;
+                for instruction in body { encode_instruction(&instruction, &mut module.bytecode); }
+                descriptor.bytecode_length = module.bytecode.len() as u32 - descriptor.bytecode_offset;
+                module.functions.push(descriptor);
+            }
+            let mut state = InterpreterState::new(Arc::new(module));
+            state.call_stack.push_frame(FunctionId(0), 8, 0, Reg(0)).unwrap();
+            state.registers.push_frame(8);
+            state.call_stack.set_generic_witnesses(vec![TypeRef::Concrete(TypeId::INT)].into_boxed_slice());
+            state.registers.set(0, Reg(0), Value::from_i64(123));
+            state.set_pc(77);
+            state.context_stack.provide(55, Value::from_i64(5), 1);
+            state.exception_handlers.push(ExceptionHandler {
+                handler_pc: 999, stack_depth: 1, reg_base: 0, func_id: FunctionId(0),
+            });
+            state.current_exception = Some(Value::from_i64(9));
+            state.pending_call_witness = Some(vec![TypeRef::Concrete(TypeId::TEXT)].into_boxed_slice());
+            let result = if closure {
+                let mut data = vec![0; 8];
+                data[..4].copy_from_slice(&1u32.to_ne_bytes());
+                data.extend_from_slice(&1u16.to_le_bytes());
+                crate::bytecode::encode_type_ref(&TypeRef::Concrete(TypeId::BOOL), &mut data);
+                let object = state.heap.alloc_with_init(TypeId(0xC000), data.len(), |payload| payload.copy_from_slice(&data)).unwrap();
+                call_closure_sync(&mut state, Value::from_ptr(object.as_ptr()), &[])
+            } else {
+                call_function_sync_with_witnesses(&mut state, FunctionId(1), &[],
+                    Some(vec![TypeRef::Concrete(TypeId::BOOL)].into_boxed_slice()))
+            };
+            assert!(matches!(result, Err(InterpreterError::Panic { ref message }) if message.contains("17")), "{result:?}");
+            assert_eq!(state.call_stack.depth(), 1);
+            assert_eq!(state.registers.top(), 8);
+            assert_eq!(state.pc(), 77);
+            assert_eq!(state.get_reg(Reg(0)).as_i64(), 123);
+            assert_eq!(state.context_stack.get(55).unwrap().as_i64(), 5);
+            assert_eq!(state.exception_handlers.len(), 1);
+            assert_eq!(state.exception_handlers.peek().unwrap().handler_pc, 999);
+            assert_eq!(state.current_exception.unwrap().as_i64(), 9);
+            assert_eq!(state.call_stack.current_generic_witnesses().unwrap(), [TypeRef::Concrete(TypeId::INT)]);
+            assert_eq!(state.pending_call_witness.as_deref().unwrap(), [TypeRef::Concrete(TypeId::TEXT)]);
+            assert_eq!(call_function_sync(&mut state, FunctionId(2), &[]).unwrap().as_i64(), 42);
+            assert_eq!(state.get_reg(Reg(0)).as_i64(), 123);
+            assert_eq!(state.exception_handlers.peek().unwrap().handler_pc, 999);
+        }
     }
 }

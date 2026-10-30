@@ -322,7 +322,7 @@ fn remapped_declaration_type(
     known(ty, map, 0).then(|| super::remap_type_ref_archive(ty, map))
 }
 
-fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize) -> bool {
+pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize) -> bool {
     if depth > 64 {
         return false;
     }
