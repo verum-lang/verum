@@ -69,7 +69,7 @@
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
-use super::super::call_function_sync;
+
 use super::heap_helpers::{alloc_record_n_fields, extract_text_arg, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
 use crate::instruction::Reg;
@@ -141,38 +141,11 @@ pub(in super::super) fn try_intercept_catch_unwind(
     let closure_val = state
         .registers
         .get(caller_base, Reg(args_start_reg));
-    let (func_id, captures): (FunctionId, Vec<Value>) = if closure_val.is_func_ref() {
-        (closure_val.as_func_id(), Vec::new())
-    } else if closure_val.is_ptr() && !closure_val.is_nil() {
-        let base_ptr = closure_val.as_ptr::<u8>();
-        // Closure discrimination: only genuine closure objects
-        // (TypeId 0xC000, the id `handle_make_closure` stamps). Any
-        // other heap shape falls through to normal dispatch — loud
-        // downstream, never a silent misread of a non-closure object.
-        // SAFETY: non-null heap pointer from a live register;
-        // `ref_or_stub` returns an all-zero stub header (type_id 0)
-        // for unaligned/garbage pointers, which fails the check.
-        let header_tid =
-            unsafe { super::super::super::heap::ObjectHeader::ref_or_stub(base_ptr) }.type_id;
-        if header_tid != crate::types::TypeId(0xC000) {
-            return Ok(None);
-        }
-        // SAFETY: verified closure object; canonical layout readers.
-        let (raw_func_id, capture_count) =
-            unsafe { super::super::super::heap::closure_header(base_ptr) };
-        let mut caps: Vec<Value> = Vec::with_capacity(capture_count as usize);
-        unsafe {
-            for i in 0..capture_count as usize {
-                caps.push(std::ptr::read(
-                    super::super::super::heap::closure_captures_ptr(base_ptr, i),
-                ));
-            }
-        }
-        (FunctionId(raw_func_id), caps)
-    } else {
-        // Not a callable value — fall through to normal dispatch.
-        return Ok(None);
-    };
+    if !closure_val.is_func_ref() {
+        if !closure_val.is_ptr() || closure_val.is_nil() { return Ok(None); }
+        let header = unsafe { super::super::super::heap::ObjectHeader::ref_or_stub(closure_val.as_ptr::<u8>()) };
+        if header.type_id != crate::types::TypeId(0xC000) { return Ok(None); }
+    }
 
     // Snapshot both stacks so a caught panic unwinds cleanly
     // (CTOR-UNWIND discipline: frames AND register windows — popping
@@ -182,13 +155,8 @@ pub(in super::super) fn try_intercept_catch_unwind(
     let saved_depth = state.call_stack.depth();
     let saved_reg_top = state.registers.top();
 
-    // Execute the closure, seeding captures into registers 0..N — the same
-    // convention `handle_call_closure` uses (captures first; `f` takes no
-    // parameters). `call_function_sync` (NOT `execute_table_with_args`) is
-    // the correct NESTED-execution primitive here: it preserves the caller's
-    // pc/r0 so a normally-returning closure returns to `main`'s real resume
-    // point instead of restarting it (T0619 — see module docs).
-    let inner_result = call_function_sync(state, func_id, &captures);
+    // Use the same environment and lexical witnesses as ordinary callbacks.
+    let inner_result = super::super::call_closure_sync(state, closure_val, &[]);
 
     match inner_result {
         Ok(val) => {

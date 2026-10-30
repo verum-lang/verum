@@ -51,6 +51,7 @@ mod specializer;
 mod substitution;
 
 pub use cache::MonomorphizationCache;
+pub(crate) use discovery::concrete as is_concrete_type;
 pub use discovery::{canonical_type_args, discover_call_instantiations, record_concrete_instantiation};
 pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,

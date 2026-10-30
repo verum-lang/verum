@@ -79,7 +79,8 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
             *func_id = remap.map_function(FunctionId(*func_id)).0;
             for ty in type_args { rewrite_type_ref_ids(ty, remap); }
         }
-        Instruction::NewClosure { func_id, capture_types, .. } => {
+        Instruction::NewClosure { func_id, capture_types, lexical_types, .. } => {
+            for ty in lexical_types { rewrite_type_ref_ids(ty, remap); }
             *func_id = remap.map_function(FunctionId(*func_id)).0;
             if let Some(types) = capture_types {
                 for ty in types.iter_mut().flatten() { rewrite_type_ref_ids(ty, remap); }

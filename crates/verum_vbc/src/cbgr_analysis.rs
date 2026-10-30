@@ -642,6 +642,7 @@ mod tests {
                 src: Reg(0),
             },
             Instruction::NewClosure {
+                lexical_types: Vec::new(),
                 dst: Reg(2),
                 func_id: 1,
                 captures: vec![Reg(1)],

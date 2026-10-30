@@ -9807,6 +9807,8 @@ pub enum ExtendedSubOpcode {
     TypeResource = 0x06,
     /// Closure creation with declaration-owned capture types in creator scope.
     NewClosureTyped = 0x07,
+    /// Closure with capture declarations and lexical generic arguments.
+    NewClosureWitnessed = 0x08,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10061,6 +10063,7 @@ impl ExtendedSubOpcode {
             0x05 => Some(Self::TypeLayout),
             0x06 => Some(Self::TypeResource),
             0x07 => Some(Self::NewClosureTyped),
+            0x08 => Some(Self::NewClosureWitnessed),
             0x10 => Some(Self::ProcessExit),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
@@ -10147,6 +10150,7 @@ impl ExtendedSubOpcode {
             Self::TypeLayout => "EXT_TYPE_LAYOUT",
             Self::TypeResource => "EXT_TYPE_RESOURCE",
             Self::NewClosureTyped => "EXT_NEW_CLOSURE_TYPED",
+            Self::NewClosureWitnessed => "EXT_NEW_CLOSURE_WITNESSED",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10943,9 +10947,9 @@ pub enum Instruction {
     /// Creates a new closure object on the heap with the specified function ID
     /// and captured values. The closure layout in memory is:
     /// - function_id: u32 (4 bytes)
-    /// - capture_count: u16 (2 bytes)
-    /// - padding: u16 (2 bytes)
+    /// - capture_count: u32 (4 bytes)
     /// - captures: [Value; capture_count] (8 bytes each)
+    /// - optional lexical TypeRef trailer, bounded by the object payload size
     ///
     /// # Operands
     /// - `dst`: Destination register for the closure pointer
@@ -10961,6 +10965,10 @@ pub enum Instruction {
         /// Original capture declarations in this creation site's generic scope.
         /// None is legacy evidence; only empty legacy environments are shareable.
         capture_types: Option<Vec<Option<TypeRef>>>,
+        /// Creator-scope arguments in the lifted descriptor's binder order.
+        /// These belong to the environment, independently of captured values.
+        #[serde(default)]
+        lexical_types: Vec<TypeRef>,
     },
 
     // ========================================================================

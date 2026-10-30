@@ -838,7 +838,7 @@ impl ModuleMerger {
         }
 
         // T1526: a lone specialization is not evidence for an untyped call.
-        // Only exact CallG (callee, declaration-ordered args) sites route to it.
+        // Only exact call/creation (callee, declaration-ordered args) sites route to it.
 
         // Per-site CallG routing table.
         let mut site_route: HashMap<(u32, Vec<TypeRef>), u32> = HashMap::new();
@@ -897,6 +897,24 @@ impl ModuleMerger {
                             func_id: spec_id,
                             args: *registers,
                         };
+                        continue;
+                    }
+                }
+                if let Instruction::NewClosure { func_id, lexical_types, .. } = instr {
+                    // Discovery and routing share the exact target/binder
+                    // check. A specialized closure needs no dynamic witnesses.
+                    let target = super::discovery::call_target(
+                        &self.user_module, *func_id, func.func_id_base,
+                    );
+                    let args = target.and_then(|id| self.user_module.get_function(id))
+                        .filter(|desc| !lexical_types.is_empty()
+                            && lexical_types.len() == desc.type_params.len())
+                        .and_then(|desc| super::canonical_type_args(desc, lexical_types));
+                    if let Some(&spec_id) = target.zip(args)
+                        .and_then(|(id, args)| site_route.get(&(id.0, args)))
+                    {
+                        *func_id = spec_id;
+                        lexical_types.clear();
                         continue;
                     }
                 }

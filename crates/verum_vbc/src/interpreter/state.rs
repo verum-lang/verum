@@ -27,6 +27,7 @@ use crate::module::{FunctionId, VbcModule};
 use crate::value::Value;
 
 use super::heap::Heap;
+use super::error::{InterpreterError, InterpreterResult};
 use super::registers::RegisterFile;
 use super::stack::CallStack;
 
@@ -3030,6 +3031,25 @@ impl InterpreterState {
             return ty.clone();
         };
         crate::mono::TypeSubstitution::from_function(function, args).apply(ty)
+    }
+
+    /// Install only an environment's own concrete witnesses, in the target
+    /// descriptor's exact binder order. Invocation never borrows caller evidence.
+    pub(crate) fn closure_generic_witnesses(&self, closure: Value, function: crate::module::FunctionId)
+        -> InterpreterResult<Box<[crate::types::TypeRef]>>
+    {
+        let args = if closure.is_func_ref() { Box::default() } else {
+            // SAFETY: callable dispatch has established a live closure pointer.
+            unsafe { super::heap::closure_lexical_types(closure.as_ptr::<u8>())? }
+        };
+        let descriptor = self.get_function(function)
+            .ok_or(InterpreterError::FunctionNotFound(function))?;
+        if args.len() != descriptor.type_params.len() || !args.iter().all(crate::mono::is_concrete_type) {
+            return Err(InterpreterError::Panic { message: format!(
+                "closure lexical witness mismatch: expected {} concrete arguments, found {}",
+                descriptor.type_params.len(), args.len()) });
+        }
+        Ok(args)
     }
 
     /// Gets a constant from the current module.

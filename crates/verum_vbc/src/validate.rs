@@ -1156,6 +1156,7 @@ mod tests {
         // Closure body referencing FunctionId(42) in a 1-function
         // module must be rejected at load time.
         let bad_closure = Instruction::NewClosure {
+            lexical_types: Vec::new(),
             dst: Reg(0),
             func_id: 42,
             captures: vec![],

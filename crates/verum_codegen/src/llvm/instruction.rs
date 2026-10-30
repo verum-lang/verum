@@ -3748,11 +3748,14 @@ fn lower_instruction_impl<'ctx>(
             func_id,
             captures,
             capture_types,
+            lexical_types,
         } => {
             let vbc_mod = ctx.vbc_module().or_internal("NewClosure requires VBC module")?;
             if let Err(message) = vbc_mod.validate_closure_captures(
                 capture_types.as_deref(), captures.len(), Clone::clone,
-            ) {
+            ).and_then(|()| if lexical_types.is_empty() { Ok(()) } else {
+                Err("native callable requires an exact lexical specialization".to_owned())
+            }) {
                 // Refuse on the executing path, including an erased generic
                 // body. A lowering error can be converted into a fallback
                 // body by the module driver; it must not erase this check.
@@ -3839,6 +3842,14 @@ fn lower_instruction_impl<'ctx>(
                 }
             };
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
+            if !func_desc.type_params.is_empty() {
+                emit_runtime_abort(ctx, "native callable has missing lexical witnesses", "closure_witness")?;
+                ctx.builder().build_unreachable().or_llvm_err()?;
+                let dead = ctx.llvm_context().append_basic_block(ctx.function(), "closure_witness_dead");
+                ctx.builder().position_at_end(dead);
+                ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+                return Ok(());
+            }
             let llvm_fn = ctx.get_module().get_function(func_name).ok_or_else(|| {
                 let message = format!("NewClosure: function '{func_name}' not found in LLVM module");
                 if captures.is_empty() { LlvmLoweringError::internal(message) }
@@ -31659,8 +31670,8 @@ fn lower_extended<'ctx>(
             // No-op anchor — encoders shouldn't emit, but tolerate.
             Ok(())
         }
-        Some(ExtendedSubOpcode::NewClosureTyped) => Err(LlvmLoweringError::unsupported(
-            "NewClosureTyped must be structurally decoded before lowering",
+        Some(ExtendedSubOpcode::NewClosureTyped | ExtendedSubOpcode::NewClosureWitnessed) => Err(LlvmLoweringError::unsupported(
+            "typed NewClosure must be structurally decoded before lowering",
         )),
         Some(ExtendedSubOpcode::TypeResource) => Err(LlvmLoweringError::unsupported(
             "TypeResource requires the canonical decoded instruction",

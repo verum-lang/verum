@@ -819,6 +819,11 @@ pub(crate) fn call_closure_sync(
     closure_val: Value,
     args: &[Value],
 ) -> InterpreterResult<Value> {
+    if closure_val.is_func_ref() {
+        let id = closure_val.as_func_id();
+        state.closure_generic_witnesses(closure_val, id)?;
+        return call_function_sync(state, id, args);
+    }
     if !closure_val.is_ptr() || closure_val.is_nil() {
         return Err(InterpreterError::TypeMismatch {
             expected: "closure",
@@ -843,6 +848,7 @@ pub(crate) fn call_closure_sync(
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
     let reg_count = func.register_count;
+    let witnesses = state.closure_generic_witnesses(closure_val, func_id)?;
     let return_pc = state.pc();
     let entry_depth = state.call_stack.depth();
 
@@ -881,6 +887,8 @@ pub(crate) fn call_closure_sync(
             depth: new_top,
             max_depth: crate::interpreter::registers::MAX_SIZE,
         })?;
+
+    if !witnesses.is_empty() { state.call_stack.set_generic_witnesses(witnesses); }
 
     // Copy captured values. SAFETY: capture_count was just read
     // from the same closure header — every index i < capture_count

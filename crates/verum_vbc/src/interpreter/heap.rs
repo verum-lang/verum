@@ -228,6 +228,38 @@ pub unsafe fn closure_header(ptr: *const u8) -> (u32, u32) {
     unsafe { (*data, *data.add(1)) }
 }
 
+/// Read lexical type arguments owned by this closure environment.
+/// Ordinary and native-specialized closures have no trailer. Generic closures
+/// store a u16 count followed by the canonical TypeRef encoding after captures;
+/// the allocation's payload size bounds every read. No Rust-owned pointer or
+/// external witness registry is needed, so ordinary heap reclamation suffices.
+///
+/// # Safety
+/// `ptr` must point to a live heap closure allocation with an ObjectHeader.
+pub(crate) unsafe fn closure_lexical_types(ptr: *const u8) -> InterpreterResult<Box<[crate::types::TypeRef]>> {
+    let header = unsafe { &*(ptr as *const ObjectHeader) };
+    let invalid = || InterpreterError::Panic { message: "invalid closure lexical witness payload".into() };
+    if header.type_id != TypeId(0xC000) { return Err(invalid()); }
+    let (_, count) = unsafe { closure_header(ptr) };
+    let prefix = 8usize.checked_add((count as usize).checked_mul(std::mem::size_of::<Value>()).ok_or_else(invalid)?)
+        .ok_or_else(invalid)?;
+    let size = header.size as usize;
+    if prefix > size { return Err(invalid()); }
+    if prefix == size { return Ok(Box::default()); }
+    let bytes = unsafe { std::slice::from_raw_parts(ptr.add(OBJECT_HEADER_SIZE + prefix), size - prefix) };
+    let count = u16::from_le_bytes(bytes.get(..2).ok_or_else(invalid)?.try_into().unwrap()) as usize;
+    // Each TypeRef consumes at least one tag byte. Never preallocate from an
+    // unchecked count; decoding below bounds each encoded field read.
+    if count > bytes.len() - 2 { return Err(invalid()); }
+    let mut offset = 2;
+    let mut types = Vec::new();
+    for _ in 0..count {
+        types.push(crate::bytecode::decode_type_ref(bytes, &mut offset).map_err(|_| invalid())?);
+    }
+    if offset != bytes.len() { return Err(invalid()); }
+    Ok(types.into_boxed_slice())
+}
+
 /// Get a `*const Value` to the `idx`-th capture slot of a closure
 /// heap pointer.  Mirror of [`variant_payload_ptr`] for the closure
 /// layout; both share `VARIANT_PAYLOAD_OFFSET` (= 32) as the base.

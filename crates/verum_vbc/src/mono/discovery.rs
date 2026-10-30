@@ -1,4 +1,4 @@
-//! Exact call-site facts shared by initial and nested mono discovery (T1526).
+//! Exact call and closure-creation facts shared by initial and nested discovery.
 
 use super::{
     InstantiationGraph, MonoPhaseConfig, MonoPhaseError, SourceLocation, TypeSubstitution,
@@ -9,7 +9,7 @@ use crate::types::TypeRef;
 
 // An associated projection is still a deferred type, even when its base is
 // concrete. Rank-2 binders need their own substitution scope (T1521).
-pub(super) fn concrete(ty: &TypeRef) -> bool {
+pub(crate) fn concrete(ty: &TypeRef) -> bool {
     match ty {
         TypeRef::Generic(_)
         | TypeRef::AssociatedProjection { .. }
@@ -71,7 +71,7 @@ pub(super) fn call_target(module: &VbcModule, raw: u32, base: u32) -> Option<Fun
     module.get_function(id).map(|_| id)
 }
 
-/// Discover only calls carrying an exact body ID and complete concrete args.
+/// Discover calls and closure creations carrying an exact body ID and complete args.
 /// Bare CallM names are deliberately not candidates for this graph.
 pub fn discover_call_instantiations(
     module: &VbcModule,
@@ -123,14 +123,18 @@ pub(super) fn concrete_call(
     instr: &Instruction,
     base: u32,
 ) -> Option<(FunctionId, Vec<TypeRef>)> {
-    let Instruction::CallG {
-        func_id, type_args, ..
-    } = instr
-    else {
-        return None;
+    let (func_id, type_args, closure) = match instr {
+        Instruction::CallG { func_id, type_args, .. } => (func_id, type_args, false),
+        Instruction::NewClosure { func_id, lexical_types, .. } => (func_id, lexical_types, true),
+        _ => return None,
     };
     let callee = call_target(module, *func_id, base)?;
     let func = module.get_function(callee)?;
+    // Creation operands are always compact declaration-ordered arguments,
+    // unlike legacy CallG padding. Missing or surplus entries are not an edge.
+    if closure && (type_args.is_empty() || type_args.len() != func.type_params.len()) {
+        return None;
+    }
     if func.bytecode_length == 0
         && func
             .instructions

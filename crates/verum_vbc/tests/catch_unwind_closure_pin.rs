@@ -71,6 +71,7 @@ fn build_module(callable: Callable, body: Body) -> Arc<VbcModule> {
     // main: r1 = <callable>; r0 = catch_unwind(r1); ret r0
     let materialise = match callable {
         Callable::HeapClosure => Instruction::NewClosure {
+            lexical_types: Vec::new(),
             dst: Reg(1),
             func_id: 2,
             captures: vec![],

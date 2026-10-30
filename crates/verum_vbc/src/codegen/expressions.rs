@@ -1867,6 +1867,30 @@ impl VbcCodegen {
         dest
     }
 
+    /// Instantiate a named function value only from its exact expected callable
+    /// signature. Neither same-named creator parameters nor raw ABI slots bind
+    /// the target's generics. Incomplete evidence remains absent and invocation
+    /// rejects it through the shared callable witness contract.
+    fn named_callable_lexical_types(&self, info: &FunctionInfo) -> Vec<crate::types::TypeRef> {
+        if info.type_param_ids.is_empty() { return Vec::new(); }
+        let Some(declared) = info.callable_signature.as_ref() else { return Vec::new() };
+        let expected = self.ctx.expected_value_type.clone().or_else(||
+            self.ctx.current_return_type_full.as_ref()
+                .or(self.ctx.current_return_type_name.as_ref())
+                .and_then(|name| self.type_name_to_type_ref_mono(name)));
+        let Some(expected) = expected else { return Vec::new() };
+        let mut bindings = std::collections::BTreeMap::new();
+        bind_generic_free(declared, &expected, &mut bindings);
+        let Some(args) = info.type_param_ids.iter().map(|id|
+            bindings.get(&u32::from(id.0)).cloned()).collect::<Option<Vec<_>>>()
+        else { return Vec::new() };
+        let mut substitution = crate::mono::TypeSubstitution::empty();
+        for (&id, ty) in info.type_param_ids.iter().zip(&args) { substitution.bind(id, ty.clone()); }
+        // The shared binder collects candidates; exact equality rules out
+        // inconsistent repeated parameters and erased reference qualifiers.
+        if substitution.apply(declared) == expected { args } else { Vec::new() }
+    }
+
     /// Compiles a simple (single-segment) path.
     fn compile_simple_path(&mut self, segment: &PathSegment) -> CodegenResult<Option<Reg>> {
         match segment {
@@ -2285,6 +2309,7 @@ impl VbcCodegen {
                         // but with capture_count = 0.
                         let dest = self.ctx.alloc_temp();
                         self.ctx.emit(Instruction::NewClosure {
+                            lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
@@ -24174,6 +24199,7 @@ impl VbcCodegen {
                     // matches the simple-name path at line ~1072 so HOFs
                     // like `.map_err(IoError.from_os)` work uniformly.
                     self.ctx.emit(Instruction::NewClosure {
+                        lexical_types: self.named_callable_lexical_types(&func_info),
                         dst: dest,
                         func_id: func_info.id.0,
                         captures: vec![],
@@ -24235,6 +24261,7 @@ impl VbcCodegen {
                     // AOT lowering treats it as a callable, not a pointer
                     // base for `[null + func_id*8]` reads.
                     self.ctx.emit(Instruction::NewClosure {
+                        lexical_types: self.named_callable_lexical_types(&func_info),
                         dst: dest,
                         func_id: func_info.id.0,
                         captures: vec![],
@@ -24303,6 +24330,7 @@ impl VbcCodegen {
                         });
                     } else {
                         self.ctx.emit(Instruction::NewClosure {
+                            lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
@@ -24397,6 +24425,7 @@ impl VbcCodegen {
                         // Function-reference HOF case (#110). See NewClosure
                         // comment at the qualified-rust branch above.
                         self.ctx.emit(Instruction::NewClosure {
+                            lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
@@ -24808,6 +24837,7 @@ impl VbcCodegen {
                     } else {
                         // #110 — type-alias-resolved HOF reference.
                         self.ctx.emit(Instruction::NewClosure {
+                            lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
@@ -24830,6 +24860,7 @@ impl VbcCodegen {
                     } else {
                         // #110 — simple-name HOF reference.
                         self.ctx.emit(Instruction::NewClosure {
+                            lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
                             captures: vec![],
@@ -24910,6 +24941,7 @@ impl VbcCodegen {
                 {
                     let dest = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::NewClosure {
+                        lexical_types: self.named_callable_lexical_types(&info),
                         dst: dest,
                         func_id: info.id.0,
                         captures: vec![],
@@ -32860,6 +32892,32 @@ impl VbcCodegen {
         }
     }
 
+    /// Exact lexical witness IDs, including receiver slots hidden by a method
+    /// parameter with the same name. Closure binders introduce no new IDs.
+    fn closure_lexical_param_ids(&self) -> CodegenResult<Vec<crate::types::TypeParamId>> {
+        let mut ids = self.ctx.current_function.as_ref()
+            .and_then(|name| self.ctx.functions.get(name))
+            .map(|info| info.type_param_ids.clone()).unwrap_or_default();
+        ids.extend(self.ctx.current_generic_param_ids.values().copied()
+            .map(crate::types::TypeParamId));
+        // Const witnesses may be absent from older function rosters; resolve
+        // them through the same declaration authority as body LoadT/CallG.
+        for name in &self.ctx.generic_type_params_ordered {
+            let Some(id) = self.ctx.current_generic_param_id(name) else { continue };
+            if !self.ctx.current_generic_param_ids.contains_key(name)
+                && self.ctx.current_generic_param_ids.values().any(|pid| *pid == id.0)
+            {
+                return Err(CodegenError::new(CodegenErrorKind::UnsupportedExpr(format!(
+                    "closure lexical witness for {name} collides with declared generic slot {}", id.0,
+                ))));
+            }
+            ids.push(id);
+        }
+        ids.sort_unstable_by_key(|id| id.0);
+        ids.dedup();
+        Ok(ids)
+    }
+
     /// Compiles a closure expression.
     ///
     /// Closures are compiled by:
@@ -32992,7 +33050,9 @@ impl VbcCodegen {
 
         // Step 4: Register and compile the closure body as a new function
         // The closure function has captures as first params, then user params
+        let lexical_param_ids = self.closure_lexical_param_ids()?;
         let closure_func_id = self.compile_closure_body_with_patterns(
+            &lexical_param_ids,
             &captures_with_mut,
             &capture_types,
             &param_names,
@@ -33012,6 +33072,7 @@ impl VbcCodegen {
         // Step 5: Emit NewClosure instruction
         let result = self.ctx.alloc_temp();
         self.ctx.emit(Instruction::NewClosure {
+            lexical_types: lexical_param_ids.into_iter().map(crate::types::TypeRef::Generic).collect(),
             dst: result,
             func_id: closure_func_id,
             captures: capture_regs,
@@ -33094,6 +33155,7 @@ impl VbcCodegen {
     /// (tuples, etc.), the pattern binding is performed at the start of the body.
     fn compile_closure_body_with_patterns(
         &mut self,
+        lexical_param_ids: &[crate::types::TypeParamId],
         captures: &[(String, bool)],
         capture_types: &[Option<crate::types::TypeRef>],
         params: &[String],
@@ -33142,7 +33204,7 @@ impl VbcCodegen {
         let info = super::FunctionInfo {
             has_source_body: false,
             callable_signature: None,
-            type_param_ids: Vec::new(),
+            type_param_ids: lexical_param_ids.to_vec(),
             explicit_type_param_ids: Vec::new(),
             id: crate::module::FunctionId(func_id),
             param_count: param_names.len(),
@@ -33426,6 +33488,17 @@ impl VbcCodegen {
         let name_id = crate::types::StringId(self.intern_string(&closure_name));
         let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
         descriptor.id = crate::module::FunctionId(func_id);
+        descriptor.is_generic = !lexical_param_ids.is_empty();
+        for &id in lexical_param_ids {
+            let name = self.ctx.current_generic_param_ids.iter()
+                .find(|(_, pid)| **pid == id.0).map(|(name, _)| name.clone())
+                .unwrap_or_else(|| format!("__generic_{}", id.0));
+            descriptor.type_params.push(crate::types::TypeParamDescriptor {
+                id,
+                name: crate::types::StringId(self.intern_string(&name)),
+                ..Default::default()
+            });
+        }
         descriptor.register_count = register_count;
         descriptor.locals_count = all_params.len() as u16;
 

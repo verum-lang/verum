@@ -236,6 +236,7 @@ fn capture_declarations_remap_with_the_creation_instruction() {
         }
     }
     let mut instruction = Instruction::NewClosure {
+        lexical_types: Vec::new(),
         dst: Reg(3),
         func_id: 4,
         captures: vec![Reg(1)],
@@ -267,14 +268,10 @@ fn capture_declarations_remap_with_the_creation_instruction() {
 }
 
 #[test]
-fn nested_generic_environment_does_not_invent_missing_lexical_witnesses() {
+fn nested_generic_environment_retains_lexical_witnesses() {
     let source = "fn make<T>(value: T) -> fn() -> T { || { let inner = || value; inner() } } fn probe() -> Int { let f = make(7); f() }";
     for bootstrap in [false, true] {
-        let error = execute(compile(source, bootstrap)).unwrap_err();
-        assert!(
-            error.contains("capture 0 requires unrestricted ownership; found Unknown"),
-            "{error}"
-        );
+        assert_eq!(execute(compile(source, bootstrap)).unwrap(), 7);
     }
 }
 

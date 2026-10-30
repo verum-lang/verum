@@ -1156,6 +1156,7 @@ pub(in super::super) fn handle_call_closure(
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
     let reg_count = func.register_count;
+    let witnesses = state.closure_generic_witnesses(closure_val, func_id)?;
     let return_pc = state.pc();
     let caller_base = state.reg_base();
 
@@ -1184,6 +1185,7 @@ pub(in super::super) fn handle_call_closure(
         .call_stack
         .push_frame(func_id, reg_count, return_pc, dst)?;
     state.registers.push_frame(reg_count);
+    if !witnesses.is_empty() { state.call_stack.set_generic_witnesses(witnesses); }
 
     // Copy captured values first (they go before parameters in the closure's register layout)
     for (i, val) in capture_values.into_iter().enumerate() {
@@ -1255,31 +1257,44 @@ pub(in super::super) fn handle_tail_call_op(
 pub(in super::super) fn handle_new_closure(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    create_closure(state, false)
+    create_closure(state, false, false)
 }
 
 pub(in super::super) fn handle_new_closure_typed(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    create_closure(state, true)
+    create_closure(state, true, false)
 }
 
-fn create_closure(state: &mut InterpreterState, typed: bool) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_closure_witnessed(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    create_closure(state, true, true)
+}
+
+fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let func_id = read_varint(state)? as u32;
-    let capture_count = read_varint(state)? as usize;
-
-    let mut capture_regs = Vec::with_capacity(capture_count);
+    let capture_count = read_varint(state)?;
+    if capture_count > u16::MAX as u64 {
+        return Err(InterpreterError::Panic { message: "excessive closure capture count".into() });
+    }
+    let capture_count = capture_count as usize;
+    let mut capture_regs = Vec::with_capacity(capture_count.min(16));
     for _ in 0..capture_count {
         capture_regs.push(read_reg(state)?);
     }
 
+    let typed = if witnessed { match read_u8(state)? {
+        0 => false, 1 => true,
+        _ => return Err(InterpreterError::Panic { message: "invalid closure capture declaration presence".into() }),
+    }} else { typed };
     let types = if typed {
-        let count = read_varint(state)? as usize;
-        if count > u16::MAX as usize {
+        let count = read_varint(state)?;
+        if count > u16::MAX as u64 {
             return Err(InterpreterError::Panic { message: "excessive closure capture type count".into() });
         }
-        let mut types = Vec::with_capacity(count.min(16));
+        let mut types = Vec::with_capacity((count as usize).min(16));
         for _ in 0..count {
             types.push(match super::bytecode_io::read_u8(state)? {
                 0 => None,
@@ -1289,6 +1304,22 @@ fn create_closure(state: &mut InterpreterState, typed: bool) -> InterpreterResul
         }
         Some(types)
     } else { None };
+    let mut lexical_payload = Vec::new();
+    if witnessed {
+        let count = read_varint(state)?;
+        if count > u16::MAX as u64 {
+            return Err(InterpreterError::Panic { message: "excessive closure lexical type count".into() });
+        }
+        lexical_payload.extend_from_slice(&(count as u16).to_le_bytes());
+        for _ in 0..count {
+            let ty = super::bytecode_io::read_type_ref(state)?;
+            let ty = state.resolve_generic_witness(&ty);
+            if !crate::mono::is_concrete_type(&ty) {
+                return Err(InterpreterError::Panic { message: "unresolved closure lexical witness".into() });
+            }
+            crate::bytecode::encode_type_ref(&ty, &mut lexical_payload);
+        }
+    }
     state.module.validate_closure_captures(types.as_deref(), capture_count,
         |ty| state.resolve_generic_witness(ty))
         .map_err(|message| InterpreterError::Panic { message })?;
@@ -1304,10 +1335,12 @@ fn create_closure(state: &mut InterpreterState, typed: bool) -> InterpreterResul
     // Header offsets and writer routed through canonical helpers in
     // `verum_vbc::interpreter::heap` (see `closure_header` /
     // `closure_captures_ptr_mut` / `write_closure_data_header`).
-    let data_size = 8 + capture_count * std::mem::size_of::<Value>();
+    let prefix_size = 8 + capture_count * std::mem::size_of::<Value>();
+    let data_size = prefix_size + lexical_payload.len();
     let type_id = TypeId(0xC000); // Closure type ID
 
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+        data[prefix_size..].copy_from_slice(&lexical_payload);
         // SAFETY: data section is exactly `data_size` bytes; helper
         // writes the leading 8 (func_id + capture_count header).
         unsafe {

@@ -336,6 +336,7 @@ fn adapter_preserves_target_calling_convention_and_exposes_slot_convention() {
         lower_instruction(
             &mut ctx,
             &Instruction::NewClosure {
+                lexical_types: Vec::new(),
                 dst: Reg(0),
                 func_id: 0,
                 captures: Default::default(),
@@ -378,8 +379,15 @@ fn shared_capture_ownership_refuses_before_native_allocation_in_lenient_mode() {
 
 #[test]
 fn generic_creator_uses_specialized_capture_ownership_in_native_code() {
+    let module = specialize_closures(compile("fn make<T>(value: T) -> fn() -> T { || value } fn probe() -> Int { let first = make(7); let second = make(13); first() + second() }"));
+    with_native(&module, |engine| {
+        let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+        assert_eq!(actual, 20);
+    });
+}
+
+fn specialize_closures(mut module: VbcModule) -> VbcModule {
     use verum_vbc::mono::{InstantiationGraph, discover_call_instantiations, monomorphize_minimal};
-    let mut module = compile("fn make<T>(value: T) -> fn() -> T { || value } fn probe() -> Int { let first = make(7); let second = make(13); first() + second() }");
     let mut graph = InstantiationGraph::new();
     for function in &mut module.functions { function.is_generic = !function.type_params.is_empty(); }
     for function in &module.functions {
@@ -387,10 +395,24 @@ fn generic_creator_uses_specialized_capture_ownership_in_native_code() {
         discover_call_instantiations(&module, &body, function.func_id_base, &mut graph).unwrap();
     }
     assert!(!graph.is_empty());
-    let module = monomorphize_minimal(module, &graph).unwrap().module;
+    monomorphize_minimal(module, &graph).unwrap().module
+}
+
+#[test]
+fn escaping_nested_generic_closures_specialize_native_environments() {
+    let module = specialize_closures(compile("fn make<T>(value: T) -> fn() -> T { || { let inner = || value; inner() } } fn probe() -> Int { let first = make(17); let second = make(true); if second() { first() } else { 0 } }"));
     with_native(&module, |engine| {
         let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
-        assert_eq!(actual, 20);
+        assert_eq!(actual, 17);
+    });
+}
+
+#[test]
+fn lexical_types_without_value_captures_specialize_native_scalar_abi() {
+    let module = specialize_closures(compile("fn make<T>() -> fn(T) -> T { |value: T| -> T { value } } fn probe() -> Float { let f = make<Float>(); f(17.25) }"));
+    with_native(&module, |engine| {
+        let actual = unsafe { engine.get_function::<unsafe extern "C" fn() -> f64>("probe").unwrap().call() };
+        assert_eq!(actual, 17.25);
     });
 }
 
