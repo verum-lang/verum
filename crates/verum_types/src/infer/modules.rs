@@ -3113,11 +3113,7 @@ impl TypeChecker {
                         && !type_bound_from_metadata
                         && !self.stdlib_single_file_mode
                     {
-                        let available_items: List<Text> = probed_module_info
-                            .exports
-                            .public_exports()
-                            .map(|e| e.name.clone())
-                            .collect();
+                        let available_items = probed_module_info.exports.public_export_names();
                         // T0555 module-surface trace: names WHICH of the three
                         // surface sources answered (and with what) before this E401.
                         if std::env::var("VERUM_TRACE_MODSURFACE").is_ok() {
@@ -3865,11 +3861,7 @@ impl TypeChecker {
                         if let Some(span) = import_span {
                             // Item not found in exports table OR as a type in AST
                             // Return error if span is provided (user import)
-                            let available_items: List<Text> = module_info
-                                .exports
-                                .public_exports()
-                                .map(|e| e.name.clone())
-                                .collect();
+                            let available_items = module_info.exports.public_export_names();
 
                             if !self.stdlib_single_file_mode {
                                 // T0555 module-surface trace: names WHICH of the three
@@ -4172,7 +4164,7 @@ impl TypeChecker {
                         return Err(TypeError::ImportItemNotFound {
                             item_name: Text::from(item_name),
                             module_path: module_path.clone(),
-                            available_items,
+                            available_items: Shared::new(available_items),
                             declared_in: self.modules_declaring(Text::from(item_name).as_str()),
                             span,
                         });
@@ -4248,7 +4240,7 @@ impl TypeChecker {
                     return Err(TypeError::ImportItemNotFound {
                         item_name: Text::from(item_name),
                         module_path: module_path.clone(),
-                        available_items,
+                        available_items: Shared::new(available_items),
                         declared_in: self.modules_declaring(Text::from(item_name).as_str()),
                         span,
                     });
@@ -5119,8 +5111,7 @@ impl TypeChecker {
                                 return Err(TypeError::ImportItemNotFound {
                                     item_name: item_name.into(),
                                     module_path: resolved_module_path.clone(),
-                                    available_items: module_info.exports.public_exports()
-                                        .map(|export| export.name.clone()).collect(),
+                                    available_items: module_info.exports.public_export_names(),
                                     declared_in: self.modules_declaring(item_name),
                                     span: import_span.unwrap_or_else(Span::dummy),
                                 });

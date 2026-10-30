@@ -10,7 +10,7 @@ use crate::path::ModuleId;
 use crate::refinement_info::{RefinementContract, RefinementInfo};
 use serde::{Deserialize, Serialize};
 use verum_ast::{Span, Visibility};
-use verum_common::{List, Map, Maybe, Text};
+use verum_common::{List, Map, Maybe, Shared, Text};
 
 /// An item exported by a module.
 /// Includes refinement and contract information for cross-module verification.
@@ -310,20 +310,33 @@ impl std::fmt::Display for ExportKind {
 }
 
 /// Table of all exports from a module.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportTable {
     /// All exported items by name
     exports: Map<Text, ExportedItem>,
+    /// Immutable diagnostic surface, shared by errors from this exact table.
+    /// Excluded from serialization and semantic equality.
+    #[serde(skip)]
+    public_names: std::sync::OnceLock<Shared<List<Text>>>,
     /// The module ID this table belongs to
     module_id: Option<ModuleId>,
     /// The module path this table belongs to (for visibility checks)
     module_path: Option<crate::path::ModulePath>,
 }
 
+impl PartialEq for ExportTable {
+    fn eq(&self, other: &Self) -> bool {
+        self.exports == other.exports
+            && self.module_id == other.module_id
+            && self.module_path == other.module_path
+    }
+}
+
 impl ExportTable {
     pub fn new() -> Self {
         Self {
             exports: Map::new(),
+            public_names: std::sync::OnceLock::new(),
             module_id: None,
             module_path: None,
         }
@@ -369,7 +382,7 @@ impl ExportTable {
             // where the function `panic` takes precedence over module `panic`
             if existing.kind == ExportKind::Module && item.kind != ExportKind::Module {
                 // Replace module with the specific item
-                self.exports.insert(name, item);
+                self.insert_export(name, item);
                 return Ok(());
             }
 
@@ -426,8 +439,13 @@ impl ExportTable {
             });
         }
 
-        self.exports.insert(name, item);
+        self.insert_export(name, item);
         Ok(())
+    }
+
+    fn insert_export(&mut self, name: Text, item: ExportedItem) {
+        self.exports.insert(name, item);
+        self.public_names.take();
     }
 
     /// Get an exported item by name
@@ -458,6 +476,21 @@ impl ExportTable {
         self.exports
             .values()
             .filter(|item| item.visibility == Visibility::Public)
+    }
+
+    /// Public binding names for diagnostics. Repeated errors share the same
+    /// immutable surface; a later mutation leaves existing errors unchanged.
+    pub fn public_export_names(&self) -> Shared<List<Text>> {
+        self.public_names
+            .get_or_init(|| {
+                let mut names: List<Text> = self
+                    .public_exports()
+                    .map(|item| item.name.clone())
+                    .collect();
+                names.sort();
+                Shared::new(names)
+            })
+            .clone()
     }
 
     /// Check if a name is visible from another module (by ModuleId - requires module_path to be set)
@@ -635,6 +668,7 @@ impl ExportTable {
     /// Clear all exports
     pub fn clear(&mut self) {
         self.exports.clear();
+        self.public_names.take();
     }
 }
 

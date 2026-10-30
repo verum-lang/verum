@@ -541,7 +541,7 @@ pub use termination::{TerminationChecker, TerminationError};
 pub use unified_type_error::UnifiedTypeError;
 
 use thiserror::Error;
-use verum_common::{List, Text};
+use verum_common::{List, Shared, Text};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// Type checking errors.
@@ -1457,7 +1457,7 @@ pub enum TypeError {
         /// Path of the module being imported from
         module_path: Text,
         /// Available exports in the module (for suggestions)
-        available_items: List<Text>,
+        available_items: Shared<List<Text>>,
         /// Modules that DO export this name.
         ///
         /// A mount naming the wrong module is the common shape — the
