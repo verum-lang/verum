@@ -255,9 +255,7 @@ pub fn validate_module_headers_against_filesystem(
             // no source exists, because a decl whose file IS on disk
             // never reaches the check below.
             let is_root_file = matches!(file_stem, "mod" | "lib" | "main");
-            if is_root_file
-                && matches!(module_decl.visibility, verum_ast::Visibility::Private)
-            {
+            if is_root_file && matches!(module_decl.visibility, verum_ast::Visibility::Private) {
                 continue;
             }
 
@@ -357,6 +355,8 @@ impl ModuleSource {
 pub struct ModuleLoader {
     /// Root directory for module search
     root_path: PathBuf,
+    /// A closed source generation: missing paths never fall back to disk.
+    source_snapshot: Option<Map<PathBuf, Text>>,
     /// Name of the cog rooted at `root_path`. When set, any module path
     /// whose first segment equals this name is treated as rooted at
     /// the cog itself — the prefix is stripped before file lookup.
@@ -413,6 +413,7 @@ impl ModuleLoader {
     pub fn new(root_path: impl Into<PathBuf>) -> Self {
         Self {
             root_path: root_path.into(),
+            source_snapshot: None,
             cog_name: None,
             next_file_id: 0,
             shared_file_id: None,
@@ -423,6 +424,31 @@ impl ModuleLoader {
             module_info_cache: Map::new(),
             cfg_evaluator: CfgEvaluator::new(),
             cog_resolver: None,
+        }
+    }
+
+    /// Resolve against one captured source generation, including unsaved files.
+    /// Replacing it invalidates parsed modules and path identities together.
+    pub fn set_source_snapshot(&mut self, sources: Map<PathBuf, Text>) {
+        self.clear_cache();
+        self.source_snapshot = Some(sources);
+    }
+
+    fn source_exists(&self, path: &Path) -> bool {
+        self.source_snapshot
+            .as_ref()
+            .map_or_else(|| path.is_file(), |files| files.contains_key(&path.to_path_buf()))
+    }
+
+    fn read_source(&self, path: &Path) -> std::io::Result<Text> {
+        match &self.source_snapshot {
+            Some(files) => files.get(&path.to_path_buf()).cloned().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "source is absent from this generation",
+                )
+            }),
+            None => std::fs::read_to_string(path).map(Text::from),
         }
     }
 
@@ -514,6 +540,7 @@ impl ModuleLoader {
     pub fn for_target(root_path: impl Into<PathBuf>, target_triple: &str) -> Self {
         Self {
             root_path: root_path.into(),
+            source_snapshot: None,
             cog_name: None,
             next_file_id: 0,
             shared_file_id: None,
@@ -536,6 +563,7 @@ impl ModuleLoader {
     pub fn with_config(root_path: impl Into<PathBuf>, config: TargetConfig) -> Self {
         Self {
             root_path: root_path.into(),
+            source_snapshot: None,
             cog_name: None,
             next_file_id: 0,
             shared_file_id: None,
@@ -587,38 +615,41 @@ impl ModuleLoader {
         // Cross-cog resolution: if first segment matches an external cog,
         // search in the cog's root directory instead of the local root.
         // Clone the resolved root to avoid borrow conflict with &mut self.
-        let cross_cog_target: Option<(PathBuf, ModulePath)> = if let Some(ref cog_resolver) =
-            self.cog_resolver
-        {
-            let segments = module_path.segments();
-            if !segments.is_empty() {
-                let first_segment = segments[0].as_str();
-                if cog_resolver.is_external_cog(first_segment) {
-                    cog_resolver.get_cog_location(first_segment).map(|location| {
-                        let rest_segments: List<Text> = segments.iter().skip(1).cloned().collect();
-                        let cog_module_path = if rest_segments.is_empty() {
-                            ModulePath::root()
-                        } else {
-                            ModulePath::new(rest_segments)
-                        };
-                        (location.source_root(), cog_module_path)
-                    })
+        let cross_cog_target: Option<(PathBuf, ModulePath)> =
+            if let Some(ref cog_resolver) = self.cog_resolver {
+                let segments = module_path.segments();
+                if !segments.is_empty() {
+                    let first_segment = segments[0].as_str();
+                    if cog_resolver.is_external_cog(first_segment) {
+                        cog_resolver
+                            .get_cog_location(first_segment)
+                            .map(|location| {
+                                let rest_segments: List<Text> =
+                                    segments.iter().skip(1).cloned().collect();
+                                let cog_module_path = if rest_segments.is_empty() {
+                                    ModulePath::root()
+                                } else {
+                                    ModulePath::new(rest_segments)
+                                };
+                                (location.source_root(), cog_module_path)
+                            })
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         if let Some((cog_root, cog_module_path)) = cross_cog_target {
             return self.load_module_from_root(&cog_root, &cog_module_path);
         }
 
         let candidates = self.find_module_file(module_path)?;
-        Self::resolve_unique_candidate(module_path, &candidates).and_then(|p| self.load_file(&p))
+        self.resolve_unique_candidate(module_path, &candidates)
+            .and_then(|p| self.load_file(&p))
     }
 
     /// Load a module from a specific root directory (used for cross-cog resolution).
@@ -628,7 +659,8 @@ impl ModuleLoader {
         module_path: &ModulePath,
     ) -> ModuleResult<ModuleSource> {
         let candidates = self.find_module_file_in_root(root, module_path)?;
-        Self::resolve_unique_candidate(module_path, &candidates).and_then(|p| self.load_file(&p))
+        self.resolve_unique_candidate(module_path, &candidates)
+            .and_then(|p| self.load_file(&p))
     }
 
     /// Walk every candidate path and return the unique one that exists,
@@ -641,10 +673,15 @@ impl ModuleLoader {
     /// errors at use-sites pointing into the loser, with no hint that
     /// two declarations of the same module exist.
     fn resolve_unique_candidate(
+        &self,
         module_path: &ModulePath,
         candidates: &List<PathBuf>,
     ) -> ModuleResult<PathBuf> {
-        let existing: Vec<PathBuf> = candidates.iter().filter(|p| p.exists()).cloned().collect();
+        let existing: Vec<PathBuf> = candidates
+            .iter()
+            .filter(|p| self.source_exists(p))
+            .cloned()
+            .collect();
         match existing.len() {
             0 => Err(ModuleError::module_not_found(
                 module_path.clone(),
@@ -929,11 +966,13 @@ impl ModuleLoader {
         // Check cache
         if let Some(&file_id) = self.loaded_files.get(&file_path.to_path_buf()) {
             // Already loaded - read again (could cache the content too)
-            let source = std::fs::read_to_string(file_path).map_err(|e| ModuleError::IoError {
-                path: file_path.to_path_buf(),
-                error: Text::from(e.to_string()),
-                span: None,
-            })?;
+            let source = self
+                .read_source(file_path)
+                .map_err(|e| ModuleError::IoError {
+                    path: file_path.to_path_buf(),
+                    error: Text::from(e.to_string()),
+                    span: None,
+                })?;
 
             return Ok(ModuleSource::new(
                 file_path.to_path_buf(),
@@ -943,11 +982,13 @@ impl ModuleLoader {
         }
 
         // Load file
-        let source = std::fs::read_to_string(file_path).map_err(|e| ModuleError::IoError {
-            path: file_path.to_path_buf(),
-            error: Text::from(e.to_string()),
-            span: None,
-        })?;
+        let source = self
+            .read_source(file_path)
+            .map_err(|e| ModuleError::IoError {
+                path: file_path.to_path_buf(),
+                error: Text::from(e.to_string()),
+                span: None,
+            })?;
 
         // Allocate FileId — prefer shared counter when attached.
         let file_id = if let Some(allocator) = &self.shared_file_id {
@@ -1259,7 +1300,7 @@ impl LazyModuleResolver for ModuleLoader {
         // The actual existence check happens in resolve_module
         let path = ModulePath::from_str(module_path);
         match self.find_module_file(&path) {
-            Ok(candidates) => candidates.iter().any(|c| c.exists()),
+            Ok(candidates) => candidates.iter().any(|c| self.source_exists(c)),
             Err(_) => false,
         }
     }

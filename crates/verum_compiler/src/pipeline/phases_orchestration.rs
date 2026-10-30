@@ -598,53 +598,12 @@ impl<'s> CompilationPipeline<'s> {
 
         checker.prepare_checked_count_file(module);
 
-        // Multi-pass type checking:
-        // Pass -1: Pre-register all inline modules
-        // This enables cross-module imports even when modules are declared after
-        // the modules that import from them.
-        // Pre-register inline modules for order-independent cross-module imports.
-        for item in &module.items {
-            if let verum_ast::ItemKind::Module(module_decl) = &item.kind {
-                checker.pre_register_module_public(module_decl, "cog");
-            }
-        }
-
-        // Pass 0: Process imports to register imported types and functions
-        // This enables cross-file type resolution for imported types
+        // Shared declaration preparation retains the compiler's existing inline
+        // root and stdlib pass boundary; imports finish before local signatures.
         let t_passes = std::time::Instant::now();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Mount(import) = &item.kind {
-                // SNAPSHOT, NOT A HELD GUARD.
-                //
-                // `&registry.read()` in argument position keeps the read
-                // guard alive for the whole call, and `process_import`
-                // may LAZY-LOAD a module and register it — which takes a
-                // WRITE lock on this very registry. `parking_lot`'s
-                // RwLock is not reentrant, so the writer waits for a
-                // reader that is its own frame and the compiler hangs
-                // forever. `verum check core/intrinsics/mod.vr` never
-                // returned.
-                //
-                // It became reachable when `set_module_registry` started
-                // sharing ONE handle for `module_registry` and
-                // `session_registry` — deliberately, to stop two copies
-                // drifting as lazy loads landed in one and not the other.
-                // That repair turned a harmless lock on two objects into
-                // a self-deadlock on one.
-                //
-                // Cloned per mount rather than once for the pass, so a
-                // module registered by an earlier mount is visible to a
-                // later one — the freshness the per-iteration `read()`
-                // used to give. Same shape as the caller in
-                // `infer/modules.rs`, which already reads-and-clones.
-                let registry_snapshot = registry.read().clone();
-                if let Err(type_error) =
-                    checker.process_import(import, &current_module_path_str, &registry_snapshot)
-                {
-                    let diag = type_error_to_diagnostic(&type_error, Some(self.session));
-                    self.session.emit_diagnostic(diag);
-                }
-            }
+        for error in checker.prepare_module_imports(module, "cog") {
+            let diag = type_error_to_diagnostic(&error, Some(self.session));
+            self.session.emit_diagnostic(diag);
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -777,91 +736,9 @@ impl<'s> CompilationPipeline<'s> {
         // so user-defined types can shadow stdlib unit variants (e.g., Status.Pending).
         checker.set_user_code_phase();
 
-        // Collect pre-existing placeholder names (from stdlib) to exclude from user verification
-        let pre_existing_placeholders: std::collections::HashSet<String> = checker
-            .verify_no_placeholders()
-            .iter()
-            .filter_map(|e| {
-                if let verum_types::TypeError::UnresolvedPlaceholder { name, .. } = e {
-                    Some(name.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Two-pass type resolution for order-independent type definitions:
-        //
-
-        // This allows types to reference each other regardless of definition order:
-        //  type SearchRequest is { sort_by: SortOrder }; // SortOrder used before defined
-        //  type SortOrder is Relevance | Downloads;
-        //
-
-        // Pass 1a: Register all type names as placeholders
-        // This makes all type names available for forward references
-        checker.register_all_type_names(&module.items);
-
-        // Pass 1b: Resolve all type definitions now that all names are known
-        // This replaces placeholders with actual type definitions
-        // ALIAS-VS-MARKER scope (#41): the user module's local visibility.
-        checker.set_alias_scope_from_items(&module.items);
-        let mut resolution_stack = List::new();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                if let Err(e) = checker.resolve_type_definition(type_decl, &mut resolution_stack) {
-                    let diag = type_error_to_diagnostic(&e, Some(self.session));
-                    self.session.emit_diagnostic(diag);
-                }
-            }
-        }
-
-        // Verify no placeholder types remain (indicates unresolved forward references)
-        // Skip placeholders that were already unresolved from stdlib pre-registration
-        for error in checker.verify_no_placeholders() {
-            let is_stdlib_placeholder =
-                if let verum_types::TypeError::UnresolvedPlaceholder { name, .. } = &error {
-                    pre_existing_placeholders.contains(name.as_str())
-                } else {
-                    false
-                };
-            if !is_stdlib_placeholder {
-                let diag = type_error_to_diagnostic(&error, Some(self.session));
-                self.session.emit_diagnostic(diag);
-            }
-        }
-
-        // Pass 1.9: Pre-register context declarations for forward references.
-        // Without this, `using [ComputeDevice]` fails if ComputeDevice is
-        // declared later in the same file. We register with full AST (not
-        // just names) so method resolution works.
-        for item in &module.items {
-            if let verum_ast::ItemKind::Context(ctx_decl) = &item.kind {
-                checker.register_stdlib_context_full(
-                    verum_common::Text::from(ctx_decl.name.name.as_str()),
-                    ctx_decl.clone(),
-                );
-            }
-        }
-
-        // Pass 2: Register protocol declarations
-        for item in &module.items {
-            if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
-                if let Err(e) = checker.register_protocol(protocol_decl) {
-                    let diag = type_error_to_diagnostic(&e, Some(self.session));
-                    self.session.emit_diagnostic(diag);
-                }
-            }
-        }
-
-        // Pass 3: Register protocol implementations
-        for item in &module.items {
-            if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
-                if let Err(e) = checker.register_impl_block(impl_decl) {
-                    let diag = type_error_to_diagnostic(&e, Some(self.session));
-                    self.session.emit_diagnostic(diag);
-                }
-            }
+        for error in checker.prepare_module_types(module) {
+            let diag = type_error_to_diagnostic(&error, Some(self.session));
+            self.session.emit_diagnostic(diag);
         }
 
         // Pass 3.5: Coherence checking (orphan rule, overlap detection)
@@ -873,37 +750,9 @@ impl<'s> CompilationPipeline<'s> {
         // Profile boundaries: Application modules cannot depend on Systems-profile code.
         self.check_profile_boundaries(module)?;
 
-        // Pass 4: Register function signatures (enables forward references)
-        // This allows functions to call other functions defined later in the file:
-        //  fn main() -> Int { fib(10) } // fib is defined below
-        //  fn fib(n: Int) -> Int { ... }
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                if let Err(e) = checker.register_function_signature(func) {
-                    let diag = type_error_to_diagnostic(&e, Some(self.session));
-                    self.session.emit_diagnostic(diag);
-                }
-            }
-        }
-
-        // Pass 4.5: Register extern function signatures (FFI)
-        for item in &module.items {
-            if let verum_ast::ItemKind::ExternBlock(extern_block) = &item.kind {
-                for func in &extern_block.functions {
-                    if let Err(e) = checker.register_function_signature(func) {
-                        let diag = type_error_to_diagnostic(&e, Some(self.session));
-                        self.session.emit_diagnostic(diag);
-                    }
-                }
-            }
-        }
-
-        // Pass 4.6: Pre-register const declarations (enables forward references)
-        // Constants defined after functions should still be visible in function bodies.
-        for item in &module.items {
-            if let verum_ast::ItemKind::Const(const_decl) = &item.kind {
-                checker.pre_register_const(const_decl);
-            }
+        for error in checker.prepare_module_values(module) {
+            let diag = type_error_to_diagnostic(&error, Some(self.session));
+            self.session.emit_diagnostic(diag);
         }
 
         // Enable lenient context validation for files with @test annotations.

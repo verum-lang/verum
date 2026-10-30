@@ -1196,26 +1196,7 @@ impl<'s> CompilationPipeline<'s> {
         project_prefix: &str,
         file_path: &Path,
     ) -> String {
-        let rel = file_path
-            .parent()
-            .and_then(|p| p.strip_prefix(source_root).ok())
-            .unwrap_or(std::path::Path::new(""));
-        let mut parts = vec![project_prefix.to_string()];
-        for component in rel.components() {
-            if let std::path::Component::Normal(seg) = component {
-                if let Some(sname) = seg.to_str() {
-                    parts.push(sname.to_string());
-                }
-            }
-        }
-        let stem = file_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        if stem != "mod" {
-            parts.push(stem.to_string());
-        }
-        parts.join(".")
+        ModulePath::for_source_file(source_root, project_prefix, file_path).to_string()
     }
 
     fn discover_vr_files_recursive(

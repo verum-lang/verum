@@ -3159,10 +3159,9 @@ impl TypeChecker {
                             let mut record_map: IndexMap<Text, Type> = IndexMap::new();
                             for field in fields {
                                 let field_name: Text = field.name.name.as_str().into();
-                                let field_type = match self.ast_to_type(&field.ty) {
-                                    Ok(ty) => ty,
-                                    Err(_) => self.ast_to_type_lenient(&field.ty),
-                                };
+                                // Final resolution has the same obligation for
+                                // named payload fields as tuple payloads.
+                                let field_type = self.ast_to_type(&field.ty)?;
                                 record_map.insert(field_name, field_type);
                             }
                             Type::Record(record_map)
@@ -3444,19 +3443,14 @@ impl TypeChecker {
                 // each other during recursive resolution.
                 self.define_type_in_current_module(type_name.clone(), Type::Var(placeholder_var));
 
-                // Use lenient resolution fallback for cross-module imports.
-                // VALIDATION-class errors still surface — see
-                // `field_error_must_surface`.
+                // This is final declaration resolution: imports and forward
+                // type names have already been registered. Only initial/import
+                // registration may defer an unavailable type; swallowing it here
+                // lets an undefined field type survive the completed module.
                 let mut record_map: IndexMap<Text, Type> = IndexMap::new();
                 for field in fields {
                     let field_name: Text = field.name.name.as_str().into();
-                    let field_type = match self.ast_to_type(&field.ty) {
-                        Ok(ty) => ty,
-                        Err(e) if !Self::field_error_must_surface(&e) => {
-                            self.ast_to_type_lenient(&field.ty)
-                        }
-                        Err(e) => return Err(e),
-                    };
+                    let field_type = self.ast_to_type(&field.ty)?;
                     record_map.insert(field_name, field_type);
                 }
 

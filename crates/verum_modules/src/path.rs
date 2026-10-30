@@ -79,6 +79,35 @@ impl ModulePath {
         }
     }
 
+    /// Canonical source identity used by project compilation and editor analysis.
+    /// The caller selects the source root; `mod.vr` names its directory,
+    /// while `main.vr` and `lib.vr` remain ordinary project modules.
+    pub fn for_source_file(root: &std::path::Path, prefix: &str, file: &std::path::Path) -> Self {
+        let relative = file
+            .parent()
+            .and_then(|parent| parent.strip_prefix(root).ok())
+            .unwrap_or(std::path::Path::new(""));
+        let mut parts = List::new();
+        if !prefix.is_empty() {
+            parts.push(Text::from(prefix));
+        }
+        for component in relative.components() {
+            if let std::path::Component::Normal(segment) = component {
+                if let Some(segment) = segment.to_str() {
+                    parts.push(segment.into());
+                }
+            }
+        }
+        let stem = file
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("unknown");
+        if stem != "mod" {
+            parts.push(stem.into());
+        }
+        Self::new(parts)
+    }
+
     /// Create a root path (cog root).
     pub fn root() -> Self {
         Self {

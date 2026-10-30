@@ -14,6 +14,7 @@
 
 // Submodules containing impl TypeChecker method groups
 mod source_declarations;
+mod preparation;
 mod field_visibility;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
 pub(crate) mod env;             // Environment management (stdlib bootstrap, pre-register, constraints)
