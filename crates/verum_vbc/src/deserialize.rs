@@ -266,7 +266,7 @@ const MAX_SPECIALIZATION_TABLE_ENTRIES: u32 = 1 << 20;
 /// Descriptor-level architectural upper bounds.
 ///
 /// Within a type / function descriptor, varint-encoded counts
-/// (type params, fields, variants, protocols, methods, params,
+/// (type params, fields, variants, methods, params,
 /// contexts, bounds) drive `SmallVec::with_capacity` /
 /// `Vec::with_capacity` allocations that have the same memory-
 /// amplification surface as the table counts above. Post the
@@ -279,7 +279,6 @@ const MAX_SPECIALIZATION_TABLE_ENTRIES: u32 = 1 << 20;
 const MAX_TYPE_PARAMS_PER_DESCRIPTOR: usize = 64;
 const MAX_FIELDS_PER_DESCRIPTOR: usize = 4 * 1024;
 const MAX_VARIANTS_PER_DESCRIPTOR: usize = 4 * 1024;
-const MAX_PROTOCOLS_PER_DESCRIPTOR: usize = 256;
 const MAX_METHODS_PER_PROTOCOL_IMPL: usize = 4 * 1024;
 const MAX_ASSOC_TYPES_PER_PROTOCOL_IMPL: usize = 256;
 
@@ -819,6 +818,25 @@ impl<'a> Deserializer<'a> {
  }
  }
 
+ /// Read the protocol count without reserving memory from an untrusted count.
+ fn parse_protocol_count(&mut self) -> VbcResult<usize> {
+ let count = decode_varint(self.data, &mut self.offset)?;
+ let minor = self.header.as_ref().map_or(0, |h| h.version_minor);
+ // A u32 protocol ID, a method-count varint, and the count varints added
+ // by each compatible format version, even for empty collections.
+ let minimum_bytes = 5 + usize::from(minor >= 4)
+     + usize::from(minor >= 7) + usize::from(minor >= 14);
+ let maximum = self.data.len().saturating_sub(self.offset) / minimum_bytes;
+ if count > maximum as u64 {
+ return Err(VbcError::TableTooLarge {
+ field: "protocols_count",
+ count: count.min(u64::from(u32::MAX)) as u32,
+ max: maximum.min(u32::MAX as usize) as u32,
+ });
+ }
+ Ok(count as usize)
+ }
+
  /// Parses a type descriptor.
  fn parse_type_descriptor(&mut self) -> VbcResult<TypeDescriptor> {
  let id = TypeId(decode_u32(self.data, &mut self.offset)?);
@@ -881,16 +899,12 @@ impl<'a> Deserializer<'a> {
  let drop_fn = self.parse_optional_u32()?;
  let clone_fn = self.parse_optional_u32()?;
 
- // Protocols
- let protocols_count = decode_varint(self.data, &mut self.offset)? as usize;
- if protocols_count > MAX_PROTOCOLS_PER_DESCRIPTOR {
- return Err(VbcError::TableTooLarge {
- field: "protocols_count",
- count: protocols_count.min(u32::MAX as usize) as u32,
- max: MAX_PROTOCOLS_PER_DESCRIPTOR as u32,
- });
- }
- let mut protocols = SmallVec::with_capacity(protocols_count);
+ // Protocol implementations have no language-level count limit. Bound their
+ // count by the bytes that could encode them, before narrowing or allocating.
+ let protocols_count = self.parse_protocol_count()?;
+ // Grow only after reading complete records. A forged count followed by an
+ // unrelated large section cannot force a count-sized speculative allocation.
+ let mut protocols = SmallVec::new();
  for _ in 0..protocols_count {
  let protocol = ProtocolId(decode_u32(self.data, &mut self.offset)?);
  let methods_count = decode_varint(self.data, &mut self.offset)? as usize;
@@ -2112,6 +2126,64 @@ impl<'a> Deserializer<'a> {
 mod tests {
  use super::*;
  use crate::serialize::serialize_module;
+
+ #[test]
+ fn test_protocol_counts_roundtrip_beyond_old_descriptor_limit() {
+ for count in [0, 1, 255, 256, 257, 285, 4096] {
+ let mut module = VbcModule::new("protocol_count".into());
+ let name = module.intern_string("ManyImplementations");
+ let mut desc = TypeDescriptor { id: TypeId(1000), name, ..TypeDescriptor::default() };
+ for i in 0..count {
+ desc.protocols.push(ProtocolImpl {
+ protocol: ProtocolId(i),
+ methods: vec![i, i + 1],
+ associated_types: vec![(name, TypeRef::Concrete(TypeId::INT))],
+ protocol_args_text: vec![name],
+ type_param_fn_bounds: vec![(name, name)],
+ });
+ }
+ module.types.push(desc);
+ let bytes = serialize_module(&module).unwrap();
+ let loaded = deserialize_module(&bytes).unwrap();
+ assert_eq!(loaded.types[0].protocols, module.types[0].protocols, "count {count}");
+ }
+ }
+
+ #[test]
+ fn test_protocol_counts_are_bounded_by_versioned_wire_payload() {
+ for (minor, width) in [(0, 5), (3, 5), (4, 6), (6, 6), (7, 7), (13, 7), (14, 8), (VERSION_MINOR, 8)] {
+ for count in [0, 1, 256, 285] {
+ let mut bytes = Vec::new();
+ encode_varint(count, &mut bytes);
+ bytes.resize(bytes.len() + count as usize * width, 0);
+ let header = VbcHeader { version_minor: minor, ..VbcHeader::default() };
+ let mut reader = Deserializer::new(&bytes);
+ reader.header = Some(header.clone());
+ assert_eq!(reader.parse_protocol_count().unwrap(), count as usize);
+ if count > 0 {
+ bytes.pop();
+ let mut reader = Deserializer::new(&bytes);
+ reader.header = Some(header);
+ assert!(matches!(reader.parse_protocol_count(), Err(VbcError::TableTooLarge {
+ field: "protocols_count", ..
+ })), "minor {minor}, count {count}");
+ }
+ }
+ }
+ }
+
+ #[test]
+ fn test_protocol_counts_reject_wide_and_truncated_untrusted_counts() {
+ for count in [u64::from(u32::MAX), 1u64 << 32, u64::MAX] {
+ let mut bytes = Vec::new();
+ encode_varint(count, &mut bytes);
+ let mut reader = Deserializer::new(&bytes);
+ assert!(matches!(reader.parse_protocol_count(), Err(VbcError::TableTooLarge {
+ field: "protocols_count", ..
+ })));
+ }
+ assert!(matches!(Deserializer::new(&[0x80]).parse_protocol_count(), Err(VbcError::UnexpectedEof { .. })));
+ }
 
  #[test]
  fn test_roundtrip_empty_module() {
