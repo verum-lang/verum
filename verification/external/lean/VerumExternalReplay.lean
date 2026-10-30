@@ -84,3 +84,4 @@ import VerumExternalReplay.SharedUpdates
 import VerumExternalReplay.AdditiveTraversal
 import VerumExternalReplay.RectangularNames
 import VerumExternalReplay.SealedAppend
+import VerumExternalReplay.ObservableLasso
