@@ -7398,6 +7398,22 @@ impl TypeChecker {
                 // the TRUE name in the source module, since that module
                 // never declared anything under the alias spelling.
                 let source_module_path: Option<(String, String)> = match &import_decl.tree.kind {
+                    MountTreeKind::Glob(path) => {
+                        // A glob publishes the selected module's public surface;
+                        // it does not create declarations owned by the facade.
+                        let resolved = verum_modules::imports::path_to_module_path_resolved(
+                            path,
+                            &verum_modules::ModulePath::from_str(current_module_path),
+                        );
+                        self.get_module_with_path_aliases(&resolved.to_string(), registry)
+                            .filter(|module| {
+                                module.exports.get(&Text::from(type_name)).is_some_and(|export| {
+                                    export.kind == verum_modules::ExportKind::Type
+                                        && export.visibility == AstVisibility::Public
+                                })
+                            })
+                            .map(|module| (module.path.to_string(), type_name.to_string()))
+                    }
                     MountTreeKind::Path(path) => {
                         // Single import: `pub import .errors.RegistryError`
                         // (optionally `as Foo` — the alias sits on
