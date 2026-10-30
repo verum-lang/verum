@@ -1373,6 +1373,7 @@ impl TypeChecker {
             let mut bounds: List<crate::protocol::ProtocolBound> = List::new();
             for b in assoc.bounds.iter() {
                 bounds.push(crate::protocol::ProtocolBound {
+                    associated_types: Default::default(),
                     protocol: Self::text_to_path(b),
                     args: List::new(),
                     // `type Conn: Connection` is a POSITIVE bound; the
@@ -2474,6 +2475,7 @@ impl TypeChecker {
                         .bounds
                         .iter()
                         .map(|b| crate::protocol::ProtocolBound {
+                            associated_types: Default::default(),
                             protocol: Self::text_to_path(b),
                             args: List::new(),
                             is_negative: false,
@@ -2503,6 +2505,7 @@ impl TypeChecker {
                 .super_protocols
                 .iter()
                 .map(|sp| crate::protocol::ProtocolBound {
+                    associated_types: Default::default(),
                     protocol: Self::text_to_path(sp),
                     args: List::new(),
                     is_negative: false,
@@ -4396,6 +4399,7 @@ impl TypeChecker {
                             .bounds
                             .iter()
                             .map(|b| crate::protocol::ProtocolBound {
+                                associated_types: Default::default(),
                                 protocol: Self::text_to_path(b),
                                 args: verum_common::List::new(),
                                 is_negative: false,
@@ -4414,6 +4418,7 @@ impl TypeChecker {
                     .super_protocols
                     .iter()
                     .map(|sp| crate::protocol::ProtocolBound {
+                        associated_types: Default::default(),
                         protocol: Self::text_to_path(sp),
                         args: verum_common::List::new(),
                         is_negative: false,

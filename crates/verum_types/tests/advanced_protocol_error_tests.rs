@@ -276,6 +276,7 @@ fn test_where_clause_violation_basic() {
     let clause = WhereClause {
         ty: make_named_type("K"),
         bounds: List::from_iter(vec![ProtocolBound {
+            associated_types: Default::default(),
             protocol: {
                 use verum_ast::ty::{Ident, Path};
                 Path::single(Ident::new("Hash", Span::default()))
@@ -338,6 +339,7 @@ fn test_where_clause_has_implementation_suggestion() {
     let clause = WhereClause {
         ty: make_named_type("T"),
         bounds: List::from_iter(vec![ProtocolBound {
+            associated_types: Default::default(),
             protocol: {
                 use verum_ast::ty::{Ident, Path};
                 Path::single(Ident::new("Clone", Span::default()))
@@ -361,6 +363,7 @@ fn test_where_clause_has_implementation_suggestion() {
 #[test]
 fn test_negative_specialization_basic() {
     let bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: {
             use verum_ast::ty::{Ident, Path};
             Path::single(Ident::new("Clone", Span::default()))
@@ -387,6 +390,7 @@ fn test_negative_specialization_basic() {
 #[test]
 fn test_negative_specialization_with_reason() {
     let bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: {
             use verum_ast::ty::{Ident, Path};
             Path::single(Ident::new("Send", Span::default()))
@@ -412,6 +416,7 @@ fn test_negative_specialization_with_reason() {
 #[test]
 fn test_negative_specialization_explains_requirement() {
     let bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: {
             use verum_ast::ty::{Ident, Path};
             Path::single(Ident::new("Sync", Span::default()))
@@ -432,6 +437,7 @@ fn test_negative_specialization_explains_requirement() {
 #[test]
 fn test_negative_specialization_has_alternatives() {
     let bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: {
             use verum_ast::ty::{Ident, Path};
             Path::single(Ident::new("Protocol", Span::default()))
@@ -475,6 +481,7 @@ fn test_all_error_codes_are_unique() {
         "P",
         make_named_type("T"),
         ProtocolBound {
+            associated_types: Default::default(),
             protocol: {
                 use verum_ast::ty::{Ident, Path};
                 Path::single(Ident::new("P", Span::default()))
@@ -542,6 +549,7 @@ fn test_all_errors_are_error_severity() {
             "P",
             make_named_type("T"),
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: {
                     use verum_ast::ty::{Ident, Path};
                     Path::single(Ident::new("P", Span::default()))
@@ -588,6 +596,7 @@ fn test_all_errors_have_help_messages() {
             "P",
             make_named_type("T"),
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: {
                     use verum_ast::ty::{Ident, Path};
                     Path::single(Ident::new("P", Span::default()))
@@ -635,6 +644,7 @@ fn test_all_errors_have_primary_labels() {
             "P",
             make_named_type("T"),
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: {
                     use verum_ast::ty::{Ident, Path};
                     Path::single(Ident::new("P", Span::default()))
@@ -696,6 +706,7 @@ fn test_error_messages_are_descriptive() {
                 "Protocol",
                 make_named_type("T"),
                 ProtocolBound {
+                    associated_types: Default::default(),
                     protocol: {
                         use verum_ast::ty::{Ident, Path};
                         Path::single(Ident::new("Clone", Span::default()))

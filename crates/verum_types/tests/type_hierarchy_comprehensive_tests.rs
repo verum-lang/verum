@@ -394,11 +394,13 @@ fn test_multiple_protocol_bounds() {
         name: Text::from("T"),
         bounds: vec![
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::from_ident(Ident::new("Eq", Span::dummy())),
                 args: List::new(),
                 is_negative: false,
             },
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::from_ident(Ident::new("Ord", Span::dummy())),
                 args: List::new(),
                 is_negative: false,

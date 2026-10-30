@@ -866,6 +866,7 @@ mod tests {
                 args: List::new(),
             },
             bounds: List::from(vec![ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("Hash", Span::default())),
                 args: List::new(),
                 is_negative: false,
@@ -933,6 +934,7 @@ mod tests {
     #[test]
     fn test_negative_specialization_error() {
         let bound = ProtocolBound {
+            associated_types: Default::default(),
             protocol: Path::single(Ident::new("Clone", Span::default())),
             args: List::new(),
             is_negative: true,
@@ -961,6 +963,7 @@ mod tests {
     #[test]
     fn test_negative_specialization_without_reason() {
         let bound = ProtocolBound {
+            associated_types: Default::default(),
             protocol: Path::single(Ident::new("Send", Span::default())),
             args: List::new(),
             is_negative: true,
@@ -1013,6 +1016,7 @@ mod tests {
                 args: List::new(),
             },
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("P", Span::default())),
                 args: List::new(),
                 is_negative: true,
@@ -1074,6 +1078,7 @@ mod tests {
                 args: List::new(),
             },
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("P", Span::default())),
                 args: List::new(),
                 is_negative: true,
@@ -1120,6 +1125,7 @@ mod tests {
                 args: List::new(),
             },
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("P", Span::default())),
                 args: List::new(),
                 is_negative: true,

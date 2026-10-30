@@ -217,6 +217,8 @@ pub struct RigidVar {
     pub fn_bound: Maybe<Type>,
 }
 
+const MAX_ALIAS_EXPANSION_DEPTH: usize = 30;
+
 /// Default `unify_inner` recursion budget (#304). 50 frames ×
 /// ~2500-line match arms ≈ the safe stack-frame budget on
 /// 64 MiB-stack threads. Embedders with deeper generic-type
@@ -858,12 +860,27 @@ impl Unifier {
     /// Recursively expand type aliases in a type.
     /// Handles direct aliases (Byte -> UInt8), generic types (List<Byte> -> List<UInt8>),
     /// and reference types (&mut List<Byte> -> &mut List<UInt8>).
+    /// Normalize only registered transparent aliases. Nominal records retain
+    /// their declaration identity; nested arguments use the same alias walker.
+    pub(crate) fn normalize_aliases(&self, ty: &Type) -> Type {
+        let mut current = ty.clone();
+        for _ in 0..MAX_ALIAS_EXPANSION_DEPTH {
+            let Some(next) = self.try_expand_alias(&current) else {
+                break;
+            };
+            if next == current {
+                break;
+            }
+            current = next;
+        }
+        current
+    }
+
     pub fn try_expand_alias(&self, ty: &Type) -> Option<Type> {
         self.try_expand_alias_impl(ty, 0)
     }
 
     fn try_expand_alias_impl(&self, ty: &Type, depth: usize) -> Option<Type> {
-        const MAX_ALIAS_EXPANSION_DEPTH: usize = 30;
         if depth > MAX_ALIAS_EXPANSION_DEPTH {
             return None;
         }
@@ -872,12 +889,14 @@ impl Unifier {
             Type::Named { path, args } => {
                 // Qualified aliases belong to their declaration; a sibling's
                 // bare alias is not evidence for an unresolved full path.
-                let parts: Option<List<&str>> = path.segments.iter().map(|segment| {
-                    match segment {
+                let parts: Option<List<&str>> = path
+                    .segments
+                    .iter()
+                    .map(|segment| match segment {
                         verum_ast::ty::PathSegment::Name(name) => Some(name.name.as_str()),
                         _ => None,
-                    }
-                }).collect();
+                    })
+                    .collect();
                 if let Some(parts) = parts {
                     let key: Text = parts.join(".").into();
                     if let Some(target) = self.type_aliases.get(&key) {
@@ -977,6 +996,53 @@ impl Unifier {
                 } else {
                     None
                 }
+            }
+            Type::Function {
+                params,
+                return_type,
+                type_params,
+                contexts,
+                properties,
+            } => {
+                let mut changed = false;
+                let params = params
+                    .iter()
+                    .map(|ty| {
+                        if let Some(expanded) = self.try_expand_alias_impl(ty, depth + 1) {
+                            changed = true;
+                            expanded
+                        } else {
+                            ty.clone()
+                        }
+                    })
+                    .collect();
+                let return_type =
+                    if let Some(expanded) = self.try_expand_alias_impl(return_type, depth + 1) {
+                        changed = true;
+                        Box::new(expanded)
+                    } else {
+                        return_type.clone()
+                    };
+                changed.then(|| Type::Function {
+                    params,
+                    return_type,
+                    type_params: type_params.clone(),
+                    contexts: contexts.clone(),
+                    properties: properties.clone(),
+                })
+            }
+            Type::Array { element, size } => {
+                self.try_expand_alias_impl(element, depth + 1)
+                    .map(|element| Type::Array {
+                        element: Box::new(element),
+                        size: *size,
+                    })
+            }
+            Type::Slice { element } => {
+                self.try_expand_alias_impl(element, depth + 1)
+                    .map(|element| Type::Slice {
+                        element: Box::new(element),
+                    })
             }
             // Expand through tuples
             Type::Tuple(elements) => {

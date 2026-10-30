@@ -1158,6 +1158,7 @@ impl TypeChecker {
                         match &bound.kind {
                             verum_ast::ty::TypeBoundKind::Protocol(path) => {
                                 Some(crate::protocol::ProtocolBound {
+                                    associated_types: Default::default(),
                                     protocol: path.clone(),
                                     args: List::new(),
                                     is_negative: false,
@@ -1165,6 +1166,7 @@ impl TypeChecker {
                             }
                             verum_ast::ty::TypeBoundKind::NegativeProtocol(path) => {
                                 Some(crate::protocol::ProtocolBound {
+                                    associated_types: Default::default(),
                                     protocol: path.clone(),
                                     args: List::new(),
                                     is_negative: true,
@@ -2927,7 +2929,7 @@ fn substitute_refinement_binder(
     /// # Returns
     /// The method type with Self replaced by the receiver type
     pub(super) fn instantiate_method_for_receiver(&self, method_ty: &Type, receiver_ty: &Type) -> Type {
-        self.substitute_self_type(method_ty, receiver_ty)
+        self.resolve_assoc_projections_deep(&self.substitute_self_type(method_ty, receiver_ty))
     }
 
     /// Compute how many of the method scheme's `ordered_fresh_vars` should be bound
@@ -8362,6 +8364,7 @@ fn substitute_refinement_binder(
                 let bounds = self.get_type_var_bounds(tv);
                 let assoc_name_text: Text = assoc_name.into();
                 for bound in bounds.iter() {
+                    if bound.is_negative { continue; }
                     if let Some(protocol_ident) = bound.protocol.as_ident() {
                         let protocol_name: Text = protocol_ident.name.clone();
                         let protocol_opt = self
@@ -8373,6 +8376,9 @@ fn substitute_refinement_binder(
                             if let Some(assoc_type_def) =
                                 protocol.associated_types.get(&assoc_name_text)
                             {
+                                if let Some(equality) = bound.associated_types.get(&assoc_name_text) {
+                                    return Some(self.unifier.apply(equality));
+                                }
                                 // Found the associated type in the bounded protocol.
                                 // If it has a default, return that. Otherwise, create
                                 // a projection that preserves the type variable link.

@@ -565,6 +565,7 @@ impl<'a> SendSyncDerivation<'a> {
                 if let Type::Var(_tv) = arg {
                     let mut bounds = List::new();
                     bounds.push(ProtocolBound {
+                        associated_types: Default::default(),
                         protocol: Path::single(Ident::new("Send", Span::default())),
                         args: List::new(),
                         is_negative: false,
@@ -591,6 +592,7 @@ impl<'a> SendSyncDerivation<'a> {
                 if let Type::Var(_tv) = arg {
                     let mut bounds = List::new();
                     bounds.push(ProtocolBound {
+                        associated_types: Default::default(),
                         protocol: Path::single(Ident::new("Sync", Span::default())),
                         args: List::new(),
                         is_negative: false,
@@ -719,11 +721,13 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
     let t_var = Type::Var(crate::ty::TypeVar::with_id(0));
     let mut bounds = List::new();
     bounds.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Send", Span::default())),
         args: List::new(),
         is_negative: false,
     });
     bounds.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Sync", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -771,6 +775,7 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
     let mut mutex_where = List::new();
     let mut mutex_bounds = List::new();
     mutex_bounds.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Send", Span::default())),
         args: List::new(),
         is_negative: false,

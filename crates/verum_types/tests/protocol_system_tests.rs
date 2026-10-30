@@ -129,6 +129,7 @@ fn create_ord_protocol() -> Protocol {
 
     let mut super_protocols = List::new();
     super_protocols.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -269,6 +270,7 @@ fn test_transitive_inheritance() {
 
     let mut debug_supers = List::new();
     debug_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Show", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -289,6 +291,7 @@ fn test_transitive_inheritance() {
 
     let mut detailed_supers = List::new();
     detailed_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Debug", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -532,6 +535,7 @@ fn test_method_override_in_subprotocol() {
 
     let mut derived_supers = List::new();
     derived_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Base", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -993,6 +997,7 @@ fn test_multiple_inheritance_levels() {
     // Level 2: Middle (inherits Base)
     let mut middle_supers = List::new();
     middle_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Base", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -1014,6 +1019,7 @@ fn test_multiple_inheritance_levels() {
     // Level 3: Top (inherits Middle)
     let mut top_supers = List::new();
     top_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Middle", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -1063,6 +1069,7 @@ fn test_diamond_inheritance_pattern() {
     // Left and Right both inherit Base
     let mut left_supers = List::new();
     left_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Base", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -1083,6 +1090,7 @@ fn test_diamond_inheritance_pattern() {
 
     let mut right_supers = List::new();
     right_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Base", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -1104,11 +1112,13 @@ fn test_diamond_inheritance_pattern() {
     // Diamond inherits both Left and Right
     let mut diamond_supers = List::new();
     diamond_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Left", Span::default())),
         args: List::new(),
         is_negative: false,
     });
     diamond_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Right", Span::default())),
         args: List::new(),
         is_negative: false,

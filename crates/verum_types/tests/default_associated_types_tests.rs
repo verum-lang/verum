@@ -409,6 +409,7 @@ fn test_default_type_validates_bounds() {
                     name: "Item".into(),
                     type_params: List::new(),
                     bounds: List::from(vec![ProtocolBound {
+                        associated_types: Default::default(),
                         protocol: Path::single(Ident::new("Clone", Span::default())),
                         args: List::new(),
                         is_negative: false,

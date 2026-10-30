@@ -48,6 +48,36 @@ thread_local! {
     static ASSOC_TYPE_RESOLUTION_STACK: RefCell<Vec<(Text, Text)>> = const { RefCell::new(Vec::new()) };
 }
 
+/// One active implementation obligation. Repeated or unbounded recursive
+/// obligations do not constitute evidence for a conditional implementation.
+struct ImplQueryGuard {
+    key: (Text, Text),
+}
+
+impl ImplQueryGuard {
+    fn enter(key: (Text, Text)) -> Option<Self> {
+        IMPL_CHECKING_STACK.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if stack.len() >= 64 || stack.contains(&key) {
+                return None;
+            }
+            stack.push(key.clone());
+            Some(Self { key })
+        })
+    }
+}
+
+impl Drop for ImplQueryGuard {
+    fn drop(&mut self) {
+        IMPL_CHECKING_STACK.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if let Some(index) = stack.iter().rposition(|key| key == &self.key) {
+                stack.remove(index);
+            }
+        });
+    }
+}
+
 /// Process-global counter handing out unique `ProtocolChecker.checker_id`
 /// values. AtomicU64 wraps after 2^64 — for any realistic process
 /// lifetime this is unbounded.
@@ -802,6 +832,8 @@ pub struct ProtocolBound {
     pub protocol: Path,
     /// Type arguments
     pub args: List<Type>,
+    /// Declared equalities for this protocol's associated types.
+    pub associated_types: Map<Text, Type>,
     /// Whether this is a negative bound (!Protocol syntax)
     ///
     /// When true, this bound requires the type to NOT implement the protocol.
@@ -817,6 +849,7 @@ impl ProtocolBound {
         Self {
             protocol,
             args,
+            associated_types: Map::new(),
             is_negative: false,
         }
     }
@@ -826,6 +859,7 @@ impl ProtocolBound {
         Self {
             protocol,
             args,
+            associated_types: Map::new(),
             is_negative: true,
         }
     }
@@ -833,6 +867,24 @@ impl ProtocolBound {
     /// Create a simple bound with just a protocol name (positive, no args)
     pub fn simple(protocol: Path) -> Self {
         Self::positive(protocol, List::new())
+    }
+
+    /// Freshen every declaration carried by the bound with the same scope map.
+    pub fn apply_subst(&self, substitution: &crate::ty::Substitution) -> Self {
+        Self {
+            protocol: self.protocol.clone(),
+            args: self
+                .args
+                .iter()
+                .map(|ty| ty.apply_subst(substitution))
+                .collect(),
+            associated_types: self
+                .associated_types
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty.apply_subst(substitution)))
+                .collect(),
+            is_negative: self.is_negative,
+        }
     }
 
     /// Check if this is a negative bound
@@ -2303,6 +2355,7 @@ impl ProtocolChecker {
             associated_types: Map::new(),
             associated_consts: Map::new(),
             super_protocols: List::from(vec![ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("PartialEq", Span::default())),
                 args: List::new(),
                 is_negative: false,
@@ -2363,6 +2416,7 @@ impl ProtocolChecker {
             super_protocols: {
                 let mut bounds = List::new();
                 bounds.push(ProtocolBound {
+                    associated_types: Default::default(),
                     protocol: Path::single(Ident::new("Eq", Span::default())),
                     args: List::new(),
                     is_negative: false,
@@ -2797,6 +2851,7 @@ impl ProtocolChecker {
             super_protocols: {
                 let mut bounds = List::new();
                 bounds.push(ProtocolBound {
+                    associated_types: Default::default(),
                     protocol: Path::single(Ident::new("Deref", Span::default())),
                     args: List::new(),
                     is_negative: false,
@@ -5555,7 +5610,9 @@ impl ProtocolChecker {
                 if impl_type_key == type_key {
                     if let Some(impl_proto_name) = impl_.protocol.as_ident().map(|i| i.as_str()) {
                         let impl_proto_text: Text = impl_proto_name.into();
-                        if self.inherits_from(&impl_proto_text, &target_text) {
+                        if self.inherits_from(&impl_proto_text, &target_text)
+                            && self.find_impl_for_instantiation(ty, &impl_.protocol, &impl_.protocol_args).is_some()
+                        {
                             return true;
                         }
                     }
@@ -5627,83 +5684,8 @@ impl ProtocolChecker {
     /// impl Show for List<Text> { ... }
     /// ```
     pub fn find_impl(&self, ty: &Type, protocol: &Path) -> Maybe<&ProtocolImpl> {
-        let type_key = self.make_type_key(ty);
-        let protocol_key = self.make_protocol_key(protocol);
-
-        // Stage 1: Try exact match first (most common case, O(1))
-        if let Some(&idx) = self.impl_index.get(&(type_key, protocol_key.clone())) {
-            return self.impls.get(idx);
-        }
-
-        // Honour `[types].instance_search = false`: skip Stage 2
-        // entirely — caller must thread the instance explicitly or
-        // register a concrete `impl Protocol for ConcreteType`.
-        // Mirrors the Idris-style "no implicit instance search"
-        // semantic. Performance: returns immediately on the
-        // exact-match miss with zero allocation.
-        if !self.instance_search_enabled {
-            return Maybe::None;
-        }
-
-        // Stage 2: Try generic/conditional matching
-        // Collect all candidate implementations for this protocol
-        let mut candidates: List<(usize, &ProtocolImpl, Map<Text, Type>)> = List::new();
-
-        for (idx, impl_) in self.impls.iter().enumerate() {
-            // Check if this impl is for the same protocol
-            if self.make_protocol_key(&impl_.protocol) != protocol_key.clone() {
-                continue;
-            }
-
-            // Honour `[protocols].blanket_impls = false`: skip
-            // candidates whose `for_type` is a bare type variable
-            // (the blanket `impl<T> Protocol for T` pattern). Pre-fix
-            // the manifest field was tracing-only at session.rs:582;
-            // setting `blanket_impls = false` had zero effect.
-            if !self.blanket_impls && matches!(&impl_.for_type, Type::Var(_)) {
-                continue;
-            }
-
-            // Try to match the impl's for_type against the concrete type
-            if let Some(substitution) = self.try_match_type(&impl_.for_type, ty) {
-                // Verify where clauses are satisfied with this substitution
-                if self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution) {
-                    candidates.push((idx, impl_, substitution));
-                }
-            }
-        }
-
-        // Stage 3: Select best candidate using specialization rules
-        if candidates.is_empty() {
-            return Maybe::None;
-        }
-
-        if candidates.len() == 1 {
-            return Maybe::Some(candidates[0].1);
-        }
-
-        // Multiple candidates: dispatch on `[protocols].
-        // resolution_strategy`. Pre-fix the resolver hardcoded
-        // most-specific selection, ignoring the manifest. Now:
-        //  * "most_specific" (default) — current behaviour via
-        //  `select_most_specific_impl` (lattice-based specificity).
-        //  * "first_declared" — pick the first registered candidate.
-        //  Useful for open-world plugin systems where ordering
-        //  reflects priority.
-        //  * "error" — return None on overlap. The compiler's
-        //  existing diagnostic path picks up the missing impl
-        //  and surfaces an ambiguity error to the user.
-        match self.resolution_strategy.as_str() {
-            "first_declared" => Maybe::Some(candidates[0].1),
-            "error" => Maybe::None,
-            // Default "most_specific" + any unrecognised string
-            // (set_resolution_strategy normalises to known values,
-            // so this branch is the documented default).
-            _ => {
-                let best_idx = self.select_most_specific_impl(&candidates, ty);
-                Maybe::Some(candidates[best_idx].1)
-            }
-        }
+        self.find_impl_with_substitution(ty, protocol)
+            .map(|(implementation, _)| implementation)
     }
 
     /// Find implementation with type substitution information
@@ -5733,14 +5715,39 @@ impl ProtocolChecker {
         ty: &Type,
         protocol: &Path,
     ) -> Maybe<(&ProtocolImpl, Map<Text, Type>)> {
+        self.find_impl_matching(ty, protocol, None)
+    }
+
+    /// Select the exact protocol application, sharing receiver matching,
+    /// conditional implementation checks and specialization with name-only lookup.
+    pub fn find_impl_for_instantiation(
+        &self,
+        ty: &Type,
+        protocol: &Path,
+        args: &[Type],
+    ) -> Maybe<(&ProtocolImpl, Map<Text, Type>)> {
+        self.find_impl_matching(ty, protocol, Some(args))
+    }
+
+    fn find_impl_matching(
+        &self,
+        ty: &Type,
+        protocol: &Path,
+        args: Option<&[Type]>,
+    ) -> Maybe<(&ProtocolImpl, Map<Text, Type>)> {
         let type_key = self.make_type_key(ty);
         let protocol_key = self.make_protocol_key(protocol);
+        let exact_key = args.map_or_else(
+            || protocol_key.clone(),
+            |args| self.make_full_protocol_key(protocol, args),
+        );
 
         // Stage 1: Try exact match first
-        if let Some(&idx) = self.impl_index.get(&(type_key, protocol_key.clone())) {
+        if let Some(&idx) = self.impl_index.get(&(type_key, exact_key)) {
             if let Some(impl_) = self.impls.get(idx) {
-                // Exact match has empty substitution
-                return Maybe::Some((impl_, Map::new()));
+                if self.check_where_clauses_satisfied(&impl_.where_clauses, &Map::new()) {
+                    return Maybe::Some((impl_, Map::new()));
+                }
             }
         }
 
@@ -5766,7 +5773,20 @@ impl ProtocolChecker {
                 continue;
             }
 
-            if let Some(substitution) = self.try_match_type(&impl_.for_type, ty) {
+            if let Some(mut substitution) = self.try_match_type(&impl_.for_type, ty) {
+                if let Some(args) = args {
+                    if impl_.protocol_args.len() != args.len()
+                        || !impl_
+                            .protocol_args
+                            .iter()
+                            .zip(args)
+                            .all(|(pattern, actual)| {
+                                self.unify_types(pattern, actual, &mut substitution)
+                            })
+                    {
+                        continue;
+                    }
+                }
                 if self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution) {
                     candidates.push((idx, impl_, substitution));
                 }
@@ -6398,7 +6418,10 @@ impl ProtocolChecker {
     }
 
     /// Check if two types are structurally equal (for substitution consistency checking)
-    fn types_structurally_equal(&self, ty1: &Type, ty2: &Type) -> bool {
+    pub(crate) fn types_structurally_equal(&self, ty1: &Type, ty2: &Type) -> bool {
+        if ty1 == ty2 {
+            return true;
+        }
         match (ty1, ty2) {
             (Type::Unit, Type::Unit) => true,
             (Type::Never, Type::Never) => true,
@@ -6484,6 +6507,15 @@ impl ProtocolChecker {
 
             // Check each bound is satisfied
             for bound in clause.bounds.iter() {
+                let bound = self.substitute_protocol_bound(bound, substitution);
+                // Parameterized and equality obligations need exact evidence;
+                // optimistic name-only applicability cannot establish them.
+                if !bound.args.is_empty() || !bound.associated_types.is_empty() {
+                    if self.check_bounds(&substituted_ty, &[bound]).is_err() {
+                        return false;
+                    }
+                    continue;
+                }
                 let bound_satisfied = if bound.is_negative {
                     // Negative bound: type must NOT implement the protocol
                     !self.implements_optimistic(&substituted_ty, &bound.protocol)
@@ -6498,6 +6530,27 @@ impl ProtocolChecker {
             }
         }
         true
+    }
+
+    fn substitute_protocol_bound(
+        &self,
+        bound: &ProtocolBound,
+        substitution: &Map<Text, Type>,
+    ) -> ProtocolBound {
+        ProtocolBound {
+            protocol: bound.protocol.clone(),
+            args: bound
+                .args
+                .iter()
+                .map(|ty| self.apply_substitution(ty, substitution))
+                .collect(),
+            associated_types: bound
+                .associated_types
+                .iter()
+                .map(|(name, ty)| (name.clone(), self.apply_substitution(ty, substitution)))
+                .collect(),
+            is_negative: bound.is_negative,
+        }
     }
 
     /// Optimistic protocol implementation check for blanket impls.
@@ -6551,70 +6604,17 @@ impl ProtocolChecker {
             return result;
         }
 
-        // Check for cycles: if we're already checking this (type, protocol) pair,
-        // return false to break the cycle
-        let is_cycle = IMPL_CHECKING_STACK.with(|s| s.borrow().contains(&stack_key));
-        if is_cycle {
+        let Some(_guard) = ImplQueryGuard::enter(stack_key) else {
             return false;
-        }
-
-        // Push onto checking stack
-        IMPL_CHECKING_STACK.with(|s| {
-            s.borrow_mut().push(stack_key.clone());
-        });
-
-        // RAII guard for checking stack
-        struct StackGuard {
-            key: (Text, Text),
-        }
-        impl Drop for StackGuard {
-            fn drop(&mut self) {
-                IMPL_CHECKING_STACK.with(|s| {
-                    let mut stack = s.borrow_mut();
-                    if let Some(pos) = stack.iter().rposition(|k| k == &self.key) {
-                        stack.remove(pos);
-                    }
-                });
-            }
-        }
-        let _stack_guard = StackGuard {
-            key: stack_key.clone(),
         };
 
-
-        // Stage 1: Try exact match first (most common case, O(1))
-        if self
-            .impl_index
-            .get(&(type_key, protocol_key.clone()))
-            .is_some()
-        {
-            // Cache the positive result
-            IMPL_OPTIMISTIC_CACHE.with(|c| {
-                c.borrow_mut().insert(cache_key, true);
+        // Exact and generic evidence use the same conditional selection as
+        // ordinary resolution. Only the unresolved fallback below is optimistic.
+        if self.find_impl_with_substitution(ty, protocol).is_some() {
+            IMPL_OPTIMISTIC_CACHE.with(|cache| {
+                cache.borrow_mut().insert(cache_key, true);
             });
             return true;
-        }
-
-        // Stage 2: Check if there's a matching generic/blanket impl
-        // This can call check_where_clauses_satisfied which may recursively
-        // call implements_optimistic, but the depth guard prevents overflow
-        for impl_ in &self.impls {
-            // Check if this impl is for the same protocol
-            if self.make_protocol_key(&impl_.protocol) != protocol_key.clone() {
-                continue;
-            }
-
-            // Try to match the impl's for_type against the concrete type
-            if let Some(substitution) = self.try_match_type(&impl_.for_type, ty) {
-                // Also verify where clauses
-                if self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution) {
-                    // Cache the positive result
-                    IMPL_OPTIMISTIC_CACHE.with(|c| {
-                        c.borrow_mut().insert(cache_key, true);
-                    });
-                    return true;
-                }
-            }
         }
 
         // CRITICAL FIX: Be smarter about optimistic checking
@@ -6653,7 +6653,9 @@ impl ProtocolChecker {
             if let Some(base_name) = base_type_name {
                 // Check if there's ANY impl of this protocol for this base type
                 for impl_ in &self.impls {
-                    if self.make_protocol_key(&impl_.protocol) != protocol_key {
+                    if self.make_protocol_key(&impl_.protocol) != protocol_key
+                        || !impl_.where_clauses.is_empty()
+                    {
                         continue;
                     }
 
@@ -6686,7 +6688,9 @@ impl ProtocolChecker {
 
             // Check if there's ANY impl of this protocol for this generic type
             for impl_ in &self.impls {
-                if self.make_protocol_key(&impl_.protocol) != protocol_key {
+                if self.make_protocol_key(&impl_.protocol) != protocol_key
+                    || !impl_.where_clauses.is_empty()
+                {
                     continue;
                 }
 
@@ -7259,9 +7263,29 @@ impl ProtocolChecker {
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     pub fn check_bounds(&self, ty: &Type, bounds: &[ProtocolBound]) -> Result<(), ProtocolError> {
         for bound in bounds {
+            let _guard = ImplQueryGuard::enter((
+                self.make_type_key(ty),
+                self.make_full_protocol_key(&bound.protocol, &bound.args),
+            ))
+            .ok_or_else(|| ProtocolError::BoundNotSatisfied {
+                ty: ty.clone(),
+                protocol: bound.protocol.clone(),
+            })?;
+            let implements = if bound.args.is_empty() {
+                self.implements(ty, &bound.protocol)
+            } else {
+                self.find_impl_for_instantiation(ty, &bound.protocol, &bound.args)
+                    .is_some()
+            };
             if bound.is_negative {
+                if !bound.associated_types.is_empty() {
+                    return Err(ProtocolError::BoundNotSatisfied {
+                        ty: ty.clone(),
+                        protocol: bound.protocol.clone(),
+                    });
+                }
                 // Negative bound: type must NOT implement the protocol
-                if self.implements(ty, &bound.protocol) {
+                if implements {
                     return Err(ProtocolError::NegativeBoundViolated {
                         ty: ty.clone(),
                         protocol: bound.protocol.clone(),
@@ -7269,11 +7293,26 @@ impl ProtocolChecker {
                 }
             } else {
                 // Positive bound: type must implement the protocol
-                if !self.implements(ty, &bound.protocol) {
+                if !implements {
                     return Err(ProtocolError::BoundNotSatisfied {
                         ty: ty.clone(),
                         protocol: bound.protocol.clone(),
                     });
+                }
+
+                for (name, expected) in &bound.associated_types {
+                    let actual = self.resolve_associated_type_for_instantiation(
+                        ty,
+                        &bound.protocol,
+                        &bound.args,
+                        name,
+                    )?;
+                    if !self.types_structurally_equal(&actual, expected) {
+                        return Err(ProtocolError::BoundNotSatisfied {
+                            ty: ty.clone(),
+                            protocol: bound.protocol.clone(),
+                        });
+                    }
                 }
 
                 // Check super-protocol bounds (inheritance)
@@ -7319,7 +7358,9 @@ impl ProtocolChecker {
                 && let Some(impl_protocol_name) = impl_.protocol.as_ident().map(|i| i.as_str())
             {
                 let impl_proto_text: Text = impl_protocol_name.into();
-                if self.inherits_from(&impl_proto_text, protocol_name) {
+                if self.inherits_from(&impl_proto_text, protocol_name)
+                    && self.find_impl_for_instantiation(ty, &impl_.protocol, &impl_.protocol_args).is_some()
+                {
                     return Ok(true);
                 }
             }
@@ -7353,20 +7394,39 @@ impl ProtocolChecker {
         protocol: &Path,
         assoc_name: &Text,
     ) -> Result<Type, ProtocolError> {
-        // Find implementation
-        let impl_ = match self.find_impl(ty, protocol) {
-            Option::Some(i) => i,
-            Option::None => {
-                return Err(ProtocolError::NotImplemented {
-                    ty: ty.clone(),
-                    protocol: protocol.clone(),
-                });
-            }
-        };
+        self.resolve_associated_type_matching(ty, protocol, None, assoc_name)
+    }
 
-        // Look up associated type in implementation
+    pub fn resolve_associated_type_for_instantiation(
+        &self,
+        ty: &Type,
+        protocol: &Path,
+        args: &[Type],
+        assoc_name: &Text,
+    ) -> Result<Type, ProtocolError> {
+        self.resolve_associated_type_matching(ty, protocol, Some(args), assoc_name)
+    }
+
+    fn resolve_associated_type_matching(
+        &self,
+        ty: &Type,
+        protocol: &Path,
+        args: Option<&[Type]>,
+        assoc_name: &Text,
+    ) -> Result<Type, ProtocolError> {
+        let (impl_, _) = self.find_impl_matching(ty, protocol, args).ok_or_else(|| {
+            ProtocolError::NotImplemented {
+                ty: ty.clone(),
+                protocol: protocol.clone(),
+            }
+        })?;
+
+        // Argument bindings and receiver bindings belong to the same selected
+        // declaration; an associated type must not come from another instance.
         if let Some(assoc_ty) = impl_.associated_types.get(assoc_name) {
-            return Ok(assoc_ty.clone());
+            return Ok(
+                self.substitute_impl_type_params_for_instantiation(assoc_ty, impl_, ty, args)
+            );
         }
 
         // Associated type not explicitly specified - check for default
@@ -8152,9 +8212,24 @@ impl ProtocolChecker {
         impl_: &ProtocolImpl,
         concrete_ty: &Type,
     ) -> Type {
+        self.substitute_impl_type_params_for_instantiation(assoc_ty, impl_, concrete_ty, None)
+    }
+
+    fn substitute_impl_type_params_for_instantiation(
+        &self,
+        assoc_ty: &Type,
+        impl_: &ProtocolImpl,
+        concrete_ty: &Type,
+        protocol_args: Option<&[Type]>,
+    ) -> Type {
         // Phase 1: Build initial substitution by matching impl for_type against concrete_ty
         let mut substitution: Map<TypeVar, Type> = Map::new();
         self.build_type_substitution(&impl_.for_type, concrete_ty, &mut substitution);
+        if let Some(args) = protocol_args {
+            for (pattern, actual) in impl_.protocol_args.iter().zip(args) {
+                self.build_type_substitution(pattern, actual, &mut substitution);
+            }
+        }
 
         // Phase 2: Extract additional type bindings from function type bounds.
         // For `implement<Fut: Future, F: fn(Fut.Output) -> T, T> Future for MapFuture<Fut, F>`:
@@ -8196,7 +8271,12 @@ impl ProtocolChecker {
                 substitution.len()
             );
         }
-        let receiver_vars = crate::dependent_helpers::collect_type_vars(concrete_ty);
+        let mut receiver_vars = crate::dependent_helpers::collect_type_vars(concrete_ty);
+        if let Some(args) = protocol_args {
+            for arg in args {
+                receiver_vars.extend(crate::dependent_helpers::collect_type_vars(arg));
+            }
+        }
         for tv in crate::dependent_helpers::collect_type_vars(assoc_ty) {
             if !substitution.contains_key(&tv) && !receiver_vars.contains(&tv) {
                 substitution.insert(tv, Type::Var(crate::ty::TypeVar::fresh()));
@@ -9363,7 +9443,9 @@ impl ProtocolChecker {
         }
         for clause in impl_.where_clauses.iter() {
             let resolved_ty = self.apply_substitution(&clause.ty, subst);
-            if self.check_bounds(&resolved_ty, &clause.bounds).is_err() {
+            let bounds: List<_> = clause.bounds.iter()
+                .map(|bound| self.substitute_protocol_bound(bound, subst)).collect();
+            if self.check_bounds(&resolved_ty, &bounds).is_err() {
                 return false;
             }
         }
@@ -15682,6 +15764,7 @@ mod tests {
         let type_params = List::from(vec![GATTypeParam {
             name: "T".into(),
             bounds: List::from(vec![ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("Clone", Span::default())),
                 args: List::new(),
                 is_negative: false,
@@ -15693,6 +15776,7 @@ mod tests {
         let where_clauses = List::from(vec![GATWhereClause {
             param: "T".into(),
             constraints: List::from(vec![ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("Clone", Span::default())),
                 args: List::new(),
                 is_negative: false,
@@ -16413,6 +16497,7 @@ mod tests {
             kind: ProtocolKind::Constraint,
             type_params: List::new(),
             super_protocols: List::from(vec![ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("Eq", Span::default())),
                 args: List::new(),
                 is_negative: false,
@@ -16592,6 +16677,7 @@ mod tests {
             name: "Element".into(),
             type_params: List::new(),
             bounds: List::from(vec![ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("Clone", Span::default())),
                 args: List::new(),
                 is_negative: false,
@@ -16888,6 +16974,7 @@ mod tests {
             kind: ProtocolKind::Constraint,
             type_params: List::new(),
             super_protocols: List::from(vec![ProtocolBound {
+                associated_types: Default::default(),
                 protocol: Path::single(Ident::new("Eq", Span::default())),
                 args: List::new(),
                 is_negative: false,

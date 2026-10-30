@@ -376,7 +376,8 @@ impl TypeScheme {
         let mut fresh_protocol_bounds: Map<TypeVar, List<ProtocolBound>> = Map::new();
         for (old_var, bounds) in &self.var_protocol_bounds {
             if let Some(fresh_var) = old_to_fresh.get(old_var) {
-                fresh_protocol_bounds.insert(*fresh_var, bounds.clone());
+                fresh_protocol_bounds.insert(*fresh_var,
+                    bounds.iter().map(|bound| bound.apply_subst(&subst)).collect());
             }
         }
 

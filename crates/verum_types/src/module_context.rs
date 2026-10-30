@@ -1701,6 +1701,7 @@ fn convert_type_bound_to_protocol_bound(bound: &verum_ast::ty::TypeBound) -> Opt
         TypeBoundKind::Protocol(path) => {
             // Standard protocol bound: T: Eq
             Some(ProtocolBound {
+                associated_types: Default::default(),
                 protocol: path.clone(),
                 args: List::new(),
                 is_negative: false,
@@ -1711,6 +1712,7 @@ fn convert_type_bound_to_protocol_bound(bound: &verum_ast::ty::TypeBound) -> Opt
             // Negative protocol bound: T: !Clone
             // Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .4
             Some(ProtocolBound {
+                associated_types: Default::default(),
                 protocol: path.clone(),
                 args: List::new(),
                 is_negative: true,
@@ -1761,6 +1763,7 @@ fn convert_type_bound_to_protocol_bound(bound: &verum_ast::ty::TypeBound) -> Opt
                         })
                         .collect();
                     return Some(ProtocolBound {
+                        associated_types: Default::default(),
                         protocol: path.clone(),
                         args: bound_args,
                         is_negative: false,

@@ -98,6 +98,7 @@ fn test_add_protocol_bound() {
 
     // Add a protocol bound: T: Clone
     let clone_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Clone", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -122,6 +123,7 @@ fn test_multiple_protocol_bounds() {
 
     // Add T: Ord
     let ord_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Ord", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -130,6 +132,7 @@ fn test_multiple_protocol_bounds() {
 
     // Add T: Clone
     let clone_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Clone", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -151,6 +154,7 @@ fn test_has_protocol_bound() {
     let var = TypeVar::fresh();
 
     let clone_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Clone", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -171,6 +175,7 @@ fn test_clear_protocol_bounds() {
     let var = TypeVar::fresh();
 
     let clone_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Clone", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -196,6 +201,7 @@ fn test_negative_protocol_bound() {
 
     // Add T: !Sync (type must NOT implement Sync)
     let not_sync_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Sync", Span::default())),
         args: List::new(),
         is_negative: true,
@@ -220,6 +226,7 @@ fn test_protocol_bounds_independent_vars() {
 
     // Add T1: Clone
     let clone_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Clone", Span::default())),
         args: List::new(),
         is_negative: false,
@@ -228,6 +235,7 @@ fn test_protocol_bounds_independent_vars() {
 
     // Add T2: Send
     let send_bound = ProtocolBound {
+        associated_types: Default::default(),
         protocol: Path::single(Ident::new("Send", Span::default())),
         args: List::new(),
         is_negative: false,

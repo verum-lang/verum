@@ -88,6 +88,7 @@ fn make_path(name: &str) -> Path {
 /// Create a protocol bound
 fn make_bound(protocol_name: &str) -> ProtocolBound {
     ProtocolBound {
+        associated_types: Default::default(),
         protocol: make_path(protocol_name),
         args: List::new(),
         is_negative: false,

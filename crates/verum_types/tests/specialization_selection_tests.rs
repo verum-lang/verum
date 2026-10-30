@@ -720,6 +720,7 @@ fn make_negative_impl(protocol: &str, for_type: Type, negative_protocol: &str) -
     let where_clause = WhereClause {
         ty: for_type.clone(),
         bounds: vec![ProtocolBound {
+            associated_types: Default::default(),
             protocol: neg_protocol_path,
             args: List::new(),
             is_negative: true,
@@ -787,6 +788,7 @@ fn test_negative_spec_multiple_negative_bounds() {
     let mut where_clause = negative_impl.where_clauses.first().unwrap().clone();
     let mut bounds = where_clause.bounds.clone();
     bounds.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: send_path,
         args: List::new(),
         is_negative: true,
@@ -863,6 +865,7 @@ fn test_negative_spec_positive_bounds_only() {
     let where_clause = WhereClause {
         ty: make_type_var(0),
         bounds: vec![ProtocolBound {
+            associated_types: Default::default(),
             protocol: clone_path,
             args: List::new(),
             is_negative: false,
@@ -917,11 +920,13 @@ fn test_negative_spec_mixed_positive_negative_bounds() {
         ty: make_type_var(0),
         bounds: vec![
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: clone_path,
                 args: List::new(),
                 is_negative: false,
             },
             ProtocolBound {
+                associated_types: Default::default(),
                 protocol: send_path,
                 args: List::new(),
                 is_negative: true,

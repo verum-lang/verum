@@ -7992,10 +7992,12 @@ impl TypeChecker {
                         for (orig, fresh) in scheme.vars.iter().zip(fresh_vars.iter()) {
                             old_to_fresh_map.insert(*orig, *fresh);
                         }
+                        let substitution: Substitution = old_to_fresh_map.iter()
+                            .map(|(old, fresh)| (*old, Type::Var(*fresh))).collect();
                         for (old_var, bounds) in &scheme.var_protocol_bounds {
                             if let Some(fresh_var) = old_to_fresh_map.get(old_var) {
-                                pending_protocol_bounds
-                                    .insert(*fresh_var, bounds.clone());
+                                pending_protocol_bounds.insert(*fresh_var,
+                                    bounds.iter().map(|bound| bound.apply_subst(&substitution)).collect());
                             }
                         }
                     }
@@ -8115,8 +8117,8 @@ impl TypeChecker {
                         if has_proto_bounds {
                             for (old_var, bounds) in &scheme.var_protocol_bounds {
                                 if let Some(fresh_var) = old_to_fresh.get(old_var) {
-                                    pending_protocol_bounds
-                                        .insert(*fresh_var, bounds.clone());
+                                    pending_protocol_bounds.insert(*fresh_var,
+                                        bounds.iter().map(|bound| bound.apply_subst(&subst)).collect());
                                 }
                             }
                         }
@@ -8761,6 +8763,11 @@ impl TypeChecker {
                 // types and verify protocol bounds are satisfied.
                 for (type_var, bounds) in &pending_protocol_bounds {
                     let resolved_ty = self.unifier.apply(&Type::Var(*type_var));
+                    self.enforce_protocol_bound_evidence(&resolved_ty, bounds, expr.span)?;
+                    let substitution = self.unifier.save_substitution();
+                    let resolved_bounds: List<_> = bounds.iter()
+                        .map(|bound| bound.apply_subst(&substitution)).collect();
+                    let bounds = &resolved_bounds;
                     // Only check bounds when the type var resolved to a concrete type
                     // (not still a type variable — those are checked at their own call sites)
                     //

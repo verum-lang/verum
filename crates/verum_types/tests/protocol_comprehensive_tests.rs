@@ -201,6 +201,7 @@ fn test_protocol_inheritance_transitive() {
     // Register protocol B (extends A)
     let mut b_supers: List<ProtocolBound> = vec![].into();
     b_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: make_path("A"),
         args: vec![].into(),
         is_negative: false,
@@ -222,6 +223,7 @@ fn test_protocol_inheritance_transitive() {
     // Register protocol C (extends B, transitively extends A)
     let mut c_supers: List<ProtocolBound> = vec![].into();
     c_supers.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: make_path("B"),
         args: vec![].into(),
         is_negative: false,
@@ -770,6 +772,7 @@ fn test_associated_type_with_bounds() {
     let mut assoc_types = Map::new();
     let mut bounds = List::new();
     bounds.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: make_path("Eq"),
         args: vec![].into(),
         is_negative: false,
@@ -1224,6 +1227,7 @@ fn test_generic_protocol_with_constraints() {
     // Create Contains<T: Eq> protocol
     let mut eq_bound: List<ProtocolBound> = vec![].into();
     eq_bound.push(ProtocolBound {
+        associated_types: Default::default(),
         protocol: make_path("Eq"),
         args: vec![].into(),
         is_negative: false,

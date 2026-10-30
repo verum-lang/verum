@@ -2011,6 +2011,7 @@ impl TypeChecker {
                                 bound_path
                                     .as_ident()
                                     .map(|id| crate::protocol::ProtocolBound {
+                                        associated_types: Default::default(),
                                         protocol: Path::single(id.clone()),
                                         args: List::new(),
                                         is_negative: false,
@@ -2204,6 +2205,7 @@ impl TypeChecker {
                         match &extend_ty.kind {
                             verum_ast::ty::TypeKind::Path(path) => {
                                 Some(crate::protocol::ProtocolBound {
+                                    associated_types: Default::default(),
                                     protocol: path.clone(),
                                     args: List::new(),
                                     is_negative: false,
@@ -2223,6 +2225,7 @@ impl TypeChecker {
                                         })
                                         .collect();
                                     Some(crate::protocol::ProtocolBound {
+                                        associated_types: Default::default(),
                                         protocol: path.clone(),
                                         args: type_args,
                                         is_negative: false,
@@ -3767,6 +3770,7 @@ impl TypeChecker {
                                 bound_path
                                     .as_ident()
                                     .map(|id| crate::protocol::ProtocolBound {
+                                        associated_types: Default::default(),
                                         protocol: Path::single(id.clone()),
                                         args: List::new(),
                                         is_negative: false,
@@ -3943,6 +3947,7 @@ impl TypeChecker {
                     .filter_map(|extend_ty| match &extend_ty.kind {
                         verum_ast::ty::TypeKind::Path(path) => {
                             Some(crate::protocol::ProtocolBound {
+                                associated_types: Default::default(),
                                 protocol: path.clone(),
                                 args: List::new(),
                                 is_negative: false,
@@ -3961,6 +3966,7 @@ impl TypeChecker {
                                     })
                                     .collect();
                                 Some(crate::protocol::ProtocolBound {
+                                    associated_types: Default::default(),
                                     protocol: path.clone(),
                                     args: type_args,
                                     is_negative: false,
@@ -5180,6 +5186,7 @@ impl TypeChecker {
                 .filter_map(|b| {
                     if let verum_ast::ty::TypeKind::Path(path) = &b.kind {
                         Some(crate::protocol::ProtocolBound {
+                            associated_types: Default::default(),
                             protocol: path.clone(),
                             args: verum_common::List::new(),
                             is_negative: false,
@@ -6816,7 +6823,7 @@ impl TypeChecker {
                         {
                             if let Ok(resolved_ty) = self.ast_to_type(assoc_ty) {
                                 let assoc_name: Text = name.name.clone();
-                                associated_types.insert(assoc_name, resolved_ty);
+                                associated_types.insert(assoc_name, self.unifier.normalize_aliases(&resolved_ty));
                             }
                         }
                     }
@@ -6845,6 +6852,8 @@ impl TypeChecker {
                             }
                         })
                         .collect();
+                    let resolved_protocol_args = resolved_protocol_args.iter()
+                        .map(|arg| self.unifier.normalize_aliases(arg)).collect();
 
                     // Process where clause for additional function type bounds.
                     // This captures bounds like `F: Fn(I.Item) -> U` from where clauses
@@ -7151,26 +7160,7 @@ impl TypeChecker {
                         implicit_type_vars.insert(fresh_var);
                     }
 
-                    // Extract protocol bounds for this type parameter
-                    if !bounds.is_empty() {
-                        if let Ok(protocol_bounds) =
-                            self.convert_type_bounds_to_protocol_bounds(bounds)
-                        {
-                            if !protocol_bounds.is_empty() {
-                                param_protocol_bounds.insert(fresh_var, protocol_bounds);
-                            }
-                        }
-                        // Also collect direct type bounds (function-type
-                        // bounds: `F: fn(A) -> B`, equality bounds: `T =
-                        // Concrete`).  These flow into the scheme so call
-                        // sites can recover the constraint via
-                        // `get_function_type_bound` for closure-shape-
-                        // driven bidirectional type-check of the body.
-                        let type_bounds = self.extract_type_bounds_from_ast(bounds);
-                        if !type_bounds.is_empty() {
-                            param_type_bounds.insert(fresh_var, type_bounds);
-                        }
-                    }
+
                 }
                 // CRITICAL FIX: Handle HKT type parameters
                 // Use a TypeVar for the HKT parameter so it gets instantiated properly
@@ -7199,16 +7189,7 @@ impl TypeChecker {
                         implicit_type_vars.insert(fresh_var);
                     }
 
-                    // Extract protocol bounds for HKT parameters
-                    if !bounds.is_empty() {
-                        if let Ok(protocol_bounds) =
-                            self.convert_type_bounds_to_protocol_bounds(bounds)
-                        {
-                            if !protocol_bounds.is_empty() {
-                                param_protocol_bounds.insert(fresh_var, protocol_bounds);
-                            }
-                        }
-                    }
+
                 }
                 GenericParamKind::Meta { name, ty, .. } => {
                     // Meta (const generic) parameters are compile-time values.
@@ -7231,6 +7212,29 @@ impl TypeChecker {
                     }
                 }
                 _ => {} // Other generic param kinds (Lifetime, Context) handled elsewhere
+            }
+        }
+
+        // Allocate every binder before resolving bounds: `<F: P<Item=T>, T>`
+        // refers to this declaration's T even when an ambient T exists.
+        for parameter in &func.generics {
+            use verum_ast::ty::GenericParamKind;
+            let (name, bounds) = match &parameter.kind {
+                GenericParamKind::Type { name, bounds, .. }
+                | GenericParamKind::HigherKinded { name, bounds, .. } => (name, bounds),
+                _ => continue,
+            };
+            let Some(Type::Var(var)) = self.ctx.lookup_type(name.name.as_str()).cloned() else {
+                continue;
+            };
+            if let Ok(protocol_bounds) = self.convert_type_bounds_to_protocol_bounds(bounds) {
+                if !protocol_bounds.is_empty() {
+                    param_protocol_bounds.insert(var, protocol_bounds);
+                }
+            }
+            let type_bounds = self.extract_type_bounds_from_ast(bounds);
+            if !type_bounds.is_empty() {
+                param_type_bounds.insert(var, type_bounds);
             }
         }
 
@@ -8074,7 +8078,7 @@ impl TypeChecker {
                         // Convert the associated type's RHS
                         if let Ok(resolved_ty) = self.ast_to_type(assoc_ty) {
                             let assoc_name: Text = name.name.clone();
-                            associated_types.insert(assoc_name, resolved_ty);
+                            associated_types.insert(assoc_name, self.unifier.normalize_aliases(&resolved_ty));
                         }
 
                         // Clean up temporary type params
@@ -8125,6 +8129,8 @@ impl TypeChecker {
                         }
                     })
                     .collect();
+                let resolved_protocol_args = resolved_protocol_args.iter()
+                    .map(|arg| self.unifier.normalize_aliases(arg)).collect();
 
                 // Create ProtocolImpl with collected methods and associated types
                 // CRITICAL: Include where_clauses for blanket impl constraint checking
@@ -11350,11 +11356,13 @@ pub(crate) fn associated_type_from_ast(
         bs.iter()
             .filter_map(|b| match &b.kind {
                 TypeBoundKind::Protocol(path) => Some(crate::protocol::ProtocolBound {
+                    associated_types: Default::default(),
                     protocol: path.clone(),
                     args: List::new(),
                     is_negative: false,
                 }),
                 TypeBoundKind::NegativeProtocol(path) => Some(crate::protocol::ProtocolBound {
+                    associated_types: Default::default(),
                     protocol: path.clone(),
                     args: List::new(),
                     is_negative: true,

@@ -3630,6 +3630,158 @@ impl TypeChecker {
             .unwrap_or_else(List::new)
     }
 
+    /// Protocol arguments and associated equalities constrain one declaration.
+    /// Forwarding uses the receiver's own evidence, with caller binders rigid.
+    pub(super) fn enforce_protocol_bound_evidence(
+        &mut self,
+        actual: &Type,
+        bounds: &[crate::protocol::ProtocolBound],
+        span: Span,
+    ) -> Result<()> {
+        for bound in bounds {
+            if bound.args.is_empty() && bound.associated_types.is_empty() {
+                continue;
+            }
+            if bound.is_negative && !bound.associated_types.is_empty() {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(),
+                    msg: "a negative protocol bound cannot supply an associated equality".into(),
+                    span,
+                });
+            }
+            let actual = self.unifier.apply(actual);
+            if let Type::Var(var) = &actual {
+                let candidates = self.get_type_var_bounds(var);
+                let mut satisfied = false;
+                for candidate in candidates.iter().filter(|candidate| {
+                    candidate.is_negative == bound.is_negative
+                        && candidate.protocol.to_string() == bound.protocol.to_string()
+                        && candidate.args.len() == bound.args.len()
+                }) {
+                    // A failed candidate must not constrain a subsequent one.
+                    // The existing rigid scope prevents a caller's universal
+                    // parameter from being specialized to make evidence fit.
+                    let saved = self.unifier.save_substitution();
+                    let result: Result<()> = (|| {
+                        for (actual, expected) in candidate.args.iter().zip(&bound.args) {
+                            self.unify_protocol_evidence_type(actual, expected, span)?;
+                        }
+                        for (name, expected) in &bound.associated_types {
+                            let declared =
+                                candidate.associated_types.get(name).ok_or_else(|| {
+                                    TypeError::OtherWithCodeSpanned {
+                                        code: "E405".into(),
+                                        msg: format!("missing associated equality `{name}`").into(),
+                                        span,
+                                    }
+                                })?;
+                            self.unify_protocol_evidence_type(declared, expected, span)?;
+                        }
+                        Ok(())
+                    })();
+                    if result.is_ok() {
+                        satisfied = true;
+                        break;
+                    }
+                    self.unifier.restore_substitution(saved);
+                }
+                if !satisfied {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(),
+                        msg: format!("cannot establish protocol argument and equality evidence for `{actual}: {}`", bound.protocol).into(),
+                        span,
+                    });
+                }
+                continue;
+            }
+
+            if let Some(owner) = self.get_type_name(&actual) {
+                self.ensure_stdlib_type_loaded_transitive(&owner);
+            }
+            let args: List<Type> = bound
+                .args
+                .iter()
+                .map(|arg| self.unifier.apply(arg))
+                .collect();
+            for (name, expected) in &bound.associated_types {
+                let resolved = self
+                    .protocol_checker
+                    .read()
+                    .resolve_associated_type_for_instantiation(
+                        &actual,
+                        &bound.protocol,
+                        &args,
+                        name,
+                    )
+                    .map_err(|_| TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(),
+                        msg: format!(
+                            "cannot establish associated equality `{}.{name}` for `{actual}`",
+                            bound.protocol
+                        )
+                        .into(),
+                        span,
+                    })?;
+                let resolved = self.resolve_assoc_projections_deep(&self.unifier.apply(&resolved));
+                let mut evidence_vars = actual.free_vars();
+                for arg in &args {
+                    evidence_vars.extend(arg.free_vars());
+                }
+                if !resolved.free_vars().is_subset(&evidence_vars) {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(),
+                        msg: "associated equality contains unbound implementation parameters"
+                            .into(),
+                        span,
+                    });
+                }
+                self.unify_protocol_evidence_type(&resolved, expected, span)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Inference may bind fresh callee variables, but assignment coercions
+    /// (for example Char to Text) are not equality evidence for a protocol.
+    fn unify_protocol_evidence_type(
+        &mut self,
+        actual: &Type,
+        expected: &Type,
+        span: Span,
+    ) -> Result<()> {
+        // Callable bounds justify invocation, not identifying a universal
+        // parameter with the function carrier used to invoke its values.
+        let rigid = self.unifier.rigid_snapshot();
+        self.unifier.enter_rigid_scope(
+            rigid
+                .iter()
+                .map(|(var, info)| (*var, info.name.clone(), false, None)),
+        );
+        let inferred = self.unifier.unify(actual, expected, span);
+        self.unifier.exit_rigid_scope(rigid);
+        inferred?;
+        let actual = self.unifier.normalize_aliases(&self.unifier.apply(actual));
+        let expected = self
+            .unifier
+            .normalize_aliases(&self.unifier.apply(expected));
+        if self
+            .protocol_checker
+            .read()
+            .types_structurally_equal(&actual, &expected)
+        {
+            Ok(())
+        } else {
+            Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(),
+                msg: format!(
+                    "protocol evidence requires equal types, found `{actual}` and `{expected}`"
+                )
+                .into(),
+                span,
+            })
+        }
+    }
+
     /// Check if a type variable has a specific protocol bound
     ///
     /// Returns true if the type variable is constrained to implement the given protocol.
@@ -13369,6 +13521,7 @@ with .to_float() or .to_int() (at {:?})",
                     }
                     // Simple protocol bound: T: Clone
                     protocol_bounds.push(crate::protocol::ProtocolBound {
+                        associated_types: Default::default(),
                         protocol: path.clone(),
                         args: List::new(),
                         is_negative: false,
@@ -13388,6 +13541,7 @@ with .to_float() or .to_int() (at {:?})",
                     //  implement<T: Clone + !Copy> DeepClone for T { ... }
                     // which only applies to types that are Clone but NOT Copy.
                     protocol_bounds.push(crate::protocol::ProtocolBound {
+                        associated_types: Default::default(),
                         protocol: path.clone(),
                         args: List::new(),
                         is_negative: true,
@@ -13408,17 +13562,30 @@ with .to_float() or .to_int() (at {:?})",
                     if let TypeKind::Generic { base, args } = &ty.kind {
                         if let TypeKind::Path(path) = &base.kind {
                             // Convert generic args to protocol bound args
-                            let bound_args: List<Type> = args
-                                .iter()
-                                .filter_map(|arg| {
-                                    if let verum_ast::ty::GenericArg::Type(t) = arg {
-                                        Some(self.ast_to_type_lenient(t))
-                                    } else {
-                                        None
+                            let mut bound_args = List::new();
+                            let mut associated_types = Map::new();
+                            for argument in args {
+                                match argument {
+                                    verum_ast::ty::GenericArg::Type(ty) => {
+                                        let ty = self.ast_to_type(ty)?;
+                                        bound_args.push(self.unifier.normalize_aliases(&ty));
                                     }
-                                })
-                                .collect();
+                                    verum_ast::ty::GenericArg::Binding(binding) => {
+                                        let ty = self.ast_to_type(&binding.ty)?;
+                                        let ty = self.unifier.normalize_aliases(&ty);
+                                        if associated_types.insert(binding.name.name.clone(), ty).is_some() {
+                                            return Err(TypeError::OtherWithCodeSpanned {
+                                                code: "E405".into(),
+                                                msg: format!("associated type `{}` is bound more than once", binding.name.name).into(),
+                                                span: binding.span,
+                                            });
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
                             protocol_bounds.push(crate::protocol::ProtocolBound {
+                                associated_types,
                                 protocol: path.clone(),
                                 args: bound_args,
                                 is_negative: false,

@@ -6408,7 +6408,7 @@ impl TypeChecker {
                     } = &item.kind
                     {
                         if let Ok(resolved_ty) = self.ast_to_type(assoc_ty) {
-                            associated_types.insert(name.name.clone(), resolved_ty);
+                            associated_types.insert(name.name.clone(), self.unifier.normalize_aliases(&resolved_ty));
                         }
                     }
                 }
@@ -6466,6 +6466,8 @@ impl TypeChecker {
                         }
                     })
                     .collect();
+                let resolved_protocol_args = resolved_protocol_args.iter()
+                    .map(|arg| self.unifier.normalize_aliases(arg)).collect();
 
                 // Create and register the ProtocolImpl
                 let protocol_impl = crate::protocol::ProtocolImpl {
@@ -10071,87 +10073,16 @@ impl TypeChecker {
                     if !bounds.is_empty() {
                         // Look up the Type::Var that was created for this type parameter
                         if let Some(type_var) = type_param_to_var.get(&name_text) {
-                            // Collect all bounds for this type parameter
-                            let mut protocol_bounds: List<crate::protocol::ProtocolBound> =
-                                List::new();
+                            let protocol_bounds =
+                                self.convert_type_bounds_to_protocol_bounds(bounds)?;
                             for bound in bounds {
                                 match &bound.kind {
-                                    verum_ast::ty::TypeBoundKind::Protocol(path) => {
-                                        // Simple protocol bound: T: Clone
-                                        protocol_bounds.push(
-                                            crate::protocol::ProtocolBound::positive(
-                                                path.clone(),
-                                                List::new(),
-                                            ),
-                                        );
-                                    }
-                                    verum_ast::ty::TypeBoundKind::GenericProtocol(ty) => {
-                                        // Generic protocol bound: U: From<T>
-                                        // Extract the protocol path and type arguments
-                                        if let verum_ast::ty::TypeKind::Generic {
-                                            base, args, ..
-                                        } = &ty.kind
-                                        {
-                                            if let verum_ast::ty::TypeKind::Path(path) = &base.kind
-                                            {
-                                                // Resolve type arguments from GenericArg to Type
-                                                let resolved_args: List<Type> = args
-                                                    .iter()
-                                                    .filter_map(|arg| {
-                                                        if let verum_ast::ty::GenericArg::Type(ty) =
-                                                            arg
-                                                        {
-                                                            Some(
-                                                                self.ast_to_type(ty)
-                                                                    .unwrap_or_else(|_| {
-                                                                        self.ast_to_type_lenient(ty)
-                                                                    }),
-                                                            )
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .collect();
-                                                protocol_bounds.push(
-                                                    crate::protocol::ProtocolBound::positive(
-                                                        path.clone(),
-                                                        resolved_args,
-                                                    ),
-                                                );
-                                            }
-                                        } else if let verum_ast::ty::TypeKind::Function { .. } =
-                                            &ty.kind
-                                        {
-                                            // Function type bound: F: Fn(I.Item) -> U
-                                            // Capture as function type bound for associated type resolution
-                                            if let Type::Var(tv) = type_var {
-                                                if let Ok(resolved_fn) = self.ast_to_type(ty) {
-                                                    type_param_fn_bounds.insert(*tv, resolved_fn);
-                                                }
-                                            }
-                                        } else if let verum_ast::ty::TypeKind::Path(path) = &ty.kind
-                                        {
-                                            // Just a path, no type args
-                                            protocol_bounds.push(
-                                                crate::protocol::ProtocolBound::positive(
-                                                    path.clone(),
-                                                    List::new(),
-                                                ),
-                                            );
-                                        }
-                                    }
-                                    verum_ast::ty::TypeBoundKind::Equality(bound_ty) => {
-                                        // Type equality bound: F: fn(X) -> T
-                                        // Resolve the bound type and store as a function type bound
-                                        if let verum_ast::ty::TypeKind::Function { .. } =
-                                            &bound_ty.kind
-                                        {
-                                            if let Type::Var(tv) = type_var {
-                                                if let Ok(resolved_fn) = self.ast_to_type(bound_ty)
-                                                {
-                                                    type_param_fn_bounds.insert(*tv, resolved_fn);
-                                                }
-                                            }
+                                    verum_ast::ty::TypeBoundKind::GenericProtocol(ty)
+                                    | verum_ast::ty::TypeBoundKind::Equality(ty)
+                                        if matches!(ty.kind, verum_ast::ty::TypeKind::Function { .. }) =>
+                                    {
+                                        if let Type::Var(tv) = type_var {
+                                            type_param_fn_bounds.insert(*tv, self.ast_to_type(ty)?);
                                         }
                                     }
                                     _ => {}
@@ -10184,6 +10115,8 @@ impl TypeChecker {
                     }
                 })
                 .collect();
+            let resolved_protocol_args = resolved_protocol_args.iter()
+                .map(|arg| self.unifier.normalize_aliases(arg)).collect();
 
             // Extract associated types from impl items (e.g., `type Item = &T;`)
             let mut associated_types: Map<Text, Type> = Map::new();
@@ -10192,7 +10125,7 @@ impl TypeChecker {
                     let resolved_ty = self
                         .ast_to_type(ty)
                         .unwrap_or_else(|_| self.ast_to_type_lenient(ty));
-                    associated_types.insert(name.name.clone(), resolved_ty);
+                    associated_types.insert(name.name.clone(), self.unifier.normalize_aliases(&resolved_ty));
                 }
             }
 
@@ -11507,36 +11440,7 @@ impl TypeChecker {
                         func_implicit_type_vars.insert(tvar);
                     }
 
-                    // CRITICAL FIX: Register type param with bounds so protocol methods can be looked up
-                    // Example: fn print_item<T: Display>(item: &T) { item.display(); }
-                    // Without this, calling protocol methods on bounded generic types fails
-                    let protocol_bounds = if !bounds.is_empty() {
-                        self.convert_type_bounds_to_protocol_bounds(bounds)?
-                    } else {
-                        List::new()
-                    };
 
-                    // Register bounds in type_var_bounds map for method resolution
-                    // This enables infer_method_call to find protocol methods on bounded type params
-                    if !protocol_bounds.is_empty() {
-                        self.register_type_var_bounds(tvar, protocol_bounds.clone());
-                        // …and carry them into the SCHEME this pass will
-                        // publish. The body-check republishes the function's
-                        // scheme (built below via `TypeScheme::poly`), and
-                        // rebuilding it without the bounds silently REPLACED
-                        // the signature pass's bounded scheme — so every
-                        // call site instantiated an unbounded scheme and the
-                        // call-site bound check had nothing to verify.
-                        // Measured 2026-08-07: `env.insert needs_ord
-                        // proto_groups=1` followed by two inserts with
-                        // `proto_groups=0`; `fn f<T: Ord>` then accepted a
-                        // type with no `Ord` at all.
-                        func_param_protocol_bounds.insert(tvar, protocol_bounds.clone());
-                    }
-
-                    let type_param = crate::context::TypeParam::new(name_text.clone(), name.span)
-                        .with_bounds(protocol_bounds);
-                    self.ctx.env.add_type_param(type_param);
                 }
                 // CRITICAL FIX: Handle HKT type parameters in first pass
                 // Use a TypeVar so it gets instantiated properly during function calls
@@ -11567,55 +11471,31 @@ impl TypeChecker {
                         func_implicit_type_vars.insert(tvar);
                     }
 
-                    // Register bounds if present
-                    if !bounds.is_empty() {
-                        if let Ok(protocol_bounds) =
-                            self.convert_type_bounds_to_protocol_bounds(bounds)
-                        {
-                            // Register protocol bounds on the TypeVar so bound-first
-                            // method dispatch in infer_method_call_inner_impl can find
-                            // the method through the bound.
-                            self.register_type_var_bounds(tvar, protocol_bounds.clone());
 
-                            // HKT-BOUND-REACHES-THE-SCHEME (T1075).  The `Type`
-                            // arm of this same loop does THREE things with a
-                            // bound; this arm did two.  The missing one is the
-                            // insert below, and it is the load-bearing one: it
-                            // is `func_param_protocol_bounds` that becomes
-                            // `scheme.with_protocol_bounds(...)`, and the scheme
-                            // is what a CALL SITE checks its argument against
-                            // (infer/expr.rs, `pending_protocol_bounds`).
-                            // Without it `fn f<F<_>: Mappable, A>(x: F<A>)`
-                            // accepted a type with no `implement Mappable`
-                            // at all, while the identical bound written as
-                            // `where type F: Mappable` was refused — because
-                            // `collect_where_clause_bounds` inserts here
-                            // regardless of the parameter's kind.
-                            func_param_protocol_bounds.insert(tvar, protocol_bounds.clone());
-
-                            let type_param = crate::context::TypeParam::new(name_text, name.span)
-                                .with_bounds(protocol_bounds);
-                            self.ctx.env.add_type_param(type_param);
-                        }
-                    }
-                }
-                GenericParamKind::Meta { name, ty, .. } => {
-                    // Meta (const generic) parameters are compile-time values.
-                    // Create a TypeVar so they are included in func_type_param_vars,
-                    // ensuring the function scheme has the correct number of type params.
-                    let tvar = TypeVar::fresh();
-                    let meta_type = self.ast_to_type(ty)?;
-                    let name_text: Text = name.name.clone();
-                    self.ctx.define_type(name_text, meta_type);
-                    func_type_param_vars.push(tvar);
-
-                    // Track implicit parameters
-                    if generic_param.is_implicit {
-                        func_implicit_type_vars.insert(tvar);
-                    }
                 }
                 _ => {} // Handle other generic param kinds (Const, Lifetime) later
             }
+        }
+
+        // All binders now exist. Bounds and their associated equalities use
+        // those same variables in the body and the republished function scheme.
+        for parameter in &func.generics {
+            use verum_ast::ty::GenericParamKind;
+            let (name, bounds) = match &parameter.kind {
+                GenericParamKind::Type { name, bounds, .. }
+                | GenericParamKind::HigherKinded { name, bounds, .. } => (name, bounds),
+                _ => continue,
+            };
+            let Some(Type::Var(var)) = self.ctx.lookup_type(name.name.as_str()).cloned() else {
+                continue;
+            };
+            let protocol_bounds = self.convert_type_bounds_to_protocol_bounds(bounds)?;
+            self.register_type_var_bounds(var, protocol_bounds.clone());
+            if !protocol_bounds.is_empty() {
+                func_param_protocol_bounds.insert(var, protocol_bounds.clone());
+            }
+            self.ctx.env.add_type_param(crate::context::TypeParam::new(name.name.clone(), name.span)
+                .with_bounds(protocol_bounds));
         }
 
         // Build function type from signature
@@ -23352,17 +23232,13 @@ impl TypeChecker {
             }
             _ => None,
         };
-        if inner_type_var.is_some() {
-            // Look up all type parameters with their bounds from the environment
-            let all_type_params = self.ctx.env.all_type_params();
-
-            // Find the type parameter for this type variable
-            // We match by checking if the receiver variable is used as a type param
-            // For now, we search all bounds from all type params since we don't track
-            // the exact correspondence between Type::Var and TypeParam
-            for type_param in all_type_params {
-                // Check each protocol bound on this type parameter
-                for bound in &type_param.bounds {
+        if let Some(Type::Var(receiver_var)) = inner_type_var {
+            // Bounds belong to this exact variable. Another generic parameter
+            // in the same scope cannot grant a method or associated equality.
+            let receiver_bounds = self.get_type_var_bounds(receiver_var);
+            {
+                for bound in &receiver_bounds {
+                    if bound.is_negative { continue; }
                     // Get the protocol name from the bound
                     if let Some(protocol_ident) = bound.protocol.as_ident() {
                         let protocol_name: Text = protocol_ident.name.clone();
@@ -23415,6 +23291,7 @@ impl TypeChecker {
 
                                         // Apply substitution to return type
                                         let resolved_return = self.unifier.apply(return_type);
+                                        let resolved_return = self.resolve_assoc_projections_deep(&resolved_return);
                                         return Ok(Some(InferResult::new(resolved_return)));
                                     }
                                 }
@@ -27467,6 +27344,7 @@ bake to have this verified.",
                                         let mut bounds: List<crate::protocol::ProtocolBound> =
                                             List::new();
                                         bounds.push(crate::protocol::ProtocolBound {
+                                            associated_types: Default::default(),
                                             protocol: verum_ast::ty::Path::single(
                                                 verum_ast::Ident::new(type_name, span),
                                             ),

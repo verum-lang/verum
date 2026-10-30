@@ -1949,6 +1949,7 @@ mod tests {
 
     fn make_copy_bound(is_negative: bool) -> ProtocolBound {
         ProtocolBound {
+            associated_types: Default::default(),
             protocol: Path::single(Ident::new("Copy", make_span())),
             args: List::new(),
             is_negative,
@@ -1957,6 +1958,7 @@ mod tests {
 
     fn make_clone_bound(is_negative: bool) -> ProtocolBound {
         ProtocolBound {
+            associated_types: Default::default(),
             protocol: Path::single(Ident::new("Clone", make_span())),
             args: List::new(),
             is_negative,
