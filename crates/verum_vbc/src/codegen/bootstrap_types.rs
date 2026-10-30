@@ -472,17 +472,29 @@ impl VbcCodegen {
                 &mut pending,
             )?;
         }
+        // Build each visited module's method index once. The owner is the
+        // declaration identity, not its module-local carrier ID: cyclic
+        // interfaces can retain several IDs for the same declaration.
+        let mut methods_by_owner = HashMap::<usize, HashMap<&str, Vec<usize>>>::new();
         while let Some(key) = pending.pop() {
             let (mi, ti) = catalog[&key];
             let module = available[mi];
             let ty = &module.types[ti];
             add_dependencies(mi, &key, descriptor_ids(ty), &mut selected, &mut pending)?;
-            for (fi, function) in module.functions.iter().enumerate() {
-                // A cyclic bootstrap can retain an imported carrier and a
-                // local definition of the same nominal declaration. Both IDs
-                // map to one consumer type; recover methods through that same
-                // declaration identity instead of only the selected carrier ID.
-                if function.parent_type.and_then(|id| source_keys.get(&(mi, id))) == Some(&key) {
+            let methods = methods_by_owner.entry(mi).or_insert_with(|| {
+                let mut methods = HashMap::<&str, Vec<usize>>::new();
+                for (fi, function) in module.functions.iter().enumerate() {
+                    if let Some(owner) = function.parent_type
+                        .and_then(|id| source_keys.get(&(mi, id)))
+                    {
+                        methods.entry(owner.as_str()).or_default().push(fi);
+                    }
+                }
+                methods
+            });
+            if let Some(methods) = methods.get(key.as_str()) {
+                for &fi in methods {
+                    let function = &module.functions[fi];
                     function_sites.insert((mi, fi));
                     let method = function_identity(module, function).ok_or_else(|| {
                         CodegenError::internal("bootstrap method has no source identity")

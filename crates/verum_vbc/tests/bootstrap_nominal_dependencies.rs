@@ -329,6 +329,49 @@ fn source_function_ids_are_never_copied_as_consumer_function_ids() {
 }
 
 #[test]
+fn dependency_closure_keeps_methods_from_duplicate_declaration_carriers() {
+    let mut dependency = producer("alpha", r#"
+        module alpha;
+        type Owner is { value: Int };
+        type First is { value: Int };
+        type Second is { value: Int };
+        type Stranger is { value: Int };
+        implement Owner {
+            fn first(&self) -> First { First { value: self.value } }
+            fn second(&self) -> Second { Second { value: self.value } }
+        }
+        implement Stranger { fn unrelated(&self) -> Int { self.value } }
+    "#);
+    let mut imported = descriptor(&dependency, "Owner").clone();
+    imported.id = TypeId(70000);
+    imported.name = dependency.strings.intern("alpha.Owner");
+    for function in &mut dependency.functions {
+        match dependency.strings.get(function.name) {
+            Some(name) if name.ends_with("Owner.second") => {
+                function.parent_type = Some(imported.id);
+            }
+            Some(name) if name.ends_with("Stranger.unrelated") => {
+                // Unselected methods must not expand the dependency closure.
+                function.return_type = TypeRef::Concrete(TypeId(87654));
+            }
+            _ => {}
+        }
+    }
+    for imported_first in [false, true] {
+        let mut dependency = dependency.clone();
+        if imported_first { dependency.types.insert(0, imported.clone()); }
+        else { dependency.types.push(imported.clone()); }
+        let result = import(
+            "module consumer; mount alpha.Owner; fn accept(x: Owner) -> Int { 7 }",
+            &[&dependency],
+        );
+        descriptor(&result, "First");
+        descriptor(&result, "Second");
+        assert!(!result.types.iter().any(|ty| result.strings.get(ty.name) == Some("Stranger")));
+    }
+}
+
+#[test]
 fn method_signature_closure_and_registry_return_use_consumer_type_ids() {
     let dependency = producer(
         "alpha",
