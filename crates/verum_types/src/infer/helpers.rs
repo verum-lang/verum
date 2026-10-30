@@ -1219,124 +1219,177 @@ pub(crate) fn meta_value_to_literal(value: &verum_ast::MetaValue) -> Option<veru
 // T2-extended-perf: lazy stdlib type registration helpers
 // ============================================================================
 
-/// Scan a top-level [`verum_ast::Item`] for every named type
-/// reference (in field types, function signatures, type
-/// declarations, etc.) and accumulate the bare names into `out`.
-///
-/// Used by [`TypeChecker::register_stdlib_types_for_module`] to
-/// build the closure of stdlib types the user module references,
-/// so only those are pulled out of `core_metadata` (skipping the
-/// other 99% of stdlib types every cold start used to register
-/// upfront).
-pub(crate) fn collect_named_types_from_item(
-    item: &verum_ast::Item,
-    out: &mut std::collections::HashSet<Text>,
-) {
+/// Collect archive preload requests from declaration signatures. Lexically bound
+/// names denote source declarations or generic parameters, never an unrelated
+/// descriptor occupying the archive's bare-name index. Bodies remain lazy.
+pub(crate) fn collect_named_types_from_module(module: &verum_ast::Module, out: &mut Set<Text>) {
     use verum_ast::ItemKind;
+    let mut bound: Set<Text> = module
+        .items
+        .iter()
+        .filter_map(|item| match &item.kind {
+            ItemKind::Type(decl) => Some(decl.name.name.clone()),
+            ItemKind::Protocol(decl) => Some(decl.name.name.clone()),
+            ItemKind::Context(decl) => Some(decl.name.name.clone()),
+            ItemKind::Module(decl) => Some(decl.name.name.clone()),
+            _ => None,
+        })
+        .collect();
+    for item in &module.items {
+        if let ItemKind::Mount(declaration) = &item.kind {
+            if let Some(alias) = &declaration.alias {
+                bound.insert(alias.name.clone());
+            } else {
+                collect_mount_binding_names(&declaration.tree, &mut bound);
+            }
+        }
+    }
+    for item in &module.items {
+        collect_named_types_from_item(item, &bound, out);
+    }
+}
+
+/// Explicit mount names are resolved by the import pass. Preloading must not
+/// guess their type from an unrelated bare archive entry; glob surfaces remain
+/// unknown until that pass has resolved the target module.
+fn collect_mount_binding_names(tree: &MountTree, bound: &mut Set<Text>) {
+    if let Some(alias) = &tree.alias {
+        bound.insert(alias.name.clone());
+        return;
+    }
+    match &tree.kind {
+        MountTreeKind::Path(path) => {
+            if let Some(verum_ast::ty::PathSegment::Name(name)) = path.segments.last() {
+                bound.insert(name.name.clone());
+            }
+        }
+        MountTreeKind::Nested { trees, .. } => {
+            for tree in trees {
+                collect_mount_binding_names(tree, bound);
+            }
+        }
+        MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+    }
+}
+
+fn generic_type_scope(bound: &Set<Text>, parameters: &[verum_ast::ty::GenericParam]) -> Set<Text> {
+    use verum_ast::ty::GenericParamKind;
+    let mut scope = bound.clone();
+    for parameter in parameters {
+        let name = match &parameter.kind {
+            GenericParamKind::Type { name, .. }
+            | GenericParamKind::HigherKinded { name, .. }
+            | GenericParamKind::KindAnnotated { name, .. }
+            | GenericParamKind::Const { name, .. }
+            | GenericParamKind::Meta { name, .. }
+            | GenericParamKind::Context { name }
+            | GenericParamKind::Level { name } => &name.name,
+            GenericParamKind::Lifetime { .. } => continue,
+        };
+        scope.insert(name.clone());
+    }
+    scope
+}
+
+fn collect_function_type_names(
+    function: &verum_ast::FunctionDecl,
+    bound: &Set<Text>,
+    out: &mut Set<Text>,
+) {
+    let scope = generic_type_scope(bound, &function.generics);
+    for parameter in &function.params {
+        if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &parameter.kind {
+            collect_named_types_from_ty(ty, &scope, out);
+        }
+    }
+    if let Some(result) = &function.return_type {
+        collect_named_types_from_ty(result, &scope, out);
+    }
+}
+
+fn collect_named_types_from_item(item: &verum_ast::Item, bound: &Set<Text>, out: &mut Set<Text>) {
+    use verum_ast::{
+        ItemKind,
+        decl::{ImplItemKind, ImplKind},
+    };
     match &item.kind {
-        ItemKind::Function(f) => {
-            for p in f.params.iter() {
-                if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                    collect_named_types_from_ty(ty, out);
+        ItemKind::Function(function) => collect_function_type_names(function, bound, out),
+        ItemKind::Type(declaration) => {
+            let scope = generic_type_scope(bound, &declaration.generics);
+            collect_named_types_from_type_decl_body(&declaration.body, &scope, out);
+        }
+        ItemKind::Const(declaration) => collect_named_types_from_ty(&declaration.ty, bound, out),
+        ItemKind::Static(declaration) => collect_named_types_from_ty(&declaration.ty, bound, out),
+        ItemKind::Impl(declaration) => {
+            let scope = generic_type_scope(bound, &declaration.generics);
+            match &declaration.kind {
+                ImplKind::Inherent(ty) => collect_named_types_from_ty(ty, &scope, out),
+                ImplKind::Protocol {
+                    protocol,
+                    for_type,
+                    protocol_args,
+                    ..
+                } => {
+                    collect_named_type_path(protocol, &scope, out);
+                    collect_named_types_from_ty(for_type, &scope, out);
+                    for argument in protocol_args {
+                        if let verum_ast::ty::GenericArg::Type(ty) = argument {
+                            collect_named_types_from_ty(ty, &scope, out);
+                        }
+                    }
                 }
             }
-            if let Some(rt) = f.return_type.as_ref() {
-                collect_named_types_from_ty(rt, out);
-            }
-            if let verum_common::Maybe::Some(body) = &f.body {
-                collect_named_types_from_function_body(body, out);
-            }
-        }
-        ItemKind::Type(td) => {
-            // Field / variant payload types pull in their referenced
-            // names so the user-defined type's transitive closure
-            // through stdlib ends up loaded.
-            collect_named_types_from_type_decl_body(&td.body, out);
-        }
-        ItemKind::Const(c) => {
-            collect_named_types_from_ty(&c.ty, out);
-        }
-        ItemKind::Static(s) => {
-            collect_named_types_from_ty(&s.ty, out);
-        }
-        ItemKind::Mount(_) => {
-            // mount declarations carry symbol names, not type names —
-            // the symbols themselves get resolved through other
-            // registration paths.  No type-name harvest here.
-        }
-        ItemKind::Impl(impl_decl) => {
-            collect_named_types_from_impl_kind(&impl_decl.kind, out);
-            for it in impl_decl.items.iter() {
-                collect_named_types_from_impl_item(it, out);
+            for item in &declaration.items {
+                if let ImplItemKind::Function(function) = &item.kind {
+                    collect_function_type_names(function, &scope, out);
+                }
             }
         }
-        ItemKind::Protocol(_)
-        | ItemKind::Module(_)
-        | ItemKind::Theorem(_)
-        | ItemKind::Lemma(_)
-        | ItemKind::Corollary(_)
-        | ItemKind::Axiom(_) => {
-            // Less common in user scripts; the lazy loader will
-            // catch them via direct lookup-on-miss when needed.
-        }
+        // Mounts resolve their own declarations. Nested modules, proof terms
+        // and function bodies use their ordinary lazy lookup paths.
         _ => {}
     }
 }
 
-pub(crate) fn collect_named_types_from_ty(
-    ty: &verum_ast::ty::Type,
-    out: &mut std::collections::HashSet<Text>,
-) {
+fn collect_named_type_path(path: &verum_ast::ty::Path, bound: &Set<Text>, out: &mut Set<Text>) {
+    let parts: Option<List<&str>> = path
+        .segments
+        .iter()
+        .map(|part| match part {
+            verum_ast::ty::PathSegment::Name(name) => Some(name.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    if let Some(parts) = parts
+        && let Some(first) = parts.first()
+        && !bound.contains(&Text::from(*first))
+    {
+        // A qualified declaration never requests an unrelated bare leaf too.
+        out.insert(parts.join(".").into());
+    }
+}
+
+fn collect_named_types_from_ty(ty: &verum_ast::ty::Type, bound: &Set<Text>, out: &mut Set<Text>) {
     use verum_ast::ty::TypeKind;
     match &ty.kind {
-        TypeKind::Path(path) => {
-            if let Some(ident) = path.as_ident() {
-                out.insert(ident.name.clone());
-            }
-            // Multi-segment paths: also harvest the LAST segment as
-            // a likely type name.  `core.io.fs.Path` brings in
-            // `Path`.  The first-segment names tend to be modules,
-            // not types, so we don't harvest them.
-            if path.segments.len() > 1 {
-                // Retain the actual requested declaration, not only a leaf
-                // that may belong to a different module's metadata slot.
-                let parts: Option<verum_common::List<&str>> = path.segments.iter().map(|part| {
-                    match part {
-                        verum_ast::ty::PathSegment::Name(name) => Some(name.name.as_str()),
-                        _ => None,
-                    }
-                }).collect();
-                if let Some(parts) = parts {
-                    out.insert(parts.join(".").into());
-                }
-                if let Some(verum_ast::ty::PathSegment::Name(last)) = path.segments.last() {
-                    out.insert(last.name.clone());
-                }
-            }
-        }
+        TypeKind::Path(path) => collect_named_type_path(path, bound, out),
         TypeKind::Generic { base, args } => {
-            collect_named_types_from_ty(base, out);
-            for a in args {
-                if let verum_ast::ty::GenericArg::Type(t) = a {
-                    collect_named_types_from_ty(t, out);
+            collect_named_types_from_ty(base, bound, out);
+            for argument in args {
+                if let verum_ast::ty::GenericArg::Type(ty) = argument {
+                    collect_named_types_from_ty(ty, bound, out);
                 }
             }
         }
         TypeKind::Reference { inner, .. }
         | TypeKind::CheckedReference { inner, .. }
         | TypeKind::UnsafeReference { inner, .. }
-        | TypeKind::Pointer { inner, .. } => {
-            collect_named_types_from_ty(inner, out);
-        }
-        TypeKind::Slice(inner) => {
-            collect_named_types_from_ty(inner, out);
-        }
-        TypeKind::Array { element, .. } => {
-            collect_named_types_from_ty(element, out);
-        }
-        TypeKind::Tuple(elems) => {
-            for e in elems {
-                collect_named_types_from_ty(e, out);
+        | TypeKind::Pointer { inner, .. }
+        | TypeKind::Slice(inner) => collect_named_types_from_ty(inner, bound, out),
+        TypeKind::Array { element, .. } => collect_named_types_from_ty(element, bound, out),
+        TypeKind::Tuple(elements) => {
+            for element in elements {
+                collect_named_types_from_ty(element, bound, out);
             }
         }
         TypeKind::Function {
@@ -1344,119 +1397,66 @@ pub(crate) fn collect_named_types_from_ty(
             return_type,
             ..
         } => {
-            for p in params {
-                collect_named_types_from_ty(p, out);
+            for parameter in params {
+                collect_named_types_from_ty(parameter, bound, out);
             }
-            collect_named_types_from_ty(return_type, out);
+            collect_named_types_from_ty(return_type, bound, out);
+        }
+        TypeKind::Rank2Function {
+            type_params,
+            params,
+            return_type,
+            ..
+        } => {
+            let scope = generic_type_scope(bound, type_params);
+            for parameter in params {
+                collect_named_types_from_ty(parameter, &scope, out);
+            }
+            collect_named_types_from_ty(return_type, &scope, out);
         }
         _ => {}
     }
 }
 
-pub(crate) fn collect_named_types_from_type_decl_body(
+fn collect_named_types_from_type_decl_body(
     body: &verum_ast::decl::TypeDeclBody,
-    out: &mut std::collections::HashSet<Text>,
+    bound: &Set<Text>,
+    out: &mut Set<Text>,
 ) {
-    use verum_ast::decl::TypeDeclBody;
+    use verum_ast::decl::{TypeDeclBody, VariantData};
     match body {
-        TypeDeclBody::Alias(t) | TypeDeclBody::Newtype(t) => {
-            collect_named_types_from_ty(t, out);
+        TypeDeclBody::Alias(ty) | TypeDeclBody::Newtype(ty) => {
+            collect_named_types_from_ty(ty, bound, out)
         }
         TypeDeclBody::Record(fields) => {
-            for f in fields.iter() {
-                collect_named_types_from_ty(&f.ty, out);
+            for field in fields {
+                collect_named_types_from_ty(&field.ty, bound, out);
             }
         }
         TypeDeclBody::Variant(variants) => {
-            for v in variants.iter() {
-                if let verum_common::Maybe::Some(data) = &v.data {
-                    use verum_ast::decl::VariantData;
-                    match data {
-                        VariantData::Tuple(tys) => {
-                            for t in tys.iter() {
-                                collect_named_types_from_ty(t, out);
-                            }
-                        }
-                        VariantData::Record(fields) => {
-                            for f in fields.iter() {
-                                collect_named_types_from_ty(&f.ty, out);
-                            }
+            for variant in variants {
+                match &variant.data {
+                    Some(VariantData::Tuple(types)) => {
+                        for ty in types {
+                            collect_named_types_from_ty(ty, bound, out);
                         }
                     }
+                    Some(VariantData::Record(fields)) => {
+                        for field in fields {
+                            collect_named_types_from_ty(&field.ty, bound, out);
+                        }
+                    }
+                    None => {}
                 }
             }
         }
-        TypeDeclBody::Tuple(tys) | TypeDeclBody::SigmaTuple(tys) => {
-            for t in tys.iter() {
-                collect_named_types_from_ty(t, out);
-            }
-        }
-        TypeDeclBody::Protocol(_) | TypeDeclBody::Unit => {}
-        // Less common forms — pull names conservatively where shape is known.
-        _ => {}
-    }
-}
-
-/// Walk a `verum_ast::decl::ImplItem` (a function / type / const
-/// inside an impl block) and harvest its named type references.
-pub(crate) fn collect_named_types_from_impl_item(
-    item: &verum_ast::decl::ImplItem,
-    out: &mut std::collections::HashSet<Text>,
-) {
-    use verum_ast::decl::ImplItemKind;
-    match &item.kind {
-        ImplItemKind::Function(f) => {
-            for p in f.params.iter() {
-                if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                    collect_named_types_from_ty(ty, out);
-                }
-            }
-            if let Some(rt) = f.return_type.as_ref() {
-                collect_named_types_from_ty(rt, out);
+        TypeDeclBody::Tuple(types) | TypeDeclBody::SigmaTuple(types) => {
+            for ty in types {
+                collect_named_types_from_ty(ty, bound, out);
             }
         }
         _ => {}
     }
-}
-
-pub(crate) fn collect_named_types_from_impl_kind(
-    kind: &verum_ast::decl::ImplKind,
-    out: &mut std::collections::HashSet<Text>,
-) {
-    use verum_ast::decl::ImplKind;
-    match kind {
-        ImplKind::Inherent(ty) => {
-            collect_named_types_from_ty(ty, out);
-        }
-        ImplKind::Protocol {
-            protocol,
-            for_type,
-            ..
-        } => {
-            if let Some(ident) = protocol.as_ident() {
-                out.insert(ident.name.clone());
-            }
-            collect_named_types_from_ty(for_type, out);
-        }
-    }
-}
-
-pub(crate) fn collect_named_types_from_function_body(
-    _body: &verum_ast::FunctionBody,
-    _out: &mut std::collections::HashSet<Text>,
-) {
-    // Function body harvest is intentionally NOT recursed into for
-    // the V0 lazy pre-pass — function-body type references go
-    // through the bare `ast_to_type` path which falls back to
-    // `Type::Named` opaque on miss, and then through the path
-    // resolution in expression typechecking.  Adding deep body
-    // walking here would re-introduce most of the eager-load cost.
-    //
-    // Real-world scripts: function signatures + record/variant
-    // fields cover ~95% of stdlib type references; body-only
-    // references (e.g., a transient `let x: Maybe<Int> = ...`
-    // inside a function) are picked up by the lookup-on-miss
-    // fallback at typecheck time.
 }
 
 thread_local! {

@@ -41,7 +41,7 @@ use super::{
     MAX_INFERENCE_DEPTH,
     read_param_classification,
     collect_inline_mount_reexports_recursive, has_declassify_attr_on_function,
-    collect_named_types_from_item, parse_descriptor_type_string,
+    collect_named_types_from_module, parse_descriptor_type_string,
     register_variant_signature_for_lazy,
 };
 #[allow(unused_imports)]
@@ -1222,11 +1222,8 @@ impl TypeChecker {
         if matches!(self.core_metadata, Maybe::None) {
             return;
         }
-        let mut needed: std::collections::HashSet<Text> =
-            std::collections::HashSet::new();
-        for item in module.items.iter() {
-            collect_named_types_from_item(item, &mut needed);
-        }
+        let mut needed = verum_common::Set::new();
+        collect_named_types_from_module(module, &mut needed);
         // Drain the set into the registration loop.  Each `ensure`
         // call may register additional dependencies (variant payload
         // types, field types, super-protocols) that were transitively
