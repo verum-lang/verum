@@ -1,10 +1,12 @@
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { searchKeymap, highlightSelectionMatches, searchPanelOpen, closeSearchPanel, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery } from '@codemirror/search';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching, indentOnInput } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
+import { translations } from './translations';
+import { currentLocale, m, t } from './i18n';
 
 const keywords = new Set('let fn is type implement mount module cog pub public return if else match for while loop break continue async await spawn select using provide with mut const pure unsafe where theorem lemma axiom proof by forall exists invariant requires ensures decreases'.split(' '));
 // Lexical coloring only. Compiler diagnostics and semantic claims come from Verum.
@@ -46,6 +48,15 @@ const verum = StreamLanguage.define({
 });
 
 const theme = new Compartment();
+const language = new Compartment();
+function editorLanguage() {
+  const phrases = currentLocale() === 'ru' ? {
+    ...translations,
+    'replaced match on line $': translations['replaced match on line {line}'].replace('{line}', '$'),
+    'replaced $ matches': translations['replaced {count} matches'].replace('{count}', '$'),
+  } : {};
+  return [EditorState.phrases.of(phrases), EditorView.contentAttributes.of({ 'aria-label': t(m('Verum source code')), spellcheck: 'false' })];
+}
 function editorTheme(dark: boolean) {
   return [EditorView.theme({
     '&': { color: 'var(--text)', backgroundColor: 'var(--editor)' },
@@ -72,11 +83,11 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
       autocompletion({ override: [context => {
         const word = context.matchBefore(/[\p{L}_][\p{L}\p{N}_]*/u);
         if (!word || (!context.explicit && word.from === word.to)) return null;
-        return { from: word.from, options: [...keywords].map(label => ({ label, type: 'keyword', detail: 'Verum keyword' })) };
+        return { from: word.from, options: [...keywords].map(label => ({ label, type: 'keyword', detail: t(m('Verum keyword')) })) };
       }] }),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, ...completionKeymap]),
       EditorState.tabSize.of(4),
-      EditorView.contentAttributes.of({ 'aria-label': 'Verum source code', spellcheck: 'false' }),
+      language.of(editorLanguage()),
       theme.of(editorTheme(document.documentElement.dataset.theme === 'dark')),
       EditorView.updateListener.of(update => {
         if (update.docChanged) onChange(update.state.doc.toString());
@@ -96,5 +107,26 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
       view.setState(stateFor(source)); onSelection(1, 1);
     },
     theme(dark: boolean) { view.dispatch({ effects: theme.reconfigure(editorTheme(dark)) }); },
+    language() {
+      const searchOpen = searchPanelOpen(view.state), focus = document.activeElement;
+      const searchFocused = focus instanceof HTMLElement && !!focus.closest('.cm-search');
+      const fieldName = focus instanceof HTMLInputElement ? focus.name : null;
+      if (searchOpen) {
+        const field = (name: string) => view.dom.querySelector<HTMLInputElement>(`.cm-search input[name="${name}"]`);
+        const query = getSearchQuery(view.state);
+        view.dispatch({ effects: setSearchQuery.of(new SearchQuery({
+          ...query, search: field('search')?.value ?? query.search, replace: field('replace')?.value ?? query.replace,
+          caseSensitive: field('case')?.checked ?? query.caseSensitive,
+          regexp: field('re')?.checked ?? query.regexp, wholeWord: field('word')?.checked ?? query.wholeWord,
+        })) });
+        closeSearchPanel(view);
+      }
+      view.dispatch({ effects: language.reconfigure(editorLanguage()) });
+      if (searchOpen) {
+        openSearchPanel(view);
+        if (searchFocused && fieldName) view.dom.querySelector<HTMLInputElement>(`.cm-search input[name="${fieldName}"]`)?.focus();
+        else if (focus instanceof HTMLElement) focus.focus({ preventScroll: true });
+      }
+    },
   };
 }

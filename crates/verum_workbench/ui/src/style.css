@@ -215,6 +215,7 @@ kbd {
   gap: 10px;
   align-items: center;
 }
+.language-switch { font-size: 11px; padding: 4px 6px; max-width: 95px; }
 .connection {
   display: flex;
   gap: 6px;
@@ -583,6 +584,7 @@ kbd {
   padding: 0 var(--gutter);
   border-bottom: 1px solid var(--subtle-border);
 }
+#run-settings svg { display: none; }
 .execution-settings {
   position: absolute;
   top: calc(var(--pane-heading-height) + 48px);
@@ -700,6 +702,8 @@ kbd {
   border-right: 1px solid var(--border);
   padding: 6px;
 }
+.history .history-row { flex-wrap: wrap; }
+.history .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .history:empty {
   display: none;
 }
@@ -1302,6 +1306,9 @@ a {
   }
 }
 @media (max-width: 400px) {
+  #run-settings span { display: none; }
+  #run-settings svg { display: block; }
+  .topbar .connection { font-size: 0; gap: 0; }
   .editor-toolbar .button { padding-inline: 9px; }
   .brand-divider,
   .brand > span:last-child {

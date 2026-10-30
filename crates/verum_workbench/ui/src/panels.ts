@@ -1,4 +1,5 @@
 import { clamp, layoutLimits, readLayout, resolveLayout, type Panel, type Pane } from './layout';
+import { m, setAttribute } from './i18n';
 
 export function installPanels(measureEditor: () => void) {
   const element = (id: string) => document.getElementById(id)!;
@@ -39,10 +40,10 @@ export function installPanels(measureEditor: () => void) {
       element(`${panel}-body`).hidden = collapsed;
       if (panel !== 'results') element(`${panel}-rail`).hidden = !collapsed;
       for (const toggle of document.querySelectorAll<HTMLElement>(`[data-toggle-panel="${panel}"]`)) {
-        const name = panel === 'files' ? 'explorer' : panel === 'agent' ? 'collaborator' : 'results';
-        const label = `${collapsed ? 'Expand' : 'Collapse'} ${name}`;
+        const labels = { files: ['Expand explorer', 'Collapse explorer'], agent: ['Expand collaborator', 'Collapse collaborator'], results: ['Expand results', 'Collapse results'] } as const;
+        const label = m(labels[panel][collapsed ? 0 : 1]);
         toggle.setAttribute('aria-expanded', String(!collapsed));
-        toggle.setAttribute('aria-label', label); toggle.title = label;
+        setAttribute(toggle, 'aria-label', label); setAttribute(toggle, 'title', label);
       }
       const separator = element(`${panel}-divider`);
       separator.setAttribute('aria-valuemin', String(collapsed ? layoutLimits.rail : layoutLimits[panel].min));
@@ -53,10 +54,12 @@ export function installPanels(measureEditor: () => void) {
       separator.tabIndex = disabled ? -1 : 0;
       if (collapsed && focused === panel) {
         element(panel === 'results' ? 'toggle-results' : `${panel}-restore`).focus();
+      } else if (!next.mobile && !collapsed && focused === panel && document.activeElement?.matches('.rail-restore')) {
+        element(`toggle-${panel}`).focus();
       }
     }
     if (resultsOnly && focused === 'editor') element('results-pane').focus();
-    if (enteringMobile && focused && document.activeElement?.matches('.divider')) element(`${focused}-pane`).focus();
+    if (enteringMobile && focused && document.activeElement?.matches('.divider,.panel-toggle,.rail-restore')) element(`${focused}-pane`).focus();
     measureEditor();
   }
   function show(pane: Pane) {
