@@ -83,3 +83,4 @@ import VerumExternalReplay.BinaryPartitionKT
 import VerumExternalReplay.SharedUpdates
 import VerumExternalReplay.AdditiveTraversal
 import VerumExternalReplay.RectangularNames
+import VerumExternalReplay.SealedAppend
