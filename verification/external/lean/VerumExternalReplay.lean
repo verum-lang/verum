@@ -86,3 +86,4 @@ import VerumExternalReplay.RectangularNames
 import VerumExternalReplay.SealedAppend
 import VerumExternalReplay.ObservableLasso
 import VerumExternalReplay.ExactCardinality
+import VerumExternalReplay.CanonicalProduct
