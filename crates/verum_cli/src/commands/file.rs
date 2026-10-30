@@ -352,26 +352,8 @@ pub fn run_with_tier_and_flags(
 
     match tier_num {
         0 => {
-            // Tier 0: Direct interpretation via pipeline.
-            //
-
-            // For script-shaped sources (shebang at byte 0 or an inline
-            // `// /// script` frontmatter block) the entry path runs
-            // through `run_script_interpreted` which adds:
-            //
-
-            //  • frontmatter validation (compiler version constraint
-            //  against the running build),
-            //  • permission resolution (frontmatter ∪ CLI flags),
-            //  • persistent VBC cache (lookup-skip-compile on hit;
-            //  compile + serialise + store on miss),
-            //  • lockfile placeholder (populated as
-            //  dependency resolution lands).
-            //
-
-            // Plain `.vr` files (no shebang, no frontmatter) take the
-            // legacy path that just runs the pipeline — no cache, no
-            // ceremony, identical behaviour to before.
+            // All sources share script-context validation, explicit permission
+            // selection and the same source/compiler/policy cache identity.
             let options = CompilerOptions {
                 input: input.clone(),
                 verify_mode: if skip_verify {
@@ -384,21 +366,6 @@ pub fn run_with_tier_and_flags(
                 ..Default::default()
             };
 
-            // Unify on `run_script_interpreted` regardless of whether
-            // the source carries a shebang or `// /// script`
-            // frontmatter. The function gracefully degrades when the
-            // frontmatter is absent (no version check, no permission
-            // policy installation, no lockfile capture) — the pieces
-            // it adds over the legacy plain path that ALWAYS apply
-            // are the persistent VBC cache (lookup-skip-compile on
-            // hit; compile + serialise + store on miss) and the
-            // ScriptContext-driven cache key (source hash + compiler
-            // version + flags). Pre-fix, plain `.vr` files hit a
-            // separate cache-disabled branch and paid the full
-            // stdlib-recompile cost on every invocation (~18s for
-            // typical script-mode runs); post-fix the cache is
-            // populated on first run and subsequent runs are
-            // sub-second.
             run_script_interpreted(&input, options, args, timings, permission_flags)?;
         }
         1 => {
@@ -424,9 +391,7 @@ pub fn run_with_tier_and_flags(
             // the cached binary directly — sub-millisecond cold
             // start. On miss, run the LLVM pipeline below and
             // store the result.
-            let mut aot_permission_policy: Option<verum_codegen::llvm::AotPermissionPolicy> = None;
-            let aot_cache_key: Option<crate::script::cache::CacheKey> = if is_script_shaped(&input)
-            {
+            let (aot_permission_policy, aot_cache_key) = {
                 use crate::script::context::{ScriptContext, ScriptContextOptions};
                 let ctx = ScriptContext::from_path(
                     &input,
@@ -456,20 +421,23 @@ pub fn run_with_tier_and_flags(
                         );
                     }
                 }
-                aot_permission_policy = build_aot_permission_policy(&ctx);
+                let aot_permission_policy = build_aot_permission_policy(&ctx);
                 if aot_permission_policy.is_some() {
                     ui::detail(
                         "Permissions",
                         &format!("{} grants baked into AOT binary", ctx.permissions.len()),
                     );
                 }
-                if let Some(cached) = lookup_aot_binary(ctx.cache_key) {
-                    ui::status("Running", &format!("`{}` (cached AOT)", cached.display()));
-                    return exec_native_binary(&cached, &args);
-                }
-                Some(ctx.cache_key)
-            } else {
-                None
+                let cache_key = if is_script_shaped(&input) {
+                    if let Some(cached) = lookup_aot_binary(ctx.cache_key) {
+                        ui::status("Running", &format!("`{}` (cached AOT)", cached.display()));
+                        return exec_native_binary(&cached, &args);
+                    }
+                    Some(ctx.cache_key)
+                } else {
+                    None
+                };
+                (aot_permission_policy, cache_key)
             };
 
             let options = CompilerOptions {
@@ -784,18 +752,6 @@ fn run_script_interpreted(
             "VERUM_CORE_PATH is inert for `verum run` (embedded stdlib stays              authoritative); use VERUM_STDLIB_PATH=<core dir> to override",
         );
     }
-    if permission_flags.allow_all {
-        extra_flags.push("perm=allow-all".to_string());
-    }
-    if permission_flags.deny_all {
-        extra_flags.push("perm=deny-all".to_string());
-    }
-    if !permission_flags.allow.is_empty() {
-        let mut sorted = permission_flags.allow.clone();
-        sorted.sort();
-        extra_flags.push(format!("perm-allow=[{}]", sorted.join(",")));
-    }
-
     // 1. Build the ScriptContext: read source, hash, extract+validate
     //  frontmatter, merge CLI permission flags, compute cache key.
     let ctx_opts = ScriptContextOptions {
@@ -828,12 +784,9 @@ fn run_script_interpreted(
         }
     }
 
-    // 3. Permission policy. Built only when the script's frontmatter
-    //  EXPLICITLY declares a `permissions = [...]` field. Plain
-    //  scripts with no permissions block keep the interpreter
-    //  router's default allow-all behaviour — explicit opt-in to
-    //  sandboxing, matching Deno's `--allow-*` philosophy without
-    //  breaking existing untouched scripts.
+    // 3. Install the context's explicit policy, including empty grants.
+    // Sources with neither permission declarations nor flags keep the legacy
+    // unrestricted mode.
     let permission_policy = build_script_permission_policy(&ctx);
     if permission_policy.is_some() {
         ui::detail(
@@ -1615,10 +1568,8 @@ fn cli_kind_to_router_scope(
 /// lowerer can bake into the generated binary at every
 /// `PermissionAssert` site.
 ///
-/// `None` is returned for scripts whose `ctx.permissions` is empty —
-/// the trusted-application path. The lowerer treats `None` as
-/// allow-all (no-op every gate), matching the interpreter's default
-/// when no script policy is wired.
+/// `None` is returned only when ScriptContext selected legacy unrestricted
+/// execution. Explicit empty grants install a policy in both execution tiers.
 ///
 /// The mapping mirrors `build_script_permission_policy` exactly so
 /// the two execution tiers agree on which scope/target combinations
@@ -1637,9 +1588,7 @@ fn build_aot_permission_policy(
     use verum_codegen::llvm::AotPermissionPolicy;
     use verum_vbc::interpreter::permission::PermissionScope;
 
-    if ctx.permissions.is_empty() {
-        return None;
-    }
+    let permissions = ctx.enforced_permissions()?;
 
     let mut policy = AotPermissionPolicy::default();
 
@@ -1654,7 +1603,7 @@ fn build_aot_permission_policy(
         .always_allow
         .insert(PermissionScope::Cryptography.to_wire_tag());
 
-    for grant in iterate_grants(&ctx.permissions) {
+    for grant in iterate_grants(permissions) {
         let Some(scope) = cli_kind_to_router_scope(grant.kind) else {
             continue;
         };
@@ -1680,15 +1629,9 @@ fn build_script_permission_policy(
     use verum_compiler::session::ScriptPermissionPolicy;
     use verum_vbc::interpreter::permission::{PermissionDecision, PermissionScope};
 
-    // Opt-in to sandboxing — install a policy when EITHER the
-    // frontmatter explicitly declared `permissions = [...]` OR the
-    // user passed any `--allow*` / `--deny-all` CLI flag (visible
-    // to us indirectly via a non-empty `ctx.permissions`). Plain
-    // scripts with neither signal keep the router's default
-    // allow-all so untouched scripts continue to work unchanged.
-    if ctx.permissions.is_empty() {
-        return None;
-    }
+    // Mode is resolved once by ScriptContext. An explicit empty grant set
+    // installs a denying policy rather than restoring ambient authority.
+    let permissions = ctx.enforced_permissions()?;
 
     use crate::script::permissions::PermissionScope as CliScope;
     use std::collections::HashSet;
@@ -1705,8 +1648,7 @@ fn build_script_permission_policy(
     // O(1) at check time (one HashSet lookup), bounded by
     // grant count at build time. No allocation in the hot path.
     let mut allow_set: HashSet<(PermissionScope, u64)> = HashSet::new();
-    let perms_snapshot = ctx.permissions.clone();
-    for grant in iterate_grants(&perms_snapshot) {
+    for grant in iterate_grants(permissions) {
         let Some(scope) = cli_kind_to_router_scope(grant.kind) else {
             continue;
         };
@@ -2159,3 +2101,7 @@ mod script_dep_tests {
         assert!(s.chars().all(|c| c == 'a'));
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/file/script_permission_policy.rs"]
+mod script_permission_policy_tests;

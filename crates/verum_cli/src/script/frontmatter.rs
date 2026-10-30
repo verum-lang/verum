@@ -71,9 +71,10 @@ pub struct Frontmatter {
     #[serde(default)]
     pub dependencies: Vec<DepSpec>,
 
-    /// Permission scopes (Deno-style). Each is a string like `"net=api.x:443"`.
-    #[serde(default)]
-    pub permissions: Vec<String>,
+    /// Permission scopes. None preserves legacy execution; Some(empty) explicitly
+    /// requests a policy with no grants. Each entry is like `"net=api.x:443"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
 
     /// Language edition (informational; reserved for future use).
     #[serde(default)]
@@ -130,8 +131,12 @@ pub struct ProfileOverrides {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RunOverrides {
-    #[serde(default, rename = "default-permissions")]
-    pub default_permissions: Vec<String>,
+    #[serde(
+        default,
+        rename = "default-permissions",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_permissions: Option<Vec<String>>,
 }
 
 /// Successful extraction result: the parsed frontmatter plus the byte range it
@@ -436,7 +441,7 @@ pub fn validate(fm: &Frontmatter) -> Result<(), FrontmatterError> {
             }
         }
     }
-    for perm in &fm.permissions {
+    for perm in fm.permissions.iter().flatten() {
         validate_permission_scope(perm).map_err(|reason| {
             FrontmatterError::InvalidPermissionScope {
                 value: perm.clone(),
@@ -445,7 +450,7 @@ pub fn validate(fm: &Frontmatter) -> Result<(), FrontmatterError> {
         })?;
     }
     if let Some(run) = &fm.run {
-        for perm in &run.default_permissions {
+        for perm in run.default_permissions.iter().flatten() {
             validate_permission_scope(perm).map_err(|reason| {
                 FrontmatterError::InvalidPermissionScope {
                     value: perm.clone(),
@@ -677,7 +682,7 @@ mod tests {
         let e = extract(src).unwrap().expect("frontmatter must be detected");
         assert_eq!(e.frontmatter.verum, None);
         assert!(e.frontmatter.dependencies.is_empty());
-        assert!(e.frontmatter.permissions.is_empty());
+        assert!(e.frontmatter.permissions.is_none());
     }
 
     #[test]
@@ -711,15 +716,18 @@ print("hello");
             DepSpec::Short(s) => assert_eq!(s, "json@1"),
             DepSpec::Long(_) => panic!("expected short form"),
         }
-        assert_eq!(fm.permissions.len(), 2);
-        assert_eq!(fm.permissions[0], "net=api.example.com:443");
+        assert_eq!(fm.permissions.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            fm.permissions.as_ref().unwrap()[0],
+            "net=api.example.com:443"
+        );
         assert_eq!(fm.edition.as_deref(), Some("2026"));
         let p = fm.profile.as_ref().unwrap();
         assert_eq!(p.tier, Some(0));
         assert_eq!(p.verify.as_deref(), Some("off"));
         assert_eq!(p.opt_level, Some(2));
         let r = fm.run.as_ref().unwrap();
-        assert_eq!(r.default_permissions, vec!["fs:cwd"]);
+        assert_eq!(r.default_permissions, Some(vec!["fs:cwd".into()]));
     }
 
     #[test]
@@ -1102,7 +1110,10 @@ print("hello");
     fn permissions_array_only() {
         let src = "// /// script\n// permissions = [\"net\", \"read=./x\"]\n// ///\n";
         let e = extract(src).unwrap().unwrap();
-        assert_eq!(e.frontmatter.permissions, vec!["net", "read=./x"]);
+        assert_eq!(
+            e.frontmatter.permissions,
+            Some(vec!["net".into(), "read=./x".into()])
+        );
     }
 
     #[test]

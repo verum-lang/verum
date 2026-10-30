@@ -107,7 +107,8 @@ impl std::error::Error for BuildError {}
 /// declared sources. Stops at the first parse error.
 ///
 /// `frontmatter == None` means the script had no inline metadata —
-/// equivalent to a frontmatter with empty `permissions` and no `[run]`.
+/// Its grant set is empty, but ScriptContext separately preserves whether a
+/// policy was requested: absence differs from explicit empty permissions.
 pub fn build_permission_set(
     frontmatter: Option<&Frontmatter>,
     flags: &PermissionFlags,
@@ -124,7 +125,7 @@ pub fn build_permission_set(
 
     let mut grants: Vec<Permission> = Vec::new();
     if let Some(fm) = frontmatter {
-        for raw in &fm.permissions {
+        for raw in fm.permissions.iter().flatten() {
             let perm =
                 Permission::parse(raw).map_err(|source| BuildError::InvalidFrontmatterScope {
                     value: raw.clone(),
@@ -133,7 +134,7 @@ pub fn build_permission_set(
             grants.push(perm);
         }
         if let Some(run) = &fm.run {
-            for raw in &run.default_permissions {
+            for raw in run.default_permissions.iter().flatten() {
                 let perm = Permission::parse(raw).map_err(|source| {
                     BuildError::InvalidFrontmatterRunScope {
                         value: raw.clone(),
@@ -188,14 +189,14 @@ mod tests {
             raw_toml: String::new(),
             verum: None,
             dependencies: Vec::new(),
-            permissions: permissions.into_iter().map(String::from).collect(),
+            permissions: Some(permissions.into_iter().map(String::from).collect()),
             edition: None,
             profile: None,
             run: if run_perms.is_empty() {
                 None
             } else {
                 Some(RunOverrides {
-                    default_permissions: run_perms.into_iter().map(String::from).collect(),
+                    default_permissions: Some(run_perms.into_iter().map(String::from).collect()),
                 })
             },
         }

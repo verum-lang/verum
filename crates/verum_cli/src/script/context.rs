@@ -67,6 +67,9 @@ pub struct ScriptContext {
     /// or the [`--allow-all`/`--deny-all`] override result.
     pub permissions: PermissionSet,
 
+    /// Distinguishes legacy unrestricted execution from an explicit empty policy.
+    permission_policy_requested: bool,
+
     /// Cache key for this (source, compiler, extra-flags) tuple.
     pub cache_key: CacheKey,
 
@@ -170,7 +173,29 @@ impl ScriptContext {
         };
         let permissions = build_permission_set(frontmatter.as_ref(), &opts.flags)?;
 
-        let extra_refs: Vec<&str> = opts.extra_cache_flags.iter().map(|s| s.as_str()).collect();
+        let permission_policy_requested = opts.flags.allow_all
+            || opts.flags.deny_all
+            || !opts.flags.allow.is_empty()
+            || frontmatter.as_ref().is_some_and(|fm| {
+                fm.permissions.is_some()
+                    || fm.run.as_ref().is_some_and(|run| {
+                        run.default_permissions.is_some()
+                    })
+            });
+        // Native caches contain baked permissions. Even an explicit empty policy
+        // must have a different identity from the legacy unrestricted execution.
+        let mut cache_flags = opts.extra_cache_flags.clone();
+        cache_flags.push(format!("permission-policy-v1={permission_policy_requested}"));
+        cache_flags.push(format!(
+            "allow-all={};deny-all={}",
+            opts.flags.allow_all, opts.flags.deny_all
+        ));
+        let mut grants = opts.flags.allow.clone();
+        grants.sort();
+        for grant in grants {
+            cache_flags.push(format!("allow={grant}"));
+        }
+        let extra_refs: Vec<&str> = cache_flags.iter().map(|s| s.as_str()).collect();
         let cache_key = key_for(&source, &opts.compiler_version, &extra_refs);
 
         Ok(Self {
@@ -179,9 +204,16 @@ impl ScriptContext {
             source_hash,
             frontmatter,
             permissions,
+            permission_policy_requested,
             cache_key,
             compiler_version: opts.compiler_version.clone(),
         })
+    }
+
+    /// The one policy-selection boundary for interpreter and native execution.
+    /// `Some(empty)` is enforced denial; `None` is the legacy unrestricted mode.
+    pub fn enforced_permissions(&self) -> Option<&PermissionSet> {
+        self.permission_policy_requested.then_some(&self.permissions)
     }
 
     /// Conventional sidecar lockfile path: `<script>.lock` next to the
@@ -350,7 +382,10 @@ mod tests {
         let path = write_script(tmp.path(), "x.vr", body);
         let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         assert!(ctx.frontmatter.is_some());
-        assert_eq!(ctx.frontmatter.as_ref().unwrap().permissions.len(), 1);
+        assert_eq!(
+            ctx.frontmatter.as_ref().unwrap().permissions.as_ref().unwrap().len(),
+            1
+        );
         assert!(
             ctx.permissions
                 .check(&PermissionRequest::Net {
