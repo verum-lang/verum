@@ -30,6 +30,7 @@ members = [
     "crates/verum_test_support",
     "crates/verum_lsp",
     "crates/verum_interactive",
+    "crates/verum_workbench",
     # DAP (Debug Adapter Protocol) server
     "crates/verum_dap",
     # VBC (Verum Bytecode) - unified IR for interpreter/JIT/AOT

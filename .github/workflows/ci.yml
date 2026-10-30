@@ -17,6 +17,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  studio-ui:
+    name: Studio UI and embedded asset consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/verum_workbench/ui/package-lock.json
+      - run: npm ci
+        working-directory: crates/verum_workbench/ui
+      - run: npm run check && npm test && npm run build
+        working-directory: crates/verum_workbench/ui
+      - run: git diff --exit-code -- crates/verum_workbench/ui/dist
+
   # ---------------------------------------------------------------------------
   # Job 0: Verum-syntax gate. Pure Python, no build — the fastest merge blocker.
   # grammar/verum.ebnf knows only `.` for paths; `::` is a Rust porting artefact
@@ -328,6 +344,7 @@ jobs:
           -p verum_cbgr -p verum_modules
           -p verum_diagnostics -p verum_error -p verum_protocol_types
           -p verum_fast_parser
+          -p verum_workbench
 
       # T1774: this targeted kernel boundary is independent of the legacy
       # architectural-attestation tests excluded from the broad pure-tier job.

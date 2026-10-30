@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Verum Studio</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#editor-pane">Skip to editor</a>
+<div id="app" data-pane="editor">
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Verum Studio"><span class="brand-mark" aria-hidden="true">V</span><strong>verum</strong><span class="brand-divider"></span><span>Studio</span></a>
+    <div class="workspace-label" id="workspace-root" title="Workspace">Local workspace</div>
+    <div class="topbar-end"><span class="connection" id="connection"><span class="status-dot"></span>Connecting</span><button id="help" class="icon-button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">?</button><button id="theme" class="icon-button" aria-label="Change color theme" title="Color theme">◐</button></div>
+  </header>
+  <div id="notice" class="notice" hidden role="alert"><span id="notice-text"></span><button id="notice-close" aria-label="Dismiss notification">×</button></div>
+  <main class="workspace">
+    <aside id="files-pane" class="files pane" aria-label="Workspace files">
+      <div class="pane-heading"><h2>Explorer</h2><div class="button-row"><button id="refresh-files" class="icon-button" title="Refresh files" aria-label="Refresh files">↻</button><button id="new-file" class="icon-button" title="New Verum file" aria-label="New Verum file">+</button></div></div>
+      <label class="file-search"><span class="sr-only">Filter files</span><input id="file-filter" type="search" placeholder="Find a file…" autocomplete="off"></label>
+      <div id="file-list" class="file-list" role="list" aria-label="Verum source files"><p class="muted empty-note">Loading workspace…</p></div>
+      <section class="learn-section" aria-labelledby="learn-title"><span class="eyebrow">Start exploring</span><h3 id="learn-title">A small idea. Real evidence.</h3><p>Run Verum, inspect its output, and check a proof against its exact source.</p><button class="lesson" id="lesson-script"><span class="lesson-symbol">λ</span><span><strong>Your first experiment</strong><small>Source → execution → output</small></span><span aria-hidden="true">↗</span></button><button class="lesson" id="lesson-proof"><span class="lesson-symbol">∀</span><span><strong>A proof you can inspect</strong><small>Identity · logical proof terms</small></span><span aria-hidden="true">↗</span></button></section>
+      <div class="sidebar-footer"><span class="status-dot"></span> Native tools. Local workspace.</div>
+    </aside>
+    <div class="divider column-divider" id="files-divider" role="separator" tabindex="0" aria-label="Resize explorer" aria-orientation="vertical" aria-valuemin="170" aria-valuemax="380" aria-valuenow="230"></div>
+    <section class="centre">
+      <section id="editor-pane" class="editor-pane pane" tabindex="-1" aria-label="Verum editor">
+        <div class="editor-tabbar"><div class="file-tab"><span class="file-icon">vr</span><span id="current-path">experiment.vr</span><span id="dirty-marker" title="Unsaved changes" aria-label="Unsaved changes">●</span></div><div class="button-row"><button id="reload-source" class="quiet-button" title="Review the saved file before reloading" disabled>Reload</button><button id="save" class="quiet-button" title="Save · ⌘/Ctrl S">Save</button></div></div>
+        <div class="editor-toolbar"><div class="button-row"><button id="run" class="button primary" title="Run locally · ⌘/Ctrl Enter"><span aria-hidden="true">▶</span> Run</button><button id="check" class="button" title="Type-check a Verum module · ⌘/Ctrl Shift Enter">Check module</button><button id="prove" class="button" title="Check a logical declaration">Prove</button></div><button id="run-settings" class="quiet-button" aria-expanded="false" aria-controls="execution-settings">Options</button></div>
+        <div id="execution-settings" class="execution-settings" hidden><label>Proof declaration<input id="declaration" value="identity" spellcheck="false" placeholder="identity"></label><label>Time budget (seconds)<input id="timeout" type="number" min="1" max="300" value="60"></label><p>Proof checking certifies the selected logical declaration. It does not certify all runtime behavior.</p><button class="quiet-button" disabled title="Runtime suspension and stepping are not implemented yet">Debug stepping · unavailable</button></div>
+        <div id="editor" class="editor"></div>
+        <div class="editor-status"><span id="cursor-position">Ln 1, Col 1</span><span id="source-status">Unsaved experiment</span><span>Verum <span class="status-divider">·</span> UTF-8</span></div>
+      </section>
+      <div class="divider row-divider" id="results-divider" role="separator" tabindex="0" aria-label="Resize results" aria-orientation="horizontal" aria-valuemin="140" aria-valuemax="600" aria-valuenow="270"></div>
+      <section id="results-pane" class="results pane" aria-label="Execution and proof results">
+        <div class="pane-heading"><h2>Results <span id="result-count" class="count">0</span></h2><span id="running-count" class="muted"></span></div>
+        <div class="result-layout"><div id="history" class="history" aria-label="Operation history"></div><div id="result-detail" class="result-detail"><div class="empty-state"><span class="empty-symbol" aria-hidden="true">⌁</span><h3>Make an idea executable</h3><p>Run, check or prove the current source.<br>Every result stays linked to the version that produced it.</p><kbd>⌘ / Ctrl + Enter</kbd></div></div></div>
+      </section>
+    </section>
+    <div class="divider column-divider" id="agent-divider" role="separator" tabindex="0" aria-label="Resize agent panel" aria-orientation="vertical" aria-valuemin="290" aria-valuemax="600" aria-valuenow="370"></div>
+    <aside id="agent-pane" class="agent pane" aria-label="Agent collaborator">
+      <div class="pane-heading"><h2><span class="agent-spark" aria-hidden="true">✳</span> Collaborator</h2><button id="new-thread" class="icon-button" aria-label="Start a new conversation" title="New conversation" disabled>+</button></div>
+      <div class="agent-connection"><div><strong>Codex</strong><span id="agent-account" class="muted">Your account, your workspace</span></div><button id="agent-connect" class="button">Connect</button></div>
+      <div id="agent-controls" class="agent-controls" hidden><label class="sr-only" for="agent-model">Agent model</label><select id="agent-model"><option value="">Account default model</option></select><button id="agent-login" class="quiet-button">Sign in</button></div>
+      <div id="agent-messages" class="agent-messages" role="log" aria-label="Agent conversation" aria-live="polite" aria-relevant="additions text"><div id="agent-welcome" class="agent-welcome"><span class="eyebrow">Think together. Check independently.</span><h3>A collaborator at your desk.</h3><p>Explore a language feature, improve an experiment, or work through a theorem.</p><p>Review proposed edits and execution requests here. The compiler and proof checker supply the evidence.</p><button id="agent-suggestion" class="suggestion">Explain this source and suggest one useful experiment <span aria-hidden="true">↗</span></button></div></div>
+      <div id="agent-progress" class="agent-progress" role="status"></div>
+      <form id="agent-form" class="agent-composer"><label class="sr-only" for="agent-input">Message the agent</label><textarea id="agent-input" placeholder="Explore an idea with Codex…" rows="3" disabled></textarea><div class="composer-footer"><span title="The current editor source is included with each message">↳ <span id="agent-context">experiment.vr</span></span><div class="button-row"><button id="agent-stop" class="quiet-button" type="button" hidden>Stop</button><button id="agent-send" class="button primary" type="submit" disabled>Send ↑</button></div></div></form>
+      <details class="event-log"><summary>Session events <span id="event-count" class="count">0</span></summary><pre id="event-content"></pre></details>
+    </aside>
+  </main>
+  <nav class="mobile-nav" aria-label="Workbench panes"><button data-pane="files" aria-controls="files-pane">Files</button><button data-pane="editor" aria-controls="editor-pane" aria-current="page">Editor</button><button data-pane="results" aria-controls="results-pane">Results <span id="mobile-result-count"></span></button><button data-pane="agent" aria-controls="agent-pane">Agent <span id="approval-count"></span></button></nav>
+</div>
+<dialog id="dialog"><form method="dialog"><h2 id="dialog-title"></h2><div id="dialog-body"></div><div id="dialog-actions" class="dialog-actions"></div></form></dialog>
+<div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+</body>
+</html>

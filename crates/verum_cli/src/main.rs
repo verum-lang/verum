@@ -789,6 +789,23 @@ enum Commands {
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
+    /// Open Verum Studio, the local graphical language workspace
+    #[command(display_order = 700, visible_alias = "playground")]
+    Studio {
+        /// Workspace directory
+        #[clap(default_value = ".")]
+        workspace: PathBuf,
+        /// Local port (zero selects an available port)
+        #[clap(long, default_value_t = 0)]
+        port: u16,
+        /// Codex CLI with app-server support
+        #[clap(long, default_value = "codex")]
+        codex: PathBuf,
+        /// Isolated Verum source proof worker
+        #[clap(long, default_value = "verum-source-replay")]
+        proof: PathBuf,
+    },
+
     /// Start interactive notebook (Playbook). `verum play` is the
     /// same door with the newcomer's name — one entry command.
     #[command(display_order = 701, visible_alias = "play")]
@@ -3625,6 +3642,13 @@ fn run_command(cli: Cli) -> Result<()> {
             feature_overrides::install(feature_overrides);
             commands::file::repl(preload.as_ref().map(|s| s.as_str()), skip_verify)
         }
+        Commands::Studio { workspace, port, codex, proof } => {
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| CliError::Custom(e.to_string()))?;
+            let verum = std::env::current_exe().map_err(|e| CliError::Custom(e.to_string()))?;
+            runtime.block_on(verum_workbench::server::serve(verum_workbench::Config {
+                workspace, port, codex, proof, verum,
+            })).map_err(|e| CliError::Custom(e.to_string()))
+        },
         Commands::Playbook {
             file,
             tier,

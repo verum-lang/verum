@@ -5230,6 +5230,7 @@ dependencies = [
  "verum_types",
  "verum_vbc",
  "verum_verification",
+ "verum_workbench",
  "walkdir",
 ]
 
@@ -5860,6 +5861,26 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
+]
+
+[[package]]
+name = "verum_workbench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "verum_common",
 ]
 
 [[package]]

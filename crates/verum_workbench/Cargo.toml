@@ -1,0 +1,27 @@
+[package]
+name = "verum_workbench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Local graphical workspace for Verum programs and proof evidence"
+
+[dependencies]
+verum_common.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["process", "signal"] }
+hyper = { version = "1.8", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+uuid = { version = "1.19", features = ["v4"] }
+libc.workspace = true
+hex = "0.4"
+dirs = "6"
+
+[[bin]]
+name = "verum-studio"
+path = "src/main.rs"
