@@ -1,4 +1,4 @@
-import Lean
+import Std.Tactic
 
 /-! Executable exact arithmetic for finite categorical-score replay.
 Labels index a declared fixed alphabet; child identifiers denote full reading

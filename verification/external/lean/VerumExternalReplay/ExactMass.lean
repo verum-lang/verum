@@ -1,4 +1,4 @@
-import Lean
+import Std.Tactic
 
 /- Nonnegative rational model using positive natural denominators. Comparisons
    use exact cross multiplication; normalization is unnecessary for these laws.
