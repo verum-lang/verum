@@ -12,9 +12,12 @@ FALSE = '`decide_cbv` failed: the proposition evaluates to `false`'
 class IsolatedLeanTest(unittest.TestCase):
     MODULES = ()
     FIXTURES = ()
+    MEMORY_MIB = 1024
 
     @classmethod
     def setUpClass(cls):
+        if type(cls.MEMORY_MIB) is not int or not 0 < cls.MEMORY_MIB <= 2048:
+            raise ValueError('Lean test memory budget must be within 1..2048 MiB')
         # No shared build products: every run checks the captured source afresh.
         cls.directory = tempfile.TemporaryDirectory(prefix='verum-isolated-lean-')
         cls.addClassCleanup(cls.directory.cleanup)
@@ -31,14 +34,14 @@ class IsolatedLeanTest(unittest.TestCase):
         for name in modules:
             output = cls.snapshot / f'.lake/build/lib/lean/VerumExternalReplay/{name}.olean'
             output.parent.mkdir(parents=True, exist_ok=True)
-            require_success(run('lake', 'env', 'lean', '-M', '1024',
+            require_success(run('lake', 'env', 'lean', '-M', str(cls.MEMORY_MIB),
                                 '-o', str(output), f'VerumExternalReplay/{name}.lean',
                                 timeout=60, cwd=cls.snapshot))
 
     def prove(self, source, *, failure=False, expected_error=FALSE):
         path = self.snapshot / 'Check.lean'
         path.write_text(source)
-        result = run('lake', 'env', 'lean', '-M', '1024', '--json', str(path),
+        result = run('lake', 'env', 'lean', '-M', str(self.MEMORY_MIB), '--json', str(path),
                      timeout=60, cwd=self.snapshot)
         self.assertEqual(result.stderr, '')
         diagnostics = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
