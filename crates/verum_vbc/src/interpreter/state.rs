@@ -478,6 +478,10 @@ pub struct InterpreterState {
     /// Execution statistics.
     pub stats: ExecutionStats,
 
+    /// Opt-in, execution-owned CBGR dispatch observations. Never copied into
+    /// another interpreter or retained across reset.
+    pub(super) cbgr_diagnostics: Option<super::diagnostics::CbgrCapture>,
+
     /// Configuration options.
     pub config: InterpreterConfig,
 
@@ -2634,6 +2638,7 @@ impl InterpreterState {
             pending_deref_receiver: None,
             heap: Heap::with_threshold(config.max_heap_size),
             stats: ExecutionStats::default(),
+            cbgr_diagnostics: None,
             config,
             context_stack: ContextStack::new(),
             ctx_dense_slot_map: None,
@@ -3119,6 +3124,7 @@ impl InterpreterState {
     /// method cache, output buffers, nurseries, exception handlers, TLS slots)
     /// to prevent unbounded memory growth across repeated executions.
     pub fn reset(&mut self) {
+        self.cbgr_diagnostics = None;
         self.host_callable_lifetime = Arc::new(());
         self.host_call_ctx = None;
         self.script_engines.clear();

@@ -1,7 +1,7 @@
 //! CBGR (Capability-Based Generational References) instruction handlers for VBC interpreter.
 
 use super::bytecode_io::read_u8;
-use super::super::super::error::{InterpreterError, InterpreterResult};
+use super::super::super::error::{CbgrFailure, CbgrTarget, CbgrViolationKind, InterpreterError, InterpreterResult};
 use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
@@ -687,7 +687,9 @@ pub(in super::super) fn handle_deref(
                         as *const u32)
                 };
                 if flags & verum_common::cbgr::flags::FREED != 0 {
-                    return Err(InterpreterError::Panic {
+                    return Err(InterpreterError::CbgrPanic {
+                        failure: CbgrFailure { kind: CbgrViolationKind::UseAfterFree,
+                            target: CbgrTarget::Address(ptr_addr), expected: None, actual: None },
                         message: "CBGR use-after-free detected".to_string(),
                     });
                 }
@@ -1190,7 +1192,9 @@ pub(in super::super) fn handle_chk_ref(
 
             // Check if allocation has been freed
             if flags & verum_common::cbgr::flags::FREED != 0 {
-                return Err(InterpreterError::Panic {
+                return Err(InterpreterError::CbgrPanic {
+                    failure: CbgrFailure { kind: CbgrViolationKind::UseAfterFree,
+                        target: CbgrTarget::Address(ptr_addr), expected: None, actual: None },
                     message: "CBGR use-after-free: allocation has been freed".to_string(),
                 });
             }
@@ -1200,7 +1204,9 @@ pub(in super::super) fn handle_chk_ref(
                 let current_epoch = state.cbgr_epoch;
                 // Allow some drift but detect major epoch skips
                 if current_epoch.wrapping_sub(ref_epoch) > 0x1000_0000 {
-                    return Err(InterpreterError::Panic {
+                    return Err(InterpreterError::CbgrPanic {
+                        failure: CbgrFailure { kind: CbgrViolationKind::EpochExpired,
+                            target: CbgrTarget::Address(ptr_addr), expected: Some(ref_epoch), actual: Some(current_epoch) },
                         message: format!(
                             "CBGR epoch mismatch: reference epoch {}, current {}",
                             ref_epoch, current_epoch
@@ -1212,7 +1218,9 @@ pub(in super::super) fn handle_chk_ref(
             // Validate generation hasn't changed unexpectedly
             // (This would indicate the object was deallocated and reallocated)
             if generation == 0 {
-                return Err(InterpreterError::Panic {
+                return Err(InterpreterError::CbgrPanic {
+                    failure: CbgrFailure { kind: CbgrViolationKind::InvalidReference,
+                        target: CbgrTarget::Address(ptr_addr), expected: None, actual: Some(0) },
                     message: "CBGR validation failed: invalid generation (0)".to_string(),
                 });
             }

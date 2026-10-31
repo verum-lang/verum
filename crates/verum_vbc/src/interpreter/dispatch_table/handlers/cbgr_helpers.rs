@@ -663,7 +663,13 @@ pub(super) fn validate_cbgr_generation(
         // practice; divergence would need a slot bumped an exact multiple of
         // 2^22 times between borrow and use.
         if !regref_generation_matches(ref_generation, current_gen) {
-            return Err(InterpreterError::Panic {
+            return Err(InterpreterError::CbgrPanic {
+                failure: crate::interpreter::CbgrFailure {
+                    kind: crate::interpreter::CbgrViolationKind::GenerationMismatch,
+                    target: crate::interpreter::CbgrTarget::Register(abs_index),
+                    expected: Some(u64::from(ref_generation)),
+                    actual: Some(u64::from(current_gen)),
+                },
                 message: format!(
                     "CBGR use-after-free detected: expected generation {}, found {}",
                     ref_generation, current_gen

@@ -1410,7 +1410,11 @@ pub fn dispatch_loop_table_with_entry_depth(
 
         // Dispatch via table lookup - O(1) array indexing
         let handler = DISPATCH_TABLE[opcode_byte as usize];
+        let diagnostic_site = state.cbgr_dispatch_site(pc as u32, opcode_byte);
         let dispatched = handler(state);
+        if let Err(error) = &dispatched {
+            state.observe_cbgr_dispatch(diagnostic_site, error);
+        }
         // T1536: panic-class errors follow the bytecode handler stack too.
         // A synchronous nested dispatch must propagate to its Rust caller
         // before entering a handler owned by that caller's bytecode frame.

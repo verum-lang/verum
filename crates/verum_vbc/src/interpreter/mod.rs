@@ -53,6 +53,7 @@ pub(crate) mod env_flags;
 pub mod autodiff;
 mod autodiff_record;
 mod cbgr_heap;
+pub mod diagnostics;
 mod dispatch_table;
 mod error;
 pub mod gpu_simulator;
@@ -239,7 +240,7 @@ pub fn execute_table_with_args(
     dispatch_table::dispatch_loop_table_with_entry_depth(state, entry_depth)
 }
 pub use cbgr_heap::{OBJECT_META_SIZE, ObjectMeta};
-pub use error::{CbgrViolationKind, InterpreterError, InterpreterResult};
+pub use error::{CbgrFailure, CbgrTarget, CbgrViolationKind, InterpreterError, InterpreterResult};
 
 use crate::module::{FunctionId, VbcModule};
 use crate::value::Value;

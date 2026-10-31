@@ -13,6 +13,30 @@ use crate::types::TypeId;
 // capability violation (read/write/execute permission), and null dereference.
 pub use verum_common::CbgrViolationKind;
 
+/// A rejected reference may identify a VM register rather than a native
+/// address. Keeping the two distinct prevents diagnostic pointer inspection
+/// from treating a stale register index as accessible memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CbgrTarget {
+    /// Absolute VM register index carried by a rejected register reference.
+    Register(u32),
+    /// Opaque native address; recording it does not authorize dereferencing it.
+    Address(usize),
+}
+
+/// Typed facts from a rejected CBGR check, without changing its catchability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CbgrFailure {
+    /// The check that rejected the reference.
+    pub kind: CbgrViolationKind,
+    /// The reference target as represented by the failing check.
+    pub target: CbgrTarget,
+    /// Reference generation or epoch, when the check supplied one.
+    pub expected: Option<u64>,
+    /// Observed generation or epoch, when the check supplied one.
+    pub actual: Option<u64>,
+}
+
 /// Result type for interpreter operations.
 pub type InterpreterResult<T> = Result<T, InterpreterError>;
 
@@ -182,6 +206,13 @@ pub enum InterpreterError {
         kind: CbgrViolationKind,
         /// Pointer address.
         ptr: usize,
+    },
+
+    /// Structured CBGR failure retaining the existing language-panic behavior.
+    /// Fatal `CbgrViolation` errors remain a separate catchability category.
+    CbgrPanic {
+        failure: CbgrFailure,
+        message: String,
     },
 
     /// Assertion failed.
@@ -453,6 +484,7 @@ impl fmt::Display for InterpreterError {
             Self::CbgrViolation { kind, ptr } => {
                 write!(f, "CBGR violation: {:?} at {:#x}", kind, ptr)
             }
+            Self::CbgrPanic { message, .. } => write!(f, "Panic: {}", message),
             Self::LayoutMismatch {
                 type_id,
                 tag,

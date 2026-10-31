@@ -81,7 +81,7 @@ use crate::value::Value;
 /// for "what is a panic" on the Tier-0 catch path.
 pub(in super::super) fn panic_class_message(err: &InterpreterError) -> Option<String> {
     match err {
-        InterpreterError::Panic { message } => Some(message.clone()),
+        InterpreterError::Panic { message } | InterpreterError::CbgrPanic { message, .. } => Some(message.clone()),
         InterpreterError::AssertionFailed { message, .. } => Some(message.clone()),
         InterpreterError::Unreachable { .. } => Some("entered unreachable code".to_string()),
         _ => None,
