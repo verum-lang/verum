@@ -41,8 +41,9 @@ class ReadReuseTests(IsolatedLeanTest):
                  [('ReadEvidence', 'ReadEvidence.'), ('ReadReuse', 'ReadReuse.')]
                  for name in re.findall(r'^theorem (\w+)', self.sources[module], re.M)]
         names += ['ReadReuse.excludesSources', 'ReadReuse.excludesState',
-                  'ReadReuse.excludesExternal', 'ReadReuse.sourceValue']
-        self.assertEqual(len(names), 20)
+                  'ReadReuse.excludesExternal', 'ReadReuse.sourceValue',
+                  'ObserverAdmission.bindValues_total']
+        self.assertEqual(len(names), 23)
         self.assert_axioms(self.prove(HEADER + '\n'.join('#print axioms ' + n for n in names)), names)
 
     def test_binding_certificate_and_successful_value_reuse(self):
@@ -129,6 +130,48 @@ example : ((prepareUpdate updateSecond goodUpdate).toOption.map
       some ⟨2, 20, .nat 1⟩ := by decide_cbv
 ''')
 
+    def test_binding_definedness_and_full_admission_agreement(self):
+        self.prove(HEADER + '''
+example (width position : Nat) (state : Value) (external : List Value)
+    (slots : List FiniteCode.InputSource)
+    (valid : validateSlots width slots position = .ok ())
+    (shape : external.length = width) :
+    ∃ bound, bindValues width state external slots position = .ok bound :=
+  bindValues_total width position state external slots valid shape
+-- No premise that either read succeeds; poisoned/resource/interface/width
+-- refusals and all execution outcomes are included for arbitrary budgets.
+example (state query before after : Value) (interface : Nat) (budget : Budget) :
+    evaluate apply .read queryRead prefixBinding state interface [query, before] budget =
+      evaluate apply .read queryRead prefixBinding state interface [query, after] budget := by
+  apply external_evaluation_agreement apply .read queryRead prefixBinding state interface
+    [query, before] [query, after] 1 budget (by rfl) (by rfl) (by rfl)
+  intro index different
+  cases index with
+  | zero => rfl
+  | succ index =>
+    cases index with
+    | zero => contradiction
+    | succ index => rfl
+-- The general source law also covers state exclusion with arbitrary budgets.
+example (leftState rightState query : Value) (interface : Nat) (budget : Budget) :
+    evaluate apply .read queryRead queryBinding leftState interface [query] budget =
+      evaluate apply .read queryRead queryBinding rightState interface [query] budget := by
+  apply binding_evaluation_agreement apply .read queryRead queryBinding leftState rightState
+    interface [query] [query] (fun source => match source with | .state => true | _ => false)
+    budget (by rfl) (by rfl) (by rfl)
+  intro source _ allowed
+  cases source with
+  | state => contradiction
+  | external index => rfl
+-- Even equal instruction footprints do not repair mismatched input widths.
+example : excludesExternal ReadEvidenceControls.constant [.external 0] 0 = true := by rfl
+example : (evaluate apply .read ReadEvidenceControls.constant ⟨7, 1, [.external 0]⟩
+    (.nat 0) 7 [] ⟨some 20, 1000, 0, 0, false⟩).result =
+      .error (.binding .read (.width 1 0)) := by rfl
+example : validateSlots 1 [.state, .external 1] 0 =
+    .error (.invalidSlot 1 1 1) := by rfl
+''')
+
     def test_resource_and_interface_admission_remain_independent(self):
         self.prove(HEADER + '''
 example : (execute apply queryRead ⟨some 0, 1000⟩ [.nat 0, .nat 42]).stop = .budget ∧
@@ -159,6 +202,8 @@ example : selectRoot queryRead (execute apply queryRead ⟨some 0, 1000⟩ [.nat
             'unused_eager_prefix_is_independent': 'excludesExternal eagerPrefix prefixBinding.slots 1 = true',
             'prefix_failure_is_reusable': 'FiniteCode.run pureApply eagerPrefix [.nat 9, .nat 42, .nat 0] = some (.nat 42)',
             'all_sources_may_be_excluded': 'excludesSources queryRead prefixBinding.slots (fun _ => true) = true',
+            'excluded_port_repairs_width': '(evaluate apply .read ReadEvidenceControls.constant queryBinding (.nat 0) 7 [] ⟨some 20, 1000, 0, 0, false⟩).result.toOption.isSome = true',
+            'invalid_slot_is_total': '(bindValues 1 (Value.nat 0) [.nat 42] [.external 1] 0).toOption.isSome = true',
         }
         for name, claim in claims.items():
             with self.subTest(claim=name):

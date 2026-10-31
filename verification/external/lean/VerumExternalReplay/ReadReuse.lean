@@ -123,6 +123,56 @@ theorem external_key_agreement (code : Code O V) (binding : Binding D)
   | state => rfl
   | external index => exact stable index (of_decide_eq_false allowed)
 
+/-- Admission, refusal, all execution observations and the resulting budget
+agree in the pure value model. Successful binding is derived from constructor
+validation and equal input shapes, not supplied as a premise. This does not
+extend the model to native Clone callbacks, allocator or trace effects. -/
+theorem binding_evaluation_agreement [DecidableEq D]
+    (apply : O → List V → Except E V) (phase : Phase) (code : Code O V)
+    (binding : Binding D) (leftState rightState : V) (interface : D)
+    (leftExternal rightExternal : List V) (excluded : InputSource → Bool) (budget : Budget)
+    (valid : validateSlots binding.width binding.slots 0 = .ok ())
+    (shape : leftExternal.length = rightExternal.length)
+    (certificate : excludesSources code binding.slots excluded = true)
+    (stable : ∀ source ∈ binding.slots, excluded source = false →
+      sourceValue leftState leftExternal source = sourceValue rightState rightExternal source) :
+    evaluate apply phase code binding leftState interface leftExternal budget =
+      evaluate apply phase code binding rightState interface rightExternal budget := by
+  by_cases width : leftExternal.length = binding.width
+  · have rightWidth : rightExternal.length = binding.width := shape.symm.trans width
+    obtain ⟨left, leftBound⟩ := bindValues_total binding.width 0 leftState leftExternal
+      binding.slots valid width
+    obtain ⟨right, rightBound⟩ := bindValues_total binding.width 0 rightState rightExternal
+      binding.slots valid rightWidth
+    have keys := binding_key_agreement code binding leftState rightState leftExternal rightExternal
+      left right excluded certificate stable leftBound rightBound
+    have body : ∀ paid, runBody apply phase code left paid = runBody apply phase code right paid := by
+      intro paid
+      simp only [runBody, execute_agreement apply code _ left right _ keys]
+    simp only [evaluate, width, rightWidth, ne_eq, not_true_eq_false,
+      leftBound, rightBound, body]
+  · have rightWidth : rightExternal.length ≠ binding.width := by omega
+    simp only [evaluate, ne_eq, shape, rightWidth, not_false_eq_true, ite_true]
+
+theorem external_evaluation_agreement [DecidableEq D]
+    (apply : O → List V → Except E V) (phase : Phase) (code : Code O V)
+    (binding : Binding D) (state : V) (interface : D)
+    (leftExternal rightExternal : List V) (port : Nat) (budget : Budget)
+    (valid : validateSlots binding.width binding.slots 0 = .ok ())
+    (shape : leftExternal.length = rightExternal.length)
+    (certificate : excludesExternal code binding.slots port = true)
+    (stable : ∀ index, index ≠ port → leftExternal[index]? = rightExternal[index]?) :
+    evaluate apply phase code binding state interface leftExternal budget =
+      evaluate apply phase code binding state interface rightExternal budget := by
+  apply binding_evaluation_agreement apply phase code binding state state interface
+    leftExternal rightExternal
+    (fun source => match source with | .state => false | .external index => decide (index = port))
+    budget valid shape certificate
+  intro source _ allowed
+  cases source with
+  | state => rfl
+  | external index => exact stable index (of_decide_eq_false allowed)
+
 /-- Completion plus actual root selection supplies a semantic value witness.
 No implication from a budget stop to undefinedness is admitted. -/
 theorem successful_value (apply : O → List V → Except E V) (code : Code O V)

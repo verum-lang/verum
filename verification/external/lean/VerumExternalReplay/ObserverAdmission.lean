@@ -46,6 +46,35 @@ def bindValues (width : Nat) (state : V) (external : List V) :
       | none => .error (.invalidSlot position n width)
       | some v => (bindValues width state external rest (position + 1)).map (v :: ·)
 
+/-- Constructor-valid slots and the checked input width suffice for binding in
+the value model. This proves definedness rather than assuming two successful
+bindings. Native cloning is not represented by value projection: its totality
+and preservation of values remain separate implementation obligations. -/
+theorem bindValues_total (width position : Nat) (state : V) (external : List V)
+    (slots : List InputSource)
+    (valid : validateSlots width slots position = .ok ())
+    (shape : external.length = width) :
+    ∃ bound, bindValues width state external slots position = .ok bound := by
+  induction slots generalizing position with
+  | nil => exact ⟨[], rfl⟩
+  | cons source slots ih =>
+      cases source with
+      | state =>
+          obtain ⟨bound, success⟩ := ih (position + 1) valid
+          exact ⟨state :: bound, by simp [bindValues, success, Except.map]⟩
+      | external index =>
+          have inside : index < width := by
+            by_cases inside : index < width
+            · exact inside
+            · simp [validateSlots, inside] at valid
+          have tail : validateSlots width slots (position + 1) = .ok () := by
+            simpa [validateSlots, inside] using valid
+          obtain ⟨bound, success⟩ := ih (position + 1) tail
+          have present : external[index]? = some (external.get ⟨index, by omega⟩) :=
+            List.getElem?_eq_getElem (by omega)
+          exact ⟨external.get ⟨index, by omega⟩ :: bound,
+            by simp [bindValues, present, success, Except.map]⟩
+
 structure Budget where
   dispatchLimit : Option Nat
   workLimit : Nat
