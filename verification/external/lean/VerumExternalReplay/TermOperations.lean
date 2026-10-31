@@ -195,7 +195,7 @@ theorem subst_shiftUp (target : Nat) (replacement t : Term) :
     simp [bound, mapVars, different, below]
 
 /-- Fuel is an explicit total reduction budget, not a normalization theorem. -/
-theorem whnfFuel_zero (t : Term) : whnfFuel 0 t = t := by
+theorem whnfFuel_zero (t : Term) : whnfFuel 0 t = .error .fuel_exhausted := by
   simp only [whnfFuel]
 
 theorem whnfFuel_let (fuel : Nat) (value body : Term) :
@@ -203,13 +203,13 @@ theorem whnfFuel_let (fuel : Nat) (value body : Term) :
   simp only [whnfFuel]
 
 theorem whnfFuel_lambda (fuel : Nat) (domain body : Term) :
-    whnfFuel fuel (.lam domain body) = .lam domain body := by
-  cases fuel <;> simp only [whnfFuel]
+    whnfFuel (fuel + 1) (.lam domain body) = .ok (.lam domain body) := by
+  simp [whnfFuel, pure, Except.pure]
 
 theorem whnfFuel_beta (fuel : Nat) (domain body argument : Term) :
     whnfFuel (fuel + 1) (.app (.lam domain body) argument) =
       whnfFuel fuel (subst 0 argument body) := by
-  simp only [whnfFuel, whnfFuel_lambda]
+  cases fuel <;> simp [whnfFuel, bind, Except.bind, pure, Except.pure]
 
 /-- info: 'VerumKernel.mapVars_identity' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in

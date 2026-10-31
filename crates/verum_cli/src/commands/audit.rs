@@ -2633,6 +2633,7 @@ fn run_rust_battery(
                         CheckError::DomainMismatch { .. } => "DomainMismatch",
                         CheckError::TypeMismatch { .. } => "TypeMismatch",
                         CheckError::UniverseOverflow { .. } => "UniverseOverflow",
+                        CheckError::FuelExhausted => "FuelExhausted",
                         CheckError::ClaimedTypeNotAType { .. } => "ClaimedTypeNotAType",
                         // The remaining variants come from the wider
                         // KernelV0 manifest pipeline; they don't

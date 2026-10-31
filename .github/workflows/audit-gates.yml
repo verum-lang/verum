@@ -209,9 +209,11 @@ jobs:
 
       - name: Reference term laws and native certificate replay
         run: |
+          python3 -m unittest discover -s verification/certificates -p test_certificate_runner.py
+          python3 -m unittest discover -s verification/external/lean -p test_reference_reduction.py
           (cd verification/external/lean && lake build \
             verum_replay_checker \
-            VerumExternalReplay.ReductionSemantics \
+            VerumExternalReplay.ReductionScope \
             VerumExternalReplay.DiagnosticFactorization \
             VerumExternalReplay.ExactTransports \
             VerumExternalReplay.TypedPrograms \

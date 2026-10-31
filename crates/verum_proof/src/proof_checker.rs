@@ -1237,9 +1237,8 @@ const WHNF_FUEL_CEILING: usize = 1 << 20; // 1,048,576 head-reductions.
 /// version of Ω(Ω)) would loop forever. Strong normalization alone
 /// does not bound the number of reductions. The kernel cannot depend
 /// on its caller's discipline for
-/// termination — fuel exhaustion now stops reduction and returns
-/// the partially-reduced term.  Subsequent `def_eq` will reject the
-/// pair structurally if it isn't actually equal.
+/// termination. Fuel exhaustion is propagated as operational failure;
+/// a partial reduction cannot establish a conversion mismatch.
 /// Conversion retains transparent definitions in their immutable binder frame.
 /// Only demanded heads unfold; unused definitions and proof bodies stay shared.
 /// `binders` counts local telescope binders beyond the checked context.
@@ -1247,6 +1246,18 @@ const WHNF_FUEL_CEILING: usize = 1 << 20; // 1,048,576 head-reductions.
 struct Conversion<'a> {
     context: &'a Context,
     binders: usize,
+}
+
+fn all_checked<T>(
+    items: impl IntoIterator<Item = T>,
+    mut check: impl FnMut(T) -> Result<bool, CheckError>,
+) -> Result<bool, CheckError> {
+    for item in items {
+        if !check(item)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 impl Conversion<'_> {
@@ -1257,29 +1268,31 @@ impl Conversion<'_> {
         }
     }
 
-    fn terms_def_eq(&self, a: &[Term], b: &[Term]) -> bool {
-        a.len() == b.len() && a.iter().zip(b).all(|(a, b)| self.def_eq(a, b))
+    fn terms_def_eq(&self, a: &[Term], b: &[Term]) -> Result<bool, CheckError> {
+        if a.len() != b.len() {
+            return Ok(false);
+        }
+        all_checked(a.iter().zip(b), |(a, b)| self.def_eq(a, b))
     }
 
-    fn expect_universe(&self, term: &Term) -> Option<Level> {
-        match self.whnf(term.clone()) {
+    fn expect_universe(&self, term: &Term) -> Result<Option<Level>, CheckError> {
+        Ok(match self.whnf(term.clone())? {
             Term::Universe(level) => Some(level.normalize()),
             _ => None,
-        }
+        })
     }
 
-    fn whnf(&self, term: Term) -> Term {
-        self.whnf_fuel(term, WHNF_FUEL_CEILING).0
+    fn whnf(&self, term: Term) -> Result<Term, CheckError> {
+        Ok(self.whnf_fuel(term, WHNF_FUEL_CEILING)?.0)
     }
 
     /// Inner whnf with explicit fuel.  Returns `(reduced, fuel_remaining)`.
-    /// When fuel reaches zero, returns the partially-reduced term
-    /// unchanged — the kernel's soundness does not depend on full
-    /// reduction (it depends on `def_eq` agreeing, which is structural).
-    fn whnf_fuel(&self, mut term: Term, mut fuel: usize) -> (Term, usize) {
+    /// Exhaustion is operational failure. A partially reduced term must never
+    /// become a negative conversion or type-checking verdict.
+    fn whnf_fuel(&self, mut term: Term, mut fuel: usize) -> Result<(Term, usize), CheckError> {
         loop {
             if fuel == 0 {
-                return (term, 0);
+                return Err(CheckError::FuelExhausted);
             }
             fuel -= 1;
             match term {
@@ -1289,7 +1302,7 @@ impl Conversion<'_> {
                         .and_then(|relative| self.context.definition_under(relative, self.binders));
                     match definition {
                         Some(value) => term = value,
-                        None => return (Term::Var(index), fuel),
+                        None => return Ok((Term::Var(index), fuel)),
                     }
                 }
                 Term::Let { value, body } => {
@@ -1301,7 +1314,7 @@ impl Conversion<'_> {
                     motive,
                     cases,
                 } => {
-                    let (head, remaining) = self.whnf_fuel(*scrutinee, fuel);
+                    let (head, remaining) = self.whnf_fuel(*scrutinee, fuel)?;
                     fuel = remaining;
                     if let Term::Construct {
                         data,
@@ -1309,13 +1322,13 @@ impl Conversion<'_> {
                         args,
                     } = &head
                     {
-                        let (declaration, remaining) = self.whnf_fuel((**data).clone(), fuel);
+                        let (declaration, remaining) = self.whnf_fuel((**data).clone(), fuel)?;
                         fuel = remaining;
                         if let Term::Data { constructors, .. } = declaration {
                             if let (Some(fields), Some(case)) =
                                 (constructors.get(*constructor), cases.get(*constructor))
                             {
-                                if fields.len() == args.len() && fuel > 0 {
+                                if fields.len() == args.len() {
                                     let mut result = case.clone();
                                     for (field, argument) in fields.iter().zip(args.iter()) {
                                         result = Term::app(result, argument.clone());
@@ -1339,34 +1352,31 @@ impl Conversion<'_> {
                             }
                         }
                     }
-                    return (
+                    return Ok((
                         Term::Induct {
                             scrutinee: Box::new(head),
                             motive,
                             cases,
                         },
                         fuel,
-                    );
+                    ));
                 }
 
                 Term::App(f, x) => {
-                    let (f_whnf, fuel_after) = self.whnf_fuel(*f, fuel);
+                    let (f_whnf, fuel_after) = self.whnf_fuel(*f, fuel)?;
                     fuel = fuel_after;
                     match f_whnf {
-                        Term::Lam(domain, body) => {
-                            if fuel == 0 {
-                                return (Term::App(Box::new(Term::Lam(domain, body)), x), 0);
-                            }
+                        Term::Lam(_, body) => {
                             term = subst(*body, 0, &x);
                         }
-                        other => return (Term::App(Box::new(other), x), fuel),
+                        other => return Ok((Term::App(Box::new(other), x), fuel)),
                     }
                 }
 
                 // Σ-projection: Fst(Pair(a, _)) → a;
                 // Snd(Pair(_, b)) → b.  Stuck on non-pair head.
                 Term::Fst(p) => {
-                    let (p_whnf, fuel_after) = self.whnf_fuel(*p, fuel);
+                    let (p_whnf, fuel_after) = self.whnf_fuel(*p, fuel)?;
                     fuel = fuel_after;
                     match p_whnf {
                         Term::Pair(a, _) => {
@@ -1374,17 +1384,17 @@ impl Conversion<'_> {
                             // (it may itself contain head redexes).
                             term = *a;
                         }
-                        other => return (Term::Fst(Box::new(other)), fuel),
+                        other => return Ok((Term::Fst(Box::new(other)), fuel)),
                     }
                 }
                 Term::Snd(p) => {
-                    let (p_whnf, fuel_after) = self.whnf_fuel(*p, fuel);
+                    let (p_whnf, fuel_after) = self.whnf_fuel(*p, fuel)?;
                     fuel = fuel_after;
                     match p_whnf {
                         Term::Pair(_, b) => {
                             term = *b;
                         }
-                        other => return (Term::Snd(Box::new(other)), fuel),
+                        other => return Ok((Term::Snd(Box::new(other)), fuel)),
                     }
                 }
 
@@ -1397,7 +1407,7 @@ impl Conversion<'_> {
                     base,
                     scrutinee,
                 } => {
-                    let (s_whnf, fuel_after) = self.whnf_fuel(*scrutinee, fuel);
+                    let (s_whnf, fuel_after) = self.whnf_fuel(*scrutinee, fuel)?;
                     fuel = fuel_after;
                     match s_whnf {
                         Term::Refl(_) => {
@@ -1405,14 +1415,14 @@ impl Conversion<'_> {
                             term = *base;
                         }
                         other => {
-                            return (
+                            return Ok((
                                 Term::J {
                                     motive,
                                     base,
                                     scrutinee: Box::new(other),
                                 },
                                 fuel,
-                            );
+                            ));
                         }
                     }
                 }
@@ -1421,7 +1431,7 @@ impl Conversion<'_> {
                     base,
                     scrutinee,
                 } => {
-                    let (s_whnf, fuel_after) = self.whnf_fuel(*scrutinee, fuel);
+                    let (s_whnf, fuel_after) = self.whnf_fuel(*scrutinee, fuel)?;
                     fuel = fuel_after;
                     match s_whnf {
                         Term::Refl(_) => {
@@ -1429,19 +1439,19 @@ impl Conversion<'_> {
                             term = *base;
                         }
                         other => {
-                            return (
+                            return Ok((
                                 Term::IdElim {
                                     motive,
                                     base,
                                     scrutinee: Box::new(other),
                                 },
                                 fuel,
-                            );
+                            ));
                         }
                     }
                 }
 
-                _ => return (term, fuel),
+                _ => return Ok((term, fuel)),
             }
         }
     }
@@ -1453,23 +1463,22 @@ impl Conversion<'_> {
     ///
     /// **η-equivalence (T-Eta-Conv)** — `λx. (f x) ≡ f` when `x` (de
     /// Bruijn 0 in the body) does not occur free in the CONTENT of `f`.
-    /// This is the standard CIC rule extending β with extensional
-    /// function equality. Brings the proof-term checker to textbook
-    /// CIC parity within the < 1000 LOC trust-base budget.
-    fn def_eq(&self, a: &Term, b: &Term) -> bool {
+    /// This is function η-conversion; it does not establish propositional
+    /// function extensionality or a soundness theorem for the checker.
+    fn def_eq(&self, a: &Term, b: &Term) -> Result<bool, CheckError> {
         // Conversion is reflexive before reduction. Shared local definitions often
         // produce identical large types; normalizing both copies wastes work and
         // can duplicate recursive eliminations. Formation is checked by callers.
         if a == b {
-            return true;
+            return Ok(true);
         }
-        let a = self.whnf(a.clone());
-        let b = self.whnf(b.clone());
+        let a = self.whnf(a.clone())?;
+        let b = self.whnf(b.clone())?;
         self.def_eq_whnf(&a, &b)
     }
 
-    fn def_eq_whnf(&self, a: &Term, b: &Term) -> bool {
-        match (a, b) {
+    fn def_eq_whnf(&self, a: &Term, b: &Term) -> Result<bool, CheckError> {
+        Ok(match (a, b) {
             (
                 Term::Data {
                     name: an,
@@ -1487,35 +1496,31 @@ impl Conversion<'_> {
                 an == bn
                     && level_eq(al, bl)
                     && ai.len() == bi.len()
-                    && ai
-                        .iter()
-                        .zip(bi)
-                        .enumerate()
-                        .all(|(index, (a, b))| self.under(index).def_eq(a, b))
+                    && all_checked(ai.iter().zip(bi).enumerate(), |(index, (a, b))| {
+                        self.under(index).def_eq(a, b)
+                    })?
                     && ac.len() == bc.len()
-                    && ac.iter().zip(bc).all(|(a, b)| {
-                        a.fields.len() == b.fields.len()
+                    && all_checked(ac.iter().zip(bc), |(a, b)| {
+                        Ok(a.fields.len() == b.fields.len()
                             && self
                                 .under(a.fields.len())
-                                .terms_def_eq(&a.indices, &b.indices)
-                            && a.fields
-                                .iter()
-                                .zip(&b.fields)
-                                .enumerate()
-                                .all(|(index, (a, b))| {
-                                    match (recursive_indices(a), recursive_indices(b)) {
-                                        (Some(a), Some(b)) => self.under(index).terms_def_eq(a, b),
-                                        (None, None) => match (
-                                            field_value_type(a, index),
-                                            field_value_type(b, index),
-                                        ) {
-                                            (Some(a), Some(b)) => self.under(index).def_eq(&a, &b),
-                                            _ => false,
-                                        },
-                                        _ => false,
-                                    }
-                                })
-                    })
+                                .terms_def_eq(&a.indices, &b.indices)?
+                            && all_checked(
+                                a.fields.iter().zip(&b.fields).enumerate(),
+                                |(index, (a, b))| match (recursive_indices(a), recursive_indices(b))
+                                {
+                                    (Some(a), Some(b)) => self.under(index).terms_def_eq(a, b),
+                                    (None, None) => match (
+                                        field_value_type(a, index),
+                                        field_value_type(b, index),
+                                    ) {
+                                        (Some(a), Some(b)) => self.under(index).def_eq(&a, &b),
+                                        _ => Ok(false),
+                                    },
+                                    _ => Ok(false),
+                                },
+                            )?)
+                    })?
             }
             (
                 Term::Construct {
@@ -1530,9 +1535,9 @@ impl Conversion<'_> {
                 },
             ) => {
                 ai == bi
-                    && self.def_eq(ad, bd)
+                    && self.def_eq(ad, bd)?
                     && aa.len() == ba.len()
-                    && aa.iter().zip(ba).all(|(a, b)| self.def_eq(a, b))
+                    && self.terms_def_eq(aa, ba)?
             }
             (
                 Term::Induct {
@@ -1546,10 +1551,10 @@ impl Conversion<'_> {
                     cases: bc,
                 },
             ) => {
-                self.def_eq(a, b)
-                    && self.def_eq(am, bm)
+                self.def_eq(a, b)?
+                    && self.def_eq(am, bm)?
                     && ac.len() == bc.len()
-                    && ac.iter().zip(bc).all(|(a, b)| self.def_eq(a, b))
+                    && self.terms_def_eq(ac, bc)?
             }
 
             (Term::Var(i), Term::Var(j)) => i == j,
@@ -1561,29 +1566,33 @@ impl Conversion<'_> {
             // equal.  See [`Level::normalize`].
             (Term::Universe(l1), Term::Universe(l2)) => level_eq(l1, l2),
             (Term::Pi(a1, b1), Term::Pi(a2, b2)) => {
-                self.def_eq(a1, a2) && self.under(1).def_eq(b1, b2)
+                self.def_eq(a1, a2)? && self.under(1).def_eq(b1, b2)?
             }
             (Term::Lam(a1, b1), Term::Lam(a2, b2)) => {
-                self.def_eq(a1, a2) && self.under(1).def_eq(b1, b2)
+                self.def_eq(a1, a2)? && self.under(1).def_eq(b1, b2)?
             }
-            (Term::App(f1, x1), Term::App(f2, x2)) => self.def_eq(f1, f2) && self.def_eq(x1, x2),
+            (Term::App(f1, x1), Term::App(f2, x2)) => {
+                self.def_eq(f1, f2)? && self.def_eq(x1, x2)?
+            }
             // Σ-types: structural component-wise equality.  The
             // β-projection rules in `whnf_fuel` collapse `Fst(Pair(a, _))`
             // and `Snd(Pair(_, b))` BEFORE we reach this point, so any
             // residual `Fst` / `Snd` here is stuck on a non-pair head
             // (typically a bound variable or neutral application).
             (Term::Sigma(a1, b1), Term::Sigma(a2, b2)) => {
-                self.def_eq(a1, a2) && self.under(1).def_eq(b1, b2)
+                self.def_eq(a1, a2)? && self.under(1).def_eq(b1, b2)?
             }
-            (Term::Pair(a1, b1), Term::Pair(a2, b2)) => self.def_eq(a1, a2) && self.def_eq(b1, b2),
+            (Term::Pair(a1, b1), Term::Pair(a2, b2)) => {
+                self.def_eq(a1, a2)? && self.def_eq(b1, b2)?
+            }
             // Sigma eta: a value is determined by its two projections. As with
             // function eta, conversion callers first establish the common type.
             (Term::Pair(first, second), other) | (other, Term::Pair(first, second)) => {
-                self.def_eq(first, &Term::fst(other.clone()))
-                    && self.def_eq(second, &Term::snd(other.clone()))
+                self.def_eq(first, &Term::fst(other.clone()))?
+                    && self.def_eq(second, &Term::snd(other.clone()))?
             }
-            (Term::Fst(p1), Term::Fst(p2)) => self.def_eq(p1, p2),
-            (Term::Snd(p1), Term::Snd(p2)) => self.def_eq(p1, p2),
+            (Term::Fst(p1), Term::Fst(p2)) => self.def_eq(p1, p2)?,
+            (Term::Snd(p1), Term::Snd(p2)) => self.def_eq(p1, p2)?,
             // Identity types: three-component structural
             // equality for `Id`; one-component for `Refl` (a = b ⇔
             // refl_a ≡ refl_b iff a ≡ b); three-component for `J` (only
@@ -1600,8 +1609,8 @@ impl Conversion<'_> {
                     lhs: l2,
                     rhs: r2,
                 },
-            ) => self.def_eq(t1, t2) && self.def_eq(l1, l2) && self.def_eq(r1, r2),
-            (Term::Refl(v1), Term::Refl(v2)) => self.def_eq(v1, v2),
+            ) => self.def_eq(t1, t2)? && self.def_eq(l1, l2)? && self.def_eq(r1, r2)?,
+            (Term::Refl(v1), Term::Refl(v2)) => self.def_eq(v1, v2)?,
             (
                 Term::J {
                     motive: m1,
@@ -1613,7 +1622,7 @@ impl Conversion<'_> {
                     base: b2,
                     scrutinee: s2,
                 },
-            ) => self.def_eq(m1, m2) && self.def_eq(b1, b2) && self.def_eq(s1, s2),
+            ) => self.def_eq(m1, m2)? && self.def_eq(b1, b2)? && self.def_eq(s1, s2)?,
             (
                 Term::IdElim {
                     motive: m1,
@@ -1625,7 +1634,7 @@ impl Conversion<'_> {
                     base: b2,
                     scrutinee: s2,
                 },
-            ) => self.def_eq(m1, m2) && self.def_eq(b1, b2) && self.def_eq(s1, s2),
+            ) => self.def_eq(m1, m2)? && self.def_eq(b1, b2)? && self.def_eq(s1, s2)?,
             (
                 Term::FunExt {
                     function_type: a,
@@ -1639,16 +1648,21 @@ impl Conversion<'_> {
                     rhs: g,
                     pointwise: h,
                 },
-            ) => self.def_eq(a, e) && self.def_eq(b, f) && self.def_eq(c, g) && self.def_eq(d, h),
+            ) => {
+                self.def_eq(a, e)?
+                    && self.def_eq(b, f)?
+                    && self.def_eq(c, g)?
+                    && self.def_eq(d, h)?
+            }
             // η-equivalence — one-sided cases. When one side is a
             // λx.(f x) and the other is `f`, they're equal iff `x`
             // does not appear free in `f`. This rule fires AFTER WHNF
             // reduction so β-redexes are eliminated first; what remains
             // is purely structural η.
-            (Term::Lam(_, body), other) => self.eta_match(body, other),
-            (other, Term::Lam(_, body)) => self.eta_match(body, other),
+            (Term::Lam(_, body), other) => self.eta_match(body, other)?,
+            (other, Term::Lam(_, body)) => self.eta_match(body, other)?,
             _ => false,
-        }
+        })
     }
 
     /// η-equivalence helper: returns `true` iff `lam_body` (the body of
@@ -1666,11 +1680,11 @@ impl Conversion<'_> {
     /// safe: `whnf` on a sub-term of a well-typed lambda body terminates
     /// (CoC strong-normalisation), and any non-`Var(0)` whnf result is
     /// rejected before the bound-variable-escape check.
-    fn eta_match(&self, lam_body: &Term, other: &Term) -> bool {
-        let app_body = self.under(1).whnf(lam_body.clone());
+    fn eta_match(&self, lam_body: &Term, other: &Term) -> Result<bool, CheckError> {
+        let app_body = self.under(1).whnf(lam_body.clone())?;
         let (f, x) = match app_body {
             Term::App(f, x) => (f, x),
-            _ => return false,
+            _ => return Ok(false),
         };
         // The argument must β-reduce to `Var(0)` (the bound variable).
         // Whnf the sub-term: any redex like `(λ. body) x` collapses, and
@@ -1679,14 +1693,14 @@ impl Conversion<'_> {
         // reject (sound but incomplete here, as in any decidable
         // η-conversion algorithm — the alternative is full normalisation
         // which costs more for the same soundness).
-        let x_whnf = self.under(1).whnf(*x);
+        let x_whnf = self.under(1).whnf(*x)?;
         if !matches!(x_whnf, Term::Var(0)) {
-            return false;
+            return Ok(false);
         }
         // The function part must not reference Var(0) — otherwise the
         // η-rule is unsound (the variable escapes its binder).
         if is_free_in(&f, 0) {
-            return false;
+            return Ok(false);
         }
         // Shift `f` down by one (since we're removing a binder) and
         // compare to `other`.
@@ -1696,16 +1710,11 @@ impl Conversion<'_> {
 }
 
 #[cfg(test)]
-fn whnf(term: Term) -> Term {
-    Context::new().conversion().whnf(term)
-}
-#[cfg(test)]
-fn whnf_fuel(term: Term, fuel: usize) -> (Term, usize) {
-    Context::new().conversion().whnf_fuel(term, fuel)
-}
-#[cfg(test)]
 fn def_eq(a: &Term, b: &Term) -> bool {
-    Context::new().conversion().def_eq(a, b)
+    Context::new()
+        .conversion()
+        .def_eq(a, b)
+        .expect("conversion completed")
 }
 
 /// Check whether de Bruijn index `target` occurs FREE in `term`
@@ -1883,6 +1892,8 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
 /// exact arm of `infer`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {
+    /// Normalization did not finish within its operational reduction budget.
+    FuelExhausted,
     /// The proof uses a principle outside the verifier's selected foundation.
     FoundationRequired(Foundation),
     /// Malformed declaration, constructor ownership, or induction premises.
@@ -2020,9 +2031,9 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             }
             let kind = infer(ctx, function_type)?;
             ctx.conversion()
-                .expect_universe(&kind)
+                .expect_universe(&kind)?
                 .ok_or_else(|| CheckError::NotAType((**function_type).clone()))?;
-            let Term::Pi(domain, codomain) = ctx.conversion().whnf((**function_type).clone())
+            let Term::Pi(domain, codomain) = ctx.conversion().whnf((**function_type).clone())?
             else {
                 return Err(CheckError::NotAFunction((**function_type).clone()));
             };
@@ -2061,7 +2072,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                 let kind = infer(&index_context, ty)?;
                 index_context
                     .conversion()
-                    .expect_universe(&kind)
+                    .expect_universe(&kind)?
                     .ok_or_else(|| CheckError::NotAType(ty.clone()))?;
                 index_context = index_context.extend(ty.clone());
             }
@@ -2075,7 +2086,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                         let kind = infer(&local, &domain)?;
                         let field_level = local
                             .conversion()
-                            .expect_universe(&kind)
+                            .expect_universe(&kind)?
                             .ok_or_else(|| CheckError::NotAType(domain.clone()))?;
                         if !level_eq(&field_level.max_with(level.clone()), level) {
                             return Err(CheckError::InvalidInductive(
@@ -2105,7 +2116,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             args,
         } => {
             infer(ctx, data)?;
-            let declaration = ctx.conversion().whnf((**data).clone());
+            let declaration = ctx.conversion().whnf((**data).clone())?;
             let Term::Data { constructors, .. } = &declaration else {
                 return Err(CheckError::InvalidInductive(
                     "constructor owner is not a data declaration".into(),
@@ -2136,8 +2147,8 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             motive,
             cases,
         } => {
-            let actual = ctx.conversion().whnf(infer(ctx, scrutinee)?);
-            let (declaration, values) = split_family(ctx, actual).ok_or_else(|| {
+            let actual = ctx.conversion().whnf(infer(ctx, scrutinee)?)?;
+            let (declaration, values) = split_family(ctx, actual)?.ok_or_else(|| {
                 CheckError::InvalidInductive(
                     "induction requires a fully applied data family".into(),
                 )
@@ -2156,19 +2167,20 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             let mut motive_kind = infer(ctx, motive)?;
             for (index, ty) in indices.iter().enumerate() {
                 let scope = ctx.conversion().under(index);
-                let Term::Pi(domain, result) = scope.whnf(motive_kind) else {
+                let Term::Pi(domain, result) = scope.whnf(motive_kind)? else {
                     return Err(CheckError::InvalidInductive(
                         "induction motive omits a family index".into(),
                     ));
                 };
-                if !scope.def_eq(&domain, ty) {
+                if !scope.def_eq(&domain, ty)? {
                     return Err(CheckError::InvalidInductive(
                         "induction motive index domain mismatch".into(),
                     ));
                 }
                 motive_kind = *result;
             }
-            let Term::Pi(domain, result) = ctx.conversion().under(indices.len()).whnf(motive_kind)
+            let Term::Pi(domain, result) =
+                ctx.conversion().under(indices.len()).whnf(motive_kind)?
             else {
                 return Err(CheckError::InvalidInductive(
                     "induction motive is not a family".into(),
@@ -2180,11 +2192,11 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             if !ctx
                 .conversion()
                 .under(indices.len())
-                .def_eq(&domain, &expected_domain)
+                .def_eq(&domain, &expected_domain)?
                 || ctx
                     .conversion()
                     .under(indices.len() + 1)
-                    .expect_universe(&result)
+                    .expect_universe(&result)?
                     .is_none()
             {
                 return Err(CheckError::InvalidInductive(
@@ -2248,13 +2260,13 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             let a_ty = infer(ctx, a)?;
             let n = ctx
                 .conversion()
-                .expect_universe(&a_ty)
+                .expect_universe(&a_ty)?
                 .ok_or_else(|| CheckError::NotAType((**a).clone()))?;
             let extended = ctx.extend((**a).clone());
             let b_ty = infer(&extended, b)?;
             let m = extended
                 .conversion()
-                .expect_universe(&b_ty)
+                .expect_universe(&b_ty)?
                 .ok_or_else(|| CheckError::NotAType((**b).clone()))?;
             Ok(Term::Universe(n.max_with(m)))
         }
@@ -2264,7 +2276,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             let dom_ty = infer(ctx, domain)?;
             // Domain annotation must be a type.
             ctx.conversion()
-                .expect_universe(&dom_ty)
+                .expect_universe(&dom_ty)?
                 .ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
             let extended = ctx.extend((**domain).clone());
             let body_ty = infer(&extended, body)?;
@@ -2273,7 +2285,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
 
         // T-App-Elim (with implicit T-Conv on argument matching)
         Term::App(f, x) => {
-            let f_ty = ctx.conversion().whnf(infer(ctx, f)?);
+            let f_ty = ctx.conversion().whnf(infer(ctx, f)?)?;
             let (dom, codom) = match f_ty {
                 Term::Pi(a, b) => (a, b),
                 other => return Err(CheckError::NotAFunction(other)),
@@ -2287,13 +2299,13 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             let a_ty = infer(ctx, a)?;
             let n = ctx
                 .conversion()
-                .expect_universe(&a_ty)
+                .expect_universe(&a_ty)?
                 .ok_or_else(|| CheckError::NotAType((**a).clone()))?;
             let extended = ctx.extend((**a).clone());
             let b_ty = infer(&extended, b)?;
             let m = extended
                 .conversion()
-                .expect_universe(&b_ty)
+                .expect_universe(&b_ty)?
                 .ok_or_else(|| CheckError::NotAType((**b).clone()))?;
             Ok(Term::Universe(n.max_with(m)))
         }
@@ -2310,7 +2322,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
 
         // T-Fst-Elim: Fst(p) : A where p : Sigma(A, B)
         Term::Fst(p) => {
-            let p_ty = ctx.conversion().whnf(infer(ctx, p)?);
+            let p_ty = ctx.conversion().whnf(infer(ctx, p)?)?;
             match p_ty {
                 Term::Sigma(a, _) => Ok(*a),
                 other => Err(CheckError::NotASigma(other)),
@@ -2322,7 +2334,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         // reference the first component, and the projection of
         // the second knows what the first was at the term level.
         Term::Snd(p) => {
-            let p_ty = ctx.conversion().whnf(infer(ctx, p)?);
+            let p_ty = ctx.conversion().whnf(infer(ctx, p)?)?;
             match p_ty {
                 Term::Sigma(_, b) => Ok(subst(*b, 0, &Term::Fst(p.clone()))),
                 other => Err(CheckError::NotASigma(other)),
@@ -2338,7 +2350,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             let ty_kind = infer(ctx, ty)?;
             let n = ctx
                 .conversion()
-                .expect_universe(&ty_kind)
+                .expect_universe(&ty_kind)?
                 .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
             check_domain(ctx, lhs, ty)?;
             check_domain(ctx, rhs, ty)?;
@@ -2382,26 +2394,26 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         } => {
             let dependent = matches!(term, Term::IdElim { .. });
             // Infer the scrutinee's Id type to extract `A`, `a`, `b`.
-            let s_ty = ctx.conversion().whnf(infer(ctx, scrutinee)?);
+            let s_ty = ctx.conversion().whnf(infer(ctx, scrutinee)?)?;
             let (a_ty, a_lhs, a_rhs) = match s_ty {
                 Term::Id { ty, lhs, rhs } => (ty, lhs, rhs),
                 other => return Err(CheckError::NotAnIdentity(other)),
             };
 
             // Both motives bind the endpoint first; IdElim then binds its path.
-            let motive_ty = ctx.conversion().whnf(infer(ctx, motive)?);
+            let motive_ty = ctx.conversion().whnf(infer(ctx, motive)?)?;
             let (motive_dom, motive_codom) = match &motive_ty {
                 Term::Pi(d, c) => (d.as_ref().clone(), c.as_ref().clone()),
                 _ => return Err(CheckError::NotAValidJMotive((**motive).clone())),
             };
-            if !ctx.conversion().def_eq(&motive_dom, &a_ty) {
+            if !ctx.conversion().def_eq(&motive_dom, &a_ty)? {
                 return Err(CheckError::DomainMismatch {
                     expected: (*a_ty).clone(),
                     actual: motive_dom,
                 });
             }
             let (result_codom, binders) = if dependent {
-                let codomain = ctx.conversion().under(1).whnf(motive_codom);
+                let codomain = ctx.conversion().under(1).whnf(motive_codom)?;
                 let Term::Pi(path_domain, result) = codomain else {
                     return Err(CheckError::NotAValidJMotive((**motive).clone()));
                 };
@@ -2413,7 +2425,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                 if !ctx
                     .conversion()
                     .under(1)
-                    .def_eq(&path_domain, &expected_path)
+                    .def_eq(&path_domain, &expected_path)?
                 {
                     return Err(CheckError::DomainMismatch {
                         expected: expected_path,
@@ -2427,7 +2439,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             if ctx
                 .conversion()
                 .under(binders)
-                .expect_universe(&result_codom)
+                .expect_universe(&result_codom)?
                 .is_none()
             {
                 return Err(CheckError::NotAValidJMotive((**motive).clone()));
@@ -2491,17 +2503,17 @@ fn field_domain(data: &Term, field: &DataField, preceding: usize) -> Term {
 }
 
 /// Decompose a fully saturated family without trusting a serialized index claim.
-fn split_family(ctx: &Context, mut term: Term) -> Option<(Term, Vec<Term>)> {
+fn split_family(ctx: &Context, mut term: Term) -> Result<Option<(Term, Vec<Term>)>, CheckError> {
     let mut values = Vec::new();
     while let Term::App(head, arg) = term {
         values.push(*arg);
-        term = ctx.conversion().whnf(*head);
+        term = ctx.conversion().whnf(*head)?;
     }
     values.reverse();
-    match &term {
+    Ok(match &term {
         Term::Data { indices, .. } if indices.len() == values.len() => Some((term, values)),
         _ => None,
-    }
+    })
 }
 
 fn check_indices(
@@ -2589,7 +2601,7 @@ pub fn check(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckErr
     match infer(ctx, expected) {
         Ok(kind) => {
             ctx.conversion()
-                .expect_universe(&kind)
+                .expect_universe(&kind)?
                 .ok_or_else(|| CheckError::NotAType(expected.clone()))?;
         }
         Err(CheckError::UniverseOverflow { .. }) if matches!(expected, Term::Universe(_)) => {}
@@ -2622,7 +2634,7 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
         let actual = ctx
             .lookup(*index)
             .ok_or(CheckError::UnboundVariable(*index))?;
-        if ctx.conversion().def_eq(&actual, &expected) {
+        if ctx.conversion().def_eq(&actual, &expected)? {
             return Ok(());
         }
         // A synthesized product may be less precise than an expected family.
@@ -2630,13 +2642,13 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
             return check_against(ctx, &source, &expected);
         }
     }
-    match (term, ctx.conversion().whnf(expected.clone())) {
+    match (term, ctx.conversion().whnf(expected.clone())?) {
         (Term::Lam(domain, body), Term::Pi(expected_domain, codomain)) => {
             let kind = infer(ctx, domain)?;
             ctx.conversion()
-                .expect_universe(&kind)
+                .expect_universe(&kind)?
                 .ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
-            if !ctx.conversion().def_eq(domain, &expected_domain) {
+            if !ctx.conversion().def_eq(domain, &expected_domain)? {
                 return Err(CheckError::TypeMismatch {
                     expected: *expected_domain,
                     actual: (**domain).clone(),
@@ -2650,7 +2662,7 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
         }
         (Term::Refl(value), Term::Id { ty, lhs, rhs }) => {
             check_domain(ctx, value, &ty)?;
-            if ctx.conversion().def_eq(value, &lhs) && ctx.conversion().def_eq(value, &rhs) {
+            if ctx.conversion().def_eq(value, &lhs)? && ctx.conversion().def_eq(value, &rhs)? {
                 return Ok(());
             }
             return Err(CheckError::TypeMismatch {
@@ -2665,7 +2677,7 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
         _ => {}
     }
     let inferred = infer(ctx, term)?;
-    if ctx.conversion().def_eq(&inferred, expected) {
+    if ctx.conversion().def_eq(&inferred, expected)? {
         Ok(())
     } else {
         Err(CheckError::TypeMismatch {
@@ -2730,7 +2742,7 @@ impl Certificate {
         // row in `audit --differential-lean-checker`).
         match infer(&ctx, &self.claimed_type) {
             Ok(claimed_kind) => {
-                if ctx.conversion().expect_universe(&claimed_kind).is_none() {
+                if ctx.conversion().expect_universe(&claimed_kind)?.is_none() {
                     return Err(CheckError::ClaimedTypeNotAType {
                         claimed_type: self.claimed_type.clone(),
                         actual: claimed_kind,
@@ -3109,17 +3121,14 @@ mod tests {
     #[test]
     fn defect_3_whnf_terminates_on_omega_omega() {
         // Build the CoC encoding of Ω(Ω) where Ω = λ. App(Var(0), Var(0)).
-        // Pre-fix: whnf would loop forever.
-        // Post-fix: fuel exhausts and whnf returns a partially-reduced
-        // term (the kernel's soundness only requires def_eq agree, not
-        // full reduction).  We assert that whnf RETURNS — that's the
-        // load-bearing property.
+        // No semantic verdict is obtained from a diverging reduction.
         let omega_body = Term::app(Term::Var(0), Term::Var(0));
         let omega = Term::lam(Term::universe(0), omega_body);
         let omega_omega = Term::app(omega.clone(), omega);
-        // If whnf loops, this test hangs and CI kills it.  If it
-        // returns at all, the fuel bound is doing its job.
-        let _result = whnf(omega_omega);
+        assert_eq!(
+            Context::new().conversion().whnf_fuel(omega_omega, 16),
+            Err(CheckError::FuelExhausted)
+        );
     }
 
     #[test]

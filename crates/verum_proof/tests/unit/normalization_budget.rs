@@ -1,17 +1,19 @@
-//! A resource pause must preserve the term, including binder annotations.
+//! Exhaustion is operational failure, even for a well-typed, terminating term.
 use super::*;
 use proptest::prelude::*;
 proptest! {
     #[test]
-    fn exhausted_head_budget_preserves_typed_application(level in 0u32..10000) {
+    fn exhausted_head_budget_never_returns_a_partial_normal_form(level in 0u32..10000) {
         let term=Term::app(Term::lam(Term::universe(level+1),Term::var(0)),Term::universe(level));
-        let expected=infer(&Context::new(),&term).unwrap();
-        let (paused,remaining)=whnf_fuel(term.clone(),2);
+        let context=Context::new();
+        let conversion=context.conversion();
+        let expected=infer(&context,&term).unwrap();
+        for fuel in 0..3 {
+            prop_assert_eq!(conversion.whnf_fuel(term.clone(),fuel),Err(CheckError::FuelExhausted));
+        }
+        let (reduced,remaining)=conversion.whnf_fuel(term,3).unwrap();
         prop_assert_eq!(remaining,0);
-        prop_assert_eq!(&paused,&term);
-        prop_assert_eq!(infer(&Context::new(),&paused).unwrap(),expected.clone());
-        let (reduced,_)=whnf_fuel(term,8);
-        prop_assert_eq!(reduced,Term::universe(level));
-        prop_assert_eq!(infer(&Context::new(),&Term::universe(level)).unwrap(),expected);
+        prop_assert_eq!(&reduced,&Term::universe(level));
+        prop_assert_eq!(infer(&context,&reduced).unwrap(),expected);
     }
 }

@@ -10,16 +10,71 @@ from pathlib import Path
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
+# A failed checker invocation is not a proof of an invalid certificate. These
+# are the semantic error constructors of the two current checking protocols;
+# new outcomes require explicit classification instead of an allow-by-default.
+NATIVE_REJECTIONS = frozenset({
+    'invalid_inductive', 'unbound_variable', 'not_a_type', 'not_a_function',
+    'not_a_pair_type', 'not_an_identity', 'identity_endpoints_differ',
+    'invalid_identity_motive', 'domain_mismatch', 'type_mismatch',
+})
+LEAN_REJECTIONS = frozenset({
+    'InvalidInductive', 'UnboundVariable', 'NotAType', 'NotAFunction',
+    'NotASigma', 'NotAnIdentity', 'NotAValidJMotive', 'DomainMismatch',
+    'TypeMismatch', 'ClaimedTypeNotAType',
+})
+
+
+def validate_verdicts(name, native, lean, expected, profile, returncode):
+    """Admit only complete matching proof verdicts, never operational failure."""
+    def require(condition, message):
+        if not condition:
+            raise RuntimeError(name + ': ' + message)
+
+    require(type(expected) is bool, 'expected verdict must be Boolean')
+    require(type(native) is dict and type(lean) is dict, 'malformed checker report')
+    require(type(native.get('accepted')) is bool and type(lean.get('ok')) is bool,
+            'checker verdict must be Boolean')
+    require(native.get('profile') == profile, 'worker changed the selected foundation')
+    require(lean.get('id') == name, 'independent checker changed certificate identity')
+    require(returncode == (0 if native['accepted'] else 1),
+            'native exit status disagrees with verdict')
+    require(native['accepted'] == expected and lean['ok'] == expected,
+            'native and independent proof verdicts differ from the expected result')
+    require(native.get('outcome') == ('accepted' if expected else 'rejected'),
+            'unsupported, exhausted or inconclusive result is not a proof verdict')
+    if expected:
+        require(native.get('diagnostic') is None and 'error' not in lean,
+                'accepted proof carries a failure diagnostic')
+    else:
+        diagnostic = native.get('diagnostic')
+        require(type(diagnostic) is dict and diagnostic.get('stage') in ('substitution', 'normalization'),
+                'rejection did not reach proof checking')
+        require(diagnostic.get('code') in NATIVE_REJECTIONS,
+                'native failure is not a semantic proof rejection')
+        require(lean.get('error') in LEAN_REJECTIONS,
+                'independent failure is not a semantic proof rejection')
+
+
+def validate_cases(cases):
+    if not cases:
+        raise ValueError('certificate battery must not be empty')
+    if any(type(name) is not str or not name or type(expected) is not bool
+           for name, _, expected in cases):
+        raise ValueError('each certificate requires a nonempty identity and Boolean expectation')
+    if len({name for name, _, _ in cases}) != len(cases):
+        raise ValueError('certificate identities must be unique')
+
 
 def run(cases, description, sources, *, foundations=None):
+    cases = list(cases)
+    validate_cases(cases)
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('--native', required=True, type=Path)
     parser.add_argument('--lean', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--export-dir', type=Path, help='write replayable exact judgments to a new directory')
     args = parser.parse_args()
-    if len({name for name, _, _ in cases}) != len(cases):
-        raise ValueError('certificate identities must be unique')
     foundations = {} if foundations is None else foundations
     policies = {'intensional': ('verum-native/1', []),
         'function-extensionality': ('verum-native-funext/1', ['--foundation', 'function-extensionality'])}
@@ -48,14 +103,7 @@ def run(cases, description, sources, *, foundations=None):
             encoded = json.dumps(judgment, separators=(',', ':')).encode()
             native_run = subprocess.run([str(native_path), *native_args], input=encoded, capture_output=True, timeout=10)
             native = json.loads(native_run.stdout)
-            if native['profile'] != profile:
-                raise RuntimeError(name + ': worker changed the selected foundation')
-            if native_run.returncode != (0 if native['accepted'] else 1):
-                raise RuntimeError(name + ': native exit status disagrees with verdict')
-            if native['accepted'] != expected or lean['ok'] != expected:
-                raise RuntimeError(f'{name}: expected {expected}, native={native}, independent={lean}')
-            if not expected and native['diagnostic']['stage'] not in ('substitution', 'normalization'):
-                raise RuntimeError(name + ': rejection did not reach proof checking: ' + str(native['diagnostic']))
+            validate_verdicts(name, native, lean, expected, profile, native_run.returncode)
             filename = f'{index:03d}.judgment.json'
             exports[filename] = encoded
             report['cases'].append({'id': name, 'artifact': filename, 'native_arguments': native_args, 'expected': expected, 'native': native, 'independent_lean': lean,

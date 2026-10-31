@@ -1,4 +1,4 @@
-import VerumExternalReplay.ReductionScope
+import VerumExternalReplay.TermOperations
 
 /-! Operational correspondence for the executable reference reducer.
 Rules specify primitive contractions and the head contexts in which they run.
@@ -55,126 +55,102 @@ theorem HeadSteps.lift (context : Term → Term)
   | refl => exact .refl _
   | step edge rest ih => exact .step (preserve edge) ih
 
-/-- Every result returned by the evaluator is reached by the explicit rules.
-    This includes zero fuel, truncated computations and neutral/stuck heads. -/
-theorem whnfFuel_reduces (fuel : Nat) (term : Term) : HeadSteps term (whnfFuel fuel term) := by
-  induction fuel generalizing term with
-  | zero => simpa only [whnfFuel] using HeadSteps.refl term
+/-- Every successful result is reached by the explicit reduction rules.
+    Exhaustion supplies no term and cannot be used as a normal form. -/
+theorem whnfFuel_reduces (fuel : Nat) (term result : Term)
+    (completed : whnfFuel fuel term = .ok result) : HeadSteps term result := by
+  induction fuel generalizing term result with
+  | zero => simp [whnfFuel] at completed
   | succ fuel ih =>
     cases term with
-    | var index =>
-      simp only [whnfFuel]
-      exact .refl _
-    | «universe» level =>
-      simp only [whnfFuel]
-      exact .refl _
-    | data name level indices constructors =>
-      simp only [whnfFuel]
-      exact .refl _
-    | construct data ctor args =>
-      simp only [whnfFuel]
-      exact .refl _
-    | pi a b =>
-      simp only [whnfFuel]
-      exact .refl _
-    | lam a b =>
-      simp only [whnfFuel]
-      exact .refl _
-    | sigma a b =>
-      simp only [whnfFuel]
-      exact .refl _
-    | pair a b =>
-      simp only [whnfFuel]
-      exact .refl _
-    | identity a b c =>
-      simp only [whnfFuel]
-      exact .refl _
-    | refl value =>
-      simp only [whnfFuel]
-      exact .refl _
-    | funExt a b c d =>
-      simp only [whnfFuel]
+    | var index | «universe» level | data name level indices constructors
+      | construct data ctor args | pi a b | lam a b | sigma a b | pair a b
+      | identity a b c | refl value | funExt a b c d =>
+      simp only [whnfFuel, pure, Except.pure, Except.ok.injEq] at completed
+      subst result
       exact .refl _
     | letE value body =>
-      simp only [whnfFuel]
-      exact .step (.letValue value body) (ih (subst 0 value body))
+      simp only [whnfFuel] at completed
+      exact .step (.letValue value body) (ih _ _ completed)
     | app f x =>
-      have headPath := HeadSteps.lift (fun head => .app head x) (HeadStep.appHead x) (ih f)
-      simp only [whnfFuel]
-      split
-      next domain body equation =>
-        have path : HeadSteps (.app f x) (.app (.lam domain body) x) := by
-          simpa only [equation] using headPath
-        exact path.trans (.step (.beta domain body x) (ih (subst 0 x body)))
-      next other equation => simpa only [equation] using headPath
+      cases headEq : whnfFuel fuel f with
+      | error error => simp [whnfFuel, headEq, bind, Except.bind] at completed
+      | ok head =>
+        have path := HeadSteps.lift (fun head => .app head x) (HeadStep.appHead x) (ih _ _ headEq)
+        simp only [whnfFuel, headEq, bind, Except.bind, pure, Except.pure] at completed
+        split at completed
+        next domain body => exact path.trans (.step (.beta domain body x) (ih _ _ completed))
+        next other => cases completed; exact path
     | fst value =>
-      have headPath := HeadSteps.lift Term.fst HeadStep.fstHead (ih value)
-      simp only [whnfFuel]
-      split
-      next a b equation =>
-        have path : HeadSteps (.fst value) (.fst (.pair a b)) := by
-          simpa only [equation] using headPath
-        exact path.trans (.step (.first a b) (ih a))
-      next other equation => simpa only [equation] using headPath
+      cases headEq : whnfFuel fuel value with
+      | error error => simp [whnfFuel, headEq, bind, Except.bind] at completed
+      | ok head =>
+        have path := HeadSteps.lift Term.fst HeadStep.fstHead (ih _ _ headEq)
+        simp only [whnfFuel, headEq, bind, Except.bind, pure, Except.pure] at completed
+        split at completed
+        next a b => exact path.trans (.step (.first a b) (ih _ _ completed))
+        next other => cases completed; exact path
     | snd value =>
-      have headPath := HeadSteps.lift Term.snd HeadStep.sndHead (ih value)
-      simp only [whnfFuel]
-      split
-      next a b equation =>
-        have path : HeadSteps (.snd value) (.snd (.pair a b)) := by
-          simpa only [equation] using headPath
-        exact path.trans (.step (.second a b) (ih b))
-      next other equation => simpa only [equation] using headPath
-    | transport motive base path =>
-      have headPath := HeadSteps.lift (fun head => .transport motive base head)
-        (HeadStep.transportHead motive base) (ih path)
-      simp only [whnfFuel]
-      split
-      next value equation =>
-        have steps : HeadSteps (.transport motive base path) (.transport motive base (.refl value)) := by
-          simpa only [equation] using headPath
-        exact steps.trans (.step (.transport motive base value) (ih base))
-      next other equation => simpa only [equation] using headPath
-    | idElim motive base path =>
-      have headPath := HeadSteps.lift (fun head => .idElim motive base head)
-        (HeadStep.idElimHead motive base) (ih path)
-      simp only [whnfFuel]
-      split
-      next value equation =>
-        have steps : HeadSteps (.idElim motive base path) (.idElim motive base (.refl value)) := by
-          simpa only [equation] using headPath
-        exact steps.trans (.step (.idElim motive base value) (ih base))
-      next other equation => simpa only [equation] using headPath
+      cases headEq : whnfFuel fuel value with
+      | error error => simp [whnfFuel, headEq, bind, Except.bind] at completed
+      | ok head =>
+        have path := HeadSteps.lift Term.snd HeadStep.sndHead (ih _ _ headEq)
+        simp only [whnfFuel, headEq, bind, Except.bind, pure, Except.pure] at completed
+        split at completed
+        next a b => exact path.trans (.step (.second a b) (ih _ _ completed))
+        next other => cases completed; exact path
+    | transport motive base value =>
+      cases headEq : whnfFuel fuel value with
+      | error error => simp [whnfFuel, headEq, bind, Except.bind] at completed
+      | ok head =>
+        have path := HeadSteps.lift (fun head => .transport motive base head)
+          (HeadStep.transportHead motive base) (ih _ _ headEq)
+        simp only [whnfFuel, headEq, bind, Except.bind, pure, Except.pure] at completed
+        split at completed
+        next value => exact path.trans (.step (.transport motive base value) (ih _ _ completed))
+        next other => cases completed; exact path
+    | idElim motive base value =>
+      cases headEq : whnfFuel fuel value with
+      | error error => simp [whnfFuel, headEq, bind, Except.bind] at completed
+      | ok head =>
+        have path := HeadSteps.lift (fun head => .idElim motive base head)
+          (HeadStep.idElimHead motive base) (ih _ _ headEq)
+        simp only [whnfFuel, headEq, bind, Except.bind, pure, Except.pure] at completed
+        split at completed
+        next value => exact path.trans (.step (.idElim motive base value) (ih _ _ completed))
+        next other => cases completed; exact path
     | induct value motive cases =>
-      have headPath := HeadSteps.lift (fun head => .induct head motive cases)
-        (HeadStep.inductHead motive cases) (ih value)
-      simp only [whnfFuel]
-      split
-      next data ctor args headEq =>
-        have constructorPath : HeadSteps (.induct value motive cases) (.induct (.construct data ctor args) motive cases) := by
-          simpa only [headEq] using headPath
-        have declarationPath := HeadSteps.lift (fun declaration => .induct (.construct declaration ctor args) motive cases)
-          (HeadStep.inductDeclaration ctor args motive cases) (ih data)
-        split
-        next name level indices constructors declarationEq =>
-          split
-          next fields branch fieldsEq branchEq =>
-            split
-            next arity =>
-              have path : HeadSteps (.induct (.construct data ctor args) motive cases)
-                  (.induct (.construct (.data name level indices constructors) ctor args) motive cases) := by
-                simpa only [declarationEq] using declarationPath
-              exact constructorPath.trans (path.trans (.step
-                (.induction name level indices constructors ctor args motive cases fields branch fieldsEq branchEq
-                  (by simpa only [beq_iff_eq] using arity))
-                (ih (applyInductionCase motive cases fields.fields args branch))))
-            next arity => exact headPath
-          next => exact headPath
-        next => exact headPath
-      next other equation => simpa only [equation] using headPath
+      cases headEq : whnfFuel fuel value with
+      | error error => simp [whnfFuel, headEq, bind, Except.bind] at completed
+      | ok head =>
+        have path := HeadSteps.lift (fun head => .induct head motive cases)
+          (HeadStep.inductHead motive cases) (ih _ _ headEq)
+        simp only [whnfFuel, headEq, bind, Except.bind, pure, Except.pure] at completed
+        split at completed
+        next data ctor args =>
+          cases declarationEq : whnfFuel fuel data with
+          | error error => simp [declarationEq] at completed
+          | ok declaration =>
+            have declarationPath := HeadSteps.lift
+              (fun declaration => .induct (.construct declaration ctor args) motive cases)
+              (HeadStep.inductDeclaration ctor args motive cases) (ih _ _ declarationEq)
+            simp only [declarationEq] at completed
+            split at completed
+            next name level indices constructors =>
+              split at completed
+              next fields branch fieldsEq branchEq =>
+                split at completed
+                next arity =>
+                  exact path.trans (declarationPath.trans (.step
+                    (.induction name level indices constructors ctor args motive cases fields branch fieldsEq branchEq
+                      (by simpa only [beq_iff_eq] using arity)) (ih _ _ completed)))
+                next => cases completed; exact path
+              next => cases completed; exact path
+            next => cases completed; exact path
+        next other => cases completed; exact path
 
-theorem whnf_reduces (term : Term) : HeadSteps term (whnf term) :=
-  whnfFuel_reduces whnfFuelCeiling term
+theorem whnf_reduces (term result : Term) (completed : whnf term = .ok result) :
+    HeadSteps term result := whnfFuel_reduces whnfFuelCeiling term result completed
 
 /-- If no primitive/context step is available, a finite reduction can only
     return the input. The relation cannot grant arbitrary results by reflexivity. -/
@@ -184,13 +160,14 @@ theorem HeadSteps.normal_unique {term result : Term}
   | refl => rfl
   | step edge rest => exact False.elim (normal _ edge)
 
-/-- Fuel exhaustion does not establish normality: zero fuel leaves even an
-    explicit beta redex untouched, and that redex still has a permitted step. -/
-theorem zero_fuel_retains_beta_redex (domain body argument : Term) :
-    whnfFuel 0 (.app (.lam domain body) argument) = .app (.lam domain body) argument ∧
-    HeadStep (whnfFuel 0 (.app (.lam domain body) argument)) (subst 0 argument body) := by
-  simp only [whnfFuel]
-  exact ⟨True.intro, .beta domain body argument⟩
+/-- Zero fuel refuses even a reducible term. An operational failure is
+    not a completed normalization or a proof that the term is ill-typed. -/
+theorem zero_fuel_refuses_beta_redex (domain body argument : Term) :
+    whnfFuel 0 (.app (.lam domain body) argument) = .error .fuel_exhausted ∧
+    HeadStep (.app (.lam domain body) argument) (subst 0 argument body) := by
+  constructor
+  · simp only [whnfFuel]
+  · exact .beta domain body argument
 
 /-- info: 'VerumKernel.whnfFuel_reduces' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
@@ -201,7 +178,7 @@ theorem zero_fuel_retains_beta_redex (domain body argument : Term) :
 /-- info: 'VerumKernel.HeadSteps.normal_unique' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms HeadSteps.normal_unique
-/-- info: 'VerumKernel.zero_fuel_retains_beta_redex' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'VerumKernel.zero_fuel_refuses_beta_redex' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
-#print axioms zero_fuel_retains_beta_redex
+#print axioms zero_fuel_refuses_beta_redex
 end VerumKernel

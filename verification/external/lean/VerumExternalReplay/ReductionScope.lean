@@ -1,4 +1,5 @@
 import VerumExternalReplay.TermScope
+import VerumExternalReplay.ReductionSemantics
 
 /-! Scope preservation for the actual fuel-bounded reference reducer.
 The statements concern all scoped terms, including terms that are not typable.
@@ -57,111 +58,63 @@ theorem scope_applyInductionCase (bound : Nat) (motive : Term) (cases : List Ter
         apply ih tail _ parts.2
         simp only [scopeError, branchGood, parts.1, Option.or_none]
 
-/-- Every completed or fuel-truncated reduction preserves scope. The theorem
-    covers every term constructor and every fuel amount, without typing premises. -/
-theorem scope_whnfFuel (fuel bound : Nat) (term : Term)
-    (good : scopeError bound term = none) :
-    scopeError bound (whnfFuel fuel term) = none := by
-  induction fuel generalizing term with
-  | zero => simpa only [whnfFuel] using good
-  | succ fuel ih =>
-    cases term with
-    | var index => simpa only [whnfFuel] using good
-    | «universe» level => simpa only [whnfFuel] using good
-    | data name level indices constructors => simpa only [whnfFuel] using good
-    | construct data ctor args => simpa only [whnfFuel] using good
-    | pi a b => simpa only [whnfFuel] using good
-    | lam a b => simpa only [whnfFuel] using good
-    | sigma a b => simpa only [whnfFuel] using good
-    | pair a b => simpa only [whnfFuel] using good
-    | identity a b c => simpa only [whnfFuel] using good
-    | refl value => simpa only [whnfFuel] using good
-    | funExt a b c d => simpa only [whnfFuel] using good
-    | letE value body =>
-      have parts : scopeError bound value = none ∧ scopeError (bound + 1) body = none := by
-        simpa only [scopeError, Option.or_eq_none_iff] using good
-      simpa only [whnfFuel] using ih (subst 0 value body) (scope_subst bound 0 value body parts.1 parts.2)
-    | app f x =>
-      have parts : scopeError bound f = none ∧ scopeError bound x = none := by
-        simpa only [scopeError, Option.or_eq_none_iff] using good
-      have headGood := ih f parts.1
-      simp only [whnfFuel]
-      split
-      next domain body equation =>
-        simp only [equation, scopeError, Option.or_eq_none_iff] at headGood
-        exact ih (subst 0 x body) (scope_subst bound 0 x body parts.2 headGood.2)
-      next other equation =>
-        simp only [scopeError, Option.or_eq_none_iff]
-        exact ⟨by simpa only [equation] using headGood, parts.2⟩
-    | fst value =>
-      have headGood := ih value (by simpa only [scopeError] using good)
-      simp only [whnfFuel]
-      split
-      next a b equation =>
-        simp only [equation, scopeError, Option.or_eq_none_iff] at headGood
-        exact ih a headGood.1
-      next other equation =>
-        simpa only [scopeError, equation] using headGood
-    | snd value =>
-      have headGood := ih value (by simpa only [scopeError] using good)
-      simp only [whnfFuel]
-      split
-      next a b equation =>
-        simp only [equation, scopeError, Option.or_eq_none_iff] at headGood
-        exact ih b headGood.2
-      next other equation =>
-        simpa only [scopeError, equation] using headGood
-    | transport motive base path =>
-      have parts : scopeError bound motive = none ∧ scopeError bound base = none ∧
-          scopeError bound path = none := by
-        simpa only [scopeError, Option.or_eq_none_iff] using good
-      have headGood := ih path parts.2.2
-      simp only [whnfFuel]
-      split
-      next value equation => exact ih base parts.2.1
-      next other equation =>
-        simp only [scopeError, Option.or_eq_none_iff]
-        exact ⟨parts.1, parts.2.1, by simpa only [equation] using headGood⟩
-    | idElim motive base path =>
-      have parts : scopeError bound motive = none ∧ scopeError bound base = none ∧
-          scopeError bound path = none := by
-        simpa only [scopeError, Option.or_eq_none_iff] using good
-      have headGood := ih path parts.2.2
-      simp only [whnfFuel]
-      split
-      next value equation => exact ih base parts.2.1
-      next other equation =>
-        simp only [scopeError, Option.or_eq_none_iff]
-        exact ⟨parts.1, parts.2.1, by simpa only [equation] using headGood⟩
-    | induct value motive cases =>
-      have parts : scopeError bound value = none ∧ scopeError bound motive = none ∧
-          scopeTerms bound cases = none := by
-        simpa only [scopeError, Option.or_eq_none_iff] using good
-      have headGood := ih value parts.1
-      have neutralGood : scopeError bound (.induct (whnfFuel fuel value) motive cases) = none := by
-        simpa only [scopeError, Option.or_eq_none_iff] using And.intro headGood parts.2
-      simp only [whnfFuel]
-      split
-      next data ctor args headEq =>
-        have constructorGood : scopeError bound data = none ∧ scopeTerms bound args = none := by
-          simpa only [headEq, scopeError, Option.or_eq_none_iff] using headGood
-        have argsGood := constructorGood.2
-        split
-        next name level indices constructors declarationEq =>
-          split
-          next fields branch fieldsEq branchEq =>
-            split
-            next arity =>
-              exact ih _ (scope_applyInductionCase bound motive cases fields.fields args branch
-                parts.2.1 parts.2.2 argsGood
-                (scopeTerms_member bound cases parts.2.2 branch (List.mem_of_getElem? branchEq)))
-            next arity => simpa only [headEq] using neutralGood
-          next => simpa only [headEq] using neutralGood
-        next => simpa only [headEq] using neutralGood
-      next other headEq => simpa only [headEq] using neutralGood
+/-- Scope preservation follows from the operational rules, independently of
+    the evaluator's traversal and resource budget. -/
+theorem HeadStep.preserves_scope {term result : Term} (step : HeadStep term result)
+    (bound : Nat) (good : scopeError bound term = none) : scopeError bound result = none := by
+  induction step with
+  | beta domain body argument =>
+    simp only [scopeError, Option.or_eq_none_iff] at good
+    exact scope_subst bound 0 argument body good.2 good.1.2
+  | letValue value body =>
+    simp only [scopeError, Option.or_eq_none_iff] at good
+    exact scope_subst bound 0 value body good.1 good.2
+  | first a b =>
+    simp only [scopeError, Option.or_eq_none_iff] at good
+    exact good.1
+  | second a b =>
+    simp only [scopeError, Option.or_eq_none_iff] at good
+    exact good.2
+  | transport motive base value | idElim motive base value =>
+    simp only [scopeError, Option.or_eq_none_iff] at good
+    exact good.2.1
+  | induction name level indices constructors ctor args motive cases fields branch fieldsFound branchFound arity =>
+    simp only [scopeError, Option.or_eq_none_iff] at good
+    exact scope_applyInductionCase bound motive cases fields.fields args branch
+      good.2.1 good.2.2 good.1.2
+      (scopeTerms_member bound cases good.2.2 branch (List.mem_of_getElem? branchFound))
+  | appHead argument step ih =>
+    simp only [scopeError, Option.or_eq_none_iff] at good ⊢
+    exact ⟨ih good.1, good.2⟩
+  | fstHead step ih | sndHead step ih =>
+    simp only [scopeError] at good ⊢
+    exact ih good
+  | transportHead motive base step ih | idElimHead motive base step ih =>
+    simp only [scopeError, Option.or_eq_none_iff] at good ⊢
+    exact ⟨good.1, good.2.1, ih good.2.2⟩
+  | inductHead motive cases step ih =>
+    simp only [scopeError, Option.or_eq_none_iff] at good ⊢
+    exact ⟨ih good.1, good.2⟩
+  | inductDeclaration ctor args motive cases step ih =>
+    simp only [scopeError, Option.or_eq_none_iff] at good ⊢
+    exact ⟨⟨ih good.1.1, good.1.2⟩, good.2⟩
 
-theorem scope_whnf (bound : Nat) (term : Term) (good : scopeError bound term = none) :
-    scopeError bound (whnf term) = none := scope_whnfFuel whnfFuelCeiling bound term good
+theorem HeadSteps.preserves_scope {term result : Term} (steps : HeadSteps term result)
+    (bound : Nat) (good : scopeError bound term = none) : scopeError bound result = none := by
+  induction steps with
+  | refl => exact good
+  | step edge rest ih => exact ih (edge.preserves_scope bound good)
+
+/-- Every successful reduction preserves scope, for all scoped inputs including
+    untypable terms. Exhaustion has no returned term to use as evidence. -/
+theorem scope_whnfFuel (fuel bound : Nat) (term result : Term)
+    (good : scopeError bound term = none) (completed : whnfFuel fuel term = .ok result) :
+    scopeError bound result = none :=
+  (whnfFuel_reduces fuel term result completed).preserves_scope bound good
+
+theorem scope_whnf (bound : Nat) (term result : Term) (good : scopeError bound term = none)
+    (completed : whnf term = .ok result) : scopeError bound result = none :=
+  scope_whnfFuel whnfFuelCeiling bound term result good completed
 
 /-- info: 'VerumKernel.applyInductionCase_eq_fold' depends on axioms: [propext] -/
 #guard_msgs in
@@ -169,6 +122,12 @@ theorem scope_whnf (bound : Nat) (term : Term) (good : scopeError bound term = n
 /-- info: 'VerumKernel.scope_applyInductionCase' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms scope_applyInductionCase
+/-- info: 'VerumKernel.HeadStep.preserves_scope' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HeadStep.preserves_scope
+/-- info: 'VerumKernel.HeadSteps.preserves_scope' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HeadSteps.preserves_scope
 /-- info: 'VerumKernel.scope_whnfFuel' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms scope_whnfFuel

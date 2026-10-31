@@ -455,56 +455,54 @@ termination_by structural fields
 /-- Fuel ceiling for whnf. -/
 def whnfFuelCeiling : Nat := 1 <<< 20
 
-/-- Fuel-bounded whnf — handles β-reduction at App and Σ-projection
-    at Fst/Snd. -/
-def whnfFuel (fuel : Nat) (t : Term) : Term :=
+/-- Structurally fuel-bounded independent reduction. This bounds recursive
+reduction depth, not Rust's cumulative head-step counter. Exhaustion yields no
+term and therefore cannot become a semantic mismatch in either checker. -/
+def whnfFuel (fuel : Nat) (t : Term) : Except CheckError Term :=
   match fuel with
-  | 0 => t
-  | fuel + 1 =>
+  | 0 => .error .fuel_exhausted
+  | fuel + 1 => do
     match t with
     | .letE value body => whnfFuel fuel (subst 0 value body)
     | .induct value motive cases =>
-      let head := whnfFuel fuel value
+      let head ← whnfFuel fuel value
       match head with
       | .construct data ctor args =>
-        match whnfFuel fuel data with
+        match ← whnfFuel fuel data with
         | .data _ _ _ constructors =>
           match constructors[ctor]?, cases[ctor]? with
           | some fields, some branch =>
             if fields.fields.length == args.length then
               whnfFuel fuel (applyInductionCase motive cases fields.fields args branch)
-            else .induct head motive cases
-          | _, _ => .induct head motive cases
-        | _ => .induct head motive cases
-      | _ => .induct head motive cases
+            else pure (.induct head motive cases)
+          | _, _ => pure (.induct head motive cases)
+        | _ => pure (.induct head motive cases)
+      | _ => pure (.induct head motive cases)
     | .app f x =>
-      let f' := whnfFuel fuel f
-      match f' with
+      match ← whnfFuel fuel f with
       | .lam _ body => whnfFuel fuel (subst 0 x body)
-      | other       => .app other x
+      | other => pure (.app other x)
     | .fst p =>
-      let p' := whnfFuel fuel p
-      match p' with
+      match ← whnfFuel fuel p with
       | .pair a _ => whnfFuel fuel a
-      | other     => .fst other
+      | other => pure (.fst other)
     | .snd p =>
-      let p' := whnfFuel fuel p
-      match p' with
+      match ← whnfFuel fuel p with
       | .pair _ b => whnfFuel fuel b
-      | other     => .snd other
+      | other => pure (.snd other)
     | .transport p h e =>
-      match whnfFuel fuel e with
+      match ← whnfFuel fuel e with
       | .refl _ => whnfFuel fuel h
-      | other => .transport p h other
+      | other => pure (.transport p h other)
     | .idElim p h e =>
-      match whnfFuel fuel e with
+      match ← whnfFuel fuel e with
       | .refl _ => whnfFuel fuel h
-      | other => .idElim p h other
-    | other => other
+      | other => pure (.idElim p h other)
+    | other => pure other
 termination_by fuel
 
-/-- Public whnf. -/
-def whnf (t : Term) : Term := whnfFuel whnfFuelCeiling t
+/-- Public reduction never exposes an exhausted partial normal form. -/
+def whnf (t : Term) : Except CheckError Term := whnfFuel whnfFuelCeiling t
 
 /-- Is `var target` free in `t`? -/
 partial def isFreeIn (target : Nat) (t : Term) : Bool :=
@@ -557,73 +555,73 @@ def applyTerms (head : Term) (arguments : List Term) : Term := arguments.foldl T
 def fieldDomain (data : Term) (field : DataField Term) (preceding : Nat) : Term :=
   (fieldValueType field preceding).getD (applyTerms (shiftUp preceding 0 data) ((recursiveIndices field).getD []))
 
-partial def splitFamily (term : Term) (values : List Term := []) : Option (Term × List Term) :=
+partial def splitFamily (term : Term) (values : List Term := []) : Except CheckError (Option (Term × List Term)) := do
   match term with
-  | .app head arg => splitFamily (whnf head) (arg :: values)
-  | .data _ _ indices _ => if indices.length == values.length then some (term, values) else none
-  | _ => none
+  | .app head arg => splitFamily (← whnf head) (arg :: values)
+  | .data _ _ indices _ => return if indices.length == values.length then some (term, values) else none
+  | _ => return none
+
+/-- Short-circuit on a completed mismatch; never erase an operational error. -/
+def allChecked (items : List α) (check : α → Except CheckError Bool) : Except CheckError Bool := do
+  match items with
+  | [] => pure true
+  | item :: rest => if ← check item then allChecked rest check else pure false
 
 mutual
 
-/-- α + β + η-equality after WHNF reduction. -/
-partial def defEq (a b : Term) : Bool :=
-  let aw := whnf a
-  let bw := whnf b
+/-- α + β + η-equality after completed WHNF reduction. -/
+partial def defEq (a b : Term) : Except CheckError Bool := do
+  let aw ← whnf a
+  let bw ← whnf b
   defEqWhnf aw bw
 
-partial def defEqWhnf : Term → Term → Bool
+partial def defEqWhnf : Term → Term → Except CheckError Bool
+  | .data an al ai ac, .data bn bl bi bc => do
+    unless an == bn && Level.eq al bl do return false
+    unless ← termsDefEq ai bi do return false
+    unless ac.length == bc.length do return false
+    allChecked (ac.zip bc) (fun (a,b) => do
+      unless a.fields.length == b.fields.length do return false
+      unless ← termsDefEq a.indices b.indices do return false
+      allChecked (a.fields.zip b.fields).zipIdx (fun ((x,y), index) =>
+        match recursiveIndices x, recursiveIndices y with
+        | some x, some y => termsDefEq x y
+        | none, none => match fieldValueType x index, fieldValueType y index with
+          | some x, some y => defEq x y
+          | _, _ => pure false
+        | _, _ => pure false))
+  | .construct a ai aa, .construct b bi ba => do
+    unless ai == bi do return false
+    unless ← defEq a b do return false
+    termsDefEq aa ba
+  | .induct a am ac, .induct b bm bc => do
+    unless ← defEq a b do return false
+    unless ← defEq am bm do return false
+    termsDefEq ac bc
+  | .var i, .var j => pure (i == j)
+  | .universe l1, .universe l2 => pure (Level.eq l1 l2)
+  | .pi a b, .pi c d | .lam a b, .lam c d | .app a b, .app c d
+    | .sigma a b, .sigma c d | .pair a b, .pair c d => termsDefEq [a,b] [c,d]
+  | .pair a b, other | other, .pair a b => termsDefEq [a,b] [.fst other,.snd other]
+  | .fst a, .fst b | .snd a, .snd b | .refl a, .refl b => defEq a b
+  | .identity a b c, .identity d e f | .transport a b c, .transport d e f
+    | .idElim a b c, .idElim d e f => termsDefEq [a,b,c] [d,e,f]
+  | .funExt a b c d, .funExt e f g h => termsDefEq [a,b,c,d] [e,f,g,h]
+  | .lam _ body, other | other, .lam _ body => etaMatch body other
+  | _, _ => pure false
 
-  | .data an al ai ac, .data bn bl bi bc =>
-    an == bn && Level.eq al bl && termsDefEq ai bi && ac.length == bc.length &&
-      (ac.zip bc).all (fun (a,b) => a.fields.length == b.fields.length && termsDefEq a.indices b.indices &&
-        (a.fields.zip b.fields).zipIdx.all (fun ((x,y), index) =>
-          match recursiveIndices x, recursiveIndices y with
-          | some x, some y => termsDefEq x y
-          | none, none => match fieldValueType x index, fieldValueType y index with
-            | some x, some y => defEq x y
-            | _, _ => false
-          | _, _ => false))
-  | .construct a ai aa, .construct b bi ba =>
-    ai == bi && defEq a b && aa.length == ba.length && (aa.zip ba).all (fun (x,y) => defEq x y)
-  | .induct a am ac, .induct b bm bc =>
-    defEq a b && defEq am bm && ac.length == bc.length && (ac.zip bc).all (fun (x,y) => defEq x y)
-  | .var i,        .var j        => i = j
-  -- Universe equality is decided structurally on canonical levels —
-  -- mirrors `proof_checker::level_eq`.
-  | .universe l1,  .universe l2  => Level.eq l1 l2
-  | .pi a1 b1,     .pi a2 b2     => defEq a1 a2 && defEq b1 b2
-  | .lam a1 b1,    .lam a2 b2    => defEq a1 a2 && defEq b1 b2
-  | .app f1 x1,    .app f2 x2    => defEq f1 f2 && defEq x1 x2
-  -- Σ-types (FV-20): structural component-wise equality.
-  -- β-projections (Fst(Pair) / Snd(Pair)) collapse in whnfFuel
-  -- before reaching here.
-  | .sigma a1 b1,  .sigma a2 b2  => defEq a1 a2 && defEq b1 b2
-  | .pair a1 b1,   .pair a2 b2   => defEq a1 a2 && defEq b1 b2
-  | .pair a b, other | other, .pair a b => defEq a (.fst other) && defEq b (.snd other)
-  | .fst p1,       .fst p2       => defEq p1 p2
-  | .snd p1,       .snd p2       => defEq p1 p2
-  | .identity a x y, .identity b u v => defEq a b && defEq x u && defEq y v
-  | .refl x, .refl y => defEq x y
-  | .transport p h e, .transport q k f => defEq p q && defEq h k && defEq e f
-  | .idElim p h e, .idElim q k f => defEq p q && defEq h k && defEq e f
-  | .funExt a b c d, .funExt e f g h => defEq a e && defEq b f && defEq c g && defEq d h
-  | .lam _ body,   other         => etaMatch body other
-  | other,         .lam _ body   => etaMatch body other
-  | _,             _             => false
+partial def termsDefEq (a b : List Term) : Except CheckError Bool := do
+  unless a.length == b.length do return false
+  allChecked (a.zip b) (fun (a,b) => defEq a b)
 
-partial def termsDefEq (a b : List Term) : Bool :=
-  a.length == b.length && (a.zip b).all (fun (a,b) => defEq a b)
-
-/-- η-equivalence helper — mirrors `proof_checker::eta_match`. -/
-partial def etaMatch (lamBody other : Term) : Bool :=
-  match whnf lamBody with
+/-- η-equivalence checks all required reductions before comparing endpoints. -/
+partial def etaMatch (lamBody other : Term) : Except CheckError Bool := do
+  match ← whnf lamBody with
   | .app f x =>
-    match whnf x with
-    | .var 0 =>
-      if isFreeIn 0 f then false
-      else defEq (shiftDown 1 0 f) other
-    | _ => false
-  | _ => false
+    match ← whnf x with
+    | .var 0 => if isFreeIn 0 f then pure false else defEq (shiftDown 1 0 f) other
+    | _ => pure false
+  | _ => pure false
 
 end
 
@@ -637,10 +635,10 @@ def lookupCtx (Γ : Ctx) (i : Nat) : Option Term :=
     none
 
 /-- If `t` whnf-reduces to `Universe l`, return the normalised level. -/
-def expectUniverse (t : Term) : Option Level :=
-  match whnf t with
-  | .universe l => some (Level.normalize l)
-  | _           => none
+def expectUniverse (t : Term) : Except CheckError (Option Level) := do
+  match ← whnf t with
+  | .universe l => pure (some (Level.normalize l))
+  | _ => pure none
 
 /-- Independently construct each case telescope from explicit recursive slots.
     Captured parameters remain in the surrounding de Bruijn context. -/
@@ -670,8 +668,8 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
   match t with
   | .funExt functionType lhs rhs pointwise => do
     unless Γ.foundation == .functionExtensionality do throw .foundation_required
-    let some _ := expectUniverse (← infer Γ functionType) | throw (.not_a_type functionType)
-    let .pi domain codomain := whnf functionType | throw (.not_a_function functionType)
+    let some _ ← expectUniverse (← infer Γ functionType) | throw (.not_a_type functionType)
+    let .pi domain codomain ← whnf functionType | throw (.not_a_function functionType)
     checkAgainst Γ lhs functionType
     checkAgainst Γ rhs functionType
     let premise := .pi domain (.identity codomain
@@ -685,7 +683,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     let mut indexContext := Γ
     for ty in indices do
       let kind ← infer indexContext ty
-      let some _ := expectUniverse kind | throw (.not_a_type ty)
+      let some _ ← expectUniverse kind | throw (.not_a_type ty)
       indexContext := indexContext.extend ty
     for constructor in constructors do
       let mut fieldContext := Γ
@@ -695,7 +693,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
           checkIndices fieldContext indices values index
         else
           let kind ← infer fieldContext domain
-          let some fieldLevel := expectUniverse kind | throw (.not_a_type domain)
+          let some fieldLevel ← expectUniverse kind | throw (.not_a_type domain)
           unless Level.eq (Level.maxCanonical fieldLevel level) level do
             throw (.invalid_inductive "field exceeds declaration universe")
         fieldContext := fieldContext.extend domain
@@ -703,7 +701,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     return indices.foldr Term.pi (.universe (Level.normalize level))
   | .construct data ctor args => do
     let _ ← infer Γ data
-    let declaration := whnf data
+    let declaration ← whnf data
     let .data _ _ _ constructors := declaration | throw (.invalid_inductive "constructor owner is not a data declaration")
     let some constructor := constructors[ctor]? | throw (.invalid_inductive "unknown constructor")
     unless constructor.fields.length == args.length do throw (.invalid_inductive "constructor field arity mismatch")
@@ -711,19 +709,21 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
       checkAgainst Γ arg (instantiateFields (fieldDomain declaration field index) (args.take index))
     return applyTerms declaration (constructor.indices.map (fun t => instantiateFields t args))
   | .induct value motive cases => do
-    let actual := whnf (← infer Γ value)
-    let some (declaration, values) := splitFamily actual | throw (.invalid_inductive "induction requires a fully applied data family")
+    let actual ← whnf (← infer Γ value)
+    let some (declaration, values) ← splitFamily actual | throw (.invalid_inductive "induction requires a fully applied data family")
     let .data _ _ indices constructors := declaration | throw (.invalid_inductive "invalid family head")
     let _ ← infer Γ declaration
     let mut motiveKind ← infer Γ motive
     for ty in indices do
-      let .pi domain result := whnf motiveKind | throw (.invalid_inductive "induction motive omits a family index")
-      unless defEq domain ty do throw (.invalid_inductive "induction motive index domain mismatch")
+      let .pi domain result ← whnf motiveKind | throw (.invalid_inductive "induction motive omits a family index")
+      unless ← defEq domain ty do throw (.invalid_inductive "induction motive index domain mismatch")
       motiveKind := result
-    let .pi domain result := whnf motiveKind | throw (.invalid_inductive "induction motive is not a family")
+    let .pi domain result ← whnf motiveKind | throw (.invalid_inductive "induction motive is not a family")
     let references := (List.range indices.length).reverse.map Term.var
     let expectedDomain := applyTerms (shiftUp indices.length 0 declaration) references
-    unless defEq domain expectedDomain && (expectUniverse result).isSome do
+    unless ← defEq domain expectedDomain do
+      throw (.invalid_inductive "induction motive domain mismatch")
+    unless (← expectUniverse result).isSome do
       throw (.invalid_inductive "induction motive domain or universe mismatch")
     unless cases.length == constructors.length do throw (.invalid_inductive "induction case count mismatch")
     for ((constructor, branch), index) in (constructors.zip cases).zipIdx do
@@ -742,48 +742,24 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
       if n ≥ 4294967295 then .error (.universe_overflow n)
       else .ok (.universe (Level.checkedSucc normal))
     | _ => .ok (.universe (Level.checkedSucc normal))
-  | .pi a b =>
-    match infer Γ a with
-    | .error e => .error e
-    | .ok aTy =>
-      match expectUniverse aTy with
-      | none => .error (.not_a_type a)
-      | some n =>
-        match infer (Γ.extend a) b with
-        | .error e => .error e
-        | .ok bTy =>
-          match expectUniverse bTy with
-          | none => .error (.not_a_type b)
-          | some m => .ok (.universe (Level.maxCanonical n m))
-  | .lam a body =>
-    match infer Γ a with
-    | .error e => .error e
-    | .ok aTy =>
-      match expectUniverse aTy with
-      | none => .error (.not_a_type a)
-      | some _ =>
-        match infer (Γ.extend a) body with
-        | .error e => .error e
-        | .ok bodyTy => .ok (.pi a bodyTy)
+  | .pi a b => do
+    let some n ← expectUniverse (← infer Γ a) | throw (.not_a_type a)
+    let some m ← expectUniverse (← infer (Γ.extend a) b) | throw (.not_a_type b)
+    return .universe (Level.maxCanonical n m)
+  | .lam a body => do
+    let some _ ← expectUniverse (← infer Γ a) | throw (.not_a_type a)
+    return .pi a (← infer (Γ.extend a) body)
   | .app f x => do
     let fTy ← infer Γ f
-    let .pi dom codom := whnf fTy | throw (.not_a_function (whnf fTy))
+    let head ← whnf fTy
+    let .pi dom codom := head | throw (.not_a_function head)
     checkDomain Γ x dom
     return subst 0 x codom
   -- T-Sigma-Form: Σ(x : A). B : Universe(max(level(A), level(B))).
-  | .sigma a b =>
-    match infer Γ a with
-    | .error e => .error e
-    | .ok aTy =>
-      match expectUniverse aTy with
-      | none => .error (.not_a_type a)
-      | some n =>
-        match infer (Γ.extend a) b with
-        | .error e => .error e
-        | .ok bTy =>
-          match expectUniverse bTy with
-          | none => .error (.not_a_type b)
-          | some m => .ok (.universe (Level.maxCanonical n m))
+  | .sigma a b => do
+    let some n ← expectUniverse (← infer Γ a) | throw (.not_a_type a)
+    let some m ← expectUniverse (← infer (Γ.extend a) b) | throw (.not_a_type b)
+    return .universe (Level.maxCanonical n m)
   -- T-Pair-Intro: synthesis-mode mirror.  Synthesises the most-
   -- specific non-dependent Σ that fits.
   | .pair fst snd =>
@@ -796,24 +772,17 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
         let body := shiftUp 1 0 sndTy
         .ok (.sigma fstTy body)
   -- T-Fst-Elim: p : Σ(A, B) ⇒ Fst(p) : A.
-  | .fst p =>
-    match infer Γ p with
-    | .error e => .error e
-    | .ok pTy =>
-      match whnf pTy with
-      | .sigma a _ => .ok a
-      | other      => .error (.not_a_sigma other)
-  -- T-Snd-Elim: p : Σ(A, B) ⇒ Snd(p) : B[Fst(p)/0].
-  | .snd p =>
-    match infer Γ p with
-    | .error e => .error e
-    | .ok pTy =>
-      match whnf pTy with
-      | .sigma _ b => .ok (subst 0 (.fst p) b)
-      | other      => .error (.not_a_sigma other)
+  | .fst p => do
+    match ← whnf (← infer Γ p) with
+    | .sigma a _ => pure a
+    | other => throw (.not_a_sigma other)
+  | .snd p => do
+    match ← whnf (← infer Γ p) with
+    | .sigma _ b => pure (subst 0 (.fst p) b)
+    | other => throw (.not_a_sigma other)
   | .identity a x y => do
     let kind ← infer Γ a
-    let some level := expectUniverse kind | .error (.not_a_type a)
+    let some level ← expectUniverse kind | .error (.not_a_type a)
     for endpoint in [x, y] do
       checkDomain Γ endpoint a
     return .universe level
@@ -822,21 +791,22 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     return .identity ty x x
   | .transport motive base path => do
     let pathTy ← infer Γ path
-    let .identity carrier lhs rhs := whnf pathTy | .error (.not_an_identity (whnf pathTy))
+    let head ← whnf pathTy
+    let .identity carrier lhs rhs := head | .error (.not_an_identity head)
     let motiveTy ← infer Γ motive
-    let .pi domain codomain := whnf motiveTy | .error (.not_a_valid_j_motive motive)
-    unless defEq domain carrier do throw (.domain_mismatch carrier domain)
-    let some _ := expectUniverse codomain | .error (.not_a_valid_j_motive motive)
+    let .pi domain codomain ← whnf motiveTy | .error (.not_a_valid_j_motive motive)
+    unless ← defEq domain carrier do throw (.domain_mismatch carrier domain)
+    let some _ ← expectUniverse codomain | .error (.not_a_valid_j_motive motive)
     checkDomain Γ base (.app motive lhs)
     return .app motive rhs
   | .idElim motive base path => do
-    let .identity carrier lhs rhs := whnf (← infer Γ path) | .error (.not_an_identity path)
-    let .pi domain codomain := whnf (← infer Γ motive) | .error (.not_a_valid_j_motive motive)
-    unless defEq domain carrier do throw (.domain_mismatch carrier domain)
-    let .pi proofDomain resultKind := whnf codomain | .error (.not_a_valid_j_motive motive)
+    let .identity carrier lhs rhs ← whnf (← infer Γ path) | .error (.not_an_identity path)
+    let .pi domain codomain ← whnf (← infer Γ motive) | .error (.not_a_valid_j_motive motive)
+    unless ← defEq domain carrier do throw (.domain_mismatch carrier domain)
+    let .pi proofDomain resultKind ← whnf codomain | .error (.not_a_valid_j_motive motive)
     let expectedPath := .identity (shiftUp 1 0 carrier) (shiftUp 1 0 lhs) (.var 0)
-    unless defEq proofDomain expectedPath do throw (.domain_mismatch expectedPath proofDomain)
-    let some _ := expectUniverse resultKind | .error (.not_a_valid_j_motive motive)
+    unless ← defEq proofDomain expectedPath do throw (.domain_mismatch expectedPath proofDomain)
+    let some _ ← expectUniverse resultKind | .error (.not_a_valid_j_motive motive)
     checkDomain Γ base (.app (.app motive lhs) (.refl lhs))
     return .app (.app motive rhs) path
 
@@ -846,22 +816,22 @@ partial def checkAgainst (Γ : Ctx) (t expected : Term) : Except CheckError Unit
   if let .letE value body := t then
     let _ ← infer Γ value
     return ← checkAgainst Γ (subst 0 value body) expected
-  match t, whnf expected with
+  match t, (← whnf expected) with
   | .lam domain body, .pi expectedDomain codomain =>
     let kind ← infer Γ domain
-    let some _ := expectUniverse kind | throw (.not_a_type domain)
-    unless defEq domain expectedDomain do throw (.type_mismatch expectedDomain domain)
+    let some _ ← expectUniverse kind | throw (.not_a_type domain)
+    unless ← defEq domain expectedDomain do throw (.type_mismatch expectedDomain domain)
     checkAgainst (Γ.extend domain) body codomain
   | .pair first second, .sigma domain family =>
     checkAgainst Γ first domain
     checkAgainst Γ second (subst 0 first family)
   | .refl value, .identity carrier lhs rhs =>
     checkDomain Γ value carrier
-    unless defEq value lhs && defEq value rhs do
+    unless ← termsDefEq [value,value] [lhs,rhs] do
       throw (.type_mismatch expected (.identity carrier value value))
   | _, _ =>
     let inferred ← infer Γ t
-    unless defEq inferred expected do throw (.type_mismatch expected inferred)
+    unless ← defEq inferred expected do throw (.type_mismatch expected inferred)
 
 partial def checkIndices (Γ : Ctx) (telescope arguments : List Term) (ambientShift : Nat) : Except CheckError Unit := do
   unless telescope.length == arguments.length do throw (.invalid_inductive "family index arity mismatch")
@@ -881,7 +851,7 @@ partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
   checkScope Γ.length t
   match infer Γ expected with
   | .ok kind =>
-    let some _ := expectUniverse kind | throw (.not_a_type expected)
+    let some _ ← expectUniverse kind | throw (.not_a_type expected)
   | .error (.universe_overflow _) =>
     -- A literal universe remains a type at the wire-level ceiling.
     -- Overflow inside a compound type cannot establish its formation.
@@ -898,7 +868,7 @@ def verifyCertificate (term claimedType : Term)
   checkScope 0 term
   match infer ctx claimedType with
   | .ok kind =>
-    let some _ := expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)
+    let some _ ← expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)
   | .error (.universe_overflow n) =>
     if let .universe _ := claimedType then pure ()
     else throw (.universe_overflow n)
@@ -914,11 +884,12 @@ namespace VerumKernel.Tests
 
 open VerumKernel
 
-/-- Wrap an inference result + expected outcome into a Bool so
-    `#eval` reports pass/fail uniformly. -/
+/-- Positive smoke assertion: every error, including exhaustion, fails. -/
 def expectInfer (Γ : Ctx) (t expected : Term) : Bool :=
   match infer Γ t with
-  | .ok inferred => defEq inferred expected
+  | .ok inferred => match defEq inferred expected with
+    | .ok true => true
+    | _ => false
   | _            => false
 
 def expectInferError (Γ : Ctx) (t : Term) (matchErr : CheckError → Bool) : Bool :=
@@ -932,31 +903,47 @@ def univ (n : Nat) : Term := .universe (.concrete n)
 -- Helper: build a level-variable Universe term.
 def univVar (name : String) : Term := .universe (.var name)
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {} (univ 0) (univ 1)
   -- T-Univ — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInferError {} (.var 0) (fun e => match e with | .unbound_variable 0 => true | _ => false)
   -- T-Var unbound — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer { bindings := [univ 0] } (.var 0) (univ 0)
   -- T-Var with hypothesis — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {} (.pi (univ 2) (univ 5)) (univ 6)
   -- T-Pi-Form max(3, 6) = 6 — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.lam (univ 0) (.var 0))
         (.pi (univ 0) (univ 0))
   -- T-Lam-Intro identity at Universe(0) — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInferError {}
         (.app (univ 0) (univ 0))
         (fun e => match e with | .not_a_function _ => true | _ => false)
   -- T-App-Elim rejects non-function — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {} (univ 1000) (univ 1001)
   -- universe successor (Nat-unbounded on Lean side) — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! (
   let id := Term.lam (univ 0) (.var 0)
   match verifyCertificate id id with
@@ -968,41 +955,57 @@ def univVar (name : String) : Term := .universe (.var name)
 -- FV-19 universe-polymorphism battery (mirrors proof_checker::tests)
 -- =============================================================================
 
+/-- info: true -/
+#guard_msgs in
 #eval! (Level.eq
         (Level.max (Level.var "u") (Level.var "v"))
         (Level.max (Level.var "v") (Level.var "u")))
   -- max commutativity via canonical form — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! (Level.eq
         (Level.max (Level.var "u") (Level.var "u"))
         (Level.var "u"))
   -- max idempotency — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! (Level.eq
         (Level.max Level.zero (Level.var "u"))
         (Level.var "u"))
   -- zero-identity — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! (Level.eq
         (Level.max (Level.succ (Level.var "u")) (Level.succ (Level.var "v")))
         (Level.succ (Level.max (Level.var "u") (Level.var "v"))))
   -- common-succ factoring — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (univVar "u")
         (.universe (.succ (.var "u")))
   -- T-Univ on a level variable: Universe(u) : Universe(succ(u)) — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.pi (univVar "u") (univVar "v"))
         (.universe (.succ (Level.maxCanonical (.var "u") (.var "v"))))
   -- T-Pi-Form on polymorphic levels: Π(_:Type@u). Type@v : Type@succ(max(u,v)) — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.lam (univVar "u") (.lam (.var 0) (.var 0)))
         (.pi (univVar "u") (.pi (.var 0) (.var 1)))
   -- Polymorphic identity at Type@u — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! (
   let term := Term.lam (univVar "u") (.lam (.var 0) (.var 0))
   let claim := Term.pi (univVar "u") (.pi (.var 0) (.var 1))
@@ -1011,6 +1014,8 @@ def univVar (name : String) : Term := .universe (.var name)
   | _     => false)
   -- Certificate at Type@u verifies — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! (
   -- Distinct universe variables in term vs claim → TypeMismatch.
   let term := Term.lam (univVar "u") (.lam (.var 0) (.var 0))
@@ -1024,42 +1029,64 @@ def univVar (name : String) : Term := .universe (.var name)
 -- FV-20 Σ-types battery (mirrors proof_checker::tests Σ section)
 -- =============================================================================
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.sigma (univ 0) (univ 0))
         (univ 1)
   -- T-Sigma-Form at concrete universe — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.sigma (univ 2) (univ 5))
         (univ 6)
   -- T-Sigma-Form takes max universe — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.sigma (univVar "u") (univVar "v"))
         (.universe (.succ (Level.maxCanonical (.var "u") (.var "v"))))
   -- T-Sigma-Form polymorphic — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.pair (univ 0) (univ 0))
         (.sigma (univ 1) (univ 1))
   -- T-Pair-Intro non-dependent — true
 
-#eval! defEq (.fst (.pair (univ 0) (univ 1))) (univ 0)
+/-- info: true -/
+#guard_msgs in
+#eval! match defEq (.fst (.pair (univ 0) (univ 1))) (univ 0) with
+  | .ok true => true
+  | _ => false
   -- β-projection: fst(pair(a, b)) ≡ a — true
 
-#eval! defEq (.snd (.pair (univ 0) (univ 1))) (univ 1)
+/-- info: true -/
+#guard_msgs in
+#eval! match defEq (.snd (.pair (univ 0) (univ 1))) (univ 1) with
+  | .ok true => true
+  | _ => false
   -- β-projection: snd(pair(a, b)) ≡ b — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInferError {}
         (.fst (univ 0))
         (fun e => match e with | .not_a_sigma _ => true | _ => false)
   -- T-Fst-Elim rejects non-Σ — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInferError {}
         (.snd (univ 0))
         (fun e => match e with | .not_a_sigma _ => true | _ => false)
   -- T-Snd-Elim rejects non-Σ — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! (
   let term := Term.pair (univ 0) (univ 0)
   let claim := Term.sigma (univ 1) (univ 1)
@@ -1068,6 +1095,8 @@ def univVar (name : String) : Term := .universe (.var name)
   | _     => false)
   -- Pair certificate at non-dependent Σ verifies — true
 
+/-- info: true -/
+#guard_msgs in
 #eval! expectInfer {}
         (.sigma (univ 0) (.sigma (univ 0) (univ 0)))
         (univ 1)

@@ -132,25 +132,34 @@ pub fn checker_identity() -> String {
     }
     h.finalize().to_hex().to_string()
 }
-fn code(error: &CheckError) -> &'static str {
+/// Each kernel error has an explicit operational classification. New variants
+/// must be classified here; they cannot silently become semantic rejections.
+fn check_failure(error: &CheckError) -> (ReplayOutcome, &'static str) {
+    use ReplayOutcome::{Rejected, ResourceExhausted, Unsupported};
     match error {
-        CheckError::FoundationRequired(_) => "foundation_required",
-        CheckError::InvalidInductive(_) => "invalid_inductive",
-        CheckError::UnboundVariable(_) => "unbound_variable",
-        CheckError::NotAType(_) | CheckError::ClaimedTypeNotAType { .. } => "not_a_type",
-        CheckError::NotAFunction(_) => "not_a_function",
-        CheckError::NotASigma(_) => "not_a_pair_type",
-        CheckError::NotAnIdentity(_) => "not_an_identity",
-        CheckError::ReflEndpointMismatch { .. } => "identity_endpoints_differ",
-        CheckError::NotAValidJMotive(_) => "invalid_identity_motive",
-        CheckError::DomainMismatch { .. } => "domain_mismatch",
-        CheckError::TypeMismatch { .. } => "type_mismatch",
-        CheckError::UniverseOverflow { .. } => "universe_limit",
+        CheckError::FuelExhausted => (ResourceExhausted, "normalization_limit"),
+        CheckError::FoundationRequired(_) => (Unsupported, "foundation_required"),
+        CheckError::InvalidInductive(_) => (Rejected, "invalid_inductive"),
+        CheckError::UnboundVariable(_) => (Rejected, "unbound_variable"),
+        CheckError::NotAType(_) | CheckError::ClaimedTypeNotAType { .. } => {
+            (Rejected, "not_a_type")
+        }
+        CheckError::NotAFunction(_) => (Rejected, "not_a_function"),
+        CheckError::NotASigma(_) => (Rejected, "not_a_pair_type"),
+        CheckError::NotAnIdentity(_) => (Rejected, "not_an_identity"),
+        CheckError::ReflEndpointMismatch { .. } => (Rejected, "identity_endpoints_differ"),
+        CheckError::NotAValidJMotive(_) => (Rejected, "invalid_identity_motive"),
+        CheckError::DomainMismatch { .. } => (Rejected, "domain_mismatch"),
+        CheckError::TypeMismatch { .. } => (Rejected, "type_mismatch"),
+        CheckError::UniverseOverflow { .. } => (Unsupported, "universe_limit"),
         CheckError::KernelV0ManifestUnclean { .. }
         | CheckError::KernelV0MetaSoundnessExceeded
-        | CheckError::KernelV0StrictIntrinsicDisagreement { .. } => "unsupported_kernel_extension",
+        | CheckError::KernelV0StrictIntrinsicDisagreement { .. } => {
+            (Unsupported, "unsupported_kernel_extension")
+        }
     }
 }
+
 fn admit_structure(judgment: &Judgment, limits: AdmissionLimits) -> Result<(), AdmissionFailure> {
     enum Node<'a> {
         Term(&'a Term, usize),
@@ -430,30 +439,23 @@ pub fn replay_with_limits(bytes: &[u8], foundation: Foundation, limits: Admissio
             "The certificate claims a different formal statement.",
         );
     }
-    let check_failure = |stage: &str, error: &CheckError| {
-        let outcome = match error {
-            CheckError::FoundationRequired(_)
-            | CheckError::UniverseOverflow { .. }
-            | CheckError::KernelV0ManifestUnclean { .. }
-            | CheckError::KernelV0MetaSoundnessExceeded
-            | CheckError::KernelV0StrictIntrinsicDisagreement { .. } => ReplayOutcome::Unsupported,
-            _ => ReplayOutcome::Rejected,
-        };
+    let report_failure = |stage: &str, error: &CheckError| {
+        let (outcome, code) = check_failure(error);
         refusal(
             outcome,
             stage,
-            code(error),
+            code,
             "The native checker did not establish the judgment.",
         )
     };
     if let Err(e) = judgment.certificate.verify_with_foundation(foundation) {
-        return check_failure("substitution", &e);
+        return report_failure("substitution", &e);
     }
     if let Err(e) = crate::proof_checker_nbe::verify_certificate_with_foundation(
         &judgment.certificate,
         foundation,
     ) {
-        return check_failure("normalization", &e);
+        return report_failure("normalization", &e);
     }
     Report {
         profile: profile_for(foundation).into(),
@@ -463,5 +465,27 @@ pub fn replay_with_limits(bytes: &[u8], foundation: Foundation, limits: Admissio
         limits,
         worker: None,
         diagnostic: None,
+    }
+}
+
+#[cfg(test)]
+mod failure_classification {
+    use super::*;
+
+    #[test]
+    fn normalization_exhaustion_cannot_become_semantic_rejection() {
+        let (outcome, code) = check_failure(&CheckError::FuelExhausted);
+        let report = Report::refusal(
+            Foundation::Intensional,
+            AdmissionLimits::DEFAULT,
+            outcome,
+            "substitution",
+            code,
+            "normalization budget exhausted",
+        );
+        assert_eq!(report.outcome, ReplayOutcome::ResourceExhausted);
+        assert!(!report.accepted);
+        assert!(report.is_consistent());
+        assert_eq!(report.diagnostic.unwrap().code, "normalization_limit");
     }
 }
