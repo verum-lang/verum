@@ -352,6 +352,10 @@ jobs:
         timeout-minutes: 5
         run: cargo test --locked -p verum_kernel --test diagnostic_proof_authority
 
+      - name: Incomplete verification cannot pass regression gates
+        timeout-minutes: 5
+        run: cargo test --locked -p verum_kernel --lib --test k_differential_fuzz --test universe_stability_outcomes
+
       - name: Portable native proof replay and process isolation
         timeout-minutes: 5
         run: cargo test --locked -p verum_proof --features process

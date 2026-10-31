@@ -15,6 +15,19 @@ pub enum Error {
     Unsupported(String),
     Scope(String),
     Rejected(String),
+    Inconclusive { code: &'static str, message: String },
+}
+impl From<k::CheckError> for Error {
+    fn from(error: k::CheckError) -> Self {
+        use verum_proof::admission::{ReplayOutcome, classify_check_failure};
+        let (outcome, code) = classify_check_failure(&error);
+        let message = format!("{error:?}");
+        match outcome {
+            ReplayOutcome::Rejected => Self::Rejected(message),
+            ReplayOutcome::Unsupported => Self::Unsupported(message),
+            _ => Self::Inconclusive { code, message },
+        }
+    }
 }
 type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -127,8 +140,7 @@ impl Elab {
         Ok(ctx)
     }
     fn infer(&self, ir: &Ir) -> Result<Term> {
-        k::infer(&self.context()?, &lower(ir, &mut self.frame())?)
-            .map_err(|e| Error::Rejected(format!("{e:?}")))
+        k::infer(&self.context()?, &lower(ir, &mut self.frame())?).map_err(Error::from)
     }
     fn require_type(&self, ir: &Ir) -> Result<()> {
         match self.infer(ir)? {
@@ -721,11 +733,11 @@ fn elaborate_in(theorem: &TheoremDecl, profile: &str, e: &mut Elab) -> Result<Ar
     };
     certificate.verify().map_err(|x| {
         e.error_span = e.error_span.or(proof_span);
-        Error::Rejected(format!("substitution kernel: {x:?}"))
+        Error::from(x)
     })?;
     verum_proof::proof_checker_nbe::verify_certificate(&certificate).map_err(|x| {
         e.error_span = e.error_span.or(proof_span);
-        Error::Rejected(format!("NbE kernel: {x:?}"))
+        Error::from(x)
     })?;
     Ok(Artifact {
         certificate,

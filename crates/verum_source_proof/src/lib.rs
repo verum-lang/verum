@@ -256,6 +256,9 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
                 ),
                 scoped::Error::Scope(m) => ("rejected", "scope", "unbound_or_duplicate_binder", m),
                 scoped::Error::Rejected(m) => ("rejected", "elaboration", "ill_typed_source", m),
+                scoped::Error::Inconclusive { code, message } => {
+                    ("inconclusive", "elaboration", code, message)
+                }
             };
             return failure(status, stage, code, &message, &source)
                 .at_source(&request.source, location);

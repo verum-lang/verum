@@ -108,12 +108,24 @@ fn independent_replay_checks_equality_and_rejects_invalid_proofs() {
                 claimed_type: claimed_type.clone(),
                 metadata: Default::default(),
             };
-            assert_eq!(certificate.verify().is_ok(), *expected, "native {id}");
-            assert_eq!(
-                verum_proof::proof_checker_nbe::verify_certificate(&certificate).is_ok(),
-                *expected,
-                "native NbE {id}"
-            );
+            for result in [
+                certificate.verify(),
+                verum_proof::proof_checker_nbe::verify_certificate(&certificate),
+            ] {
+                let outcome = result.as_ref().map_or_else(
+                    |error| verum_proof::admission::classify_check_failure(error).0,
+                    |_| verum_proof::admission::ReplayOutcome::Accepted,
+                );
+                assert_eq!(
+                    outcome,
+                    if *expected {
+                        verum_proof::admission::ReplayOutcome::Accepted
+                    } else {
+                        verum_proof::admission::ReplayOutcome::Rejected
+                    },
+                    "native {id}: {result:?}"
+                );
+            }
             serde_json::json!({"id": id, "term": term, "claimed_type": claimed_type})
         })
         .collect();
@@ -137,6 +149,27 @@ fn independent_replay_checks_equality_and_rejects_invalid_proofs() {
     for (verdict, (id, _, _, expected)) in verdicts.iter().zip(&cases) {
         assert_eq!(verdict["id"], *id);
         assert_eq!(verdict["ok"], *expected, "Lean {id}: {verdict}");
+        if !expected {
+            let error = verdict["error"]
+                .as_str()
+                .expect("negative verdict needs an error");
+            assert!(
+                [
+                    "InvalidInductive",
+                    "UnboundVariable",
+                    "NotAType",
+                    "NotAFunction",
+                    "NotASigma",
+                    "NotAnIdentity",
+                    "NotAValidJMotive",
+                    "DomainMismatch",
+                    "TypeMismatch",
+                    "ClaimedTypeNotAType"
+                ]
+                .contains(&error),
+                "operational failure is not a negative control: {verdict}"
+            );
+        }
     }
     // Decoder rejection must precede checking: neither the first constructor
     // key nor a valid subterm may conceal an additional authority.

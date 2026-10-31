@@ -2569,9 +2569,8 @@ struct DifferentialCert {
 
 /// Per-cert verdict captured by either kernel.  `ok=true` ⇔
 /// `verifyCertificate` accepted; `ok=false` carries a short error
-/// tag (mirroring `CheckError`'s variant names) for diagnostic
-/// purposes — the cross-checker compares only the `ok` field, not
-/// the error tag wording.
+/// tag. Error classification is required: shared operational failure is
+/// not shared semantic rejection.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct DifferentialVerdict {
     id: String,
@@ -2583,7 +2582,6 @@ struct DifferentialVerdict {
 /// JSON envelope read back from the Lean executable.
 #[derive(Debug, serde::Deserialize)]
 struct LeanVerdictBundle {
-    #[allow(dead_code)]
     schema_version: u32,
     verdicts: Vec<DifferentialVerdict>,
 }
@@ -2606,9 +2604,7 @@ fn load_differential_battery() -> Vec<DifferentialCert> {
 
 /// Run the Rust kernel's `Certificate::verify()` on every battery
 /// row, package per-cert verdicts in the cross-language envelope.
-fn run_rust_battery(
-    battery: &[DifferentialCert],
-) -> Vec<DifferentialVerdict> {
+fn run_rust_battery(battery: &[DifferentialCert]) -> Vec<DifferentialVerdict> {
     use verum_kernel::proof_checker::{Certificate, CheckError};
 
     battery
@@ -2635,6 +2631,12 @@ fn run_rust_battery(
                         CheckError::UniverseOverflow { .. } => "UniverseOverflow",
                         CheckError::FuelExhausted => "FuelExhausted",
                         CheckError::ClaimedTypeNotAType { .. } => "ClaimedTypeNotAType",
+                        CheckError::InvalidInductive(_) => "InvalidInductive",
+                        CheckError::NotASigma(_) => "NotASigma",
+                        CheckError::NotAnIdentity(_) => "NotAnIdentity",
+                        CheckError::NotAValidJMotive(_) => "NotAValidJMotive",
+                        CheckError::ReflEndpointMismatch { .. } => "ReflEndpointMismatch",
+                        CheckError::FoundationRequired(_) => "FoundationRequired",
                         // The remaining variants come from the wider
                         // KernelV0 manifest pipeline; they don't
                         // arise in `Certificate::verify`'s six-rule
@@ -2726,6 +2728,9 @@ fn run_lean_battery(
     let stdout = String::from_utf8_lossy(&run.stdout);
     let bundle: LeanVerdictBundle = serde_json::from_str(&stdout)
         .map_err(|e| format!("verdict JSON parse: {e}\nstdout was:\n{stdout}"))?;
+    if bundle.schema_version != 1 {
+        return Err("unsupported independent verdict schema".into());
+    }
     Ok(bundle.verdicts)
 }
 
@@ -2745,6 +2750,9 @@ struct AgreementRow {
     id: String,
     rust_ok: bool,
     lean_ok: bool,
+    rust_outcome: verum_kernel::kernel_registry::ReplayOutcome,
+    lean_outcome: verum_kernel::kernel_registry::ReplayOutcome,
+    expected_outcome: verum_kernel::kernel_registry::ReplayOutcome,
     agree: bool,
     rust_error: Option<String>,
     lean_error: Option<String>,
@@ -2810,22 +2818,42 @@ pub fn audit_differential_lean_checker_with_format(format: AuditFormat) -> Resul
 
     // 4. Cross-comparison.
     let mut rows = Vec::with_capacity(rust_verdicts.len());
-    let lean_by_id: std::collections::BTreeMap<&str, &DifferentialVerdict> = lean_verdicts
-        .iter()
-        .map(|v| (v.id.as_str(), v))
-        .collect();
+    let lean_by_id: std::collections::BTreeMap<&str, &DifferentialVerdict> =
+        lean_verdicts.iter().map(|v| (v.id.as_str(), v)).collect();
+    if battery.is_empty()
+        || lean_by_id.len() != lean_verdicts.len()
+        || lean_by_id.len() != battery.len()
+        || battery.iter().any(|c| !lean_by_id.contains_key(c.id))
+    {
+        return Err(crate::error::CliError::VerificationFailed(
+            "independent replay omitted, duplicated or invented certificate identities".into(),
+        ));
+    }
     for r in &rust_verdicts {
-        let l = lean_by_id.get(r.id.as_str()).copied();
-        let lean_ok = l.map(|x| x.ok).unwrap_or(false);
-        let lean_error = l.and_then(|x| x.error.clone());
-        let agree = l.is_some() && r.ok == lean_ok;
+        use verum_kernel::differential::classify_reference_verdict;
+        let l = lean_by_id[r.id.as_str()];
+        let rust_outcome = classify_reference_verdict(r.ok, r.error.as_deref());
+        let lean_outcome = classify_reference_verdict(l.ok, l.error.as_deref());
+        let expected_outcome = verum_kernel::canonical_battery::expected_verdict(&r.id)
+            .ok_or_else(|| {
+                crate::error::CliError::VerificationFailed("unknown canonical certificate".into())
+            })?;
+        let agree = matches!(
+            expected_outcome,
+            verum_kernel::kernel_registry::ReplayOutcome::Accepted
+                | verum_kernel::kernel_registry::ReplayOutcome::Rejected
+        ) && rust_outcome == expected_outcome
+            && lean_outcome == expected_outcome;
         rows.push(AgreementRow {
             id: r.id.clone(),
             rust_ok: r.ok,
-            lean_ok,
+            lean_ok: l.ok,
             agree,
+            rust_outcome,
+            lean_outcome,
+            expected_outcome,
             rust_error: r.error.clone(),
-            lean_error,
+            lean_error: l.error.clone(),
         });
     }
     let agreements = rows.iter().filter(|r| r.agree).count();
@@ -2840,10 +2868,7 @@ pub fn audit_differential_lean_checker_with_format(format: AuditFormat) -> Resul
         rows,
     };
     let report_path = report_dir.join("agreement.json");
-    let _ = std::fs::write(
-        &report_path,
-        serde_json::to_string_pretty(&report).unwrap(),
-    );
+    let _ = std::fs::write(&report_path, serde_json::to_string_pretty(&report).unwrap());
 
     match format {
         AuditFormat::Plain => {
@@ -2855,13 +2880,18 @@ pub fn audit_differential_lean_checker_with_format(format: AuditFormat) -> Resul
             println!("  Disagreements:  {}", report.disagreements);
             println!();
             for row in &report.rows {
-                let mark = if row.agree { "✓".green() } else { "✗".red() };
+                let mark = if row.agree {
+                    "✓".green()
+                } else {
+                    "✗".red()
+                };
                 let detail = if row.agree {
                     if row.rust_ok {
                         "both accept".dimmed().to_string()
                     } else {
                         format!(
-                            "both reject ({})",
+                            "expected {} ({})",
+                            row.rust_outcome.tag(),
                             row.rust_error.clone().unwrap_or_default()
                         )
                         .dimmed()
@@ -4144,7 +4174,7 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
 /// implementation registered in [`verum_kernel::kernel_registry::KernelRegistry::default`]
 /// and asserts unanimous accept/reject across all of them.
 ///
-/// The default registry ships three structurally-distinct kernels:
+/// The default registry runs two independent algorithms and a metadata wrapper:
 ///
 /// * **Slot A** — `proof_checker` (bidirectional type-checking +
 ///   explicit substitution + WHNF, the trusted base).
@@ -4153,7 +4183,7 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
 ///   relation, structurally distinct algorithm).
 /// * **Slot C** — `kernel_v0` (manifest-driven verifier — anchors on
 ///   Slot A's structural verdict, then performs orthogonal
-///   meta-soundness checks against the canonical kernel registry).
+///   metadata consistency checks; this is not an independent proof checker).
 ///
 /// Disagreements between any pair fail the audit.  This is the
 /// load-bearing complement to `--differential-lean-checker`:
@@ -4182,6 +4212,8 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
     let mut rows: Vec<serde_json::Value> = Vec::with_capacity(battery.len());
     let mut unanimous_accept = 0usize;
     let mut unanimous_reject = 0usize;
+    let mut incomplete = 0usize;
+    let mut mismatches = Vec::new();
     let mut disagreements: Vec<(String, Vec<&'static str>, Vec<&'static str>)> = Vec::new();
     for cert in &battery {
         let multi = registry.verify_all(&cert.certificate);
@@ -4191,29 +4223,38 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
             .map(|o| {
                 serde_json::json!({
                     "kernel": o.kernel_name,
-                    "accepted": o.accepted,
+                    "accepted": o.is_accepted(),
+                    "outcome": o.outcome,
                     "error": o.error_summary,
                 })
             })
             .collect();
+        let matches_expected = multi.agreement.is_unanimous()
+            && !multi.outcomes.is_empty()
+            && multi
+                .outcomes
+                .iter()
+                .all(|o| o.outcome == cert.expected_outcome);
+        if !matches_expected {
+            mismatches.push(cert.id);
+        }
         let agreement_tag = multi.agreement.tag();
         match &multi.agreement {
+            AgreementVerdict::Incomplete => incomplete += 1,
             AgreementVerdict::Unanimous => unanimous_accept += 1,
             AgreementVerdict::UnanimousReject => unanimous_reject += 1,
             AgreementVerdict::Disagreement {
                 accepting,
                 rejecting,
             } => {
-                disagreements.push((
-                    cert.id.to_string(),
-                    accepting.clone(),
-                    rejecting.clone(),
-                ));
+                disagreements.push((cert.id.to_string(), accepting.clone(), rejecting.clone()));
             }
         }
         rows.push(serde_json::json!({
             "id": cert.id,
             "agreement": agreement_tag,
+            "expected_outcome": cert.expected_outcome,
+            "matches_expected": matches_expected,
             "verdicts": per_kernel,
         }));
     }
@@ -4231,8 +4272,12 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
             "unanimous_accept": unanimous_accept,
             "unanimous_reject": unanimous_reject,
             "disagreements": disagreements.len(),
+            "incomplete": incomplete,
+            "expectation_mismatches": mismatches,
         },
-        "load_bearing": disagreements.is_empty(),
+        "checks_passed": !battery.is_empty() && mismatches.is_empty() && disagreements.is_empty(),
+        "proof_status": "regression_checks_only",
+        "load_bearing": false,
         "rows": rows,
     });
     let _ = std::fs::write(
@@ -4251,13 +4296,18 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
             println!("Unanimous reject:      {}", unanimous_reject);
             println!(
                 "{} Disagreements:         {}",
-                if disagreements.is_empty() { "✓" } else { "✗" },
+                if mismatches.is_empty() && disagreements.is_empty() {
+                    "✓"
+                } else {
+                    "✗"
+                },
                 disagreements.len(),
             );
             println!();
             for cert in &battery {
                 let multi = registry.verify_all(&cert.certificate);
                 let glyph = match &multi.agreement {
+                    AgreementVerdict::Incomplete => "?".to_string(),
                     AgreementVerdict::Unanimous => "✓".green().to_string(),
                     AgreementVerdict::UnanimousReject => "○".to_string(),
                     AgreementVerdict::Disagreement { .. } => "✗".red().to_string(),
@@ -4265,20 +4315,16 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
                 let columns: Vec<String> = multi
                     .outcomes
                     .iter()
-                    .map(|o| {
-                        format!(
-                            "{}={}",
-                            o.kernel_name,
-                            if o.accepted { "accept" } else { "reject" }
-                        )
-                    })
+                    .map(|o| format!("{}={}", o.kernel_name, o.outcome.tag()))
                     .collect();
                 println!("  {} {:<32}  {}", glyph, cert.id, columns.join("  "));
             }
             println!();
-            if disagreements.is_empty() {
+            println!("Incomplete verdicts:   {}", incomplete);
+            println!("Expectation failures:  {:?}", mismatches);
+            if mismatches.is_empty() && disagreements.is_empty() {
                 println!(
-                    "{} all {} certs unanimous across {} kernels — implementations consistent.",
+                    "{} all {} expected behaviors matched across {} registered checkers.",
                     "✓".green(),
                     battery.len(),
                     kernel_names.len(),
@@ -4290,10 +4336,7 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
                     disagreements.len(),
                 );
                 for (id, accepting, rejecting) in &disagreements {
-                    println!(
-                        "    {} accept={:?} reject={:?}",
-                        id, accepting, rejecting
-                    );
+                    println!("    {} accept={:?} reject={:?}", id, accepting, rejecting);
                 }
             }
             println!();
@@ -4304,11 +4347,12 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
         }
     }
 
-    if !disagreements.is_empty() {
+    if battery.is_empty() || !mismatches.is_empty() || !disagreements.is_empty() {
         return Err(crate::error::CliError::Custom(
             format!(
-                "differential-kernel audit: {} disagreement(s) across {} kernels — see {}",
+                "differential-kernel audit: {} disagreement(s), expectation failures {:?}, across {} kernels — see {}",
                 disagreements.len(),
+                mismatches,
                 kernel_names.len(),
                 report_path.display(),
             )
@@ -4375,7 +4419,8 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
                 "outcomes": d.verdict.outcomes.iter().map(|o| {
                     serde_json::json!({
                         "kernel": o.kernel_name,
-                        "accepted": o.accepted,
+                        "accepted": o.is_accepted(),
+                        "outcome": o.outcome,
                         "error": o.error_summary,
                     })
                 }).collect::<Vec<_>>(),
@@ -4409,10 +4454,19 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
             "unanimous_accept": report.unanimous_accept,
             "unanimous_reject": report.unanimous_reject,
             "disagreements": report.disagreements.len(),
+            "incomplete": report.incomplete.len(),
         },
         "coverage": coverage_payload,
-        "load_bearing": report.is_sound(),
+        "checks_passed": report.checks_passed(),
+        "proof_status": "regression_checks_only",
+        "load_bearing": false,
         "disagreement_details": disagreement_summaries,
+        "incomplete_details": report.incomplete.iter().map(|r| serde_json::json!({
+            "iteration": r.iteration, "seed_index": r.seed_index, "mutation_chain": r.mutation_tag,
+            "outcomes": r.verdict.outcomes.iter().map(|o| serde_json::json!({
+                "kernel": o.kernel_name, "outcome": o.outcome, "error": o.error_summary,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
     });
     let _ = std::fs::write(
         &report_path,
@@ -4435,13 +4489,14 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
             );
             println!("Unanimous accept:      {}", report.unanimous_accept);
             println!("Unanimous reject:      {}", report.unanimous_reject);
+            println!("Incomplete iterations: {}", report.incomplete.len());
             println!(
                 "{} Disagreements:         {}",
-                if report.is_sound() { "✓" } else { "✗" },
+                if report.checks_passed() { "✓" } else { "✗" },
                 report.disagreements.len(),
             );
             println!();
-            if report.is_sound() {
+            if report.checks_passed() {
                 println!(
                     "{} All {} mutants produced unanimous verdicts — \
                      kernel implementations consistent under mutation.",
@@ -4465,21 +4520,17 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
                 if total_chain_hits > 0 {
                     println!();
                     print!("Chain-length distribution: ");
-                    for (i, n) in report
-                        .coverage
-                        .chain_length_distribution
-                        .iter()
-                        .enumerate()
-                    {
+                    for (i, n) in report.coverage.chain_length_distribution.iter().enumerate() {
                         print!("len={} → {}  ", i + 1, n);
                     }
                     println!();
                 }
             } else {
                 println!(
-                    "{} {} disagreement(s) detected — kernel-implementation bug surfaced.",
+                    "{} {} disagreement(s), {} incomplete iteration(s).",
                     "✗".red(),
                     report.disagreements.len(),
+                    report.incomplete.len(),
                 );
                 for (d, shrink) in report
                     .disagreements
@@ -4489,7 +4540,10 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
                 {
                     println!(
                         "    iter {} seed {} chain={} agreement={}",
-                        d.iteration, d.seed_index, d.mutation_tag, d.agreement_tag(),
+                        d.iteration,
+                        d.seed_index,
+                        d.mutation_tag,
+                        d.agreement_tag(),
                     );
                     if shrink.minimal_chain_len < shrink.original_chain_len {
                         println!(
@@ -4515,12 +4569,13 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
         }
     }
 
-    if !report.is_sound() {
+    if !report.checks_passed() {
         return Err(crate::error::CliError::Custom(
             format!(
-                "differential-kernel fuzz audit: {} disagreement(s) over {} iterations \
+                "differential-kernel fuzz audit: {} disagreement(s), {} incomplete over {} iterations \
                  (seed {:#x}) — see {}",
                 report.disagreements.len(),
+                report.incomplete.len(),
                 report.total_iterations,
                 DIFFERENTIAL_FUZZ_DEFAULT_SEED,
                 report_path.display(),
@@ -5357,26 +5412,27 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
  // "reject" so the audit gate enforces the inverted contract:
  // both kernels must REJECT, not ACCEPT.
     let mut entries: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(&library_dir) {
-        for e in rd.flatten() {
-            let p = e.path();
+    for entry in std::fs::read_dir(&library_dir)? {
+        let p = entry?.path();
+        if p.extension().map_or(false, |ext| ext == "vproof") {
+            entries.push(p);
+        }
+    }
+    let adv_dir = library_dir.join("adversarial");
+    if adv_dir.try_exists()? {
+        for entry in std::fs::read_dir(&adv_dir)? {
+            let p = entry?.path();
             if p.extension().map_or(false, |ext| ext == "vproof") {
                 entries.push(p);
             }
         }
     }
-    let adv_dir = library_dir.join("adversarial");
-    if adv_dir.is_dir() {
-        if let Ok(rd) = std::fs::read_dir(&adv_dir) {
-            for e in rd.flatten() {
-                let p = e.path();
-                if p.extension().map_or(false, |ext| ext == "vproof") {
-                    entries.push(p);
-                }
-            }
-        }
-    }
     entries.sort();
+    if entries.is_empty() {
+        return Err(crate::error::CliError::VerificationFailed(
+            "proof-term library contains no certificates".into(),
+        ));
+    }
 
     let mut verifications: Vec<serde_json::Value> = Vec::new();
     let mut verified = 0usize;
@@ -5390,6 +5446,7 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
  // NbE-based). Disagreements between the two are bugs in EITHER
  // implementation; they fail the audit.
     let mut nbe_disagreements = 0usize;
+    let mut incomplete = 0usize;
  // **#158 V1** — universe-stability check. Every certificate's
  // verdict is computed at lifts 0..=2 via
  // `proof_checker_meta::check_universe_stability`. The verdict
@@ -5452,7 +5509,10 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                         multi_verdict.agreement,
                         AgreementVerdict::UnanimousReject,
                     );
-                    let (label, detail) = if expected_reject {
+                    let (label, detail) = if matches!(multi_verdict.agreement, AgreementVerdict::Incomplete) {
+                        incomplete += 1;
+                        ("incomplete", format!("{:?}", multi_verdict.outcomes))
+                    } else if expected_reject {
  // Adversarial path: every kernel MUST reject.
                         if unanimous_reject {
                             adversarial_rejected += 1;
@@ -5547,7 +5607,7 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     let payload = serde_json::json!({
-        "schema_version": 5,
+        "schema_version": 6,
         "command": "audit-proof-term-library",
         "library_path": library_dir.display().to_string(),
  // **#159 V4** — list every kernel implementation in the
@@ -5563,6 +5623,7 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
  // the trusted base and the NbE kernel disagreed. Any
  // non-zero value flips the audit gate to failure.
         "nbe_disagreements": nbe_disagreements,
+        "incomplete": incomplete,
  // #159 V3 adversarial counts — every certificate marked
  // expected_outcome=reject MUST be rejected by both kernels.
  // adversarial_unsoundly_accepted > 0 → SOUNDNESS BUG.
@@ -5607,8 +5668,10 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                 META_MAX_LIFT,
                 entries.len(),
             );
+            println!("  Incomplete verdicts: {}", incomplete);
             let any_failure = rejected > 0
                 || malformed > 0
+                || incomplete > 0
                 || nbe_disagreements > 0
                 || adversarial_unsoundly_accepted > 0
                 || universe_unstable > 0;
@@ -5638,18 +5701,20 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
 
     if rejected > 0
         || malformed > 0
+        || incomplete > 0
         || nbe_disagreements > 0
         || adversarial_unsoundly_accepted > 0
         || universe_unstable > 0
     {
         return Err(crate::error::CliError::VerificationFailed(format!(
             "proof-term-library: {} rejected + {} malformed + {} NbE-disagreement(s) + \
-             {} adversarial-unsoundly-accepted + {} universe-unstable",
+             {} adversarial-unsoundly-accepted + {} universe-unstable + {} incomplete",
             rejected,
             malformed,
             nbe_disagreements,
             adversarial_unsoundly_accepted,
             universe_unstable,
+            incomplete,
         )));
     }
     Ok(())

@@ -1,77 +1,17 @@
-//! Differential-kernel testing harness (#159).
+//! Differential comparison of completed native proof verdicts.
 //!
-//! Verum runs **two** kernel implementations in parallel:
-//!
-//! 1. The Rust trusted base — [`crate::proof_checker`] — 633 LOC of
-//!  bidirectional type-checking over a minimal CoC fragment, the
-//!  answer reviewers receive when they ask "what do I need to
-//!  trust to trust Verum?".
-//!
-//! 2. The Verum-side scaffold — `core/verify/kernel_v0/` — a Verum-
-//!  self-hosted mirror of the same 10-rule bootstrap kernel, whose
-//!  soundness lemmas are enumerated by
-//!  [`crate::soundness::kernel_v0_manifest`].
-//!
-//! Differential testing checks that **both** implementations agree on
-//! every test certificate: either they both accept (`Both_Accept`),
-//! both reject (`Both_Reject`), or they disagree (`Disagreement`) —
-//! the last case being the audit failure mode that surfaces a kernel
-//! divergence before it reaches the trust boundary.
-//!
-//! ## Three kernel slots active
-//!
-//! All three differential slots are populated:
-//!
-//!  * Slot A — [`crate::proof_checker`] (bidirectional type-checking
-//!    with explicit substitution + WHNF). The trusted-base
-//!    structural verifier.
-//!  * Slot B — [`crate::proof_checker_nbe`] (Normalisation-by-
-//!    Evaluation with closures + level-indexed quote). A
-//!    structurally-distinct algorithmic specification of the same
-//!    input/output relation.
-//!  * Slot C — [`crate::kernel_registry::KernelV0Kernel`] (manifest-
-//!    driven Verum-self-hosted bootstrap verifier). Anchors on
-//!    Algorithm A's structural verdict, then performs orthogonal
-//!    meta-soundness checks (`kernel_v0_manifest` audit-cleanness
-//!    + `kernel_meta_soundness_holds` ZFC + 2·κ ceiling +
-//!    per-rule strict-intrinsic dispatch through the canonical
-//!    `intrinsic_dispatch` registry).
-//!
-//! Disagreements are bugs in EITHER side. An A↔B disagreement
-//! surfaces drift in the structural algorithmic kernels; an
-//! A↔C or B↔C disagreement surfaces drift between the
-//! implementation kernels and the bootstrap meta-theory's
-//! commitments.  The two-slot legacy verdict
-//! `DifferentialAgreement::NotYetSelfHosting` is retained for
-//! schema-stability of the audit JSON but is not produced by the
-//! current registry.
-//!
-//! This module is **load-bearing scaffolding**: the entire framework
-//! is in place — `DifferentialReport`, `run_differential_test`, the
-//! per-rule scaffold [`differential_test_rule`], the
-//! [`DifferentialOutcome`] aggregator — so that plugging in a real
-//! Verum-side checker is a **single-line addition** to
-//! [`run_differential_test_with_verum`]. The audit gate, the JSON
-//! emitter, the test harness, and the per-rule pin tests all consume
-//! this surface today and will continue to consume it unchanged once
-//! the Verum side comes online.
-//!
-//! ## What this module does NOT do
-//!
-//! - Does NOT fix the parser blocker on `core/verify/kernel_v0/`.
-//!  That's tracked separately as a multi-day Verum-compiler effort.
-//! - Does NOT shell out to a Verum binary. When the Verum side
-//!  becomes self-checking the integration is via a Rust trait
-//!  implementation, not via process invocation.
-//! - Does NOT promote disagreement into a panic. The harness
-//!  *records* divergence; the audit gate *interprets* it.
+//! The substitution and NbE checkers are separate Rust algorithms. The optional
+//! kernel_v0 slot wraps the substitution checker with bootstrap metadata checks;
+//! it is not an independent self-hosted checker or a proof of kernel soundness.
+//! Agreement on a finite corpus is regression evidence, not a soundness theorem.
+//! Unsupported evidence and resource exhaustion cannot count as shared rejection.
 
 #![warn(missing_docs)]
 
-use serde::{Deserialize, Serialize};
-
 use crate::proof_checker::{self, Certificate, CheckError};
 use crate::soundness::kernel_v0_manifest::{self, KernelV0Rule};
+use serde::{Deserialize, Serialize};
+use verum_proof::admission::{ReplayOutcome, classify_check_failure};
 
 // =============================================================================
 // KernelVerdict — one kernel's accept/reject answer for a certificate
@@ -85,6 +25,13 @@ use crate::soundness::kernel_v0_manifest::{self, KernelV0Rule};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KernelVerdict {
+    /// Checking did not establish a semantic verdict.
+    Incomplete {
+        /// Unsupported evidence, resource exhaustion, or another operational failure.
+        outcome: ReplayOutcome,
+        /// Original diagnostic retained without classifying it as rejection.
+        reason: String,
+    },
     /// The kernel accepted the certificate as a valid proof of its
     /// claimed type.
     Accepted,
@@ -106,6 +53,7 @@ impl KernelVerdict {
     /// Stable diagnostic tag — matches the serde representation.
     pub fn tag(&self) -> &'static str {
         match self {
+            KernelVerdict::Incomplete { .. } => "incomplete",
             KernelVerdict::Accepted => "accepted",
             KernelVerdict::Rejected { .. } => "rejected",
             KernelVerdict::NotYetSelfHosting => "not_yet_self_hosting",
@@ -130,16 +78,50 @@ impl KernelVerdict {
 
 impl From<Result<(), CheckError>> for KernelVerdict {
     /// Lift the Rust-side checker's `Result` into a [`KernelVerdict`].
-    /// `Ok(())` → `Accepted`; `Err(e)` → `Rejected { reason: <Debug>>`.
-    /// The `Debug` projection is stable for the kernel's error
-    /// surface (no float/pointer values reach `CheckError`).
+    /// Semantic errors reject; operational/unsupported failures remain incomplete.
+    /// Diagnostics are retained without determining the classification from prose.
     fn from(r: Result<(), CheckError>) -> Self {
         match r {
             Ok(()) => KernelVerdict::Accepted,
-            Err(e) => KernelVerdict::Rejected {
-                reason: format!("{:?}", e),
-            },
+            Err(e) => {
+                let (outcome, _) = classify_check_failure(&e);
+                let reason = format!("{e:?}");
+                if outcome == ReplayOutcome::Rejected {
+                    Self::Rejected { reason }
+                } else {
+                    Self::Incomplete { outcome, reason }
+                }
+            }
         }
+    }
+}
+
+/// Classify the independent checker's wire verdict without treating unknown or
+/// operational errors as semantic rejection. A new protocol tag requires review.
+pub fn classify_reference_verdict(accepted: bool, error: Option<&str>) -> ReplayOutcome {
+    match (accepted, error) {
+        (true, None) => ReplayOutcome::Accepted,
+        (false, Some("FuelExhausted")) => ReplayOutcome::ResourceExhausted,
+        (false, Some("UniverseOverflow" | "FoundationRequired" | "UnsupportedProfile")) => {
+            ReplayOutcome::Unsupported
+        }
+        (
+            false,
+            Some(
+                "InvalidInductive"
+                | "UnboundVariable"
+                | "NotAType"
+                | "NotAFunction"
+                | "NotASigma"
+                | "NotAnIdentity"
+                | "NotAValidJMotive"
+                | "DomainMismatch"
+                | "TypeMismatch"
+                | "ClaimedTypeNotAType"
+                | "ReflEndpointMismatch",
+            ),
+        ) => ReplayOutcome::Rejected,
+        _ => ReplayOutcome::Inconclusive,
     }
 }
 
@@ -156,6 +138,8 @@ impl From<Result<(), CheckError>> for KernelVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DifferentialAgreement {
+    /// At least one checker returned an operational failure, not a verdict.
+    Incomplete,
     /// Both kernels accepted the certificate. The healthy path.
     BothAccept,
     /// Both kernels rejected the certificate. Also healthy — the
@@ -176,6 +160,7 @@ impl DifferentialAgreement {
     /// Stable diagnostic tag — matches the serde representation.
     pub fn tag(self) -> &'static str {
         match self {
+            DifferentialAgreement::Incomplete => "incomplete",
             DifferentialAgreement::BothAccept => "both_accept",
             DifferentialAgreement::BothReject => "both_reject",
             DifferentialAgreement::Disagreement => "disagreement",
@@ -192,6 +177,11 @@ impl DifferentialAgreement {
     pub fn classify(rust: &KernelVerdict, verum: &KernelVerdict) -> Self {
         if rust.is_not_yet_self_hosting() || verum.is_not_yet_self_hosting() {
             return DifferentialAgreement::NotYetSelfHosting;
+        }
+        if matches!(rust, KernelVerdict::Incomplete { .. })
+            || matches!(verum, KernelVerdict::Incomplete { .. })
+        {
+            return DifferentialAgreement::Incomplete;
         }
         match (rust.is_accepted(), verum.is_accepted()) {
             (true, true) => DifferentialAgreement::BothAccept,
@@ -253,13 +243,9 @@ impl DifferentialReport {
 /// Run a differential test: invoke both kernels on `certificate` and
 /// return a [`DifferentialReport`] describing the outcome.
 ///
-/// The Rust side is queried via [`Certificate::verify`]. The Verum
-/// side is currently stubbed as [`KernelVerdict::NotYetSelfHosting`]
-/// pending the parser blocker on `core/verify/kernel_v0/`; once the
-/// Verum-side checker is invokable, plug it in via
-/// [`run_differential_test_with_verum`] and the agreement
-/// classification will become live without touching this function's
-/// callers.
+/// Compares the native substitution and NbE algorithms from the registry.
+/// The legacy `verum` field contains the NbE result; this function does not
+/// invoke a self-hosted Verum checker.
 pub fn run_differential_test(rule: &KernelV0Rule, certificate: &Certificate) -> DifferentialReport {
     // Canonical N-kernel discharge via the registry — single source
     // of truth for differential testing.  Outcomes are extracted in
@@ -284,15 +270,14 @@ pub fn run_differential_test(rule: &KernelV0Rule, certificate: &Certificate) -> 
 }
 
 fn outcome_to_kernel_verdict(outcome: &crate::kernel_registry::KernelOutcome) -> KernelVerdict {
-    if outcome.accepted {
-        KernelVerdict::Accepted
-    } else {
-        KernelVerdict::Rejected {
-            reason: outcome
-                .error_summary
-                .clone()
-                .unwrap_or_else(|| "rejected".to_string()),
-        }
+    let reason = outcome.error_summary.clone().unwrap_or_default();
+    match outcome.outcome {
+        ReplayOutcome::Accepted => KernelVerdict::Accepted,
+        ReplayOutcome::Rejected => KernelVerdict::Rejected { reason },
+        other => KernelVerdict::Incomplete {
+            outcome: other,
+            reason,
+        },
     }
 }
 
@@ -301,11 +286,8 @@ fn outcome_to_kernel_verdict(outcome: &crate::kernel_registry::KernelOutcome) ->
 /// point**: once `core/verify/kernel_v0/` is self-checking, the
 /// caller obtains a [`KernelVerdict`] from it and passes it here.
 ///
-/// Exposed publicly so the future Verum-side adapter can route
-/// through it without touching this module. Until then, callers
-/// pass [`KernelVerdict::NotYetSelfHosting`] explicitly when they
-/// want the future-proof shape (the standard
-/// [`run_differential_test`] supplies that default).
+/// Callers without a checker must pass [`KernelVerdict::NotYetSelfHosting`].
+/// The standard [`run_differential_test`] instead compares two Rust algorithms.
 pub fn run_differential_test_with_verum(
     rule: &KernelV0Rule,
     certificate: &Certificate,
@@ -384,6 +366,8 @@ pub struct DifferentialOutcome {
     pub rejected: usize,
     /// Reports where the kernels disagreed — the audit-failure count.
     pub disagreement: usize,
+    /// Reports with operational failures rather than complete verdicts.
+    pub incomplete: usize,
     /// Reports where the Verum side wasn't queryable.
     pub not_yet_self_hosting: usize,
 }
@@ -394,6 +378,7 @@ impl DifferentialOutcome {
         let mut out = DifferentialOutcome::default();
         for r in reports {
             match r.agreement {
+                DifferentialAgreement::Incomplete => out.incomplete += 1,
                 DifferentialAgreement::BothAccept => out.accepted += 1,
                 DifferentialAgreement::BothReject => out.rejected += 1,
                 DifferentialAgreement::Disagreement => out.disagreement += 1,
@@ -405,13 +390,22 @@ impl DifferentialOutcome {
 
     /// Total report count across all categories.
     pub fn total(&self) -> usize {
-        self.accepted + self.rejected + self.disagreement + self.not_yet_self_hosting
+        self.accepted
+            + self.rejected
+            + self.disagreement
+            + self.incomplete
+            + self.not_yet_self_hosting
     }
 
-    /// Project: are there any divergences? This is the audit-fail
-    /// predicate the gate consumes. `NotYetSelfHosting` is *not* a
-    /// divergence (the Verum side simply isn't online); only
-    /// `Disagreement` flips this to true.
+    /// A nonempty batch reached complete matching semantic verdicts.
+    pub fn is_complete(&self) -> bool {
+        self.total() > 0
+            && self.incomplete == 0
+            && self.not_yet_self_hosting == 0
+            && self.disagreement == 0
+    }
+
+    /// Whether completed checker verdicts disagree. Incompleteness is separate.
     pub fn has_divergence(&self) -> bool {
         self.disagreement > 0
     }
@@ -424,6 +418,49 @@ impl DifferentialOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operational_failure_is_never_both_reject() {
+        let verdict: KernelVerdict = Err(CheckError::FuelExhausted).into();
+        assert!(!verdict.is_rejected());
+        let row = DifferentialReport::new("exhaustion", verdict.clone(), verdict);
+        assert_eq!(row.agreement, DifferentialAgreement::Incomplete);
+        let batch = DifferentialOutcome::from_reports(&[row]);
+        assert_eq!(batch.rejected, 0);
+        assert_eq!(batch.incomplete, 1);
+        assert!(!batch.is_complete());
+        assert!(!DifferentialOutcome::from_reports(&[]).is_complete());
+    }
+
+    #[test]
+    fn wire_verdict_classification_never_guesses_rejection() {
+        assert_eq!(
+            classify_reference_verdict(true, None),
+            ReplayOutcome::Accepted
+        );
+        assert_eq!(
+            classify_reference_verdict(false, Some("TypeMismatch")),
+            ReplayOutcome::Rejected
+        );
+        assert_eq!(
+            classify_reference_verdict(false, Some("FuelExhausted")),
+            ReplayOutcome::ResourceExhausted
+        );
+        assert_eq!(
+            classify_reference_verdict(false, Some("FoundationRequired")),
+            ReplayOutcome::Unsupported
+        );
+        for result in [
+            (false, None),
+            (false, Some("Unknown")),
+            (true, Some("TypeMismatch")),
+        ] {
+            assert_eq!(
+                classify_reference_verdict(result.0, result.1),
+                ReplayOutcome::Inconclusive
+            );
+        }
+    }
 
     /// Build a minimal `KernelV0Rule` for synthetic-path tests so we
     /// don't have to materialise the full manifest.
@@ -664,6 +701,7 @@ mod tests {
             accepted: 7,
             rejected: 3,
             disagreement: 0,
+            incomplete: 0,
             not_yet_self_hosting: 10,
         };
         let json = serde_json::to_string(&outcome).expect("serialise");

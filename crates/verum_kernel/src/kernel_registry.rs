@@ -37,6 +37,8 @@
 
 use crate::proof_checker::{Certificate, CheckError};
 use crate::proof_checker_nbe;
+pub use verum_proof::admission::ReplayOutcome;
+use verum_proof::admission::classify_check_failure;
 
 // =============================================================================
 // KernelChecker trait — the abstraction
@@ -57,7 +59,7 @@ pub trait KernelChecker: Send + Sync {
     fn description(&self) -> &'static str;
 
     /// Verify a certificate.  Returns `Ok(())` for accept,
-    /// `Err(CheckError)` for reject.
+    /// `Err(CheckError)` for a semantic rejection or explicit operational failure.
     fn verify(&self, cert: &Certificate) -> Result<(), CheckError>;
 }
 
@@ -106,39 +108,12 @@ impl KernelChecker for ProofCheckerNbeKernel {
     }
 }
 
-/// Algorithm C — kernel_v0 manifest-driven verifier.  The
-/// **Verum-self-hosted** third slot of the differential
-/// architecture.
+/// Bootstrap metadata audit around Algorithm A.
 ///
-/// Where Algorithm A walks the certificate's term structurally
-/// and Algorithm B evaluates it through closures, Algorithm C
-/// performs **meta-soundness verification** orthogonal to both:
-///
-/// 1. The certificate's term must round-trip through Algorithm
-///    A — this anchors the structural verdict.  (Without this
-///    anchor the manifest checks below would be vacuous on a
-///    rejected certificate.)
-/// 2. Every rule in `kernel_v0_manifest::manifest()` must be
-///    *audit-clean* (`Discharged` or `DischargedByFramework`).
-///    A bootstrap rule sitting at `AdmittedWithIou` with no
-///    cited upstream proof fails this check.
-/// 3. The kernel-soundness footprint must be bounded by the
-///    canonical meta-theory ceiling — every rule's required
-///    ZFC axioms + Grothendieck universes must fit within
-///    ZFC + 2 strongly-inaccessibles.
-/// 4. Each kernel_v0 rule's strict-intrinsic must dispatch to
-///    a `Decision { value: true }` answer through the canonical
-///    `dispatch_intrinsic` registry.  This is the "the bootstrap
-///    rule's soundness lemma agrees with the registered
-///    intrinsic" check.
-///
-/// All four conditions must hold for Algorithm C to admit the
-/// certificate.  This is structurally orthogonal to Algorithms
-/// A and B because it consults the **bootstrap manifest** and
-/// the **meta-soundness registry** rather than re-walking the
-/// certificate's term — a disagreement with A or B surfaces
-/// drift between the implementation kernels and the bootstrap
-/// meta-theory's commitments.
+/// This Rust wrapper first checks the certificate through explicit substitution,
+/// then checks manifest status, declared foundational footprint and intrinsic
+/// dispatch. These are metadata consistency checks, not independently checked
+/// soundness proofs. The wrapper does not execute a self-hosted Verum kernel.
 pub struct KernelV0Kernel;
 
 impl KernelChecker for KernelV0Kernel {
@@ -147,9 +122,7 @@ impl KernelChecker for KernelV0Kernel {
     }
 
     fn description(&self) -> &'static str {
-        "Algorithm C — Verum-self-hosted bootstrap manifest verifier \
-         (kernel_v0/ + dispatch_intrinsic + kernel_meta_soundness_holds; \
-         orthogonal meta-soundness check)"
+        "Substitution checker plus bootstrap metadata consistency checks (not an independent checker)"
     }
 
     fn verify(&self, cert: &Certificate) -> Result<(), CheckError> {
@@ -200,9 +173,7 @@ impl KernelChecker for KernelV0Kernel {
             match dispatch_intrinsic(&intrinsic, &[]) {
                 Some(IntrinsicValue::Decision { holds, .. }) if holds => continue,
                 _ => {
-                    return Err(CheckError::KernelV0StrictIntrinsicDisagreement {
-                        intrinsic,
-                    });
+                    return Err(CheckError::KernelV0StrictIntrinsicDisagreement { intrinsic });
                 }
             }
         }
@@ -217,9 +188,9 @@ impl KernelChecker for KernelV0Kernel {
 
 /// Collection of registered kernel implementations.
 ///
-/// **Default**: builds a registry with the two algorithmically-
-/// distinct production kernels (`ProofCheckerKernel` +
-/// `ProofCheckerNbeKernel`).  Callers can construct an empty
+/// **Default**: two algorithmically distinct production kernels and a
+/// bootstrap metadata wrapper around the substitution checker.
+/// Callers can construct an empty
 /// registry via `KernelRegistry::new()` and register custom
 /// implementations.
 pub struct KernelRegistry {
@@ -229,7 +200,9 @@ pub struct KernelRegistry {
 impl KernelRegistry {
     /// Construct an empty registry.
     pub fn new() -> Self {
-        Self { kernels: Vec::new() }
+        Self {
+            kernels: Vec::new(),
+        }
     }
 
     /// Register a kernel implementation.
@@ -262,7 +235,9 @@ impl KernelRegistry {
             let result = kernel.verify(cert);
             verdicts.push(KernelOutcome {
                 kernel_name: kernel.name(),
-                accepted: result.is_ok(),
+                outcome: result
+                    .as_ref()
+                    .map_or_else(|e| classify_check_failure(e).0, |_| ReplayOutcome::Accepted),
                 error_summary: result.err().map(|e| format!("{:?}", e)),
             });
         }
@@ -271,14 +246,8 @@ impl KernelRegistry {
 }
 
 impl Default for KernelRegistry {
-    /// Default registry: the three production kernels —
-    /// Algorithm A (`ProofCheckerKernel`, structural bidirectional
-    /// type-check), Algorithm B (`ProofCheckerNbeKernel`,
-    /// closure-based NbE evaluation), and Algorithm C
-    /// (`KernelV0Kernel`, manifest-driven Verum-self-hosted
-    /// bootstrap verifier).  All three are differential-tested
-    /// against each other; any pairwise disagreement fails the
-    /// audit.
+    /// Two independent Rust algorithms and a bootstrap metadata wrapper around
+    /// Algorithm A. Agreement does not supply a kernel soundness theorem.
     fn default() -> Self {
         let mut r = Self::new();
         r.register(ProofCheckerKernel);
@@ -297,20 +266,29 @@ impl Default for KernelRegistry {
 pub struct KernelOutcome {
     /// Name of the kernel implementation that produced this verdict.
     pub kernel_name: &'static str,
-    /// `true` iff the kernel accepted.
-    pub accepted: bool,
-    /// `Some(_)` iff the kernel rejected — formatted error.
+    /// Semantic verdict or operational failure, without a lossy Boolean projection.
+    pub outcome: ReplayOutcome,
+    /// Diagnostic for any non-accepted outcome.
     pub error_summary: Option<String>,
+}
+
+impl KernelOutcome {
+    /// Compatibility projection; operational failures remain visible in `outcome`.
+    pub fn is_accepted(&self) -> bool {
+        self.outcome == ReplayOutcome::Accepted
+    }
 }
 
 /// N-kernel agreement classification.
 ///
 /// `Unanimous` (all accept) and `UnanimousReject` (all reject) are
-/// the soundness-clean outcomes. `Disagreement` lists which
+/// the completed semantic outcomes. `Disagreement` lists which
 /// kernels disagreed — used by the audit gate to surface the
 /// specific divergence.
 #[derive(Debug, Clone)]
 pub enum AgreementVerdict {
+    /// A checker did not complete, or fewer than two distinct kernels ran.
+    Incomplete,
     /// All registered kernels accepted.
     Unanimous,
     /// All registered kernels rejected.
@@ -330,6 +308,7 @@ impl AgreementVerdict {
     /// Stable diagnostic tag for audit reports.
     pub fn tag(&self) -> &'static str {
         match self {
+            AgreementVerdict::Incomplete => "incomplete",
             AgreementVerdict::Unanimous => "unanimous_accept",
             AgreementVerdict::UnanimousReject => "unanimous_reject",
             AgreementVerdict::Disagreement { .. } => "disagreement",
@@ -339,7 +318,10 @@ impl AgreementVerdict {
     /// True iff all kernels agreed (any direction). Disagreements
     /// are the load-bearing failure mode.
     pub fn is_unanimous(&self) -> bool {
-        !matches!(self, AgreementVerdict::Disagreement { .. })
+        matches!(
+            self,
+            AgreementVerdict::Unanimous | AgreementVerdict::UnanimousReject
+        )
     }
 }
 
@@ -357,14 +339,27 @@ impl MultiVerdict {
     /// Build from per-kernel outcomes. Computes the agreement
     /// classifier from the outcome set.
     pub fn from_outcomes(outcomes: Vec<KernelOutcome>) -> Self {
+        let names: std::collections::BTreeSet<_> = outcomes.iter().map(|o| o.kernel_name).collect();
+        if names.len() < 2
+            || names.len() != outcomes.len()
+            || outcomes.iter().any(|o| {
+                !matches!(o.outcome, ReplayOutcome::Accepted | ReplayOutcome::Rejected)
+                    || o.is_accepted() != o.error_summary.is_none()
+            })
+        {
+            return Self {
+                outcomes,
+                agreement: AgreementVerdict::Incomplete,
+            };
+        }
         let accepting: Vec<&'static str> = outcomes
             .iter()
-            .filter(|o| o.accepted)
+            .filter(|o| o.is_accepted())
             .map(|o| o.kernel_name)
             .collect();
         let rejecting: Vec<&'static str> = outcomes
             .iter()
-            .filter(|o| !o.accepted)
+            .filter(|o| o.outcome == ReplayOutcome::Rejected)
             .map(|o| o.kernel_name)
             .collect();
         let agreement = match (accepting.is_empty(), rejecting.is_empty()) {
@@ -374,10 +369,7 @@ impl MultiVerdict {
                 accepting,
                 rejecting,
             },
-            // (true, true) is impossible with non-empty outcomes;
-            // if outcomes is empty, treat as unanimous (degenerate
-            // — no kernels to disagree).
-            (true, true) => AgreementVerdict::Unanimous,
+            (true, true) => AgreementVerdict::Incomplete,
         };
         Self {
             outcomes,
@@ -407,14 +399,8 @@ mod tests {
     use crate::proof_checker::Term;
 
     fn polymorphic_identity() -> Certificate {
-        let term = Term::lam(
-            Term::universe(0),
-            Term::lam(Term::var(0), Term::var(0)),
-        );
-        let claimed_type = Term::pi(
-            Term::universe(0),
-            Term::pi(Term::var(0), Term::var(1)),
-        );
+        let term = Term::lam(Term::universe(0), Term::lam(Term::var(0), Term::var(0)));
+        let claimed_type = Term::pi(Term::universe(0), Term::pi(Term::var(0), Term::var(1)));
         Certificate {
             term,
             claimed_type,
@@ -461,7 +447,7 @@ mod tests {
         assert!(v.agreement.is_unanimous());
         assert_eq!(v.outcomes.len(), 3);
         for o in &v.outcomes {
-            assert!(o.accepted);
+            assert!(o.is_accepted());
             assert!(o.error_summary.is_none());
         }
     }
@@ -473,9 +459,75 @@ mod tests {
         assert!(matches!(v.agreement, AgreementVerdict::UnanimousReject));
         assert!(v.agreement.is_unanimous());
         for o in &v.outcomes {
-            assert!(!o.accepted);
+            assert!(!o.is_accepted());
             assert!(o.error_summary.is_some());
         }
+    }
+
+    #[test]
+    fn incomplete_registries_cannot_claim_unanimity() {
+        let cert = polymorphic_identity();
+        let mut registry = KernelRegistry::new();
+        assert!(!registry.verify_all(&cert).agreement.is_unanimous());
+        registry.register(ProofCheckerKernel);
+        assert!(!registry.verify_all(&cert).agreement.is_unanimous());
+        registry.register(ProofCheckerKernel);
+        assert!(!registry.verify_all(&cert).agreement.is_unanimous());
+    }
+
+    #[test]
+    fn operational_failures_survive_registry_and_campaigns() {
+        struct Refuse(bool);
+        impl KernelChecker for Refuse {
+            fn name(&self) -> &'static str {
+                "refusal_control"
+            }
+            fn description(&self) -> &'static str {
+                "test-only operational failure"
+            }
+            fn verify(&self, _: &Certificate) -> Result<(), CheckError> {
+                Err(if self.0 {
+                    CheckError::FuelExhausted
+                } else {
+                    CheckError::FoundationRequired(
+                        crate::proof_checker::Foundation::FunctionExtensionality,
+                    )
+                })
+            }
+        }
+        for exhausted in [false, true] {
+            let mut registry = KernelRegistry::new();
+            registry.register(ProofCheckerKernel);
+            registry.register(Refuse(exhausted));
+            let result = registry.verify_all(&invalid_cert());
+            assert!(matches!(result.agreement, AgreementVerdict::Incomplete));
+            assert_eq!(
+                result.outcomes[1].outcome,
+                if exhausted {
+                    ReplayOutcome::ResourceExhausted
+                } else {
+                    ReplayOutcome::Unsupported
+                }
+            );
+            for report in [
+                crate::differential_fuzz::run_fuzz_campaign_against(&registry, 3, 17),
+                crate::differential_fuzz::run_generative_campaign_against(&registry, 3, 17),
+            ] {
+                assert!(!report.checks_passed());
+                assert_eq!(report.incomplete.len(), 3);
+                assert_eq!(report.unanimous_reject, 0);
+                assert!(report.disagreements.is_empty());
+            }
+        }
+        assert!(!crate::differential_fuzz::run_fuzz_campaign(0, 17).checks_passed());
+        assert!(
+            !crate::differential_fuzz::run_generative_campaign_against(
+                &KernelRegistry::new(),
+                3,
+                17
+            )
+            .checks_passed()
+        );
     }
 
     // ----- Custom kernel registration -----
@@ -520,6 +572,7 @@ mod tests {
     fn agreement_verdict_tags_are_distinct() {
         // Pin: every variant has a distinct stable tag.
         let probes = [
+            AgreementVerdict::Incomplete,
             AgreementVerdict::Unanimous,
             AgreementVerdict::UnanimousReject,
             AgreementVerdict::Disagreement {
@@ -528,7 +581,7 @@ mod tests {
             },
         ];
         let tags: std::collections::BTreeSet<_> = probes.iter().map(|v| v.tag()).collect();
-        assert_eq!(tags.len(), 3);
+        assert_eq!(tags.len(), 4);
     }
 
     #[test]

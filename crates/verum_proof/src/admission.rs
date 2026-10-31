@@ -50,6 +50,19 @@ pub enum ReplayOutcome {
     Inconclusive,
 }
 
+impl ReplayOutcome {
+    /// Stable tag shared by embedded and command-line consumers.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+            Self::Unsupported => "unsupported",
+            Self::ResourceExhausted => "resource_exhausted",
+            Self::Inconclusive => "inconclusive",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Report {
@@ -134,7 +147,7 @@ pub fn checker_identity() -> String {
 }
 /// Each kernel error has an explicit operational classification. New variants
 /// must be classified here; they cannot silently become semantic rejections.
-fn check_failure(error: &CheckError) -> (ReplayOutcome, &'static str) {
+pub fn classify_check_failure(error: &CheckError) -> (ReplayOutcome, &'static str) {
     use ReplayOutcome::{Rejected, ResourceExhausted, Unsupported};
     match error {
         CheckError::FuelExhausted => (ResourceExhausted, "normalization_limit"),
@@ -440,7 +453,7 @@ pub fn replay_with_limits(bytes: &[u8], foundation: Foundation, limits: Admissio
         );
     }
     let report_failure = |stage: &str, error: &CheckError| {
-        let (outcome, code) = check_failure(error);
+        let (outcome, code) = classify_check_failure(error);
         refusal(
             outcome,
             stage,
@@ -474,7 +487,7 @@ mod failure_classification {
 
     #[test]
     fn normalization_exhaustion_cannot_become_semantic_rejection() {
-        let (outcome, code) = check_failure(&CheckError::FuelExhausted);
+        let (outcome, code) = classify_check_failure(&CheckError::FuelExhausted);
         let report = Report::refusal(
             Foundation::Intensional,
             AdmissionLimits::DEFAULT,

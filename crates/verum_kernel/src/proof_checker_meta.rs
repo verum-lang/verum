@@ -8,8 +8,8 @@
 //!
 //! The mathematical translation preserves well-formed typing derivations.
 //! Algorithmic verdict stability is conditional on supported representations
-//! and successful checking: the concrete inference ceiling and conservative
-//! conversion can reject a translated input. A differential stability test
+//! and successful checking: resource limits and conservative conversion
+//! can prevent acceptance of a translated input. A differential stability test
 //! is diagnostic evidence, not a proof of metatheoretic consistency.
 //!
 //! `verify_certificate_with_lift` validates both the translated claimed type
@@ -222,9 +222,9 @@ pub fn verify_certificate_with_lift(
 /// verdict is stable across a range of lifts. Returns
 /// `(verdicts_at_each_lift, all_agree)` where `verdicts_at_each_lift`
 /// is `Vec<Result<(), CheckError>>` for lifts `0..=max_lift` and
-/// `all_agree` is `true` iff every lift produces the SAME accept/
-/// reject classification (the actual error reasons may differ but
-/// the boolean accept/reject must be uniform).
+/// `all_agree` is `true` iff every lift produces the same completed semantic
+/// verdict. Unsupported evidence or resource exhaustion cannot establish
+/// stability, even if every lift fails in the same way.
 ///
 /// **Architectural use**: the audit gate
 /// `verum audit --meta-universe-stability` calls this for every
@@ -235,12 +235,15 @@ pub fn check_universe_stability(
     cert: &Certificate,
     max_lift: u32,
 ) -> (Vec<Result<(), CheckError>>, bool) {
-    let mut verdicts = Vec::with_capacity((max_lift + 1) as usize);
-    for lift in 0..=max_lift {
-        verdicts.push(verify_certificate_with_lift(cert, lift));
-    }
+    let verdicts: Vec<_> = (0..=max_lift)
+        .map(|lift| verify_certificate_with_lift(cert, lift))
+        .collect();
     let all_accept = verdicts.iter().all(|v| v.is_ok());
-    let all_reject = verdicts.iter().all(|v| v.is_err());
+    let all_reject = verdicts.iter().all(|v| match v {
+        Err(error) => verum_proof::admission::classify_check_failure(error).0
+            == verum_proof::admission::ReplayOutcome::Rejected,
+        Ok(()) => false,
+    });
     let stable = all_accept || all_reject;
     (verdicts, stable)
 }

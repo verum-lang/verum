@@ -34,7 +34,7 @@ impl Elab {
             &lower(proof, &mut self.frame())?,
             &lower(goal, &mut self.frame())?,
         )
-        .map_err(|error| Error::Rejected(format!("{error:?}")))
+        .map_err(Error::from)
     }
 
     fn tactics_inner(&mut self, tactic: &TacticExpr, mut goal: Ir) -> Result<Ir> {
@@ -114,10 +114,13 @@ impl Elab {
                     let mut found = None;
                     for binding in self.stack.iter().rev() {
                         let proof = Ir::Var(binding.id);
-                        if k::check(&context, &lower(&proof, &mut self.frame())?, &expected).is_ok()
-                        {
-                            found = Some(proof);
-                            break;
+                        match k::check(&context, &lower(&proof, &mut self.frame())?, &expected) {
+                            Ok(()) => {
+                                found = Some(proof);
+                                break;
+                            }
+                            Err(k::CheckError::TypeMismatch { .. }) => continue,
+                            Err(error) => return Err(Error::from(error)),
                         }
                     }
                     found.ok_or_else(|| {

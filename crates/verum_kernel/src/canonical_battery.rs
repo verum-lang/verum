@@ -48,6 +48,7 @@
 //! the kernel(s) before merging — that's the load-bearing value of
 //! the gates.
 
+use crate::kernel_registry::ReplayOutcome;
 use crate::proof_checker::{Certificate, Term};
 
 /// One certificate in the canonical battery.  Pairs the certificate
@@ -63,11 +64,10 @@ pub struct CanonicalCert {
     /// directly (no metadata — the canonical battery exercises the
     /// trusted-base structural fragment, not framework axioms).
     pub certificate: Certificate,
-    /// The trusted-base verdict this cert pins.  `true` = the cert
-    /// MUST verify; `false` = the cert MUST reject.  Single source of
-    /// truth: per-kernel sanity tests AND
+    /// Exact expected checker outcome; unsupported and incomplete checks are
+    /// distinct from semantic rejection. Per-kernel sanity tests and
     /// [`expected_verdict`] both consult this field.
-    pub expected_outcome: bool,
+    pub expected_outcome: ReplayOutcome,
 }
 
 impl CanonicalCert {
@@ -75,14 +75,14 @@ impl CanonicalCert {
     /// kernel in the registry.  Convenience wrapper over
     /// [`CanonicalCert::build`].
     fn accept(id: &'static str, term: Term, claimed_type: Term) -> Self {
-        Self::build(id, term, claimed_type, true)
+        Self::build(id, term, claimed_type, ReplayOutcome::Accepted)
     }
 
     /// Construct a reject-cert: `id` should be refused by every
     /// kernel in the registry.  Convenience wrapper over
     /// [`CanonicalCert::build`].
     fn reject(id: &'static str, term: Term, claimed_type: Term) -> Self {
-        Self::build(id, term, claimed_type, false)
+        Self::build(id, term, claimed_type, ReplayOutcome::Rejected)
     }
 
     /// Construct from primitive parts with an explicit expected
@@ -90,7 +90,12 @@ impl CanonicalCert {
     /// [`CanonicalCert::reject`] at the call site for readability;
     /// this function is the underlying constructor both helpers
     /// route through.
-    fn build(id: &'static str, term: Term, claimed_type: Term, expected_outcome: bool) -> Self {
+    fn build(
+        id: &'static str,
+        term: Term,
+        claimed_type: Term,
+        expected_outcome: ReplayOutcome,
+    ) -> Self {
         Self {
             id,
             certificate: Certificate {
@@ -146,22 +151,10 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
         // ---- 2. Var (T-Var) — empty ctx → unbound -------------------------
         CanonicalCert::reject("var0-empty-ctx-fails", var(0), univ(0)),
         // ---- 3. Identity at Universe(0) (T-Lam-Intro + T-Var) -------------
-        CanonicalCert::accept(
-            "id-at-univ0",
-            lam(univ(0), var(0)),
-            pi(univ(0), univ(0)),
-        ),
-        CanonicalCert::reject(
-            "id-at-univ0-wrong-claim",
-            lam(univ(0), var(0)),
-            univ(0),
-        ),
+        CanonicalCert::accept("id-at-univ0", lam(univ(0), var(0)), pi(univ(0), univ(0))),
+        CanonicalCert::reject("id-at-univ0-wrong-claim", lam(univ(0), var(0)), univ(0)),
         // ---- 4. Identity at Universe(3) -----------------------------------
-        CanonicalCert::accept(
-            "id-at-univ3",
-            lam(univ(3), var(0)),
-            pi(univ(3), univ(3)),
-        ),
+        CanonicalCert::accept("id-at-univ3", lam(univ(3), var(0)), pi(univ(3), univ(3))),
         // ---- 5. Polymorphic identity (Π A. Π _:A. A) ----------------------
         CanonicalCert::accept(
             "poly-id-shape",
@@ -179,21 +172,15 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
             univ(0),
         ),
         // ---- 8. App on non-function ---------------------------------------
-        CanonicalCert::reject(
-            "app-non-function",
-            app(univ(0), univ(0)),
-            univ(0),
-        ),
-        // ---- 9. DEFECT-2: universe overflow rejection ---------------------
-        CanonicalCert::reject(
+        CanonicalCert::reject("app-non-function", app(univ(0), univ(0)), univ(0)),
+        // ---- 9. Exact successors must never wrap back to Universe(0). -----
+        CanonicalCert::build(
             "defect-2-univ-max-overflows",
             univ(u32::MAX),
             univ(0),
+            ReplayOutcome::Rejected,
         ),
-        // DEFECT-5 boundary case (universe-tower-top escape hatch) — both
-        // kernels must accept since the claimed_type lives at the top
-        // and `verify`'s DEFECT-4 step swallows the inferred-kind
-        // overflow.
+        // Ordinary formation now checks the kind above the wire maximum too.
         CanonicalCert::accept(
             "defect-2-univ-max-minus-one-ok",
             univ(u32::MAX - 1),
@@ -208,10 +195,7 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
         // ---- 11. Nested application — outer λ takes U(0), inner reduces to U(0) ---
         CanonicalCert::reject(
             "nested-app-domain-mismatch",
-            app(
-                lam(univ(0), var(0)),
-                app(lam(univ(0), var(0)), univ(0)),
-            ),
+            app(lam(univ(0), var(0)), app(lam(univ(0), var(0)), univ(0))),
             univ(0),
         ),
         // ---- 12. Const function (λ_:A. λ_:B. Var(1)) ----------------------
@@ -223,11 +207,7 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
         // ---- 13. Higher universe Pi (Type 2 → Type 7 lives in Type 8) ----
         CanonicalCert::accept("high-pi", pi(univ(2), univ(7)), univ(8)),
         // ---- 14. Identity-arrow at Universe(0) ---------------------------
-        CanonicalCert::accept(
-            "id-arrow",
-            lam(univ(0), var(0)),
-            pi(univ(0), univ(0)),
-        ),
+        CanonicalCert::accept("id-arrow", lam(univ(0), var(0)), pi(univ(0), univ(0))),
         // ---- 15. Free var inside nested Pi (deep T-Var) ------------------
         CanonicalCert::accept(
             "deep-var",
@@ -241,17 +221,9 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
             pi(univ(0), univ(0)),
         ),
         // ---- 17. Type-mismatch: identity claimed as Universe(1) ----------
-        CanonicalCert::reject(
-            "id-claimed-as-universe",
-            lam(univ(0), var(0)),
-            univ(1),
-        ),
+        CanonicalCert::reject("id-claimed-as-universe", lam(univ(0), var(0)), univ(1)),
         // ---- 18. Nested Pi — Π(_:U(0)). Π(_:U(0)). U(0) -------------------
-        CanonicalCert::accept(
-            "nested-pi",
-            pi(univ(0), pi(univ(0), univ(0))),
-            univ(1),
-        ),
+        CanonicalCert::accept("nested-pi", pi(univ(0), pi(univ(0), univ(0))), univ(1)),
         // ---- 19. Nested Lam — λ(A:U(0)). λ(x:A). x -----------------------
         CanonicalCert::accept(
             "nested-lam-correct",
@@ -282,7 +254,7 @@ pub fn canonical_battery_size() -> usize {
 /// This is consulted by per-kernel sanity tests but **not** by the
 /// audit gate itself — the audit gate's verdict is purely "do all
 /// registered kernels agree?", agnostic to the expected outcome.
-pub fn expected_verdict(id: &str) -> Option<bool> {
+pub fn expected_verdict(id: &str) -> Option<ReplayOutcome> {
     canonical_battery()
         .into_iter()
         .find(|cert| cert.id == id)
@@ -348,10 +320,13 @@ mod tests {
         // the kernel changed (intended → update the cert's outcome)
         // or the kernel regressed (unintended → fix the kernel).
         for cert in canonical_battery() {
-            let actual = cert.certificate.verify().is_ok();
+            let actual = cert.certificate.verify().as_ref().map_or_else(
+                |e| verum_proof::admission::classify_check_failure(e).0,
+                |_| ReplayOutcome::Accepted,
+            );
             assert_eq!(
                 actual, cert.expected_outcome,
-                "canonical cert {}: trusted base produced {}, expected {}",
+                "canonical cert {}: trusted base produced {:?}, expected {:?}",
                 cert.id, actual, cert.expected_outcome,
             );
         }
@@ -364,10 +339,13 @@ mod tests {
         // structural NbE bug.
         use crate::proof_checker_nbe::verify_certificate;
         for cert in canonical_battery() {
-            let actual = verify_certificate(&cert.certificate).is_ok();
+            let actual = verify_certificate(&cert.certificate).as_ref().map_or_else(
+                |e| verum_proof::admission::classify_check_failure(e).0,
+                |_| ReplayOutcome::Accepted,
+            );
             assert_eq!(
                 actual, cert.expected_outcome,
-                "canonical cert {}: NbE produced {}, expected {}",
+                "canonical cert {}: NbE produced {:?}, expected {:?}",
                 cert.id, actual, cert.expected_outcome,
             );
         }
@@ -384,21 +362,20 @@ mod tests {
         // this test pins it at unit-test resolution.
         use crate::kernel_registry::{AgreementVerdict, KernelRegistry};
         let registry = KernelRegistry::default();
-        let mut disagreements: Vec<(String, Vec<&str>, Vec<&str>)> = Vec::new();
         for cert in canonical_battery() {
-            let v = registry.verify_all(&cert.certificate);
-            if let AgreementVerdict::Disagreement {
-                accepting,
-                rejecting,
-            } = v.agreement
-            {
-                disagreements.push((cert.id.to_string(), accepting, rejecting));
+            let result = registry.verify_all(&cert.certificate);
+            for outcome in &result.outcomes {
+                assert_eq!(
+                    outcome.outcome, cert.expected_outcome,
+                    "{}: {:?}",
+                    cert.id, outcome
+                );
+            }
+            if cert.expected_outcome == ReplayOutcome::Unsupported {
+                assert!(matches!(result.agreement, AgreementVerdict::Incomplete));
+            } else {
+                assert!(result.agreement.is_unanimous(), "{}: {:?}", cert.id, result);
             }
         }
-        assert!(
-            disagreements.is_empty(),
-            "FV-11 invariant violated — 3-kernel registry disagrees on certs: {:?}",
-            disagreements
-        );
     }
 }

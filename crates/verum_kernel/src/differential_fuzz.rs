@@ -476,7 +476,7 @@ pub fn seed_certificates() -> Vec<Certificate> {
         .into_iter()
         .filter_map(|c| {
             crate::canonical_battery::expected_verdict(c.id)
-                .filter(|expect| *expect)
+                .filter(|expect| *expect == crate::kernel_registry::ReplayOutcome::Accepted)
                 .map(|_| c.certificate)
         })
         .collect();
@@ -599,10 +599,7 @@ pub fn shrink_disagreement(
             candidate.mutations.remove(i);
             let mutant = apply_mutation_chain(seed, &candidate);
             let verdict = registry.verify_all(&mutant);
-            if matches!(
-                verdict.agreement,
-                AgreementVerdict::Disagreement { .. }
-            ) {
+            if matches!(verdict.agreement, AgreementVerdict::Disagreement { .. }) {
                 current = candidate;
                 steps += 1;
                 continue 'outer;
@@ -667,6 +664,8 @@ pub struct FuzzCampaignReport {
     /// Mutants where kernels disagreed.  EVERY entry is a soundness
     /// alert — the audit gate fails on any non-empty list.
     pub disagreements: Vec<FuzzResult>,
+    /// Iterations without completed semantic verdicts from every checker.
+    pub incomplete: Vec<FuzzResult>,
     /// Per-disagreement minimal-failing-case reports.  Same length
     /// + index-aligned with `disagreements`.  An empty
     /// `minimal_chain` means the seed alone already disagrees,
@@ -682,10 +681,14 @@ pub struct FuzzCampaignReport {
 }
 
 impl FuzzCampaignReport {
-    /// True iff zero disagreements were observed — the soundness
-    /// contract held.
-    pub fn is_sound(&self) -> bool {
-        self.disagreements.is_empty()
+    /// A nonempty campaign completed with matching semantic verdicts.
+    /// This finite regression check does not establish kernel soundness.
+    pub fn checks_passed(&self) -> bool {
+        self.total_iterations > 0
+            && self.registered_kernels.len() >= 2
+            && self.disagreements.is_empty()
+            && self.incomplete.is_empty()
+            && self.unanimous_accept + self.unanimous_reject == self.total_iterations
     }
 }
 
@@ -740,6 +743,7 @@ pub fn run_fuzz_campaign_against(
     let mut unanimous_accept = 0usize;
     let mut unanimous_reject = 0usize;
     let mut disagreements: Vec<FuzzResult> = Vec::new();
+    let mut incomplete: Vec<FuzzResult> = Vec::new();
     let mut shrunk_disagreements: Vec<ShrinkReport> = Vec::new();
     let mut coverage = FuzzCoverage::default();
 
@@ -747,6 +751,7 @@ pub fn run_fuzz_campaign_against(
         let result = run_fuzz_iteration(iter, &mut rng, &seeds, registry);
         coverage.record(result.seed_index, &result.chain);
         match &result.verdict.agreement {
+            AgreementVerdict::Incomplete => incomplete.push(result),
             AgreementVerdict::Unanimous => unanimous_accept += 1,
             AgreementVerdict::UnanimousReject => unanimous_reject += 1,
             AgreementVerdict::Disagreement { .. } => {
@@ -763,6 +768,7 @@ pub fn run_fuzz_campaign_against(
         unanimous_accept,
         unanimous_reject,
         disagreements,
+        incomplete,
         shrunk_disagreements,
         coverage,
         registered_kernels: registry.names(),
@@ -909,10 +915,12 @@ pub fn run_generative_campaign_against(
     let mut unanimous_accept = 0usize;
     let mut unanimous_reject = 0usize;
     let mut disagreements: Vec<FuzzResult> = Vec::new();
+    let mut incomplete: Vec<FuzzResult> = Vec::new();
 
     for iter in 0..n_iterations {
         let result = run_generative_iteration(iter, &mut rng, registry);
         match &result.verdict.agreement {
+            crate::kernel_registry::AgreementVerdict::Incomplete => incomplete.push(result),
             crate::kernel_registry::AgreementVerdict::Unanimous => unanimous_accept += 1,
             crate::kernel_registry::AgreementVerdict::UnanimousReject => unanimous_reject += 1,
             crate::kernel_registry::AgreementVerdict::Disagreement { .. } => {
@@ -926,6 +934,7 @@ pub fn run_generative_campaign_against(
         unanimous_accept,
         unanimous_reject,
         disagreements,
+        incomplete,
         // Generative iterations carry no mutation chain → no
         // shrinking surface.  An empty `shrunk_disagreements`
         // index-aligned with `disagreements` keeps the report
@@ -994,7 +1003,10 @@ mod tests {
 
     #[test]
     fn lift_universes_increments_every_universe() {
-        let t = Term::pi(Term::universe(0), Term::lam(Term::var(0), Term::universe(3)));
+        let t = Term::pi(
+            Term::universe(0),
+            Term::lam(Term::var(0), Term::universe(3)),
+        );
         let lifted = lift_universes_in_term(&t, 2);
         match lifted {
             Term::Pi(domain, body) => {
@@ -1095,8 +1107,7 @@ mod tests {
         // appear at least once. Detects a sampler that misses a
         // variant index (e.g., off-by-one in `gen_below(11)`).
         let mut rng = FuzzRng::new(0xFEED_FACE);
-        let mut seen: std::collections::BTreeSet<&'static str> =
-            std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
         for _ in 0..2048 {
             seen.insert(sample_mutation(&mut rng).tag());
         }
@@ -1195,7 +1206,9 @@ mod tests {
         let canonical_count = crate::canonical_battery::canonical_battery()
             .iter()
             .filter(|c| {
-                crate::canonical_battery::expected_verdict(c.id).unwrap_or(false)
+                crate::canonical_battery::expected_verdict(c.id).is_some_and(|outcome| {
+                    outcome == crate::kernel_registry::ReplayOutcome::Accepted
+                })
             })
             .count();
         let seeds = seed_certificates();
@@ -1214,7 +1227,7 @@ mod tests {
         let report = run_fuzz_campaign(200, 0xDEAD_BEEF);
         assert_eq!(report.total_iterations, 200);
         assert!(
-            report.is_sound(),
+            report.checks_passed(),
             "differential fuzz found {} disagreement(s); first: {:?}",
             report.disagreements.len(),
             report.disagreements.first(),
@@ -1275,7 +1288,7 @@ mod tests {
         // NbE kernel agree on every verdict.
         let report = run_generative_campaign(100, 0xDEAD_F00D);
         assert!(
-            report.is_sound(),
+            report.checks_passed(),
             "generative fuzz found {} disagreement(s); first: {:?}",
             report.disagreements.len(),
             report.disagreements.first(),
@@ -1322,7 +1335,10 @@ mod tests {
         registry.register(ProofCheckerKernel);
         registry.register(AlwaysAccept);
         let report = run_generative_campaign_against(&registry, 50, 0xCAFE);
-        assert!(!report.is_sound(), "synthetic always-accept must surface disagreements");
+        assert!(
+            !report.checks_passed(),
+            "synthetic always-accept must surface disagreements"
+        );
     }
 
     #[test]
@@ -1344,9 +1360,8 @@ mod tests {
         // distributions (with high probability over 50 iters).
         let r1 = run_fuzz_campaign(50, 1);
         let r2 = run_fuzz_campaign(50, 2);
-        let same_distribution =
-            r1.unanimous_accept == r2.unanimous_accept
-                && r1.unanimous_reject == r2.unanimous_reject;
+        let same_distribution = r1.unanimous_accept == r2.unanimous_accept
+            && r1.unanimous_reject == r2.unanimous_reject;
         assert!(
             !same_distribution,
             "two distinct seeds produced identical distributions — RNG broken?",
@@ -1399,7 +1414,7 @@ mod tests {
         registry.register(AlwaysAcceptKernel);
         let report = run_fuzz_campaign_against(&registry, 100, 0xCAFE);
         assert!(
-            !report.is_sound(),
+            !report.checks_passed(),
             "synthetic always-accept kernel must surface disagreements vs trusted base",
         );
         assert!(
@@ -1568,7 +1583,13 @@ mod tests {
         ];
         for tag in expected_tags {
             assert!(
-                report.coverage.per_mutation_hits.get(tag).copied().unwrap_or(0) > 0,
+                report
+                    .coverage
+                    .per_mutation_hits
+                    .get(tag)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0,
                 "mutation '{}' got zero hits in 500-iter campaign",
                 tag
             );
@@ -1612,8 +1633,7 @@ mod tests {
     fn mutation_kind_tags_are_unique() {
         // Pin: each entry in KIND_TAGS is unique. Duplicate tags
         // would silently collapse coverage bins in FuzzCoverage.
-        let mut seen: std::collections::BTreeSet<&str> =
-            std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
         for tag in Mutation::KIND_TAGS {
             assert!(
                 seen.insert(tag),
@@ -1633,8 +1653,7 @@ mod tests {
         //     updating KIND_TAGS, or vice versa.
         //   • a missing arm (e.g. only 10 of 11 in sample dispatch).
         let mut rng = FuzzRng::new(0xC0DE);
-        let mut hit: std::collections::BTreeSet<&'static str> =
-            std::collections::BTreeSet::new();
+        let mut hit: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
         // 11 kinds × generous sample budget — well above the
         // coupon-collector expectation (~33 draws for 11 kinds at
         // uniform, with FuzzRng's deterministic stream we use a
