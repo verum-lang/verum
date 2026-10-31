@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path, required=True)
     args = parser.parse_args()
-    modules = ['ExactMass', 'EnumerableMass', 'AcquisitionScheduling']
+    modules = ['ExactMass', 'EnumerableMass', 'FifoService', 'AcquisitionScheduling']
     sources = [ROOT / 'VerumExternalReplay' / (m + '.lean') for m in modules]
     sources += [Path(__file__).resolve(), ROOT / 'check_typed_programs.py',
                 ROOT / 'lean-toolchain', ROOT / 'lakefile.toml']
@@ -33,8 +33,9 @@ def resetStep (s : SearchState Nat Nat) (action : SearchAction Nat) : SearchStat
   | .revision start => { s with revisit := some start, revisitTurn := true }
   | _ => searchStep Nat.succ s action
 '''
-    names = ['AcquisitionScheduling.' + n for n in re.findall(r'^theorem (\w+)',
-        (ROOT / 'VerumExternalReplay/AcquisitionScheduling.lean').read_text(), re.M)]
+    names = ['AcquisitionScheduling.' + n for module in ('FifoService', 'AcquisitionScheduling')
+        for n in re.findall(r'^theorem (\w+)',
+            (ROOT / 'VerumExternalReplay' / (module + '.lean')).read_text(), re.M)]
     names += ['AcquisitionScheduling.declarations']
     equations = {
         'diagonal_cannot_skip_pair': 'addressAt 4 = ⟨0, 3⟩',
