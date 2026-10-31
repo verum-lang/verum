@@ -201,6 +201,7 @@ pub use to_text::ToText;
 // Legacy modules for compatibility
 pub mod error;
 pub mod execution_env;
+pub mod runtime_diagnostics;
 pub mod traits;
 
 // Re-export span types for convenience

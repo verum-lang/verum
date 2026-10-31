@@ -1024,6 +1024,17 @@ impl<T> List<T> {
         self.inner.shrink_to_fit();
     }
 
+    /// Reserve capacity without aborting on capacity overflow or allocation
+    /// refusal. Existing elements remain intact on failure.
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), std::collections::TryReserveError> {
+        self.inner.try_reserve(additional)
+    }
+
+    /// Fallible exact reservation for bounded runtime buffers.
+    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), std::collections::TryReserveError> {
+        self.inner.try_reserve_exact(additional)
+    }
+
     /// Get first element
     pub fn first(&self) -> Option<&T> {
         self.inner.first()
