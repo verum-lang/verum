@@ -310,6 +310,7 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_partial_prediction.py
           python3 -m unittest discover -s verification/external/lean -p test_program_totality.py
           python3 -m unittest discover -s verification/external/lean -p test_work_drain.py
+          python3 -m unittest discover -s verification/external/lean -p test_read_reuse.py
           python3 -m unittest discover -s verification/external/lean -p test_guarded_drain.py
           python3 -m unittest discover -s verification/external/lean -p test_guarded_driver_export.py
           python3 -m unittest discover -s verification/external/lean -p test_preaction_export.py
