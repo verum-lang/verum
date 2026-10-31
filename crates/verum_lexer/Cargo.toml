@@ -14,7 +14,9 @@ workspace = true
 verum_ast = { workspace = true }
 verum_common = { workspace = true }
 # DEPRECATED: Superseded by stdlib/ and verum_common types
-logos = { workspace = true }
+# Scanner transitions and trivia skipping must have bounded native stack use,
+# including when Rust does not optimize tail calls (e.g. editor/debug builds).
+logos = { workspace = true, features = ["state_machine_codegen"] }
 
 [dev-dependencies]
 proptest = { workspace = true }
