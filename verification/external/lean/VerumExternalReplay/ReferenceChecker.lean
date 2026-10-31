@@ -195,7 +195,7 @@ def Level.stripSucc (l : Level) (count : Nat) : Level :=
 termination_by structural l
 
 /-- Flatten a (possibly-nested) `max` into a flat list of summands. -/
-partial def Level.flattenMax (l : Level) : List Level :=
+def Level.flattenMax (l : Level) : List Level :=
   match l with
   | .max a b => Level.flattenMax a ++ Level.flattenMax b
   | other    => [other]
@@ -212,7 +212,7 @@ partial def Level.sortDedupe (xs : List Level) : List Level :=
 
 /-- Reassemble a `max` from a concrete summand (if any) and a list
     of symbolic summands. -/
-partial def Level.assembleMax (concrete : Option Nat) (symbolic : List Level) : Level :=
+def Level.assembleMax (concrete : Option Nat) (symbolic : List Level) : Level :=
   -- Drop a concrete-zero summand when at least one symbolic summand exists
   -- (`max(0, x) = x`).
   let concreteToKeep :=

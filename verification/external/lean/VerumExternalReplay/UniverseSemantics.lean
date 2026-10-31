@@ -1,6 +1,6 @@
 import VerumExternalReplay.ReferenceChecker
 
-/-! Mathematical meaning of the reference checker's exact successor and compact offset operations.
+/-! Mathematical meaning of the reference checker's exact universe arithmetic and maximum helpers.
 This does not assert correctness of the entire level normalizer or Rust checker. -/
 namespace VerumKernel
 set_option warningAsError true
@@ -20,6 +20,123 @@ def Level.WireValid : Level → Prop
   | .succ base => base.WireValid
   | .max a b => a.WireValid ∧ b.WireValid
   | .offset base amount => base.WireValid ∧ amount ≤ Level.wireMax
+
+/-- The supremum of a finite collection of universe levels; the empty maximum is zero. -/
+def Level.denoteMax (environment : String → Nat) : List Level → Nat
+  | [] => 0
+  | head :: tail => Nat.max (head.denote environment) (Level.denoteMax environment tail)
+
+theorem Level.denoteMax_append (environment : String → Nat) (left right : List Level) :
+    Level.denoteMax environment (left ++ right) =
+      Nat.max (Level.denoteMax environment left) (Level.denoteMax environment right) := by
+  induction left with
+  | nil => simp [Level.denoteMax]
+  | cons head tail ih => simp [Level.denoteMax, ih, Nat.max_assoc]
+
+theorem Level.denoteMax_reverse (environment : String → Nat) (levels : List Level) :
+    Level.denoteMax environment levels.reverse = Level.denoteMax environment levels := by
+  induction levels with
+  | nil => rfl
+  | cons head tail ih =>
+    simp [List.reverse_cons, Level.denoteMax_append, Level.denoteMax, ih, Nat.max_comm]
+
+/-- This unfolds the function used by the checker, with no abstraction assumption. -/
+theorem Level.flattenMax_exact (environment : String → Nat) (level : Level) :
+    Level.denoteMax environment level.flattenMax = level.denote environment := by
+  induction level with
+  | max left right ihLeft ihRight =>
+    simp [Level.flattenMax, Level.denoteMax_append, ihLeft, ihRight, Level.denote]
+  | concrete _ | var _ | succ _ _ | offset _ _ _ =>
+    simp [Level.flattenMax, Level.denoteMax]
+
+theorem Level.flattenMax_wireValid (level : Level) (valid : level.WireValid) :
+    ∀ member ∈ level.flattenMax, member.WireValid := by
+  induction level with
+  | max left right ihLeft ihRight =>
+    intro member found
+    simp only [Level.flattenMax, List.mem_append] at found
+    exact found.elim (ihLeft valid.1 member) (ihRight valid.2 member)
+  | concrete _ | var _ | succ _ _ | offset _ _ _ =>
+    simpa only [Level.flattenMax, List.mem_singleton, forall_eq] using valid
+
+private theorem denote_foldl_max (environment : String → Nat) (levels : List Level) (initial : Level) :
+    (levels.foldl (fun acc level => Level.max level acc) initial).denote environment =
+      Nat.max (Level.denoteMax environment levels) (initial.denote environment) := by
+  induction levels generalizing initial with
+  | nil => simp [Level.denoteMax]
+  | cons head tail ih =>
+    simp only [List.foldl_cons, ih, Level.denoteMax, Level.denote]
+    exact (Nat.max_left_comm _ _ _).trans (Nat.max_assoc _ _ _).symm
+
+private theorem wireValid_foldl_max (levels : List Level) (initial : Level)
+    (initialValid : initial.WireValid) (valid : ∀ level ∈ levels, level.WireValid) :
+    (levels.foldl (fun acc level => Level.max level acc) initial).WireValid := by
+  induction levels generalizing initial with
+  | nil => exact initialValid
+  | cons head tail ih =>
+    apply ih (.max head initial) ⟨valid head (by simp), initialValid⟩
+    intro level found
+    exact valid level (by simp [found])
+
+private theorem assemble_list_exact (environment : String → Nat) (levels : List Level) :
+    (match levels.reverse with
+      | [] => Level.concrete 0
+      | last :: rest => rest.foldl (fun acc level => Level.max level acc) last).denote environment =
+      Level.denoteMax environment levels := by
+  rw [← Level.denoteMax_reverse environment levels]
+  cases levels.reverse with
+  | nil => rfl
+  | cons head tail => simp [denote_foldl_max, Level.denoteMax, Nat.max_comm]
+
+private theorem assemble_list_wireValid (levels : List Level)
+    (valid : ∀ level ∈ levels, level.WireValid) :
+    (match levels.reverse with
+      | [] => Level.concrete 0
+      | last :: rest => rest.foldl (fun acc level => Level.max level acc) last).WireValid := by
+  have reversed : ∀ level ∈ levels.reverse, level.WireValid := by simpa using valid
+  cases reversedLevels : levels.reverse with
+  | nil => exact Nat.zero_le _
+  | cons head tail =>
+    rw [reversedLevels] at reversed
+    apply wireValid_foldl_max tail head (reversed head (by simp))
+    intro level found
+    exact reversed level (by simp [found])
+
+/-- Zero removal and right-associated assembly preserve the whole finite maximum. -/
+theorem Level.assembleMax_exact (environment : String → Nat) (concrete : Option Nat) (symbolic : List Level) :
+    (Level.assembleMax concrete symbolic).denote environment =
+      Nat.max (concrete.getD 0) (Level.denoteMax environment symbolic) := by
+  let kept := match concrete with
+    | some 0 => if symbolic.isEmpty then some 0 else none
+    | other => other
+  let all := (match kept with | some n => [Level.concrete n] | none => []) ++ symbolic
+  have assembled : (Level.assembleMax concrete symbolic).denote environment = Level.denoteMax environment all :=
+    assemble_list_exact environment all
+  rw [assembled]
+  dsimp only [all, kept]
+  cases concrete with
+  | none => simp
+  | some n =>
+    cases n with
+    | zero => cases symbolic <;> simp [Level.denoteMax, Level.denote]
+    | succ n => simp [Level.denoteMax, Level.denote]
+
+theorem Level.assembleMax_wireValid (concrete : Option Nat) (symbolic : List Level)
+    (concreteValid : ∀ n ∈ concrete, n ≤ Level.wireMax)
+    (symbolicValid : ∀ level ∈ symbolic, level.WireValid) :
+    (Level.assembleMax concrete symbolic).WireValid := by
+  unfold Level.assembleMax
+  apply assemble_list_wireValid
+  cases concrete with
+  | none => simpa using symbolicValid
+  | some n =>
+    have bound := concreteValid n (by simp)
+    cases n with
+    | zero =>
+      cases symbolic with
+      | nil => simp [Level.WireValid]
+      | cons head tail => simpa using symbolicValid
+    | succ n => simpa [Level.WireValid] using And.intro bound symbolicValid
 
 theorem Level.offsetNode_exact (environment : String → Nat) (level : Level)
     (amount : Nat) :
@@ -261,4 +378,16 @@ theorem Level.successor_strict (environment : String → Nat) (level : Level) :
 /-- info: 'VerumKernel.Level.stripSucc_restore' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms Level.stripSucc_restore
+/-- info: 'VerumKernel.Level.flattenMax_exact' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms Level.flattenMax_exact
+/-- info: 'VerumKernel.Level.flattenMax_wireValid' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Level.flattenMax_wireValid
+/-- info: 'VerumKernel.Level.assembleMax_exact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Level.assembleMax_exact
+/-- info: 'VerumKernel.Level.assembleMax_wireValid' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Level.assembleMax_wireValid
 end VerumKernel

@@ -126,6 +126,33 @@ open VerumKernel
                                  'VerumKernel.HeadStep.preserves_scope',
                                  'VerumKernel.scope_whnfFuel'])
 
+    def test_maximum_helpers_preserve_all_summands_and_wire_domain(self):
+        names = ['flattenMax_exact', 'flattenMax_wireValid',
+                 'assembleMax_exact', 'assembleMax_wireValid']
+        rows = self.prove('import VerumExternalReplay.UniverseSemantics\nopen VerumKernel\n'
+                          + '\n'.join(f'#print axioms Level.{name}' for name in names) + '''
+example : (Level.assembleMax none []).denote (fun _ => 7) = 0 := by decide_cbv
+example : (Level.assembleMax (some 0) [.var "u"]).denote (fun _ => 7) = 7 := by decide_cbv
+example : (Level.assembleMax (some 9) [.var "u", .var "u"]).denote (fun _ => 7) = 9 := by decide_cbv
+example : Level.denoteMax (fun _ => 7) (Level.flattenMax
+    (.max (.concrete 11) (.offset (.max (.var "u") (.concrete 0)) 3))) = 11 := by decide_cbv
+''')
+        self.assert_axioms(rows, [f'VerumKernel.Level.{name}' for name in names])
+        for claim in [
+            '(Level.assembleMax (some 9) [.var "u"]).denote (fun _ => 7) = 7',
+            'Level.denoteMax (fun _ => 7) (Level.flattenMax (.max (.var "u") (.concrete 11))) = 7',
+        ]:
+            with self.subTest(claim=claim):
+                self.prove('import VerumExternalReplay.UniverseSemantics\nopen VerumKernel\n'
+                           + 'example : ' + claim + ' := by decide_cbv\n', failure=True)
+        self.prove('''
+import VerumExternalReplay.UniverseSemantics
+open VerumKernel
+example : (Level.assembleMax none [.concrete (Level.wireMax + 1)]).WireValid := by
+  change Level.wireMax + 1 ≤ Level.wireMax
+  decide_cbv
+''', failure=True)
+
 
 if __name__ == '__main__':
     unittest.main()
