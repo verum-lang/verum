@@ -178,13 +178,13 @@ partial def Level.lexCompare (a b : Level) : Ordering :=
 
 /-- Common-prefix budget, capped at the wire integer width. This bound is
     only a factoring budget; it never saturates a universe's value. -/
-partial def Level.succDepth : Level → Nat
+def Level.succDepth : Level → Nat
   | .succ inner => min Level.wireMax (1 + Level.succDepth inner)
   | .offset inner by_ => min Level.wireMax (by_ + Level.succDepth inner)
   | _ => 0
 
 /-- Strip an available prefix by visiting syntax, never by counting to its value. -/
-partial def Level.stripSucc (l : Level) (count : Nat) : Level :=
+def Level.stripSucc (l : Level) (count : Nat) : Level :=
   if count = 0 then l
   else match l with
     | .succ inner => Level.stripSucc inner (count - 1)
@@ -192,6 +192,7 @@ partial def Level.stripSucc (l : Level) (count : Nat) : Level :=
       if by_ ≤ count then Level.stripSucc inner (count - by_)
       else Level.addOffset inner (by_ - count)
     | other => other
+termination_by structural l
 
 /-- Flatten a (possibly-nested) `max` into a flat list of summands. -/
 partial def Level.flattenMax (l : Level) : List Level :=

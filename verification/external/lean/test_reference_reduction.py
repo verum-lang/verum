@@ -81,6 +81,34 @@ example : (Level.concrete (Level.wireMax + 1)).WireValid := by
   decide_cbv
 """, failure=True)
 
+    def test_available_prefix_removal_and_restoration(self):
+        rows = self.prove("""
+import VerumExternalReplay.UniverseSemantics
+open VerumKernel
+#print axioms Level.succDepth_bounded
+#print axioms Level.succDepth_le_denote
+#print axioms Level.stripSucc_wireValid
+#print axioms Level.stripSucc_exact
+#print axioms Level.stripSucc_restore
+example : ((Level.offset (.var "u") 9).stripSucc 4).denote (fun _ => 7) = 12 := by decide_cbv
+example : ((Level.offset (.offset (.var "u") Level.wireMax) Level.wireMax).stripSucc
+    Level.wireMax).denote (fun _ => 7) = Level.wireMax + 7 := by decide_cbv
+example : ((Level.succ (.offset (.var "u") Level.wireMax)).stripSucc
+    Level.wireMax).denote (fun _ => 7) = 8 := by decide_cbv
+""")
+        self.assert_axioms(rows, ['VerumKernel.Level.succDepth_bounded',
+                                 'VerumKernel.Level.succDepth_le_denote',
+                                 'VerumKernel.Level.stripSucc_wireValid',
+                                 'VerumKernel.Level.stripSucc_exact',
+                                 'VerumKernel.Level.stripSucc_restore'])
+        for claim in [
+            '((Level.succ (.var "u")).stripSucc 2).denote (fun _ => 7) + 2 = 8',
+            '(Level.offset (.offset (.var "u") Level.wireMax) Level.wireMax).succDepth = 2 * Level.wireMax',
+        ]:
+            with self.subTest(claim=claim):
+                self.prove('import VerumExternalReplay.UniverseSemantics\nopen VerumKernel\n'
+                           + 'example : ' + claim + ' := by decide_cbv\n', failure=True)
+
     def test_completed_mismatch_and_law_axioms(self):
         rows = self.prove('''
 import VerumExternalReplay.ReductionScope
