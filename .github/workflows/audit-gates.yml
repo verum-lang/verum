@@ -57,12 +57,17 @@ jobs:
           python3 verification/external/kani/check_integration.py \
             --kani "$RUNNER_TEMP/kani-0.68.0/bin/kani-driver" \
             --output "$RUNNER_TEMP/rust-symbolic-replay"
+          python3 verification/external/kani/check_native_clock.py \
+            --kani "$RUNNER_TEMP/kani-0.68.0/bin/kani-driver" \
+            --output "$RUNNER_TEMP/native-clock-replay"
       - name: Retain exact sources and verification results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rust-symbolic-replay
-          path: ${{ runner.temp }}/rust-symbolic-replay/
+          path: |
+            ${{ runner.temp }}/rust-symbolic-replay/
+            ${{ runner.temp }}/native-clock-replay/
   # ---------------------------------------------------------------------------
   # Tier 1: in-process audit gates.  No external toolchain needed.
   # ---------------------------------------------------------------------------

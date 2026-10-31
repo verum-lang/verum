@@ -1,0 +1,16 @@
+{
+  "schema": "verum-native-clock-fixture-v1",
+  "archive_sha256": "c11b181d9552b8c96594468cfe8c6cbe7b28667a6431628ae545283e5dd8276c",
+  "members": {
+    "action.rs": "3555c77906b38c0fa6b34226aa3f4355dc155ff97197b082f5d419298db7436f",
+    "causal_coordinates.rs": "e22c371335c60a66351923858108b140ae7c7690e01d5dd7bbc570de9bab4143",
+    "manifest.json": "c28a195c4f2384c9af8505294bf7e364f6db68beb54d4a7f3b493bd4150d78c6",
+    "physical_time.rs": "edf98e6014dad780569c1c74032fd8d97bf25ae20753707db8ad874bcf57d325",
+    "verification.rs": "91eda333e13ea6644d93020c286ae4365d30a751fc9f2f9adb658ff3f5c8e6f8"
+  },
+  "native_sources": {
+    "action.rs": "rust/crates/synarc-kan/src/organism/action.rs",
+    "causal_coordinates.rs": "rust/crates/synarc-kan/src/organism/causal_coordinates.rs",
+    "physical_time.rs": "rust/crates/synarc-kan/src/organism/causal_coordinates/physical_time.rs"
+  }
+}

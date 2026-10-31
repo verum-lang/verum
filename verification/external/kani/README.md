@@ -40,6 +40,14 @@ checker. Its deliberately wrapping implementation must produce an assertion
 counterexample; its excluded maximum must produce an unsatisfied cover even when
 Kani reports successful assertions. Tool/parser failures never satisfy controls.
 
+`check_native_clock.py --kani /path/to/kani-driver --output /new/evidence-directory`
+checks the actual native clock module against arbitrary full-width fields and
+retained `Arc` owners. Its immutable sources match the native build receipt in
+the Lean source-cycle corpus. Restart refusal, fresh origins, exact consumed
+edges and terminal/tick separation have required reachability cases and semantic
+mutation controls. The enclosing application's independent verdict is retained;
+these primitive contracts do not certify its callers or external world behavior.
+
 See [Kani usage](https://model-checking.github.io/kani/usage.html) and
 [loop unwinding](https://model-checking.github.io/kani/tutorial-loop-unwinding.html)
 for the underlying verification boundary.
