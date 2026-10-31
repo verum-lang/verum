@@ -13,6 +13,44 @@ fn studio(root: &std::path::Path) -> Studio {
 }
 
 #[tokio::test]
+async fn script_analysis_uses_compiler_entry_scope_and_original_diagnostic_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let studio = studio(root.path());
+    for prefix in ["", "\u{feff}"] {
+        let source = format!("{prefix}#!/usr/bin/env verum\nlet value: Int = 42;\nprint(value);\n");
+        let valid = studio.call("language.request", json!({
+            "path":"script.vr", "source":source,
+        })).await.unwrap();
+        assert_eq!(valid["result"]["parsed"], true, "{valid}");
+        assert_eq!(valid["result"]["diagnostics"], json!([]), "{valid}");
+
+        let malformed = format!("{prefix}#!/usr/bin/env verum\n// original line retained\nlet = ;\n");
+        let invalid = studio.call("language.request", json!({
+            "path":"script.vr", "source":malformed,
+        })).await.unwrap();
+        assert_eq!(invalid["result"]["parsed"], false, "{invalid}");
+        assert_eq!(invalid["result"]["diagnostics"][0]["range"]["start"]["line"], 2, "{invalid}");
+    }
+}
+
+#[tokio::test]
+async fn closed_script_dependencies_use_the_same_source_parser() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("Verum.toml"), "[cog]\nname='script-project'\n").unwrap();
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    std::fs::write(root.path().join("src/dependency.vr"),
+        "#!/usr/bin/env verum\npublic fn answer() -> Int { 42 }\nprint(answer());\n").unwrap();
+    let studio = studio(root.path());
+    let analysis = studio.call("language.request", json!({
+        "path":"src/main.vr",
+        "source":"mount script_project.dependency.{answer}; fn main() -> Int { answer() }",
+    })).await.unwrap();
+    assert_eq!(analysis["result"]["parsed"], true, "{analysis}");
+    assert_eq!(analysis["result"]["diagnostics"], json!([]), "{analysis}");
+    assert_eq!(analysis["result"]["bindings"][0]["name"], "answer");
+}
+
+#[tokio::test]
 async fn actual_lsp_session_shares_revision_diagnostics_architecture_and_navigation() {
     let root = tempfile::tempdir().unwrap();
     let studio = studio(root.path());

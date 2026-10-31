@@ -83,6 +83,7 @@ pub mod references;
 pub mod refinement_validation;
 pub mod rename;
 pub mod script; // Script/REPL parsing with incremental caching
+mod source_parsing;
 pub mod selection_range;
 pub mod semantic_tokens;
 pub mod smt_worker;

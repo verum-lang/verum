@@ -267,9 +267,7 @@ impl ProjectContext {
             } else {
                 let uri = Url::from_file_path(&path).map_err(|_| anyhow::anyhow!("Source URI"))?;
                 let id = documents.get_file_id(&uri);
-                let ast = verum_parser::VerumParser::new()
-                    .parse_module(verum_lexer::Lexer::new(&text, id), id)
-                    .ok();
+                let ast = crate::source_parsing::parse(&text, id).ok();
                 (id, ast, None)
             };
             sources.insert(

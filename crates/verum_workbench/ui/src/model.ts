@@ -14,7 +14,7 @@ export type Receipt = {
   permissions?: RunPermissions | null; declaration?: string | null;
 };
 
-export const STARTER = 'let answer = 6 * 7;\nprint(answer);\n';
+export const STARTER = '#!/usr/bin/env verum\nlet answer = 6 * 7;\nprint(answer);\n';
 export const IDENTITY = 'theorem identity(A: Type, x: A): A proof = x;\n';
 
 export type DocumentRevision = { path: string; editVersion: number };

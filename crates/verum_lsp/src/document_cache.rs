@@ -65,20 +65,17 @@ impl ParsedDocument {
     fn parse_full(&mut self) {
         let start = Instant::now();
 
-        let lexer = Lexer::new(&self.source, self.file_id);
-        let parser = VerumParser::new();
-
-        match parser.parse_module(lexer, self.file_id) {
+        match crate::source_parsing::parse(&self.source, self.file_id) {
             Ok(module) => {
                 self.ast = Some(module);
                 self.parse_errors.clear();
             }
-            Err(_errors) => {
+            Err(errors) => {
                 self.ast = None;
-                // Parse errors are not directly convertible to diagnostics
-                // For now, just clear the errors list - proper error handling would need
-                // to convert parser errors to diagnostics
-                self.parse_errors.clear();
+                self.parse_errors = errors
+                    .into_iter()
+                    .map(|error| crate::source_parsing::diagnostic(error, &self.source))
+                    .collect();
             }
         }
 
@@ -115,6 +112,17 @@ impl ParsedDocument {
 
         // Consolidate dirty regions
         self.incremental_state.consolidate_dirty_regions();
+
+        // A script's synthesized entry owns all top-level statements. A parsed
+        // fragment cannot be merged as module items without changing that scope.
+        // Header edits must also replace the previous script entry as a whole.
+        if self.ast.as_ref().is_some_and(Module::is_script)
+            || crate::source_parsing::is_script(&self.source, self.file_id)
+        {
+            self.parse_full();
+            self.incremental_state.clear_dirty_regions();
+            return Ok(());
+        }
 
         // Decide whether to use incremental or full parsing
         if self

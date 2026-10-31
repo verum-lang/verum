@@ -14,8 +14,6 @@ use tower_lsp::lsp_types::*;
 use verum_ast::{Attribute, FileId, ItemKind, LiteralKind, Module};
 use verum_common::{List, Text};
 use verum_diagnostics::Diagnostic;
-use verum_lexer::Lexer;
-use verum_parser::VerumParser;
 use verum_types::{Type, TypeChecker};
 
 /// A refused edit leaves both the source and its analyzed revision unchanged.
@@ -429,11 +427,8 @@ impl DocumentState {
         self.type_info.clear();
 
         // Parse the document
-        let lexer = Lexer::new(&self.text, self.file_id);
-        let parser = VerumParser::new();
-
         let parse_started = std::time::Instant::now();
-        let parse_result = parser.parse_module(lexer, self.file_id);
+        let parse_result = crate::source_parsing::parse(&self.text, self.file_id);
         self.last_parse_us = parse_started.elapsed().as_micros() as u64;
 
         match parse_result {
@@ -460,16 +455,8 @@ impl DocumentState {
 
                 // Convert parse errors to diagnostics
                 for error in parse_errors {
-                    use verum_diagnostics::{DiagnosticBuilder, Severity};
-
-                    let diagnostic = DiagnosticBuilder::new(Severity::Error)
-                        .message(error.to_string())
-                        .span(verum_common::span_utils::span_to_line_col_span(
-                            error.span, &self.text, "",
-                        ))
-                        .build();
-
-                    self.diagnostics.push(diagnostic);
+                    self.diagnostics
+                        .push(crate::source_parsing::diagnostic(error, &self.text));
                 }
             }
         }
