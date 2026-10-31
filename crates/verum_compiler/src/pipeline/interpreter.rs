@@ -104,57 +104,56 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // Make the embedded scripting engine able to compile scripts at
-        // runtime (core.script / script_engine_eval). Idempotent.
-        crate::api::ensure_scripting_compiler_installed();
+        self.interpret_vbc(vbc_module, List::new())
+    }
 
-        // Step 2: Create VBC interpreter with runtime config from [runtime]
-        let mut interpreter = VbcInterpreter::new(vbc_module);
-        {
-            let rt = &self.session.language_features().runtime;
-            interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
-            interpreter.state.config.async_worker_threads = rt.async_worker_threads;
-            interpreter.state.config.futures_enabled = rt.futures;
-            interpreter.state.config.nurseries_enabled = rt.nurseries;
-            interpreter.state.config.task_stack_size = rt.task_stack_size;
-            interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
-        }
-        // Production `verum run` has no wall-clock budget — long-running
-        // services (HTTP servers, daemons, REPL loops) must not be killed
-        // by the interpreter's default 30s deadline. The deadline is a
-        // test-runner safety net; production execution opts out by
-        // setting `timeout_ms = 0` (the dispatch loop interprets 0 as
-        // "no deadline" — see
-        // `crates/verum_vbc/.../dispatch_table/mod.rs:1284`). Same for
-        // `max_instructions = 0` so server accept-loops can run for
-        // billions of iterations without hitting the test-mode cap.
+    /// One execution path for freshly compiled, cached and argument-bearing
+    /// programs. Constructors, permissions and diagnostic capture share the
+    /// same lifecycle, including failures before the entry body returns.
+    pub(super) fn interpret_vbc(
+        &self,
+        module: std::sync::Arc<verum_vbc::module::VbcModule>,
+        args: List<Text>,
+    ) -> Result<()> {
+        crate::api::ensure_scripting_compiler_installed();
+        let mut interpreter = VbcInterpreter::try_new(module)?;
+        let rt = &self.session.language_features().runtime;
+        interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
+        interpreter.state.config.async_worker_threads = rt.async_worker_threads;
+        interpreter.state.config.futures_enabled = rt.futures;
+        interpreter.state.config.nurseries_enabled = rt.nurseries;
+        interpreter.state.config.task_stack_size = rt.task_stack_size;
+        interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
+        // Production services have no implicit test-runner deadline or cap.
         interpreter.state.config.timeout_ms = 0;
         interpreter.state.config.max_instructions = 0;
-        // Script-mode permission policy (see `phase_interpret_with_args`
-        // for the full rationale).
         if let Some(policy) = self.session.take_script_permission_policy() {
             interpreter.state.permission_router.set_policy(policy.0);
         }
-
-        // Step 3: Find and execute main function
-        let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
-
-        // Run module.global_ctors first so @thread_local static initializers
-        // populate their TLS slots before `main` reads them. This mirrors the
-        // AOT path (LLVM @llvm.global_ctors runs before main via the C
-        // runtime); without it, the CBGR allocator's LOCAL_HEAP/CURRENT_HEAP
-        // bootstrap reads Value::default() from an uninitialized TLS slot and
-        // crashes on first allocation.
-        if let Err(e) = interpreter.run_global_ctors() {
-            return Err(anyhow::anyhow!("VBC global_ctors error: {:?}", e));
+        if self.session.options().runtime_diagnostics {
+            interpreter.state.enable_cbgr_diagnostics(
+                verum_vbc::interpreter::diagnostics::MAX_CBGR_EVENTS)?;
         }
-
-        info!(
-            "Executing main function via VBC interpreter (function ID: {})",
-            main_func_id.0
-        );
-        let result = interpreter.execute_function(main_func_id);
-        self.finalize_run_result(result)
+        let result = (|| {
+            let main = self.find_main_function_id(&interpreter.state.module)?;
+            interpreter.run_global_ctors()
+                .map_err(|error| anyhow::anyhow!("VBC global_ctors error: {error:?}"))?;
+            let parameters = interpreter.state.module.get_function(main)
+                .map(|function| function.params.len()).unwrap_or(0);
+            let result = if parameters == 0 {
+                interpreter.execute_function(main)
+            } else {
+                let arguments: List<_> = args.iter().map(|arg| arg.to_string()).collect();
+                let value = interpreter.alloc_string_list(&arguments)
+                    .map_err(|error| anyhow::anyhow!("Failed to allocate args: {error:?}"))?;
+                interpreter.call(main, &[value])
+            };
+            self.finalize_run_result(result)
+        })();
+        if let Some(report) = interpreter.state.cbgr_report() {
+            self.session.record_runtime_report(report);
+        }
+        result
     }
 
     /// Tier-parity exit-code propagation.
@@ -271,75 +270,7 @@ impl<'s> CompilationPipeline<'s> {
         // typecheck + verify + codegen entirely.
         self.session.record_compiled_vbc(vbc_module.clone());
 
-        // Make the embedded scripting engine able to compile scripts at
-        // runtime (core.script / script_engine_eval). Idempotent.
-        crate::api::ensure_scripting_compiler_installed();
-
-        // Step 2: Create VBC interpreter with runtime config from [runtime]
-        let mut interpreter = VbcInterpreter::new(vbc_module);
-        {
-            let rt = &self.session.language_features().runtime;
-            interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
-            interpreter.state.config.async_worker_threads = rt.async_worker_threads;
-            interpreter.state.config.futures_enabled = rt.futures;
-            interpreter.state.config.nurseries_enabled = rt.nurseries;
-            interpreter.state.config.task_stack_size = rt.task_stack_size;
-            interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
-        }
-        // Production parity with `phase_interpret` (the no-args path):
-        // disable the InterpreterConfig wall-clock + instruction-count
-        // budgets so `verum run script.vr ARGS` doesn't kill long-running
-        // services after 30 s the way the no-args entry point already
-        // doesn't. The default `timeout_ms = 30_000` /
-        // `max_instructions = 100_000_000` are *test-runner* safety nets;
-        // both production interpret entries opt out by setting them to
-        // 0 (= "no deadline" — see
-        // `crates/verum_vbc/.../dispatch_table/mod.rs`). Without this
-        // override the args path inherited the 30 s wall-clock and
-        // tripped at the first 256-instruction sample whenever any pre-
-        // execution work (codegen, monomorphization, global ctors)
-        // pushed the runtime past that boundary — even though main()
-        // itself was about to do almost no work.
-        interpreter.state.config.timeout_ms = 0;
-        interpreter.state.config.max_instructions = 0;
-        // Script-mode permission policy (see `run_compiled_vbc` for
-        // the full rationale).
-        if let Some(policy) = self.session.take_script_permission_policy() {
-            interpreter.state.permission_router.set_policy(policy.0);
-        }
-
-        // Step 2b: Skip global constructors (FFI initializers corrupt state on macOS).
-
-        // Step 3: Find main function
-        let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
-
-        // Step 4: Check if main() accepts parameters
-        let main_param_count = interpreter
-            .state
-            .module
-            .get_function(main_func_id)
-            .map(|f| f.params.len())
-            .unwrap_or(0);
-
-        if main_param_count == 0 {
-            // main() takes no args — execute normally
-            info!("Executing main function via VBC interpreter (no args accepted)");
-            let result = interpreter.execute_function(main_func_id);
-            return self.finalize_run_result(result);
-        }
-
-        // Step 5: Allocate args as List<Text> on interpreter heap and call main(args)
-        let rust_args: Vec<String> = args.iter().map(|t| t.to_string()).collect();
-        let args_value = interpreter
-            .alloc_string_list(&rust_args)
-            .map_err(|e| anyhow::anyhow!("Failed to allocate args: {:?}", e))?;
-
-        info!(
-            "Executing main function with {} args via VBC interpreter",
-            rust_args.len()
-        );
-        let result = interpreter.call(main_func_id, &[args_value]);
-        self.finalize_run_result(result)
+        self.interpret_vbc(vbc_module, args)
     }
 
     /// Find the program entry function in the VBC module and return
@@ -410,6 +341,7 @@ impl<'s> CompilationPipeline<'s> {
     /// - `Ok(TestExecutionResult)` on successful execution (even if panic)
     /// - `Err` only for compilation errors
     pub fn run_for_test(&mut self) -> Result<TestExecutionResult> {
+        self.session.clear_runtime_report();
         let start = Instant::now();
 
         // T1119, the harness half — the THIRD entry point with the same

@@ -316,6 +316,10 @@ pub struct CompilerOptions {
     /// Input source file
     pub input: PathBuf,
 
+    /// Capture bounded CBGR error observations for this interpreter execution.
+    /// Disabled by default; no implication of complete memory-safety coverage.
+    pub runtime_diagnostics: bool,
+
     /// Output file (binary/executable)
     pub output: PathBuf,
 
@@ -640,6 +644,7 @@ impl Default for CompilerOptions {
     fn default() -> Self {
         Self {
             input: PathBuf::new(),
+            runtime_diagnostics: false,
             output: PathBuf::new(),
             verify_mode: VerifyMode::default(),
             verify_strategy: VerifyStrategy::default(),

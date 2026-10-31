@@ -44,6 +44,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// MLIR is used for GPU targets only; CPU code uses LLVM IR directly.
     pub fn run_mlir_jit(&mut self, args: List<Text>) -> Result<()> {
+        self.session.clear_runtime_report();
         use verum_codegen::mlir::MlirContext;
 
         let start = Instant::now();

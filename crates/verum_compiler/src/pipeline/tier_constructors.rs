@@ -93,6 +93,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Returns the exit code from the main function, or an error if compilation fails.
     pub fn run_vbc_jit(&mut self) -> Result<i64> {
+        self.session.clear_runtime_report();
         let start = Instant::now();
         info!("Starting VBC → LLVM JIT compilation");
 

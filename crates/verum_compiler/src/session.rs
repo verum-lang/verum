@@ -194,6 +194,8 @@ pub struct Session {
     /// compile cost.
     pending_exit_code: Shared<RwLock<Option<i32>>>,
 
+    runtime_report: Shared<RwLock<Option<verum_vbc::interpreter::diagnostics::CbgrReport>>>,
+
     /// AOT permission policy serialised as data (rather than a
     /// closure) so the LLVM lowerer can bake it into the generated
     /// binary at compile time. Built by the CLI from the same
@@ -267,6 +269,7 @@ impl Session {
             routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
             last_compiled_vbc: Shared::new(RwLock::new(None)),
             pending_exit_code: Shared::new(RwLock::new(None)),
+            runtime_report: Shared::new(RwLock::new(None)),
             script_permission_policy: Shared::new(RwLock::new(None)),
             aot_permission_policy: Shared::new(RwLock::new(None)),
             arch_shape_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
@@ -493,6 +496,20 @@ impl Session {
     /// non-numeric return — the CLI maps those to exit 0.
     pub fn take_exit_code(&self) -> Option<i32> {
         self.pending_exit_code.write().take()
+    }
+
+    /// Clear at each execution request, before compilation can fail. A previous
+    /// successful run must never supply evidence for an unexecuted request.
+    pub fn clear_runtime_report(&self) {
+        self.runtime_report.write().take();
+    }
+
+    pub(crate) fn record_runtime_report(&self, report: verum_vbc::interpreter::diagnostics::CbgrReport) {
+        *self.runtime_report.write() = Some(report);
+    }
+
+    pub fn take_runtime_report(&self) -> Option<verum_vbc::interpreter::diagnostics::CbgrReport> {
+        self.runtime_report.write().take()
     }
 
     /// Install a script-mode permission policy. Called by the CLI
@@ -1011,6 +1028,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
             routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
             last_compiled_vbc: Shared::new(RwLock::new(None)),
             pending_exit_code: Shared::new(RwLock::new(None)),
+            runtime_report: Shared::new(RwLock::new(None)),
             script_permission_policy: Shared::new(RwLock::new(None)),
             aot_permission_policy: Shared::new(RwLock::new(None)),
             arch_shape_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
