@@ -29,6 +29,49 @@ fn source_mount_binds_name(tree: &verum_ast::decl::MountTree, name: &str) -> boo
 }
 
 impl TypeChecker {
+    /// Bind refinement names in the file that declared the type, using the
+    /// same declaration inventory and import resolver as module loading. This
+    /// establishes name availability only; it does not prove the predicate.
+    pub(super) fn refinement_source_bindings(&self, owner: &Text) -> Option<Set<Text>> {
+        use verum_modules::{ImportResolver, exports::{extract_exports_with_policy, ExportVisibilityPolicy}};
+        let mut registry = self.module_registry.read().clone();
+        // Inline bodies have the same lexical authority as file modules. Give
+        // the existing resolver a snapshot entry instead of borrowing the
+        // parent's imports or the consumer's flat bindings.
+        if let Some(inline) = self.inline_modules.get(owner)
+            && let Some(items) = &inline.items
+        {
+            let id = registry.allocate_id();
+            let ast = verum_ast::Module::new(items.clone(), inline.span.file_id, inline.span);
+            registry.register(ModuleInfo::new(
+                id, ModulePath::from_str(owner), ast, inline.span.file_id, Text::new(),
+            ));
+        }
+        let module = self.get_module_with_path_aliases(owner.as_str(), &registry)?;
+        if module.ast.items.is_empty() {
+            return None;
+        }
+        // WholeSurface is local to this lexical inventory: private declarations
+        // are visible to their own predicates, but are not exported to callers.
+        let Ok(local) = extract_exports_with_policy(
+            &module.ast, module.id, &module.path, ExportVisibilityPolicy::WholeSurface,
+        ) else { return Some(Set::new()); };
+        let mut names: Set<Text> = local.all_exports()
+            .filter(|(_, item)| !item.is_reexport())
+            .map(|(name, _)| name.clone()).collect();
+        let exports = registry.all_modules().map(|(id, m)| (*id, m.exports.clone())).collect();
+        let paths = registry.all_modules().map(|(id, m)| (*id, m.path.clone())).collect();
+        let mut resolver = ImportResolver::new();
+        for item in &module.ast.items {
+            if let verum_ast::ItemKind::Mount(mount) = &item.kind
+                && let Ok(import) = resolver.resolve_import(mount, module.id, &exports, &paths)
+            {
+                names.extend(import.items.iter().map(|item| item.name.clone()));
+            }
+        }
+        Some(names)
+    }
+
     /// Local declaration authority is independent of whether an importer may
     /// name the type. A public function may return a privately declared type.
     pub(super) fn local_source_type_declaration(

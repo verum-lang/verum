@@ -3061,10 +3061,19 @@ impl TypeChecker {
     /// read, exactly the outcome the comment said it prevented.
     pub fn take_deferred_errors(&mut self) -> Vec<TypeError> {
         let mut out = std::mem::take(&mut self.deferred_soundness_errors);
-        for (name, span) in std::mem::take(&mut self.deferred_refinement_names) {
-            if self.ctx.env.lookup(name.as_str()).is_none()
-                && self.ctx.lookup_type(name.as_str()).is_none()
-            {
+        let mut scopes = Map::new();
+        for (owner, name, span) in std::mem::take(&mut self.deferred_refinement_names) {
+            let names = scopes.entry(owner.clone())
+                .or_insert_with(|| self.refinement_source_bindings(&owner));
+            let bound = self.builtin_ambient_names.contains(&name) || match names {
+                Some(names) => names.contains(&name),
+                // Standalone checker clients may have no source registry. Only
+                // their own lexical environment is relevant, never an importer.
+                None => owner == self.current_module_path
+                    && (self.ctx.env.lookup(name.as_str()).is_some()
+                        || self.ctx.lookup_type(name.as_str()).is_some()),
+            };
+            if !bound {
                 out.push(TypeError::OtherWithCodeSpanned {
                     code: verum_common::Text::from("E100"),
                     msg: verum_common::Text::from(format!(

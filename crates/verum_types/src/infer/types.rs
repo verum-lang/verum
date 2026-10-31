@@ -490,36 +490,29 @@ impl TypeChecker {
         }
     }
 
-    /// Convert AST type to internal type representation.
+    /// Names whose declaration scope must be checked after registration.
     ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
-    /// Tracks recursion depth to detect infinite recursion early.
-    /// Names a refinement predicate mentions that are in no scope.
-    ///
-    /// Returns the FIRST such name, or `None`. Walks single-segment
+    /// Collects every distinct name. Walks single-segment
     /// paths only: a qualified path names something the resolver owns,
     /// and guessing about it here would trade one silent wrong answer
     /// for another.
     ///
     /// `self` is always in scope — it is the value under refinement —
     /// as is the sigma binder when the surface syntax provided one.
-    fn unbound_names_in_predicate(
+    fn refinement_names_to_resolve(
         &self,
         expr: &verum_ast::expr::Expr,
         binder: Option<verum_common::Text>,
-    ) -> Option<verum_common::Text> {
+    ) -> List<Text> {
         use verum_ast::expr::ExprKind;
-        let mut found: Option<verum_common::Text> = None;
+        let mut found = Set::new();
         let mut stack: Vec<&verum_ast::expr::Expr> = vec![expr];
         // Locally bound names introduced inside the predicate itself
         // (a closure parameter, a `let`) are not resolved here; a
-        // predicate that binds its own names is left alone entirely.
+        // predicate subexpression that binds its own names is left alone.
         while let Some(e) = stack.pop() {
-            if found.is_some() {
-                break;
-            }
             match &e.kind {
-                ExprKind::Closure { .. } => return None,
+                ExprKind::Closure { .. } => {},
                 ExprKind::Path(path) if path.segments.len() == 1 => {
                     if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
                         let n = &ident.name;
@@ -540,10 +533,9 @@ impl TypeChecker {
                         let is_binder = binder.as_ref().is_some_and(|b| b == n);
                         if !is_self
                             && !is_binder
-                            && self.ctx.env.lookup(n.as_str()).is_none()
-                            && self.ctx.lookup_type(n.as_str()).is_none()
+                            && self.lookup_decl_param(n.as_str()).is_none()
                         {
-                            found = Some(n.clone());
+                            found.insert(n.clone());
                         }
                     }
                 }
@@ -556,7 +548,9 @@ impl TypeChecker {
                 _ => {}
             }
         }
-        found
+        let mut names: List<_> = found.into_iter().collect();
+        names.sort();
+        names
     }
 
     pub fn ast_to_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
@@ -874,23 +868,24 @@ impl TypeChecker {
                 // unknown; this path simply never asked.
                 //
                 // Deliberately narrow: single-segment paths only, and
-                // only names absent from BOTH the value environment and
-                // the type environment. A qualified path, a constant, a
-                // function and the binder itself all pass.
+                // simple expression forms. Qualified paths and local binding
+                // expressions remain the responsibility of expression checking.
                 // DEFERRED, not reported here. A `const` the predicate
                 // names is registered LATER than the type declaration
                 // that uses it, so an eager check rejects
                 // `type P is Int { self < LIMIT }` — correct code, and
                 // exactly the false positive the first version of this
-                // produced. `take_deferred_errors` re-asks once the
-                // module is fully registered.
-                if self.in_type_declaration
-                    && let Some(bad) = self.unbound_names_in_predicate(
+                // produced. `take_deferred_errors` re-asks in the DECLARING
+                // module once registration is complete.
+                if self.in_type_declaration {
+                    for name in self.refinement_names_to_resolve(
                         &predicate.expr,
                         predicate.binding.as_ref().map(|i| i.name.clone()),
-                    )
-                {
-                    self.deferred_refinement_names.push((bad, predicate.span));
+                    ) {
+                        self.deferred_refinement_names.push((
+                            self.current_module_path.clone(), name, predicate.span,
+                        ));
+                    }
                 }
                 let pred = TyRefinementPredicate {
                     predicate: predicate.expr.clone(),

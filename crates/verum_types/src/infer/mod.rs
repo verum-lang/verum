@@ -633,7 +633,9 @@ pub struct TypeChecker {
     /// is finished, because a `const` the predicate names is registered
     /// later than the type declaration that uses it — checking eagerly
     /// rejects `type P is Int { self < LIMIT }`, which is correct code.
-    pub(crate) deferred_refinement_names: Vec<(verum_common::Text, verum_ast::span::Span)>,
+    // Retain the declaring owner: a consumer's flat environment cannot resolve
+    // names in an imported refinement, even when their spellings coincide.
+    pub(crate) deferred_refinement_names: Vec<(Text, Text, verum_ast::span::Span)>,
     /// True while a TYPE DECLARATION's body is being converted.
     ///
     /// The refinement-name check (T1112) only applies there. A
