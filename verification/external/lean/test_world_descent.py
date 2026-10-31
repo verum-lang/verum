@@ -59,6 +59,15 @@ def stay (_ : Unit) (_ : Unit) : Option Unit := some ()
 example (next : Q → Unit → Option Q) (view : Q → Unit → Option Nat) (encode : Unit → Q) :
     ¬ Witness ageStep ageRead stay erase next view encode :=
   different_reads_obstruct_descent (0,()) (1,()) rfl () (by decide)
+
+-- Retaining a six-phase clock still cannot factor an absolute-age read.
+-- Both ages are ordinary machine values; this is not a large-number issue.
+def phase6 (state : Nat × Unit) : Fin 6 := ⟨state.1 % 6, Nat.mod_lt _ (by decide)⟩
+def tick6 (phase : Fin 6) (_ : Unit) : Option (Fin 6) :=
+  some ⟨(phase.val+1)%6, Nat.mod_lt _ (by decide)⟩
+example (next : Q → Unit → Option Q) (view : Q → Unit → Option Nat) (encode : Fin 6 → Q) :
+    ¬ Witness ageStep ageRead tick6 phase6 next view encode :=
+  different_reads_obstruct_descent (0,()) (6,()) (by decide) () (by decide)
 ''')
 
     def test_wrong_identity_reset_and_missing_generator_are_rejected(self):
