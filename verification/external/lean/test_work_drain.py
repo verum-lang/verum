@@ -1,9 +1,7 @@
-"""Termination and exact callback composition, independently of native exports."""
-from pathlib import Path
+"""Exact callback composition and paid outer visits, independent of native exports."""
 import re
-import tempfile
 import unittest
-from check_typed_programs import ROOT, check, require_success, run
+from lean_test_fixture import IsolatedLeanTest
 
 HEADER = '''import VerumExternalReplay.WorkDrain
 set_option warningAsError true
@@ -43,24 +41,11 @@ def yielding : Machine Nat Unit Nat where
   bounded _ _ := Nat.le_refl _
   progress _ _ _ pending _ := by cases pending
 '''
-FALSE = '`decide_cbv` failed: the proposition evaluates to `false`'
-
-
-class WorkDrainTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        require_success(run('lake', 'build', 'VerumExternalReplay.WorkDrain'))
+class WorkDrainTests(IsolatedLeanTest):
+    MODULES = ('WorkDrain',)
 
     def prove(self, body, failure=False):
-        with tempfile.TemporaryDirectory(prefix='verum-work-drain-') as directory:
-            path = Path(directory) / 'check.lean'
-            path.write_text(HEADER + body)
-            result = check(path, FALSE if failure else None)
-            if failure:
-                errors = [d for d in result['diagnostics'] if d['severity'] == 'error']
-                self.assertEqual(len(errors), 1, errors)
-                self.assertTrue(errors[0]['data'].startswith(FALSE), errors)
-            return result
+        return super().prove(HEADER + body, failure=failure)
 
     def test_handoffs_and_slicing_preserve_full_result(self):
         self.prove('''
@@ -131,18 +116,88 @@ example : ¬ ∃ m : Machine Bool Unit Unit,
                 self.prove('example : ' + claim + ' := by decide_cbv', True)
 
     def test_constructive_axiom_roster(self):
-        source = (ROOT / 'VerumExternalReplay/WorkDrain.lean').read_text()
-        names = re.findall(r'^theorem ([\w.]+)', source, re.M) + ['Machine','drain','Execution','machine']
-        result = self.prove('\n'.join('#print axioms ' + (n if n == 'machine' else 'WorkDrain.' + n)
-                                     for n in names))
-        rows = [d['data'] for d in result['diagnostics'] if d['severity'] == 'information']
-        self.assertEqual(len(rows), len(names))
-        for row in rows:
-            if 'depends on axioms: [' in row:
-                axioms = row.split('depends on axioms: [')[1].removesuffix(']').split(', ')
-                self.assertLessEqual(set(axioms), {'propext','Quot.sound'}, row)
-            else:
-                self.assertTrue(row.endswith('does not depend on any axioms'), row)
+        names = re.findall(r'^theorem ([\w.]+)', self.sources['WorkDrain'], re.M)
+        names += ['Machine', 'drain', 'Execution', 'paidVisit', 'PaidVisits']
+        names = ['WorkDrain.' + n for n in names] + ['machine']
+        self.assertEqual(len(names), 31)
+        self.assert_axioms(self.prove('\n'.join('#print axioms ' + n for n in names)), names)
+
+    def test_paid_visit_exact_cost_and_unsigned_boundaries(self):
+        self.prove('''
+example : paidVisit 9 9 = 8 := by rfl
+example : paidVisit 9 8 = 8 := by rfl
+example : paidVisit 9 4 = 4 := by rfl
+example : paidVisit 9 0 = 0 := by rfl
+example : paidVisit 1 1 = 0 := by rfl
+example : paidVisit 1 0 = 0 := by rfl
+example : paidVisit 18446744073709551615 18446744073709551615 = 18446744073709551614 := by rfl
+example : 18446744073709551615 - paidVisit 18446744073709551615 0 = 18446744073709551615 := by rfl
+example (b a : Nat) (positive : 0 < b) (bounded : a ≤ b) :
+    b - paidVisit b a = max 1 (b-a) := paid_visit_cost positive bounded
+example (b a : Nat) (positive : 0 < b) (bounded : a ≤ b) :
+    a - paidVisit b a = 1 ↔ b-a = 0 := paid_visit_administrative_iff positive bounded
+''')
+
+    def test_finite_round_conservation_and_composition(self):
+        self.prove('''
+theorem initialRound : PaidVisits 10 [1, 3] 6 :=
+  .visit (afterNative := 10) (by decide) (by decide)
+    (.visit (afterNative := 6) (by decide) (by decide) (.nil _))
+theorem finalRound : PaidVisits 6 [1, 5] 0 :=
+  .visit (afterNative := 6) (by decide) (by decide)
+    (.visit (afterNative := 0) (by decide) (by decide) (.nil _))
+example : PaidVisits 10 [1, 3, 1, 5] 0 := initialRound.append finalRound
+example : [1, 3, 1, 5].sum + 0 = 10 := (initialRound.append finalRound).accounting
+example : [1, 3, 1, 5].sum ≤ 10 ∧ [1, 3, 1, 5].length ≤ 10 :=
+  (initialRound.append finalRound).grant_bound
+example (grant final : Nat) (costs : List Nat) (run : PaidVisits grant costs final) :
+    costs.sum + final = grant ∧ costs.length ≤ grant :=
+  ⟨run.accounting, run.grant_bound.2⟩
+example : ¬ PaidVisits 0 [1] 0 := by
+  intro run
+  have := run.zero_inert
+  simp at this
+example : ¬ PaidVisits 1 [1, 1] 0 := by
+  intro run
+  have := run.grant_bound
+  simp at this
+example : ¬ PaidVisits 1 [0] 1 := by
+  intro run
+  have := run.visit_bound
+  simp at this
+''')
+
+    def test_outer_visit_preserves_inner_execution_accounting(self):
+        self.prove('''
+example : PaidVisits 3 [2] 1 := by
+  have remaining : (drain machine start 3).remaining = 1 := by decide_cbv
+  simpa [remaining, paidVisit] using (drain_execution machine start 3).paid_visit (by decide)
+example : PaidVisits 3 [1] 2 := by
+  have remaining : (drain machine ⟨2,0,true⟩ 3).remaining = 2 := by decide_cbv
+  simpa [remaining, paidVisit] using (drain_execution machine ⟨2,0,true⟩ 3).paid_visit (by decide)
+example : PaidVisits 9 [1] 8 := by
+  have remaining : (drain yielding 4 9).remaining = 9 := by decide_cbv
+  simpa [remaining, paidVisit] using (drain_execution yielding 4 9).paid_visit (by decide)
+example : (drain yielding 4 9).remaining = 9 := by decide_cbv
+example : broken.events = [12,22,7] := by decide_cbv
+''')
+
+    def test_false_paid_visit_claims_rejected(self):
+        claims = {
+            'free_handoff': 'paidVisit 7 7 = 7',
+            'precharged_callback': 'paidVisit 7 2 = 1',
+            'rebilled_unit_native_work': 'paidVisit 7 6 = 5',
+            'consumed_grant_refunded': 'paidVisit 7 0 = 1',
+            'spent_native_cost_erased': '7 - paidVisit 7 2 = 1',
+            'native_visit_charges_admin': '2 - paidVisit 7 2 = 1',
+            'idle_visit_has_no_admin': '7 - paidVisit 7 7 = 0',
+            'zero_is_positive_visit': '1 ≤ 0 - paidVisit 0 0',
+            'nonmonotone_native_is_admissible': 'paidVisit 3 4 < 3',
+            'grant_partitions_preserve_admin_cost': 'paidVisit 2 2 = paidVisit 1 1 + paidVisit 1 1',
+        }
+        for name, claim in claims.items():
+            with self.subTest(claim=name):
+                self.prove('example : ' + claim + ' := by decide_cbv', True)
 
 
 if __name__ == '__main__':

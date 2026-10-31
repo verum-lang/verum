@@ -167,4 +167,112 @@ theorem no_pending_stutter (m : Machine S E A) (s : S) (work : Nat)
   rw [sameState] at lower
   exact (Nat.lt_irrefl _) lower
 
+/-- Remaining work after one outer service visit. The native callback receives
+the entire existing grant first. Only a callback that spent nothing incurs the
+one-unit handoff charge. This does not rebill the internal rank-decreasing
+handoffs of `drain`, replace callback effects, or introduce another counter.
+Admission requires a positive grant and a nonincreasing native remainder. -/
+def paidVisit (before afterNative : Nat) : Nat :=
+  if afterNative = before then before - 1 else afterNative
+
+theorem paid_visit_decreases {before afterNative : Nat}
+    (positive : 0 < before) (bounded : afterNative ≤ before) :
+    paidVisit before afterNative < before := by
+  unfold paidVisit
+  split <;> omega
+
+theorem paid_visit_cost {before afterNative : Nat}
+    (positive : 0 < before) (bounded : afterNative ≤ before) :
+    before - paidVisit before afterNative = max 1 (before - afterNative) := by
+  unfold paidVisit
+  split <;> omega
+
+theorem paid_visit_cost_bounded {before afterNative : Nat}
+    (positive : 0 < before) (bounded : afterNative ≤ before) :
+    1 ≤ before - paidVisit before afterNative ∧
+      before - paidVisit before afterNative ≤ before := by
+  have := paid_visit_decreases positive bounded
+  constructor <;> omega
+
+/-- Administrative work is exactly one iff native work is zero; an actual
+native operation is never charged again merely for returning control. -/
+theorem paid_visit_administrative {before afterNative : Nat}
+    (positive : 0 < before) (bounded : afterNative ≤ before) :
+    afterNative - paidVisit before afterNative =
+      if before - afterNative = 0 then 1 else 0 := by
+  unfold paidVisit
+  split <;> split <;> omega
+
+theorem paid_visit_administrative_iff {before afterNative : Nat}
+    (positive : 0 < before) (bounded : afterNative ≤ before) :
+    afterNative - paidVisit before afterNative = 1 ↔ before - afterNative = 0 := by
+  rw [paid_visit_administrative positive bounded]
+  by_cases zero : before - afterNative = 0 <;> simp [zero]
+
+theorem paid_visit_cost_split (before afterNative : Nat) :
+    before - paidVisit before afterNative =
+      (before - afterNative) + (afterNative - paidVisit before afterNative) := by
+  unfold paidVisit
+  split <;> omega
+
+/-- A finite sequence of admitted visits. Its list records costs derived from
+the same remaining-work snapshots, not an independently maintained budget.
+Callback state, result and effects are unconstrained here: accounting alone
+does not certify ownership, fairness, successful computation or Rust refinement.
+Stopping early, including on refusal or capacity, is permitted. -/
+inductive PaidVisits : Nat → List Nat → Nat → Prop where
+  | nil (remaining) : PaidVisits remaining [] remaining
+  | visit {before afterNative costs final}
+      (positive : 0 < before) (bounded : afterNative ≤ before)
+      (rest : PaidVisits (paidVisit before afterNative) costs final) :
+      PaidVisits before ((before - paidVisit before afterNative) :: costs) final
+
+theorem PaidVisits.append {before middle final costs more}
+    (first : PaidVisits before costs middle) (second : PaidVisits middle more final) :
+    PaidVisits before (costs ++ more) final := by
+  induction first with
+  | nil => exact second
+  | visit positive bounded _ ih => exact .visit positive bounded (ih second)
+
+/-- Exact telescoping conservation holds for every admitted finite round,
+independently of which visits consumed native work or paid only for handoff. -/
+theorem PaidVisits.accounting {before costs final} (visits : PaidVisits before costs final) :
+    costs.sum + final = before := by
+  induction visits with
+  | nil => simp
+  | visit positive bounded _ ih =>
+      have := paid_visit_decreases positive bounded
+      simp only [List.sum_cons]
+      omega
+
+theorem PaidVisits.visit_bound {before costs final} (visits : PaidVisits before costs final) :
+    costs.length ≤ costs.sum := by
+  induction visits with
+  | nil => simp
+  | visit positive bounded _ ih =>
+      have := paid_visit_cost_bounded positive bounded
+      simp only [List.length_cons, List.sum_cons]
+      omega
+
+theorem PaidVisits.grant_bound {before costs final} (visits : PaidVisits before costs final) :
+    costs.sum ≤ before ∧ costs.length ≤ before := by
+  have := visits.accounting
+  have := visits.visit_bound
+  constructor <;> omega
+
+theorem PaidVisits.zero_inert {costs final} (visits : PaidVisits 0 costs final) :
+    costs = [] ∧ final = 0 := by
+  have := visits.accounting
+  have := visits.grant_bound
+  have empty : costs.length = 0 := by omega
+  exact ⟨List.eq_nil_of_length_eq_zero empty, by omega⟩
+
+/-- The existing full callback execution supplies the native bound; charging
+its outer visit adds no new callback semantics or grant allocation. -/
+theorem Execution.paid_visit {m : Machine S E A} (run : Execution m s work result)
+    (positive : 0 < work) :
+    PaidVisits work [work - paidVisit work result.remaining]
+      (paidVisit work result.remaining) :=
+  .visit positive run.bounded (.nil _)
+
 end WorkDrain
