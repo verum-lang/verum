@@ -302,6 +302,9 @@ jobs:
             --report observer-lifecycle-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_resource_ledger_export.py
           python3 -m unittest discover -s verification/external/lean -p test_resource_ledger.py
+          python3 -m unittest discover -s verification/external/lean -p test_resource_wake.py
+          python3 -m unittest discover -s verification/external/lean -p test_admission_round.py
+          python3 -m unittest discover -s verification/external/lean -p test_paid_prefix.py
           python3 -m unittest discover -s verification/external/lean -p test_physical_clock.py
           python3 -m unittest discover -s verification/external/lean -p test_physical_clock_export.py
           python3 -m unittest discover -s verification/external/lean -p test_arrival_slabs.py
