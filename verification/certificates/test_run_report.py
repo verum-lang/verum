@@ -115,6 +115,8 @@ class RunReportTests(unittest.TestCase):
             report = run.complete(payload)
         runner.require_replay_report(report, run.run_id, request, returncode=0)
         mutations = []
+        version = copy.deepcopy(report); version['schema_version'] = 3.0; mutations.append(version)
+        boolean_exit = copy.deepcopy(report); boolean_exit['cases'][0]['native_returncode'] = False; mutations.append(boolean_exit)
         empty = copy.deepcopy(report); empty['cases'] = []; mutations.append(empty)
         exhausted = copy.deepcopy(report); exhausted['cases'][0]['native']['outcome'] = 'resource_exhausted'; mutations.append(exhausted)
         wrong = copy.deepcopy(report); wrong['cases'][0]['id'] = 'unrelated'; mutations.append(wrong)

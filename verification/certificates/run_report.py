@@ -36,7 +36,8 @@ def atomic_write(path, value):
 def require_completed(report, run_id, request, *, returncode):
     """The caller supplies the expected invocation AND exact input/tool manifest."""
     if (type(returncode) is not int or returncode != 0
-            or report.get('schema_version') != 3
+            or type(report.get('schema_version')) is not int
+            or report['schema_version'] != 3
             or report.get('run') != {'id': run_id, 'status': 'completed',
                                      'request_sha256': identity(request)}
             or report.get('request') != request):

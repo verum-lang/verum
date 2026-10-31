@@ -38,7 +38,7 @@ def validate_verdicts(name, native, lean, expected, profile, returncode):
             'checker verdict must be Boolean')
     require(native.get('profile') == profile, 'worker changed the selected foundation')
     require(lean.get('id') == name, 'independent checker changed certificate identity')
-    require(returncode == (0 if native['accepted'] else 1),
+    require(type(returncode) is int and returncode == (0 if native['accepted'] else 1),
             'native exit status disagrees with verdict')
     require(native['accepted'] == expected and lean['ok'] == expected,
             'native and independent proof verdicts differ from the expected result')
