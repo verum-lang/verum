@@ -1,6 +1,7 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Your draft changed while loading. It has been kept; try opening the file again.': 'Черновик изменился во время загрузки и сохранён в редакторе. Повторите открытие файла.',
   'Project text': 'Текст проекта',
   'Plain text': 'Обычный текст',
   'Work with your agent': 'Работа с агентом',

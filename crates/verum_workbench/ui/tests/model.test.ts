@@ -1,6 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt } from '../src/model.ts';
+import { sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt } from '../src/model.ts';
+
+test('delayed document responses cannot replace intervening edits or a reopened document', async () => {
+  for (const after of [{ path: 'a.vr', editVersion: 2 }, { path: 'b.vr', editVersion: 1 }, { path: 'a.vr', editVersion: 3 }]) {
+    let current = { path: 'a.vr', editVersion: 1 }, draft = 'initial';
+    let deliver!: (value: string) => void;
+    const pending = replaceDocumentRevision(current, () => current,
+      () => new Promise<string>(resolve => { deliver = resolve; }), source => { draft = source; });
+    current = after; draft = 'new unsaved draft';
+    deliver('old response');
+    assert.equal(await pending, 'stale');
+    assert.equal(draft, 'new unsaved draft');
+  }
+});
+
+test('document replacement distinguishes consent, current results and failed reads', async () => {
+  const revision = { path: 'a.vr', editVersion: 1 };
+  const applied: string[] = [];
+  assert.equal(await replaceDocumentRevision(revision, () => revision, async () => 'new', value => applied.push(value)), 'applied');
+  assert.equal(await replaceDocumentRevision(revision, () => revision, async () => null, value => applied.push(value)), 'cancelled');
+  await assert.rejects(replaceDocumentRevision(revision, () => revision, async () => { throw new Error('read failed'); }, value => applied.push(value)), /read failed/);
+  assert.equal(await replaceDocumentRevision(revision, () => ({ ...revision, editVersion: 2 }),
+    async () => { assert.fail('stale consent must not fetch'); }, value => applied.push(value)), 'stale');
+  assert.deepEqual(applied, ['new']);
+});
 
 const receipt: Receipt = { id: 'one', kind: 'proof', path: 'identity.vr', source_hash: 'revision-a', status: 'succeeded', stdout: '', stderr: '', elapsed_ms: 4, exit_code: 0 };
 

@@ -20,6 +20,20 @@ export function sameDocumentRevision(left: DocumentRevision, right: DocumentRevi
   return left.path === right.path && left.editVersion === right.editVersion;
 }
 
+// Consent and fetched content belong to the editor revision that requested them.
+// Keep typing enabled, but never replace a draft changed across an async boundary.
+export async function replaceDocumentRevision<T>(revision: DocumentRevision,
+  current: () => DocumentRevision, prepare: () => Promise<T | null>, apply: (value: T) => void,
+): Promise<'applied' | 'cancelled' | 'stale'> {
+  const expected = { ...revision };
+  if (!sameDocumentRevision(expected, current())) return 'stale';
+  const value = await prepare();
+  if (value === null) return 'cancelled';
+  if (!sameDocumentRevision(expected, current())) return 'stale';
+  apply(value);
+  return 'applied';
+}
+
 export function isStale(receipt: Receipt, path: string, hash: string | null): boolean {
   return receipt.path !== path || hash === null || receipt.source_hash !== hash;
 }

@@ -9,7 +9,7 @@ import type { Pane } from './layout';
 import { languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, hasToken, installToken } from './api';
-import { STARTER, IDENTITY, sameDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
+import { STARTER, IDENTITY, sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
 
 installIcons(); installTooltips(); initializeLanguage();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => {
@@ -190,8 +190,14 @@ async function mayReplace() {
 async function openFile(path: string) {
   if (path === currentPath && savedHash !== null) { setPane('editor'); return; }
   if (switching) return; switching = true;
-  try { if (await mayReplace()) { const file = await api<SourceFile>('document.read', { path }); loadDocument(file.path, file.source, file.hash); } }
+  try { await replaceDocument(async () => await mayReplace() ? api<SourceFile>('document.read', { path }) : null); }
   finally { switching = false; }
+}
+async function replaceDocument(prepare: () => Promise<{ path: string; source: string; hash: string | null } | null>) {
+  const result = await replaceDocumentRevision(documentRevision(), documentRevision, prepare,
+    file => loadDocument(file.path, file.source, file.hash));
+  if (result === 'stale') announce(m('Your draft changed while loading. It has been kept; try opening the file again.'));
+  return result;
 }
 async function save() {
   if (isSaving || !dirty()) return;
@@ -206,31 +212,33 @@ async function save() {
 }
 async function reloadSource() {
   if (switching || savedHash === null) return; switching = true;
-  try {
+  try { await replaceDocument(async () => {
     const path = currentPath;
     const file = await api<SourceFile>('document.read', { path });
     if (dirty()) {
       const content = node('div', 'source-review');
       content.append(node('p', '', m('Compare your draft with the saved source. Replacing the editor discards this draft; copy it first if you want to preserve both versions.')), button(m('Copy editor draft'), async () => { await navigator.clipboard.writeText(editor.source()); announce(m('Editor draft copied')); }, 'quiet-button'));
       content.append(node('span', 'approval-source-label', m('Current editor draft')), node('pre', '', editor.source()), node('span', 'approval-source-label', m('Saved file')), node('pre', '', file.source));
-      if (await dialog(m('Review saved source'), content, [{ value: 'cancel', label: m('Keep editor draft') }, { value: 'reload', label: m('Replace with saved source'), primary: true }]) !== 'reload') return;
+      if (await dialog(m('Review saved source'), content, [{ value: 'cancel', label: m('Keep editor draft') }, { value: 'reload', label: m('Replace with saved source'), primary: true }]) !== 'reload') return null;
     }
-    loadDocument(path, file.source, file.hash);
+    return file;
+  });
   } finally { switching = false; }
 }
 async function newDocument(source = '', suggestion = 'experiment.vr') {
   if (switching) return; switching = true;
-  try {
-    if (!(await mayReplace())) return;
+  try { const replaced = await replaceDocument(async () => {
+    if (!(await mayReplace())) return null;
     const content = node('div'); content.append(node('p', '', m('Create a Verum source file in this workspace. Existing directories are supported.')));
     const label = node('label', '', m('File path')); const field = node('input'); field.value = suggestion; field.autocomplete = 'off'; field.spellcheck = false;
     label.append(field); content.append(label);
-    if (await dialog(m('New experiment'), content, [{ value: 'cancel', label: m('Cancel') }, { value: 'create', label: m('Create draft'), primary: true }]) !== 'create') return;
+    if (await dialog(m('New experiment'), content, [{ value: 'cancel', label: m('Cancel') }, { value: 'create', label: m('Create draft'), primary: true }]) !== 'create') return null;
     const path = relativeVerumPath(field.value);
     if (!path) throw new Error(t(m('Use a relative .vr path without hidden traversal, for example experiment.vr.')));
     if (files.some(file => file.path === path)) throw new Error(t(m('{path} already exists. Open it from the explorer or choose a different name.', { path })));
-    loadDocument(path, source, null);
-    if (source === IDENTITY) { input('declaration').value = 'identity'; $('execution-settings').hidden = false; $('run-settings').setAttribute('aria-expanded', 'true'); }
+    return { path, source, hash: null };
+  });
+    if (replaced === 'applied' && source === IDENTITY) { input('declaration').value = 'identity'; $('execution-settings').hidden = false; $('run-settings').setAttribute('aria-expanded', 'true'); }
   } finally { switching = false; }
 }
 bind('save', save); bind('refresh-files', refreshFiles); bind('new-file', () => newDocument());
