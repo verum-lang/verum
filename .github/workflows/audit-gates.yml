@@ -202,6 +202,9 @@ jobs:
       - name: Build verum CLI
         run: cargo build --release --bin verum
 
+      - name: Audit execution receipt controls
+        run: cargo test --locked -p verum_cli --test audit_execution
+
       - name: differential-lean-checker (24-cert battery, Rust ↔ Lean unanimity)
         run: |
           cd core
@@ -209,7 +212,7 @@ jobs:
 
       - name: Reference term laws and native certificate replay
         run: |
-          python3 -m unittest discover -s verification/certificates -p test_certificate_runner.py
+          python3 -m unittest discover -s verification/certificates -p 'test_*.py'
           python3 -m unittest discover -s verification/external/lean -p test_reference_reduction.py
           (cd verification/external/lean && lake build \
             verum_replay_checker \

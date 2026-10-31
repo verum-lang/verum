@@ -6446,79 +6446,49 @@ fn bundle_gate_metric(
 
 pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Audit bundle — load-bearing L1+L2+L3+L4 gate aggregator");
+        ui::step("Audit bundle — current gate executions");
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
     let report_dir = manifest_dir.join("target").join("audit-reports");
-    let _ = std::fs::create_dir_all(&report_dir);
+    std::fs::create_dir_all(&report_dir)?;
 
- // Run each gate, capturing its JSON report from disk. Each
- // gate's `_with_format(Json)` path writes to a known location;
- // we read it back after invocation. This pattern works because
- // every gate already produces a JSON file under target/audit-reports
- // — the bundle reuses the existing artefacts rather than
- // re-running the audit logic.
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let executable = std::env::current_exe()?;
+    let tool_hash = blake3::hash(&std::fs::read(&executable)?).to_hex().to_string();
+    let bundle_path = report_dir.join("bundle.json");
+    super::audit_execution::publish(&bundle_path, &serde_json::json!({
+        "schema_version": 2, "run_id": run_id, "execution_status": "running",
+        "proof_status": "no_bound_proof_evidence", "l4_load_bearing": false,
+        "checks_passed": false,
+    }))?;
+
     use std::collections::BTreeMap;
     let mut gates: BTreeMap<&'static str, serde_json::Value> = BTreeMap::new();
     let mut summary: BTreeMap<&'static str, &'static str> = BTreeMap::new();
-    let mut overall_l4 = true;
+    let mut checks_passed = true;
 
- /// Invoke a gate and capture (JSON outcome, "passed"|"failed"
- /// label). A gate that returns `Err` is recorded as `failed`
- /// without aborting the bundle — the bundle is observability
- /// across all gates, not a fail-fast pipeline.
- ///
- /// Per-gate JSON stdout is silenced inside the bundle: gates
- /// invoked under `AuditFormat::Json` normally print their
- /// payload to stdout, but the bundle's clean output requires
- /// that output be captured to disk only. We redirect stdout
- /// for the duration of the gate's invocation by routing the
- /// captured chunk through a Vec writer; this is best-effort —
- /// gates that bypass println! (e.g., direct write_all to fd 1)
- /// will still surface, but the standard `serde_json::to_string_pretty
- /// + println!` pattern used by every load-bearing audit is captured.
+    // Record current execution only. Legacy artifact paths are informational;
+    // their contents have no binding to this invocation or its inputs.
     fn run_gate<F>(
+        run_id: &str,
         gates: &mut BTreeMap<&'static str, serde_json::Value>,
         summary: &mut BTreeMap<&'static str, &'static str>,
         name: &'static str,
         json_path: std::path::PathBuf,
         invoke: F,
-    ) where
-        F: FnOnce() -> Result<()>,
-    {
- // Use Gag (or similar) is heavy; the simpler path is to just
- // run the gate and accept its stdout noise. The bundle's
- // headline summary still lands at the bottom and aggregates
- // every gate's verdict.
-        let outcome = invoke();
-        let label = if outcome.is_ok() { "passed" } else { "failed" };
+    ) where F: FnOnce() -> Result<()> {
+        let mut receipt = super::audit_execution::capture(run_id, name, invoke);
+        let label = if receipt["execution_status"] == "completed" { "passed" } else { "failed" };
+        receipt["unbound_artifact_path"] = json_path.display().to_string().into();
         summary.insert(name, label);
-        if let Ok(text) = std::fs::read_to_string(&json_path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                gates.insert(name, json);
-                return;
-            }
-        }
- // Gate's JSON file unavailable — record stub so the bundle
- // still surfaces the gate's existence and verdict. The
- // stub records the gate's verdict label so downstream
- // tooling can still tell pass-from-fail without parsing the
- // missing report.
-        gates.insert(
-            name,
-            serde_json::json!({
-                "command": format!("audit-{}", name),
-                "verdict": label,
-                "report_path": json_path.display().to_string(),
-                "report_readable": false,
-            }),
-        );
+        gates.insert(name, receipt);
     }
 
  // 1. Bridge-discharge — observability for `apply kernel_*_strict`
  // callsites. Pre-cursor to the apply-graph's transitive walk.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "bridge_discharge",
@@ -6526,12 +6496,13 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_bridge_discharge_with_format(AuditFormat::Json),
     );
     if summary.get("bridge_discharge") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 2. Kernel-discharged-axioms — drift check on stdlib's
  // @kernel_discharge cross-link.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "kernel_discharged_axioms",
@@ -6539,7 +6510,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_kernel_discharged_axioms(AuditFormat::Json),
     );
     if summary.get("kernel_discharged_axioms") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 2b. Kernel-soundness IOU dashboard — observability for the
@@ -6548,6 +6519,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // L4 failures), but the bundle records the admit count so
  // CI tracks trust-base shrinkage over time.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "soundness_iou",
@@ -6559,6 +6531,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // 3. Apply-graph — transitive load-bearing verdict. This is the
  // headline gate for L4 closure.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "apply_graph",
@@ -6566,7 +6539,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_apply_graph_with_format(AuditFormat::Json),
     );
     if summary.get("apply_graph") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 4. Cross-format-roundtrip — independent foreign-tool re-check
@@ -6574,6 +6547,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // lean (gate stays GREEN); fails on real foreign-tool
  // rejections. Use --docker to force the docker backend.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "cross_format_roundtrip",
@@ -6582,12 +6556,12 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
             .join("cross-format-roundtrip.json"),
         || audit_cross_format_roundtrip_with_format(AuditFormat::Json),
     );
- // Cross-format failures don't drop overall_l4 — when foreign
+ // Cross-format failures don't drop checks_passed — when foreign
  // tools are missing the gate's "verdict" is `tool_missing` which
  // is by-design observability. Real failures are caught upstream
  // by the gate's own non-zero exit, which surfaces as Err here.
     if summary.get("cross_format_roundtrip") == Some(&"failed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 5. Signature verification — each emitted file carries a
@@ -6596,6 +6570,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // surface drift between the emit step and the signature
  // expectation (#174).
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "signatures",
@@ -6603,17 +6578,18 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_signatures_with_format(AuditFormat::Json),
     );
     if summary.get("signatures") == Some(&"failed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 6. Manifest-coverage — every Verum.toml manifest field's
  // wiring status is enumerated in a static table; this gate
  // emits the report and verifies no field is silently inert
- // (#290). Doesn't flip overall_l4 (forward-looking entries
+ // (#290). Doesn't flip checks_passed (forward-looking entries
  // are observability, not L4 failures), but the bundle
  // records the wired/forward-looking counts so CI tracks
  // inert-defense audit progress over time.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "manifest_coverage",
@@ -6628,6 +6604,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // bundle records counts so CI can track classification
  // growth.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "mls_coverage",
@@ -6641,6 +6618,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // failure: if proof_checker.rs gains a rule that kernel_v0
  // doesn't mirror, the bootstrap chain is broken.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "kernel_v0_roster",
@@ -6648,7 +6626,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_kernel_v0_roster_with_format(AuditFormat::Json),
     );
     if summary.get("kernel_v0_roster") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 9. Foundation-profiles — citation-by-foundation classifier.
@@ -6657,6 +6635,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // host independent theorems in incompatible foundations as
  // long as no single derivation chain assumes both.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "foundation_profiles",
@@ -6669,6 +6648,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // reports 0 of 6 passes attested; observability-only in V0,
  // flips to load-bearing when discharge work lands.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "codegen_attestation",
@@ -6684,6 +6664,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // are kernel-implementation bugs to be fixed; this is the
  // load-bearing CI gate that catches them at audit time.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "differential_kernel",
@@ -6691,7 +6672,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_differential_kernel_with_format(AuditFormat::Json),
     );
     if summary.get("differential_kernel") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 11b. Differential-kernel fuzz — mutation-based property
@@ -6702,6 +6683,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // gate. Complements the canonical-certificate roster: roster
  // covers the curated surface, fuzz covers the long tail.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "differential_kernel_fuzz",
@@ -6709,7 +6691,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_differential_kernel_fuzz_with_format(AuditFormat::Json),
     );
     if summary.get("differential_kernel_fuzz") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 11c. Reflection-tower — ordinal-indexed meta-soundness.
@@ -6721,6 +6703,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // load-bearing meta-theory invariant of Verum's Gödel-2nd
  // escape.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "reflection_tower",
@@ -6728,7 +6711,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_reflection_tower_with_format(AuditFormat::Json),
     );
     if summary.get("reflection_tower") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 11d. ATS-V Architectural Type System discharge registry.
@@ -6737,6 +6720,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // RFC error codes (ATS-V-AP-001..010). registry
  // surface; full per-cog dispatch lands.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "arch_discharges",
@@ -6744,7 +6728,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_arch_discharges_with_format(AuditFormat::Json),
     );
     if summary.get("arch_discharges") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 11e. ATS-V counterfactual reasoning engine pin
@@ -6753,6 +6737,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // its soundness contract; failure means engine arm-routing
  // drifted from spec §22.2.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "counterfactual",
@@ -6760,7 +6745,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_counterfactual_with_format(AuditFormat::Json),
     );
     if summary.get("counterfactual") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 11f. ATS-V adjunction analyzer pin battery.
@@ -6769,6 +6754,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // Strengthen⊣Weaken) classifies the corresponding shape-delta
  // correctly; failure means recogniser drifted from spec §20.6.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "adjunctions",
@@ -6776,7 +6762,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_adjunctions_with_format(AuditFormat::Json),
     );
     if summary.get("adjunctions") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 11g. ATS-V Yoneda-equivalence checker pin battery.
@@ -6786,6 +6772,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // Failure means the observer-functor projection drifted from
  // spec.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "yoneda",
@@ -6793,7 +6780,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_yoneda_with_format(AuditFormat::Json),
     );
     if summary.get("yoneda") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
     // 11h. ATS-V whole-corpus cross-cog architectural firewall.
@@ -6805,6 +6792,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     //  an incompatible foundation against a mounted-and-annotated
     //  cog — a real architectural defect.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "arch_corpus",
@@ -6812,7 +6800,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_arch_corpus_with_format(AuditFormat::Json),
     );
     if summary.get("arch_corpus") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
  // 12. Proof-term-library — N-kernel + universe-stability +
@@ -6820,11 +6808,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  // library at `core/verify/proof_term_examples/` (#157, #158
  // V1, #159 V2-V4). Every certificate runs through every
  // registered kernel; the verdict is checked for
- // universe-stability across lifts 0..=2 (Gödel-2nd
- // workaround foundation); adversarial certificates
+ // universe-stability across lifts 0..=2; adversarial certificates
  // (`expected_outcome=reject` metadata) MUST be unanimously
  // rejected — soundness violations flip the gate.
     run_gate(
+        &run_id,
         &mut gates,
         &mut summary,
         "proof_term_library",
@@ -6832,26 +6820,28 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_proof_term_library_with_format(AuditFormat::Json),
     );
     if summary.get("proof_term_library") != Some(&"passed") {
-        overall_l4 = false;
+        checks_passed = false;
     }
 
-    let bundle_path = report_dir.join("bundle.json");
+    if blake3::hash(&std::fs::read(&executable)?).to_hex().as_str() != tool_hash {
+        return Err(crate::error::CliError::VerificationFailed("audit executable changed during invocation".into()));
+    }
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "command": "audit-bundle",
-        "l4_load_bearing": overall_l4,
+        "run_id": run_id, "execution_status": "completed",
+        "tool": {"path": executable, "blake3": tool_hash},
+        "proof_status": "no_bound_proof_evidence",
+        "l4_load_bearing": false, "checks_passed": checks_passed,
         "gates": gates,
         "summary": summary,
     });
-    let _ = std::fs::write(
-        &bundle_path,
-        serde_json::to_string_pretty(&payload).unwrap(),
-    );
+    super::audit_execution::publish(&bundle_path, &payload)?;
 
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("Audit bundle — L1+L2+L3+L4 verdict");
+            println!("Audit bundle — execution diagnostics");
             println!("────────────────────────────────────────");
             for (gate, label) in &summary {
                 let marker = match *label {
@@ -6871,11 +6861,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
                 }
             }
             println!();
-            if overall_l4 {
-                println!("  ✓ L4 load-bearing — every gate produced a clean verdict.");
+            if checks_passed {
+                println!("  ✓ Required gate executions completed. No bound proof evidence is asserted.");
                 println!("    Bundle: {}", bundle_path.display());
             } else {
-                println!("  ✗ NOT L4 load-bearing — at least one gate reported a failure.");
+                println!("  ✗ At least one required gate execution failed.");
                 println!("    Bundle: {}", bundle_path.display());
             }
         }
@@ -6884,7 +6874,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    if !overall_l4 {
+    if !checks_passed {
         return Err(crate::error::CliError::VerificationFailed(format!(
             "audit bundle: at least one gate reported a failure — see {}",
             bundle_path.display(),
