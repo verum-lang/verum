@@ -15,6 +15,7 @@ pub mod config;
 pub mod error;
 pub mod feature_overrides;
 pub mod registry;
+pub mod runtime_diagnostics;
 pub mod script;
 pub mod templates;
 pub mod tier;
