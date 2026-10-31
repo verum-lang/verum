@@ -1,0 +1,31 @@
+{
+  "schema": "verum-source-cycle-fixture-v1",
+  "scope": "Actual passing export-producing tests within a failed native suite. The separate reinstall failure and original Monoid failure remain unresolved in this evidence; no complete implementation acceptance.",
+  "native_whole_run_status": "failed",
+  "archive_sha256": "cca95c5d8a264702bac4246097177a8c7e6c2fb5d772d2419a6405eaf934ac3c",
+  "members": {
+    "matching_actual_action.json": "e09a162eb6f6b838e6590aca197f7284f142574de6fd3bf99ac3f897f04e9ce3",
+    "moving_membership_and_physical_lifecycle.json": "c74e4505e80e0ffafb50922f6813a4af1bfdf71357dfaaea2c6a71142052a5bd",
+    "native-finite-service.log": "e21fa2e5a82a95b1927d6de1d8e89639e30649396b0a1854d44d16f6c5f80aea",
+    "native-receipt.json": "406e899ffbf0dc24593bf5d7c037cca98c8afb2d27d617cd27891179610e85c7",
+    "native-runner.py": "95bbe9219f85341053662c2a12af55f94147dfdbf5aeb43002d1872548148a9e",
+    "reviewed-sources.json": "38bc64036ae32e47f4c1fe924f8dae005537fbd96774d4f87c890258a52ecf02",
+    "source-0.rs": "aaa4b73a7a0af14fb708da47d0b0e99648182d314c7d00b7a0f6aed71e9a2745",
+    "source-1.rs": "b34d0bdf8873fadc1b1105dc2551dc777e573ca6fcb06aba99940f0f2e17ec07",
+    "source-10.rs": "342a61c48f0cacd6eb50a9fa0d7ceea75880929a75ab3a98b24dcf4b54d0eddf",
+    "source-11.rs": "0306b28de10aa024cfcfdc95d12bf33968d8847707d2847ecadf4c75d5595119",
+    "source-12.rs": "bdad3d76b8e36502aefb3c76da9d49a4b394f7f8de25a8159f77a8f0f786cb71",
+    "source-13.rs": "895d1041bfa9dd16b692e891c50f30480e9130670ee25d6dc6e78dae7f9d4ffe",
+    "source-14.rs": "e201aad6e8d4137ab5fc7e44ebbd513106fc5e5ced0ce483bdbee3263f7061d4",
+    "source-2.rs": "3e280b6e40a13f42909a6a5fd281ccbe550261ff40e8e8b609cb68670677af46",
+    "source-3.rs": "edf98e6014dad780569c1c74032fd8d97bf25ae20753707db8ad874bcf57d325",
+    "source-4.rs": "48d079bfb391a175a89e6935579981eb3bb66940feed4699cf389f65519d5b29",
+    "source-5.rs": "e22c371335c60a66351923858108b140ae7c7690e01d5dd7bbc570de9bab4143",
+    "source-6.rs": "9a9c3c550ac640900876ed6e8ed92386e9143ca762771ca2106d0933596e359e",
+    "source-7.rs": "5bfbc989750df578082aef9ac31483bc527dd667171804b67899ec15d593dbb8",
+    "source-8.rs": "5e6b25bce88522d96c05234aab8a7318c4e6aa7e6d78aa97ff5f15b74f639bd5",
+    "source-9.rs": "ec02309e9ebb3e224bc784b756bde567a9e36f345d4d8fecf247cb1faaaf45f3",
+    "source-cycle-export-provenance.json": "ce2dfeece4c3d62e1628b95ae2da71b70710af6cd13597d7ab779adcd146aec5",
+    "wrong_actual_action_equal_autonomous_successor.json": "239900dd7f0252267ce056e82ff0dcae20ca577e9a0ba8b0bf1154b4e5a016a7"
+  }
+}

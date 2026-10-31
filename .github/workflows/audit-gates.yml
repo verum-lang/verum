@@ -314,6 +314,8 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_weighted_ordinals.py
           python3 -m unittest discover -s verification/external/lean -p test_online_score.py
           python3 -m unittest discover -s verification/external/lean -p test_source_cycle.py
+          python3 -m unittest discover -s verification/external/lean -p test_source_cycle_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_source_cycle_native.py
           python3 -m unittest discover -s verification/external/lean -p test_bounded_lasso.py
           python3 -m unittest discover -s verification/external/lean -p test_guarded_drain.py
           python3 -m unittest discover -s verification/external/lean -p test_guarded_driver_export.py
