@@ -50,6 +50,37 @@ open VerumKernel
 example : (Level.successor (.concrete Level.wireMax)).denote (fun _ => 0) = 0 := by decide_cbv
 """, failure=True)
 
+    def test_compact_offsets_preserve_meaning_and_wire_domain(self):
+        rows = self.prove("""
+import VerumExternalReplay.UniverseSemantics
+open VerumKernel
+#print axioms Level.addOffset_exact
+#print axioms Level.addOffset_wireValid
+#print axioms Level.addOffset_cancel
+example : (Level.offset (.concrete Level.wireMax) Level.wireMax).WireValid :=
+  ⟨Nat.le_refl _, Nat.le_refl _⟩
+example : ((Level.offset (.concrete Level.wireMax) Level.wireMax).addOffset Level.wireMax).denote
+    (fun _ => 0) = 3 * Level.wireMax := by decide_cbv
+""")
+        self.assert_axioms(rows, ['VerumKernel.Level.addOffset_exact',
+                                 'VerumKernel.Level.addOffset_wireValid',
+                                 'VerumKernel.Level.addOffset_cancel'])
+        for claim in [
+            '(Level.addOffset (.concrete Level.wireMax) 1).denote (fun _ => 0) = 0',
+            '(Level.addOffset (.concrete (Level.wireMax + 1)) 1).denote (fun _ => 0) = Level.wireMax + 2',
+        ]:
+            with self.subTest(claim=claim):
+                self.prove('import VerumExternalReplay.UniverseSemantics\nopen VerumKernel\n'
+                           + 'example : ' + claim + ' := by decide_cbv\n', failure=True)
+
+        self.prove("""
+import VerumExternalReplay.UniverseSemantics
+open VerumKernel
+example : (Level.concrete (Level.wireMax + 1)).WireValid := by
+  unfold Level.WireValid
+  decide_cbv
+""", failure=True)
+
     def test_completed_mismatch_and_law_axioms(self):
         rows = self.prove('''
 import VerumExternalReplay.ReductionScope

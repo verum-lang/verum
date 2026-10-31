@@ -7,7 +7,7 @@ import VerumExternalReplay.FunctionExtensionality
 /-! Independent re-implementation of the structural fragment of
     `crates/verum_kernel/src/proof_checker.rs` (Var / Universe /
     Pi / Lam / App / Sigma / Id / Refl / J, plus β-reduction, α-equivalence, η-equivalence,
-    universe-overflow handling, and post-FV-19 universe
+    exact universe arithmetic, and post-FV-19 universe
     polymorphism).
 
     This is the **Lean side of the differential checker**: a
@@ -22,8 +22,8 @@ import VerumExternalReplay.FunctionExtensionality
 
     **Universe polymorphism (FV-19)**: `Universe` carries a
     structured `Level` (Concrete / Var / Succ / Max / Offset).  The Lean
-    side uses `Nat` for storage but enforces the Rust `u32`
-    concrete-level ceiling during inference. Equality is decided up to algebraic
+    side uses `Nat` for storage and enforces Rust `u32` bounds on wire
+    literals; structured levels can denote larger values exactly. Equality is decided up to algebraic
     normalisation (idempotency, identity at zero, common-succ
     factoring, lexicographic flattening of `Max`). -/
 
@@ -128,7 +128,7 @@ def Level.offsetNode (base : Level) (by_ : Nat) : Level :=
   | 1 => .succ base
   | n => .offset base n
 
-partial def Level.addOffset (base : Level) (by_ : Nat) : Level :=
+def Level.addOffset (base : Level) (by_ : Nat) : Level :=
   if by_ = 0 then base else
   match base with
   | .concrete n =>
@@ -141,6 +141,7 @@ partial def Level.addOffset (base : Level) (by_ : Nat) : Level :=
     if prior + by_ ≤ Level.wireMax then Level.addOffset inner (prior + by_)
     else Level.offsetNode base by_
   | other => Level.offsetNode other by_
+termination_by structural base
 
 /-- Exact successor: bounded wire literals do not cap the universe hierarchy. -/
 def Level.successor (l : Level) : Level :=
