@@ -10,6 +10,8 @@ import uuid
 from check_typed_programs import ROOT, check, require_success, run, sha256
 
 MAX64 = 2**64 - 1
+LEAN_MEMORY_MIB = 1024
+LEAN_TIMEOUT_SECONDS = 60
 
 
 def module_closure(roots):
@@ -134,6 +136,7 @@ def verify(args, *, emit, modules, producers, scope, export_loader=load):
     provenance = load(args.provenance)
     require(provenance['export_sha256'] == args.sha256, 'Provenance/export mismatch')
     provenance_hash = sha256(args.provenance)
+    modules = module_closure(modules)
     sources = [ROOT / 'VerumExternalReplay' / (m + '.lean') for m in modules]
     sources += [*producers, Path(__file__).resolve(), ROOT / 'check_typed_programs.py',
                 ROOT / 'lean-toolchain', ROOT / 'lakefile.toml']
@@ -165,7 +168,15 @@ def verify(args, *, emit, modules, producers, scope, export_loader=load):
         binaries = [prefix / 'bin/lean'] + sorted(p for p in (prefix / 'lib/lean').iterdir()
             if p.is_file() and p.suffix in {'.dylib', '.so', '.dll'})
         checker_hashes = {str(p.relative_to(prefix)): sha256(p) for p in binaries}
-        require_success(run('lake', 'build', *('VerumExternalReplay.' + m for m in modules), cwd=snapshot))
+        # Compile the captured import closure sequentially. A parallel lake
+        # build can multiply an individual checker's memory budget before the
+        # first proof is checked. No shared or previously built model is used.
+        for name in modules:
+            output = snapshot / '.lake/build/lib/lean/VerumExternalReplay' / (name + '.olean')
+            output.parent.mkdir(parents=True, exist_ok=True)
+            require_success(run('lake', 'env', 'lean', '-M', str(LEAN_MEMORY_MIB),
+                                '-o', str(output), f'VerumExternalReplay/{name}.lean',
+                                timeout=LEAN_TIMEOUT_SECONDS, cwd=snapshot))
         shared_module = 'FrozenObserverDeclarations'
         shared_text = declarations(text)
         shared_source = snapshot / (shared_module + '.lean')
@@ -173,7 +184,9 @@ def verify(args, *, emit, modules, producers, scope, export_loader=load):
         retained_shared = artifacts / 'shared-declarations.lean'
         retained_shared.write_text(shared_text)
         compiled_shared = snapshot / '.lake/build/lib/lean' / (shared_module + '.olean')
-        require_success(run('lake', 'env', 'lean', '-o', str(compiled_shared), str(shared_source), cwd=snapshot))
+        require_success(run('lake', 'env', 'lean', '-M', str(LEAN_MEMORY_MIB),
+                            '-o', str(compiled_shared), str(shared_source),
+                            timeout=LEAN_TIMEOUT_SECONDS, cwd=snapshot))
         shared_hash = sha256(compiled_shared)
         results = []
         for index, (part, names) in enumerate(batches(text, shared_module=shared_module)):
@@ -181,7 +194,7 @@ def verify(args, *, emit, modules, producers, scope, export_loader=load):
             require(path.resolve() not in {p.resolve() for p in
                     [args.output, args.export, args.report, args.provenance]}, 'Batch path collision')
             path.write_text(part)
-            result = check(path, cwd=snapshot)
+            result = check(path, cwd=snapshot, memory_mib=LEAN_MEMORY_MIB)
             rosters = [d['data'] for d in result['diagnostics'] if d['severity'] == 'information']
             require(len(rosters) == len(names), 'Missing theorem axiom audit')
             for roster in rosters:

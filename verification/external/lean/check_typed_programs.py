@@ -50,8 +50,11 @@ def require_success(result):
     return result.stdout.strip()
 
 
-def check(path, expected=None, *, cwd=ROOT):
-    result = run("lake", "env", "lean", "--json", str(path), timeout=60, cwd=cwd)
+def check(path, expected=None, *, cwd=ROOT, memory_mib=None):
+    if memory_mib is not None and (type(memory_mib) is not int or memory_mib <= 0):
+        raise ValueError('Expected a positive Lean memory limit')
+    memory = () if memory_mib is None else ('-M', str(memory_mib))
+    result = run("lake", "env", "lean", *memory, "--json", str(path), timeout=60, cwd=cwd)
     # Lean's JSON diagnostics let us require the intended proof/type failure,
     # rather than accepting any nonzero process status as a successful control.
     diagnostics = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
