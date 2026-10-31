@@ -11,6 +11,12 @@ def allowance : Limits := ⟨some 20, 1000⟩
 def queryRead : Code := .mk
   [⟨.primitive .checkedAdd, [.input 1, .literal (.nat 0)], none⟩] none []
 def queryBinding : Binding Nat := ⟨7, 1, [.state, .external 0]⟩
+def prefixBinding : Binding Nat := ⟨7, 2, [.state, .external 0, .external 1]⟩
+def prefixRead : Code := .mk
+  [⟨.primitive .checkedAdd, [.input 2, .literal (.nat 0)], none⟩] none []
+def eagerPrefix : Code := .mk
+  [⟨.primitive .checkedAdd, [.input 1, .literal (.nat 0)], none⟩,
+   ⟨.primitive .rem, [.literal (.nat 1), .input 2], none⟩] (some 0) []
 def goodUpdate : Code := .mk
   [⟨.primitive .checkedAdd, [.input 0, .literal (.nat 1)], none⟩] none []
 def lateFailure : Code := .mk
@@ -34,8 +40,9 @@ class ReadReuseTests(IsolatedLeanTest):
         names = [namespace + name for module, namespace in
                  [('ReadEvidence', 'ReadEvidence.'), ('ReadReuse', 'ReadReuse.')]
                  for name in re.findall(r'^theorem (\w+)', self.sources[module], re.M)]
-        names += ['ReadReuse.excludesState']
-        self.assertEqual(len(names), 14)
+        names += ['ReadReuse.excludesSources', 'ReadReuse.excludesState',
+                  'ReadReuse.excludesExternal', 'ReadReuse.sourceValue']
+        self.assertEqual(len(names), 20)
         self.assert_axioms(self.prove(HEADER + '\n'.join('#print axioms ' + n for n in names)), names)
 
     def test_binding_certificate_and_successful_value_reuse(self):
@@ -68,6 +75,38 @@ example : (execute apply lateFailure allowance [.nat 1]).stop = .complete := by 
 example : FiniteCode.run pureApply lateFailure [.nat 0] = none := by decide_cbv
 example : key lateFailure [.nat 0] ≠ key lateFailure [.nat 1] := by decide_cbv
 example : excludesState ReadEvidenceControls.eagerCall [.external 0, .state] = false := by rfl
+''')
+
+    def test_excluded_prefix_port_preserves_successful_read(self):
+        self.prove(HEADER + '''
+theorem prefix_changes (query before after : Value) (index : Nat) (different : index ≠ 1) :
+    [query, before][index]? = [query, after][index]? := by
+  cases index with
+  | zero => rfl
+  | succ index =>
+      cases index with
+      | zero => contradiction
+      | succ index => rfl
+example : excludesExternal queryRead prefixBinding.slots 1 = true := by rfl
+example : excludesExternal prefixRead prefixBinding.slots 1 = false := by rfl
+example : excludesExternal eagerPrefix prefixBinding.slots 1 = false := by rfl
+example : excludesSources queryRead prefixBinding.slots
+    (fun source => match source with | .external 0 => false | _ => true) = true := by rfl
+example (state before after : Value) :
+    key queryRead [state, .nat 42, before] = key queryRead [state, .nat 42, after] :=
+  external_key_agreement queryRead prefixBinding state [.nat 42, before] [.nat 42, after]
+    [state, .nat 42, before] [state, .nat 42, after] 1 (by rfl)
+    (prefix_changes _ _ _) (by rfl) (by rfl)
+example (nextPrefix : Value) :
+    FiniteCode.run pureApply queryRead [.nat 9, .nat 42, nextPrefix] = some (.nat 42) := by
+  apply external_excluded_reuse apply queryRead prefixBinding (.nat 9)
+    [.nat 42, .nat 0] [.nat 42, nextPrefix]
+    [.nat 9, .nat 42, .nat 0] [.nat 9, .nat 42, nextPrefix] 1 (by rfl)
+    (prefix_changes _ _ _) (by rfl) (by rfl) allowance 0 (.nat 42)
+  · decide_cbv
+  · decide_cbv
+example : (execute apply eagerPrefix allowance [.nat 9, .nat 42, .nat 0]).stop = .undefined ∧
+    (execute apply eagerPrefix allowance [.nat 9, .nat 42, .nat 1]).stop = .complete := by decide_cbv
 ''')
 
     def test_update_failure_and_read_capabilities_stay_local(self):
@@ -116,6 +155,10 @@ example : selectRoot queryRead (execute apply queryRead ⟨some 0, 1000⟩ [.nat
             'changed_relevant_input_reuses_value': 'FiniteCode.run pureApply queryRead [.nat 0, .nat 43] = some (.nat 42)',
             'missing_input_is_zero': 'key queryRead [.nat 0] = key queryRead [.nat 0, .nat 0]',
             'eager_callee_state_can_be_ignored': 'excludesState ReadEvidenceControls.eagerCall [.external 0, .state] = true',
+            'prefix_read_is_independent': 'excludesExternal prefixRead prefixBinding.slots 1 = true',
+            'unused_eager_prefix_is_independent': 'excludesExternal eagerPrefix prefixBinding.slots 1 = true',
+            'prefix_failure_is_reusable': 'FiniteCode.run pureApply eagerPrefix [.nat 9, .nat 42, .nat 0] = some (.nat 42)',
+            'all_sources_may_be_excluded': 'excludesSources queryRead prefixBinding.slots (fun _ => true) = true',
         }
         for name, claim in claims.items():
             with self.subTest(claim=name):
