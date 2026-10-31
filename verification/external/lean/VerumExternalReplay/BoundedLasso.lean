@@ -43,6 +43,20 @@ theorem subResidue_lt (period left right : Nat) (hl : left < period) :
   unfold subResidue
   split <;> omega
 
+/-- A machine implementation can establish the unique residue through a
+bounded lift, without asking its solver to prove a second variable-width
+division. The carry equation determines the mathematical result; the separate
+range theorem supplies its bound when the left operand is also reduced. -/
+theorem subResidue_unique (period left right result : Nat)
+    (hr : right < period)
+    (lift : result + (if right ≤ left then period else 0) = left + period - right) :
+    result = subResidue period left right := by
+  by_cases noBorrow : right ≤ left
+  · simp only [subResidue, ite_eq_left noBorrow] at *
+    omega
+  · simp only [subResidue, ite_eq_right noBorrow] at *
+    omega
+
 theorem subResidue_exact (period count distance : Nat) (positive : 0 < period)
     (enough : distance ≤ count) :
     subResidue period (count % period) (distance % period) = (count - distance) % period := by
