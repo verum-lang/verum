@@ -60,6 +60,16 @@ jobs:
           python3 verification/external/kani/check_native_clock.py \
             --kani "$RUNNER_TEMP/kani-0.68.0/bin/kani-driver" \
             --output "$RUNNER_TEMP/native-clock-replay"
+      - name: Check compiler-derived full-width arithmetic with Lean
+        run: |
+          curl --fail --location --silent --show-error https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain leanprover/lean4:v4.35.0
+          export PATH="$HOME/.elan/bin:$PATH"
+          python3 -m unittest discover -s verification/external/rust_mir
+          python3 verification/external/rust_mir/check_shift.py \
+            --rustc "$(rustup which --toolchain nightly-2026-08-21 rustc)" \
+            --lean "$(elan which lean)" \
+            --output "$RUNNER_TEMP/native-shift-replay"
       - name: Retain exact sources and verification results
         if: always()
         uses: actions/upload-artifact@v4
@@ -68,6 +78,7 @@ jobs:
           path: |
             ${{ runner.temp }}/rust-symbolic-replay/
             ${{ runner.temp }}/native-clock-replay/
+            ${{ runner.temp }}/native-shift-replay/
   # ---------------------------------------------------------------------------
   # Tier 1: in-process audit gates.  No external toolchain needed.
   # ---------------------------------------------------------------------------
