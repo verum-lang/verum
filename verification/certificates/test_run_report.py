@@ -43,6 +43,26 @@ class RunReportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 require_completed(report, run.run_id, self.request, returncode=0)
 
+    def test_request_requires_exact_json_values_recursively(self):
+        self.request['controls'] = [{'accepted': True, 'limits': [1, {'work': 0}]}]
+        run_id, report = self.succeed()
+        for path, replacement in [
+                (('accepted',), 1), (('accepted',), 1.0),
+                (('limits', 0), True), (('limits', 0), 1.0),
+                (('limits', 1, 'work'), False), (('limits', 1, 'work'), 0.0)]:
+            with self.subTest(path=path, replacement=replacement):
+                changed = json.loads(json.dumps(report))
+                target = changed['request']['controls'][0]
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = replacement
+                # Python equality considers these distinct JSON values equal.
+                self.assertEqual(changed['request'], self.request)
+                with self.assertRaises(ValueError):
+                    require_completed(changed, run_id, self.request, returncode=0)
+        reordered = dict(reversed(list(self.request.items())))
+        require_completed(report, run_id, reordered, returncode=0)
+
     def test_hard_interruption_leaves_running_not_success(self):
         old_id, old = self.succeed()
         run = RunReport(self.path).__enter__()  # Simulate process killed before __exit__.

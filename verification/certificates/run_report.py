@@ -40,7 +40,9 @@ def require_completed(report, run_id, request, *, returncode):
             or report['schema_version'] != 3
             or report.get('run') != {'id': run_id, 'status': 'completed',
                                      'request_sha256': identity(request)}
-            or report.get('request') != request):
+            # Python container equality coerces bool/int/float recursively;
+            # compare the same canonical JSON domain used by the run digest.
+            or encoded(report.get('request')) != encoded(request)):
         raise ValueError('report does not complete this exact invocation and request')
     return report
 
