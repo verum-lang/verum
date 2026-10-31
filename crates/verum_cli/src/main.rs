@@ -35,6 +35,7 @@ mod error;
 mod feature_overrides;
 pub mod registry;
 mod repl;
+mod runtime_diagnostics;
 mod script;
 mod templates;
 mod tier;
@@ -383,6 +384,8 @@ enum Commands {
  /// frontmatter. No-op for non-script invocations.
         #[clap(flatten)]
         permission_flags: crate::script::permission_flags::PermissionFlags,
+        #[clap(flatten)]
+        runtime_report: crate::runtime_diagnostics::RuntimeReportArgs,
     },
 
     /// Run tests
@@ -3224,6 +3227,7 @@ fn run_command(cli: Cli) -> Result<()> {
             args,
             feature_overrides,
             permission_flags,
+            runtime_report,
         } => {
             // Install the embedded scripting-engine compiler hook up front — on
             // the main thread, before any source is compiled or interpreted —
@@ -3259,17 +3263,19 @@ fn run_command(cli: Cli) -> Result<()> {
  // identical parser, identical permission model, identical
  // exit-code semantics. The temp file is removed on drop.
             if let Some(expr) = eval {
-                let tmp =
-                    commands::file::synthesize_script_temp(&format!("print({});\n", expr), "eval")
-                        .map_err(|e| CliError::Custom(format!("synthesize -e: {e}")))?;
+                let source = format!("print({});\n", expr);
+                let report = runtime_report.request(source.as_bytes(), true)?;
+                let tmp = commands::file::synthesize_script_temp(&source, "eval")
+                    .map_err(|e| CliError::Custom(format!("synthesize -e: {e}")))?;
                 ui::status("Running", &format!("-e ({})", tier_label));
-                let result = commands::file::run_with_tier_and_flags(
+                let result = commands::file::run_with_observation(
                     tmp.path().to_str().expect("temp path is utf-8"),
                     args_list,
                     false,
                     tier_num,
                     timings,
                     permission_flags.clone(),
+                    report,
                 );
                 drop(tmp);
                 return result;
@@ -3280,16 +3286,18 @@ fn run_command(cli: Cli) -> Result<()> {
                 std::io::stdin()
                     .read_to_string(&mut buf)
                     .map_err(|e| CliError::Custom(format!("read stdin: {e}")))?;
+                let report = runtime_report.request(buf.as_bytes(), true)?;
                 let tmp = commands::file::synthesize_script_temp(&buf, "stdin")
                     .map_err(|e| CliError::Custom(format!("synthesize stdin: {e}")))?;
                 ui::status("Running", &format!("- ({})", tier_label));
-                let result = commands::file::run_with_tier_and_flags(
+                let result = commands::file::run_with_observation(
                     tmp.path().to_str().expect("temp path is utf-8"),
                     args_list,
                     false,
                     tier_num,
                     timings,
                     permission_flags.clone(),
+                    report,
                 );
                 drop(tmp);
                 return result;
@@ -3297,6 +3305,14 @@ fn run_command(cli: Cli) -> Result<()> {
 
             match resolve_path(file.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
+                    let report = if runtime_report.runtime_report.is_some() {
+                        let source = std::fs::read(file_path.as_str()).map_err(|error| {
+                            CliError::Custom(format!("Read diagnostic source: {error}"))
+                        })?;
+                        runtime_report.request(&source, false)?
+                    } else {
+                        None
+                    };
                     verum_error::crash::set_input_file(file_path.as_str());
  // The inner `run_script_interpreted` /
  // `run_native_compilation` paths print their own
@@ -3304,16 +3320,22 @@ fn run_command(cli: Cli) -> Result<()> {
  // status with the cache-state-aware label.
  // Printing here too would emit a duplicate
  // `Running` line on every invocation.
-                    commands::file::run_with_tier_and_flags(
+                    commands::file::run_with_observation(
                         file_path.as_str(),
                         args_list,
                         false,
                         tier_num,
                         timings,
                         permission_flags,
+                        report,
                     )
                 }
                 PathTarget::Project => {
+                    if runtime_report.runtime_report.is_some() {
+                        return Err(CliError::InvalidArgument(
+                            "Runtime diagnostics currently require a source file, stdin or expression".into(),
+                        ));
+                    }
                     commands::run::execute(tier_num, None, release, None, None, args_list)
                 }
             }

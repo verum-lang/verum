@@ -327,6 +327,23 @@ pub fn run_with_tier_and_flags(
     timings: bool,
     permission_flags: crate::script::permission_flags::PermissionFlags,
 ) -> Result<(), CliError> {
+    run_with_observation(file, args, skip_verify, tier, timings, permission_flags, None)
+}
+
+pub fn run_with_observation(
+    file: &str,
+    args: List<Text>,
+    skip_verify: bool,
+    tier: Option<u8>,
+    timings: bool,
+    permission_flags: crate::script::permission_flags::PermissionFlags,
+    runtime_report: Option<crate::runtime_diagnostics::ReportRequest>,
+) -> Result<(), CliError> {
+    if runtime_report.is_some() && tier.is_some_and(|tier| tier != 0) {
+        return Err(CliError::InvalidArgument(
+            "Runtime diagnostics require interpreter execution".into(),
+        ));
+    }
     let tier_num = match tier {
         Some(0) | None => 0,
         Some(1) => 1,
@@ -366,7 +383,9 @@ pub fn run_with_tier_and_flags(
                 ..Default::default()
             };
 
-            run_script_interpreted(&input, options, args, timings, permission_flags)?;
+            run_script_interpreted(
+                &input, options, args, timings, permission_flags, runtime_report,
+            )?;
         }
         1 => {
             // Tier 1: AOT compilation to native binary then execute.
@@ -723,6 +742,7 @@ fn run_script_interpreted(
     args: List<Text>,
     timings: bool,
     permission_flags: crate::script::permission_flags::PermissionFlags,
+    runtime_report: Option<crate::runtime_diagnostics::ReportRequest>,
 ) -> Result<(), CliError> {
     use crate::script::cache::ScriptCache;
     use crate::script::context::{ScriptContext, ScriptContextOptions};
@@ -761,6 +781,10 @@ fn run_script_interpreted(
     };
     let ctx = ScriptContext::from_path(input, &ctx_opts)
         .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
+    let mut runtime_report = runtime_report
+        .map(|request| request.open(&ctx.source))
+        .transpose()?;
+    options.runtime_diagnostics = runtime_report.is_some();
 
     // 2. Frontmatter version gate. A script with `verum = "X.Y"` that
     //  doesn't match the running build fails fast with a clear
@@ -817,6 +841,7 @@ fn run_script_interpreted(
                     timings,
                     permission_policy,
                     script_cog_resolver,
+                    runtime_report,
                 );
             }
             Ok(None) => { /* miss — fall through */ }
@@ -830,18 +855,31 @@ fn run_script_interpreted(
     options.input = input.to_path_buf();
     ui::status("Running", &format!("{} (interpreter)", input.display()));
     let mut session = Session::new(options);
+    // Compile the bytes used for permission parsing and cache identity. The
+    // entry must not change between ScriptContext and the compiler's read.
+    let source = std::str::from_utf8(&ctx.source)
+        .map_err(|error| CliError::Custom(format!("Script source is not UTF-8: {error}")))?;
+    session.load_source_string(source, input.to_path_buf())
+        .map_err(|error| CliError::Custom(format!("Load script snapshot: {error}")))?;
     if let Some(policy) = permission_policy {
         session.set_script_permission_policy(policy);
     }
     if let Some(resolver) = script_cog_resolver {
         session.set_cog_resolver(resolver);
     }
-    {
+    let result = {
         let mut pipeline = CompilationPipeline::new(&mut session);
-        pipeline
-            .run_interpreter(args)
-            .map_err(|e| CliError::RuntimeError(e.to_string()))?;
+        pipeline.run_interpreter(args)
+    };
+    let reported = runtime_report
+        .as_mut()
+        .map(|report| report.finish(&session))
+        .transpose();
+    if let Err(error) = &reported {
+        ui::warn(&format!("Runtime report: {error}"));
     }
+    result.map_err(|e| CliError::RuntimeError(e.to_string()))?;
+    reported?;
 
     if timings {
         print_phase_timings(&session);
@@ -929,6 +967,7 @@ fn execute_cached_vbc(
     timings: bool,
     permission_policy: Option<verum_compiler::session::ScriptPermissionPolicy>,
     cog_resolver: Option<verum_modules::cog_resolver::CogResolver>,
+    mut runtime_report: Option<crate::runtime_diagnostics::ReportFile>,
 ) -> Result<(), CliError> {
     let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes)
         .map_err(|e| CliError::Custom(format!("cached VBC deserialise failed: {e}")))?;
@@ -958,12 +997,19 @@ fn execute_cached_vbc(
     if let Some(resolver) = cog_resolver {
         session.set_cog_resolver(resolver);
     }
-    {
+    let result = {
         let mut pipeline = CompilationPipeline::new(&mut session);
-        pipeline
-            .run_compiled_vbc(std::sync::Arc::new(vbc_module), args)
-            .map_err(|e| CliError::RuntimeError(e.to_string()))?;
+        pipeline.run_compiled_vbc(std::sync::Arc::new(vbc_module), args)
+    };
+    let reported = runtime_report
+        .as_mut()
+        .map(|report| report.finish(&session))
+        .transpose();
+    if let Err(error) = &reported {
+        ui::warn(&format!("Runtime report: {error}"));
     }
+    result.map_err(|e| CliError::RuntimeError(e.to_string()))?;
+    reported?;
     if timings {
         print_phase_timings(&session);
     }
