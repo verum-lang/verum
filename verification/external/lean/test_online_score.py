@@ -42,7 +42,7 @@ class OnlineScoreTests(IsolatedLeanTest):
     def test_constructive_axioms(self):
         names = ['OnlineScore.' + name for name in
                  re.findall(r'^theorem (\w+)', self.sources['OnlineScore'], re.M)]
-        self.assertEqual(len(names), 27)
+        self.assertEqual(len(names), 32)
         self.assert_axioms(self.prove(HEADER + '\n'.join('#print axioms ' + n for n in names)), names)
 
     def test_empty_and_unseen_counts(self):
@@ -55,6 +55,20 @@ example : equivalent (parentML [2,1]) (mul (parentML [2,0]) (mlStep 2 0)) = true
 example : equivalent (kt 3 [2,1,0]) (mul (kt 3 [2,0,0]) (ktStep 3 2 0)) = true := by decide_cbv
 example : equivalent (mlStep 2 0) ⟨4,27⟩ = true := by decide_cbv
 example : equivalent (mlStep 3 2) ⟨729,1024⟩ = true := by decide_cbv
+''')
+
+    def test_factored_positive_powers_preserve_the_same_mle(self):
+        self.prove(HEADER + '''
+example (total selected : Nat) : factoredML total selected = mlStep total selected :=
+  factored_ml_exact total selected
+example (total selected : Nat) : equivalent (factoredML total selected) (mlStep total selected) = true :=
+  factored_ml_checked total selected
+example (n : Nat) : Positive (symbolPower n) ∧ Positive (totalPower n) :=
+  ⟨symbolPower_positive n, totalPower_positive n⟩
+example : symbolPower 0 = one ∧ totalPower 0 = one ∧ factoredML 0 0 = one := ⟨rfl,rfl,rfl⟩
+example : equivalent (factoredML 3 2) ⟨729,1024⟩ = true := by decide_cbv
+example : equivalent (factoredML 2 0) ⟨4,27⟩ = true := by decide_cbv
+example : equivalent (factoredML 5 5) one = true := by decide_cbv
 ''')
 
     def test_universal_full_bank_recurrence(self):
@@ -127,10 +141,16 @@ example : ktStep 3 18446744073709551615 18446744073709551615 =
             'bad_row_erased': 'matchesOracle [⟨0,3⟩,⟨0,0⟩] = true',
             'zero_alphabet_positive': '(ktStep 0 0 0).denominator > 0',
             'unchecked_u64_doubling': '(ktStep 3 18446744073709551615 1).denominator < 18446744073709551616',
+            'zero_symbol_base_is_positive': 'Positive (⟨1,0⟩ : Ratio)',
+            'zero_total_base_is_positive': 'Positive (⟨0,1⟩ : Ratio)',
+            'skip_nonzero_symbol_power': 'equivalent (factoredML 3 2) (mul ⟨3,4⟩ (totalPower 3)) = true',
+            'skip_nonzero_total_power': 'equivalent (factoredML 3 2) (mul ⟨3,4⟩ (symbolPower 2)) = true',
+            'reverse_scalar_factor': 'equivalent (factoredML 3 2) (mul ⟨4,3⟩ (mul (symbolPower 2) (totalPower 3))) = true',
         }
         for name, claim in claims.items():
             with self.subTest(claim=name):
-                self.prove(HEADER + 'example : ' + claim + ' := by decide_cbv', failure=True)
+                tactic = 'unfold Positive; decide_cbv' if claim.startswith('Positive ') else 'decide_cbv'
+                self.prove(HEADER + 'example : ' + claim + ' := by ' + tactic, failure=True)
 
 
 if __name__ == '__main__':

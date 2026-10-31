@@ -104,6 +104,52 @@ theorem mlStep_positive (total selected : Nat) : Positive (mlStep total selected
   ⟨Nat.mul_pos (self_power_positive _) (self_power_positive _),
     Nat.mul_pos (self_power_positive _) (self_power_positive _)⟩
 
+/-- At zero, do not construct a ratio with denominator zero. A native power
+cursor must branch before trying to admit the positive base `(n+1)/n`. -/
+def symbolPower : Nat → Ratio
+  | 0 => one
+  | n+1 => ⟨(n+2)^(n+1), (n+1)^(n+1)⟩
+
+/-- At zero, do not construct a zero-numerator base for a positive-ratio
+cursor. Its absent power stage contributes exactly one. -/
+def totalPower : Nat → Ratio
+  | 0 => one
+  | n+1 => ⟨(n+1)^(n+1), (n+2)^(n+1)⟩
+
+private theorem symbolPower_formula (n : Nat) :
+    symbolPower n = ⟨(n+1)^n, n^n⟩ := by cases n <;> rfl
+
+private theorem totalPower_formula (n : Nat) :
+    totalPower n = ⟨n^n, (n+1)^n⟩ := by cases n <;> rfl
+
+theorem symbolPower_positive (n : Nat) : Positive (symbolPower n) := by
+  rw [symbolPower_formula]
+  exact ⟨Nat.pow_pos (by omega), self_power_positive n⟩
+
+theorem totalPower_positive (n : Nat) : Positive (totalPower n) := by
+  rw [totalPower_formula]
+  exact ⟨self_power_positive n, Nat.pow_pos (by omega)⟩
+
+/-- Factored specification, not an eager bigint implementation or a work bound.
+The scalar can be applied before, between or after the two positive powers. -/
+def factoredML (total selected : Nat) : Ratio :=
+  mul ⟨selected+1,total+1⟩ (mul (symbolPower selected) (totalPower total))
+
+theorem factored_ml_exact (total selected : Nat) :
+    factoredML total selected = mlStep total selected := by
+  simp only [factoredML, symbolPower_formula, totalPower_formula, mlStep, mul, Nat.pow_succ]
+  congr 1 <;> ac_rfl
+
+theorem factored_ml_positive (total selected : Nat) : Positive (factoredML total selected) :=
+  positive_mul (a := ⟨selected+1,total+1⟩) ⟨Nat.succ_pos selected, Nat.succ_pos total⟩
+    (positive_mul (symbolPower_positive selected) (totalPower_positive total))
+
+theorem factored_ml_checked (total selected : Nat) :
+    equivalent (factoredML total selected) (mlStep total selected) = true := by
+  apply equivalent_of_equal (factored_ml_positive _ _) (mlStep_positive _ _)
+  rw [factored_ml_exact]
+  rfl
+
 private theorem product_modify (f : α → Nat) (xs : List α) (i : Nat) (hi : i < xs.length)
     (update : α → α) (factor : Nat) (step : f (update xs[i]) = f xs[i] * factor) :
     product ((xs.modify i update).map f) = product (xs.map f) * factor := by
