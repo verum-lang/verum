@@ -29,6 +29,7 @@ def score (h : Histogram) (labels : List Nat) : Fraction :=
   match path h labels with | none => zero | some (q, _) => q
 def bank (c : Bool) : Histogram := if c then trained else binary
 def choose (past : List Nat) : Bool := past.head? == some 1
+def postTraining : Bool → Histogram := observeContext bank false ⟨1, by decide⟩
 '''
     names = [m + '.' + n for m in modules for n in re.findall(r'^theorem (\w+)',
         (ROOT / 'VerumExternalReplay' / (m + '.lean')).read_text(), re.M)]
@@ -43,6 +44,13 @@ def choose (past : List Nat) : Bool := past.head? == some 1
         'later_unknown_label_not_skipped': '(path binary [0, 2, 1]).isSome = true',
         'alphabet_does_not_grow': '(observe binary ⟨0, by decide⟩).counts.length = 3',
         'held_out_counts_are_not_reset': 'Equal (score trained [1, 0]) (score binary [1, 0])',
+        'context_continuation_retains_training_prefix':
+            'Equal (contextMass choose postTraining [1] [0]) (contextMass choose postTraining [] [0])',
+        'joint_likelihood_is_not_a_cold_restart':
+            'Equal (contextMass choose bank [] [1, 0]) '
+            '(mul (contextMass choose bank [] [1]) (contextMass choose bank [] [0]))',
+        'context_suffix_cannot_skip_invalid_label':
+            '(contextPath choose bank [] [1, 2, 0]).isSome = true',
         'path_keeps_every_factor': 'Equal (score binary [0, 0, 1]) (unit 8 (by decide))',
         'other_context_not_updated':
             '(observeContext bank false ⟨0, by decide⟩ true).counts = [4, 1]',
@@ -70,6 +78,12 @@ example : Equal (score singleton [0, 0, 0]) one := by decide_cbv
 example : path binary [0, 2, 1] = none := by decide_cbv
 example : Equal (futureMass ternary 3) one := by decide_cbv
 example : Equal (contextFutureMass choose bank [] 3) one := by decide_cbv
+example : Equal (contextMass choose bank [] [1, 0]) ⟨7, 20, by decide⟩ := by decide_cbv
+example : Equal (divide (contextMass choose bank [] [1, 0])
+    (contextMass choose bank [] [1]) (by decide_cbv)) ⟨7, 10, by decide⟩ := by decide_cbv
+example : Equal (contextMass choose postTraining [1] [0]) ⟨7, 10, by decide⟩ := by decide_cbv
+example : Equal (contextMass choose postTraining [] [0]) (unit 4 (by decide)) := by decide_cbv
+example : contextPath choose bank [] [1, 2, 0] = none := by decide_cbv
 example : (observeContext bank false ⟨0, by decide⟩ true).counts = [3, 1] := by decide_cbv
 example : statisticalGate (unit 20 (by decide)) (unit 4 (by decide))
     (unit 2 (by decide)) (unit 200 (by decide)) := by decide_cbv

@@ -180,6 +180,13 @@ theorem divide_positive (a b : Fraction) (ha : 0 < a.numerator)
     (hb : 0 < b.numerator) : 0 < (divide a b hb).numerator :=
   Nat.mul_pos ha b.positive
 
+/-- Recover a continuation likelihood from its joint likelihood and the
+positive training likelihood. No canonical fraction representation is needed. -/
+theorem divide_product_left (training fresh : Fraction)
+    (positive : 0 < training.numerator) :
+    Equal (divide (mul training fresh) training positive) fresh := by
+  simp only [Equal, divide, mul, Nat.mul_comm, Nat.mul_left_comm]
+
 theorem divide_congr {a b c d : Fraction} (h : Equal a b) (k : Equal c d)
     (hc : 0 < c.numerator) (hd : 0 < d.numerator) :
     Equal (divide a c hc) (divide b d hd) := by

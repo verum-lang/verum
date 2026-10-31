@@ -243,6 +243,50 @@ def contextPath [DecidableEq Context] (choose : List Nat → Context)
           (fun (mass, final) => (mul (predict (bank c) ⟨label, valid⟩) mass, final))
       else none
 
+/-- Splitting a trace carries both the count bank and the complete reversed
+prefix into the continuation. Invalid labels remain failures in either half. -/
+theorem context_path_split [DecidableEq Context] (choose : List Nat → Context)
+    (bank : Context → Histogram) (past training fresh : List Nat) :
+    contextPath choose bank past (training ++ fresh) =
+      (contextPath choose bank past training).bind (fun (q, mid) =>
+        (contextPath choose mid (training.reverse ++ past) fresh).map
+          (fun (r, final) => (mul q r, final))) := by
+  induction training generalizing bank past with
+  | nil =>
+      simp only [List.nil_append, List.reverse_nil, contextPath, Option.bind_some]
+      cases contextPath choose bank past fresh with
+      | none => rfl
+      | some result =>
+          rcases result with ⟨q, final⟩
+          simp [mul, one]
+  | cons label rest ih =>
+      simp only [List.cons_append, contextPath]
+      split
+      · rename_i valid
+        rw [ih]
+        simp only [List.reverse_cons, List.append_assoc, List.singleton_append]
+        cases contextPath choose (observeContext bank (choose past) ⟨label, valid⟩)
+            (label :: past) rest with
+        | none => rfl
+        | some result =>
+            rcases result with ⟨q, mid⟩
+            simp only [Option.map_some, Option.bind_some]
+            cases contextPath choose mid (rest.reverse ++ label :: past) fresh with
+            | none => rfl
+            | some result =>
+                rcases result with ⟨r, final⟩
+                simp only [Option.map_some, mul_assoc_exact]
+      · rfl
+
+theorem context_path_append [DecidableEq Context] (choose : List Nat → Context)
+    (bank mid final : Context → Histogram) (past training fresh : List Nat)
+    (q r : Fraction)
+    (first : contextPath choose bank past training = some (q, mid))
+    (second : contextPath choose mid (training.reverse ++ past) fresh = some (r, final)) :
+    contextPath choose bank past (training ++ fresh) = some (mul q r, final) := by
+  rw [context_path_split, first]
+  simp only [Option.bind_some, second, Option.map_some]
+
 theorem context_path_positive [DecidableEq Context] (choose : List Nat → Context)
     (bank : Context → Histogram) (past labels : List Nat) (mass : Fraction) (final : Context → Histogram)
     (accepted : contextPath choose bank past labels = some (mass, final)) :
@@ -313,6 +357,24 @@ def contextMass [DecidableEq Context] (choose : List Nat → Context)
     (bank : Context → Histogram) (past labels : List Nat) : Fraction :=
   ((contextPath choose bank past labels).map Prod.fst).getD zero
 
+/-- The joint/training quotient is the actual warm continuation, including
+zero mass for rejected fresh words. It does not refit a parent denominator. -/
+theorem context_mass_suffix [DecidableEq Context] (choose : List Nat → Context)
+    (bank mid : Context → Histogram) (past training fresh : List Nat) (q : Fraction)
+    (first : contextPath choose bank past training = some (q, mid)) :
+    Equal (divide (contextMass choose bank past (training ++ fresh)) q
+      (context_path_positive _ _ _ _ _ _ first))
+      (contextMass choose mid (training.reverse ++ past) fresh) := by
+  unfold contextMass
+  rw [context_path_split, first]
+  simp only [Option.bind_some]
+  cases next : contextPath choose mid (training.reverse ++ past) fresh with
+  | none => simp [Equal, divide, zero]
+  | some result =>
+      rcases result with ⟨r, final⟩
+      simp only [Option.map_some, Option.getD_some]
+      exact divide_product_left _ _ _
+
 theorem context_mass_cons [DecidableEq Context] (choose : List Nat → Context)
     (bank : Context → Histogram) (past rest : List Nat) (label : Nat)
     (valid : label < (bank (choose past)).counts.length) :
@@ -352,6 +414,22 @@ theorem context_words_normalized [DecidableEq Context] (choose : List Nat → Co
       have size_eq := (fixed (choose past)).symm
       subst size
       exact distribution_normalized _
+
+/-- From every accepted training trace, the joint/training likelihoods sum to
+one over the complete fixed-length fresh word space. The classifier sees only
+the accumulated prefix; native fidelity and parent-null bounds remain separate. -/
+theorem trained_continuations_normalized [DecidableEq Context]
+    (choose : List Nat → Context) (bank mid : Context → Histogram)
+    (past training : List Nat) (q : Fraction) (size horizon : Nat)
+    (fixed : FixedSupport bank size)
+    (first : contextPath choose bank past training = some (q, mid)) :
+    Equal (sum ((words size horizon).map (fun fresh =>
+      divide (contextMass choose bank past (training ++ fresh)) q
+        (context_path_positive _ _ _ _ _ _ first)))) one := by
+  apply eq_trans (sum_congr (words size horizon) _ _
+    (fun fresh _ => context_mass_suffix choose bank mid past training fresh q first))
+  exact context_words_normalized choose mid _ size horizon
+    (context_path_fixed_support choose bank past training size fixed q mid first)
 
 def contextFutureMass [DecidableEq Context] (choose : List Nat → Context)
     (bank : Context → Histogram) (past : List Nat) : Nat → Fraction
