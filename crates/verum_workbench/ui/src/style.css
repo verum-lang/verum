@@ -147,6 +147,19 @@ kbd {
 .skip-link:focus {
   top: 12px;
 }
+.session-gate {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+.session-card { width: min(100%, 360px); display: grid; gap: var(--space-3); }
+.session-mark { justify-self: center; }
+.session-card h1 { margin: 0; font-size: 18px; font-weight: 550; text-align: center; }
+.session-card p { margin: 0; }
+#session-endpoint { text-align: center; overflow-wrap: anywhere; }
+.session-card input { width: 100%; min-height: 36px; }
+.session-error { color: var(--danger); min-height: 1.5em; }
 #app {
   height: 100dvh;
   min-height: 0;

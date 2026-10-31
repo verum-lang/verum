@@ -11,8 +11,20 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
+<section id="session-gate" class="session-gate" aria-labelledby="session-title">
+  <form id="session-form" class="session-card">
+    <img class="session-mark" src="__VERUM_BRAND_URI__" alt="" width="48" height="48">
+    <h1 id="session-title">Connect to Verum Studio</h1>
+    <p id="session-endpoint" class="muted"></p>
+    <p>Open the launch URL printed by verum studio, or enter its access token. The token stays in this browser tab.</p>
+    <label for="session-token">Access token</label>
+    <input id="session-token" type="password" autocomplete="off" spellcheck="false" required aria-describedby="session-error">
+    <p id="session-error" class="session-error" role="alert"></p>
+    <button id="session-connect" class="button primary" type="submit">Connect</button>
+  </form>
+</section>
+<div id="app" data-pane="editor" hidden inert>
 <a class="skip-link" href="#editor-pane">Skip to editor</a>
-<div id="app" data-pane="editor">
   <header class="topbar">
     <div class="brand" aria-label="Verum Studio"><img class="brand-mark" src="__VERUM_BRAND_URI__" alt="" width="28" height="28"></div>
     <button id="command-palette" class="icon-button" aria-label="Command palette" title="Command palette"><span data-icon="keyboard"></span></button>

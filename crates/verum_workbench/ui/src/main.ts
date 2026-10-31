@@ -10,9 +10,13 @@ import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
 import { languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
-import { api, hasToken, installToken } from './api';
+import { api, initialToken, isConnected, connectSession, onSessionChange } from './api';
+import { SessionAccessError, SessionChangedError } from './session';
 import { STARTER, IDENTITY, sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
 
+// Register before command/editor handlers. The connection page keeps ordinary
+// text input and browser defaults, but cannot dispatch workspace commands.
+document.addEventListener('keydown', event => { if (!isConnected()) event.stopImmediatePropagation(); }, { capture: true });
 installIcons(); installTooltips(); initializeLanguage();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => {
   const node = document.getElementById(id);
@@ -27,7 +31,8 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 function errorText(error: unknown) { return error instanceof Error ? error.message : String(error); }
 function notice(message: Content) { setText($('notice-text'), message); $('notice').hidden = false; }
 function announce(message: Content) { setText($('announcer'), message); }
-function fail(error: unknown) { notice(errorText(error)); }
+function sessionFailure(error: unknown) { return error instanceof SessionAccessError || error instanceof SessionChangedError; }
+function fail(error: unknown) { if (!sessionFailure(error)) notice(errorText(error)); }
 const actions = new Map<string, () => unknown | Promise<unknown>>();
 function bind(id: string, action: () => unknown | Promise<unknown>) {
   if (actions.has(id)) throw new Error(`Duplicate action: ${id}`);
@@ -105,7 +110,7 @@ function updateDocumentState() {
   $<HTMLButtonElement>('reload-source').disabled = savedHash === null || isSaving;
   setText($('source-status'), currentHash ? m('{state} · {hash}', { state: m(dirty() ? 'Unsaved' : 'Saved'), hash: currentHash.slice(0, 10) }) : m('Calculating source revision…'));
   setAttribute($('source-status'), 'title', currentHash ? m('SHA-256 {hash}', { hash: currentHash }) : m('Source hashing in progress'));
-  document.title = `${dirty() ? '• ' : ''}${currentPath.split('/').pop()} · Verum Studio`;
+  document.title = isConnected() ? `${dirty() ? '• ' : ''}${currentPath.split('/').pop()} · Verum Studio` : 'Verum Studio';
   explorer?.current(currentPath, dirty());
   const verum = currentPath.endsWith('.vr');
   for (const id of ['run', 'check', 'prove']) $<HTMLButtonElement>(id).disabled = !verum || starting;
@@ -318,7 +323,7 @@ function scheduleAnalysis() {
   analysisPending = true; analysisTimer = window.setTimeout(analyzeSource, 350);
 }
 async function analyzeSource() {
-  if (analysisBusy || !hasToken()) return;
+  if (analysisBusy || !isConnected()) return;
   analysisBusy = true; analysisPending = false;
   const revision = languageRevision(), generation = analysisGeneration;
   try {
@@ -796,14 +801,11 @@ const commandRegistry = new CommandRegistry([
   command('editor.complete', m('Show completions'), 'Ctrl+Space', editorAction(editor.actions.complete), ['editor'], () => currentPath.endsWith('.vr')),
 ]);
 const commands = installCommands(commandRegistry, fail, announce);
+let workspaceInitialized = false;
 async function initialize() {
   const initialRevision = documentRevision();
-  if (!hasToken()) {
-    const content = node('div'); content.append(node('p', '', m('Open the launch URL printed by verum studio, or paste its local access token below. The token stays in this browser tab.')));
-    const label = node('label', '', m('Local access token')); const field = node('input'); field.type = 'password'; field.autocomplete = 'off'; label.append(field); content.append(label);
-    if (await dialog(m('Connect to Verum Studio'), content, [{ value: 'connect', label: m('Connect'), primary: true }]) !== 'connect') return;
-    installToken(field.value);
-  }
+  const restoreInitial = !workspaceInitialized;
+  workspaceInitialized = true;
   await refreshFiles();
   // A returning workspace opens its existing default file, never a colliding new draft.
   // Both async boundaries must preserve the initial document revision: typing, opening
@@ -811,7 +813,7 @@ async function initialize() {
   const initialPath = files.find(file => file.path === initialRevision.path)?.path
     ?? files.find(file => file.path.toLowerCase() === 'readme.md')?.path
     ?? files.find(file => file.path.endsWith('.vr'))?.path;
-  if (!switching && sameDocumentRevision(initialRevision, documentRevision()) && initialPath) {
+  if (restoreInitial && !switching && sameDocumentRevision(initialRevision, documentRevision()) && initialPath) {
     const file = await api<SourceFile>('document.read', { path: initialPath });
     if (!switching && sameDocumentRevision(initialRevision, documentRevision())) loadDocument(file.path, file.source, file.hash);
   }
@@ -819,14 +821,60 @@ async function initialize() {
   scheduleAnalysis();
 }
 updateDocumentState(); scheduleHash();
-initialize().catch(fail);
+let sessionWasConnected = false;
 let lastPollError = '';
+onSessionChange(state => {
+  const unlocked = state === 'connected';
+  $('app').hidden = !unlocked; $('app').inert = !unlocked;
+  $('session-gate').hidden = unlocked;
+  input('session-token').disabled = state === 'checking';
+  $<HTMLButtonElement>('session-connect').disabled = state === 'checking';
+  setText($('session-connect'), state === 'checking' ? m('Connecting…') : m('Connect'));
+  if (unlocked) {
+    if (lastPollError) { $('notice').hidden = true; lastPollError = ''; }
+    updateDocumentState();
+  }
+  if (!unlocked) {
+    document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach(dialog => dialog.close('session-locked'));
+    document.title = 'Verum Studio';
+    if (sessionWasConnected) {
+      setText($('session-error'), m('Session access expired. Reconnect using the current launch URL.'));
+      // A replacement host has its own operation and agent identities. Keep
+      // the editor draft and readable conversation, but retire old actions.
+      receipts = []; selectedReceipt = null; renderResults();
+      analysisGeneration++; analysisPending = false;
+      connected = false; authenticated = false; threadId = null; turnId = null;
+      cursor = 0; pendingApprovals = 0; approvalIds.clear(); completedTurns.clear(); messageBodies.clear();
+      document.querySelectorAll<HTMLButtonElement>('#agent-messages button').forEach(button => { button.disabled = true; });
+      agentState(); connectionStatus(false);
+    }
+    if (state === 'locked') input('session-token').focus();
+  }
+  sessionWasConnected = unlocked;
+});
+setText($('session-endpoint'), location.origin);
+async function connectWorkspace() {
+  setText($('session-error'), '');
+  try {
+    await connectSession(input('session-token').value);
+    input('session-token').value = '';
+    await initialize();
+    setPane('editor');
+    if (!$('editor').hidden) editor.view.focus(); else $('editor-pane').focus();
+  } catch (error) {
+    if (isConnected()) fail(error);
+    else { setText($('session-error'), errorText(error)); input('session-token').focus(); }
+  }
+}
+$('session-form').addEventListener('submit', event => { event.preventDefault(); void connectWorkspace(); });
+if (initialToken) { input('session-token').value = initialToken; void connectWorkspace(); }
 window.setInterval(() => {
-  if (!hasToken()) return;
+  if (!isConnected()) return;
   refreshOperations().then(() => { if (lastPollError) { lastPollError = ''; connectionStatus(true); } }).catch(error => {
+    if (sessionFailure(error)) return;
     connectionStatus(false);
     const text = errorText(error); if (text !== lastPollError) { lastPollError = text; notice(m('Connection: {error}', { error: text })); }
   });
 }, 1200);
-window.setInterval(() => { pollEvents().catch(error => { const text = errorText(error); if (text !== lastPollError) { lastPollError = text; notice(m('Agent event stream: {error}', { error: text })); } }); }, 700);
-window.setInterval(() => { if (hasToken() && document.visibilityState === 'visible') explorer?.refresh().catch(fail); }, 5000);
+window.setInterval(() => { if (isConnected()) pollEvents().catch(error => { if (sessionFailure(error)) return; const text = errorText(error); if (text !== lastPollError) { lastPollError = text; notice(m('Agent event stream: {error}', { error: text })); } }); }, 700);
+window.setInterval(() => { if (isConnected() && document.visibilityState === 'visible') explorer?.refresh().catch(fail); }, 5000);
