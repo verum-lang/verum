@@ -1,4 +1,4 @@
-import Lean
+import Lean.Elab.Tactic.Basic
 import VerumExternalReplay.ConservativeRefinement
 import VerumExternalReplay.ExactTransports
 import VerumExternalReplay.TypedPrograms

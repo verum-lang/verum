@@ -1,4 +1,5 @@
 import VerumExternalReplay.ActionQuotient
+import VerumExternalReplay.RetainedNames
 
 namespace ActionQuotientControls
 open ActionQuotient
@@ -8,6 +9,10 @@ set_option warningAsError true
 law is universal, not inferred by enumerating a prefix of the counter. -/
 def counterStep (state action : Nat) : Option Nat := some (state + action)
 def counterRead (period state : Nat) (_ : Unit) : Option Nat := some (state % period)
+-- Keep the proof-producing replay tactic usable with its focused Lean import.
+example : PartialObservers.fold counterStep [1, 2, 3] 0 = some 6 := by
+  reduce_observer_fold 3
+
 def residue (period : Nat) (positive : 0 < period) (state : Nat) : Fin period :=
   ⟨state % period, Nat.mod_lt _ positive⟩
 def residueStep (period : Nat) (positive : 0 < period) (state : Fin period)
@@ -35,6 +40,56 @@ theorem counter_behavioral_classes (period : Nat) (positive : 0 < period) (s t :
     Equivalent counterStep (counterRead period) s t ↔
       residue period positive s = residue period positive t :=
   (counter_factor period positive).exact_behavioral_classes (residue_separating period positive)
+
+-- Three distinguishable future phases have only two current read values.
+-- This unbounded counter factor does not assert a world period or acquisition.
+def thirdRead (state : Nat) (_ : Unit) : Option Bool := some (state % 3 == 2)
+def thirdView (phase : Fin 3) (_ : Unit) : Option Bool := some (phase.val == 2)
+theorem third_factor : Factor counterStep thirdRead (residueStep 3 (by decide))
+    thirdView (residue 3 (by decide)) :=
+  ⟨(counter_factor 3 (by decide)).update, fun _ _ => rfl⟩
+
+theorem residue_representative (phase : Fin 3) :
+    residue 3 (by decide) phase.val = phase := by
+  apply Fin.ext
+  exact Nat.mod_eq_of_lt phase.isLt
+
+-- Reuse the actual retained-name model, rather than an unmetered mock name.
+-- The equality covers unpaid steps, capacity refusal and all retained cursors.
+example (state input capacity scanned : Nat) (keys : List (Nat × Bool)) (paid : Bool) :
+    (thirdRead (residue 3 (by decide) state).val ()).map
+      (fun value => RetainedNames.step capacity keys (input, value) scanned paid) =
+    (thirdRead state ()).map
+      (fun value => RetainedNames.step capacity keys (input, value) scanned paid) :=
+  third_factor.consume_representative Fin.val residue_representative _ state ()
+
+example : thirdRead 0 () = thirdRead 1 () := by decide_cbv
+example : residue 3 (by decide) 0 ≠ residue 3 (by decide) 1 := by decide_cbv
+example : ¬ Equivalent counterStep thirdRead 0 1 := by
+  intro same
+  have different := (same [1]).2 ()
+  contradiction
+
+def readName (state input : Nat) : Option (List (Nat × Bool) × Option Nat) :=
+  (thirdRead state ()).map (fun value => ExactNames.intern 2 [(7, false), (7, true)] (input, value))
+
+example : readName 0 7 = some ([(7, false), (7, true)], some 0) := by decide_cbv
+example : readName 1 7 = readName 0 7 := by decide_cbv
+example : readName 2 7 = some ([(7, false), (7, true)], some 1) := by decide_cbv
+example : readName 1 8 = some ([(7, false), (7, true)], none) := by decide_cbv
+
+/-- error: `decide_cbv` failed: the proposition evaluates to `false` -/
+#guard_msgs in
+example : observation counterStep thirdRead [1] 0 () =
+    observation counterStep thirdRead [1] 1 () := by decide_cbv
+
+/-- error: `decide_cbv` failed: the proposition evaluates to `false` -/
+#guard_msgs in
+example : readName 1 7 = some ([(7, false), (7, true)], some 1) := by decide_cbv
+
+/-- error: `decide_cbv` failed: the proposition evaluates to `false` -/
+#guard_msgs in
+example : readName 1 8 = readName 1 7 := by decide_cbv
 
 example (period : Nat) (positive : 0 < period) (actions : List Nat) (state : Nat) :
     observation (residueStep period positive) residueRead actions (residue period positive state) () =
@@ -177,6 +232,14 @@ example : iterate Nat.succ 4 0 = 0 := by decide_cbv
 example : (3 : Nat) ∣ 2 := by decide_cbv
 
 -- Reject hidden oracle, admission or project-specific axioms in every named law.
+/-- info: 'ActionQuotient.Factor.representative_read' does not depend on any axioms -/
+#guard_msgs in
+#print axioms ActionQuotient.Factor.representative_read
+
+/-- info: 'ActionQuotient.Factor.consume_representative' does not depend on any axioms -/
+#guard_msgs in
+#print axioms ActionQuotient.Factor.consume_representative
+
 /-- info: 'ActionQuotient.Factor.fold' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms ActionQuotient.Factor.fold

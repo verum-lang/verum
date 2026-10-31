@@ -64,6 +64,25 @@ theorem Factor.kernel_congruence (factor : Factor step read next view encode)
     (step s action).map encode = (step t action).map encode := by
   rw [← factor.update, ← factor.update, same]
 
+/-- A representative of the same whole behavioral class preserves the current
+read, including undefinedness. This does not identify a phase with its output,
+nor prove that a native installed state belongs to the certified class. -/
+theorem Factor.representative_read (factor : Factor step read next view encode)
+    (represent : Q → S) (retraction : ∀ q, encode (represent q) = q)
+    (s : S) (query : I) : read (represent (encode s)) query = read s query := by
+  rw [← factor.observe, retraction, factor.observe]
+
+/-- The complete downstream result is preserved, including a stateful naming
+step's table, cursor and refusal. Both sides use the same consumer: its input
+namespace, retained table, cursor and resource grant cannot be substituted.
+No consumer runs for an undefined read. Native execution/ownership remain
+adapter obligations, rather than assumptions hidden in a name certificate. -/
+theorem Factor.consume_representative (factor : Factor step read next view encode)
+    (represent : Q → S) (retraction : ∀ q, encode (represent q) = q)
+    (consume : O → R) (s : S) (query : I) :
+    (read (represent (encode s)) query).map consume = (read s query).map consume := by
+  rw [factor.representative_read represent retraction]
+
 theorem Factor.kernel_equivalent (factor : Factor step read next view encode)
     (same : encode s = encode t) : Equivalent step read s t := by
   intro actions
