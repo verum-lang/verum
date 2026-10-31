@@ -6,6 +6,7 @@ pub mod language;
 pub mod project_files;
 pub mod project_git;
 pub mod server;
+pub mod runtime_diagnostics;
 pub mod workspace;
 
 use anyhow::{Context, Result, bail, ensure};

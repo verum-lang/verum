@@ -55,7 +55,7 @@ async fn shared_planning_is_read_only_and_uses_the_workspace_boundary() {
     };
     let planning = schema("verum_plan");
     let running = schema("verum_run");
-    for field in ["permissions", "timeout_ms", "source", "path"] {
+    for field in ["permissions", "runtime_diagnostics", "timeout_ms", "source", "path"] {
         assert_eq!(planning["properties"][field], running["properties"][field]);
     }
     assert_eq!(planning["additionalProperties"], false);

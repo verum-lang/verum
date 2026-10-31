@@ -45,6 +45,8 @@ pub struct ExecutionPlan {
     #[serde(default)]
     pub permissions: Option<RunPermissions>,
     #[serde(default)]
+    pub runtime_diagnostics: Option<bool>,
+    #[serde(default)]
     pub declaration: Option<Text>,
 }
 
@@ -91,6 +93,16 @@ impl ExecutionPlan {
             );
             None
         };
+        let runtime_diagnostics = if kind == OperationKind::Run {
+            Some(match params.get("runtime_diagnostics") {
+                None => false,
+                Some(value) => value.as_bool().context("Runtime diagnostics must be a boolean")?,
+            })
+        } else {
+            ensure!(params.get("runtime_diagnostics").is_none(),
+                "Runtime diagnostics apply only to interpreter runs");
+            None
+        };
         Ok(Self {
             kind,
             path: path.into(),
@@ -103,6 +115,7 @@ impl ExecutionPlan {
             .into(),
             timeout_ms,
             permissions,
+            runtime_diagnostics,
             declaration,
         })
     }

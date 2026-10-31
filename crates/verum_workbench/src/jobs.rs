@@ -17,6 +17,7 @@ use tokio::{
     sync::{Mutex, watch},
 };
 use verum_common::{List, Text};
+use verum_common::runtime_diagnostics::RuntimeReport;
 
 const OUTPUT_LIMIT: usize = 256 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -30,6 +31,10 @@ pub struct Receipt {
     pub exit_code: Option<i32>,
     pub elapsed_ms: u64,
     pub proof: Option<Value>,
+    #[serde(default)]
+    pub runtime: Option<RuntimeReport>,
+    #[serde(default)]
+    pub runtime_error: Option<Text>,
     pub evidence_path: PathBuf,
     pub started_unix_ms: u64,
     pub termination: Text,
@@ -65,6 +70,9 @@ impl Jobs {
             let Ok(mut receipt) = serde_json::from_slice::<Receipt>(&std::fs::read(path)?) else {
                 continue;
             };
+            if entry.file_name().to_str() != Some(receipt.id.as_str()) {
+                continue;
+            }
             let Ok(source) = std::fs::read(entry.path().join("source.vr")) else {
                 continue;
             };
@@ -76,6 +84,7 @@ impl Jobs {
                 receipt.status = "inconclusive".into();
                 receipt.termination = "Studio stopped before receiving a terminal result".into();
             }
+            load_runtime_report(&mut receipt);
             receipts.push(receipt);
         }
         receipts.sort_by_key(|r| r.started_unix_ms);
@@ -146,6 +155,10 @@ impl Jobs {
             if let Some(flag) = plan.permissions.and_then(|policy| policy.cli_flag()) {
                 command.arg(flag);
             }
+            if plan.runtime_diagnostics == Some(true) {
+                command.arg("--runtime-report").arg(evidence_path.join("runtime.json"))
+                    .arg("--runtime-run-id").arg(id.as_str());
+            }
             command.arg("-");
             Some(source.as_bytes().iter().copied().collect())
         } else {
@@ -164,6 +177,8 @@ impl Jobs {
             exit_code: None,
             elapsed_ms: 0,
             proof: None,
+            runtime: None,
+            runtime_error: None,
             evidence_path,
             started_unix_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
@@ -301,6 +316,7 @@ async fn execute(
     record.elapsed_ms = started.elapsed().as_millis() as u64;
     record.termination = reason;
     record.version += 1;
+    load_runtime_report(&mut record);
     if record.plan.kind == OperationKind::Proof && state == "succeeded" {
         match serde_json::from_str::<Value>(&record.stdout) {
             Ok(proof)
@@ -327,6 +343,19 @@ async fn execute(
         record
             .stderr
             .push_str(&format!("\nCould not retain receipt: {error}"));
+    }
+}
+fn load_runtime_report(receipt: &mut Receipt) {
+    receipt.runtime = None;
+    receipt.runtime_error = None;
+    if receipt.plan.kind != OperationKind::Run || receipt.plan.runtime_diagnostics != Some(true) {
+        return;
+    }
+    match crate::runtime_diagnostics::read_report(
+        &receipt.evidence_path.join("runtime.json"), &receipt.id, &receipt.plan.source_hash,
+    ) {
+        Ok(report) => receipt.runtime = Some(report),
+        Err(error) => receipt.runtime_error = Some(error.to_string().into()),
     }
 }
 fn process_status(status: std::process::ExitStatus, proof: bool) -> &'static str {
