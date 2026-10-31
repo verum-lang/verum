@@ -18,7 +18,7 @@ export function installTooltips() {
     if (!text) return; hide(); current = control;
     timer = window.setTimeout(() => {
       if (current !== control || !control.isConnected) return;
-      (control.closest('dialog') || document.body).append(tooltip); tooltip.textContent = text; tooltip.hidden = false;
+      (control.closest('dialog') || document.body).append(tooltip); tooltip.textContent = text + (control.dataset.shortcut ? ` · ${control.dataset.shortcut}` : ''); tooltip.hidden = false;
       const bounds = control.getBoundingClientRect();
       tooltip.style.left = `${Math.max(8, Math.min(innerWidth - tooltip.offsetWidth - 8, bounds.left + bounds.width / 2 - tooltip.offsetWidth / 2))}px`;
       tooltip.style.top = `${bounds.bottom + tooltip.offsetHeight + 8 <= innerHeight ? bounds.bottom + 6 : Math.max(8, bounds.top - tooltip.offsetHeight - 6)}px`;
@@ -31,5 +31,6 @@ export function installTooltips() {
   document.addEventListener('focusout', hide); document.addEventListener('pointerdown', hide);
   document.addEventListener('scroll', hide, true); window.addEventListener('blur', hide);
   document.addEventListener('studio:language', hide);
+  document.addEventListener('studio:shortcuts', hide);
   document.addEventListener('keydown', event => { if (event.key === 'Escape') hide(); });
 }

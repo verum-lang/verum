@@ -1,9 +1,9 @@
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, hoverTooltip } from '@codemirror/view';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { searchKeymap, highlightSelectionMatches, searchPanelOpen, closeSearchPanel, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery } from '@codemirror/search';
-import { autocompletion, completionKeymap, snippet } from '@codemirror/autocomplete';
+import { defaultKeymap, history, historyKeymap, undo, redo, toggleComment } from '@codemirror/commands';
+import { searchKeymap, highlightSelectionMatches, searchPanelOpen, closeSearchPanel, openSearchPanel, gotoLine, SearchQuery, getSearchQuery, setSearchQuery } from '@codemirror/search';
+import { autocompletion, completionKeymap, snippet, startCompletion } from '@codemirror/autocomplete';
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching, indentOnInput } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { translations } from './translations';
@@ -86,6 +86,10 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
   let hooks: LanguageHooks | null = null;
   let verumEnabled = true;
   const syntax = new Compartment();
+  // These bindings belong to Studio's editable registry, including their removal.
+  const actions = { undo, redo, find: openSearchPanel, gotoLine, comment: toggleComment, complete: startCompletion };
+  const managed = new Set(Object.values(actions));
+  const editingKeys = [...completionKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap].filter(binding => !binding.run || !managed.has(binding.run));
   async function definition() {
     if (!hooks || !verumEnabled) return;
     const revision = hooks.revision();
@@ -97,7 +101,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
   const stateFor = (source: string) => EditorState.create({ doc: source, extensions: [
       lineNumbers(), lintGutter(), highlightActiveLineGutter(), history(), drawSelection(), rectangularSelection(),
       highlightActiveLine(), highlightSelectionMatches(), bracketMatching(), indentOnInput(), syntax.of(verumEnabled ? verum : []),
-      autocompletion({ override: [async context => {
+      autocompletion({ defaultKeymap: false, override: [async context => {
         const word = context.matchBefore(/[\p{L}_][\p{L}\p{N}_]*/u);
         if (!word || (!context.explicit && word.from === word.to)) return null;
         if (!hooks || !verumEnabled) return null;
@@ -118,7 +122,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
           }) };
         } catch { return null; }
       }] }),
-      keymap.of([{ key: 'F12', run: () => { definition().catch(error => hooks?.failure(error)); return true; } }, ...defaultKeymap, ...historyKeymap, ...searchKeymap, ...completionKeymap]),
+      keymap.of(editingKeys),
       hoverTooltip(async (_view, position) => {
         if (!hooks || !verumEnabled) return null;
         const revision = hooks.revision();
@@ -153,6 +157,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
     connectLanguage(value: LanguageHooks) { hooks = value; },
     document(path: string) { verumEnabled = path.endsWith('.vr'); view.dispatch({ effects: [syntax.reconfigure(verumEnabled ? verum : []), language.reconfigure(editorLanguage(verumEnabled))] }); },
     definition,
+    actions: Object.fromEntries(Object.entries(actions).map(([id, action]) => [id, () => { view.focus(); return action(view); }])) as Record<keyof typeof actions, () => boolean>,
     diagnostics(source: string, diagnostics: Diagnostic[]) {
       if (view.state.doc.toString() !== source) return;
       view.dispatch(setDiagnostics(view.state, diagnostics.flatMap(diagnostic => {

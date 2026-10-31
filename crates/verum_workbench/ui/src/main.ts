@@ -1,5 +1,7 @@
 import './style.css';
 import { makeEditor } from './editor';
+import { CommandRegistry, type CommandContext, type StudioCommand } from './commands';
+import { installCommands } from './command-surface';
 import { installPanels } from './panels';
 import { installExplorer } from './explorer';
 import { icon, installIcons, type IconName } from './icons';
@@ -26,7 +28,10 @@ function errorText(error: unknown) { return error instanceof Error ? error.messa
 function notice(message: Content) { setText($('notice-text'), message); $('notice').hidden = false; }
 function announce(message: Content) { setText($('announcer'), message); }
 function fail(error: unknown) { notice(errorText(error)); }
+const actions = new Map<string, () => unknown | Promise<unknown>>();
 function bind(id: string, action: () => unknown | Promise<unknown>) {
+  if (actions.has(id)) throw new Error(`Duplicate action: ${id}`);
+  actions.set(id, action);
   $(id).addEventListener('click', () => { Promise.resolve().then(action).catch(fail); });
 }
 function button(label: Content, action: () => unknown | Promise<unknown>, className = 'button') {
@@ -285,8 +290,15 @@ window.addEventListener('focus', scheduleAnalysis);
 function resultView(diagnostics: boolean) {
   $('operations-panel').hidden = diagnostics; $('diagnostics-panel').hidden = !diagnostics;
   $('operations-tab').setAttribute('aria-selected', String(!diagnostics)); $('diagnostics-tab').setAttribute('aria-selected', String(diagnostics));
+  $('operations-tab').tabIndex = diagnostics ? -1 : 0; $('diagnostics-tab').tabIndex = diagnostics ? 0 : -1;
 }
 bind('operations-tab', () => resultView(false)); bind('diagnostics-tab', () => resultView(true));
+for (const id of ['operations-tab', 'diagnostics-tab']) $(id).addEventListener('keydown', event => {
+  if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const diagnostics = event.key === 'End' || (event.key !== 'Home' && id === 'operations-tab');
+  resultView(diagnostics); $(diagnostics ? 'diagnostics-tab' : 'operations-tab').focus();
+});
 bind('language-status', () => { resultView(true); setPane('results'); });
 function scheduleAnalysis() {
   ++analysisGeneration;
@@ -626,7 +638,6 @@ bind('new-thread', () => {
 });
 bind('agent-suggestion', () => { $<HTMLTextAreaElement>('agent-input').value = t(m('Explain this Verum source and suggest one useful experiment. Use Verum tools to check your claims.')); if (connected) $('agent-input').focus(); else notice(m('Connect Codex to start this conversation.')); });
 $('agent-form').addEventListener('submit', event => { event.preventDefault(); sendMessage().catch(fail); });
-$('agent-input').addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); sendMessage().catch(fail); } });
 bind('agent-stop', async () => {
   if (!threadId || !turnId) throw new Error(t(m('The turn is still starting. Try Stop again when its identifier arrives.')));
   await api('agent.request', { method: 'turn/interrupt', params: { threadId, turnId } });
@@ -719,7 +730,9 @@ async function showApproval(id: string | number, method: string, params: Record<
       pendingApprovals--; agentState();
       if (approved && kind === 'source' && typeof args.path === 'string') {
         await refreshFiles();
-        if (args.path === currentPath && !dirty()) { const file = await api<SourceFile>('workspace.read', { path: args.path }); loadDocument(file.path, file.source, file.hash); }
+        if (!switching && args.path === currentPath && !dirty()) {
+          await replaceDocument(() => api<SourceFile>('workspace.read', { path: args.path }));
+        }
       }
       await refreshOperations();
     } catch (error) { status.append(node('p', '', m('Refresh unavailable: {error}', { error: errorText(error) }))); }
@@ -738,21 +751,51 @@ bind('theme', () => {
 bind('settings', () => { setText($('connection-endpoint'), location.origin); $<HTMLDialogElement>('settings-dialog').showModal(); });
 bind('settings-close', () => $<HTMLDialogElement>('settings-dialog').close());
 function findProjectFile() { setPane('files'); input('file-filter').focus(); input('file-filter').select(); }
-bind('project-search', findProjectFile);
-bind('help', async () => {
+bind('command-palette', () => commands.palette());
+bind('help', () => {
   $<HTMLDialogElement>('settings-dialog').close();
-  const content = node('div', 'shortcut-list');
-  for (const [label, shortcut] of [[m('Save source'), '⌘ / Ctrl S'], [m('Run source'), '⌘ / Ctrl Enter'], [m('Check source'), '⌘ / Ctrl Shift Enter'], [m('Find a project file'), '⌘ / Ctrl P'], [m('Find in source'), '⌘ / Ctrl F'], [m('Go to definition'), 'F12'], [m('Toggle explorer'), '⌘ / Ctrl B'], [m('Toggle collaborator'), '⌘ / Ctrl Shift B'], [m('Toggle results'), '⌘ / Ctrl J'], [m('Resize focused divider'), m('Arrow keys · Home / End')], [m('Collapse focused divider'), 'Enter'], [m('Send agent message'), '⌘ / Ctrl Enter'], [m('Leave editor with Tab'), m('Esc, then Tab')]]) content.append(node('span', '', label), node('kbd', '', shortcut));
-  await dialog(m('Keyboard shortcuts'), content, [{ value: 'close', label: m('Done'), primary: true }]);
+  commands.preferences();
 });
-document.addEventListener('keydown', event => {
-  if (document.querySelector('dialog[open]') || !(event.ctrlKey || event.metaKey)) return;
-  if (event.key.toLowerCase() === 'p') { event.preventDefault(); findProjectFile(); }
-  else if (event.key.toLowerCase() === 'b') { event.preventDefault(); panels.toggle(event.shiftKey ? 'agent' : 'files'); }
-  else if (event.key.toLowerCase() === 'j') { event.preventDefault(); panels.toggle('results'); }
-  else if (event.key.toLowerCase() === 's') { event.preventDefault(); save().catch(fail); }
-  else if (event.key === 'Enter' && event.target !== $('agent-input')) { event.preventDefault(); startOperation(event.shiftKey ? 'check' : 'run').catch(fail); }
-});
+const everywhere: CommandContext[] = ['workspace', 'editor', 'agent'];
+function command(id: string, label: Content, shortcut: string, run: StudioCommand['run'], contexts = everywhere, enabled = () => true, controls?: string): StudioCommand {
+  return { id, label: () => t(label), shortcut, run, contexts, enabled, controls };
+}
+function control(id: string, label: Content, shortcut = '', contexts = everywhere, available = () => true): StudioCommand {
+  const run = actions.get(id); if (!run) throw new Error(`Missing command action: ${id}`);
+  return command(id, label, shortcut, run, contexts, () => available() && !$<HTMLButtonElement>(id).disabled, `#${id}`);
+}
+function editorAction(run: StudioCommand['run']): StudioCommand['run'] {
+  return () => { setPane('editor'); sourceView(); return run(); };
+}
+const commandRegistry = new CommandRegistry([
+  control('command-palette', m('Command palette'), 'Mod+Shift+P'),
+  control('help', m('Keyboard shortcuts'), 'F1'), control('settings', m('Settings'), 'Mod+Comma'),
+  command('project-search', m('Find a project file'), 'Mod+P', findProjectFile),
+  control('save', m('Save source'), 'Mod+S'), control('new-file', m('New Verum file')),
+  control('reload-source', m('Review the saved file before reloading')), control('refresh-files', m('Refresh files')),
+  control('run', m('Run source'), 'Mod+Enter', ['editor']), control('check', m('Check source'), 'Mod+Shift+Enter', ['editor']),
+  control('prove', m('Check a logical declaration'), 'Alt+Shift+Enter', ['editor']),
+  control('run-settings', m('Execution options')), control('preview-run', m('Inspect run plan')),
+  control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),
+  control('language-status', m('Show module diagnostics')), control('theme', m('Change color theme')),
+  control('agent-connect', m('Connect agent')), control('agent-login', m('Sign in'), '', everywhere, () => connected),
+  control('new-thread', m('New conversation')), control('agent-stop', m('Stop agent turn'), '', everywhere, () => turnId !== null),
+  command('agent.send', m('Send agent message'), 'Mod+Enter', sendMessage, ['agent'], () => !$<HTMLButtonElement>('agent-send').disabled, '#agent-send'),
+  command('view.files', m('Toggle explorer'), 'Mod+B', () => panels.toggle('files'), everywhere, undefined, '[data-toggle-panel="files"]'),
+  command('view.agent', m('Toggle collaborator'), 'Mod+Shift+B', () => panels.toggle('agent'), everywhere, undefined, '[data-toggle-panel="agent"]'),
+  command('view.results', m('Toggle results'), 'Mod+J', () => panels.toggle('results'), everywhere, undefined, '[data-toggle-panel="results"]'),
+  command('focus.editor', m('Focus editor'), 'Alt+1', () => { setPane('editor'); sourceView(); editor.view.focus(); }),
+  command('focus.agent', m('Focus collaborator'), 'Alt+2', () => { setPane('agent'); $(input('agent-input').disabled ? 'agent-connect' : 'agent-input').focus(); }),
+  command('focus.results', m('Focus results'), 'Alt+3', () => { setPane('results'); $( $('diagnostics-panel').hidden ? 'operations-tab' : 'diagnostics-tab').focus(); }),
+  command('editor.definition', m('Go to definition'), 'F12', editorAction(editor.definition), ['editor'], () => currentPath.endsWith('.vr')),
+  command('editor.find', m('Find in source'), 'Mod+F', editorAction(editor.actions.find), ['editor']),
+  command('editor.line', m('Go to line'), 'Alt+G', editorAction(editor.actions.gotoLine), ['editor']),
+  command('editor.undo', m('Undo edit'), 'Mod+Z', editorAction(editor.actions.undo), ['editor']),
+  command('editor.redo', m('Redo edit'), /Mac|iPhone|iPad/.test(navigator.platform) ? 'Mod+Shift+Z' : 'Mod+Y', editorAction(editor.actions.redo), ['editor']),
+  command('editor.comment', m('Toggle comment'), 'Mod+Slash', editorAction(editor.actions.comment), ['editor']),
+  command('editor.complete', m('Show completions'), 'Ctrl+Space', editorAction(editor.actions.complete), ['editor'], () => currentPath.endsWith('.vr')),
+]);
+const commands = installCommands(commandRegistry, fail, announce);
 async function initialize() {
   const initialRevision = documentRevision();
   if (!hasToken()) {
