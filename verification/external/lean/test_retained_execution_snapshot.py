@@ -93,6 +93,35 @@ class SnapshotTests(unittest.TestCase):
         value['pending']['part'] = 'primitive'
         self.assertIs(validate(value), value)
 
+    def test_compressed_storage_cannot_be_projected_to_explicit_frames(self):
+        # These are representation changes, even when the advertised count is
+        # one. The explicit-frame model must not silently discard them.
+        for path, key, extra in [
+            ([], 'frameEncoding', 'empty-register-rle-v1'),
+            ([], 'logicalFrames', '2'),
+            (['frames', 1], 'repetitions', '1'),
+            (['frames', 1], 'repetitions', '2'),
+        ]:
+            with self.subTest(path=path, key=key, extra=extra):
+                value = copy.deepcopy(BASE)
+                self.assertIs(validate(value), value)
+                target = value
+                for part in path: target = target[part]
+                target[key] = extra
+                original = copy.deepcopy(value)
+                with self.assertRaisesRegex(ValueError, 'Expected fields'):
+                    validate(value)
+                self.assertEqual(value, original)
+
+        value = copy.deepcopy(BASE)
+        value['pending'] = None
+        value['terminal'] = {'stop': 'undefined',
+            'reason': {'kind': 'missing_callee_output'}, 'haltPath': ['0', '0']}
+        self.assertIs(validate(value), value)
+        value['terminal']['haltPathRuns'] = [{'pc': '0', 'count': '2'}]
+        with self.assertRaisesRegex(ValueError, 'Expected fields'):
+            validate(value)
+
 
 if __name__ == '__main__':
     unittest.main()

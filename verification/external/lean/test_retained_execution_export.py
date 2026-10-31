@@ -54,6 +54,14 @@ class NativeExecutionTests(unittest.TestCase):
     def test_empty_native_shaped_protocol(self):
         self.assertEqual(self.proof(empty_export())['claims'], 5)
 
+    def test_compressed_schema_requires_its_own_model(self):
+        for version in ('v2', 'v4'):
+            with self.subTest(version=version):
+                data = empty_export()
+                data['schema'] = 'synarc-shared-vm-native-' + version
+                with self.assertRaisesRegex(ValueError, 'Unsupported native VM scope/schema'):
+                    emit(data)
+
     def test_guard_and_abort_axioms(self):
         names = ['active_injective', 'abort_retains_poison', 'abort_cannot_resume']
         with tempfile.TemporaryDirectory(prefix='verum-native-axioms-') as directory:
