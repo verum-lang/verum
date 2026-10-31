@@ -58,6 +58,7 @@
           <label>Time budget (seconds)<input id="timeout" type="number" min="1" max="300" value="60"></label>
           <label>Script permissions<select id="run-permissions" aria-describedby="permission-scope"><option value="source">Source / CLI defaults</option><option value="deny-all">Deny all grants</option><option value="allow-all">Allow all grants</option></select></label>
           <p id="permission-scope">Interpreter permission checks are not OS isolation. Source defaults can permit unrestricted execution. Run trusted code only.</p>
+          <label class="check-option"><input id="runtime-diagnostics" type="checkbox"><span>Capture CBGR dispatch failures</span></label>
           <button id="preview-run" class="quiet-button">Inspect run plan</button>
           <details id="execution-plan" hidden open><summary>Execution plan</summary><pre id="execution-plan-content"></pre></details>
           <p>Proof checking certifies the selected logical declaration. It does not certify all runtime behavior.</p>

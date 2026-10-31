@@ -1,6 +1,22 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'This Studio host does not support runtime diagnostics. Restart with the matching Studio build.': 'Сервер Studio не поддерживает диагностику выполнения. Перезапустите сервер с соответствующей сборкой Studio.',
+  'CBGR checks were disabled when capture started.': 'На момент начала записи проверки CBGR были отключены.',
+  'Run with CBGR diagnostics': 'Запуск с диагностикой CBGR',
+  'Capture CBGR dispatch failures': 'Записывать ошибки диспетчера CBGR',
+  'CBGR runtime observations': 'Наблюдения CBGR при выполнении',
+  'Waiting for runtime observations…': 'Ожидание наблюдений за выполнением…',
+  'Runtime observations unavailable.': 'Наблюдения за выполнением недоступны.',
+  '{count} dispatch observations': 'Наблюдений диспетчера: {count}',
+  'No CBGR failures observed in this capture.': 'В этой записи ошибки CBGR не наблюдались.',
+  'Capture limit reached. Additional observations were dropped.': 'Достигнут лимит записи. Последующие наблюдения пропущены.',
+  'Capture scope': 'Область наблюдения',
+  'CBGR errors returned by this interpreter’s table dispatcher only. Other interpreters, native/AOT code, allocation lifetimes and successful validation checks are not captured. One failure may appear at several call boundaries. This is not a memory-safety proof.': 'Только ошибки CBGR, возвращённые табличным диспетчером этого интерпретатора. Другие интерпретаторы, нативный/AOT-код, жизненный цикл выделений и успешные проверки не отслеживаются. Одна ошибка может появиться на нескольких границах вызовов. Это не доказательство безопасности памяти.',
+  'Expected {expected} · actual {actual}': 'Ожидалось {expected} · фактически {actual}',
+  'No exact source-map entry. Bytecode location retained.': 'Точного соответствия исходному коду нет. Позиция в байткоде сохранена.',
+  'Reveal source line': 'Показать строку кода',
+
   'Your draft changed while loading. It has been kept; try opening the file again.': 'Черновик изменился во время загрузки и сохранён в редакторе. Повторите открытие файла.',
   'Project text': 'Текст проекта',
   'Plain text': 'Обычный текст',

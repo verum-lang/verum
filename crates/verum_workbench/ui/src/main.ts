@@ -1,4 +1,6 @@
 import './style.css';
+import { runtimeSourceRange } from './runtime';
+import { runtimeView } from './runtime-view';
 import { makeEditor } from './editor';
 import { CommandRegistry, type CommandContext, type StudioCommand } from './commands';
 import { installCommands } from './command-surface';
@@ -397,7 +399,7 @@ document.addEventListener('keydown', event => {
 });
 window.addEventListener('beforeunload', event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
 
-function operationRequest(kind: Receipt['kind']) {
+function operationRequest(kind: Receipt['kind'], diagnostics = input('runtime-diagnostics').checked) {
   if (!currentPath.endsWith('.vr')) throw new Error(t(m('Select a Verum source file to run, check or prove.')));
   const source = editor.source(), path = currentPath;
   const seconds = Number(input('timeout').value);
@@ -405,9 +407,9 @@ function operationRequest(kind: Receipt['kind']) {
   const declaration = input('declaration').value.trim();
   if (kind === 'proof' && !declaration) { $('execution-settings').hidden = false; input('declaration').focus(); throw new Error(t(m('Enter the logical declaration to check.'))); }
   const permissions = $<HTMLSelectElement>('run-permissions').value as RunPermissions;
-  return { kind, source, path, ...(kind === 'proof' ? { declaration } : {}), ...(kind === 'run' ? { permissions } : {}), timeout_ms: Math.round(seconds * 1000) };
+  return { kind, source, path, ...(kind === 'proof' ? { declaration } : {}), ...(kind === 'run' ? { permissions, runtime_diagnostics: diagnostics } : {}), timeout_ms: Math.round(seconds * 1000) };
 }
-for (const id of ['run-permissions', 'timeout', 'declaration']) $(id).addEventListener('input', () => { $('execution-plan').hidden = true; });
+for (const id of ['run-permissions', 'runtime-diagnostics', 'timeout', 'declaration']) $(id).addEventListener('input', () => { $('execution-plan').hidden = true; });
 bind('preview-run', async () => {
   const request = operationRequest('run'), revision = documentRevision();
   const plan = await api<ExecutionPlan>('operation.plan', request);
@@ -417,11 +419,15 @@ bind('preview-run', async () => {
   $('execution-plan-content').textContent = pretty(plan); $('execution-plan').hidden = false;
   announce(m('Run plan ready; no process started.'));
 });
-async function startOperation(kind: Receipt['kind']) {
+async function startOperation(kind: Receipt['kind'], diagnostics?: boolean) {
   if (starting) return;
-  const request = operationRequest(kind);
+  const request = operationRequest(kind, diagnostics);
   starting = true; ['run', 'check', 'prove'].forEach(id => { $<HTMLButtonElement>(id).disabled = true; });
   try {
+    if (kind === 'run' && request.runtime_diagnostics) {
+      const plan = await api<ExecutionPlan>('operation.plan', request);
+      if (plan.runtime_diagnostics !== true) throw new Error(t(m('This Studio host does not support runtime diagnostics. Restart with the matching Studio build.')));
+    }
     const result = await api<{ id: string }>('operation.start', request);
     selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path: request.path }));
   } finally { starting = false; updateDocumentState(); }
@@ -522,6 +528,13 @@ function renderResults() {
   }
   if (receipt.stderr) appendStream(detail, m('Diagnostics / standard error'), receipt.stderr, 'stderr');
   if (!receipt.stdout && !receipt.stderr) detail.append(node('p', 'muted', receipt.status === 'running' ? m('Waiting for process output…') : m('The process produced no text output.')));
+  const runtime = runtimeView(receipt,
+    event => runtimeSourceRange(receipt, event, currentPath, currentHash, editor.source()) !== null,
+    event => {
+      const range = runtimeSourceRange(receipt, event, currentPath, currentHash, editor.source());
+      if (range) { setPane('editor'); sourceView(); editor.select(range); }
+    });
+  if (runtime) detail.append(runtime);
   detail.append(context); appendDetails(detail, m('Full operation receipt'), receipt, 'receipt');
   if (oldId === receipt.id) { detail.querySelectorAll<HTMLDetailsElement>('details').forEach(item => { item.open = expanded.has(item.dataset.key); }); detail.scrollTop = scroll; }
   restoreFocus();
@@ -780,6 +793,7 @@ const commandRegistry = new CommandRegistry([
   control('reload-source', m('Review the saved file before reloading')), control('refresh-files', m('Refresh files')),
   control('run', m('Run source'), 'Mod+Enter', ['editor']), control('check', m('Check source'), 'Mod+Shift+Enter', ['editor']),
   control('prove', m('Check a logical declaration'), 'Alt+Shift+Enter', ['editor']),
+  command('run.cbgr', m('Run with CBGR diagnostics'), '', () => startOperation('run', true), ['editor'], () => currentPath.endsWith('.vr') && !starting),
   control('run-settings', m('Execution options')), control('preview-run', m('Inspect run plan')),
   control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),
   control('language-status', m('Show module diagnostics')), control('theme', m('Change color theme')),

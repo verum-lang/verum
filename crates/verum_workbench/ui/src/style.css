@@ -1439,3 +1439,11 @@ a {
     transition: none !important;
   }
 }
+
+.execution-settings label.check-option { flex-direction:row; align-items:center; gap:8px; }
+.execution-settings .check-option input { width:14px; height:14px; margin:0; flex:0 0 14px; accent-color:var(--accent); }
+.runtime-diagnostics { border-top:1px solid var(--border); padding-top:12px; margin-top:12px; }
+.runtime-diagnostics h3 { font-size:12px; margin:0 0 8px; }
+.runtime-diagnostics p { overflow-wrap:anywhere; }
+.runtime-diagnostics pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.runtime-truncated { color:var(--warning); }

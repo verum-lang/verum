@@ -1,7 +1,8 @@
+import type { RuntimeReport } from './runtime';
 export type RunPermissions = 'source' | 'deny-all' | 'allow-all';
 export type ExecutionPlan = {
   kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
-  executable: string; timeout_ms: number; permissions: RunPermissions | null; declaration: string | null;
+  executable: string; timeout_ms: number; permissions: RunPermissions | null; runtime_diagnostics?: boolean | null; declaration: string | null;
 };
 export type Receipt = {
   id: string; kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
@@ -9,6 +10,7 @@ export type Receipt = {
   stdout: string; stderr: string; exit_code: number | null; elapsed_ms: number; proof?: unknown;
   timeout_ms?: number; evidence_path?: string; version?: number;
   started_unix_ms?: number; termination?: string;
+  runtime_diagnostics?: boolean | null; runtime?: RuntimeReport | null; runtime_error?: string | null;
   permissions?: RunPermissions | null; declaration?: string | null;
 };
 
