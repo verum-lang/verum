@@ -57,6 +57,29 @@ theorem subResidue_unique (period left right result : Nat)
   · simp only [subResidue, ite_eq_right noBorrow] at *
     omega
 
+/-- A source checker can establish these branch-local equations using widened
+machine arithmetic. They determine the exact abstract transport result; no
+solver certificate or implementation behavior is assumed by this theorem. -/
+theorem transport_of_lift (size closing index value : Nat) (summary : Summary)
+    (closed : closing < size)
+    (beforeWrap : summary.capped < size - index → value = index + summary.capped)
+    (cycle : size - index ≤ summary.capped → closing ≤ value ∧
+      value - closing + (if (size - index) % (size - closing) ≤ summary.residue
+        then size - closing else 0) =
+      summary.residue + (size - closing) - (size - index) % (size - closing)) :
+    value = transport size closing summary index := by
+  unfold transport
+  dsimp only
+  by_cases before : summary.capped < size - index
+  · rw [ite_eq_left before]
+    exact beforeWrap before
+  · rw [ite_eq_right before]
+    obtain ⟨inside, lift⟩ := cycle (by omega)
+    have exactResidue := subResidue_unique (size - closing) summary.residue
+      ((size - index) % (size - closing)) (value - closing)
+      (Nat.mod_lt _ (by omega)) lift
+    omega
+
 theorem subResidue_exact (period count distance : Nat) (positive : 0 < period)
     (enough : distance ≤ count) :
     subResidue period (count % period) (distance % period) = (count - distance) % period := by

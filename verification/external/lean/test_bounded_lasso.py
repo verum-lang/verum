@@ -14,7 +14,7 @@ class BoundedLassoTests(IsolatedLeanTest):
 
     def test_constructive_axioms(self):
         names = ['BoundedLasso.'+n for n in re.findall(r'^theorem (\w+)', self.sources['BoundedLasso'], re.M)]
-        self.assertEqual(len(names), 14)
+        self.assertEqual(len(names), 15)
         self.assert_axioms(self.prove(HEADER+'\n'.join('#print axioms '+n for n in names)), names)
 
     def test_transient_arbitrary_member_and_wrapped_cycle(self):
@@ -41,6 +41,12 @@ example : 1 = subResidue maximum 0 (maximum-1) :=
   subResidue_unique maximum 0 (maximum-1) 1 (by decide) (by decide)
 example : maximum-2 = subResidue maximum (maximum-1) 1 :=
   subResidue_unique maximum (maximum-1) 1 (maximum-2) (by decide) (by decide)
+example : maximum-1 = transport maximum (maximum-1) ⟨maximum,0⟩ 0 :=
+  transport_of_lift maximum (maximum-1) 0 (maximum-1) ⟨maximum,0⟩
+    (by decide) (by decide) (by decide)
+example (n : Nat) (positive : 0 < n) : 0 = transport n 0 ⟨0,0⟩ 0 :=
+  transport_of_lift n 0 0 0 ⟨0,0⟩ positive (by simp)
+    (by dsimp only; intro h; omega)
 example : transport maximum 0 (elapsed maximum 0 maximum) (maximum-1) = maximum-1 := by decide_cbv
 example : (List.range 30).foldl (fun summary _ => push 5 2 summary) (elapsed 5 2 0) =
     elapsed 5 2 30 := by decide_cbv
