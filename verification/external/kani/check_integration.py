@@ -5,14 +5,23 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-from rust_replay import FORMAT, load, read, sha, write
+from rust_replay import FORMAT, SOLVERS, load, read, sha, write
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--kani', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--solver', choices=SOLVERS, default='cadical')
+    parser.add_argument('--solver-executable', type=Path)
+    parser.add_argument('--arithmetic-refinement', action='store_true')
+    parser.add_argument('--timeout', type=int, default=120)
     args = parser.parse_args()
+    backend = ['--solver', args.solver, '--timeout', str(args.timeout)]
+    if args.solver_executable:
+        backend += ['--solver-executable', str(args.solver_executable.resolve())]
+    if args.arithmetic_refinement:
+        backend += ['--arithmetic-refinement']
     root = Path(__file__).resolve().parent
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -39,7 +48,7 @@ def main():
         write(case/'manifest.json', manifest)
         process = subprocess.run([sys.executable, str(root/'rust_replay.py'),
                                   '--manifest', str(case/'manifest.json'), '--output', str(case/'run'),
-                                  '--kani', str(args.kani.resolve())], capture_output=True, text=True, timeout=180)
+                                  '--kani', str(args.kani.resolve()), *backend], capture_output=True, text=True, timeout=args.timeout+30)
         (case/'driver.log').write_text(process.stdout+process.stderr)
         report = load(read(case/'run/receipt.json'))
         if accepted:

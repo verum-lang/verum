@@ -51,3 +51,12 @@ these primitive contracts do not certify its callers or external world behavior.
 See [Kani usage](https://model-checking.github.io/kani/usage.html) and
 [loop unwinding](https://model-checking.github.io/kani/tutorial-loop-unwinding.html)
 for the underlying verification boundary.
+
+The runner also supports explicit solver selection with `--solver`. External
+SMT solvers require `--solver-executable`; the runner captures and hashes that
+executable instead of searching ambient `PATH`. Runtime libraries remain part
+of the trusted execution environment. Bundled SAT solvers can use
+`--arithmetic-refinement`. These options retain every safety, reachability,
+unwinding and coverage obligation. `check_integration.py` accepts the same
+options and checks valid arithmetic, a semantic mutation and a vacuous input
+restriction. A timeout remains inconclusive with every backend.

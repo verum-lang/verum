@@ -12,12 +12,15 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import signal
+import shutil
 import subprocess
 import time
 
 FORMAT = 'verum-rust-symbolic/1'
 KANI_VERSION = '0.68.0'
 MAX_INPUT = 16 * 1024 * 1024
+SOLVERS = ('cadical', 'kissat', 'minisat', 'z3', 'cvc5', 'bitwuzla')
+EXTERNAL_SOLVERS = ('z3', 'cvc5', 'bitwuzla')
 
 
 def require(condition, message):
@@ -216,6 +219,38 @@ def tool_identity(kani):
     return root, result
 
 
+def prepare_solver(name, executable, output):
+    """Freeze an explicit SMT executable; never resolve it through ambient PATH.
+
+Bundled SAT solvers are already covered by the Kani distribution identity.
+External solver runtime libraries, like the host runtime, remain build inputs.
+"""
+    require(name in SOLVERS, 'Unsupported solver')
+    if name not in EXTERNAL_SOLVERS:
+        require(executable is None, 'Bundled solver cannot be replaced')
+        return None, {'name': name, 'authority': 'kani-distribution'}
+    require(executable is not None, 'External solver requires an explicit executable')
+    original = Path(executable).resolve(strict=True)
+    require(original.is_file() and os.access(original, os.X_OK), 'Solver is not executable')
+    directory = output / 'solver'
+    directory.mkdir()
+    captured = directory / name
+    shutil.copy2(original, captured)
+    with original.open('rb') as source, captured.open('rb') as snapshot:
+        digest = hashlib.file_digest(source, 'sha256').hexdigest()
+        require(hashlib.file_digest(snapshot, 'sha256').hexdigest() == digest,
+                'Solver changed during capture')
+    return directory, {'name': name, 'authority': 'external-symbolic-check',
+                       'original': str(original), 'sha256': digest}
+
+
+def check_solver(directory, identity):
+    if directory is not None:
+        with (directory / identity['name']).open('rb') as stream:
+            require(hashlib.file_digest(stream, 'sha256').hexdigest() == identity['sha256'],
+                    'Solver executable changed during checking')
+
+
 def execute(command, *, cwd, env, timeout, log):
     with log.open('wb') as stream:
         process = subprocess.Popen(command, cwd=cwd, env=env, stdout=stream, stderr=subprocess.STDOUT,
@@ -245,8 +280,15 @@ def main():
     parser.add_argument('--kani', type=Path, required=True, help='Installed bin/kani-driver')
     parser.add_argument('--timeout', type=int, default=120)
     parser.add_argument('--unwind', type=int, default=4)
+    parser.add_argument('--solver', choices=SOLVERS, default='cadical')
+    parser.add_argument('--solver-executable', type=Path,
+                        help='Required explicit executable for z3, cvc5 or bitwuzla')
+    parser.add_argument('--arithmetic-refinement', action='store_true',
+                        help='Use CBMC arithmetic refinement with complete safety checks')
     args = parser.parse_args()
     require(0 < args.timeout <= 3600 and 0 < args.unwind <= 1024, 'Invalid execution bound')
+    require(not args.arithmetic_refinement or args.solver in ('cadical', 'kissat', 'minisat'),
+            'Arithmetic refinement requires a bundled SAT solver')
     raw = read(args.manifest)
     manifest = load(raw)
     workspace, snapshot = prepare(manifest, args.manifest.resolve().parent, args.output.resolve())
@@ -261,15 +303,22 @@ def main():
     started = time.monotonic()
     try:
         root, identity = tool_identity(args.kani)
+        solver_directory, solver_identity = prepare_solver(args.solver, args.solver_executable, out)
+        report['solver'] = solver_identity
+        report['arithmetic_refinement'] = args.arithmetic_refinement
         write(out / 'toolchain.json', identity)
         report['toolchain_sha256'] = sha(read(out / 'toolchain.json'))
         command = [str(args.kani.resolve()), manifest['entry'], '-Z', 'unstable-options',
                    '--default-unwind', str(args.unwind), '--harness-timeout', str(args.timeout),
+                   '--solver', args.solver,
                    '--export-json', str(out / 'result.json'), '--output-format', 'terse', '--keep-temps']
+        if args.arithmetic_refinement:
+            command += ['--cbmc-args', '--refine', '--refine-arithmetic']
         # No caller-supplied compiler flags, stub features, unsound unchecked
         # unwinding, panic expectations or omitted reachability checks.
         env = {k: os.environ[k] for k in ('HOME', 'TMPDIR', 'SYSTEMROOT') if k in os.environ}
-        env['PATH'] = str(root / 'bin') + os.pathsep + '/usr/bin:/bin'
+        env['PATH'] = os.pathsep.join(str(p) for p in
+            (root / 'bin', *([solver_directory] if solver_directory else []), '/usr/bin', '/bin'))
         report.update(command=command, cwd=str(workspace), target=(root/'rust-toolchain-version').read_text())
         write(out / 'receipt.json', report)
         code = execute(command, cwd=workspace, env=env, timeout=args.timeout, log=out/'execution.log')
@@ -281,6 +330,7 @@ def main():
         for name, expected in snapshot['files'].items():
             require(sha(read(workspace / name)) == expected, 'Compilation input changed during checking')
         require(tool_identity(args.kani)[1] == identity, 'Checker distribution changed during checking')
+        check_solver(solver_directory, solver_identity)
         report['status'] = 'verified'
     except BaseException as error:
         report.update(status='inconclusive', error=f'{type(error).__name__}: {error}')

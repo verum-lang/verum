@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from rust_replay import FORMAT, load, prepare, sha, validate_result
+from rust_replay import FORMAT, load, prepare, prepare_solver, check_solver, sha, validate_result
 
 
 def result():
@@ -130,6 +130,30 @@ class SnapshotTests(unittest.TestCase):
                 manifest = deepcopy(self.manifest)
                 manifest['files']['main.rs'][0].update(start=start, end=end)
                 with self.assertRaises(ValueError): prepare(manifest, self.root, Path(directory)/'run')
+
+
+class SolverTests(unittest.TestCase):
+    def test_external_solver_is_an_immutable_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'original'
+            source.write_bytes(b'original executable'); source.chmod(0o755)
+            folder, identity = prepare_solver('z3', source, root)
+            source.write_bytes(b'replaced executable')
+            self.assertEqual((folder / 'z3').read_bytes(), b'original executable')
+            check_solver(folder, identity)
+            (folder / 'z3').write_bytes(b'changed captured executable')
+            with self.assertRaisesRegex(ValueError, 'changed during checking'):
+                check_solver(folder, identity)
+
+    def test_missing_external_or_replaced_bundled_solver_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, executable in [('z3', None), ('cadical', root/'replacement'), ('unknown', None)]:
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    prepare_solver(name, executable, root)
+            self.assertEqual(prepare_solver('kissat', None, root),
+                             (None, {'name':'kissat', 'authority':'kani-distribution'}))
 
 
 if __name__ == '__main__':
