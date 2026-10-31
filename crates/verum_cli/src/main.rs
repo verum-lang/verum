@@ -1644,15 +1644,10 @@ enum Commands {
         #[clap(long = "soundness-iou")]
         soundness_iou: bool,
 
- /// Run the unified audit-bundle (#151). Executes each of the
- /// load-bearing L1+L2+L3+L4 gates in dependency order
- /// (`--bridge-discharge`, `--kernel-discharged-axioms`,
- /// `--apply-graph`, `--cross-format-roundtrip`) and aggregates
- /// their JSON outputs into a single `target/audit-reports/
- /// bundle.json`. Top-level `l4_load_bearing: bool` summarises
- /// the corpus's L4 verdict in one boolean. The bundle is the
- /// user-facing UX for the verum-corpus L4-readiness gate: one
- /// command, one verdict, all evidence in one place.
+ /// Run configured audit gates and record current execution diagnostics.
+ /// The bundle carries a fresh run ID and executable hash; it does not import
+ /// legacy report files as current evidence. `checks_passed` describes gate
+ /// execution. `l4_load_bearing` remains false: no aggregate proof is asserted.
         #[clap(long = "bundle")]
         bundle: bool,
 

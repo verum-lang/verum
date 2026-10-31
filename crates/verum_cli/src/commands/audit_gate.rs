@@ -252,14 +252,14 @@ impl AuditGate for BridgeDischargeGate {
     }
 }
 
-/// `verum audit --bundle` — composed L4-load-bearing dispatcher.
+/// `verum audit --bundle` — current gate execution diagnostics.
 pub struct BundleGate;
 impl AuditGate for BundleGate {
     fn name(&self) -> &'static str {
         "bundle"
     }
     fn description(&self) -> &'static str {
-        "Composed audit bundle: runs every load-bearing gate in dependency order; emits unified verdict."
+        "Runs configured audit gates and records current execution outcomes; does not assert aggregate proof authority."
     }
     fn run(&self, format: AuditFormat) -> Result<()> {
         super::audit::audit_bundle_with_format(format)
