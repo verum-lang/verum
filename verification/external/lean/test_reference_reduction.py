@@ -4,7 +4,7 @@ from lean_test_fixture import IsolatedLeanTest
 
 
 class ReferenceReductionTests(IsolatedLeanTest):
-    MODULES = ('ReductionScope',)
+    MODULES = ('ReductionScope', 'UniverseSemantics')
 
     def test_well_typed_terms_can_exhaust_without_becoming_invalid(self):
         self.prove('''
@@ -34,6 +34,21 @@ import VerumExternalReplay.ReductionScope
 open VerumKernel
 example : (whnfFuel 0 (.universe (.concrete 0))).isOk = true := by decide_cbv
 ''', failure=True)
+
+    def test_exact_universe_successor_laws_and_no_wrap(self):
+        rows = self.prove("""
+import VerumExternalReplay.UniverseSemantics
+open VerumKernel
+#print axioms Level.successor_exact
+#print axioms Level.successor_strict
+""")
+        self.assert_axioms(rows, ['VerumKernel.Level.successor_exact',
+                                 'VerumKernel.Level.successor_strict'])
+        self.prove("""
+import VerumExternalReplay.UniverseSemantics
+open VerumKernel
+example : (Level.successor (.concrete Level.wireMax)).denote (fun _ => 0) = 0 := by decide_cbv
+""", failure=True)
 
     def test_completed_mismatch_and_law_axioms(self):
         rows = self.prove('''

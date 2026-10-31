@@ -19,10 +19,9 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 /// A universe level — concrete number, level variable, or expression
-/// (`succ`, `max`) over them.  The kernel reasons structurally:
-/// `Concrete(n).succ()` reduces to `Concrete(n+1)` (with `u32`
-/// overflow rejected), but `Var("u").succ()` stays symbolic as
-/// `Succ(Var("u"))`.
+/// (`succ`, `max`) over them. Concrete successors remain compact while
+/// representable in `u32`; larger or symbolic successors use exact syntax.
+/// The wire integer width does not bound the mathematical universe hierarchy.
 ///
 /// Equality is decided up to algebraic normalisation
 /// (idempotency / commutativity of `Max`, identity at `Concrete(0)`,
@@ -103,16 +102,15 @@ impl Level {
         Level::Var(name.into())
     }
 
-    /// Compute the successor level.  On a concrete carrier,
-    /// rejects `u32::MAX` overflow with `None` so the caller can
-    /// emit `CheckError::UniverseOverflow` at the kernel boundary
-    /// (DEFECT-2).  On symbolic carriers (`Var` / `Succ` / `Max`),
-    /// always returns the wrapped form — overflow is impossible
-    /// because the structure is unbounded.
-    pub fn checked_succ(&self) -> Option<Self> {
+    /// Exact successor. The concrete wire integer is a compact representation,
+    /// not a bound on the universe hierarchy; larger levels retain successor syntax.
+    pub fn successor(&self) -> Self {
         match self {
-            Level::Concrete(n) => n.checked_add(1).map(Level::Concrete),
-            other => Some(Level::Succ(Box::new(other.clone()))),
+            Level::Concrete(n) => match n.checked_add(1) {
+                Some(next) => Level::Concrete(next),
+                None => Level::Succ(Box::new(self.clone())),
+            },
+            other => Level::Succ(Box::new(other.clone())),
         }
     }
 
@@ -1969,11 +1967,8 @@ pub enum CheckError {
         /// The intrinsic name that failed to dispatch positively.
         intrinsic: String,
     },
-    /// **DEFECT-2 (kernel-audit-2026-05-08).** A `Universe(n)` term
-    /// names a level whose successor `n + 1` would overflow the
-    /// `u32` carrier.  In release builds, naive arithmetic wraps to
-    /// zero and would emit `Universe(u32::MAX) : Universe(0)` —
-    /// unsound — so the kernel hard-rejects instead.
+    /// Unsupported level from an external/legacy kernel adapter. Native
+    /// universe successors are exact and do not emit this refusal.
     UniverseOverflow {
         /// The offending level.
         level: u32,
@@ -2224,31 +2219,8 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         // T-Var
         Term::Var(i) => ctx.lookup(*i).ok_or(CheckError::UnboundVariable(*i)),
 
-        // T-Univ.  Universe(l) : Universe(succ(l)).  DEFECT-2:
-        // explicit overflow check on the concrete-level arm only —
-        // symbolic levels (`Var`, `Succ`, `Max`) are unbounded so
-        // their successor always exists structurally.  When the
-        // carrier reduces to `Concrete(u32::MAX)`, we reject with
-        // `UniverseOverflow` (a wrapping `+1` would silently emit
-        // `Universe(MAX) : Universe(0)` — unsound).
-        Term::Universe(level) => {
-            // Normalise BEFORE the overflow check so
-            // `Succ(Concrete(MAX-1))` is recognised as concrete
-            // `MAX` rather than treated as a symbolic carrier.
-            let level = level.clone().normalize();
-            match level.checked_succ() {
-                Some(next) => Ok(Term::Universe(next)),
-                None => Err(CheckError::UniverseOverflow {
-                    level: match level {
-                        Level::Concrete(n) => n,
-                        // Symbolic carriers can't reach this
-                        // branch — `checked_succ` only returns
-                        // `None` for `Concrete(u32::MAX)`.
-                        _ => u32::MAX,
-                    },
-                }),
-            }
-        }
+        // T-Univ: universe levels have exact successors beyond the wire width.
+        Term::Universe(level) => Ok(Term::Universe(level.clone().normalize().successor())),
 
         // T-Pi-Form.  Π(x : A). B : Universe(max(level(A), level(B)))
         // where `level(T)` is the universe carrier of T's own type.
@@ -2598,15 +2570,10 @@ pub(crate) fn induction_case_type(
 /// that type directly; synthesizing a nondependent product cannot reconstruct
 /// the family of a dependent pair.
 pub fn check(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckError> {
-    match infer(ctx, expected) {
-        Ok(kind) => {
-            ctx.conversion()
-                .expect_universe(&kind)?
-                .ok_or_else(|| CheckError::NotAType(expected.clone()))?;
-        }
-        Err(CheckError::UniverseOverflow { .. }) if matches!(expected, Term::Universe(_)) => {}
-        Err(error) => return Err(error),
-    }
+    let kind = infer(ctx, expected)?;
+    ctx.conversion()
+        .expect_universe(&kind)?
+        .ok_or_else(|| CheckError::NotAType(expected.clone()))?;
     check_against(ctx, term, expected)
 }
 
@@ -2729,34 +2696,12 @@ impl Certificate {
     /// grants permission to use an additional foundational principle.
     pub fn verify_with_foundation(&self, foundation: Foundation) -> Result<(), CheckError> {
         let ctx = Context::with_foundation(foundation);
-        // Step 1 — claimed_type must itself be a type.
-        //
-        // **Top-of-tower escape hatch.**  When `claimed_type` is at
-        // exactly a universe such as `Universe(u32::MAX)`, inferring
-        // its own kind would emit `UniverseOverflow` — but the
-        // claimed_type is still a *type* (universes are types at every
-        // representable level).  Differentially-tested with the Lean
-        // ReferenceChecker which uses unbounded `Nat`; without this
-        // escape hatch the two kernels disagree on `Universe(MAX-1) :
-        // Universe(MAX)` (`defect-2-univ-max-minus-one-ok` battery
-        // row in `audit --differential-lean-checker`).
-        match infer(&ctx, &self.claimed_type) {
-            Ok(claimed_kind) => {
-                if ctx.conversion().expect_universe(&claimed_kind)?.is_none() {
-                    return Err(CheckError::ClaimedTypeNotAType {
-                        claimed_type: self.claimed_type.clone(),
-                        actual: claimed_kind,
-                    });
-                }
-            }
-            Err(CheckError::UniverseOverflow { .. })
-                if matches!(&self.claimed_type, Term::Universe(_)) =>
-            {
-                // A literal universe is itself a type. An overflow while
-                // checking an arbitrary compound expression does NOT prove
-                // that expression well-formed; never swallow that failure.
-            }
-            Err(other) => return Err(other),
+        let claimed_kind = infer(&ctx, &self.claimed_type)?;
+        if ctx.conversion().expect_universe(&claimed_kind)?.is_none() {
+            return Err(CheckError::ClaimedTypeNotAType {
+                claimed_type: self.claimed_type.clone(),
+                actual: claimed_kind,
+            });
         }
         // Step 2 — term has the claimed type.
         check_against(&ctx, &self.term, &self.claimed_type)
@@ -3056,26 +3001,22 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn defect_2_universe_overflow_is_rejected() {
-        // Pre-fix: Universe(u32::MAX) was accepted with a release-mode wrap
-        // to Universe(0), giving "Universe(MAX) : Universe(0)" — unsound.
-        // Post-fix: explicit UniverseOverflow rejection.
-        let ctx = Context::new();
-        match infer(&ctx, &Term::universe(u32::MAX)) {
-            Err(CheckError::UniverseOverflow { level }) => {
-                assert_eq!(level, u32::MAX);
-            }
-            other => panic!("expected UniverseOverflow, got {:?}", other),
-        }
+    fn universe_successor_never_wraps_at_the_wire_boundary() {
+        let inferred = infer(&Context::new(), &Term::universe(u32::MAX)).unwrap();
+        assert_eq!(
+            inferred,
+            Term::universe_at(Level::Succ(Box::new(Level::Concrete(u32::MAX))))
+        );
+        assert_ne!(inferred, Term::universe(0));
+        assert_ne!(inferred, Term::universe(u32::MAX));
     }
 
     #[test]
-    fn defect_2_one_below_max_universe_still_typechecks() {
-        // The ceiling at `u32::MAX - 1` is the largest valid level —
-        // its successor `u32::MAX` fits in u32.
-        let ctx = Context::new();
-        let inferred = infer(&ctx, &Term::universe(u32::MAX - 1)).unwrap();
-        assert_eq!(inferred, Term::universe(u32::MAX));
+    fn one_below_wire_maximum_has_a_concrete_successor() {
+        assert_eq!(
+            infer(&Context::new(), &Term::universe(u32::MAX - 1)).unwrap(),
+            Term::universe(u32::MAX)
+        );
     }
 
     #[test]
@@ -3191,36 +3132,26 @@ mod tests {
 
     #[test]
     fn level_concrete_succ_increments() {
-        // T-Univ on a concrete carrier mirrors u32 successor.
-        assert_eq!(Level::Concrete(0).checked_succ(), Some(Level::Concrete(1)),);
-        assert_eq!(
-            Level::Concrete(42).checked_succ(),
-            Some(Level::Concrete(43)),
-        );
+        assert_eq!(Level::Concrete(0).successor(), Level::Concrete(1));
+        assert_eq!(Level::Concrete(42).successor(), Level::Concrete(43));
     }
 
     #[test]
-    fn level_concrete_max_overflow_rejected() {
-        // DEFECT-2 mirror at the level-algebra layer: u32::MAX has no
-        // u32 successor — the symbolic carrier exists, but the
-        // CONCRETE arm must not silently wrap.
-        assert_eq!(Level::Concrete(u32::MAX).checked_succ(), None);
-        // One below the ceiling still typechecks.
+    fn level_concrete_max_successor_is_exact() {
         assert_eq!(
-            Level::Concrete(u32::MAX - 1).checked_succ(),
-            Some(Level::Concrete(u32::MAX)),
+            Level::Concrete(u32::MAX).successor(),
+            Level::Succ(Box::new(Level::Concrete(u32::MAX)))
+        );
+        assert_eq!(
+            Level::Concrete(u32::MAX - 1).successor(),
+            Level::Concrete(u32::MAX)
         );
     }
 
     #[test]
     fn level_var_succ_stays_symbolic() {
-        // `succ(u)` on a level variable wraps in `Succ(...)` — no
-        // overflow possible because the structure is unbounded.
         let u = Level::Var("u".to_string());
-        assert_eq!(
-            u.checked_succ(),
-            Some(Level::Succ(Box::new(Level::Var("u".to_string())))),
-        );
+        assert_eq!(u.successor(), Level::Succ(Box::new(u)));
     }
 
     #[test]

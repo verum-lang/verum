@@ -89,13 +89,13 @@ fn cases() -> Vec<(&'static str, Certificate, bool)> {
             false,
         ),
         (
-            "concrete-overflow",
+            "concrete-boundary-equality",
             offset(Level::Concrete(big - 1), 1),
             Level::Concrete(big),
-            false,
+            true,
         ),
     ];
-    pairs
+    let mut cases: Vec<_> = pairs
         .into_iter()
         .map(|(id, left, right, accepted)| {
             let domain = Term::universe_at(right);
@@ -109,18 +109,61 @@ fn cases() -> Vec<(&'static str, Certificate, bool)> {
                 accepted,
             )
         })
-        .collect()
+        .collect();
+    for (name, level) in [
+        ("exact-boundary-successor", Level::Concrete(big)),
+        ("exact-higher-successor", offset(Level::Concrete(big), big)),
+        (
+            "exact-symbolic-successor",
+            maximum(Level::var("u"), Level::Concrete(big)),
+        ),
+    ] {
+        let term = Term::universe_at(level.clone());
+        cases.push((
+            name,
+            Certificate {
+                term: term.clone(),
+                claimed_type: Term::universe_at(successor(level)),
+                metadata: Default::default(),
+            },
+            true,
+        ));
+        cases.push((
+            match name {
+                "exact-boundary-successor" => "no-boundary-self-typing",
+                "exact-higher-successor" => "no-higher-self-typing",
+                _ => "no-symbolic-self-typing",
+            },
+            Certificate {
+                term: term.clone(),
+                claimed_type: term,
+                metadata: Default::default(),
+            },
+            false,
+        ));
+    }
+    cases
 }
 
 #[test]
 fn native_compact_universe_controls() {
     for (id, certificate, accepted) in cases() {
-        assert_eq!(certificate.verify().is_ok(), accepted, "substitution: {id}");
-        assert_eq!(
-            verum_proof::proof_checker_nbe::verify_certificate(&certificate).is_ok(),
-            accepted,
-            "NbE: {id}"
-        );
+        for result in [
+            certificate.verify(),
+            verum_proof::proof_checker_nbe::verify_certificate(&certificate),
+        ] {
+            if accepted {
+                assert_eq!(result, Ok(()), "{id}");
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(verum_proof::proof_checker::CheckError::TypeMismatch { .. })
+                    ),
+                    "{id}: {result:?}"
+                );
+            }
+        }
     }
 }
 
@@ -148,6 +191,9 @@ fn independent_compact_universes_and_wire_bounds() {
     for (verdict, (id, _, expected)) in verdicts.iter().zip(cases) {
         assert_eq!(verdict["id"], id);
         assert_eq!(verdict["ok"], expected, "{id}: {verdict}");
+        if !expected {
+            assert_eq!(verdict["error"], "TypeMismatch", "{id}: {verdict}");
+        }
     }
     for invalid in [
         serde_json::json!(4294967296_u64),

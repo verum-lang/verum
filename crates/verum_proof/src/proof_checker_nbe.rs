@@ -1443,22 +1443,8 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             .cloned()
             .ok_or(CheckError::UnboundVariable(*i)),
 
-        // T-Univ — universe-polymorphic mirror of the trusted base.
-        // Concrete-overflow rejected via [`Level::checked_succ`];
-        // symbolic carriers pass through structurally.  Mirrors
-        // `proof_checker.rs::infer` Term::Universe arm.
-        Term::Universe(level) => {
-            let level = level.clone().normalize();
-            match level.checked_succ() {
-                Some(next) => Ok(Value::VUniverse(next)),
-                None => Err(CheckError::UniverseOverflow {
-                    level: match level {
-                        Level::Concrete(n) => n,
-                        _ => u32::MAX,
-                    },
-                }),
-            }
-        }
+        // The same exact level algebra; the wire width does not cap universes.
+        Term::Universe(level) => Ok(Value::VUniverse(level.clone().normalize().successor())),
 
         Term::Pi(a, b) => {
             let a_ty = infer_value(ctx, a)?;
@@ -1670,13 +1656,8 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
 /// implementations MUST agree on every well-typed certificate;
 /// disagreements are bugs in either side.
 pub fn check(ctx: &NbeContext, term: &Term, expected: &Term) -> Result<(), CheckError> {
-    match infer_value(ctx, expected) {
-        Ok(kind) => {
-            expect_universe(&kind).ok_or_else(|| CheckError::NotAType(expected.clone()))?;
-        }
-        Err(CheckError::UniverseOverflow { .. }) if matches!(expected, Term::Universe(_)) => {}
-        Err(error) => return Err(error),
-    }
+    let kind = infer_value(ctx, expected)?;
+    expect_universe(&kind).ok_or_else(|| CheckError::NotAType(expected.clone()))?;
     check_value(ctx, term, &eval(expected, ctx.env()))
 }
 
@@ -1785,15 +1766,8 @@ fn expect_universe(value: &Value) -> Option<Level> {
 // Certificate verification (parity with proof_checker::Certificate::verify)
 // =============================================================================
 
-/// Verify a [`Certificate`](crate::proof_checker::Certificate) using
-/// the NbE kernel.  Architectural twin of
-/// [`crate::proof_checker::Certificate::verify`] — mirrors its
-/// claimed-type well-formedness check (claimed_type must itself be
-/// a type) plus the universe-tower-top escape hatch (a
-/// claimed_type at the very top of the universe tower triggers
-/// `UniverseOverflow` on its successor's kind-check, but is still a
-/// valid type — swallow the overflow there and let the structural
-/// check downstream catch any genuine type mismatch).
+/// Verify a closed certificate with NbE, including ordinary formation checking
+/// of its claimed type at every universe level.
 pub fn verify_certificate(cert: &crate::proof_checker::Certificate) -> Result<(), CheckError> {
     verify_certificate_with_foundation(cert, Foundation::Intensional)
 }
@@ -1804,23 +1778,13 @@ pub fn verify_certificate_with_foundation(
     foundation: Foundation,
 ) -> Result<(), CheckError> {
     let ctx = NbeContext::with_foundation(foundation);
-    match infer(&ctx, &cert.claimed_type) {
-        Ok(claimed_kind) => {
-            let claimed_kind_value = eval(&claimed_kind, ctx.env());
-            if expect_universe(&claimed_kind_value).is_none() {
-                return Err(CheckError::ClaimedTypeNotAType {
-                    claimed_type: cert.claimed_type.clone(),
-                    actual: claimed_kind,
-                });
-            }
-        }
-        Err(CheckError::UniverseOverflow { .. })
-            if matches!(&cert.claimed_type, Term::Universe(_)) =>
-        {
-            // Only a literal universe is known to be a type without
-            // inferring its successor. Compound overflow stays a refusal.
-        }
-        Err(other) => return Err(other),
+    let claimed_kind = infer(&ctx, &cert.claimed_type)?;
+    let claimed_kind_value = eval(&claimed_kind, ctx.env());
+    if expect_universe(&claimed_kind_value).is_none() {
+        return Err(CheckError::ClaimedTypeNotAType {
+            claimed_type: cert.claimed_type.clone(),
+            actual: claimed_kind,
+        });
     }
     check_value(&ctx, &cert.term, &eval(&cert.claimed_type, ctx.env()))
 }

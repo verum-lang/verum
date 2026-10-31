@@ -142,10 +142,10 @@ partial def Level.addOffset (base : Level) (by_ : Nat) : Level :=
     else Level.offsetNode base by_
   | other => Level.offsetNode other by_
 
-/-- Successor after the caller has checked the concrete wire ceiling. -/
-def Level.succ' (l : Level) : Level :=
+/-- Exact successor: bounded wire literals do not cap the universe hierarchy. -/
+def Level.successor (l : Level) : Level :=
   match l with
-  | .concrete n => .concrete (n + 1)
+  | .concrete n => if n < Level.wireMax then .concrete (n + 1) else .succ l
   | other => .succ other
 
 /-- Lexicographic structural ordering on canonical Levels.  Used by
@@ -276,11 +276,6 @@ end
     compare structurally. -/
 def Level.eq (a b : Level) : Bool :=
   Level.normalize a == Level.normalize b
-
-/-- The successor with concrete-overflow tracking.  In Lean `Nat` is
-    unbounded so this never reports overflow; the kernel-level
-    decision is made on the Rust side via `Level::checked_succ`. -/
-partial def Level.checkedSucc (l : Level) : Level := Level.succ' l
 
 /-- Compact exact lifting, with work bounded by the expression size. -/
 def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
@@ -733,15 +728,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     match lookupCtx Γ i with
     | some T => Except.ok T
     | none   => Except.error (.unbound_variable i)
-  | .universe l =>
-    -- The certificate format uses Rust's bounded concrete universe levels.
-    -- The independent checker enforces that boundary, despite using Nat.
-    let normal := Level.normalize l
-    match normal with
-    | .concrete n =>
-      if n ≥ 4294967295 then .error (.universe_overflow n)
-      else .ok (.universe (Level.checkedSucc normal))
-    | _ => .ok (.universe (Level.checkedSucc normal))
+  | .universe l => .ok (.universe (Level.successor (Level.normalize l)))
   | .pi a b => do
     let some n ← expectUniverse (← infer Γ a) | throw (.not_a_type a)
     let some m ← expectUniverse (← infer (Γ.extend a) b) | throw (.not_a_type b)
@@ -849,15 +836,8 @@ end
 partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
   checkScope Γ.length expected
   checkScope Γ.length t
-  match infer Γ expected with
-  | .ok kind =>
-    let some _ ← expectUniverse kind | throw (.not_a_type expected)
-  | .error (.universe_overflow _) =>
-    -- A literal universe remains a type at the wire-level ceiling.
-    -- Overflow inside a compound type cannot establish its formation.
-    if let .universe _ := expected then pure ()
-    else throw (.not_a_type expected)
-  | .error error => throw error
+  let kind ← infer Γ expected
+  let some _ ← expectUniverse kind | throw (.not_a_type expected)
   checkAgainst Γ t expected
 
 /-- Verify a closed `(term, claimed_type)` certificate. -/
@@ -866,13 +846,8 @@ def verifyCertificate (term claimedType : Term)
   let ctx : Ctx := { foundation }
   checkScope 0 claimedType
   checkScope 0 term
-  match infer ctx claimedType with
-  | .ok kind =>
-    let some _ ← expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)
-  | .error (.universe_overflow n) =>
-    if let .universe _ := claimedType then pure ()
-    else throw (.universe_overflow n)
-  | .error error => throw error
+  let kind ← infer ctx claimedType
+  let some _ ← expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)
   checkAgainst ctx term claimedType
 
 end VerumKernel
