@@ -10,26 +10,8 @@ SCOPE = ('Finite physical-clock and projected Organism restart correspondence. '
          'and truthful physical capture remain source/provenance obligations. '
          'Injected arithmetic states and omitted pre-handoff execution are explicit. '
          'No world-reset, finite-factor, allocator, liveness or whole-Rust refinement proof.')
-PHASES = {'ready', 'inFlight', 'terminalPending'}
-KINDS = {'Death': 'death', 'Time': 'time', 'Completed': 'completed', 'Ended': 'ended'}
-REFUSALS = {name[0].upper() + name[1:]: name for name in
-            ['missingEpisode', 'ageOverflow', 'pendingOutcome', 'pendingTerminal',
-             'undeclaredTime', 'foreignPoint']}
-LIFECYCLE = {name[0].upper() + name[1:]: name for name in
-             ['pendingBoundary', 'unknownDelivery', 'pendingPhysicalTime', 'pendingTerminalClosure']}
-
-
-def option(value, encode):
-    return 'none' if value is None else '(some ' + encode(value) + ')'
-
-
-def status(value, reasons=REFUSALS):
-    require(type(value) is str, 'Expected typed native status')
-    if value == 'Ok(())':
-        return '.ok ()'
-    require(value.startswith('Err(') and value.endswith(')') and value[4:-1] in reasons,
-            'Unknown native refusal')
-    return '.error .' + reasons[value[4:-1]]
+from physical_clock_codec import KINDS, REFUSALS, LIFECYCLE, option, status
+import physical_clock_codec as codec
 
 
 def emit(data):
@@ -63,39 +45,22 @@ def emit(data):
         origins.add(value)
         return encoded
 
-    def time(value):
-        fields(value, 'episode age')
-        return '⟨' + natural(value['episode']) + ',' + natural(value['age']) + '⟩'
-
     def point(value):
-        fields(value, 'origin time')
-        return '⟨' + origin(value['origin']) + ',' + time(value['time']) + '⟩'
+        return codec.point(value, origin)
 
     def clock(value):
-        fields(value, 'origin episode age phase')
-        require(type(value['phase']) is str and value['phase'] in PHASES, 'Unknown clock phase')
-        return '(⟨' + origin(value['origin']) + ',' + option(value['episode'], natural) + ',' + \
-            natural(value['age']) + ',.' + value['phase'] + '⟩ : Clock Nat)'
+        return codec.clock(value, origin)
+
+    def sample(value):
+        natural(value)
+        require(value < data['sample_count'], 'Sample outside declared names')
+        samples.add(value)
+        return str(value)
 
     def receipt(value):
-        fields(value, 'point sample transition successor')
-        kind, argument = variant(value['transition'])
-        require((kind == 'tick' and argument is None) or
-                (kind == 'terminal' and type(argument) is str and argument in KINDS),
-                'Unknown physical transition')
-        if value['sample'] is not None:
-            natural(value['sample'])
-            require(value['sample'] < data['sample_count'], 'Sample outside declared names')
-            samples.add(value['sample'])
-        transition = '.tick' if kind == 'tick' else '(.terminal .' + KINDS[argument] + ')'
-        return '(⟨' + point(value['point']) + ',' + option(value['sample'], natural) + ',' + \
-            transition + ',' + option(value['successor'], time) + '⟩ : Receipt Nat)'
+        return codec.receipt(value, origin, sample)
 
-    def journal(value):
-        if value is None:
-            return 'none'
-        fields(value, 'pending_boundary history_known')
-        return '(some ⟨' + boolean(value['pending_boundary']) + ',' + boolean(value['history_known']) + '⟩)'
+    journal = codec.journal
 
     def payload(value):
         fields(value, 'clock journal failure plan pending_goal calls')
@@ -228,5 +193,5 @@ def emit(data):
 
 
 if __name__ == '__main__':
-    replay_main(emit=emit, modules=MODELS, producers=[Path(__file__).resolve()],
+    replay_main(emit=emit, modules=MODELS, producers=[Path(__file__).resolve(), Path(codec.__file__).resolve()],
                 scope=SCOPE, description=__doc__)
