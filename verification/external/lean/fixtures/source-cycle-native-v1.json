@@ -1,18 +1,18 @@
 {
   "schema": "verum-source-cycle-fixture-v1",
-  "scope": "Actual passing export-producing tests within a failed native suite. The separate reinstall failure and original Monoid failure remain unresolved in this evidence; no complete implementation acceptance.",
+  "scope": "Actual passing native source-cycle, ownership, terminal and restart tests. The independent original Monoid failure is retained in the enclosing verdict; no complete application acceptance.",
   "native_whole_run_status": "failed",
-  "archive_sha256": "cca95c5d8a264702bac4246097177a8c7e6c2fb5d772d2419a6405eaf934ac3c",
+  "archive_sha256": "85a76e37b03d98e9bf59740ad3099805d6c500ff4c1e7634f91182408e8e0dbb",
   "members": {
     "matching_actual_action.json": "e09a162eb6f6b838e6590aca197f7284f142574de6fd3bf99ac3f897f04e9ce3",
     "moving_membership_and_physical_lifecycle.json": "c74e4505e80e0ffafb50922f6813a4af1bfdf71357dfaaea2c6a71142052a5bd",
-    "native-finite-service.log": "e21fa2e5a82a95b1927d6de1d8e89639e30649396b0a1854d44d16f6c5f80aea",
-    "native-receipt.json": "406e899ffbf0dc24593bf5d7c037cca98c8afb2d27d617cd27891179610e85c7",
-    "native-runner.py": "95bbe9219f85341053662c2a12af55f94147dfdbf5aeb43002d1872548148a9e",
-    "reviewed-sources.json": "38bc64036ae32e47f4c1fe924f8dae005537fbd96774d4f87c890258a52ecf02",
+    "native-finite-service.log": "b288425232566112d6d37885abdbbf548eca0d238188635897798251ac3b1041",
+    "native-receipt.json": "e3090f493e111675467055aea6f0f2cd8e9827b417303befde44cf6d0e375dfd",
+    "native-runner.py": "fb188d746efb2fe2ba4c8df48c751c148651de95b74a447c34b13a7797977952",
+    "reviewed-sources.json": "3ddc8eff67ce9a42e6015a981d8dc2df3575b8cda660621a366993a2167b55ce",
     "source-0.rs": "aaa4b73a7a0af14fb708da47d0b0e99648182d314c7d00b7a0f6aed71e9a2745",
     "source-1.rs": "b34d0bdf8873fadc1b1105dc2551dc777e573ca6fcb06aba99940f0f2e17ec07",
-    "source-10.rs": "342a61c48f0cacd6eb50a9fa0d7ceea75880929a75ab3a98b24dcf4b54d0eddf",
+    "source-10.rs": "e33dd4b67a53d923b5b0f78e794a3b59ec2292b90e83057e9bca0c4562e64f58",
     "source-11.rs": "0306b28de10aa024cfcfdc95d12bf33968d8847707d2847ecadf4c75d5595119",
     "source-12.rs": "bdad3d76b8e36502aefb3c76da9d49a4b394f7f8de25a8159f77a8f0f786cb71",
     "source-13.rs": "895d1041bfa9dd16b692e891c50f30480e9130670ee25d6dc6e78dae7f9d4ffe",
@@ -25,7 +25,7 @@
     "source-7.rs": "5bfbc989750df578082aef9ac31483bc527dd667171804b67899ec15d593dbb8",
     "source-8.rs": "5e6b25bce88522d96c05234aab8a7318c4e6aa7e6d78aa97ff5f15b74f639bd5",
     "source-9.rs": "ec02309e9ebb3e224bc784b756bde567a9e36f345d4d8fecf247cb1faaaf45f3",
-    "source-cycle-export-provenance.json": "ce2dfeece4c3d62e1628b95ae2da71b70710af6cd13597d7ab779adcd146aec5",
+    "source-cycle-export-provenance.json": "a63d88f1c414b3f6f40d9296deda973d7ef751d373a9ca03369d73327d6c8d20",
     "wrong_actual_action_equal_autonomous_successor.json": "239900dd7f0252267ce056e82ff0dcae20ca577e9a0ba8b0bf1154b4e5a016a7"
   }
 }

@@ -42,6 +42,20 @@ class NativeSourceCycleTests(IsolatedLeanTest):
         require(receipt['source']==provenance['source'],'Producer source roster changed')
         require(hashlib.sha256(blobs['native-runner.py']).hexdigest()==provenance['runner']['sha256'],
                 'Native runner changed')
+        stage=next(s for s in receipt['stages'] if s['name']=='native-finite-service')
+        require(stage['status']=='passed' and stage['returncode']==0,
+                'Native ownership/lifecycle suite did not pass')
+        text=blobs['native-finite-service.log'].decode()
+        for test in (
+            'source_cycle_terminal_restart_fork_and_replacement_cannot_retain_physical_authority',
+            'pending_membership_keeps_terminal_u_across_admitted_restart',
+            'pending_membership_refused_restart_keeps_the_captured_comparison_and_commit_chain',
+        ):
+            marker='test organism::observer_finite::courts::'+test+' ... '
+            require(text.count(marker)==1,'Missing native ownership/lifecycle control')
+            row=text.split(marker,1)[1].split('\ntest ',1)[0]
+            require(row.rstrip().endswith('ok') and 'FAILED' not in row,
+                    'Native ownership/lifecycle control did not pass')
         for source,item in json.loads(blobs['reviewed-sources.json']).items():
             require(hashlib.sha256(blobs[item['file']]).hexdigest()==item['sha256']==receipt['source'][source]['sha256'],
                     'Reviewed source differs from native build')
