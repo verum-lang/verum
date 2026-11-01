@@ -1,0 +1,79 @@
+{
+  "format": "verum-rust-record-source/1",
+  "provenance": "append-handoff-native-v5.provenance.json",
+  "sources": {
+    "priority.rs": {
+      "fixture": "append-handoff-native-v5.source-0.rs.gz",
+      "native_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority.rs",
+      "sha256": "7d76cb21bbe55574cd2be3a6c4f68e20e057d0222e8078c401fdae8cd827a3e3"
+    },
+    "streaming.rs": {
+      "fixture": "append-handoff-native-v5.source-1.rs.gz",
+      "native_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming.rs",
+      "sha256": "39e1b3737c3243fb1250fffb430f50096308826d2b11cec8be490a28bc2e4b6c"
+    }
+  },
+  "declarations": [
+    {
+      "source": "priority.rs",
+      "start": 1802,
+      "end": 1897,
+      "sha256": "4660cd1755b39efbe941782680334c9369790c8d248bd6d0b5ad1e06fcee4505"
+    },
+    {
+      "source": "priority.rs",
+      "start": 1898,
+      "end": 2014,
+      "sha256": "c07cc4a5b7a024b1cd82ed442e5ddab3bb3d002382fba462c03a1250abb388ce"
+    },
+    {
+      "source": "priority.rs",
+      "start": 2015,
+      "end": 2123,
+      "sha256": "6a5ebd4be703e1f3314c1934f8edda22a68eed76b0cf02469a6870fa583c7090"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5167,
+      "end": 5306,
+      "sha256": "7b4a5b4ec690cf65a24050047ac6c26869a77817bfbca4827910fc2c19dc0bd6"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5307,
+      "end": 5434,
+      "sha256": "f33b8c790fbc8e950efcd78f57ba85fa81e0c4988790f53154a85c73571ce777"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5435,
+      "end": 5761,
+      "sha256": "01c3636432c32ed6da0c5aacb5ee3db6f03f698b2c071f561393422b962825af"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 10672,
+      "end": 10782,
+      "sha256": "1c196b41a83ab1c67618acd60292b1c8f9d5f2a0d47cf629318b558c6964dad1"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 10783,
+      "end": 11079,
+      "sha256": "1edf89eca5766c824798294529c08a4621864ff846eca0093684aee1b6c80cfc"
+    }
+  ],
+  "method": {
+    "source": "streaming.rs",
+    "start": 6076,
+    "end": 6238,
+    "sha256": "2e68a0dde164632d7ce9c8e6a1bfb356140045244f5f1f3262cb1df033bf4624"
+  },
+  "record": "Constructor",
+  "function": "merge",
+  "premises": [
+    "The selected complete declarations and method are unchanged bytes from the pinned native build sources.",
+    "Original types and derived implementations are retained; the surrounding use of std::sync::Arc and impl Constructor supplies lexical context only.",
+    "Rust compiler, rustdoc field metadata and the fail-closed MIR frontend are trusted; invalid references, concurrency, callers and machine-code lowering are outside this proof."
+  ]
+}

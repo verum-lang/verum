@@ -40,25 +40,41 @@ def pair(text):
     raise ValueError('Expected two operands')
 
 
+def function_body(mir, function, result):
+    require(isinstance(mir, str) and len(mir) <= 16*1024*1024, 'Invalid MIR input')
+    require(re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', function), 'Invalid function name')
+    headers = list(re.finditer(r'^fn (.+)\((.*?)\) -> ' + re.escape(result) + r' \{\n', mir, re.M))
+    selected = [m for m in headers if m[1] == function or m[1].endswith('::'+function)]
+    require(len(selected) == 1, 'Function must have one exact MIR declaration')
+    header = selected[0]
+    end = mir.find('\n}', header.end())
+    require(end >= 0, 'Unterminated function')
+    return header[2], mir[header.end():end]
+
+
+def basic_blocks(body):
+    sections = re.split(r'^    (bb\d+): \{\n', body, flags=re.M)
+    require(len(sections) >= 3 and len(sections) % 2 == 1, 'Missing basic blocks')
+    blocks = {}
+    for i in range(1, len(sections), 2):
+        name, body = sections[i:i+2]
+        lines = [line.strip() for line in body.strip().splitlines()]
+        require(lines and lines[-1] == '}', 'Malformed basic block')
+        require(name not in blocks, 'Duplicate basic block')
+        blocks[name] = lines[:-1]
+    require('bb0' in blocks, 'Missing entry')
+    return sections[0], blocks
+
+
 class Translation:
     def __init__(self, mir, function, bits):
-        require(isinstance(mir, str) and len(mir) <= 16*1024*1024, 'Invalid MIR input')
         require(type(bits) is int and 0 < bits <= 128, 'Invalid target width')
-        require(re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', function), 'Invalid function name')
-        headers = list(re.finditer(r'^fn (.+)\((.*?)\) -> usize \{\n', mir, re.M))
-        selected = [m for m in headers if m[1] == function or m[1].endswith('::'+function)]
-        require(len(selected) == 1, 'Function must have one exact MIR declaration')
-        header = selected[0]
-        # rustc renders each outer closing brace at column zero; block and scope
-        # braces are indented. MIR format is compiler-version dependent.
-        end = mir.find('\n}', header.end())
-        require(end >= 0, 'Unterminated function')
-        self.body = mir[header.end():end]
+        parameters, self.body = function_body(mir, function, 'usize')
         self.bits = bits
         self.types = {}
         self.arguments = {}
         self.references = set()
-        for parameter in header[2].split(', '):
+        for parameter in parameters.split(', '):
             m = re.fullmatch(r'(_\d+): (usize|&[A-Za-z][A-Za-z0-9_]*)', parameter)
             require(m is not None, 'Unsupported parameter')
             name, kind = m.groups()
@@ -67,9 +83,8 @@ class Translation:
                 self.arguments[name] = Value('arg'+name[1:], kind)
             else:
                 self.references.add(name)
-        sections = re.split(r'^    (bb\d+): \{\n', self.body, flags=re.M)
-        require(len(sections) >= 3 and len(sections) % 2 == 1, 'Missing basic blocks')
-        for line in sections[0].splitlines():
+        locals, self.blocks = basic_blocks(self.body)
+        for line in locals.splitlines():
             line = line.strip()
             if not line or re.fullmatch(r'debug \w+ => .+;', line) or re.fullmatch(r'scope \d+ \{|}', line):
                 continue
@@ -80,14 +95,6 @@ class Translation:
                     'Unsupported local type: '+kind)
             require(name not in self.types, 'Duplicate local')
             self.types[name] = kind
-        self.blocks = {}
-        for i in range(1, len(sections), 2):
-            name, body = sections[i:i+2]
-            lines = [line.strip() for line in body.strip().splitlines()]
-            require(lines[-1] == '}', 'Malformed basic block')
-            require(name not in self.blocks, 'Duplicate basic block')
-            self.blocks[name] = lines[:-1]
-        require('bb0' in self.blocks, 'Missing entry')
         require(self.types.get('_0') == 'usize', 'Return type mismatch')
         self.fields = set()
         self.visited = set()

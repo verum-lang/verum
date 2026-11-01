@@ -1,7 +1,8 @@
 import VerumExternalReplay.AppendHandoff
 
-/-! Paid visits to a fixed constructor bank. This is a model of the recorded
-projection, not a proof of the Rust heap or arbitrary native executions. -/
+/-! Paid visits to a fixed constructor bank. The retained frame can be an exact
+trace snapshot or a source-derived record. Callers must separately establish
+that Rust heap operations and scheduling implement the model. -/
 namespace WakeHandoff
 
 def ready (pending : Option Nat) (indexed catalogue cursor count : Nat) : Bool :=
@@ -14,25 +15,30 @@ theorem ready_completed (pending : Option Nat) (indexed catalogue cursor count :
   have inner := Bool.and_eq_true_iff.mp outer.1
   exact ⟨inner.1, Nat.eq_of_beq_eq_true inner.2, Nat.eq_of_beq_eq_true outer.2⟩
 
-/-- `rest` preserves every other captured constructor field exactly. -/
-structure Constructor where
+/-- `rest` retains every field outside the wake projection, without inspection. -/
+structure Constructor (Frame : Type) where
   phase : String
   scan : Nat
   newest : Option Nat
   watermark : Nat
   observed : Nat
-  rest : AppendHandoff.Snapshot
+  rest : Frame
   deriving DecidableEq
 
-def needsWake (indexed : Nat) (c : Constructor) : Bool :=
+variable {Frame : Type}
+
+def merge (indexed : Nat) (c : Constructor Frame) : Constructor Frame :=
+  { c with phase := "Merge", scan := 0, newest := none, watermark := indexed }
+
+def needsWake (indexed : Nat) (c : Constructor Frame) : Bool :=
   c.phase == "Idle" && c.observed < indexed
 
-def wake (indexed : Nat) (c : Constructor) : Constructor :=
+def wake (indexed : Nat) (c : Constructor Frame) : Constructor Frame :=
   if needsWake indexed c then
-    { c with phase := "Merge", scan := 0, newest := none, watermark := indexed }
+    merge indexed c
   else c
 
-theorem wake_preserves_retained (indexed : Nat) (c : Constructor) :
+theorem wake_preserves_retained (indexed : Nat) (c : Constructor Frame) :
     (wake indexed c).observed = c.observed ∧ (wake indexed c).rest = c.rest := by
   unfold wake
   split <;> exact ⟨rfl, rfl⟩

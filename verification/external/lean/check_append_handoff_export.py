@@ -83,7 +83,7 @@ def wake_claims(stream, number, claim, definitions, child_owners):
                       natural(c['watermark']), natural(c['observed']),
                       snapshot({k:v for k,v in c.items() if k not in
                                ('phase', 'scan', 'newest', 'watermark', 'observed')})]
-            definitions.append(f'def {name} : WakeHandoff.Constructor := ⟨{", ".join(values)}⟩')
+            definitions.append(f'def {name} : WakeHandoff.Constructor AppendHandoff.Snapshot := ⟨{", ".join(values)}⟩')
             names[key] = name
         return names[key]
     def frame(state, excluded):

@@ -5,12 +5,9 @@ This proves the selected sequential Rust arithmetic under the explicit MIR
 frontend trust boundary. It does not prove callers, ownership or world descent.
 """
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
-import signal
-import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent
@@ -19,7 +16,7 @@ from check_native_clock import archive
 from rust_replay import load, read, require, sha, write
 from mir_to_lean import translate
 
-RUST_VERSION = 'rustc 1.100.0-nightly (8925ea358 2026-08-20)'
+from runtime import RUST_VERSION, execute, runtime_identity
 SOURCE = 'rust/crates/synarc-kan/src/organism/observer_acquired/finite_realization/source_transport.rs'
 HEADER = 'import VerumExternalReplay.BoundedLasso\nset_option warningAsError true\nopen BoundedLasso\n'
 PROOF = '''
@@ -90,30 +87,6 @@ fn main() {
     assert!(std::panic::catch_unwind(|| Shift::new(5,2).apply(5)).is_err());
 }
 """
-
-
-def execute(command, cwd, log, env=None):
-    with subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          text=True, start_new_session=True) as process:
-        try:
-            stdout, stderr = process.communicate(timeout=30)
-        except BaseException:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.communicate()
-            raise
-    log.write_text(stdout + stderr)
-    return process.returncode, stdout, stderr
-
-
-def runtime_identity(executable):
-    root = executable.resolve().parent.parent
-    paths = [executable.resolve(), *sorted((root/'lib').rglob('*'))]
-    result = {}
-    for path in paths:
-        if path.is_file():
-            with path.open('rb') as stream:
-                result[str(path.relative_to(root))] = hashlib.file_digest(stream, 'sha256').hexdigest()
-    return result
 
 
 def main():
@@ -221,7 +194,8 @@ def main():
         require(runtime_identity(args.rustc) == identity, 'Compiler changed during replay')
         require(runtime_identity(args.lean) == lean_identity, 'Lean runtime changed during replay')
         report.update(status='verified', results=results, model_sha256=sha(model.read_bytes()),
-                      translator_sha256=sha(read(ROOT/'mir_to_lean.py')), runner_sha256=sha(read(Path(__file__))))
+                      translator_sha256=sha(read(ROOT/'mir_to_lean.py')), runner_sha256=sha(read(Path(__file__))),
+                      runtime_sha256=sha(read(ROOT/'runtime.py')))
     except BaseException as error:
         report['error'] = repr(error)
         raise
