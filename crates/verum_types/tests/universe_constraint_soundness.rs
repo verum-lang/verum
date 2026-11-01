@@ -28,6 +28,35 @@ fn value(substitution: &UniverseSubstitution, id: u32) -> u64 {
 }
 
 #[test]
+fn cloned_contexts_share_identity_but_keep_constraints_local() {
+    let mut parent = UniverseContext::new();
+    let mut child = parent.clone();
+    let child_id = child.fresh_universe_var().unwrap();
+    let parent_id = parent.fresh_universe_var().unwrap();
+    assert_ne!(child_id, parent_id);
+    child.reserve_variable(2).unwrap();
+    assert_ne!(parent.fresh_universe_var().unwrap(), var(2));
+    child.add_constraint(Constraint::Equal(child_id.clone(), concrete(9)));
+    child.solve().unwrap();
+    assert_eq!(parent.resolve(&child_id).unwrap(), child_id);
+    assert!(parent.constraints().is_empty());
+}
+
+#[test]
+fn reservation_invalidates_assignments_and_respects_local_budget() {
+    let mut context = UniverseContext::new();
+    context.reserve_variable(7).unwrap();
+    context.solve().unwrap();
+    assert_eq!(context.resolve(&var(7)).unwrap(), concrete(0));
+    context.reserve_variable(7).unwrap();
+    assert_eq!(context.resolve(&var(7)).unwrap(), var(7));
+    for id in 0..SolverLimits::default().max_variables as u32 {
+        context.reserve_variable(id).unwrap();
+    }
+    assert!(context.reserve_variable(u32::MAX).is_err());
+}
+
+#[test]
 fn unresolved_constraints_are_not_model_evidence() {
     let empty = UniverseSubstitution::new();
     for constraint in [

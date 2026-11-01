@@ -1932,6 +1932,14 @@ pub enum TypeError {
     #[error("{0}")]
     Other(Text),
 
+    /// Invalid source universe binding or annotation. Import recovery must not
+    /// replace this with a fresh ordinary type variable or nominal placeholder.
+    #[error("invalid universe annotation: {message}")]
+    UniverseBinding {
+        message: Text,
+        span: verum_ast::span::Span,
+    },
+
     /// E370: Strict-positivity violation (K-Pos kernel rule).
     ///
     /// The named inductive type's constructor mentions itself in a
@@ -2155,6 +2163,7 @@ impl TypeError {
             AsmOutputNotLvalue { span } => *span,
             AnalysisCancelled | RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
             OtherWithCodeSpanned { span, .. } => *span,
+            UniverseBinding { span, .. } => *span,
             PositivityViolation { span, .. } => *span,
             UnknownVariantConstructor { span, .. } => *span,
             UnknownField { span, .. } => *span,
@@ -2167,7 +2176,7 @@ impl TypeError {
     /// item-registration phase to ensure soundness errors abort
     /// the build rather than getting masked by `tracing::debug!`.
     pub fn is_soundness_critical(&self) -> bool {
-        matches!(self, TypeError::PositivityViolation { .. })
+        matches!(self, TypeError::PositivityViolation { .. } | TypeError::UniverseBinding { .. })
     }
 
     /// Convert to diagnostic for error reporting with span information
@@ -3406,6 +3415,15 @@ impl TypeError {
                 .message("Analysis cancelled or deadline exceeded; no verdict is available")
                 .build(),
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
+
+            UniverseBinding { message, span } => {
+                let mut builder = DiagnosticBuilder::error()
+                    .message(format!("invalid universe annotation: {message}"));
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder.build()
+            }
 
             OtherWithCode { code, msg } => DiagnosticBuilder::error()
                 .code(code.as_str())

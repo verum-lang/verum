@@ -206,6 +206,12 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested types.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
+        self.with_universe_parameter_scope(&type_decl.generics, false, |checker| {
+            checker.register_type_declaration_in_universe_scope(type_decl)
+        })
+    }
+
+    fn register_type_declaration_in_universe_scope(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
         // Same scoping as `resolve_type_definition`: the refinement
         // name check (T1112) speaks only about a TYPE DECLARATION's own
         // predicate. Both entries set it because a module-level
@@ -2659,7 +2665,9 @@ impl TypeChecker {
         // refinement's name check applies here and nowhere else.
         let prev_in_type_decl = self.in_type_declaration;
         self.in_type_declaration = true;
-        let out = self.resolve_type_definition_inner(type_decl, resolution_stack);
+        let out = self.with_universe_parameter_scope(&type_decl.generics, false, |checker| {
+            checker.resolve_type_definition_inner(type_decl, resolution_stack)
+        });
         self.in_type_declaration = prev_in_type_decl;
         return out;
     }
@@ -7018,6 +7026,13 @@ impl TypeChecker {
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
+        self.with_universe_parameter_scope(&func.generics, false, |checker| {
+            checker.validate_function_universes(func)?;
+            checker.register_function_signature_in_universe_scope(func)
+        })
+    }
+
+    fn register_function_signature_in_universe_scope(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
         use verum_ast::decl::FunctionParamKind;
         use verum_common::Set;
 

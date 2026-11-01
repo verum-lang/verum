@@ -10601,7 +10601,40 @@ impl TypeChecker {
         let saved_owner = std::mem::replace(&mut self.current_module_path, source_module.into());
         let saved_scope = std::mem::replace(&mut self.resolving_source_signature, true);
         self.push_decl_param_frame(indexmap::IndexMap::new());
-        let result = self.extract_function_type_in_source_scope(ast, func_name);
+        // Signature extraction is isolated from the caller's level binders.
+        // Validate before its lenient nominal-type fallback can run.
+        let generics = ast.items.iter().find_map(|item| match &item.kind {
+            verum_ast::ItemKind::Function(function) if function.name.name.as_str() == func_name => Some(&function.generics),
+            verum_ast::ItemKind::Axiom(axiom) if axiom.name.name.as_str() == func_name => Some(&axiom.generics),
+            _ => None,
+        }).cloned().unwrap_or_default();
+        let result = self.with_universe_parameter_scope(&generics, false, |checker| {
+            for item in &ast.items {
+                if let verum_ast::ItemKind::Function(function) = &item.kind
+                    && function.name.name.as_str() == func_name
+                {
+                    checker.validate_function_universes(function)?;
+                }
+                if let verum_ast::ItemKind::Axiom(axiom) = &item.kind
+                    && axiom.name.name.as_str() == func_name
+                {
+                    for parameter in &axiom.params {
+                        if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &parameter.kind {
+                            checker.validate_universe_annotations(ty)?;
+                        }
+                    }
+                    if let Some(ty) = &axiom.return_type { checker.validate_universe_annotations(ty)?; }
+                }
+            }
+            Ok(checker.extract_function_type_in_source_scope(ast, func_name))
+        });
+        let result = match result {
+            Ok(signature) => signature,
+            Err(error) => {
+                self.deferred_soundness_errors.push(error);
+                None
+            }
+        };
         self.pop_decl_param_frame();
         self.resolving_source_signature = saved_scope;
         self.current_module_path = saved_owner;
@@ -11174,7 +11207,10 @@ impl TypeChecker {
         // and a leaked parameter would arrive at the next function as a var
         // that refuses to bind to anything.
         let saved_rigid = self.unifier.rigid_snapshot();
-        let result = self.check_function_inner(func);
+        let result = self.with_universe_parameter_scope(&func.generics, false, |checker| {
+            checker.validate_function_universes(func)?;
+            checker.check_function_inner(func)
+        });
         self.unifier.exit_rigid_scope(saved_rigid);
         result
     }
@@ -11945,20 +11981,9 @@ impl TypeChecker {
                     // Also register as a type so it can be used in `using C` clauses
                     self.ctx.define_type(name_text, context_var);
                 }
-                GenericParamKind::Level { name } => {
-                    // Universe level parameters for universe polymorphism
-                    // Register as a type name so Type(u) can resolve the level variable
-                    let name_text: Text = name.name.clone();
-                    // Universe level params don't create type variables, but we register
-                    // the name so it can be referenced in Type(u) annotations.
-                    self.ctx.env.insert(
-                        name.name.clone(),
-                        TypeScheme::mono(Type::Universe {
-                            level: crate::ty::UniverseLevel::Variable(
-                                self.fresh_universe_var_id(&name_text),
-                            ),
-                        }),
-                    );
+                GenericParamKind::Level { .. } => {
+                    // Level binders live in the dedicated lexical universe scope;
+                    // they are neither ordinary values nor ordinary types.
                 }
                 GenericParamKind::KindAnnotated {
                     name,

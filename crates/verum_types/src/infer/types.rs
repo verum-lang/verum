@@ -554,6 +554,13 @@ impl TypeChecker {
     }
 
     pub fn ast_to_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        let head = match &ast_ty.kind {
+            verum_ast::ty::TypeKind::Generic { base, .. } => &base.kind,
+            kind => kind,
+        };
+        if let verum_ast::ty::TypeKind::Path(path) = head {
+            self.reject_level_as_type(path)?;
+        }
         // SPECIAL CASE: stdlib core/math/hott.vr uses `type I is @builtin_interval;`
         // — a top-level alias whose *body* is the meta-type marker. Intercept it
         // before the depth guard so recursive ast_to_type on the outer alias
@@ -600,39 +607,6 @@ impl TypeChecker {
         };
 
         self.ast_to_type_inner(ast_ty)
-    }
-
-    /// Allocate a fresh universe variable ID for a named level parameter.
-    /// Uses a deterministic mapping from name to ID via hashing.
-    pub(super) fn fresh_universe_var_id(&self, name: &verum_common::Text) -> u32 {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        name.hash(&mut hasher);
-        (hasher.finish() & 0x7FFF_FFFF) as u32
-    }
-
-    /// Convert an AST universe level expression to the internal UniverseLevel.
-    fn ast_universe_level_to_internal(
-        &self,
-        expr: &verum_ast::UniverseLevelExpr,
-    ) -> crate::ty::UniverseLevel {
-        use crate::ty::UniverseLevel;
-        match expr {
-            verum_ast::UniverseLevelExpr::Concrete(n) => UniverseLevel::Concrete(*n),
-            verum_ast::UniverseLevelExpr::Variable(ident) => {
-                let var_id = self.fresh_universe_var_id(&ident.name);
-                UniverseLevel::Variable(var_id)
-            }
-            verum_ast::UniverseLevelExpr::Max(a, b) => {
-                let la = self.ast_universe_level_to_internal(a);
-                let lb = self.ast_universe_level_to_internal(b);
-                la.max(&lb)
-            }
-            verum_ast::UniverseLevelExpr::Succ(inner) => {
-                let l = self.ast_universe_level_to_internal(inner);
-                l.succ()
-            }
-        }
     }
 
     fn ast_to_type_inner(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
@@ -1251,60 +1225,13 @@ impl TypeChecker {
                 Ok(Type::Record(field_types))
             }
 
-            // Universe types: Type, Type(0), Type(1), Type(u)
+            // Universe variables resolve only through source generic binders.
             TypeKind::Universe { level } => {
-                use crate::ty::UniverseLevel;
-                // Honour `[types].universe_polymorphism = false`:
-                // reject POLYMORPHIC universe forms (level variable
-                // `Type(u)`, or expressions containing one — `Max`,
-                // `Succ`). Concrete forms (`Type` and `Type(N)`)
-                // are always allowed: the universe level is fixed
-                // at declaration time, so no polymorphism is
-                // introduced.
-                //
-
-                // Pre-fix the manifest field was tracing-only at
-                // session.rs:472; the elaborator unconditionally
-                // synthesised `UniverseLevel::Variable` for
-                // `Type(u)` regardless of the flag — silently
-                // permitting the language feature even when the
-                // user explicitly disabled it.
-                let level_is_polymorphic = matches!(
-                    level,
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(_))
-                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(_, _))
-                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(_))
-                );
-                if level_is_polymorphic && !self.universe_poly_enabled {
-                    return Err(TypeError::Other(verum_common::Text::from(
-                        "universe-polymorphic types (e.g. `Type(u)`, `Type(max(a,b))`, \
-                         `Type(succ u)`) require `[types].universe_polymorphism = true` \
-                         in Verum.toml — concrete `Type` / `Type(N)` are always \
-                         allowed",
-                    )));
-                }
-                let uni_level = match level {
-                    verum_common::Maybe::None => UniverseLevel::TYPE,
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
-                        UniverseLevel::Concrete(*n)
-                    }
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(ident)) => {
-                        // Look up the level variable in scope
-                        // For now, assign a fresh variable ID based on the name
-                        let var_id = self.fresh_universe_var_id(&ident.name);
-                        UniverseLevel::Variable(var_id)
-                    }
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(a, b)) => {
-                        let la = self.ast_universe_level_to_internal(a);
-                        let lb = self.ast_universe_level_to_internal(b);
-                        la.max(&lb)
-                    }
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(inner)) => {
-                        let l = self.ast_universe_level_to_internal(inner);
-                        l.succ()
-                    }
+                let level = match level {
+                    Some(expression) => self.ast_universe_level_to_internal(expression)?,
+                    None => crate::ty::UniverseLevel::TYPE,
                 };
-                Ok(Type::Universe { level: uni_level })
+                Ok(Type::Universe { level })
             }
 
             // Meta type: meta T - compile-time type-level value
@@ -1353,6 +1280,14 @@ impl TypeChecker {
     /// Pushes/pops a scope for the universally-quantified type parameters;
     /// handles Type/HKT/Const/Meta/KindAnnotated param kinds.
     fn ast_to_rank2_function_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        let verum_ast::ty::TypeKind::Rank2Function { type_params, .. } = &ast_ty.kind
+            else { unreachable!() };
+        self.with_universe_parameter_scope(type_params, true, |checker| {
+            checker.ast_to_rank2_function_type_in_universe_scope(ast_ty)
+        })
+    }
+
+    fn ast_to_rank2_function_type_in_universe_scope(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         use verum_ast::ty::TypeKind;
         let TypeKind::Rank2Function { type_params, params, return_type, .. } = &ast_ty.kind
             else { unreachable!() };

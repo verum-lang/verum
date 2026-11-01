@@ -14,6 +14,7 @@
 
 // Submodules containing impl TypeChecker method groups
 mod source_declarations;
+mod universe_parameters;
 mod preparation;
 mod field_visibility;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
@@ -749,6 +750,7 @@ pub struct TypeChecker {
     higher_kinded_enabled: bool,
     /// Whether universe polymorphism is tracked (`[types] universe_polymorphism`).
     universe_poly_enabled: bool,
+    universe_parameters: universe_parameters::UniverseParameterScopes,
     /// Whether coinductive types (codata/cofix) are allowed (`[types] coinductive`).
     coinductive_enabled: bool,
     /// Whether quotient types are allowed (`[types] quotient`).

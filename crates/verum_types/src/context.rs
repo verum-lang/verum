@@ -14,7 +14,7 @@ pub use crate::variance::Variance;
 use indexmap::IndexMap;
 use verum_ast::span::Span;
 use verum_common::well_known_types::WellKnownType as WKT;
-use verum_common::{List, Map, Maybe, Set, Text};
+use verum_common::{List, Map, Maybe, Set, Shared, Text};
 
 // Module system integration
 // Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports
@@ -704,6 +704,15 @@ impl UniverseSubstitution {
     }
 }
 
+/// IDs remain reserved when a lexical scope is popped or a context is cloned.
+/// Constraints and solutions belong to each context; identity belongs to its
+/// entire checking lineage.
+#[derive(Debug, Default)]
+struct UniverseVariableSupply {
+    reserved: Set<u32>,
+    next: u64,
+}
+
 /// Universe context for tracking universe levels and constraints
 /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
 #[derive(Debug, Clone)]
@@ -714,8 +723,7 @@ pub struct UniverseContext {
     substitution: UniverseSubstitution,
     /// Every explicit or allocated ID is reserved independently of its magnitude.
     known_variables: Set<u32>,
-    /// Candidate ID; u64 preserves the exhausted state beyond u32::MAX.
-    next_var: u64,
+    supply: Shared<parking_lot::Mutex<UniverseVariableSupply>>,
 }
 
 impl UniverseContext {
@@ -730,7 +738,7 @@ impl UniverseContext {
             constraints: List::new(),
             substitution: UniverseSubstitution::new(),
             known_variables: Set::new(),
-            next_var: 0,
+            supply: Shared::new(parking_lot::Mutex::new(UniverseVariableSupply::default())),
         }
     }
 
@@ -742,21 +750,40 @@ impl UniverseContext {
         {
             return Err("universe context exceeds its variable budget".into());
         }
+        let mut supply = self.supply.lock();
         loop {
-            let id = u32::try_from(self.next_var)
+            let id = u32::try_from(supply.next)
                 .map_err(|_| Text::from("universe variable supply exhausted"))?;
-            self.next_var += 1; // id was u32, so this u64 addition cannot overflow.
-            if self.known_variables.insert(id) {
+            supply.next += 1; // id was u32, so this u64 addition cannot overflow.
+            if supply.reserved.insert(id) {
+                self.known_variables.insert(id);
                 self.substitution = UniverseSubstitution::new();
                 return Ok(UniverseLevel::Variable(id));
             }
         }
     }
 
+    /// Make an existing declaration identity visible to this context. This
+    /// also reserves explicit IDs against future allocations in sibling scopes.
+    pub fn reserve_variable(&mut self, id: u32) -> Result<(), Text> {
+        if !self.known_variables.contains(&id)
+            && self.known_variables.len()
+                >= crate::universe_solver::SolverLimits::default().max_variables
+        {
+            return Err("universe context exceeds its variable budget".into());
+        }
+        self.supply.lock().reserved.insert(id);
+        self.known_variables.insert(id);
+        self.substitution = UniverseSubstitution::new();
+        Ok(())
+    }
+
     /// Add a universe constraint
     pub fn add_constraint(&mut self, constraint: UniverseConstraint) {
         self.substitution = UniverseSubstitution::new();
-        self.known_variables.extend(constraint.variables());
+        let variables = constraint.variables();
+        self.supply.lock().reserved.extend(variables.iter().copied());
+        self.known_variables.extend(variables);
         self.constraints.push(constraint);
     }
 
