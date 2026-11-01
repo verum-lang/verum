@@ -95,7 +95,7 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
   async function searchFiles() {
     const query = filter.value.trim(), generation = ++searchGeneration;
     if (!query || changesOnly) search = null;
-    searchError = ''; searchPending = !!query; render();
+    searchError = ''; searchPending = !!query && !changesOnly; render();
     if (!query || changesOnly) { searchPending = false; return; }
     try { const result = await api<ProjectListing>('workspace.search', { query }); if (generation === searchGeneration) search = result; }
     catch (error) { if (generation === searchGeneration) searchError = error instanceof Error ? error.message : String(error); }
@@ -116,6 +116,19 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
       await searchFiles(); render();
     } finally { refreshing = false; }
   }
+  // File search and the tree share activation, including dirty-document review.
+  // Do not dispatch through stale results while a newer query is in flight.
+  filter.setAttribute('aria-controls', tree.id);
+  filter.addEventListener('keydown', event => {
+    if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+    event.preventDefault();
+    if (searchPending || searchError || !rows.length) return;
+    if (event.key === 'Enter') {
+      const row = rows.find(row => row.kind === 'file');
+      if (row && !event.repeat) { focusPath = row.path; activate(row).catch(hooks.failure); }
+    } else focus(rows[event.key === 'ArrowDown' ? 0 : rows.length - 1].path);
+  });
   filter.addEventListener('input', () => { ++searchGeneration; window.clearTimeout(searchTimer); search = null; searchPending = !!filter.value.trim(); render(); searchTimer = window.setTimeout(() => { searchFiles().catch(hooks.failure); }, 180); });
   changesButton.addEventListener('click', () => { changesOnly = !changesOnly; searchFiles().catch(hooks.failure); });
   document.getElementById('collapse-folders')!.addEventListener('click', () => { expanded.clear(); changesOnly = false; filter.value = ''; persist(); searchFiles().catch(hooks.failure); });
