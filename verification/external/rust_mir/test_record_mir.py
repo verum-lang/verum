@@ -67,22 +67,22 @@ class RecordTests(unittest.TestCase):
         text = translate(mir('        ((*_1).0: usize) = copy _2;\n        return;'))
         self.assertIn('structure Record (Frame2 : Type)', text)
         self.assertIn('field2 : Frame2', text)
-        self.assertIn('{ initial with field0 := arg2 }', text)
-        self.assertIn('(state1, Exit.returned)', text)
+        self.assertIn('let write1 : Nat := arg2', text)
+        self.assertIn('({ initial with field0 := write1 }, Exit.returned ())', text)
 
     def test_read_captures_state_before_mutation(self):
         text = translate(mir('''        _4 = copy ((*_1).0: usize);
         ((*_1).0: usize) = copy _2;
         ((*_1).0: usize) = copy _4;
         return;''', '    let mut _4: usize;\n'))
-        self.assertIn('{ state1 with field0 := initial.field0 }', text)
+        self.assertIn('let write2 : Nat := initial.field0', text)
 
     def test_read_after_mutation_uses_new_state(self):
         text = translate(mir('''        ((*_1).0: usize) = copy _2;
         _4 = copy ((*_1).0: usize);
         ((*_1).0: usize) = copy _4;
         return;''', '    let mut _4: usize;\n'))
-        self.assertIn('{ state1 with field0 := state1.field0 }', text)
+        self.assertIn('let write2 : Nat := write1', text)
 
     def test_bool_storage_and_branch_use_same_value(self):
         text = translate(mir('''        ((*_1).1: bool) = copy _3;
@@ -94,8 +94,8 @@ class RecordTests(unittest.TestCase):
         return;
     }
 '''))
-        self.assertIn('field1 := (decide (arg3 = true))', text)
-        self.assertIn('if state1.field1 = true then', text)
+        self.assertIn('let write1 : Bool := (decide (arg3 = true))', text)
+        self.assertIn('if write1 = true then', text)
 
     def test_checked_failure_preserves_preceding_writes(self):
         text = translate(mir('''        ((*_1).0: usize) = copy _2;
@@ -107,14 +107,14 @@ class RecordTests(unittest.TestCase):
     }
 '''))
         self.assertIn('if 1 ≤ arg2 then', text)
-        self.assertIn('else (state1, Exit.panicked)', text)
+        self.assertIn('else ({ initial with field0 := write1 }, Exit.panicked)', text)
 
     def test_remainder_divisor_is_captured_before_assignment(self):
         text = translate(mir('''        ((*_1).0: usize) = const 7_usize;
         _2 = Rem(const 0_usize, copy _2);
         ((*_1).0: usize) = copy _2;
         return;'''))
-        self.assertIn('if arg2 = 0 then (state1, Exit.panicked) else', text)
+        self.assertIn('if arg2 = 0 then ({ initial with field0 := write1 }, Exit.panicked) else', text)
         self.assertNotIn('if (0 % arg2) = 0', text)
 
     def test_missing_guard_and_unknown_effects_fail_closed(self):
@@ -142,7 +142,7 @@ class RecordTests(unittest.TestCase):
             lambda m: m['index']['1']['inner']['struct']['kind']['plain'].update(fields=[4,4,6]),
             lambda m: m['index']['2']['inner']['impl']['for']['resolved_path'].update(id=8),
             lambda m: m['index']['3']['inner']['function']['header'].update(is_unsafe=True),
-            lambda m: m['index']['3']['inner']['function']['sig']['inputs'][0][1]['borrowed_ref'].update(is_mutable=False),
+            lambda m: m['index']['3']['inner']['function']['sig']['inputs'][0][1]['borrowed_ref'].update(is_mutable='invalid'),
         ]:
             data = copy.deepcopy(metadata()); mutate(data)
             with self.subTest(data=data), self.assertRaises(ValueError):
@@ -154,10 +154,67 @@ class RecordTests(unittest.TestCase):
                        mir('        return;', blocks='    bb9: {\n        return;\n    }\n')]:
             with self.assertRaises(ValueError): translate(source)
 
+    def test_shared_scalar_return_and_frame(self):
+        for kind, index in [('bool', 1), ('usize', 0)]:
+            data = metadata()
+            sig = data['index']['3']['inner']['function']['sig']
+            sig['inputs'][0][1]['borrowed_ref']['is_mutable'] = False
+            sig['output'] = {'primitive': kind}
+            source = mir(f'        _0 = copy ((*_1).{index}: {kind});\n        return;').replace(
+                '&mut State', '&State').replace('-> ()', '-> '+kind).replace('_0: ();', '_0: '+kind+';')
+            self.assertIn('Exit.returned', translate(source, data))
+            with self.assertRaisesRegex(ValueError, 'Invalid return'):
+                translate(source.replace(f'        _0 = copy ((*_1).{index}: {kind});\n', ''), data)
+            with self.assertRaisesRegex(ValueError, 'Store through a shared receiver'):
+                translate(source.replace('        return;', '        ((*_1).0: usize) = copy _2;\n        return;'), data)
+            with self.assertRaises(ValueError):
+                translate(source.replace('_0: '+kind+';', '_0: ();'), data)
+
 
 @unittest.skipUnless(os.getenv('VERUM_REPLAY_RUSTC') and os.getenv('VERUM_REPLAY_LEAN'),
                      'Set both pinned compiler paths to run actual Rust/Lean semantics checks')
 class CompiledRecordTests(unittest.TestCase):
+    def test_shared_getters_preserve_arbitrary_owned_frame(self):
+        source = '''struct State { value: usize, flag: bool, owned: Vec<usize> }
+impl State {
+    fn value(&self) -> usize { self.value }
+    fn flag(&self) -> bool { self.flag }
+}
+'''
+        with tempfile.TemporaryDirectory(prefix='verum-record-getters-') as tmp:
+            root = Path(tmp)
+            rustc = Path(os.environ['VERUM_REPLAY_RUSTC']).resolve()
+            lean = Path(os.environ['VERUM_REPLAY_LEAN']).resolve()
+            (root/'state.rs').write_text(source)
+            commands = [
+                ('mir', [str(rustc), '--crate-type=lib', '--emit=mir', 'state.rs', '-o', 'state.mir']),
+                ('doc', [str(rustc.with_name('rustdoc')), '-Z', 'unstable-options', '--document-private-items',
+                         '--output-format=json', 'state.rs', '-o', 'metadata'])]
+            for name, command in commands:
+                code, stdout, stderr = execute(command, root, root/f'{name}.log')
+                self.assertEqual(code, 0, stdout+stderr)
+            data = json.loads((root/'metadata/state.json').read_bytes())
+            layout = Layout(data, 'State', 'value')
+            (root/'witness.rs').write_text(source + witness_source(layout))
+            code, stdout, stderr = execute([str(rustc), '--crate-type=lib', '--emit=mir', 'witness.rs', '-o',
+                                           'witness.mir'], root, root/'witness.log')
+            self.assertEqual(code, 0, stdout+stderr)
+            text = 'set_option warningAsError true\n'
+            for i, name in enumerate(['value', 'flag']):
+                method = Layout(data, 'State', name)
+                self.assertEqual(method.declarations(), layout.declarations())
+                text += RecordTranslation((root/'state.mir').read_text(), name, method,
+                    (root/'witness.mir').read_text()).lean(name=name, declarations=i == 0)
+                text += f'''\ntheorem {name}_exact {{Frame2 : Type}} (s : Record Frame2) :
+    {name} s = (s, Exit.returned s.field{i}) := by unfold {name}; cases s.field1 <;> rfl
+#print axioms {name}_exact
+'''
+            (root/'Check.lean').write_text(text)
+            code, stdout, stderr = execute([str(lean), '-M', '1024', '--json', 'Check.lean'], root, root/'lean.log')
+            self.assertEqual(code, 0, stdout+stderr)
+            self.assertEqual([json.loads(line)['data'] for line in stdout.splitlines()],
+                             [f"'{name}_exact' does not depend on any axioms" for name in ['value', 'flag']])
+
     def test_arbitrary_state_preserves_frame_on_both_return_and_panic(self):
         source = '''struct State { value: usize, flag: bool, owned: Vec<usize> }
 impl State {
@@ -191,9 +248,9 @@ impl State {
 theorem exact_state {Frame2 : Type} (s : Record Frame2) (x : Nat) (flag : Bool) :
     extracted s x flag =
       if flag = true then
-        if x ≤ s.field0 then ({ s with field0 := s.field0-x, field1 := flag }, Exit.returned)
+        if x ≤ s.field0 then ({ s with field0 := s.field0-x, field1 := flag }, Exit.returned ())
         else ({ s with field0 := x, field1 := flag }, Exit.panicked)
-      else ({ s with field0 := x, field1 := flag }, Exit.returned) := by
+      else ({ s with field0 := x, field1 := flag }, Exit.returned ()) := by
   cases flag <;> rfl
 #print axioms exact_state
 '''

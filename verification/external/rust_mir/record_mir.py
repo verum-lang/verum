@@ -1,4 +1,4 @@
-"""Typed, exclusive record updates from compiler MIR and rustdoc metadata.
+"""Typed record reads and exclusive updates from native-checked metadata.
 
 Every record field is retained. Uninterpreted fields are universally quantified
 frame values, never replaced by empty containers. Accessing such a field, calls,
@@ -55,11 +55,15 @@ class Layout:
         require(signature['header'] == {'is_const': False, 'is_unsafe': False, 'is_async': False, 'abi': 'Rust'}
                 and signature['generics'] == {'params': [], 'where_predicates': []}
                 and signature['has_body'] and not signature['sig']['is_c_variadic']
-                and signature['sig']['output'] is None, 'Unsupported method signature')
+                and signature['sig']['output'] in (None, {'primitive': 'bool'}, {'primitive': 'usize'}),
+                'Unsupported method signature')
+        self.result = '()' if signature['sig']['output'] is None else signature['sig']['output']['primitive']
         inputs = signature['sig']['inputs']
-        require(inputs and inputs[0][1] == {'borrowed_ref': {'lifetime': None, 'is_mutable': True,
-                                                         'type': {'generic': 'Self'}}},
-                'Expected exclusive self parameter')
+        require(inputs and set(inputs[0][1]) == {'borrowed_ref'}, 'Expected self reference')
+        receiver = inputs[0][1]['borrowed_ref']
+        require(receiver == {'lifetime': None, 'is_mutable': receiver.get('is_mutable'), 'type': {'generic': 'Self'}}
+                and type(receiver['is_mutable']) is bool, 'Unsupported self reference')
+        self.mutable = receiver['is_mutable']
         self.parameters = []
         for _, ty in inputs[1:]:
             require(ty in ({'primitive': 'usize'}, {'primitive': 'bool'}), 'Unsupported method parameter')
@@ -113,7 +117,7 @@ class Layout:
         parameters = f' ({" ".join(self.opaque)} : Type)' if self.opaque else ''
         record = 'structure Record' + parameters + ' where\n' + '\n'.join(
             f'  field{i} : {field.lean}' for i, field in enumerate(self.fields)) + '\n  deriving DecidableEq'
-        return '\n\n'.join(enums + [record, 'inductive Exit where\n  | returned\n  | panicked\n  deriving DecidableEq'])
+        return '\n\n'.join(enums + [record, 'inductive Exit (Result : Type) where\n  | returned (value : Result)\n  | panicked\n  deriving DecidableEq'])
 
     def record_type(self):
         return 'Record' + ((' ' + ' '.join(self.opaque)) if self.opaque else '')
@@ -123,13 +127,14 @@ class RecordTranslation(Translation):
     def __init__(self, mir, function, layout, native_layout_mir, bits=64):
         validate_layout(native_layout_mir, layout)
         require(type(bits) is int and 0 < bits <= 128, 'Invalid target width')
-        parameters, body = function_body(mir, function, '()')
-        require(function_body(native_layout_mir, function, '()') == (parameters, body),
+        parameters, body = function_body(mir, function, layout.result)
+        require(function_body(native_layout_mir, function, layout.result) == (parameters, body),
                 'Layout witness compilation changed the selected native method')
-        expected = ['_1: &mut ' + layout.record] + [f'_{i+2}: {kind}' for i, kind in enumerate(layout.parameters)]
+        receiver = '&mut ' if layout.mutable else '&'
+        expected = ['_1: ' + receiver + layout.record] + [f'_{i+2}: {kind}' for i, kind in enumerate(layout.parameters)]
         require(parameters.split(', ') == expected, 'MIR/metadata parameter mismatch')
         self.layout, self.bits = layout, bits
-        self.types = {'_1': '&mut ' + layout.record}
+        self.types = {'_1': receiver + layout.record}
         self.arguments = {}
         for i, kind in enumerate(layout.parameters):
             name = f'_{i+2}'
@@ -144,7 +149,7 @@ class RecordTranslation(Translation):
             require(m[2] in ('()', 'usize', 'bool', '(usize, bool)', 'std::option::Option<usize>')
                     or m[2] in layout.enums, 'Unsupported local type: '+m[2])
             self.types[m[1]] = m[2]
-        require(self.types.get('_0') == '()', 'Return type mismatch')
+        require(self.types.get('_0') == layout.result, 'Return type mismatch')
         self.references, self.visited, self.nodes, self.fresh = set(), set(), 0, 0
 
     def field(self, owner, index, kind):
@@ -158,7 +163,7 @@ class RecordTranslation(Translation):
         m = re.fullmatch(r'copy \(\(\*(_\d+)\)\.(\d+): (.+)\)', text)
         if m:
             index = self.field(*m.groups())
-            value = f'{environment["state"]}.field{index}'
+            value = environment.get(('field', index), f'initial.field{index}')
             return Value(value + (' = true' if m[3] == 'bool' else ''), m[3])
         if text in ('const true', 'const false'):
             return Value('True' if text == 'const true' else 'False', 'bool')
@@ -175,6 +180,17 @@ class RecordTranslation(Translation):
         m = re.fullmatch(r'([A-Za-z][A-Za-z0-9_]*)::([A-Za-z][A-Za-z0-9_]*)', text)
         if m: return Value(self.layout.enum_value(*m.groups()), m[1])
         return super().expression(text, environment)
+
+    def state(self, environment):
+        """Reconstruct once per exit, avoiding nested record-projection expansion.
+
+        Each write is an immutable scalar binding. Reads capture that binding;
+        branch-local dictionaries retain the latest binding for each field.
+        Unchanged and opaque fields always come from the original record.
+        """
+        updates = [f'field{i} := {environment[("field", i)]}' for i in range(len(self.layout.fields))
+                   if ('field', i) in environment]
+        return '{ initial with ' + ', '.join(updates) + ' }' if updates else 'initial'
 
     def block(self, name, environment, stack=()):
         require(name in self.blocks and name not in stack, 'Missing block or cyclic control flow')
@@ -195,7 +211,7 @@ class RecordTranslation(Translation):
                 # Capture operands before a local assignment can shadow its divisor.
                 require(target in self.types, 'Remainder must be evaluated in a local')
                 _, denominator = (self.operand(x, environment) for x in pair(source[4:-1]))
-                prefix += f'if {denominator.text} = 0 then ({environment["state"]}, Exit.panicked) else\n'
+                prefix += f'if {denominator.text} = 0 then ({self.state(environment)}, Exit.panicked) else\n'
             if target in self.types:
                 if isinstance(value, Overflow):
                     require(self.types[target] == '(usize, bool)', 'Overflow tuple type mismatch')
@@ -205,17 +221,18 @@ class RecordTranslation(Translation):
                     # Reads capture the state at this instruction, before any later write.
                     environment[target] = value
             else:
+                require(self.layout.mutable, 'Store through a shared receiver')
                 place = re.fullmatch(r'\(\(\*(_\d+)\)\.(\d+): (.+)\)', target)
                 require(place is not None, 'Unsupported assignment target: '+target)
                 index = self.field(*place.groups())
                 require(isinstance(value, Value) and value.kind == place[3], 'Field value type mismatch')
                 encoded = f'(decide ({value.text}))' if value.kind == 'bool' else value.text
                 self.fresh += 1
-                state = f'state{self.fresh}'
-                prefix += f'let {state} := {{ {environment["state"]} with field{index} := {encoded} }}\n'
-                environment['state'] = state
+                binding = f'write{self.fresh}'
+                prefix += f'let {binding} : {self.layout.fields[index].lean} := {encoded}\n'
+                environment[('field', index)] = binding
         advance = lambda target: self.block(target, environment, (*stack, name))
-        failed = f'({environment["state"]}, Exit.panicked)'
+        failed = f'({self.state(environment)}, Exit.panicked)'
         last = lines[-1]
         if pending is not None:
             local, value = pending
@@ -227,7 +244,11 @@ class RecordTranslation(Translation):
             environment[(local, 0)] = Value(result, 'usize')
             environment[(local, 1)] = Value('False', 'bool')
             return prefix + f'if {guard} then\n{advance(m[1])}\nelse {failed}'
-        if last == 'return;': return prefix + f'({environment["state"]}, Exit.returned)'
+        if last == 'return;':
+            value = Value('()', '()') if self.layout.result == '()' else environment.get('_0')
+            require(isinstance(value, Value) and value.kind == self.layout.result, 'Invalid return')
+            encoded = f'(decide ({value.text}))' if value.kind == 'bool' else value.text
+            return prefix + f'({self.state(environment)}, Exit.returned {encoded})'
         m = re.fullmatch(r'goto -> (bb\d+);', last)
         if m: return prefix + advance(m[1])
         m = re.fullmatch(r'switchInt\((.*)\) -> \[0: (bb\d+), otherwise: (bb\d+)\];', last)
@@ -242,14 +263,16 @@ class RecordTranslation(Translation):
             return prefix + f'if {value.text} then {failed} else\n{advance(m[2])}'
         raise ValueError('Unsupported terminator: '+last)
 
-    def lean(self):
-        body = self.block('bb0', {**self.arguments, 'state': 'initial'})
+    def lean(self, name='extracted', declarations=True):
+        identifier(name)
+        body = self.block('bb0', dict(self.arguments))
         require(self.visited == self.blocks.keys(), 'Unvisited basic blocks')
         frame = f' {{{" ".join(self.layout.opaque)} : Type}}' if self.layout.opaque else ''
         params = ''
         for i, kind in enumerate(self.layout.parameters):
-            name = f'arg{i+2}'
-            if not re.search(r'\b'+name+r'\b', body): name = '_' + name
-            params += f' ({name} : {"Nat" if kind == "usize" else "Bool"})'
-        return self.layout.declarations() + '\n\ndef extracted' + frame + f' (initial : {self.layout.record_type()})' + params + \
-            f' : ({self.layout.record_type()}) × Exit :=\n' + '\n'.join('  '+line for line in body.splitlines())+'\n'
+            argument = f'arg{i+2}'
+            if not re.search(r'\b'+argument+r'\b', body): argument = '_' + argument
+            params += f' ({argument} : {"Nat" if kind == "usize" else "Bool"})'
+        result_type = {'()': 'Unit', 'bool': 'Bool', 'usize': 'Nat'}[self.layout.result]
+        return (self.layout.declarations() + '\n\n' if declarations else '') + 'def ' + name + frame + f' (initial : {self.layout.record_type()})' + params + \
+            f' : ({self.layout.record_type()}) × Exit {result_type} :=\n' + '\n'.join('  '+line for line in body.splitlines())+'\n'

@@ -109,7 +109,8 @@ impl State { fn update(&mut self, amount: usize) { self.value = amount; } }
             self.assertEqual(code, 0, log)
             text = RecordTranslation((root/'source.mir').read_text(), 'update', layout, (root/'witness.mir').read_text()).lean()
             self.assertIn('field2 : Frame2', text)
-            self.assertIn('{ initial with field0 := arg2 }', text)
+            self.assertIn('let write1 : Nat := arg2', text)
+            self.assertIn('{ initial with field0 := write1 }', text)
 
 
 if __name__ == '__main__':

@@ -22,16 +22,17 @@ structure Constructor (Frame : Type) where
   newest : Option Nat
   watermark : Nat
   observed : Nat
+  sleeping : Bool
   rest : Frame
   deriving DecidableEq
 
 variable {Frame : Type}
 
 def merge (indexed : Nat) (c : Constructor Frame) : Constructor Frame :=
-  { c with phase := "Merge", scan := 0, newest := none, watermark := indexed }
+  { c with phase := "Merge", scan := 0, newest := none, watermark := indexed, sleeping := false }
 
 def needsWake (indexed : Nat) (c : Constructor Frame) : Bool :=
-  c.phase == "Idle" && c.observed < indexed
+  c.sleeping && c.observed < indexed
 
 def wake (indexed : Nat) (c : Constructor Frame) : Constructor Frame :=
   if needsWake indexed c then

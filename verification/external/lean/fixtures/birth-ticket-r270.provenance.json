@@ -1,0 +1,39 @@
+{
+  "format": "verum-frozen-native-source/1",
+  "native_binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/r270/synarc_kan-courts",
+    "bytes": 69490864,
+    "sha256": "d252591bdf993724b6cae009d79eb0b59bc30624d9d13709924ffcb12c80088b"
+  },
+  "receipt_sha256": "1dd93ad8e03ed3e21db24cb3bb790ee27df3d3cd5095725c23a0457dbe6a9a27",
+  "build_receipt_sha256": "1dd93ad8e03ed3e21db24cb3bb790ee27df3d3cd5095725c23a0457dbe6a9a27",
+  "sources": [
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority.rs",
+      "fixture": "birth-ticket-r270.source-0.rs.gz",
+      "bytes": 14224,
+      "sha256": "53187f0980abd3ba93006332ecf6535f8721399872dba50accf9a6eb9216137a"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming.rs",
+      "fixture": "birth-ticket-r270.source-1.rs.gz",
+      "bytes": 48621,
+      "sha256": "7e4695553415ae84c01c767e82c0b2ebba898066697a39038f1327e09cf11776"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming/ticket_courts.rs",
+      "fixture": "birth-ticket-r270.source-2.rs.gz",
+      "bytes": 12179,
+      "sha256": "f2ad299ae58772353c3abb8cdbd9002033215fd29bd72714b8c83aaa8b207096"
+    }
+  ],
+  "native_status": "failed",
+  "compiler_identity": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2\n",
+  "build_environment": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_DEV_OPT_LEVEL": "1",
+    "CARGO_PROFILE_DEV_DEBUG_ASSERTIONS": "true",
+    "CARGO_PROFILE_DEV_OVERFLOW_CHECKS": "true"
+  }
+}

@@ -32,16 +32,16 @@ def inflated(path):
     return data
 
 
-def prepare(out):
+def prepare(out, profile):
     """Bind reviewed byte ranges to complete native inputs, never a source mirror."""
-    manifest_bytes = read(ROOT / 'constructor-merge.json')
+    manifest_bytes = read(ROOT / ('constructor-merge.json' if profile == 'legacy' else 'birth-ticket-wake.json'))
     manifest = load(manifest_bytes)
     require(manifest['format'] == 'verum-rust-record-source/1', 'Wrong selection schema')
     provenance_bytes = read(FIXTURES / manifest['provenance'])
     provenance = load(provenance_bytes)
     receipts = {}
     for name, digest in [('receipt', 'receipt_sha256'), ('build-receipt', 'build_receipt_sha256')]:
-        data = inflated(FIXTURES / f'append-handoff-native-v5.{name}.json.gz')
+        data = inflated(FIXTURES / manifest.get('receipts', {}).get(name, f'append-handoff-native-v5.{name}.json.gz'))
         require(sha(data) == provenance[digest], 'Changed native receipt')
         receipts[name] = load(data)
         require(receipts[name]['binary'] == provenance['native_binary'], 'Binary identity mismatch')
@@ -70,12 +70,12 @@ def prepare(out):
         require(sha(fragment) == spec['sha256'], 'Changed reviewed declaration')
         return fragment
     declarations = b'\n\n'.join(selected(d) for d in manifest['declarations'])
-    method = selected(manifest['method'])
+    methods = [selected(spec) for spec in manifest.get('methods', [manifest.get('method')])]
     require(manifest['record'] == 'Constructor' and manifest['function'] == 'merge', 'Wrong proof target')
-    assembled = b'use std::sync::Arc;\n\n' + declarations + b'\n\nimpl Constructor {\n' + method + b'\n}\n'
+    assembled = b'use std::sync::Arc;\n\n' + declarations + b'\n\nimpl Constructor {\n' + b'\n'.join(methods) + b'\n}\n'
     (out / 'selection.json').write_bytes(manifest_bytes)
     (out / 'provenance.json').write_bytes(provenance_bytes)
-    return assembled, method, {
+    return assembled, methods, {
         'selection_sha256': sha(manifest_bytes), 'provenance_sha256': sha(provenance_bytes),
         'native_run_status': receipts['receipt']['status'],
         'native_build_receipt_status': receipts['build-receipt']['status'],
@@ -83,14 +83,17 @@ def prepare(out):
     }
 
 
-def specification(layout):
+def specification(layout, profile, mutation_field=None):
     """A complete typed projection: every non-wake field becomes part of the frame."""
     needed = {'phase': 'ConstructorPhase', 'scan': 'usize', 'newest': 'std::option::Option<usize>',
               'watermark': 'usize', 'observed': 'usize'}
+    if profile == 'birth-tickets': needed['sleeping'] = 'bool'
     for name, kind in needed.items():
         require(layout.fields[layout.index(name)].kind == kind, 'Model field type mismatch')
     phase = layout.enums['ConstructorPhase']
-    require(set(phase) == {'Merge', 'Freeze', 'Anchor', 'Bounds', 'Tuple', 'Reset', 'Carry', 'Idle'},
+    expected_phases = ({'Merge', 'Freeze', 'Anchor', 'Bounds', 'Tuple', 'Reset', 'Carry', 'Idle'}
+                       if profile == 'legacy' else {'Merge', 'Freeze', 'Anchor', 'Bounds', 'Publish', 'Idle'})
+    require(set(phase) == expected_phases,
             'Unreviewed constructor phase')
     frame = [i for i, f in enumerate(layout.fields) if f.name not in needed]
     require(frame, 'Missing retained frame')
@@ -100,19 +103,24 @@ def specification(layout):
     phase_cases = '\n'.join(f'    | {layout.enum_value("ConstructorPhase", name)} => "{name}"' for name in phase)
     implicit = f' {{{" ".join(layout.opaque)} : Type}}' if layout.opaque else ''
     expected = f'{{ before with {field("phase")} := {layout.enum_value("ConstructorPhase", "Merge")}, ' + \
-               f'{field("scan")} := 0, {field("newest")} := none, {field("watermark")} := indexed }}'
+               f'{field("scan")} := 0, {field("newest")} := none, {field("watermark")} := indexed' + \
+               (f', {field("sleeping")} := false' if profile == 'birth-tickets' else '') + ' }'
+    sleeping = (f'c.{field("sleeping")}' if profile == 'birth-tickets' else
+                f'decide (c.{field("phase")} = {layout.enum_value("ConstructorPhase", "Idle")})')
     projection = f'''
 def project{implicit} (c : {layout.record_type()}) : WakeHandoff.Constructor ({frame_type}) :=
   {{ phase := match c.{field('phase')} with
 {phase_cases}
     scan := c.{field('scan')}, newest := c.{field('newest')}, watermark := c.{field('watermark')},
-    observed := c.{field('observed')}, rest := ⟨{values}⟩ }}
+    observed := c.{field('observed')},
+    sleeping := {sleeping},
+    rest := ⟨{values}⟩ }}
 '''
     proof = f'''
 -- Full record equality includes the opaque Vec/Option<Tuple> fields; there is
 -- no hypothesis assuming frame preservation and no finite state enumeration.
 theorem full_record_exact{implicit} (before : {layout.record_type()}) (indexed : Nat) :
-    extracted before indexed = ({expected}, Exit.returned) := by rfl
+    extracted before indexed = ({expected}, Exit.returned ()) := by rfl
 
 theorem model_exact{implicit} (before : {layout.record_type()}) (indexed : Nat) :
     project (extracted before indexed).1 = WakeHandoff.merge indexed (project before) := by rfl
@@ -130,15 +138,60 @@ theorem enabled_wake_exact{implicit} (before : {layout.record_type()}) (indexed 
     # Every retained component has a distinct value, including a nonempty newest.
     concrete = []
     for i, f in enumerate(layout.fields):
-        if f.kind == 'ConstructorPhase': concrete.append(layout.enum_value(f.kind, 'Idle'))
+        if f.kind == 'ConstructorPhase': concrete.append(layout.enum_value(f.kind, 'Idle' if profile == 'legacy' else 'Merge'))
         elif f.kind == 'std::option::Option<usize>': concrete.append('(some 29)')
+        elif f.kind == 'bool': concrete.append('true')
         else:
             require(f.kind in (None, 'usize'), 'Unreviewed counterexample carrier')
             concrete.append(str(11 + i))
     instance = 'Record' + ' Nat' * len(layout.opaque)
     witness = f'\ndef before : {instance} := ⟨{", ".join(concrete)}⟩\ndef indexed : Nat := 47\n'
-    false_claim = f'\nexample : extracted before indexed = ({expected}, Exit.returned) := by decide_cbv\n'
+    # A single differing observation refutes full-record equality. Evaluate that
+    # projection directly instead of expanding nested derived equality over all
+    # opaque owners. The positive theorem still proves the entire record.
+    observation = f'.1.{field(mutation_field)}' if mutation_field else ''
+    false_claim = f'\nexample : (extracted before indexed){observation} = (({expected}, Exit.returned ()) : {instance} × Exit Unit){observation} := by decide_cbv\n'
     return projection, proof, witness + false_claim
+
+
+def getter_specification(layout):
+    implicit = f' {{{" ".join(layout.opaque)} : Type}}' if layout.opaque else ''
+    field = f'field{layout.index("sleeping")}'
+    return f'''
+theorem idle_exact{implicit} (before : {layout.record_type()}) :
+    idle before = (before, Exit.returned before.{field}) := by
+  unfold idle
+  cases before.{field} <;> rfl
+
+-- Composition covers the state update of one eligible visit, including the
+-- actual shared getter. The enclosing Vec lookup and loop are separate duties.
+def visit{implicit} (before : {layout.record_type()}) (indexed : Nat) :=
+  let (afterRead, result) := idle before
+  match result with
+  | Exit.panicked => (afterRead, Exit.panicked)
+  | Exit.returned sleeping =>
+    if sleeping && afterRead.field{layout.index('observed')} < indexed then
+      extracted afterRead indexed
+    else (afterRead, Exit.returned ())
+
+theorem visit_exact{implicit} (before : {layout.record_type()}) (indexed : Nat) :
+    project (visit before indexed).1 = WakeHandoff.wake indexed (project before) := by
+  unfold visit
+  rw [idle_exact]
+  change project (if WakeHandoff.needsWake indexed (project before) then extracted before indexed
+    else (before, Exit.returned ())).1 = _
+  unfold WakeHandoff.wake
+  split <;> first | exact model_exact before indexed | rfl
+
+theorem visit_preserves_ownership{implicit} (before : {layout.record_type()}) (indexed : Nat) :
+    (project (visit before indexed).1).rest = (project before).rest := by
+  rw [visit_exact]
+  exact (WakeHandoff.wake_preserves_retained indexed (project before)).2
+
+#print axioms idle_exact
+#print axioms visit_exact
+#print axioms visit_preserves_ownership
+'''
 
 
 NATIVE_CONTROL = b'''
@@ -188,16 +241,19 @@ def main():
     parser.add_argument('--rustc', type=Path, required=True)
     parser.add_argument('--lean', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--profile', choices=['legacy', 'birth-tickets'], default='legacy')
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    inputs = [*ROOT.glob('*.py'), ROOT/'constructor-merge.json', ROOT.parent/'kani/rust_replay.py',
+    inputs = [*ROOT.glob('*.py'), *ROOT.glob('*.json'), ROOT/'birth_ticket_control.rs', ROOT.parent/'kani/rust_replay.py',
               *(ROOT.parent/f'lean/VerumExternalReplay/{name}.lean' for name in MODELS)]
     inputs = {p: read(p) for p in inputs}
     report = {'status': 'inconclusive', 'run_id': str(uuid.uuid4()), 'scope': __doc__, 'results': []}
     write(out/'receipt.json', report)
     try:
-        source, method, provenance = prepare(out)
+        source, methods, provenance = prepare(out, args.profile)
+        method = methods[0]
+        report['profile'] = args.profile
         report.update(provenance)
         rustc, lean = args.rustc.resolve(), args.lean.resolve()
         rustdoc = rustc.with_name('rustdoc')
@@ -221,7 +277,7 @@ def main():
             model.write_bytes(inputs[ROOT.parent/f'lean/VerumExternalReplay/{name}.lean'])
             code, _, _ = execute([*checker, '-o', str(model.with_suffix('.olean')), str(model)], out, out/f'{name}.log', env)
             require(code == 0, 'Model failed to compile')
-        native = source + NATIVE_CONTROL
+        native = source + (NATIVE_CONTROL if args.profile == 'legacy' else inputs[ROOT/'birth_ticket_control.rs'])
         (out/'native.rs').write_bytes(native)
         code, _, _ = execute([str(rustc), '--edition=2021', '-C', 'overflow-checks=yes',
                               'native.rs', '-o', 'native'], out, out/'native-compile.log')
@@ -236,10 +292,21 @@ def main():
             ('corrupted_observed', b'self.scan = 0;', b'self.scan = 0; self.observed = 0;'),
             ('corrupted_anchor', b'self.scan = 0;', b'self.scan = 0; self.anchor = 0;'),
         ]
+        if args.profile == 'birth-tickets':
+            mutants += [
+                ('missing_sleeping_reset', b'self.sleeping = false;', b''),
+                ('corrupted_ticket_cells', b'self.scan = 0;', b'self.scan = 0; self.ticket_cells = 0;'),
+                ('corrupted_next_turn', b'self.scan = 0;', b'self.scan = 0; self.next_turn = 0;'),
+                ('corrupted_service', b'self.scan = 0;', b'self.scan = 0; self.service = false;'),
+            ]
         cases = [('exact', source, False)]
         for name, before, after in mutants:
             require(method.count(before) == 1 and source.count(method) == 1, 'Ambiguous mutation')
             cases.append((name, source.replace(method, method.replace(before, after)), True))
+        if args.profile == 'birth-tickets':
+            require(len(methods) == 2 and methods[1].count(b'self.sleeping') == 1, 'Ambiguous getter')
+            cases.append(('wrong_sleeping_getter', source.replace(methods[1], methods[1].replace(
+                b'self.sleeping', b'false')), True))
         for name, data, negative in cases:
             case = out/name
             case.mkdir()
@@ -263,7 +330,24 @@ def main():
             require(code == 0, 'Native metadata witness failed to compile')
             layout_mir = read(case/'layout.mir')
             generated = RecordTranslation(mir.decode(), 'merge', layout, layout_mir.decode()).lean()
-            projection, proof, counterexample = specification(layout)
+            mutation_field = {'wrong_watermark': 'watermark', 'missing_newest_reset': 'newest',
+                'missing_scan_reset': 'scan', 'wrong_phase': 'phase', 'corrupted_observed': 'observed',
+                'corrupted_anchor': 'anchor', 'missing_sleeping_reset': 'sleeping',
+                'corrupted_ticket_cells': 'ticket_cells', 'corrupted_next_turn': 'next_turn',
+                'corrupted_service': 'service'}.get(name)
+            projection, proof, counterexample = specification(layout, args.profile, mutation_field)
+            axiom_names = ['full_record_exact', 'model_exact', 'enabled_wake_exact']
+            if args.profile == 'birth-tickets':
+                getter = Layout(load(metadata), 'Constructor', 'idle')
+                require(not getter.mutable and getter.result == 'bool' and not getter.parameters and
+                        getter.declarations() == layout.declarations(), 'Getter layout/signature differs')
+                generated += RecordTranslation(mir.decode(), 'idle', getter, layout_mir.decode()).lean(
+                    name='idle', declarations=False)
+                proof += getter_specification(layout)
+                axiom_names += ['idle_exact', 'visit_exact', 'visit_preserves_ownership']
+                if name == 'wrong_sleeping_getter':
+                    counterexample = counterexample[:counterexample.index('\nexample :')]
+                    counterexample += f'\nexample : (idle before).2 = Exit.returned before.field{layout.index("sleeping")} := by decide_cbv\n'
             generated = HEADER + generated + (counterexample if negative else projection + proof)
             (case/'Replay.lean').write_text(generated)
             code, stdout, stderr = execute([*checker, str(case/'Replay.lean')], out, case/'lean.log', env)
@@ -278,8 +362,7 @@ def main():
             else:
                 require(code == 0 and not errors, 'Universal record correspondence failed')
                 infos = [d['data'] for d in diagnostics if d['severity'] == 'information']
-                require(infos == [f"'{n}' does not depend on any axioms" for n in
-                                  ['full_record_exact', 'model_exact', 'enabled_wake_exact']],
+                require(infos == [f"'{n}' does not depend on any axioms" for n in axiom_names],
                         'Unexpected theorem axiom roster')
             require(read(case/'transaction.rs') == data and read(case/'transaction.mir') == mir and
                     read(case/'metadata/transaction.json') == metadata and read(case/'layout.rs') == witness and

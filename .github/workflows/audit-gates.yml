@@ -76,6 +76,11 @@ jobs:
             --rustc "$VERUM_REPLAY_RUSTC" \
             --lean "$VERUM_REPLAY_LEAN" \
             --output "$RUNNER_TEMP/native-constructor-replay"
+          python3 verification/external/rust_mir/check_constructor_merge.py \
+            --profile birth-tickets \
+            --rustc "$VERUM_REPLAY_RUSTC" \
+            --lean "$VERUM_REPLAY_LEAN" \
+            --output "$RUNNER_TEMP/native-birth-ticket-replay"
       - name: Retain exact sources and verification results
         if: always()
         uses: actions/upload-artifact@v4
@@ -86,6 +91,7 @@ jobs:
             ${{ runner.temp }}/native-clock-replay/
             ${{ runner.temp }}/native-shift-replay/
             ${{ runner.temp }}/native-constructor-replay/
+            ${{ runner.temp }}/native-birth-ticket-replay/
   # ---------------------------------------------------------------------------
   # Tier 1: in-process audit gates.  No external toolchain needed.
   # ---------------------------------------------------------------------------

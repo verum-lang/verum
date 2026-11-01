@@ -80,7 +80,7 @@ def wake_claims(stream, number, claim, definitions, child_owners):
             fields(c, 'alternative anchor axes carry newest observed phase scan slot tuple watermark')
             name = f'c_{number}_{state_id}_{slot}'
             values = [json.dumps(c['phase']), natural(c['scan']), optional(c['newest']),
-                      natural(c['watermark']), natural(c['observed']),
+                      natural(c['watermark']), natural(c['observed']), boolean(c['phase'] == 'Idle'),
                       snapshot({k:v for k,v in c.items() if k not in
                                ('phase', 'scan', 'newest', 'watermark', 'observed')})]
             definitions.append(f'def {name} : WakeHandoff.Constructor AppendHandoff.Snapshot := ⟨{", ".join(values)}⟩')

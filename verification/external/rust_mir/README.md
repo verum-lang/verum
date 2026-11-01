@@ -33,16 +33,20 @@ model, axiom audits and semantic-control diagnostics. This is a primitive
 sequential correspondence result; caller ownership, dispatch, scheduling and
 world-model descent need their own evidence.
 
-## Exclusive record updates
+## Record reads and exclusive updates
 
-`record_mir.py` extends the same checked scalar semantics to one exclusive
-mutable record. Field order, method membership, nominal enums and supported
+`record_mir.py` extends the same checked scalar semantics to one shared or
+exclusive record reference. Shared receivers cannot write. Methods may return
+unit, Boolean or `usize` values. Field order, method membership, nominal enums and supported
 field types come from rustdoc for the same compilation input. Every other
 field remains an arbitrary, universally quantified frame value. No container
 is replaced by an empty stand-in. Reading, writing or dropping an uninterpreted
 field, additional references, calls and cyclic control flow are refused.
 Return and panic both retain the complete resulting record, including writes
 that precede a failed arithmetic check.
+Writes use immutable scalar bindings; each return or panic reconstructs the
+record once. This retains reads before later writes without expanding a chain
+of record updates during kernel reduction.
 
 Rustdoc enables `cfg(doc)`, so its declarations alone cannot authorize a native
 projection. The adapter appends an exhaustive record reconstruction and enum
@@ -64,6 +68,16 @@ its enabling condition holds. Compiled semantic mutations must reach actual
 false-proposition diagnostics. Separate native controls check retained
 allocations and `Arc` owners; these finite controls are not the universal proof.
 
+The `birth-tickets` profile separately pins the newer constructor declarations,
+`merge` and shared `idle` getter. Eligibility uses the actual sleeping flag,
+not a phase-name inference. The complete retained frame includes building,
+admitted and active tickets, heap state, tuple and accounting. Getter and reset
+compose into a proved per-visit model transition. This composition does not
+extract or prove the enclosing `Expressions::wake` loop. The frozen producer
+receipt records Rust 1.95 and retains its failed overall verdict; MIR from the
+pinned nightly compiler is explicitly a new source replay, not original build
+output. A corrected producer requires its own reviewed source binding.
+
 ```sh
 VERUM_REPLAY_RUSTC=/path/to/nightly-2026-08-21/bin/rustc \
 VERUM_REPLAY_LEAN=/path/to/lean-4.35.0/bin/lean \
@@ -72,7 +86,13 @@ python3 verification/external/rust_mir/check_constructor_merge.py \
   --rustc /path/to/nightly-2026-08-21/bin/rustc \
   --lean /path/to/lean-4.35.0/bin/lean \
   --output /new/record-replay-directory
+# Add --profile birth-tickets for the separately frozen birth-ticket source.
 ```
+
+This experimental Python adapter is trusted extraction/orchestration tooling,
+not Verum's proof kernel. It does not feed a checked native Verum certificate
+through either native checker. Its semantic translation remains an integration
+gap for the typed Verum verification pipeline.
 
 This is a source-derived primitive correspondence result, not a native Verum
 certificate or proof of the entire Rust wake loop. It assumes a valid exclusive

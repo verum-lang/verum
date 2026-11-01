@@ -1,0 +1,115 @@
+{
+  "format": "verum-rust-record-source/1",
+  "provenance": "birth-ticket-r270.provenance.json",
+  "receipts": {
+    "receipt": "birth-ticket-r270.receipt.json.gz",
+    "build-receipt": "birth-ticket-r270.receipt.json.gz"
+  },
+  "record": "Constructor",
+  "function": "merge",
+  "sources": {
+    "priority.rs": {
+      "fixture": "birth-ticket-r270.source-0.rs.gz",
+      "native_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority.rs",
+      "sha256": "53187f0980abd3ba93006332ecf6535f8721399872dba50accf9a6eb9216137a"
+    },
+    "streaming.rs": {
+      "fixture": "birth-ticket-r270.source-1.rs.gz",
+      "native_path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming.rs",
+      "sha256": "7e4695553415ae84c01c767e82c0b2ebba898066697a39038f1327e09cf11776"
+    }
+  },
+  "declarations": [
+    {
+      "source": "priority.rs",
+      "start": 1802,
+      "end": 1897,
+      "sha256": "4660cd1755b39efbe941782680334c9369790c8d248bd6d0b5ad1e06fcee4505"
+    },
+    {
+      "source": "priority.rs",
+      "start": 1898,
+      "end": 2014,
+      "sha256": "c07cc4a5b7a024b1cd82ed442e5ddab3bb3d002382fba462c03a1250abb388ce"
+    },
+    {
+      "source": "priority.rs",
+      "start": 2015,
+      "end": 2123,
+      "sha256": "6a5ebd4be703e1f3314c1934f8edda22a68eed76b0cf02469a6870fa583c7090"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5345,
+      "end": 5465,
+      "sha256": "253e33f7d3eb5f7f32429250cdc86d11472d5a7a688feb126fbbded6ecc0f9c5"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5466,
+      "end": 5581,
+      "sha256": "6926dfb6e4a20b26e3a2f7c22998326feb026c7b0a1129b6fa6fd50bb414f6b5"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5582,
+      "end": 5693,
+      "sha256": "0e4619e869ff56b15a047d5181a4c80687ce6bed6d519304e603afc1f7cb5ce8"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5694,
+      "end": 5787,
+      "sha256": "20ffc4694dd00a44cd8461311b9e88e0c88f587fad4ad54c39a2b20e169ad665"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 5788,
+      "end": 6047,
+      "sha256": "c10220939526ea385e1fc06d714b711456160972f8d19d7b708a60d27f8ef169"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 6134,
+      "end": 6249,
+      "sha256": "057f040e2700af6e0cf8fc9f916beb74b176960bdc2476eeb92809dacd0e25db"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 6250,
+      "end": 6782,
+      "sha256": "35fc5b1c15764406954d5e6343c9c4d6afe683893dd2e96c52aa56ecc82f357c"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 18623,
+      "end": 18733,
+      "sha256": "1c196b41a83ab1c67618acd60292b1c8f9d5f2a0d47cf629318b558c6964dad1"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 18734,
+      "end": 19030,
+      "sha256": "1edf89eca5766c824798294529c08a4621864ff846eca0093684aee1b6c80cfc"
+    }
+  ],
+  "methods": [
+    {
+      "source": "streaming.rs",
+      "start": 7308,
+      "end": 7493,
+      "sha256": "6e687d352b722d24187f0f26edc401231eae1426d8746ee6b628c3758728cfad"
+    },
+    {
+      "source": "streaming.rs",
+      "start": 7251,
+      "end": 7307,
+      "sha256": "759a2eac3eabae852b9adee2f955c57942eb5d483b3fd18c8a0407408510285d"
+    }
+  ],
+  "premises": [
+    "Complete selected declarations, merge and idle are unchanged bytes of the frozen native build inputs.",
+    "Generated MIR is a new pinned-compiler replay of these exact declarations, not an output of the original Rust 1.95 build.",
+    "The Rust compiler, source selection and fail-closed frontend are trusted. Valid references are assumed. Surrounding Vec indexing, heap algorithms, caller scheduling and machine-code lowering remain outside this primitive proof."
+  ]
+}
