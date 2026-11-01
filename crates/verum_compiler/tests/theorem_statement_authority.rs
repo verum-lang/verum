@@ -197,6 +197,8 @@ fn written_branch_and_term_evidence_cannot_be_replaced_by_automatic_success() {
         "theorem t(): true proof { fail(\"invalid evidence\"); }",
         "theorem t(): true proof { exact(missing); }",
         "theorem t(): true proof = missing;",
+        "theorem t(): true proof by custom<Bool>();",
+        "theorem t(): true proof by simp at absent;",
     ] {
         let result = verify(source);
         assert!(matches!(result, ProofVerificationResult::Failed { .. }), "{source}: {result:?}");
@@ -231,6 +233,7 @@ fn guarded_elimination_retains_valid_boolean_and_arithmetic_proofs() {
         "theorem t(n:Int) requires n == 0 || n == 1 : n >= 0 proof by cases on n { case 0 => auto, case 1 => auto };",
         "theorem t(b:Bool): true proof by cases { case b == true => trivial, case b == false => trivial, case _ => trivial };",
         "theorem t(): true proof { show true by trivial; trivial; }",
+        "theorem t(): true proof by exact(true);",
         "theorem t(): true proof by contradiction { show false by auto; };",
         "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 { proof { have lower_bound: n >= 0 by assumption; show n * 2 >= 0 by omega; } }",
         "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 proof by induction on n { case _ => auto, case _ => auto, case _ => auto };",

@@ -376,12 +376,8 @@ impl HintsDatabase {
 
         for (_pattern, lemma_list) in &self.lemmas {
             for lemma in lemma_list {
-                let lemma_expr = &*lemma.lemma;
-                let (premises, conclusion) = Self::extract_lemma_structure_static(lemma_expr);
-
-                // Check if conclusion unifies with goal
-                if Self::can_unify_static(&conclusion, goal) {
-                    applicable.push((lemma.name.clone(), premises));
+                if let Ok(obligations) = ProofSearchEngine::lemma_obligations(lemma, &ProofGoal::new(goal.clone())) {
+                    applicable.push((lemma.name.clone(), obligations.into_iter().map(|g| g.goal).collect()));
                 }
             }
         }
@@ -404,39 +400,6 @@ impl HintsDatabase {
     /// Static version of extract_lemma_structure (no self)
     fn extract_lemma_structure_static(lemma: &Expr) -> (List<Expr>, Expr) {
         ProofSearchEngine::extract_lemma_structure(lemma)
-    }
-
-    /// Static version of unification check
-    fn can_unify_static(pattern: &Expr, target: &Expr) -> bool {
-        use ExprKind::*;
-
-        match (&pattern.kind, &target.kind) {
-            // Variables unify with anything
-            (Path(p), _) if p.as_ident().is_some() => true,
-
-            // Literals must match
-            (Literal(l1), Literal(l2)) => l1.kind == l2.kind,
-
-            // Binary operators must match recursively
-            (
-                Binary {
-                    op: op1,
-                    left: l1,
-                    right: r1,
-                },
-                Binary {
-                    op: op2,
-                    left: l2,
-                    right: r2,
-                },
-            ) => op1 == op2 && Self::can_unify_static(l1, l2) && Self::can_unify_static(r1, r2),
-
-            // Parentheses - unwrap
-            (Paren(e1), _) => Self::can_unify_static(e1, target),
-            (_, Paren(e2)) => Self::can_unify_static(pattern, e2),
-
-            _ => false,
-        }
     }
 
     /// Automatic lemma selection based on goal characteristics
@@ -574,927 +537,69 @@ impl HintsDatabase {
         }
     }
 
-    /// Register standard library hints
+    /// Mathematical schemas have explicit binders and ASTs. A description
+    /// string is documentation, never a parser or a fallback proof of true.
     fn register_stdlib_hints(&mut self) {
-        // ===== Arithmetic Lemmas =====
-
-        // Commutativity
-        self.register_lemma(
-            "_ + _ = _".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "plus_comm".into(),
-                priority: 100,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a + b = b + a")),
-            },
-        );
-        self.register_named_lemma(
-            "plus_comm".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "plus_comm".into(),
-                priority: 100,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a + b = b + a")),
-            },
-        );
-
-        self.register_lemma(
-            "_ * _ = _".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "mult_comm".into(),
-                priority: 100,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a * b = b * a")),
-            },
-        );
-        self.register_named_lemma(
-            "mult_comm".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "mult_comm".into(),
-                priority: 100,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a * b = b * a")),
-            },
-        );
-
-        // Associativity
-        self.register_named_lemma(
-            "plus_assoc".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "plus_assoc".into(),
-                priority: 95,
-                lemma: Heap::new(Self::create_arithmetic_lemma("(a + b) + c = a + (b + c)")),
-            },
-        );
-
-        self.register_named_lemma(
-            "mult_assoc".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "mult_assoc".into(),
-                priority: 95,
-                lemma: Heap::new(Self::create_arithmetic_lemma("(a * b) * c = a * (b * c)")),
-            },
-        );
-
-        // Identity
-        self.register_named_lemma(
-            "plus_zero".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "plus_zero".into(),
-                priority: 110,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a + 0 = a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "mult_one".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "mult_one".into(),
-                priority: 110,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a * 1 = a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "mult_zero".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "mult_zero".into(),
-                priority: 110,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a * 0 = 0")),
-            },
-        );
-
-        // Distributivity
-        self.register_named_lemma(
-            "mult_dist_plus".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "mult_dist_plus".into(),
-                priority: 90,
-                lemma: Heap::new(Self::create_arithmetic_lemma("a * (b + c) = a * b + a * c")),
-            },
-        );
-
-        // ===== Boolean Lemmas =====
-
-        // De Morgan's laws
-        self.register_lemma(
-            "!(_ && _)".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "demorgan_and".into(),
-                priority: 105,
-                lemma: Heap::new(Self::create_boolean_lemma("!(a && b) = !a || !b")),
-            },
-        );
-        self.register_named_lemma(
-            "demorgan_and".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "demorgan_and".into(),
-                priority: 105,
-                lemma: Heap::new(Self::create_boolean_lemma("!(a && b) = !a || !b")),
-            },
-        );
-
-        self.register_lemma(
-            "!(_ || _)".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "demorgan_or".into(),
-                priority: 105,
-                lemma: Heap::new(Self::create_boolean_lemma("!(a || b) = !a && !b")),
-            },
-        );
-        self.register_named_lemma(
-            "demorgan_or".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "demorgan_or".into(),
-                priority: 105,
-                lemma: Heap::new(Self::create_boolean_lemma("!(a || b) = !a && !b")),
-            },
-        );
-
-        // Boolean identities
-        self.register_lemma(
-            "_ && _ = _".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "and_properties".into(),
-                priority: 90,
-                lemma: Heap::new(Self::create_boolean_lemma("a && b = b && a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "and_comm".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "and_comm".into(),
-                priority: 100,
-                lemma: Heap::new(Self::create_boolean_lemma("a && b = b && a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "or_comm".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "or_comm".into(),
-                priority: 100,
-                lemma: Heap::new(Self::create_boolean_lemma("a || b = b || a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "and_true".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "and_true".into(),
-                priority: 110,
-                lemma: Heap::new(Self::create_boolean_lemma("a && true = a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "or_false".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "or_false".into(),
-                priority: 110,
-                lemma: Heap::new(Self::create_boolean_lemma("a || false = a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "double_negation".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "double_negation".into(),
-                priority: 120,
-                lemma: Heap::new(Self::create_boolean_lemma("!!a = a")),
-            },
-        );
-
-        // ===== Implication Lemmas =====
-
-        self.register_named_lemma(
-            "modus_ponens".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "modus_ponens".into(),
-                priority: 150,
-                lemma: Heap::new(Self::create_implication_lemma("a && (a => b) => b")),
-            },
-        );
-
-        self.register_named_lemma(
-            "implication_trans".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "implication_trans".into(),
-                priority: 130,
-                lemma: Heap::new(Self::create_implication_lemma(
-                    "(a => b) && (b => c) => (a => c)",
-                )),
-            },
-        );
-
-        // ===== Equality Lemmas =====
-
-        self.register_named_lemma(
-            "eq_refl".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "eq_refl".into(),
-                priority: 200,
-                lemma: Heap::new(Self::create_equality_lemma("a = a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "eq_symm".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "eq_symm".into(),
-                priority: 140,
-                lemma: Heap::new(Self::create_equality_lemma("a = b => b = a")),
-            },
-        );
-
-        self.register_named_lemma(
-            "eq_trans".into(),
-            LemmaHint {
-                params: List::new(),
-                name: "eq_trans".into(),
-                priority: 140,
-                lemma: Heap::new(Self::create_equality_lemma("(a = b) && (b = c) => (a = c)")),
-            },
-        );
-
-        // ===== Decision Procedures =====
-
-        self.register_decision_procedure(DecisionProcedure {
-            name: "linear_arithmetic".into(),
-            applicable_to: ProofDomain::LinearArithmetic,
-            timeout: Duration::from_millis(100),
-        });
-
-        self.register_decision_procedure(DecisionProcedure {
-            name: "propositional".into(),
-            applicable_to: ProofDomain::Propositional,
-            timeout: Duration::from_millis(50),
-        });
-
-        self.register_decision_procedure(DecisionProcedure {
-            name: "equality".into(),
-            applicable_to: ProofDomain::Equality,
-            timeout: Duration::from_millis(75),
-        });
-    }
-
-    /// Create an arithmetic lemma
-    ///
-    /// Generates standard arithmetic lemmas based on the description:
-    /// - "commutativity" -> a + b = b + a
-    /// - "associativity" -> (a + b) + c = a + (b + c)
-    /// - "identity" -> a + 0 = a
-    /// - "inverse" -> a - a = 0
-    /// - "distributivity" -> a * (b + c) = a * b + a * c
-    fn create_arithmetic_lemma(description: &str) -> Expr {
-        use verum_ast::Ident;
-        use verum_ast::expr::BinOp;
-        use verum_ast::literal::{IntLit, Literal, LiteralKind};
-        use verum_ast::span::Span;
-
+        use verum_ast::{Literal, UnOp, span::Span};
         let span = Span::dummy();
-
-        // Create variable expressions for lemmas
-        let var_a = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("a", span))),
-            span,
-        );
-        let var_b = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("b", span))),
-            span,
-        );
-        let var_c = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("c", span))),
-            span,
-        );
-        let zero = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Int(IntLit::new(0)), span)),
-            span,
-        );
-
-        let desc_lower = description.to_lowercase();
-
-        if desc_lower.contains("commut") {
-            // a + b = b + a
-            let lhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let rhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(var_b),
-                    right: Box::new(var_a),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(lhs),
-                    right: Box::new(rhs),
-                },
-                span,
-            )
-        } else if desc_lower.contains("assoc") {
-            // (a + b) + c = a + (b + c)
-            let lhs_inner = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let lhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(lhs_inner),
-                    right: Box::new(var_c.clone()),
-                },
-                span,
-            );
-            let rhs_inner = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(var_b),
-                    right: Box::new(var_c),
-                },
-                span,
-            );
-            let rhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(var_a),
-                    right: Box::new(rhs_inner),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(lhs),
-                    right: Box::new(rhs),
-                },
-                span,
-            )
-        } else if desc_lower.contains("identity") || desc_lower.contains("zero") {
-            // a + 0 = a
-            let lhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(zero),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(lhs),
-                    right: Box::new(var_a),
-                },
-                span,
-            )
-        } else if desc_lower.contains("inverse") {
-            // a - a = 0
-            let lhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Sub,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_a),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(lhs),
-                    right: Box::new(zero),
-                },
-                span,
-            )
-        } else if desc_lower.contains("distribut") {
-            // a * (b + c) = a * b + a * c
-            let bc_sum = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(var_b.clone()),
-                    right: Box::new(var_c.clone()),
-                },
-                span,
-            );
-            let lhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Mul,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(bc_sum),
-                },
-                span,
-            );
-            let ab = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Mul,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_b),
-                },
-                span,
-            );
-            let ac = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Mul,
-                    left: Box::new(var_a),
-                    right: Box::new(var_c),
-                },
-                span,
-            );
-            let rhs = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Add,
-                    left: Box::new(ab),
-                    right: Box::new(ac),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(lhs),
-                    right: Box::new(rhs),
-                },
-                span,
-            )
-        } else {
-            // Default: return true literal
-            Self::create_default_lemma()
+        let var = |name: &str| Expr::path(Path::from_ident(Ident::new(name, span)));
+        let (a, b, c) = (var("a"), var("b"), var("c"));
+        let zero = Expr::literal(Literal::int(0, span));
+        let one = Expr::literal(Literal::int(1, span));
+        let truth = Expr::literal(Literal::bool(true, span));
+        let falsity = Expr::literal(Literal::bool(false, span));
+        let bin = |op, left: &Expr, right: &Expr| Expr::new(ExprKind::Binary {
+            op, left: Heap::new(left.clone()), right: Heap::new(right.clone()),
+        }, span);
+        let add = |x: &Expr, y: &Expr| bin(BinOp::Add, x, y);
+        let mul = |x: &Expr, y: &Expr| bin(BinOp::Mul, x, y);
+        let eq = |x: &Expr, y: &Expr| bin(BinOp::Eq, x, y);
+        let and = |x: &Expr, y: &Expr| bin(BinOp::And, x, y);
+        let or = |x: &Expr, y: &Expr| bin(BinOp::Or, x, y);
+        let implies = |x: &Expr, y: &Expr| bin(BinOp::Imply, x, y);
+        let not = |x: &Expr| Expr::new(ExprKind::Unary { op: UnOp::Not, expr: Heap::new(x.clone()) }, span);
+        let schemas: [(&str, u32, &[&str], Expr); 20] = [
+            ("plus_comm", 100, &["a", "b"], eq(&add(&a, &b), &add(&b, &a))),
+            ("mult_comm", 100, &["a", "b"], eq(&mul(&a, &b), &mul(&b, &a))),
+            ("plus_assoc", 95, &["a", "b", "c"], eq(&add(&add(&a, &b), &c), &add(&a, &add(&b, &c)))),
+            ("mult_assoc", 95, &["a", "b", "c"], eq(&mul(&mul(&a, &b), &c), &mul(&a, &mul(&b, &c)))),
+            ("plus_zero", 110, &["a"], eq(&add(&a, &zero), &a)),
+            ("mult_one", 110, &["a"], eq(&mul(&a, &one), &a)),
+            ("mult_zero", 110, &["a"], eq(&mul(&a, &zero), &zero)),
+            ("mult_dist_plus", 90, &["a", "b", "c"], eq(&mul(&a, &add(&b, &c)), &add(&mul(&a, &b), &mul(&a, &c)))),
+            ("demorgan_and", 105, &["a", "b"], eq(&not(&and(&a, &b)), &or(&not(&a), &not(&b)))),
+            ("demorgan_or", 105, &["a", "b"], eq(&not(&or(&a, &b)), &and(&not(&a), &not(&b)))),
+            ("and_properties", 90, &["a", "b"], eq(&and(&a, &b), &and(&b, &a))),
+            ("and_comm", 100, &["a", "b"], eq(&and(&a, &b), &and(&b, &a))),
+            ("or_comm", 100, &["a", "b"], eq(&or(&a, &b), &or(&b, &a))),
+            ("and_true", 110, &["a"], eq(&and(&a, &truth), &a)),
+            ("or_false", 110, &["a"], eq(&or(&a, &falsity), &a)),
+            ("double_negation", 120, &["a"], eq(&not(&not(&a)), &a)),
+            ("modus_ponens", 150, &["a", "b"], implies(&and(&a, &implies(&a, &b)), &b)),
+            ("implication_trans", 130, &["a", "b", "c"], implies(&and(&implies(&a, &b), &implies(&b, &c)), &implies(&a, &c))),
+            ("eq_refl", 200, &["a"], eq(&a, &a)),
+            ("eq_symm", 140, &["a", "b"], implies(&eq(&a, &b), &eq(&b, &a))),
+        ];
+        for (name, priority, params, lemma) in schemas.into_iter().chain(std::iter::once((
+            "eq_trans", 140, &["a", "b", "c"][..], implies(&and(&eq(&a, &b), &eq(&b, &c)), &eq(&a, &c)),
+        ))) {
+            let hint = LemmaHint {
+                name: name.into(), priority,
+                params: params.iter().map(|p| Text::from(*p)).collect(), lemma: Heap::new(lemma),
+            };
+            let (_, conclusion) = Self::extract_lemma_structure_static(&hint.lemma);
+            self.register_lemma(self.extract_pattern(&conclusion), hint.clone());
+            self.register_named_lemma(name.into(), hint);
         }
-    }
-
-    /// Create a boolean lemma
-    ///
-    /// Generates standard boolean lemmas based on the description:
-    /// - "double_negation" -> !!a = a
-    /// - "de_morgan" -> !(a && b) = !a || !b
-    /// - "excluded_middle" -> a || !a
-    /// - "contradiction" -> !(a && !a)
-    fn create_boolean_lemma(description: &str) -> Expr {
-        use verum_ast::Ident;
-        use verum_ast::expr::{BinOp, UnOp};
-        use verum_ast::span::Span;
-
-        let span = Span::dummy();
-
-        let var_a = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("a", span))),
-            span,
-        );
-        let var_b = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("b", span))),
-            span,
-        );
-
-        let desc_lower = description.to_lowercase();
-
-        if desc_lower.contains("double") && desc_lower.contains("neg") {
-            // !!a = a
-            let not_a = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(var_a.clone()),
-                },
-                span,
-            );
-            let not_not_a = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(not_a),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(not_not_a),
-                    right: Box::new(var_a),
-                },
-                span,
-            )
-        } else if desc_lower.contains("de_morgan") || desc_lower.contains("demorgan") {
-            // !(a && b) = !a || !b
-            let a_and_b = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::And,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let not_a_and_b = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(a_and_b),
-                },
-                span,
-            );
-            let not_a = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(var_a),
-                },
-                span,
-            );
-            let not_b = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(var_b),
-                },
-                span,
-            );
-            let not_a_or_not_b = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(not_a),
-                    right: Box::new(not_b),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(not_a_and_b),
-                    right: Box::new(not_a_or_not_b),
-                },
-                span,
-            )
-        } else if desc_lower.contains("excluded") {
-            // a || !a
-            let not_a = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(var_a.clone()),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(var_a),
-                    right: Box::new(not_a),
-                },
-                span,
-            )
-        } else {
-            Self::create_default_lemma()
+        for (name, domain, timeout_ms) in [
+            ("linear_arithmetic", ProofDomain::LinearArithmetic, 100),
+            ("propositional", ProofDomain::Propositional, 50),
+            ("equality", ProofDomain::Equality, 75),
+        ] {
+            self.register_decision_procedure(DecisionProcedure {
+                name: name.into(), applicable_to: domain, timeout: Duration::from_millis(timeout_ms),
+            });
         }
-    }
-
-    /// Create an implication lemma
-    ///
-    /// Generates implication-related lemmas:
-    /// - "modus_ponens" -> (a && (a => b)) => b
-    /// - "contrapositive" -> (a => b) = (!b => !a)
-    /// - "transitivity" -> ((a => b) && (b => c)) => (a => c)
-    fn create_implication_lemma(description: &str) -> Expr {
-        use verum_ast::Ident;
-        use verum_ast::expr::{BinOp, UnOp};
-        use verum_ast::span::Span;
-
-        let span = Span::dummy();
-
-        let var_a = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("a", span))),
-            span,
-        );
-        let var_b = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("b", span))),
-            span,
-        );
-        let var_c = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("c", span))),
-            span,
-        );
-
-        let desc_lower = description.to_lowercase();
-
-        if desc_lower.contains("modus") || desc_lower.contains("ponens") {
-            // (a && (a => b)) => b
-            // Note: a => b is equivalent to !a || b
-            let a_implies_b = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(var_a.clone()),
-                        },
-                        span,
-                    )),
-                    right: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let premise = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::And,
-                    left: Box::new(var_a),
-                    right: Box::new(a_implies_b),
-                },
-                span,
-            );
-            // premise => b encoded as !premise || b
-            let not_premise = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(premise),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(not_premise),
-                    right: Box::new(var_b),
-                },
-                span,
-            )
-        } else if desc_lower.contains("contra") {
-            // (a => b) = (!b => !a)
-            // Using: (a => b) = !a || b and (!b => !a) = !!b || !a = b || !a
-            let not_a = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(var_a.clone()),
-                },
-                span,
-            );
-            let not_b = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Not,
-                    expr: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let a_implies_b = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(not_a.clone()),
-                    right: Box::new(var_b),
-                },
-                span,
-            );
-            let notb_implies_nota = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(not_b),
-                        },
-                        span,
-                    )),
-                    right: Box::new(not_a),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(a_implies_b),
-                    right: Box::new(notb_implies_nota),
-                },
-                span,
-            )
-        } else if desc_lower.contains("trans") {
-            // ((a => b) && (b => c)) => (a => c)
-            let a_implies_b = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(var_a.clone()),
-                        },
-                        span,
-                    )),
-                    right: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let b_implies_c = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(var_b),
-                        },
-                        span,
-                    )),
-                    right: Box::new(var_c.clone()),
-                },
-                span,
-            );
-            let premise = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::And,
-                    left: Box::new(a_implies_b),
-                    right: Box::new(b_implies_c),
-                },
-                span,
-            );
-            let a_implies_c = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(var_a),
-                        },
-                        span,
-                    )),
-                    right: Box::new(var_c),
-                },
-                span,
-            );
-            // premise => conclusion as !premise || conclusion
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(premise),
-                        },
-                        span,
-                    )),
-                    right: Box::new(a_implies_c),
-                },
-                span,
-            )
-        } else {
-            Self::create_default_lemma()
-        }
-    }
-
-    /// Create an equality lemma
-    ///
-    /// Generates equality-related lemmas:
-    /// - "reflexivity" -> a = a
-    /// - "symmetry" -> (a = b) => (b = a)
-    /// - "transitivity" -> ((a = b) && (b = c)) => (a = c)
-    /// - "substitution" -> (a = b) => (f(a) = f(b))
-    fn create_equality_lemma(description: &str) -> Expr {
-        use verum_ast::Ident;
-        use verum_ast::expr::{BinOp, UnOp};
-        use verum_ast::span::Span;
-
-        let span = Span::dummy();
-
-        let var_a = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("a", span))),
-            span,
-        );
-        let var_b = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("b", span))),
-            span,
-        );
-        let var_c = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(Ident::new("c", span))),
-            span,
-        );
-
-        let desc_lower = description.to_lowercase();
-
-        if desc_lower.contains("reflex") {
-            // a = a
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_a),
-                },
-                span,
-            )
-        } else if desc_lower.contains("symm") {
-            // (a = b) => (b = a)
-            let a_eq_b = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let b_eq_a = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(var_b),
-                    right: Box::new(var_a),
-                },
-                span,
-            );
-            // implication as !premise || conclusion
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(a_eq_b),
-                        },
-                        span,
-                    )),
-                    right: Box::new(b_eq_a),
-                },
-                span,
-            )
-        } else if desc_lower.contains("trans") {
-            // ((a = b) && (b = c)) => (a = c)
-            let a_eq_b = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(var_a.clone()),
-                    right: Box::new(var_b.clone()),
-                },
-                span,
-            );
-            let b_eq_c = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(var_b),
-                    right: Box::new(var_c.clone()),
-                },
-                span,
-            );
-            let premise = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::And,
-                    left: Box::new(a_eq_b),
-                    right: Box::new(b_eq_c),
-                },
-                span,
-            );
-            let a_eq_c = Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Eq,
-                    left: Box::new(var_a),
-                    right: Box::new(var_c),
-                },
-                span,
-            );
-            Expr::new(
-                ExprKind::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Not,
-                            expr: Box::new(premise),
-                        },
-                        span,
-                    )),
-                    right: Box::new(a_eq_c),
-                },
-                span,
-            )
-        } else {
-            Self::create_default_lemma()
-        }
-    }
-
-    /// Create a default true lemma when no specific pattern matches
-    fn create_default_lemma() -> Expr {
-        use verum_ast::literal::{Literal, LiteralKind};
-        use verum_ast::span::Span;
-
-        Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
-            Span::dummy(),
-        )
     }
 
     /// Get database statistics
@@ -1523,7 +628,7 @@ impl HintsDatabase {
     /// ```
     pub fn instantiate_lemma(&self, lemma: &Expr, terms: &List<Expr>) -> Result<Expr, Text> {
         // Parse lemma to extract quantified variables
-        let (vars, body) = Self::extract_quantifiers(lemma);
+        let (vars, body) = Self::extract_quantifiers(lemma)?;
 
         if vars.len() != terms.len() {
             return Err(format!(
@@ -1541,126 +646,28 @@ impl HintsDatabase {
         }
 
         // Apply substitution to body
-        Ok(ProofSearchEngine::apply_substitution(&body, &subst))
+        ProofSearchEngine::apply_substitution(&body, &subst).map_err(|e| e.to_string().into())
     }
 
-    /// Extract universal quantifiers from lemma
-    ///
-    /// Returns (variables, body) where variables are the quantified variables
-    /// and body is the formula after removing quantifiers.
-    ///
-    /// # Example
-    /// ```ignore
-    /// // Input: forall x. forall y. P(x, y)
-    /// // Output: ([x, y], P(x, y))
-    /// ```
-    fn extract_quantifiers(expr: &Expr) -> (List<Text>, Expr) {
+    /// Only leading, unguarded schematic universal binders can be erased.
+    /// Dependent/typed domains and existential witnesses need checked scope
+    /// evidence, which this context-free hint database cannot manufacture.
+    fn extract_quantifiers(expr: &Expr) -> Result<(List<Text>, Expr), Text> {
         let mut vars = List::new();
-        let mut current = expr.clone();
-
-        // Walk nested Forall / Exists chains. Each binding's pattern
-        // contributes one variable name (or several, for tuple/record
-        // patterns) to the quantifier-variable list. Mixed nesting is
-        // handled — `forall x. exists y. forall z. P(x, y, z)` yields
-        // ["x", "y", "z"] in that order.
-        loop {
-            let next = match &current.kind {
-                ExprKind::Forall { bindings, body } | ExprKind::Exists { bindings, body } => {
-                    for binding in bindings.iter() {
-                        Self::collect_pattern_idents(&binding.pattern, &mut vars);
-                    }
-                    (**body).clone()
+        let mut current = expr;
+        while let ExprKind::Forall { bindings, body } = &current.kind {
+            for binding in bindings {
+                let verum_ast::PatternKind::Ident { name, by_ref: false, mutable: false, subpattern: Maybe::None } = &binding.pattern.kind else {
+                    return Err("quantifier instantiation requires checked simple binders".into());
+                };
+                if binding.ty.is_some() || binding.domain.is_some() || binding.guard.is_some() || vars.contains(&name.name) {
+                    return Err("quantifier instantiation requires checked typing, domain and scope evidence".into());
                 }
-                _ => break,
-            };
-            current = next;
+                vars.push(name.name.clone());
+            }
+            current = body;
         }
-
-        (vars, current)
-    }
-
-    /// Walk a quantifier-binding pattern and collect every bound
-    /// identifier into `vars`. Handles `x`, `(x, y)`, `Point { x, y }`,
-    /// and nested forms. Wildcards and literals contribute nothing.
-    fn collect_pattern_idents(pattern: &verum_ast::Pattern, vars: &mut List<Text>) {
-        use verum_ast::pattern::{PatternKind, VariantPatternData};
-        match &pattern.kind {
-            PatternKind::Ident {
-                name, subpattern, ..
-            } => {
-                vars.push(Text::from(name.as_str()));
-                if let Maybe::Some(sub) = subpattern {
-                    Self::collect_pattern_idents(sub, vars);
-                }
-            }
-            PatternKind::Tuple(elems) | PatternKind::Array(elems) => {
-                for elem in elems.iter() {
-                    Self::collect_pattern_idents(elem, vars);
-                }
-            }
-            PatternKind::Slice {
-                before,
-                rest,
-                after,
-            } => {
-                for elem in before.iter() {
-                    Self::collect_pattern_idents(elem, vars);
-                }
-                if let Maybe::Some(rest_pat) = rest {
-                    Self::collect_pattern_idents(rest_pat, vars);
-                }
-                for elem in after.iter() {
-                    Self::collect_pattern_idents(elem, vars);
-                }
-            }
-            PatternKind::Record { fields, .. } => {
-                for field in fields.iter() {
-                    Self::collect_field_idents(field, vars);
-                }
-            }
-            PatternKind::Variant {
-                data: Maybe::Some(data),
-                ..
-            } => match data {
-                VariantPatternData::Tuple(elems) => {
-                    for elem in elems.iter() {
-                        Self::collect_pattern_idents(elem, vars);
-                    }
-                }
-                VariantPatternData::Record { fields, .. } => {
-                    for field in fields.iter() {
-                        Self::collect_field_idents(field, vars);
-                    }
-                }
-            },
-            PatternKind::Or(alts) | PatternKind::And(alts) => {
-                // For Or/And the same binders must appear in every
-                // branch — collecting from the first is sufficient
-                // and avoids duplicates.
-                if let Some(first) = alts.iter().next() {
-                    Self::collect_pattern_idents(first, vars);
-                }
-            }
-            PatternKind::Reference { inner, .. } | PatternKind::Paren(inner) => {
-                Self::collect_pattern_idents(inner, vars);
-            }
-            PatternKind::TypeTest { binding, .. } => {
-                vars.push(Text::from(binding.as_str()));
-            }
-            // Wildcard / Literal / Path / Range / Stream / Cons / Guard /
-            // View / Active / Rest contribute no fresh binders for the
-            // purposes of quantifier-variable extraction.
-            _ => {}
-        }
-    }
-
-    /// FieldPattern has shorthand form `{ x }` (pattern = None ⇒ name
-    /// is the binder) and explicit form `{ x: pat }` — handle both.
-    fn collect_field_idents(field: &verum_ast::pattern::FieldPattern, vars: &mut List<Text>) {
-        match &field.pattern {
-            Maybe::Some(pat) => Self::collect_pattern_idents(pat, vars),
-            Maybe::None => vars.push(Text::from(field.name.as_str())),
-        }
+        Ok((vars, current.clone()))
     }
 
     /// Get all registered lemma names
@@ -1718,8 +725,8 @@ pub struct LemmaHint {
     /// for positional instantiation of `apply lemma(a, b)`. The
     /// lemma expression's free variables cannot serve: their
     /// occurrence order inside the proposition need not match the
-    /// declaration order. Empty for hints registered without a decl
-    /// (stdlib pattern hints).
+    /// declaration order. Empty means the lemma has no schematic parameters;
+    /// rigid free symbols are never inferred as metavariables.
     pub params: List<Text>,
 }
 
@@ -2048,7 +1055,7 @@ pub enum ProofTactic {
     Apply { lemma: Text },
 
     /// Apply lemma with explicit arguments
-    ApplyWith { lemma: Text, args: List<Text> },
+    ApplyWith { lemma: Text, args: List<Expr> },
 
     /// Induction on variable
     Induction { var: Text },
@@ -3050,37 +2057,9 @@ impl ProofSearchEngine {
         lemma: &LemmaHint,
     ) -> VerificationResult {
         let start = Instant::now();
-        let lemma_expr = &*lemma.lemma;
-
-        // Parse lemma structure
-        let (premises, conclusion) = Self::extract_lemma_structure(lemma_expr);
-
-        // Try to unify lemma conclusion with goal
-        let substitution = match self.try_unify(&conclusion, goal) {
-            Ok(subst) => subst,
-            Err(e) => {
-                return Err(VerificationError::Unknown(
-                    format!("Failed to unify lemma '{}' with goal: {}", lemma.name, e).into(),
-                ));
-            }
-        };
-
-        // If lemma has no premises and unifies with goal, we're done
-        if premises.is_empty() {
-            let cost = VerificationCost::new(
-                format!("lemma_{}", lemma.name).into(),
-                start.elapsed(),
-                true,
-            );
-            return Ok(ProofResult::new(cost));
-        }
-
-        // Instantiate premises with substitution
-        let mut instantiated_premises = List::new();
-        for premise in &premises {
-            let inst_premise = Self::apply_substitution(premise, &substitution);
-            instantiated_premises.push(inst_premise);
-        }
+        let obligations = Self::lemma_obligations(lemma, &ProofGoal::new(goal.clone()))
+            .map_err(|e| VerificationError::Unknown(e.to_string().into()))?;
+        let instantiated_premises: List<Expr> = obligations.into_iter().map(|g| g.goal).collect();
 
         // Verify each premise recursively
         // This is the key step: we need to prove all premises before
@@ -3591,45 +2570,30 @@ impl ProofSearchEngine {
         lemma_name: &Text,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Look up lemma in hints database
-        let lemma_hints = self.hints.lemmas.get(lemma_name);
-        let lemma_hint = match lemma_hints {
-            Maybe::Some(hints) if !hints.is_empty() => &hints[0],
-            _ => {
-                return Err(ProofError::TacticFailed(
-                    format!("Lemma '{}' not found in hints database", lemma_name).into(),
-                ));
-            }
-        };
+        let hint = self.lookup_lemma(lemma_name)?;
+        Self::lemma_obligations(hint, goal)
+    }
 
-        let lemma_expr = &*lemma_hint.lemma;
-
-        // Parse lemma structure: expect implication or direct equality
-        // Lemma forms:
-        // 1. Direct: P (no premises, lemma proves goal directly)
-        // 2. Implication: P1 => P2 => ... => Pn => Q (premises P1..Pn, conclusion Q)
-        // 3. Universal quantification: forall x. P(x) (need to instantiate)
-
-        let (premises, conclusion) = Self::extract_lemma_structure(lemma_expr);
-
-        // Try to unify the lemma conclusion with the goal
-        let substitution = self.try_unify(&conclusion, &goal.goal)?;
-
-        // Generate subgoals for each premise, applying substitution
-        let mut subgoals = List::new();
-        for premise in &premises {
-            let instantiated_premise = Self::apply_substitution(premise, &substitution);
-
-            // Create a new proof goal for this premise
-            let mut premise_goal = goal.clone();
-            premise_goal.goal = instantiated_premise;
-            premise_goal.label = Maybe::Some(format!("premise_{}", subgoals.len()).into());
-
-            subgoals.push(premise_goal);
+    fn lookup_lemma(&self, name: &Text) -> Result<&LemmaHint, ProofError> {
+        if let Maybe::Some(hint) = self.hints.lookup_lemma_by_name(name) { return Ok(hint); }
+        if let Maybe::Some(hints) = self.hints.lemmas.get(name) {
+            if let Some(hint) = hints.first() { return Ok(hint); }
         }
+        Err(ProofError::TacticFailed(format!("lemma '{name}' not found in hints database").into()))
+    }
 
-        // If lemma has no premises and unifies with goal, proof is complete
-        Ok(subgoals)
+    fn lemma_obligations(hint: &LemmaHint, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
+        let (premises, conclusion) = Self::extract_lemma_structure(&hint.lemma);
+        let substitution = Self::try_unify(&conclusion, &goal.goal, &hint.params)?;
+        // A rigid comparison of the fully instantiated conclusion also catches
+        // unsupported syntax that a partial matcher must never ignore.
+        let instantiated = Self::apply_substitution(&conclusion, &substitution)?;
+        if !Self::expr_eq(&instantiated, &goal.goal) {
+            return Err(ProofError::UnificationFailed("instantiated conclusion differs from the goal".into()));
+        }
+        premises.iter().map(|premise| Ok(ProofGoal::with_hypotheses(
+            Self::apply_substitution(premise, &substitution)?, goal.hypotheses.clone(),
+        ))).collect()
     }
 
     /// Extract lemma structure into (premises, conclusion)
@@ -3667,24 +2631,24 @@ impl ProofSearchEngine {
     /// - Literal matching
     /// - Variable binding (variables are Paths with single ident)
     /// - Binary operation matching with recursive unification
-    fn try_unify(&self, pattern: &Expr, target: &Expr) -> Result<Map<Text, Expr>, ProofError> {
+    fn try_unify(pattern: &Expr, target: &Expr, params: &List<Text>) -> Result<Map<Text, Expr>, ProofError> {
         let mut subst = Map::new();
-        self.unify_recursive(pattern, target, &mut subst)?;
+        Self::unify_recursive(pattern, target, params, &mut subst)?;
         Ok(subst)
     }
 
     /// Recursive unification helper
     fn unify_recursive(
-        &self,
         pattern: &Expr,
         target: &Expr,
+        params: &List<Text>,
         subst: &mut Map<Text, Expr>,
     ) -> Result<(), ProofError> {
         use ExprKind::*;
 
         match (&pattern.kind, &target.kind) {
             // Variable in pattern - bind it to target
-            (Path(p), _) if p.as_ident().is_some() => {
+            (Path(p), _) if p.as_ident().is_some_and(|name| params.iter().any(|p| p.as_str() == name.as_str())) => {
                 let var_name = p.as_ident().unwrap().as_str().to_text();
 
                 // Check if variable is already bound
@@ -3734,8 +2698,8 @@ impl ProofSearchEngine {
                         .into(),
                     ));
                 }
-                self.unify_recursive(l1, l2, subst)?;
-                self.unify_recursive(r1, r2, subst)?;
+                Self::unify_recursive(l1, l2, params, subst)?;
+                Self::unify_recursive(r1, r2, params, subst)?;
                 Ok(())
             }
 
@@ -3746,36 +2710,36 @@ impl ProofSearchEngine {
                         "Unary operators don't match".into(),
                     ));
                 }
-                self.unify_recursive(e1, e2, subst)
+                Self::unify_recursive(e1, e2, params, subst)
             }
 
             // Parentheses - unwrap and recurse
-            (Paren(e1), _) => self.unify_recursive(e1, target, subst),
-            (_, Paren(e2)) => self.unify_recursive(pattern, e2, subst),
+            (Paren(e1), _) => Self::unify_recursive(e1, target, params, subst),
+            (_, Paren(e2)) => Self::unify_recursive(pattern, e2, params, subst),
 
             // Call expressions - unify function and arguments
             (
                 Call {
-                    func: f1, args: a1, ..
+                    func: f1, args: a1, type_args: t1
                 },
                 Call {
-                    func: f2, args: a2, ..
+                    func: f2, args: a2, type_args: t2
                 },
             ) => {
-                if a1.len() != a2.len() {
+                if !t1.is_empty() || !t2.is_empty() || a1.len() != a2.len() {
                     return Err(ProofError::UnificationFailed(
                         "Different number of arguments".into(),
                     ));
                 }
-                self.unify_recursive(f1, f2, subst)?;
+                Self::unify_recursive(f1, f2, params, subst)?;
                 for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                    self.unify_recursive(arg1, arg2, subst)?;
+                    Self::unify_recursive(arg1, arg2, params, subst)?;
                 }
                 Ok(())
             }
 
             // Paths must match exactly (if not variables)
-            (Path(p1), Path(p2)) if p1 == p2 => Ok(()),
+            (Path(p1), Path(p2)) if Self::path_eq(p1, p2) => Ok(()),
 
             _ => Err(ProofError::UnificationFailed(
                 format!("Cannot unify {:?} with {:?}", pattern.kind, target.kind).into(),
@@ -3783,70 +2747,42 @@ impl ProofSearchEngine {
         }
     }
 
-    /// Apply substitution to an expression
-    ///
-    /// Replaces all occurrences of variables in the substitution map
-    /// with their bound values.
-    fn apply_substitution(expr: &Expr, subst: &Map<Text, Expr>) -> Expr {
+    fn apply_substitution(expr: &Expr, subst: &Map<Text, Expr>) -> Result<Expr, ProofError> {
+        Self::substitute_expression(expr, &|name| match subst.get(&Text::from(name)) {
+            Maybe::Some(value) => Some(value.clone()), Maybe::None => None,
+        })
+    }
+
+    /// One simultaneous, capture-free substitution for the binder-free
+    /// fragment. Unsupported forms require checked scope evidence.
+    fn substitute_expression(expr: &Expr, lookup: &impl Fn(&str) -> Option<Expr>) -> Result<Expr, ProofError> {
         use ExprKind::*;
-
-        match &expr.kind {
-            Path(p) if p.as_ident().is_some() => {
-                let var_name = p.as_ident().unwrap().as_str().to_text();
-                match subst.get(&var_name) {
-                    Maybe::Some(replacement) => replacement.clone(),
-                    Maybe::None => expr.clone(),
+        let kind = match &expr.kind {
+            Path(path) => {
+                if let Maybe::Some(name) = path.as_ident() {
+                    if let Some(value) = lookup(name.as_str()) { return Ok(value); }
                 }
+                return Ok(expr.clone());
             }
-
-            Binary { op, left, right } => {
-                let new_left = Self::apply_substitution(left, subst);
-                let new_right = Self::apply_substitution(right, subst);
-                Expr::new(
-                    Binary {
-                        op: *op,
-                        left: Box::new(new_left),
-                        right: Box::new(new_right),
-                    },
-                    expr.span,
-                )
-            }
-
-            Unary { op, expr: inner } => {
-                let new_inner = Self::apply_substitution(inner, subst);
-                Expr::new(
-                    Unary {
-                        op: *op,
-                        expr: Box::new(new_inner),
-                    },
-                    expr.span,
-                )
-            }
-
-            Call { func, args, .. } => {
-                let new_func = Self::apply_substitution(func, subst);
-                let new_args = args
-                    .iter()
-                    .map(|arg| Self::apply_substitution(arg, subst))
-                    .collect();
-                Expr::new(
-                    Call {
-                        func: Box::new(new_func),
-                        type_args: List::new(),
-                        args: new_args,
-                    },
-                    expr.span,
-                )
-            }
-
-            Paren(inner) => {
-                let new_inner = Self::apply_substitution(inner, subst);
-                Expr::new(Paren(Box::new(new_inner)), expr.span)
-            }
-
-            // Literals and other atoms remain unchanged
-            _ => expr.clone(),
-        }
+            Literal(_) => return Ok(expr.clone()),
+            Binary { op, left, right } => Binary {
+                op: *op, left: Heap::new(Self::substitute_expression(left, lookup)?),
+                right: Heap::new(Self::substitute_expression(right, lookup)?),
+            },
+            Unary { op, expr: inner } => Unary {
+                op: *op, expr: Heap::new(Self::substitute_expression(inner, lookup)?),
+            },
+            Call { func, type_args, args } if type_args.is_empty() => Call {
+                func: Heap::new(Self::substitute_expression(func, lookup)?),
+                type_args: type_args.clone(),
+                args: args.iter().map(|a| Self::substitute_expression(a, lookup)).collect::<Result<List<_>, _>>()?,
+            },
+            Paren(inner) => Paren(Heap::new(Self::substitute_expression(inner, lookup)?)),
+            _ => return Err(ProofError::TacticFailed(
+                "substitution requires supported binder-free expressions and checked scope/type evidence for other forms".into(),
+            )),
+        };
+        Ok(Expr::new(kind, expr.span))
     }
 
     /// Apply induction only when its elimination principle is known. A list
@@ -4060,38 +2996,8 @@ impl ProofSearchEngine {
         Ok(constructors)
     }
 
-    /// Capture-free substitution for the binder-free induction fragment.
-    /// Unsupported binding/control forms are rejected, never left unchanged.
     fn substitute_var_with_expr(expr: &Expr, var: &Text, replacement: &Expr) -> Result<Expr, ProofError> {
-        use ExprKind::*;
-        let kind = match &expr.kind {
-            Path(path) => {
-                if path.as_ident().is_some_and(|name| name.as_str() == var.as_str()) {
-                    return Ok(replacement.clone());
-                }
-                return Ok(expr.clone());
-            }
-            Literal(_) => return Ok(expr.clone()),
-            Binary { op, left, right } => Binary {
-                op: *op,
-                left: Heap::new(Self::substitute_var_with_expr(left, var, replacement)?),
-                right: Heap::new(Self::substitute_var_with_expr(right, var, replacement)?),
-            },
-            Unary { op, expr: inner } => Unary {
-                op: *op, expr: Heap::new(Self::substitute_var_with_expr(inner, var, replacement)?),
-            },
-            Call { func, type_args, args } => Call {
-                func: Heap::new(Self::substitute_var_with_expr(func, var, replacement)?),
-                type_args: type_args.clone(),
-                args: args.iter().map(|arg| Self::substitute_var_with_expr(arg, var, replacement))
-                    .collect::<Result<List<_>, _>>()?,
-            },
-            Paren(inner) => Paren(Heap::new(Self::substitute_var_with_expr(inner, var, replacement)?)),
-            _ => return Err(ProofError::TacticFailed(
-                "induction substitution requires a supported binder-free expression; use a certified eliminator for this expression".into(),
-            )),
-        };
-        Ok(Expr::new(kind, expr.span))
+        Self::substitute_expression(expr, &|name| (name == var.as_str()).then(|| replacement.clone()))
     }
 
     /// Try simplify tactic
@@ -4751,19 +3657,17 @@ impl ProofSearchEngine {
             (Paren(e1), _) => Self::expr_eq(e1, e2),
             (_, Paren(e2)) => Self::expr_eq(e1, e2),
 
-            // Function calls — same callee + same arity + arg-by-arg
-            // structural equality. Type-args are not part of equality
-            // reasoning at this level (the type system has already
-            // monomorphized whatever is being compared).
+            // Uninstantiated generic arguments require checked type evidence;
+            // this legacy backend must not erase them during equality.
             (
                 Call {
-                    func: f1, args: a1, ..
+                    func: f1, args: a1, type_args: t1
                 },
                 Call {
-                    func: f2, args: a2, ..
+                    func: f2, args: a2, type_args: t2
                 },
             ) => {
-                Self::expr_eq(f1, f2)
+                t1.is_empty() && t2.is_empty() && Self::expr_eq(f1, f2)
                     && a1.len() == a2.len()
                     && a1.iter().zip(a2.iter()).all(|(x, y)| Self::expr_eq(x, y))
             }
@@ -4774,16 +3678,18 @@ impl ProofSearchEngine {
                     receiver: r1,
                     method: m1,
                     args: a1,
+                    type_args: t1,
                     ..
                 },
                 MethodCall {
                     receiver: r2,
                     method: m2,
                     args: a2,
+                    type_args: t2,
                     ..
                 },
             ) => {
-                m1.name == m2.name
+                t1.is_empty() && t2.is_empty() && m1.name == m2.name
                     && Self::expr_eq(r1, r2)
                     && a1.len() == a2.len()
                     && a1.iter().zip(a2.iter()).all(|(x, y)| Self::expr_eq(x, y))
@@ -5251,252 +4157,42 @@ impl ProofSearchEngine {
         Ok(result)
     }
 
-    /// Try apply with explicit arguments
-    ///
-    /// This extends `try_apply` by allowing explicit instantiation of universally
-    /// quantified variables in the lemma. For example:
-    /// - apply lemma_name with [arg1, arg2] substitutes the first two forall-bound
-    ///  variables with arg1 and arg2 respectively.
-    ///
-    /// Lemma application with explicit instantiation of universally quantified variables.
-    /// `apply lemma_name with [arg1, arg2]` substitutes the first N forall-bound
-    /// variables with the given arguments, then checks if the instantiated conclusion
-    /// matches the current goal.
-    /// Resolve a lemma by name and instantiate it POSITIONALLY with
-    /// `args`: the substitution targets the lemma's DECLARED
-    /// parameters (`LemmaHint::params`, declaration order), falling
-    /// back to its forall-bound variables for pattern-style hints.
-    /// Returns the instantiated `(premises, conclusion)`.
-    ///
-    /// The ONE carrier for apply-style instantiation: `try_apply_with`
-    /// (goal-directed apply) and the structured-proof bare-`apply`
-    /// step (hypothesis-accumulating apply) both go through here.
+    /// Instantiate declared parameters simultaneously with actual AST values.
+    /// Explicit calls require exact arity; supplied arguments remain rigid.
     pub fn instantiate_lemma(
-        &self,
-        lemma_name: &Text,
-        args: &List<Text>,
+        &self, lemma_name: &Text, args: &List<Expr>,
     ) -> Result<(List<Expr>, Expr), ProofError> {
-        let trace = std::env::var_os("VERUM_TRACE_PROOFS").is_some();
-        // Look up the lemma by name (both key spellings).
-        let lemma_key = format!("@name:{}", lemma_name).into();
-        let hint = match self.hints.lemmas.get(&lemma_key) {
-            Maybe::Some(hints) if !hints.is_empty() => hints[0].clone(),
-            _ => match self.hints.lemmas.get(lemma_name) {
-                Maybe::Some(hints) if !hints.is_empty() => hints[0].clone(),
-                _ => {
-                    if trace {
-                        eprintln!(
-                            "[proof-trace] instantiate_lemma `{}`: NOT FOUND in hints database",
-                            lemma_name,
-                        );
-                    }
-                    return Err(ProofError::TacticFailed(
-                        format!("apply: lemma '{}' not found in hints database", lemma_name)
-                            .into(),
-                    ));
-                }
-            },
-        };
-        let lemma_expr = hint.lemma.clone();
-
-        let (premises, conclusion) = Self::extract_lemma_structure(&lemma_expr);
-
-        // Substitution targets: declared parameters first (the decl
-        // order is the calling convention), forall-bound variables as
-        // the fallback for undeclared pattern hints.
-        let targets: List<Text> = if hint.params.is_empty() {
-            Self::collect_forall_vars(&lemma_expr)
-        } else {
-            hint.params.clone()
-        };
-        let mut subst = std::collections::HashMap::new();
-        for (i, arg) in args.iter().enumerate() {
-            if i < targets.len() {
-                subst.insert(targets[i].clone(), arg.clone());
+        let hint = self.lookup_lemma(lemma_name)?;
+        let (quantified, body) = HintsDatabase::extract_quantifiers(&hint.lemma)
+            .map_err(ProofError::TacticFailed)?;
+        let mut params = hint.params.clone();
+        params.extend(quantified);
+        let mut subst = Map::new();
+        if params.len() != args.len() {
+            return Err(ProofError::TacticFailed(format!(
+                "lemma '{lemma_name}' expects {} arguments but got {}", params.len(), args.len()
+            ).into()));
+        }
+        for (param, value) in params.iter().zip(args) {
+            if subst.get(param).is_some() {
+                return Err(ProofError::TacticFailed("duplicate lemma parameters require checked scope evidence".into()));
             }
+            subst.insert(param.clone(), value.clone());
         }
-
-        let instantiated_conclusion = Self::substitute_in_expr(&conclusion, &subst);
-        let instantiated_premises: List<Expr> = premises
-            .iter()
-            .map(|p| Self::substitute_in_expr(p, &subst))
-            .collect();
-
-        if trace {
-            eprintln!(
-                "[proof-trace] instantiate_lemma `{}` args={:?} targets={:?}: premises={} conclusion=`{}`",
-                lemma_name,
-                args.iter().map(|a| a.as_str()).collect::<Vec<_>>(),
-                targets.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
-                instantiated_premises.len(),
-                render_expr_for_trace(&instantiated_conclusion),
-            );
-        }
-        Ok((instantiated_premises, instantiated_conclusion))
+        let instantiated = Self::apply_substitution(&body, &subst)?;
+        Ok(Self::extract_lemma_structure(&instantiated))
     }
 
     fn try_apply_with(
-        &mut self,
-        lemma_name: &Text,
-        args: &List<Text>,
-        goal: &ProofGoal,
+        &mut self, lemma_name: &Text, args: &List<Expr>, goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // T0842: an unproved goal must be explainable. Every decision
-        // point of the apply pipeline reports under this filter.
-        let trace = std::env::var_os("VERUM_TRACE_PROOFS").is_some();
-        if trace {
-            eprintln!(
-                "[proof-trace] apply_with lemma=`{}` args={:?} goal=`{}`",
-                lemma_name,
-                args.iter().map(|a| a.as_str()).collect::<Vec<_>>(),
-                render_expr_for_trace(&goal.goal),
-            );
-        }
-        let (premises, instantiated_conclusion) = self.instantiate_lemma(lemma_name, args)?;
-
-        // Check if instantiated conclusion matches goal
-        if let Err(e) = self.try_unify(&instantiated_conclusion, &goal.goal) {
-            if trace {
-                eprintln!(
-                    "[proof-trace] apply_with UNIFY FAILED: `{}` vs goal `{}`: {:?}",
-                    render_expr_for_trace(&instantiated_conclusion),
-                    render_expr_for_trace(&goal.goal),
-                    e,
-                );
-            }
-            return Err(ProofError::TacticFailed(
-                "apply_with: instantiated lemma conclusion does not unify with goal"
-                    .to_string()
-                    .into(),
+        let (premises, conclusion) = self.instantiate_lemma(lemma_name, args)?;
+        if !Self::expr_eq(&conclusion, &goal.goal) {
+            return Err(ProofError::UnificationFailed(
+                "explicitly instantiated lemma conclusion differs from the goal".into(),
             ));
         }
-        if trace {
-            eprintln!(
-                "[proof-trace] apply_with unified; emitting {} premise subgoal(s)",
-                premises.len(),
-            );
-        }
-
-        // Generate subgoals for each premise (already instantiated)
-        let mut subgoals = List::new();
-        for premise in &premises {
-            let mut new_goal = goal.clone();
-            new_goal.goal = premise.clone();
-            new_goal.label = Maybe::Some(format!("apply_{}_{}", lemma_name, subgoals.len()).into());
-            subgoals.push(new_goal);
-        }
-
-        Ok(subgoals)
-    }
-
-    /// Collect forall-bound variable names from an expression
-    fn collect_forall_vars(expr: &Expr) -> List<Text> {
-        let mut vars = List::new();
-
-        fn collect_inner(e: &Expr, vars: &mut List<Text>) {
-            match &e.kind {
-                ExprKind::Forall { bindings, body } => {
-                    // Extract variable names from each binding's pattern
-                    for binding in bindings {
-                        if let verum_ast::PatternKind::Ident { name, .. } = &binding.pattern.kind {
-                            vars.push(name.name.clone().into());
-                        }
-                    }
-                    // Recursively collect from body
-                    collect_inner(body, vars);
-                }
-                ExprKind::Binary { left, right, .. } => {
-                    collect_inner(left, vars);
-                    collect_inner(right, vars);
-                }
-                ExprKind::Paren(inner) => collect_inner(inner, vars),
-                _ => {}
-            }
-        }
-
-        collect_inner(expr, &mut vars);
-        vars
-    }
-
-    /// Substitute variables in an expression
-    fn substitute_in_expr(expr: &Expr, subst: &std::collections::HashMap<Text, Text>) -> Expr {
-        use verum_ast::ty::{Ident, Path};
-
-        match &expr.kind {
-            ExprKind::Path(p) => {
-                // Check if this path is a single-segment variable that should be substituted
-                if let Maybe::Some(ident) = p.as_ident() {
-                    let name: Text = ident.as_str().into();
-                    if let Some(replacement) = subst.get(&name) {
-                        // Create new path with substituted name using Path::single
-                        let new_ident = Ident {
-                            name: replacement.to_string().into(),
-                            span: expr.span,
-                        };
-                        let new_path = Path::single(new_ident);
-                        return Expr::new(ExprKind::Path(new_path), expr.span);
-                    }
-                }
-                expr.clone()
-            }
-            ExprKind::Binary { op, left, right } => Expr::new(
-                ExprKind::Binary {
-                    op: *op,
-                    left: Box::new(Self::substitute_in_expr(left, subst)),
-                    right: Box::new(Self::substitute_in_expr(right, subst)),
-                },
-                expr.span,
-            ),
-            ExprKind::Unary { op, expr: inner } => Expr::new(
-                ExprKind::Unary {
-                    op: *op,
-                    expr: Box::new(Self::substitute_in_expr(inner, subst)),
-                },
-                expr.span,
-            ),
-            ExprKind::Call { func, args, .. } => {
-                let new_args: List<Expr> = args
-                    .iter()
-                    .map(|a| Self::substitute_in_expr(a, subst))
-                    .collect();
-                Expr::new(
-                    ExprKind::Call {
-                        func: Box::new(Self::substitute_in_expr(func, subst)),
-                        type_args: List::new(),
-                        args: new_args,
-                    },
-                    expr.span,
-                )
-            }
-            ExprKind::Forall { bindings, body } => {
-                // Check if any bound variable shadows a substitution
-                let shadows_subst = bindings.iter().any(|binding| {
-                    if let verum_ast::PatternKind::Ident { name, .. } = &binding.pattern.kind {
-                        let var_name: Text = name.name.clone().into();
-                        subst.contains_key(&var_name)
-                    } else {
-                        false
-                    }
-                });
-
-                if shadows_subst {
-                    expr.clone()
-                } else {
-                    Expr::new(
-                        ExprKind::Forall {
-                            bindings: bindings.clone(),
-                            body: Box::new(Self::substitute_in_expr(body, subst)),
-                        },
-                        expr.span,
-                    )
-                }
-            }
-            ExprKind::Paren(inner) => Expr::new(
-                ExprKind::Paren(Box::new(Self::substitute_in_expr(inner, subst))),
-                expr.span,
-            ),
-            _ => expr.clone(),
-        }
+        Ok(premises.into_iter().map(|p| ProofGoal::with_hypotheses(p, goal.hypotheses.clone())).collect())
     }
 
     /// Strong and relation-based induction need their own checked eliminators.
@@ -6986,42 +5682,12 @@ impl ProofSearchEngine {
             }
         }
 
-        // Strategy 2: Check if term is a lemma in hints database
-        let lemma_key = format!("@name:{}", term).into();
-        if let Maybe::Some(lemma_hints) = self.hints.lemmas.get(&lemma_key)
-            && !lemma_hints.is_empty()
-        {
-            let lemma = &lemma_hints[0];
-            let (premises, conclusion) = Self::extract_lemma_structure(&lemma.lemma);
-
-            // For exact, there must be no premises (or they must all be satisfied)
-            if premises.is_empty() {
-                // Check if lemma conclusion unifies with goal
-                if self.try_unify(&conclusion, &goal.goal).is_ok() {
-                    return Ok(List::new());
-                }
-            } else {
-                // Check if all premises are available as hypotheses
-                let all_premises_satisfied = premises.iter().all(|premise| {
-                    goal.hypotheses
-                        .iter()
-                        .any(|hyp| Self::expr_eq(premise, hyp))
-                });
-
-                if all_premises_satisfied && self.try_unify(&conclusion, &goal.goal).is_ok() {
-                    return Ok(List::new());
-                }
-            }
-        }
-
-        // Strategy 3: Check if term is an axiom
-        if let Maybe::Some(axiom_hints) = self.hints.lemmas.get(term)
-            && !axiom_hints.is_empty()
-        {
-            let axiom = &axiom_hints[0];
-            if Self::expr_eq(&axiom.lemma, &goal.goal) {
-                return Ok(List::new());
-            }
+        // Resolve a named lemma using the same instantiated obligations as
+        // apply. Every premise is checked after conclusion unification.
+        if let Ok(hint) = self.lookup_lemma(term) {
+            let obligations = Self::lemma_obligations(hint, goal)?;
+            for obligation in &obligations { self.try_assumption(obligation)?; }
+            return Ok(List::new());
         }
 
         // Strategy 4: Literal 'true' proves goal 'true'
@@ -7029,18 +5695,6 @@ impl ProofSearchEngine {
             && Self::is_true(&goal.goal)
         {
             return Ok(List::new());
-        }
-
-        // Strategy 5: Check if the term itself is an expression that matches the goal
-        // This handles cases like `exact H` where H is a hypothesis expression
-        for hyp in &goal.hypotheses {
-            if Self::expr_eq(hyp, &goal.goal) {
-                // If any hypothesis matches goal, term could be referencing it
-                // But we need to verify the term actually refers to this hypothesis
-                // This is a conservative check - we found a matching hypothesis
-                // The term could be its name (already checked above)
-                continue; // Don't auto-accept, require explicit name
-            }
         }
 
         // No valid proof term found - this is the safe failure case

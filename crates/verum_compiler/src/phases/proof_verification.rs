@@ -145,15 +145,16 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
         }
 
         TacticExpr::Apply { lemma, args } => {
-            let lemma_text = format_expr(lemma);
-            if args.is_empty() {
-                ProofTactic::Apply { lemma: lemma_text }
-            } else {
-                ProofTactic::ApplyWith {
-                    lemma: lemma_text,
-                    args: args.iter().map(|a| format_expr(a)).collect(),
-                }
-            }
+            let (callee, arguments) = match &lemma.kind {
+                ExprKind::Call { func, type_args, args: call_args } if args.is_empty() && type_args.is_empty() => (func.as_ref(), call_args),
+                ExprKind::Call { .. } => return ProofTactic::Fail {
+                    message: "apply requires unambiguous arguments and checked generic instantiation".into(),
+                },
+                _ => (lemma.as_ref(), args),
+            };
+            let lemma = format_expr(callee);
+            if arguments.is_empty() { ProofTactic::Apply { lemma } }
+            else { ProofTactic::ApplyWith { lemma, args: arguments.clone() } }
         }
 
         TacticExpr::Rewrite {
@@ -180,26 +181,10 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
                 ProofTactic::Simplify
             } else {
                 let lemma_texts: List<Text> = lemmas.iter().map(|l| format_expr(l)).collect();
-                // If there is a target, compose Simp with a focused rewrite
-                if let Maybe::Some(target) = at_target {
-                    let simp = if lemma_texts.is_empty() {
-                        ProofTactic::Simplify
-                    } else {
-                        ProofTactic::SimpWith {
-                            lemmas: lemma_texts,
-                        }
-                    };
-                    // Focus simplification at a specific hypothesis
-                    ProofTactic::Seq(
-                        Heap::new(ProofTactic::Unfold {
-                            name: target.name.clone(),
-                        }),
-                        Heap::new(simp),
-                    )
+                if at_target.is_some() {
+                    ProofTactic::Fail { message: "targeted simplification requires checked hypothesis transformation, which this backend does not support".into() }
                 } else {
-                    ProofTactic::SimpWith {
-                        lemmas: lemma_texts,
-                    }
+                    ProofTactic::SimpWith { lemmas: lemma_texts }
                 }
             }
         }
@@ -242,7 +227,7 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
         },
 
         TacticExpr::Exact(term) => ProofTactic::Exact {
-            term: format_expr(term),
+            term: format_expr(proof_operand(term)),
         },
 
         TacticExpr::Unfold(names) => {
@@ -285,6 +270,9 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
 
         TacticExpr::Focus(inner) => ProofTactic::Focus(Heap::new(convert_tactic(inner))),
 
+        TacticExpr::Named { generic_args, .. } if !generic_args.is_empty() => ProofTactic::Fail {
+            message: "generic tactic arguments require checked instantiation, which this backend does not support".into(),
+        },
         TacticExpr::Named { name, args, .. } => ProofTactic::Named {
             name: name.name.clone(),
             args: args.iter().map(|a| format_expr(a)).collect(),
@@ -329,6 +317,13 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
             },
         },
     }
+}
+
+fn proof_operand(mut expression: &Expr) -> &Expr {
+    while let ExprKind::Paren(inner) = &expression.kind {
+        expression = inner;
+    }
+    expression
 }
 
 /// Lower a `Seq(...)` tactic body while desugaring any `let` bindings it
@@ -1044,7 +1039,7 @@ fn verify_proof_steps_accumulating(
                 // in hand (T0842 trace, d1_repro).
                 let apply_parts = match &tactic {
                     ProofTactic::Apply { lemma } => {
-                        Some((lemma.clone(), List::<Text>::new()))
+                        Some((lemma.clone(), List::<Expr>::new()))
                     }
                     ProofTactic::ApplyWith { lemma, args } => {
                         Some((lemma.clone(), args.clone()))

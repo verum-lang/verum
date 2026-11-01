@@ -1501,12 +1501,12 @@ impl<'a> RecursiveParser<'a> {
                     "take" => {
                         // take x: Type; -- introduce universally quantified variable
                         let var_name = self.consume_ident()?;
-                        let ty = if self.stream.consume(&TokenKind::Colon).is_some() {
-                            let t = self.parse_type()?;
-                            Maybe::Some(t)
-                        } else {
-                            Maybe::None
-                        };
+                        if self.stream.consume(&TokenKind::Colon).is_some() {
+                            return Err(ParseError::malformed_tactic(
+                                "typed take bindings require checked binder semantics; use a typed theorem parameter",
+                                self.stream.current_span(),
+                            ));
+                        }
                         // Consume optional semicolon
                         self.stream.consume(&TokenKind::Semicolon);
                         ProofStepKind::Tactic(TacticExpr::Named {

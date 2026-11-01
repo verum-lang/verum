@@ -74,7 +74,7 @@ fn declared_params_drive_positional_instantiation() {
     let engine = ProofSearchEngine::with_hints(hints);
 
     let mut args = List::new();
-    args.push(Text::from("v"));
+    args.push(var("v"));
     let (premises, conclusion) = engine
         .instantiate_lemma(&Text::from("grounding"), &args)
         .expect("registered lemma instantiates");
@@ -93,7 +93,7 @@ fn declared_params_drive_positional_instantiation() {
 #[test]
 fn unknown_lemma_is_a_named_error() {
     let engine = ProofSearchEngine::with_hints(HintsDatabase::with_core());
-    let args: List<Text> = List::new();
+    let args: List<Expr> = List::new();
     let err = engine
         .instantiate_lemma(&Text::from("no_such_lemma"), &args)
         .expect_err("unknown lemma must error");

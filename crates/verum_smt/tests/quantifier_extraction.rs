@@ -1,25 +1,5 @@
-//! Locks the quantifier-aware lemma instantiation in
-//! `HintsDatabase::instantiate_lemma`.
-//!
-//! Pre-fix `extract_quantifiers` was a stub:
-//!
-//! ```ignore
-//! fn extract_quantifiers(expr: &Expr) -> (List<Text>, Expr) {
-//!  let mut vars = List::new();
-//!  let mut current = expr;
-//!  // For now, we don't have explicit forall syntax in ExprKind
-//!  (vars, current.clone())
-//! }
-//! ```
-//!
-//! The comment was stale: `verum_ast::ExprKind` HAS Forall and Exists
-//! variants. The stub returned an empty variable list, so
-//! `instantiate_lemma(forall_expr, [t])` errored with "expects 0
-//! arguments" — quantified lemmas were unusable.
-//!
-//! Post-fix the function walks Forall/Exists chains and collects
-//! every binding-pattern's identifier, producing a real variable list
-//! that matches the lemma's arity.
+//! Schematic universal instantiation preserves actual arguments and refuses
+//! existential witness substitution and unchecked binder metadata.
 
 use verum_ast::expr::{Expr, ExprKind, QuantifierBinding};
 use verum_ast::pattern::{Pattern, PatternKind};
@@ -82,18 +62,14 @@ fn forall_with_one_binding_instantiates_with_one_term() {
     // ∀x. P(x) — body uses x, which we approximate with `ident_expr("x")`
     let mut bindings: List<QuantifierBinding> = List::new();
     bindings.push(quantifier_binding("x"));
-    let lemma = forall(bindings, ident_expr("P_of_x"));
+    let lemma = forall(bindings, ident_expr("x"));
 
     let mut terms: List<Expr> = List::new();
     terms.push(ident_expr("term_a"));
 
     let result = db.instantiate_lemma(&lemma, &terms);
-    assert!(
-        result.is_ok(),
-        "1 binding + 1 term must succeed (was failing pre-fix because the \
-         extractor returned 0 vars): {:?}",
-        result.err()
-    );
+    let result = result.expect("universal instantiation");
+    assert!(matches!(result.kind, ExprKind::Path(ref path) if path.as_ident().unwrap().as_str() == "term_a"));
 }
 
 #[test]
@@ -122,7 +98,7 @@ fn nested_forall_extracts_all_binders() {
 }
 
 #[test]
-fn mixed_forall_exists_chain_extracts_all_binders() {
+fn an_existential_is_not_a_universal_instantiation_parameter() {
     let db = HintsDatabase::new();
 
     // ∀x. ∃y. body
@@ -134,22 +110,10 @@ fn mixed_forall_exists_chain_extracts_all_binders() {
     outer_bindings.push(quantifier_binding("x"));
     let lemma = forall(outer_bindings, inner);
 
-    // 2 binders → must accept 2 terms.
-    let mut terms: List<Expr> = List::new();
-    terms.push(ident_expr("a"));
-    terms.push(ident_expr("b"));
-    assert!(db.instantiate_lemma(&lemma, &terms).is_ok());
-
-    // 1 term must fail with arity mismatch — proves the extractor
-    // saw both binders, not just the outer one.
-    let mut one_term: List<Expr> = List::new();
-    one_term.push(ident_expr("a"));
-    let result = db.instantiate_lemma(&lemma, &one_term);
-    assert!(
-        result.is_err(),
-        "instantiating ∀x. ∃y. body with 1 term must fail — extractor \
-         must collect both binders"
-    );
+    for terms in [List::from_iter([ident_expr("a"), ident_expr("b")]), List::from_iter([ident_expr("a")])] {
+        assert!(db.instantiate_lemma(&lemma, &terms).is_err(),
+            "existential witnesses cannot be chosen by a caller's universal instantiation");
+    }
 }
 
 #[test]

@@ -26,6 +26,7 @@ fn unsupported_input_cannot_be_erased_or_reinterpreted() {
         "theorem t() proof { let a, b such that true; }",
         "theorem t() proof { let a such that true; }",
         "theorem t() proof { assume h: false; }",
+        "theorem t() proof { take x: Missing; }",
         "theorem t() proof { proof = false; }",
         "theorem t() proof { proof { show false by trivial; } }",
         "theorem t() proof { proof by induction on x { case 0 => { trivial; } } }",
