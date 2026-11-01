@@ -1089,6 +1089,13 @@ impl<'a> RecursiveParser<'a> {
     ///  Type(u) -- level variable u
     ///  Type(max(u, v)) -- maximum of two levels
     fn parse_universe_level_expr(&mut self) -> ParseResult<UniverseLevelExpr> {
+        self.enter_recursion()?;
+        let result = self.parse_universe_level_expr_inner();
+        self.exit_recursion();
+        result
+    }
+
+    fn parse_universe_level_expr_inner(&mut self) -> ParseResult<UniverseLevelExpr> {
         match self.stream.peek() {
             // Concrete level: 0, 1, 2, ...
             Some(Token {
