@@ -1,0 +1,38 @@
+{
+  "export_sha256": "ee9d822beae7fbfc4ebb8e30dfac628800a252eabfc1f15615ed9ca17e70136a",
+  "native_binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/r265/synarc_kan-courts",
+    "bytes": 69581600,
+    "sha256": "ad2051aa03f162e0fbc16c703c02e3ab62dab2e63f53cd88cce9e96c7d435f53"
+  },
+  "sources": [
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority.rs",
+      "sha256": "7d76cb21bbe55574cd2be3a6c4f68e20e057d0222e8078c401fdae8cd827a3e3",
+      "bytes": 13982,
+      "fixture": "append-handoff-native-v5.source-0.rs.gz"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming.rs",
+      "sha256": "39e1b3737c3243fb1250fffb430f50096308826d2b11cec8be490a28bc2e4b6c",
+      "bytes": 37189,
+      "fixture": "append-handoff-native-v5.source-1.rs.gz"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming/probe.rs",
+      "sha256": "7a3eb73ab27b597a20cc1aef3819b1712a0655f0c39ae49a469d427b19d362d2",
+      "bytes": 23376,
+      "fixture": "append-handoff-native-v5.source-2.rs.gz"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming_courts.rs",
+      "sha256": "f64fcf52324c38099bb33e7ef85f5221fb5f27303e18a01688d942f0f3d2fe07",
+      "bytes": 44851,
+      "fixture": "append-handoff-native-v5.source-3.rs.gz"
+    }
+  ],
+  "receipt_sha256": "a0e81e61591e2946ae50941875d1d90edeef9acdf2504f2a0af0e637a364e33f",
+  "build_receipt_sha256": "f5e5256f4f3ba97cd0cd17e7337345b2351d31f4ab090505a34a4f901b96d879",
+  "scope": "Frozen native-v5 bounded observations only. Broader native test failures remain separate; no universal Rust refinement.",
+  "source_head": "926b351469fc34a1ee35a4c1f34fc6f56cac4f0c"
+}
