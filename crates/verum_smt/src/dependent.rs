@@ -2510,10 +2510,12 @@ impl UniverseLevel {
 
     /// Create successor level
     pub fn succ(&self) -> Self {
-        match self {
-            UniverseLevel::Concrete(n) => UniverseLevel::Concrete(n + 1),
-            _ => UniverseLevel::Succ(Heap::new(self.clone())),
+        if let UniverseLevel::Concrete(n) = self {
+            if let Some(next) = n.checked_add(1) {
+                return UniverseLevel::Concrete(next);
+            }
         }
+        UniverseLevel::Succ(Heap::new(self.clone()))
     }
 
     /// Create maximum of two levels
@@ -2538,15 +2540,30 @@ impl UniverseLevel {
 
     /// Evaluate a ground level to a concrete number
     pub fn eval(&self) -> Maybe<usize> {
-        match self {
-            UniverseLevel::Concrete(n) => Maybe::Some(*n),
-            UniverseLevel::Variable(_) => Maybe::None,
-            UniverseLevel::Max(l1, l2) => match (l1.eval(), l2.eval()) {
-                (Maybe::Some(n1), Maybe::Some(n2)) => Maybe::Some(n1.max(n2)),
-                _ => Maybe::None,
-            },
-            UniverseLevel::Succ(l) => l.eval().map(|n| n + 1),
+        self.evaluate(&Map::new())
+    }
+
+    /// Evaluate the original named expression with checked arithmetic and a
+    /// complete assignment. This acceptance path is independent of SMT terms.
+    fn evaluate(&self, assignment: &Map<Text, usize>) -> Maybe<usize> {
+        let mut work = List::from_single((self, 0usize));
+        let mut remaining = verum_types::universe_level::MAX_LEVEL_NODES;
+        let mut value = 0;
+        while let Some((level, offset)) = work.pop() {
+            remaining = remaining.checked_sub(1)?;
+            match level {
+                Self::Concrete(n) => value = value.max(n.checked_add(offset)?),
+                Self::Variable(name) => {
+                    value = value.max(assignment.get(name)?.checked_add(offset)?);
+                }
+                Self::Succ(inner) => work.push((inner, offset.checked_add(1)?)),
+                Self::Max(left, right) => {
+                    work.push((left, offset));
+                    work.push((right, offset));
+                }
+            }
         }
+        Some(value)
     }
 
     /// Collect all level variables in this level
@@ -2648,6 +2665,7 @@ impl UniverseConstraintSolver {
 
     /// Add a constraint
     pub fn add_constraint(&mut self, constraint: UniverseConstraint) {
+        self.assignments.clear();
         self.constraints.push(constraint);
     }
 
@@ -2666,132 +2684,136 @@ impl UniverseConstraintSolver {
         self.add_constraint(UniverseConstraint::Equal(l1, l2));
     }
 
-    /// Solve constraints using iterative refinement
-    ///
-    /// Returns Ok(()) if constraints are satisfiable, Err with message otherwise.
+    /// Use the shared bounded universe solver, then independently validate the
+    /// original named expressions before publishing any assignments.
     pub fn solve(&mut self) -> Result<(), Text> {
-        // Collect all variables
-        let mut all_vars = Set::new();
+        use verum_types::context::UniverseConstraint as SharedConstraint;
+        self.assignments.clear();
+        let limits = verum_types::universe_solver::SolverLimits::default();
+        if self.constraints.len() > limits.max_constraints {
+            return Err("universe constraint collection limit exceeded".into());
+        }
+        let mut names = Map::new();
+        let mut remaining = limits.max_expression_nodes;
+        let mut lowered = List::new();
         for constraint in &self.constraints {
-            match constraint {
-                UniverseConstraint::LessOrEqual(l1, l2)
-                | UniverseConstraint::LessThan(l1, l2)
-                | UniverseConstraint::Equal(l1, l2) => {
-                    for v in l1.variables() {
-                        all_vars.insert(v);
+            let (left, right) = match constraint {
+                UniverseConstraint::LessOrEqual(a, b)
+                | UniverseConstraint::LessThan(a, b)
+                | UniverseConstraint::Equal(a, b) => (a, b),
+            };
+            let left = Self::lower_level(left, &mut names, &mut remaining)?;
+            let right = Self::lower_level(right, &mut names, &mut remaining)?;
+            lowered.push(match constraint {
+                UniverseConstraint::LessOrEqual(..) => SharedConstraint::LessOrEqual(left, right),
+                UniverseConstraint::LessThan(..) => SharedConstraint::StrictlyLess(left, right),
+                UniverseConstraint::Equal(..) => SharedConstraint::Equal(left, right),
+            });
+        }
+        let solution = verum_types::universe_solver::solve_universe_constraints(&lowered)?;
+        let mut candidate = Map::new();
+        for (name, id) in &names {
+            let value = solution
+                .resolve(&verum_types::ty::UniverseLevel::Variable(*id))?
+                .evaluate(&Map::new())
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| Text::from("universe model value is not representable"))?;
+            candidate.insert(name.clone(), value);
+        }
+        for constraint in &self.constraints {
+            let accepted = match constraint {
+                UniverseConstraint::LessOrEqual(a, b) => a
+                    .evaluate(&candidate)
+                    .zip(b.evaluate(&candidate))
+                    .map(|(a, b)| a <= b),
+                UniverseConstraint::LessThan(a, b) => a
+                    .evaluate(&candidate)
+                    .zip(b.evaluate(&candidate))
+                    .map(|(a, b)| a < b),
+                UniverseConstraint::Equal(a, b) => a
+                    .evaluate(&candidate)
+                    .zip(b.evaluate(&candidate))
+                    .map(|(a, b)| a == b),
+            };
+            if accepted != Some(true) {
+                return Err("universe model failed original named-constraint validation".into());
+            }
+        }
+        self.assignments = candidate;
+        Ok(())
+    }
+
+    /// Intern names with exact map equality into one constraint-system scope.
+    /// Conversion retains the tree and refuses unsupported values or budgets.
+    fn lower_level(
+        level: &UniverseLevel,
+        names: &mut Map<Text, u32>,
+        remaining: &mut usize,
+    ) -> Result<verum_types::ty::UniverseLevel, Text> {
+        use verum_types::ty::UniverseLevel as SharedLevel;
+        enum Work<'a> {
+            Visit(&'a UniverseLevel),
+            Successor,
+            Maximum,
+        }
+        let mut work = List::from_single(Work::Visit(level));
+        let mut values = List::new();
+        let mut local_remaining = verum_types::universe_level::MAX_LEVEL_NODES;
+        let exhausted = || Text::from("universe expression representation limit exceeded");
+        while let Some(step) = work.pop() {
+            match step {
+                Work::Visit(level) => {
+                    *remaining = remaining.checked_sub(1).ok_or_else(exhausted)?;
+                    local_remaining = local_remaining.checked_sub(1).ok_or_else(exhausted)?;
+                    match level {
+                        UniverseLevel::Concrete(value) => {
+                            let value = u64::try_from(*value).map_err(|_| exhausted())?;
+                            let extra = usize::try_from(value.saturating_sub(u64::from(u32::MAX)))
+                                .map_err(|_| exhausted())?;
+                            *remaining = remaining.checked_sub(extra).ok_or_else(exhausted)?;
+                            local_remaining =
+                                local_remaining.checked_sub(extra).ok_or_else(exhausted)?;
+                            values.push(SharedLevel::from_value(value).ok_or_else(exhausted)?);
+                        }
+                        UniverseLevel::Variable(name) => {
+                            let id = if let Some(id) = names.get(name) {
+                                *id
+                            } else {
+                                if names.len()
+                                    >= verum_types::universe_solver::SolverLimits::default()
+                                        .max_variables
+                                {
+                                    return Err("universe variable limit exceeded".into());
+                                }
+                                let id = u32::try_from(names.len()).map_err(|_| exhausted())?;
+                                names.insert(name.clone(), id);
+                                id
+                            };
+                            values.push(SharedLevel::Variable(id));
+                        }
+                        UniverseLevel::Succ(inner) => {
+                            work.push(Work::Successor);
+                            work.push(Work::Visit(inner));
+                        }
+                        UniverseLevel::Max(left, right) => {
+                            work.push(Work::Maximum);
+                            work.push(Work::Visit(right));
+                            work.push(Work::Visit(left));
+                        }
                     }
-                    for v in l2.variables() {
-                        all_vars.insert(v);
-                    }
+                }
+                Work::Successor => {
+                    let value = values.pop().ok_or_else(exhausted)?;
+                    values.push(SharedLevel::Succ(Box::new(value)));
+                }
+                Work::Maximum => {
+                    let right = values.pop().ok_or_else(exhausted)?;
+                    let left = values.pop().ok_or_else(exhausted)?;
+                    values.push(SharedLevel::Max(Box::new(left), Box::new(right)));
                 }
             }
         }
-
-        // Initialize all variables to level 0
-        for var in all_vars {
-            self.assignments.insert(var, 0);
-        }
-
-        // Iterative constraint propagation
-        let max_iterations = 100;
-        for _ in 0..max_iterations {
-            let mut changed = false;
-
-            for constraint in &self.constraints {
-                match constraint {
-                    UniverseConstraint::LessOrEqual(l1, l2) => {
-                        let v1 = self.eval_with_assignments(l1);
-                        let v2 = self.eval_with_assignments(l2);
-
-                        if v1 > v2 {
-                            // Need to increase l2 or decrease l1
-                            // Try increasing l2 first
-                            if let Maybe::Some(var) = self.find_variable(l2) {
-                                let current = self.assignments.get(&var).copied().unwrap_or(0);
-                                self.assignments.insert(var, v1);
-                                changed = true;
-                            } else {
-                                return Err(format!(
-                                    "Universe constraint unsatisfiable: {} <= {}",
-                                    v1, v2
-                                )
-                                .into());
-                            }
-                        }
-                    }
-                    UniverseConstraint::LessThan(l1, l2) => {
-                        let v1 = self.eval_with_assignments(l1);
-                        let v2 = self.eval_with_assignments(l2);
-
-                        if v1 >= v2 {
-                            if let Maybe::Some(var) = self.find_variable(l2) {
-                                self.assignments.insert(var, v1 + 1);
-                                changed = true;
-                            } else {
-                                return Err(format!(
-                                    "Universe constraint unsatisfiable: {} < {}",
-                                    v1, v2
-                                )
-                                .into());
-                            }
-                        }
-                    }
-                    UniverseConstraint::Equal(l1, l2) => {
-                        let v1 = self.eval_with_assignments(l1);
-                        let v2 = self.eval_with_assignments(l2);
-
-                        if v1 != v2 {
-                            // Try to equalize
-                            if let Maybe::Some(var) = self.find_variable(l1) {
-                                self.assignments.insert(var, v2);
-                                changed = true;
-                            } else if let Maybe::Some(var) = self.find_variable(l2) {
-                                self.assignments.insert(var, v1);
-                                changed = true;
-                            } else {
-                                return Err(format!(
-                                    "Universe constraint unsatisfiable: {} = {}",
-                                    v1, v2
-                                )
-                                .into());
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !changed {
-                // Reached fixed point
-                return Ok(());
-            }
-        }
-
-        Err("Universe constraint solving did not converge".into())
-    }
-
-    fn eval_with_assignments(&self, level: &UniverseLevel) -> usize {
-        match level {
-            UniverseLevel::Concrete(n) => *n,
-            UniverseLevel::Variable(v) => self.assignments.get(v).copied().unwrap_or(0),
-            UniverseLevel::Max(l1, l2) => {
-                let v1 = self.eval_with_assignments(l1);
-                let v2 = self.eval_with_assignments(l2);
-                v1.max(v2)
-            }
-            UniverseLevel::Succ(l) => self.eval_with_assignments(l) + 1,
-        }
-    }
-
-    fn find_variable(&self, level: &UniverseLevel) -> Maybe<Text> {
-        match level {
-            UniverseLevel::Variable(v) => Maybe::Some(v.clone()),
-            UniverseLevel::Max(l1, l2) => match self.find_variable(l1) {
-                Maybe::Some(v) => Maybe::Some(v),
-                Maybe::None => self.find_variable(l2),
-            },
-            UniverseLevel::Succ(l) => self.find_variable(l),
-            UniverseLevel::Concrete(_) => Maybe::None,
-        }
+        values.pop().ok_or_else(exhausted)
     }
 
     /// Get the assignment for a variable
