@@ -319,6 +319,8 @@ jobs:
           python3 -m unittest discover -s verification/external/lean -p test_finite_risk.py
           python3 verification/external/lean/check_categorical_prediction.py \
             --report categorical-prediction-acceptance.json
+          python3 verification/external/lean/check_frozen_rounds.py \
+            --report frozen-rounds-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_causal_coding.py
           python3 -m unittest discover -s verification/external/lean -p test_finite_wire.py
           python3 -m unittest discover -s verification/external/lean -p test_adaptive_length.py
@@ -616,6 +618,7 @@ jobs:
             observer-retirement-export*
             enumerable-mass-acceptance.json
             categorical-prediction-acceptance.json
+            frozen-rounds-acceptance.json
             finite-admission-acceptance.json
             acquisition-scheduling-acceptance.json
             observer-export-acceptance.json
