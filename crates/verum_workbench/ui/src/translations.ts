@@ -194,6 +194,8 @@ export const translations = {
   'Options': 'Параметры',
   'Proof scope': 'Область доказательства',
   'Proof evidence': 'Свидетельства доказательства',
+  'Reveal proof location': 'Показать место доказательства в коде',
+  'Proof location is unavailable for the current source.': 'Место доказательства недоступно для текущего исходника.',
   'Function contract': 'Контракт функции',
   'Call in function body': 'Вызов в теле функции',
   'Call in precondition': 'Вызов в предусловии',

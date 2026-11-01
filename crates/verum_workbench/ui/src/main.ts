@@ -1,5 +1,7 @@
 import './style.css';
 import { runtimeSourceRange } from './runtime';
+import { proofSourceRange } from './proof';
+import { sourceHash as sha256 } from './source';
 import { runtimeView } from './runtime-view';
 import { makeEditor } from './editor';
 import { CommandRegistry, type CommandContext, type StudioCommand } from './commands';
@@ -119,10 +121,6 @@ function updateDocumentState() {
   for (const id of ['run-settings', 'architecture-toggle']) $<HTMLButtonElement>(id).disabled = !verum;
   setText($('document-kind'), verum ? 'vr' : '·');
   setText($('document-language'), verum ? 'Verum' : m('Plain text'));
-}
-async function sha256(source: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
-  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 function scheduleHash() {
   const generation = ++hashGeneration;
@@ -461,6 +459,19 @@ function restoreFocusAfterRender(container: HTMLElement) {
     else { container.tabIndex = -1; container.focus({ preventScroll: true }); }
   };
 }
+function appendProofLocation(parent: HTMLElement, receipt: Receipt, span: unknown, key: string) {
+  if (typeof parseArguments(span).start !== 'number') return;
+  const reveal = iconButton('source', m('Reveal proof location'), async () => {
+    const revision = documentRevision();
+    const range = await proofSourceRange(receipt, span, currentPath, currentHash, editor.source());
+    if (range && sameDocumentRevision(revision, documentRevision())) {
+      setPane('editor'); sourceView(); editor.select(range);
+    } else announce(m('Proof location is unavailable for the current source.'));
+  });
+  reveal.dataset.focusKey = key;
+  reveal.disabled = isStale(receipt, currentPath, currentHash) || !['succeeded', 'failed', 'unsupported'].includes(receipt.status);
+  parent.classList.add('proof-location'); parent.append(reveal);
+}
 function renderResults() {
   setText($('result-count'), String(receipts.length)); setText($('mobile-result-count'), receipts.length ? String(receipts.length) : '');
   const running = receipts.filter(receipt => receipt.status === 'running').length;
@@ -517,19 +528,26 @@ function renderResults() {
     const proof = node('div', 'proof-outcome');
     const report = parseArguments(receipt.proof), diagnostic = parseArguments(report.diagnostic);
     proof.append(node('h3', '', m('Proof evidence')));
-    if (receipt.declaration) proof.append(node('p', '', m('Declaration: {declaration}', { declaration: receipt.declaration })));
-    if (typeof diagnostic.message === 'string') proof.append(node('p', '', diagnostic.message));
+    if (receipt.declaration) {
+      const declaration = node('p', '', m('Declaration: {declaration}', { declaration: receipt.declaration }));
+      appendProofLocation(declaration, receipt, parseArguments(report.source).span, 'proof-declaration'); proof.append(declaration);
+    }
+    if (typeof diagnostic.message === 'string') {
+      const message = node('p', '', diagnostic.message);
+      appendProofLocation(message, receipt, report.diagnostic_span, 'proof-diagnostic'); proof.append(message);
+    }
     proof.append(node('p', '', m(receipt.proof_profile === 'verum-source-finite/1' ? 'Finite function contract' : receipt.proof_profile === 'verum-source-pi-id/1' ? 'Logical theorem' : 'Not recorded')));
     const implementation = parseArguments(report.implementation);
     if (receipt.status === 'succeeded' && Array.isArray(implementation.obligations)) {
       const obligations = node('details'); obligations.dataset.key = 'obligations';
       const summary = node('summary', '', m('Checked obligations: {count}', { count: implementation.obligations.length })); summary.dataset.focusKey = 'obligations'; obligations.append(summary);
       const labels: Record<string, Content> = { function_contract: m('Function contract'), body_call: m('Call in function body'), precondition_call: m('Call in precondition'), postcondition_call: m('Call in postcondition') };
-      for (const raw of implementation.obligations) {
+      for (const [index, raw] of implementation.obligations.entries()) {
         const obligation = parseArguments(raw), owner = parseArguments(obligation.owner), callee = parseArguments(obligation.callee);
         const label = labels[String(obligation.kind)] ?? m('Proof obligation');
         const row = node('p', 'muted', `${String(owner.declaration ?? '')} · `);
-        row.append(node('span', '', label), document.createTextNode(typeof callee.declaration === 'string' ? ` → ${callee.declaration}` : '')); obligations.append(row);
+        row.append(node('span', '', label), document.createTextNode(typeof callee.declaration === 'string' ? ` → ${callee.declaration}` : ''));
+        appendProofLocation(row, receipt, obligation.call ?? owner.span, `proof-obligation-${index}`); obligations.append(row);
       }
       proof.append(obligations);
     }

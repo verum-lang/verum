@@ -924,6 +924,16 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   color: var(--muted);
   margin-top: 4px;
 }
+.proof-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.proof-location .icon-button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
 .result-detail details {
   margin: 12px 0;
   font-size: 11px;
