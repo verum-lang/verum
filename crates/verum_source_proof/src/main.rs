@@ -31,6 +31,7 @@ fn main() -> std::io::Result<()> {
             "output_limit",
             "The source report exceeds its output budget.",
         );
+        failure.profile = report.profile;
         failure.source = report.source;
         encoded = serde_json::to_vec(&failure).map_err(std::io::Error::other)?;
     }

@@ -1,0 +1,50 @@
+type Phase is Waiting | Closing | Published | Poisoned;
+
+fn admissible(phase: Phase) -> Bool {
+    match phase {
+        Phase.Poisoned => false,
+        _ => true,
+    }
+}
+
+fn same_phase(left: Phase, right: Phase) -> Bool {
+    match left {
+        Phase.Waiting => match right { Phase.Waiting => true, _ => false },
+        Phase.Closing => match right { Phase.Closing => true, _ => false },
+        Phase.Published => match right { Phase.Published => true, _ => false },
+        Phase.Poisoned => match right { Phase.Poisoned => true, _ => false },
+    }
+}
+
+fn reference(phase: Phase, finished: Bool) -> Phase {
+    match phase {
+        Phase.Waiting => Phase.Closing,
+        Phase.Closing => if finished { Phase.Published } else { Phase.Closing },
+        Phase.Published => Phase.Published,
+        Phase.Poisoned => Phase.Poisoned,
+    }
+}
+
+fn step(phase: Phase, finished: Bool) -> Phase
+    requires admissible(phase)
+    ensures admissible(result), same_phase(result, reference(phase, finished))
+{
+    let next = match phase {
+        Phase.Waiting => Phase.Closing,
+        Phase.Closing => if !finished { Phase.Closing } else { Phase.Published },
+        Phase.Published => Phase.Published,
+        Phase.Poisoned => Phase.Poisoned,
+    };
+    next
+}
+
+fn main() {
+    assert(same_phase(step(Phase.Waiting, false), Phase.Closing));
+    assert(same_phase(step(Phase.Waiting, true), Phase.Closing));
+    assert(same_phase(step(Phase.Closing, false), Phase.Closing));
+    assert(same_phase(step(Phase.Closing, true), Phase.Published));
+    assert(same_phase(step(Phase.Published, false), Phase.Published));
+    assert(same_phase(step(Phase.Published, true), Phase.Published));
+    assert(!admissible(Phase.Poisoned));
+    print("finite-transition: all admitted cases passed");
+}

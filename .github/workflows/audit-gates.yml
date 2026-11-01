@@ -229,6 +229,10 @@ jobs:
             cargo test --locked -p verum_proof --test lean_replay --test induction_lean_replay --test universe_lean_replay --test dependent_pairs --test identity_induction --test function_extensionality --test admission -- --include-ignored
           VERUM_LEAN_REPLAY="$GITHUB_WORKSPACE/verification/external/lean/.lake/build/bin/verum_replay_checker" \
             cargo test --locked -p verum_source_proof --test equality -- --include-ignored
+          VERUM_LEAN_REPLAY="$GITHUB_WORKSPACE/verification/external/lean/.lake/build/bin/verum_replay_checker" \
+            cargo test --locked -p verum_source_proof --test finite independent_lean_replays -- --include-ignored
+          VERUM_SOURCE_REPLAY="$GITHUB_WORKSPACE/target/debug/verum-source-replay" \
+            python3 -m unittest discover -s verification/certificates -p test_source_finite_terms.py
 
       - name: General finite execution and observation certificates
         run: |

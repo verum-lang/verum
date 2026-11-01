@@ -1,9 +1,11 @@
 //! Exact-source, opt-in logical elaboration using the Verum production parser.
-//! This profile checks closed proof terms; it does not certify runtime functions.
+//! Profiles check logical proof terms or contracts of a total finite source
+//! fragment. Neither profile certifies compiler lowering or native execution.
 //! Untrusted input must run through the bounded host process, not in a server.
 //!
 //! The wire protocol and binder IR deliberately use the portable native checker's
 //! Rust ownership types. They are not language-runtime values or a second checker.
+pub mod finite;
 pub mod scoped;
 
 pub use scoped::PROFILE;
@@ -66,6 +68,9 @@ pub struct SourceReport {
     /// Half-open UTF-8 source range; an empty range denotes an insertion point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic_span: Option<SourceSpan>,
+    /// Present only for a successfully checked source-function contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation: Option<finite::ImplementationBinding>,
 }
 
 pub fn sha256(bytes: &[u8]) -> String {
@@ -108,6 +113,7 @@ impl SourceReport {
             conclusion: None,
             universe_bindings: Vec::new(),
             diagnostic_span: None,
+            implementation: None,
             diagnostic: Some(Diagnostic {
                 code: code.into(),
                 stage: stage.into(),
@@ -146,15 +152,16 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
     };
     let failure = |status: &str, stage: &str, code: &str, message: &str, source: &SourceBinding| {
         let mut report = SourceReport::failure(status, stage, code, message);
+        report.profile = request.profile.clone();
         report.source = source.clone();
         report
     };
-    if request.profile != PROFILE {
+    if request.profile != PROFILE && request.profile != finite::PROFILE {
         return failure(
             "unsupported",
             "profile",
             "unsupported_profile",
-            "Select the explicit verum-source-pi-id/1 proof-only interpretation.",
+            "Select an explicit supported source interpretation: verum-source-pi-id/1 or verum-source-finite/1.",
             &source,
         );
     }
@@ -186,6 +193,9 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
             .at_source(&request.source, error.span);
         }
     };
+    if request.profile == finite::PROFILE {
+        return replay_finite(&request, &module, source);
+    }
     let mut selected = module.items.iter().filter_map(|item| match &item.kind {
         ItemKind::Theorem(theorem) | ItemKind::Lemma(theorem) | ItemKind::Corollary(theorem)
             if theorem.name.as_str() == request.declaration =>
@@ -331,6 +341,58 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
             .collect(),
         diagnostic: None,
         diagnostic_span: None,
+        implementation: None,
+    }
+}
+
+fn replay_finite(
+    request: &SourceRequest,
+    module: &verum_ast::Module,
+    source: SourceBinding,
+) -> SourceReport {
+    let artifact = match finite::elaborate(&request.source, module, &request.declaration) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            let (status, code, message) = match error {
+                scoped::Error::Unsupported(message) => {
+                    ("unsupported", "unsupported_source_construct", message)
+                }
+                scoped::Error::Scope(message) => {
+                    ("rejected", "unbound_or_duplicate_binder", message)
+                }
+                scoped::Error::Rejected(message) => ("rejected", "ill_typed_source", message),
+                scoped::Error::Inconclusive { code, message } => ("inconclusive", code, message),
+            };
+            let mut report = SourceReport::failure(status, "elaboration", code, &message);
+            report.profile = finite::PROFILE.into();
+            report.source = source;
+            return report;
+        }
+    };
+    let judgment = Judgment {
+        profile: admission::PROFILE.into(),
+        statement: artifact.certificate.claimed_type.clone(),
+        certificate: artifact.certificate,
+    };
+    let native = admission::replay(&serde_json::to_vec(&judgment).expect("serializable judgment"));
+    if !native.accepted {
+        let mut report = native_refusal(native, &artifact.source);
+        report.profile = finite::PROFILE.into();
+        return report;
+    }
+    SourceReport {
+        profile: finite::PROFILE.into(),
+        status: "verified".into(),
+        source: artifact.source,
+        elaborator: elaborator_identity().into(),
+        native: Some(native),
+        conclusion: Some(judgment.statement.clone()),
+        judgment: Some(judgment),
+        telescope: vec![],
+        universe_bindings: vec![],
+        diagnostic: None,
+        diagnostic_span: None,
+        implementation: Some(artifact.implementation),
     }
 }
 
