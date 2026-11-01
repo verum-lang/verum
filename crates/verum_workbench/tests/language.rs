@@ -13,6 +13,37 @@ fn studio(root: &std::path::Path) -> Studio {
 }
 
 #[tokio::test]
+async fn loose_workspace_keeps_root_files_and_nested_module_owners() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    std::fs::write(root.path().join("helper.vr"),
+        "public fn answer() -> Int { 42 }").unwrap();
+    std::fs::write(root.path().join("src/helper.vr"),
+        "public fn answer() -> Bool { true }").unwrap();
+    let studio = studio(root.path());
+    for (module, result_type, valid) in [
+        ("helper", "Int", true),
+        ("src.helper", "Bool", true),
+        ("src.helper", "Int", false),
+    ] {
+        let source = format!("mount {module}.{{answer}}; fn main() -> {result_type} {{ answer() }}");
+        let analysis = studio.call("language.request", json!({
+            "path":"lesson.vr", "source":source,
+        })).await.unwrap();
+        assert_eq!(analysis["result"]["parsed"], true, "{analysis}");
+        let diagnostics = analysis["result"]["diagnostics"].as_array().unwrap();
+        if valid {
+            assert!(diagnostics.is_empty(), "{analysis}");
+        } else {
+            assert!(diagnostics.iter().any(|d| {
+                let message = d["message"].as_str().unwrap_or("");
+                message.contains("Int") && message.contains("Bool")
+            }), "a genuine type mismatch is required: {analysis}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn script_analysis_uses_compiler_entry_scope_and_original_diagnostic_lines() {
     let root = tempfile::tempdir().unwrap();
     let studio = studio(root.path());

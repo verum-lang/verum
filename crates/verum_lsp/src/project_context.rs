@@ -108,9 +108,11 @@ impl ProjectContext {
         let mut roots: List<(Text, PathBuf)> = List::new();
         let mut cog = Text::new();
         let mut configuration = Text::new();
+        let mut has_manifest = false;
         for name in ["Verum.toml", "verum.toml"] {
             let manifest = root.join(name);
             if manifest.is_file() {
+                has_manifest = true;
                 configuration = std::fs::read_to_string(&manifest)?.into();
                 let value: toml::Value =
                     toml::from_str(&configuration).context("Project manifest")?;
@@ -137,7 +139,9 @@ impl ProjectContext {
                 break;
             }
         }
-        let source_root = if root.join("src").is_dir() {
+        // A manifest selects the project layout. In a loose workspace, `src`
+        // is an ordinary namespace and must not hide files beside it.
+        let source_root = if has_manifest && root.join("src").is_dir() {
             root.join("src")
         } else {
             root.clone()
