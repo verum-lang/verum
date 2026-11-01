@@ -98,6 +98,11 @@ the concrete decoder law nor the Kraft inequality. Direct Lean term replay has
 empty axiom rosters; false controls cover truncation, discarded suffixes,
 undefined ordinals, altered schemas, renormalized holes and reused look prices.
 
+For the emitted gamma/instruction header, the certificates derive the exact
+length `1 + opcodeWidth + 2*high + restLength`. This proves the mandatory-header
+minimum and dyadic-price upper bound for every bit extractor and remainder;
+the bound does not replace the full candidate's price.
+
 These are model laws for the stated constructors. A native grammar adapter must
 bind the complete frozen catalogs, field widths, lexical child order, recursive
 edges, actual code words, materialized bodies and retained pricing authority.

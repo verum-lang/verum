@@ -358,6 +358,57 @@ library.prove('prefix_name_look_rectangle_bounded',[('tree',Tree),('n',N)],
     order(times(mass(t),look_sum(n)),one))
 
 
+# The encoder emits a positive-width gamma value and the first opcode before
+# the remaining operands, instructions, root and lexical children. Length laws
+# hold for every bit extraction function, hence for the native MSB extractor.
+pick=var('pick')
+emit_bits=lambda width,pick:call('emit_bits',width,pick)
+zeros_word=lambda width:call('zeros_word',width)
+library.define('emit_bits',bind(lam,[('width',N),('pick',arrow(N,B))],
+    induction('width',lambda _:W,nil(B),lambda n,ih:cons(B,app(pick,n),ih))))
+library.define('zeros_word',lam('width',N,induction('width',lambda _:W,nil(B),lambda _,ih:cons(B,F,ih))))
+library.prove('emitted_field_length',[('width',N),('pick',arrow(N,B))],
+    induction('width',lambda n:eq(length(emit_bits(n,pick)),n),refl(Z),
+        lambda n,ih:Path(length(emit_bits(n,pick)),n,ih).under(S).proof),eq(length(emit_bits(width,pick)),width))
+library.prove('emitted_zero_length',[('width',N)],
+    induction('width',lambda n:eq(length(zeros_word(n)),n),refl(Z),
+        lambda n,ih:Path(length(zeros_word(n)),n,ih).under(S).proof),eq(length(zeros_word(width)),width))
+high,opcode,gbit,obit,rest=map(var,('high','opcode_width','gamma_bit','opcode_bit','rest'))
+encoded=lambda high,opcode,gbit,obit,rest:append(zeros_word(high),append(emit_bits(S(high),gbit),append(emit_bits(opcode,obit),rest)))
+full=encoded(high,opcode,gbit,obit,rest)
+first_field,second_field,third_field=zeros_word(high),emit_bits(S(high),gbit),emit_bits(opcode,obit)
+padding=add(high,add(high,length(rest)))
+length_path=Path(length(full),add(length(first_field),length(append(second_field,append(third_field,rest)))),
+    call('word_append_length',first_field,append(second_field,append(third_field,rest)))).then(
+    Path(length(first_field),high,call('emitted_zero_length',high)).under(lambda z:add(z,length(append(second_field,append(third_field,rest)))))).then(
+    Path(length(append(second_field,append(third_field,rest))),add(length(second_field),length(append(third_field,rest))),
+        call('word_append_length',second_field,append(third_field,rest))).under(lambda z:add(high,z))).then(
+    Path(length(second_field),S(high),call('emitted_field_length',S(high),gbit)).under(lambda z:add(high,add(z,length(append(third_field,rest)))))).then(
+    Path(length(append(third_field,rest)),add(length(third_field),length(rest)),call('word_append_length',third_field,rest)).under(lambda z:add(high,add(S(high),z)))).then(
+    Path(length(third_field),opcode,call('emitted_field_length',opcode,obit)).under(lambda z:add(high,add(S(high),add(z,length(rest)))))).then(
+    ring(add(high,add(S(high),add(opcode,length(rest)))),add(S(opcode),padding)))
+header_params=[('high',N),('opcode_width',N),('gamma_bit',arrow(N,B)),('opcode_bit',arrow(N,B)),('rest',W)]
+library.prove('encoded_mandatory_header_length',header_params,length_path.proof,eq(length(full),add(S(opcode),padding)))
+u,v=var('u'),var('v')
+library.prove('length_with_padding',[('u',N),('v',N)],
+    change_order(add(u,Z),add(u,v),call('add_le_left',u,Z,v,tt()),law('add_zero',add(u,Z),u,u)),le(u,add(u,v)))
+library.prove('encoded_mandatory_header_minimum',header_params,
+    change_order(S(opcode),add(S(opcode),padding),call('length_with_padding',S(opcode),padding),
+        right_path=Path(length(full),add(S(opcode),padding),call('encoded_mandatory_header_length',high,opcode,gbit,obit,rest)).reverse()),
+    le(S(opcode),length(full)))
+library.prove('pow_two_padding',[('u',N),('v',N)],
+    change_order(mul(pow2(u),ONE),mul(pow2(u),pow2(v)),
+        call('mul_le_left',pow2(u),ONE,pow2(v),call('pow_two_positive',v)),
+        ring(mul(pow2(u),ONE),pow2(u)),
+        Path(pow2(add(u,v)),mul(pow2(u),pow2(v)),call('pow_two_sum',u,v)).reverse()),le(pow2(u),pow2(add(u,v))))
+length_den=Path(length(full),add(S(opcode),padding),call('encoded_mandatory_header_length',high,opcode,gbit,obit,rest)).under(pow2)
+header_price=fraction(ONE,pow2(S(opcode)))
+library.prove('encoded_mandatory_header_price',header_params,
+    change_order(pow2(S(opcode)),pow2(add(S(opcode),padding)),call('pow_two_padding',S(opcode),padding),
+        ring(pow2(S(opcode)),mul(ONE,pow2(S(opcode)))),
+        length_den.reverse().then(ring(pow2(length(full)),mul(ONE,pow2(length(full)))))),order(weight(full),header_price))
+
+
 def number(n):
     result=Z
     for _ in range(n):result=S(result)
@@ -402,4 +453,7 @@ def cases():
     case('opening_bound_is_not_candidate_price',refl(mul(num(priced),den(nominal))),equal(priced,nominal),False)
     case('paid_look_zero_cannot_be_reused',refl(mul(num(look_weight(ONE)),den(look_weight(Z)))),equal(look_weight(ONE),look_weight(Z)),False)
     case('finite_looks_do_not_spend_tail',refl(mul(num(look_sum(ONE)),den(one))),equal(look_sum(ONE),one),False)
+    body=encoded(Z,number(2),lam('_i',N,T),lam('_i',N,F),word([0]))
+    optimistic=fraction(ONE,pow2(number(3)))
+    case('mandatory_header_does_not_reprice_tail',refl(mul(num(weight(body)),den(optimistic))),equal(weight(body),optimistic),False)
     return result
