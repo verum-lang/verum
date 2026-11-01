@@ -1,0 +1,37 @@
+{
+  "export_sha256": "b5442b2897de4e17177473e3f3227f581a5ff563bf8b8b5e7edd017343b043f2",
+  "source_commit": "926b35146",
+  "native_binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/r263/synarc_kan-courts",
+    "bytes": 69179872,
+    "sha256": "611f3590f27ceed8c56b878c14e037089da71a0bcc56b3407d45930ee0b3813d"
+  },
+  "sources": [
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority.rs",
+      "sha256": "2a1c6d6e68b89345139bcc360376c88b50a5db8c883220651876b02e6d6ea492",
+      "bytes": 13902,
+      "fixture": "append-handoff-native-v4.source-0.rs.gz"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming.rs",
+      "sha256": "9f3a6ae6900b93becd821eb925080e256c50a76bdbfc9b49cb79a382e946a4ab",
+      "bytes": 36968,
+      "fixture": "append-handoff-native-v4.source-1.rs.gz"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming/probe.rs",
+      "sha256": "7a3eb73ab27b597a20cc1aef3819b1712a0655f0c39ae49a469d427b19d362d2",
+      "bytes": 23376,
+      "fixture": "append-handoff-native-v4.source-2.rs.gz"
+    },
+    {
+      "path": "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming_courts.rs",
+      "sha256": "91b4625922fb7475e59e7dd21fce3806d6021c438b87809e1ddc3dde63007e85",
+      "bytes": 44751,
+      "fixture": "append-handoff-native-v4.source-3.rs.gz"
+    }
+  ],
+  "scope": "Frozen native-v4 observations only; raw wake cursor and other hidden runtime state are not exported.",
+  "receipt_sha256": "80547ead2a52f853e050f67f334128dab2ebb7938ddc3ad18504b39bb4eebc1a"
+}
