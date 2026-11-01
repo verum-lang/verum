@@ -1,0 +1,51 @@
+{
+  "export_sha256": "363cbd4a2ca06835aa1aa631812f9b52e8d07c1b1f5a27a0cf3583a070fb51e3",
+  "native_binary": {
+    "path": "/private/tmp/synarc-recovery-runtime-v69/r256/synarc_kan-courts",
+    "bytes": 69031824,
+    "sha256": "5b7e850487514976b9cc568d4dc845c5075ea555e6543bff0774fb8e91b7c0f2"
+  },
+  "source": {
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority.rs",
+      "bytes": 13523,
+      "sha256": "4fc3d18438c9e29ec2c1f2e252be9588d1e4b57ad528a58c61b1abbb05593ff7"
+    },
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/flatten.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/flatten.rs",
+      "bytes": 6346,
+      "sha256": "5b8e84dcafbeec1f03bfb4bec9b56f2e06a561f76d969542b34f777a770e9186"
+    },
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/rank.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/rank.rs",
+      "bytes": 15466,
+      "sha256": "915287a0c8a3e18655e6ec4048078698ea7f1928179190f8c03383171dd8ea3b"
+    },
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/rank/basis.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/rank/basis.rs",
+      "bytes": 3507,
+      "sha256": "53631df0e32547b2f83be3470e9bb038f100718d2761c072a8e194d2517a813a"
+    },
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/rank/compositional_courts.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/rank/compositional_courts.rs",
+      "bytes": 10290,
+      "sha256": "43e5f8f706c48541296dbebde8aca7ac1e3dba4e0bdf2683086d440080d18ca1"
+    },
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming.rs",
+      "bytes": 29477,
+      "sha256": "10c1254af0843a081edf61f17e72c33aa9d10acebcb578cbaff4bc47d7359d45"
+    },
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming/probe.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming/probe.rs",
+      "bytes": 19320,
+      "sha256": "26694d44a915d23496ba3817b1f3fb9a2957ea996dc4e6625132cebc2a1b5b10"
+    },
+    "rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming_courts.rs": {
+      "path": "/Users/taaliman/projects/oldman/synarcai/omega/rust/crates/synarc-kan/src/construction/family/syntax/structural/priority/streaming_courts.rs",
+      "bytes": 44151,
+      "sha256": "9f3bb04bf3dfd658980159f4511e05ca579d7e36cb5ee0264404ec7030a15e82"
+    }
+  },
+  "scope": "Frozen unary v2 plan and expansion snapshots, without appended-slab contents. Independent native replay and source review; no universal Rust refinement or replacement producer claim."
+}
