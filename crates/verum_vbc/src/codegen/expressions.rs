@@ -17510,7 +17510,7 @@ impl VbcCodegen {
         if self.ctx.is_thread_local(&receiver_name).is_some()
             || self.nominal_type_id(&receiver_name).is_some()
             || self.ctx.lookup_qualified_function(&receiver_name)
-                .is_some_and(|info| info.param_count == 0)
+                .is_some_and(|info| info.is_const)
         {
             return None;
         }
@@ -23574,13 +23574,13 @@ impl VbcCodegen {
                             // not the binding's spelling or initializer shape.
                             let is_local_var = self.ctx.get_var_reg(&ident.name).is_ok()
                                 || self.ctx.is_thread_local(&ident.name).is_some();
-                            // #17 migration #4: scope-aware probe so
-                            // const-detection prefers caller's module's
-                            // binding over first-wins archive shadow.
+                            // Constants have explicit declaration metadata.
+                            // A zero-argument function is not a value binding
+                            // and cannot hide an imported module namespace.
                             let is_static_or_const = self
                                 .ctx
                                 .lookup_function_in_scope(&ident.name)
-                                .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
+                                .map(|f| f.is_const)
                                 .unwrap_or(false);
 
                             if !is_local_var && !is_static_or_const && !is_type_name(&ident.name) {

@@ -24,11 +24,20 @@ impl VbcCodegen {
     /// const arguments. Unknown owners remain unknown; cyclic aliases refuse.
     pub(super) fn method_receiver_declaration_name(&self, name: &str) -> Maybe<Text> {
         let name = Self::method_receiver_type_name(name);
+        let base = Self::strip_generic_args(name);
         let Some(alias) = self
-            .nominal_type_id(Self::strip_generic_args(name))
+            .nominal_type_id(base)
             .and_then(|id| self.type_by_id(id))
             .filter(|ty| ty.kind == crate::types::TypeKind::Alias)
         else {
+            // A mount rename is a source binding, not a TypeKind::Alias.
+            // Its selected owner still governs method lookup; retain explicit
+            // type/const arguments while replacing only the nominal head.
+            if !self.local_concrete_types.contains(base)
+                && let Some(owner) = self.mounted_type_path(base)
+            {
+                return Some(format!("{owner}{}", &name[base.len()..]).into());
+            }
             return Some(name.into());
         };
         let ast = verum_fast_parser::Parser::new(name).parse_type().ok()?;
@@ -137,6 +146,19 @@ impl VbcCodegen {
             else {
                 unreachable!("collected receiver edge");
             };
+            // Namespace resolution selects one declaration for every query
+            // view. A missing explicit target cannot borrow method evidence
+            // from an unrelated value with the same spelling.
+            if let Some(result) = self.namespace_call_result_type_name(expr) {
+                let name: Maybe<Text> = result.map(Into::into);
+                types = ExpressionTypes {
+                    callable: None,
+                    name: name.clone(),
+                    chain: name.clone(),
+                    declared: name,
+                };
+                continue;
+            }
             let callable = self.callable_method_result_from_receiver(expr, &types);
             let callable_name = callable
                 .as_ref()
@@ -165,13 +187,10 @@ impl VbcCodegen {
                         .map(Into::into)
                 }
             };
-            let name = match self.namespace_call_result_type_name(expr) {
-                Some(name) => name.map(Into::into),
-                None => chain.clone().or_else(|| {
-                    self.method_result_name_fallback(expr, types.name.as_ref().map(Text::as_str))
-                        .map(Into::into)
-                }),
-            };
+            let name = chain.clone().or_else(|| {
+                self.method_result_name_fallback(expr, types.name.as_ref().map(Text::as_str))
+                    .map(Into::into)
+            });
             let declared = callable_name.or_else(|| name.clone());
             types = ExpressionTypes {
                 callable,
