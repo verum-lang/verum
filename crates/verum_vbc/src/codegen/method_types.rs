@@ -6,7 +6,7 @@
 //! only to this immutable query; no AST-address cache survives a scope change.
 use super::*;
 use crate::types::TypeRef;
-use verum_common::{List, Maybe, Text};
+use verum_common::{List, Maybe, Set, Text};
 
 pub(super) struct ExpressionTypes {
     /// The declared structural result, including callable parameter witnesses.
@@ -20,6 +20,52 @@ pub(super) struct ExpressionTypes {
 }
 
 impl VbcCodegen {
+    /// Expand the selected alias declaration structurally, retaining type and
+    /// const arguments. Unknown owners remain unknown; cyclic aliases refuse.
+    pub(super) fn method_receiver_declaration_name(&self, name: &str) -> Maybe<Text> {
+        let name = Self::method_receiver_type_name(name);
+        let Some(alias) = self
+            .nominal_type_id(Self::strip_generic_args(name))
+            .and_then(|id| self.type_by_id(id))
+            .filter(|ty| ty.kind == crate::types::TypeKind::Alias)
+        else {
+            return Some(name.into());
+        };
+        let ast = verum_fast_parser::Parser::new(name).parse_type().ok()?;
+        // The scoped nominal lookup above selects the alias. Do not re-enter
+        // the ambient bare-alias cache while recovering its instantiation.
+        let mut witness = match &ast.kind {
+            verum_ast::ty::TypeKind::Generic { .. } => {
+                let TypeRef::Instantiated { args, .. } = self.explicit_type_witness(&ast, None)?
+                else {
+                    return None;
+                };
+                TypeRef::Instantiated {
+                    base: alias.id,
+                    args,
+                }
+            }
+            _ => TypeRef::Concrete(alias.id),
+        };
+        let mut seen = Set::new();
+        loop {
+            let (base, args) = match &witness {
+                TypeRef::Concrete(id) => (*id, &[][..]),
+                TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+                _ => return self.callable_result_name(&witness),
+            };
+            let descriptor = self.type_by_id(base)?;
+            if descriptor.kind != crate::types::TypeKind::Alias {
+                return self.callable_result_name(&witness);
+            }
+            if !seen.insert(base) || args.len() != descriptor.type_params.len() {
+                return None;
+            }
+            witness = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
+                .apply(descriptor.alias_target.as_ref()?);
+        }
+    }
+
     fn callable_result_name(&self, ty: &TypeRef) -> Maybe<Text> {
         self.callable_type_name(ty)
             .or_else(|| self.type_ref_to_field_name(ty).map(Into::into))
@@ -138,12 +184,10 @@ impl VbcCodegen {
     }
 
     fn declared_nominal_receiver_name(&self, receiver: &Expr) -> Maybe<Text> {
-        if let Some(ty) = self.declaration_property_operand(receiver)
-            && let verum_ast::ty::TypeKind::Path(path) = &ty.kind
-        {
-            let name = path.to_string().replace("::", ".");
-            if !self.ctx.generic_type_params.contains(&name)
-                && self.nominal_type_id(&name).is_some()
+        if let Some(ty) = self.declaration_property_operand(receiver) {
+            let name = Self::extract_type_name_from_ast(&ty);
+            let base = Self::strip_generic_args(&name);
+            if !self.ctx.generic_type_params.contains(base) && self.nominal_type_id(base).is_some()
             {
                 return Some(name.into());
             }
@@ -188,7 +232,9 @@ impl VbcCodegen {
                 .or_else(|| self.type_ref_to_field_name(ty))?,
             None => receiver_types.declared.as_ref()?.to_string(),
         };
-        let mut owner = Self::method_receiver_type_name(&receiver_name).to_string();
+        let mut owner = self
+            .method_receiver_declaration_name(&receiver_name)?
+            .to_string();
         for _ in 0..self.method_receiver_deref_count(&owner, method.name.as_str()) {
             owner = self.user_deref_target_type_name(&owner)?.to_string();
         }
@@ -271,7 +317,7 @@ impl VbcCodegen {
             receiver,
             method,
             args,
-            ..
+            type_args,
         } = &expr.kind
         else {
             unreachable!("method expression");
@@ -290,6 +336,7 @@ impl VbcCodegen {
         // into `ConstValue(7)`.
         if let ExprKind::TypeExpr(recv_ty) = &receiver.kind {
             let full = VbcCodegen::extract_type_name_from_ast(recv_ty);
+            let full = self.method_receiver_declaration_name(&full)?.to_string();
             if !full.is_empty() {
                 let base = VbcCodegen::strip_generic_args(&full).to_string();
                 let qualified = format!("{}.{}", base, method.name);
@@ -419,91 +466,21 @@ impl VbcCodegen {
                 // in `resolve_field_index_impl`.
                 if self.is_allocating_wrapper(name.as_str())
                     && method.name.as_str() == "new"
+                    && self
+                        .registered_receiver_method(name.as_str(), "new")
+                        .is_some()
                     && let Some(first_arg) = args.first()
                     && let Some(inner_type) = self.extract_expr_type_name(first_arg)
                 {
                     return Some(format!("{}<{}>", name, inner_type));
                 }
-                // Look up the qualified static method to get its return type.
-                //
-                // **Self → concrete substitution at static-call READ-site**
-                // (defence-in-depth alongside the WRITE-site
-                // substitution in `register_impl_function` at
-                // codegen/mod.rs:8225).  When the static method's
-                // declared signature is `fn new(...) -> Self`, the
-                // function table normally stores `return_type_name
-                // = Some("<concrete>")` because register_impl_function
-                // already calls `substitute_self_in_type_name` at
-                // registration time.  But registration-path drift
-                // (forward declarations, protocol default-method
-                // monomorphisations registered via alternate paths,
-                // cross-module aliasing) can leave the literal
-                // `"Self"` in the table.  Applying the substitution
-                // here too means the receiver-type tracking never
-                // sees `"Self"` polluting downstream consumers —
-                // even when the WRITE-site path missed.  Mirrors
-                // the same discipline in the instance-method arm
-                // below at line ~18555.
-                let qualified_method = format!("{}.{}", name, method.name);
-                if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
-                    && let Some(ref ret_type_name) = func_info.return_type_name
-                {
-                    let resolved = VbcCodegen::substitute_self_in_type_name(ret_type_name, name);
-                    // **URL-8 fix 2026-05-28 — static-call
-                    // generic-instantiation preservation at READ-site**.
-                    //
-                    // Archive-loaded `FunctionInfo` stores the
-                    // declared return type as a base name in
-                    // `return_type_name` ("Result") and the inner
-                    // generic args separately in `return_type_inner`
-                    // (["Url", "UrlError"]) — see
-                    // `verum_compiler/src/archive_ctx_loader.rs:443-444`.
-                    // Pre-fix this READ-site returned just the base
-                    // name, dropping the `<Url, UrlError>`
-                    // instantiation.  Downstream
-                    // `compile_match` then set `match_scrutinee_type
-                    // = "Result"`, the `Err(e)` pattern bind found
-                    // `Result.Err` with generic payload `["E"]`,
-                    // and the scrutinee-extracted inner args were
-                    // `[]` (no `<...>` in the bare name).  The
-                    // pattern binder couldn't resolve `e :
-                    // UrlError`, `variable_type_names["e"]` stayed
-                    // unset, `e.position` field access fell
-                    // through to the global field-intern fallback
-                    // and read idx=5 — OOB on the 24-byte
-                    // UrlError record.
-                    //
-                    // Compose the canonical generic form when
-                    // `return_type_inner` is populated.  Mirrors
-                    // the Call-arm composition at line ~18834
-                    // and the variant-ctor composition at line
-                    // ~18790.  Closes URL-8 for every
-                    // cross-module static method returning
-                    // `Result<T, E>` / `Maybe<T>` / any generic
-                    // wrapper without needing user-side explicit
-                    // type annotation as workaround.
-                    if let Some(ref inner) = func_info.return_type_inner
-                        && !inner.is_empty()
-                        && inner.iter().all(|s| !s.trim().is_empty())
-                        && !resolved.contains('<')
-                    {
-                        return Some(format!("{}<{}>", resolved, inner.join(", ")));
-                    }
-                    return Some(resolved);
-                }
-                // Check if this is a known static method that returns Maybe<T>
-                const MAYBE_RETURNING_STATIC_METHODS: &[&str] = &[
-                    "from_digit", // Char.from_digit returns Maybe<Char>
-                    "from_u32",   // Char.from_u32 returns Maybe<Char>
-                    "try_from",   // Various types
-                    "from_str",   // Parse methods
-                    "parse",      // Parse methods
-                ];
-                if MAYBE_RETURNING_STATIC_METHODS.contains(&&*method.name) {
-                    return Some(format!("Maybe<{}>", name));
-                }
-                // Fallback to the receiver type if no return type found
-                return Some(name.to_string());
+                // Associated calls use the same declaration/alias resolver as
+                // value receivers, retaining the selected owner's arguments.
+                return self.resolved_method_return_type_name(
+                    name,
+                    method.name.as_str(),
+                    type_args,
+                );
             }
         }
 
@@ -555,24 +532,7 @@ impl VbcCodegen {
                 _ => receiver_type.map(str::to_owned),
             };
             if let Some(ref receiver_type) = receiver_type {
-                // Unwrapping methods: extract inner type from generic wrapper
-                // e.g., Maybe<Node>.unwrap() → Node, Result<Int, E>.unwrap() → Int
                 let base_type = VbcCodegen::strip_generic_args(receiver_type);
-                if matches!(
-                    &*method.name,
-                    "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default"
-                ) {
-                    let inner_types = self.extract_inner_types(receiver_type);
-                    if let Some(first_inner) = inner_types.first() {
-                        return Some(first_inner.clone());
-                    }
-                }
-                if method.name.as_str() == "unwrap_err" {
-                    let inner_types = self.extract_inner_types(receiver_type);
-                    if let Some(err_type) = inner_types.get(1) {
-                        return Some(err_type.clone());
-                    }
-                }
                 let qualified_method = format!("{}.{}", base_type, method.name);
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
                     && let Some(ref ret_type_name) = func_info.return_type_name
@@ -698,54 +658,11 @@ impl VbcCodegen {
                     }
                     return Some(after_self);
                 }
-                // Pointer methods like offset/add/sub return the same type as receiver
-                if matches!(&*method.name, "offset" | "add" | "sub") {
-                    return Some(rt.clone());
-                }
             }
         }
 
-        // Final fallback: search the function registry by SHORT name.
-        //
-        // This catches sites that lack receiver-type info (e.g.
-        // chained method receivers whose own type couldn't be
-        // inferred above).  Pre-this fallback the same gap was
-        // patched by a hardcoded `MAYBE_RETURNING_METHODS` list
-        // that returned `"Maybe"` for ~50 stdlib method names —
-        // a textbook hardcode that mis-categorised every user
-        // type defining a same-named method (Poll.map,
-        // Stream.next, custom .pop, …) as Maybe-shaped, mis-
-        // dispatching downstream chains.
-        //
-        // The registry walk below is type-honest:
-        //   - if exactly ONE registered function with this short
-        //     name has a declared return-type, use it;
-        //   - if MULTIPLE share the short name (Maybe.map AND
-        //     Poll.map etc.), we cannot disambiguate without
-        //     receiver type, so we return None and let the
-        //     caller's outer fallback take over.
-        //
-        // This is the same architectural commitment as the
-        // earlier `determine_method_return_type_prefix` reorder
-        // (commit ahead) — never substitute a hardcoded type
-        // guess for a type-honest lookup.
-        let method_name = &*method.name;
-        let mut hits: Vec<String> = Vec::new();
-        for fn_name in self.ctx.functions.keys() {
-            if let Some(suffix) = fn_name.rsplit_once('.').map(|(_, s)| s) {
-                if suffix == method_name
-                    && let Some(info) = self.ctx.lookup_function(fn_name)
-                    && let Some(ref rt) = info.return_type_name
-                {
-                    hits.push(rt.clone());
-                }
-            }
-        }
-        hits.sort();
-        hits.dedup();
-        if hits.len() == 1 {
-            return Some(hits.into_iter().next().unwrap());
-        }
+        // Without a selected receiver declaration there is no result evidence.
+        // Agreement among unrelated same-named methods cannot provide it.
         None
     }
 }

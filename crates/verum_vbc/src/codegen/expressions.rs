@@ -17383,7 +17383,7 @@ impl VbcCodegen {
         method: &str,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> Option<crate::types::TypeRef> {
-        let mut owner = Self::method_receiver_type_name(receiver).to_string();
+        let mut owner = self.method_receiver_declaration_name(receiver)?.to_string();
         for _ in 0..self.method_receiver_deref_count(&owner, method) {
             owner = self.user_deref_target_type_name(&owner)?.to_string();
         }
@@ -17411,7 +17411,7 @@ impl VbcCodegen {
         if let Some(result) = self.declared_method_result_type(receiver, method, explicit) {
             if let Some(name) = self.callable_type_name(&result) { return Some(name.to_string()); }
         }
-        let mut receiver = Self::method_receiver_type_name(receiver).to_string();
+        let mut receiver = self.method_receiver_declaration_name(receiver)?.to_string();
         for _ in 0..self.method_receiver_deref_count(&receiver, method) {
             receiver = self.user_deref_target_type_name(&receiver)?.to_string();
         }
@@ -31959,25 +31959,22 @@ impl VbcCodegen {
         }
     }
 
-    /// Parse owner arguments as types, then bind exactly the declared roster.
+    /// Resolve owner type and const arguments against the declared roster.
     /// Missing, surplus and unsupported arguments provide no partial facts.
     fn callable_owner_substitution(&self, owner: &str) -> Option<crate::mono::TypeSubstitution> {
-        let mut substitution = crate::mono::TypeSubstitution::empty();
         let owner_id = self.nominal_type_id(Self::strip_generic_args(owner))?;
         let owner_descriptor = self.type_by_id(owner_id)?;
         let owner_ast = verum_fast_parser::Parser::new(owner).parse_type().ok()?;
-        let owner_args = match &owner_ast.kind {
-            verum_ast::ty::TypeKind::Generic { args, .. } => args.as_slice(),
-            _ => &[],
+        let witness = self.explicit_type_witness(&owner_ast, None)?;
+        let owner_args = match &witness {
+            crate::types::TypeRef::Instantiated { base, args } if *base == owner_id => args.as_slice(),
+            crate::types::TypeRef::Concrete(id) if *id == owner_id => &[],
+            _ => return None,
         };
         if owner_args.len() != owner_descriptor.type_params.len() {
             return None;
         }
-        for (arg, parameter) in owner_args.iter().zip(&owner_descriptor.type_params) {
-            let verum_ast::ty::GenericArg::Type(ty) = arg else { return None };
-            substitution.bind(parameter.id, self.explicit_type_witness(ty, None)?);
-        }
-        Some(substitution)
+        Some(crate::mono::TypeSubstitution::new(&owner_descriptor.type_params, owner_args))
     }
 
     fn declared_callable_receiver_name(&self, receiver: &Expr) -> Option<String> {
