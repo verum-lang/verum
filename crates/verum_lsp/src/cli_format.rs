@@ -13,9 +13,12 @@
 //! invisible. The old in-LSP formatter remains as a fallback for
 //! cases where the binary can't be located.
 
-use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+use std::time::Duration;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::Command;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 use verum_common::List;
@@ -59,32 +62,50 @@ pub async fn format_via_cli(
         return None;
     }
     let binary = settings.binary.clone().unwrap_or_else(|| "verum".into());
-    let buffer = text.to_string();
-    let hint = filename_hint.map(|s| s.to_string());
-
-    let stdout_bytes = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+    // Cancellation drops and kills the child. Concurrent input/output avoids
+    // pipe deadlocks; bounded output and time also cover misconfigured binaries.
+    let operation = async {
+        const OUTPUT_LIMIT: u64 = 16 * 1024 * 1024;
         let mut cmd = Command::new(&binary);
         cmd.arg("fmt").arg("--stdin");
-        if let Some(h) = &hint {
+        if let Some(h) = filename_hint {
             cmd.arg("--stdin-filename").arg(h);
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
         let mut child = cmd.spawn().ok()?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(buffer.as_bytes()).ok()?;
-        }
-        let output = child.wait_with_output().ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        Some(output.stdout)
-    })
-    .await
-    .ok()??;
-
-    String::from_utf8(stdout_bytes).ok()
+        let mut stdin = child.stdin.take()?;
+        let stdout = child.stdout.take()?;
+        let (_, output, status) = tokio::try_join!(
+            async {
+                stdin.write_all(text.as_bytes()).await?;
+                drop(stdin);
+                Ok::<_, std::io::Error>(())
+            },
+            async {
+                let mut output = Vec::new();
+                stdout
+                    .take(OUTPUT_LIMIT + 1)
+                    .read_to_end(&mut output)
+                    .await?;
+                if output.len() as u64 > OUTPUT_LIMIT {
+                    return Err(std::io::Error::other("Formatter output exceeds limit"));
+                }
+                Ok(output)
+            },
+            child.wait(),
+        )
+        .ok()?;
+        status
+            .success()
+            .then(|| String::from_utf8(output).ok())
+            .flatten()
+    };
+    tokio::time::timeout(Duration::from_secs(10), operation)
+        .await
+        .ok()?
 }
 
 /// Build a single full-document `TextEdit` if the formatted output
@@ -101,10 +122,7 @@ pub fn diff_to_text_edits(original: &str, formatted: &str) -> List<TextEdit> {
                 line: 0,
                 character: 0,
             },
-            end: Position {
-                line: u32::MAX,
-                character: u32::MAX,
-            },
+            end: verum_common::span_utils::lsp::offset_to_lsp_position(original.len(), original),
         },
         new_text: formatted.to_string(),
     });

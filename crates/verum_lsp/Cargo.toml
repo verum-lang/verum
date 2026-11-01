@@ -21,7 +21,7 @@ path = "src/lib.rs"
 [dependencies]
 # LSP framework
 tower-lsp = "0.20"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2.workspace = true

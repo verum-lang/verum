@@ -976,22 +976,7 @@ pub fn format_document_with_config(text: &str, config: VerumFormatConfig) -> Lis
         return List::new();
     }
 
-    // Replace entire document
-    let mut result = List::new();
-    result.push(TextEdit {
-        range: Range {
-            start: Position {
-                line: 0,
-                character: 0,
-            },
-            end: Position {
-                line: u32::MAX,
-                character: u32::MAX,
-            },
-        },
-        new_text: final_text.to_string(),
-    });
-    result
+    crate::cli_format::diff_to_text_edits(text, &final_text)
 }
 
 /// Format Verum source code with full formatting rules (fallback).
@@ -1351,19 +1336,29 @@ fn ensure_space_before(result: &mut String) {
 
 /// Format a range of the document
 pub fn format_range(text: &str, range: Range) -> List<TextEdit> {
-    // Extract the range, format it, and return the edit
-    let lines: Vec<&str> = text.lines().collect();
-
-    let start_line = range.start.line as usize;
-    let end_line = range.end.line as usize;
-
-    if start_line >= lines.len() {
+    use verum_common::span_utils::lsp::{lsp_position_to_offset, offset_to_lsp_position};
+    if range.start > range.end
+        || lsp_position_to_offset(range.start, text).is_none()
+        || lsp_position_to_offset(range.end, text).is_none()
+    {
         return List::new();
     }
-
-    let end_line = end_line.min(lines.len() - 1);
-    let range_text = lines[start_line..=end_line].join("\n");
-    let formatted_range = basic_format(&range_text);
+    // Formatting consumes whole lines; the returned edit must replace exactly
+    // those lines, never the user's narrower character selection. A range
+    // ending at column zero does not include that following line.
+    let last = if range.end.character == 0 && range.end.line > range.start.line {
+        range.end.line - 1
+    } else {
+        range.end.line
+    };
+    let start = lsp_position_to_offset(Position::new(range.start.line, 0), text).unwrap();
+    let end = lsp_position_to_offset(Position::new(last, u32::MAX), text).unwrap();
+    let range_text = &text[start..end];
+    let mut formatted_range = basic_format(range_text);
+    // The line terminator is outside the edit and remains byte-for-byte intact.
+    if formatted_range.ends_with('\n') {
+        formatted_range.pop();
+    }
 
     if formatted_range == range_text {
         return List::new();
@@ -1371,7 +1366,10 @@ pub fn format_range(text: &str, range: Range) -> List<TextEdit> {
 
     let mut result = List::new();
     result.push(TextEdit {
-        range,
+        range: Range::new(
+            offset_to_lsp_position(start, text),
+            offset_to_lsp_position(end, text),
+        ),
         new_text: formatted_range.to_string(),
     });
     result
