@@ -1,6 +1,7 @@
 import './style.css';
 import { runtimeSourceRange } from './runtime';
 import { proofSourceRange } from './proof';
+import { ProofTargets, declarationProfile, type ProofProfile } from './proof-targets';
 import { sourceHash as sha256 } from './source';
 import { runtimeView } from './runtime-view';
 import { makeEditor } from './editor';
@@ -86,6 +87,7 @@ let isSaving = false;
 let starting = false;
 let switching = false;
 let editVersion = 0;
+const proofTargets = new ProofTargets();
 const documentRevision = () => ({ path: currentPath, editVersion });
 const editor = makeEditor($('editor'), STARTER, () => { editVersion++; updateDocumentState(); scheduleHash(); scheduleAnalysis(); }, (line, column) => {
   setText($('cursor-position'), m('Ln {line}, Col {column}', { line, column }));
@@ -248,7 +250,10 @@ async function newDocument(source = '', suggestion = 'experiment.vr') {
     if (files.some(file => file.path === path)) throw new Error(t(m('{path} already exists. Open it from the explorer or choose a different name.', { path })));
     return { path, source, hash: null };
   });
-    if (replaced === 'applied' && source === IDENTITY) { input('declaration').value = 'identity'; $<HTMLSelectElement>('proof-profile').value = 'verum-source-pi-id/1'; $('execution-settings').hidden = false; $('run-settings').setAttribute('aria-expanded', 'true'); }
+    if (replaced === 'applied' && source === IDENTITY) {
+      proofTargets.select(languageRevision(), { profile: 'verum-source-pi-id/1', declaration: '' });
+      renderProofTargets(); openExecutionSettings();
+    }
   } finally { switching = false; }
 }
 bind('save', save); bind('refresh-files', refreshFiles); bind('new-file', () => newDocument());
@@ -307,6 +312,7 @@ for (const id of ['operations-tab', 'diagnostics-tab']) $(id).addEventListener('
 bind('language-status', () => { resultView(true); setPane('results'); });
 function scheduleAnalysis() {
   ++analysisGeneration;
+  proofTargets.begin(languageRevision()); renderProofTargets();
   window.clearTimeout(analysisTimer);
   editor.diagnostics(editor.source(), []);
   if (!currentPath.endsWith('.vr')) {
@@ -336,10 +342,13 @@ async function analyzeSource() {
       const message = m('Analysis failed: {error}', { error: errorText(error) });
       $('diagnostics-list').replaceChildren(node('p', 'muted', message));
       $('architecture-content').replaceChildren(node('p', 'muted', message));
+      setText($('proof-target-status'), message);
     }
   } finally { analysisBusy = false; if (analysisPending) analysisTimer = window.setTimeout(analyzeSource, 100); }
 }
 function renderAnalysis(snapshot: Analysis) {
+  const revision = languageRevision();
+  proofTargets.accept(revision, snapshot); renderProofTargets();
   editor.diagnostics(editor.source(), snapshot.diagnostics);
   const count = snapshot.diagnostics.length;
   setText($('language-status'), count ? m('{count} diagnostics', { count }) : m('No module diagnostics'));
@@ -364,6 +373,17 @@ function renderAnalysis(snapshot: Analysis) {
       card.append(node('p', 'muted', m('Context requirements')));
       for (const requirement of declaration.requirements) card.append(button(requirement.source, () => showRange(requirement.range), 'context-requirement'));
     }
+    for (const [label, clauses] of [[m('Preconditions'), declaration.preconditions], [m('Postconditions'), declaration.postconditions]] as const) {
+      if (!clauses?.length) continue;
+      card.append(node('p', 'muted', label));
+      for (const clause of clauses) card.append(button(clause.source, () => showRange(clause.range), 'context-requirement'));
+    }
+    const profile = declarationProfile(declaration);
+    if (profile) card.append(iconButton('proof', m(profile === 'verum-source-finite/1' ? 'Check finite function contract' : 'Check logical theorem'), () => {
+      if (!sameRevision(revision, languageRevision())) throw new Error(t(m('Source changed. Select a declaration from the current analysis.')));
+      proofTargets.select(revision, { profile, declaration: declaration.name }); renderProofTargets();
+      return startOperation('proof');
+    }));
     structure.append(card);
   }
   if (snapshot.bindings?.length) {
@@ -387,7 +407,29 @@ bind('lesson-script', () => newDocument(STARTER, 'first-experiment.vr'));
 bind('lesson-proof', () => newDocument(IDENTITY, 'identity.vr'));
 $<HTMLSelectElement>('language').value = currentLocale();
 $('language').addEventListener('change', () => { setLocale($<HTMLSelectElement>('language').value as Locale); editor.language(); editor.view.requestMeasure(); });
-bind('run-settings', () => { $('execution-settings').hidden = !$('execution-settings').hidden; $('run-settings').setAttribute('aria-expanded', String(!$('execution-settings').hidden)); });
+function openExecutionSettings() { $('execution-settings').hidden = false; $('run-settings').setAttribute('aria-expanded', 'true'); }
+function renderProofTargets() {
+  const revision = languageRevision(), selection = proofTargets.selection(revision.path);
+  const options = proofTargets.options(revision, selection.profile), field = $<HTMLSelectElement>('declaration');
+  $<HTMLSelectElement>('proof-profile').value = selection.profile;
+  const placeholder = node('option', '', m('Select a declaration')); placeholder.value = '';
+  field.replaceChildren(placeholder);
+  for (const target of options ?? []) {
+    const option = node('option', '', target.name); option.value = target.name; field.append(option);
+  }
+  const valid = options?.some(target => target.name === selection.declaration);
+  field.value = valid ? selection.declaration : ''; field.disabled = !options?.length;
+  setText($('proof-target-status'), options === null ? m('Waiting for current source analysis…')
+    : !options.length ? m('No declarations for this proof scope in the current source.')
+    : selection.declaration && !valid ? m('The selected declaration is no longer available. Choose a current declaration.')
+    : m('Targets come from current source analysis. Proof support is checked by the selected verifier.'));
+}
+for (const id of ['proof-profile', 'declaration']) $(id).addEventListener('change', () => {
+  proofTargets.select(languageRevision(), { profile: $<HTMLSelectElement>('proof-profile').value as ProofProfile,
+    declaration: id === 'proof-profile' ? '' : $<HTMLSelectElement>('declaration').value });
+  renderProofTargets();
+});
+bind('run-settings', () => { if ($('execution-settings').hidden) openExecutionSettings(); else closeSettings(); });
 function closeSettings() { $('execution-settings').hidden = true; $('run-settings').setAttribute('aria-expanded', 'false'); }
 document.addEventListener('pointerdown', event => {
   if (event.target instanceof Node && !$('execution-settings').contains(event.target) && !$('run-settings').contains(event.target)) closeSettings();
@@ -402,11 +444,14 @@ function operationRequest(kind: Receipt['kind'], diagnostics = input('runtime-di
   const source = editor.source(), path = currentPath;
   const seconds = Number(input('timeout').value);
   if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300) throw new Error(t(m('Choose a time budget between 1 and 300 seconds.')));
-  const declaration = input('declaration').value.trim();
-  if (kind === 'proof' && !declaration) { $('execution-settings').hidden = false; input('declaration').focus(); throw new Error(t(m('Enter the declaration to check.'))); }
-  const proof_profile = $<HTMLSelectElement>('proof-profile').value;
+  const target = proofTargets.request(languageRevision());
+  if (kind === 'proof' && !target) {
+    openExecutionSettings();
+    ($<HTMLSelectElement>('declaration').disabled ? $('proof-profile') : $('declaration')).focus();
+    throw new Error(t(m('Select a declaration from the current source analysis.')));
+  }
   const permissions = $<HTMLSelectElement>('run-permissions').value as RunPermissions;
-  return { kind, source, path, ...(kind === 'proof' ? { declaration, proof_profile } : {}), ...(kind === 'run' ? { permissions, runtime_diagnostics: diagnostics } : {}), timeout_ms: Math.round(seconds * 1000) };
+  return { kind, source, path, ...(kind === 'proof' && target ? { declaration: target.declaration, proof_profile: target.profile } : {}), ...(kind === 'run' ? { permissions, runtime_diagnostics: diagnostics } : {}), timeout_ms: Math.round(seconds * 1000) };
 }
 for (const id of ['run-permissions', 'runtime-diagnostics', 'timeout', 'declaration', 'proof-profile']) $(id).addEventListener('input', () => { $('execution-plan').hidden = true; });
 bind('preview-run', async () => {
@@ -882,6 +927,7 @@ onSessionChange(state => {
     updateDocumentState();
   }
   if (!unlocked) {
+    proofTargets.clear(); renderProofTargets();
     document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach(dialog => dialog.close('session-locked'));
     document.title = 'Verum Studio';
     if (sessionWasConnected) {

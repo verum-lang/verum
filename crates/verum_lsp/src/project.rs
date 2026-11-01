@@ -29,6 +29,8 @@ pub struct Declaration {
     pub range: Range,
     pub selection_range: Range,
     pub requirements: List<Requirement>,
+    pub preconditions: List<Requirement>,
+    pub postconditions: List<Requirement>,
 }
 #[derive(Debug, Serialize)]
 pub struct Requirement {
@@ -88,12 +90,27 @@ impl DocumentSnapshot {
                     ItemKind::Context(decl) => (&decl.name, "context", List::new()),
                     ItemKind::Protocol(decl) => (&decl.name, "protocol", List::new()),
                     ItemKind::Const(decl) => (&decl.name, "constant", List::new()),
+                    ItemKind::Theorem(decl) => (&decl.name, "theorem", List::new()),
+                    ItemKind::Lemma(decl) => (&decl.name, "lemma", List::new()),
+                    ItemKind::Corollary(decl) => (&decl.name, "corollary", List::new()),
+                    ItemKind::Axiom(decl) => (&decl.name, "axiom", List::new()),
                     ItemKind::Module(decl) => (&decl.name, "module", List::new()),
                     ItemKind::Mount(_) => {
                         mounts.push(requirement(item.span));
                         continue;
                     }
                     _ => continue,
+                };
+                let (preconditions, postconditions) = match &item.kind {
+                    ItemKind::Function(decl) => (
+                        decl.requires.iter().map(|expr| requirement(expr.span)).collect(),
+                        decl.ensures.iter().map(|expr| requirement(expr.span)).collect(),
+                    ),
+                    ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => (
+                        decl.requires.iter().map(|expr| requirement(expr.span)).collect(),
+                        decl.ensures.iter().map(|expr| requirement(expr.span)).collect(),
+                    ),
+                    _ => (List::new(), List::new()),
                 };
                 declarations.push(Declaration {
                     id: format!("{}#{}:{}:{}", uri, item.span.start, item.span.end, kind).into(),
@@ -106,6 +123,8 @@ impl DocumentSnapshot {
                     range: ast_span_to_range(&item.span, &doc.text),
                     selection_range: ast_span_to_range(&name.span, &doc.text),
                     requirements,
+                    preconditions,
+                    postconditions,
                 });
             }
         }

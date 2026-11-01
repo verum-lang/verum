@@ -157,6 +157,54 @@ async fn context_requirements_are_projected_from_the_same_ast_and_exact_source_r
 }
 
 #[tokio::test]
+async fn proof_declarations_and_contracts_share_the_compiler_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    let studio = studio(root.path());
+    let source = concat!(
+        "// Ω🙂 ranges must count UTF-16, not UTF-8 bytes\n",
+        "theorem identity(A:Type,x:A):A proof=x;\n",
+        "lemma implication(P:Type) requires P ensures P proof by assumption;\n",
+        "corollary unchanged(A:Type,x:A):A proof=x;\n",
+        "axiom assumed(A:Type) ensures A;\n",
+        "fn guarded(x:Bool)->Bool requires x ensures result { x }\n",
+        "fn plain(x:Bool)->Bool { x }\n",
+    );
+    let reply = studio.call("language.request", json!({"path":"proofs.vr","source":source}))
+        .await.unwrap();
+    let snapshot = &reply["result"];
+    assert_eq!(snapshot["parsed"], true, "{reply}");
+    assert_eq!(snapshot["source_hash"], reply["source_hash"]);
+    let declarations = snapshot["declarations"].as_array().unwrap();
+    let kinds: Vec<_> = declarations.iter().map(|item| item["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["theorem", "lemma", "corollary", "axiom", "function", "function"]);
+    let source_at = |range: &Value| {
+        let start = &range["start"];
+        let end = &range["end"];
+        assert_eq!(start["line"], end["line"]);
+        let line = source.lines().nth(start["line"].as_u64().unwrap() as usize).unwrap();
+        let utf16: Vec<_> = line.encode_utf16().collect();
+        String::from_utf16(&utf16[start["character"].as_u64().unwrap() as usize..end["character"].as_u64().unwrap() as usize]).unwrap()
+    };
+    for item in declarations {
+        assert_eq!(source_at(&item["selection_range"]), item["name"].as_str().unwrap());
+        assert_eq!(item["requirements"], json!([]), "logical clauses are not context dependencies");
+        for key in ["preconditions", "postconditions"] {
+            for clause in item[key].as_array().unwrap() {
+                assert_eq!(source_at(&clause["range"]), clause["source"].as_str().unwrap());
+            }
+        }
+    }
+    assert_eq!(declarations[1]["preconditions"][0]["source"], "P");
+    assert_eq!(declarations[1]["postconditions"][0]["source"], "P");
+    assert_eq!(declarations[4]["preconditions"][0]["source"], "x");
+    assert_eq!(declarations[4]["postconditions"][0]["source"], "result");
+    assert_eq!(declarations[5]["postconditions"], json!([]));
+    let project = studio.call("project.inspect", json!({})).await.unwrap();
+    assert_eq!(project["analysis"]["documents"][0]["declarations"], snapshot["declarations"],
+        "Studio, agent tools and project architecture must use the same declarations");
+}
+
+#[tokio::test]
 async fn saved_source_analysis_and_submitted_drafts_share_one_service_without_writes() {
     let root = tempfile::tempdir().unwrap();
     let saved = "fn saved() -> Int { 7 }";
