@@ -113,7 +113,21 @@ fn install_limits(limits: ProcessLimits) -> std::io::Result<InstalledLimits> {
 
 /// Legacy worker entry point: retain the default OS ceilings.
 pub fn install_worker_limits() -> std::io::Result<()> {
-    install_limits(ProcessLimits::default()).map(|_| ())
+    install_worker_limits_with_policy(ProcessLimits::default()).map(|_| ())
+}
+
+/// Install a trusted producer's fixed process policy before reading input.
+/// Artifact producers may need a different output budget from verdict workers.
+pub fn install_worker_limits_with_policy(
+    limits: ProcessLimits,
+) -> std::io::Result<InstalledLimits> {
+    if !limits.is_valid() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid process resource policy",
+        ));
+    }
+    install_limits(limits)
 }
 
 pub fn worker() -> std::io::Result<()> {
@@ -291,6 +305,25 @@ pub fn run_worker_with_deadline(
 ) -> Result<Vec<u8>, Diagnostic> {
     let mut limits = ReplayLimits::default();
     limits.process.wall_time_ms = wall.min(WALL_LIMIT).as_millis() as u64;
+    run_worker_with_limits(executable, trusted_worker_arg, bytes, limits)
+}
+
+/// Generic bounded transport for a trusted worker with its own fixed policy.
+/// The worker must install the same policy; callers validate its response.
+/// Neither the argument nor the policy may come from submitted proof input.
+pub fn run_worker_with_limits(
+    executable: &Path,
+    trusted_worker_arg: &str,
+    bytes: &[u8],
+    limits: ReplayLimits,
+) -> Result<Vec<u8>, Diagnostic> {
+    if !limits.is_valid() {
+        return Err(inconclusive(
+            "invalid_limits",
+            "The resource policy cannot be represented safely.",
+        )
+        .diagnostic);
+    }
     run_worker_command(executable, &[trusted_worker_arg], bytes, limits)
         .map_err(|error| error.diagnostic)
 }

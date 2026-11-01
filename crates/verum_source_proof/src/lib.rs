@@ -14,7 +14,20 @@ use sha2::{Digest, Sha256};
 use verum_ast::decl::ItemKind;
 use verum_proof::{
     admission::{self, Diagnostic, Judgment, ReplayOutcome, Report},
+    limits::{AdmissionLimits, ProcessLimits, ReplayLimits},
     proof_checker::Term,
+};
+
+/// A source producer returns the judgment, its displayed conclusion and source
+/// implementation, whereas a native replay worker returns only a verdict.
+/// Bound this envelope separately; input, proof and execution budgets stay at
+/// their native defaults. The child and supervising caller use this policy.
+pub const WORKER_LIMITS: ReplayLimits = ReplayLimits {
+    admission: AdmissionLimits::DEFAULT,
+    process: ProcessLimits {
+        output_bytes: 4 * AdmissionLimits::DEFAULT.max_bytes as u64,
+        ..ProcessLimits::DEFAULT
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -376,6 +389,41 @@ fn replay_finite(
     };
     let native = admission::replay(&serde_json::to_vec(&judgment).expect("serializable judgment"));
     if !native.accepted {
+        // A failed conjunction can be localized without rechecking every
+        // component on the successful path. Resource refusals stay distinct.
+        if native.outcome == ReplayOutcome::Rejected && native.is_consistent() {
+            for candidate in &artifact.candidates {
+                let component = Judgment {
+                    profile: admission::PROFILE.into(),
+                    statement: candidate.certificate.claimed_type.clone(),
+                    certificate: candidate.certificate.clone(),
+                };
+                let checked = admission::replay(
+                    &serde_json::to_vec(&component).expect("serializable component"),
+                );
+                if checked.outcome == ReplayOutcome::Rejected && checked.is_consistent() {
+                    let mut report = native_refusal(checked, &artifact.source);
+                    report.profile = finite::PROFILE.into();
+                    report.diagnostic_span = candidate
+                        .binding
+                        .call
+                        .clone()
+                        .or_else(|| candidate.binding.owner.span.clone());
+                    if let Some(diagnostic) = &mut report.diagnostic {
+                        diagnostic.message = format!(
+                            "{:?} obligation in {}: {}",
+                            candidate.binding.kind,
+                            candidate.binding.owner.declaration,
+                            diagnostic.message
+                        );
+                    }
+                    return report;
+                }
+                if !checked.accepted {
+                    break;
+                }
+            }
+        }
         let mut report = native_refusal(native, &artifact.source);
         report.profile = finite::PROFILE.into();
         return report;

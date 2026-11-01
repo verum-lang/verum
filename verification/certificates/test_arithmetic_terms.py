@@ -38,8 +38,12 @@ class ArithmeticTerms(unittest.TestCase):
                             [f"'PortableArithmetic.proof{i}' does not depend on any axioms" for i in range(len(batch))])
                     else:
                         self.assertEqual(result.returncode, 1, messages)
-                        self.assertEqual(len(errors), 1, messages)
-                        self.assertTrue(errors[0]['data'].startswith(('Type mismatch', 'Application type mismatch')), errors)
+                        # A malformed conjunction can fail at several proof
+                        # components. Every error must be a semantic type
+                        # mismatch; resource or exporter failures never count.
+                        self.assertGreater(len(errors), 0, messages)
+                        self.assertTrue(all(row['data'].startswith(
+                            ('Type mismatch', 'Application type mismatch')) for row in errors), errors)
 
     def test_exporter_refuses_unimplemented_or_changed_data(self):
         for term in ({'SmtProof': {}}, {'Var': -1}, {'Universe': {'Var': 'u'}},

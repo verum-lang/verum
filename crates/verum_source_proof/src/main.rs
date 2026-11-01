@@ -1,15 +1,12 @@
 use std::io::{Read, Write};
-use verum_proof::{
-    admission::MAX_BYTES,
-    process::{OUTPUT_BYTES, install_worker_limits},
-};
-use verum_source_proof::{SourceReport, replay};
+use verum_proof::{admission::MAX_BYTES, process::install_worker_limits_with_policy};
+use verum_source_proof::{SourceReport, WORKER_LIMITS, replay};
 fn main() -> std::io::Result<()> {
     if std::env::args().skip(1).collect::<Vec<_>>() != ["--worker"] {
         eprintln!("usage: verum-source-replay --worker < source-request.json");
         std::process::exit(2);
     }
-    let report = if install_worker_limits().is_err() {
+    let report = if install_worker_limits_with_policy(WORKER_LIMITS.process).is_err() {
         SourceReport::failure(
             "unavailable",
             "process",
@@ -24,7 +21,7 @@ fn main() -> std::io::Result<()> {
         replay(&bytes)
     };
     let mut encoded = serde_json::to_vec(&report).map_err(std::io::Error::other)?;
-    if encoded.len() as u64 > OUTPUT_BYTES {
+    if encoded.len() as u64 > WORKER_LIMITS.process.output_bytes {
         let mut failure = SourceReport::failure(
             "inconclusive",
             "process",

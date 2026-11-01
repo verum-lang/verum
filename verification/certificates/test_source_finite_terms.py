@@ -9,14 +9,26 @@ import test_arithmetic_terms as replay
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCUMENTED = 'fn publish(ready:Bool,requested:Bool)->Bool requires ready ensures result == requested { ready && requested }'
+DOCUMENTED = '''fn finish(ready: Bool, accepted: Bool) -> Bool
+    requires ready
+    ensures result == accepted
+{
+    ready && accepted
+}
+
+fn publish(ready: Bool, accepted: Bool) -> Bool
+    ensures result == (ready && accepted)
+{
+    if ready { finish(ready, accepted) } else { false }
+}'''
 
 
 def cases():
     worker = os.environ['VERUM_SOURCE_REPLAY']
     source = (ROOT / 'crates/verum_source_proof/tests/fixtures/finite_transition.vr').read_text()
+    contracted = (ROOT / 'crates/verum_source_proof/tests/fixtures/contracted_transition.vr').read_text()
     rows = []
-    for name, text in [('step', source), ('publish', DOCUMENTED)]:
+    for name, text in [('step', source), ('publish', DOCUMENTED), ('publish', contracted)]:
         request = dict(profile='verum-source-finite/1', source=text, declaration=name)
         result = subprocess.run([worker, '--worker'], input=json.dumps(request),
                                 text=True, capture_output=True, timeout=60, check=True)
@@ -32,6 +44,11 @@ def cases():
         if judgment['statement'] != judgment['certificate']['claimed_type']:
             raise AssertionError('source statement differs from certificate')
         rows.append((name, judgment['certificate'], True))
+    # The conjunction must retain supporting helper and call proofs. A caller
+    # proof alone cannot inhabit the complete bundle's claimed type.
+    missing = copy.deepcopy(rows[-1][1])
+    missing['term'] = missing['term']['Pair'][1]
+    rows.append(('missing-supporting-obligations', missing, False))
     corrupt = copy.deepcopy(rows[0][1])
     # A reflexive type equality is not a proof of the universally quantified
     # contract. The target kernel must reject it semantically, not time out.

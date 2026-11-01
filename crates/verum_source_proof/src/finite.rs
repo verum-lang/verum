@@ -16,7 +16,10 @@ use verum_ast::{BinOp, Expr, ExprKind, Module, Path, PathSegment, UnOp};
 use verum_common::Maybe;
 use verum_proof::proof_checker::{Certificate, DataConstructor, Level, Term};
 
+mod obligations;
 pub mod proof;
+use obligations::{CallRequirement, Candidate};
+pub use obligations::{ObligationBinding, ObligationKind};
 pub const PROFILE: &str = "verum-source-finite/1";
 type Result<T> = std::result::Result<T, Error>;
 type Env = Vec<(String, Term)>;
@@ -31,22 +34,38 @@ pub struct ImplementationBinding {
     pub input_cases: usize,
     pub requires_count: usize,
     pub ensures_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligations: Vec<ObligationBinding>,
 }
 pub struct Artifact {
     pub certificate: Certificate,
     pub implementation: ImplementationBinding,
     pub source: SourceBinding,
+    pub(crate) candidates: Vec<Candidate>,
 }
 #[derive(Clone)]
 struct Value {
     term: Term,
     ty: Term,
+    calls: Vec<CallRequirement>,
+}
+impl Value {
+    fn plain(term: Term, ty: Term) -> Self {
+        Self {
+            term,
+            ty,
+            calls: vec![],
+        }
+    }
 }
 #[derive(Clone)]
 struct Function {
     term: Term,
     domains: Vec<Term>,
     result: Term,
+    precondition: Term,
+    requires_count: usize,
+    ensures_count: usize,
 }
 struct Elab<'a> {
     source: &'a str,
@@ -58,7 +77,8 @@ struct Elab<'a> {
     active: BTreeSet<String>,
     dependencies: BTreeSet<String>,
     remaining: usize,
-    selected: &'a str,
+    remaining_cases: usize,
+    candidates: Vec<Candidate>,
 }
 fn unsupported(message: impl Into<String>) -> Error {
     Error::Unsupported(message.into())
@@ -101,6 +121,15 @@ fn choose(condition: Term, ty: Term, yes: Term, no: Term) -> Term {
 fn and(a: Term, b: Term) -> Term {
     choose(a, boolean(), b, truth(false))
 }
+fn implies(a: Term, b: Term) -> Term {
+    choose(a, boolean(), b, truth(true))
+}
+fn abstract_over(domains: &[Term], body: Term) -> Term {
+    domains
+        .iter()
+        .rev()
+        .fold(body, |body, ty| Term::lam(ty.clone(), body))
+}
 fn name(path: &Path) -> Result<String> {
     path.segments
         .iter()
@@ -132,6 +161,18 @@ fn require_type(actual: &Term, expected: &Term) -> Result<()> {
     } else {
         Err(rejected("finite source type mismatch"))
     }
+}
+fn input_cases(domains: &[Term]) -> Result<usize> {
+    domains.iter().try_fold(1usize, |n, ty| {
+        let Term::Data { constructors, .. } = ty else {
+            return Err(rejected("non-finite parameter"));
+        };
+        n.checked_mul(constructors.len())
+            .ok_or_else(|| Error::Inconclusive {
+                code: "finite_case_limit",
+                message: "finite input cardinality overflow".into(),
+            })
+    })
 }
 impl Elab<'_> {
     fn binding(&self, name: &str) -> Result<SourceBinding> {
@@ -240,10 +281,7 @@ impl Elab<'_> {
             .get(owner)
             .and_then(|variants| variants.iter().position(|n| n == variant))
             .ok_or_else(|| Error::Scope(format!("unknown constructor {qualified}")))?;
-        Ok(Value {
-            term: constructor(&ty, index),
-            ty,
-        })
+        Ok(Value::plain(constructor(&ty, index), ty))
     }
     fn signature(&mut self, decl: &FunctionDecl) -> Result<(Env, Term)> {
         if decl.is_async
@@ -312,32 +350,129 @@ impl Elab<'_> {
         if !item.attributes.is_empty() {
             return Err(unsupported("function item attributes"));
         }
-        if n != self.selected && (!decl.requires.is_empty() || !decl.ensures.is_empty()) {
-            return Err(unsupported(
-                "calls to contracted helpers require separately discharged call obligations",
-            ));
-        }
         let (mut env, result) = self.signature(decl)?;
         let domains: Vec<_> = env.iter().map(|(_, ty)| ty.clone()).collect();
+        // Keep the declaration active through contracts as well as its body:
+        // a cached body must not turn a circular specification into evidence.
+        let pre = self.predicates(&decl.requires, &mut env)?;
         let value = match &decl.body {
             Maybe::Some(FunctionBody::Block(block)) => self.block(block, &mut env)?,
             Maybe::Some(FunctionBody::Expr(expr)) => self.expr(expr, &mut env)?,
             _ => return Err(unsupported("function body missing")),
         };
         require_type(&value.ty, &result)?;
-        let term = domains
-            .iter()
-            .rev()
-            .fold(value.term, |body, ty| Term::lam(ty.clone(), body));
+        env.push(("result".into(), result.clone()));
+        let mut post = self.predicates(&decl.ensures, &mut env)?;
+        for call in &mut post.calls {
+            call.bind(value.term.clone());
+        }
+        // A precondition cannot justify calls used to evaluate itself. Only
+        // preceding short-circuit clauses guard those calls (predicates below).
+        self.calls(
+            n,
+            &domains,
+            pre.calls,
+            None,
+            ObligationKind::PreconditionCall,
+        )?;
+        self.calls(
+            n,
+            &domains,
+            value.calls,
+            Some(&pre.term),
+            ObligationKind::BodyCall,
+        )?;
+        self.calls(
+            n,
+            &domains,
+            post.calls,
+            Some(&pre.term),
+            ObligationKind::PostconditionCall,
+        )?;
+        if !decl.ensures.is_empty() {
+            let post = Term::Let {
+                value: Box::new(value.term.clone()),
+                body: Box::new(post.term),
+            };
+            self.candidate(
+                &domains,
+                implies(pre.term.clone(), post),
+                ObligationBinding {
+                    owner: self.binding(n)?,
+                    kind: ObligationKind::FunctionContract,
+                    call: None,
+                    callee: None,
+                },
+            )?;
+        }
         let f = Function {
-            term,
+            term: abstract_over(&domains, value.term),
+            precondition: abstract_over(&domains, pre.term),
             domains,
             result,
+            requires_count: decl.requires.len(),
+            ensures_count: decl.ensures.len(),
         };
         self.functions.insert(n.into(), f.clone());
         self.dependencies.insert(n.into());
         self.active.remove(n);
         Ok(f)
+    }
+    fn candidate(
+        &mut self,
+        domains: &[Term],
+        predicate: Term,
+        binding: ObligationBinding,
+    ) -> Result<()> {
+        let count = input_cases(domains)?;
+        self.remaining_cases =
+            self.remaining_cases
+                .checked_sub(count)
+                .ok_or_else(|| Error::Inconclusive {
+                    code: "finite_case_limit",
+                    message: "compositional proof exceeds its total constructor-case budget".into(),
+                })?;
+        let certificate =
+            proof::certificate(domains, &abstract_over(domains, predicate), &boolean())?;
+        self.candidates.push(Candidate {
+            binding,
+            certificate,
+        });
+        Ok(())
+    }
+    fn calls(
+        &mut self,
+        owner: &str,
+        domains: &[Term],
+        calls: Vec<CallRequirement>,
+        precondition: Option<&Term>,
+        kind: ObligationKind,
+    ) -> Result<()> {
+        for mut call in calls {
+            if let Some(precondition) = precondition {
+                call.guard(precondition.clone());
+            }
+            let text = self
+                .source
+                .get(call.span.start as usize..call.span.end as usize)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| rejected("invalid call source range"))?;
+            self.candidate(
+                domains,
+                call.predicate,
+                ObligationBinding {
+                    owner: self.binding(owner)?,
+                    kind,
+                    call: Some(SourceSpan {
+                        start: call.span.start,
+                        end: call.span.end,
+                        sha256: sha256(text.as_bytes()),
+                    }),
+                    callee: Some(self.binding(&call.callee)?),
+                },
+            )?;
+        }
+        Ok(())
     }
     fn block(&mut self, block: &Block, env: &mut Env) -> Result<Value> {
         let saved = env.len();
@@ -362,7 +497,7 @@ impl Elab<'_> {
                 require_type(&value.ty, &self.ty(annotation)?)?;
             }
             env.push((local, value.ty.clone()));
-            values.push(value.term);
+            values.push(value);
         }
         let Maybe::Some(tail) = &block.expr else {
             return Err(unsupported("finite block requires a tail value"));
@@ -370,8 +505,14 @@ impl Elab<'_> {
         let mut value = self.expr(tail, env)?;
         env.truncate(saved);
         for local in values.into_iter().rev() {
+            for call in &mut value.calls {
+                call.bind(local.term.clone());
+            }
+            let mut calls = local.calls;
+            calls.append(&mut value.calls);
+            value.calls = calls;
             value.term = Term::Let {
-                value: Box::new(local),
+                value: Box::new(local.term),
                 body: Box::new(value.term),
             };
         }
@@ -389,10 +530,7 @@ impl Elab<'_> {
             ExprKind::Paren(inner) => self.expr(inner, env),
             ExprKind::Block(block) => self.block(block, env),
             ExprKind::Literal(lit) => match lit.kind {
-                LiteralKind::Bool(value) => Ok(Value {
-                    term: truth(value),
-                    ty: boolean(),
-                }),
+                LiteralKind::Bool(value) => Ok(Value::plain(truth(value), boolean())),
                 _ => Err(unsupported(
                     "only Boolean literals are in the finite source profile",
                 )),
@@ -405,10 +543,7 @@ impl Elab<'_> {
                     .enumerate()
                     .find(|(_, (bound, _))| *bound == n)
                 {
-                    Ok(Value {
-                        term: Term::var(index),
-                        ty: ty.clone(),
-                    })
+                    Ok(Value::plain(Term::var(index), ty.clone()))
                 } else {
                     if n.split_once('.')
                         .is_some_and(|(owner, _)| env.iter().any(|(bound, _)| bound == owner))
@@ -443,29 +578,35 @@ impl Elab<'_> {
                 if env.iter().any(|(bound, _)| bound == &n) {
                     return Err(unsupported("call target is shadowed by a value"));
                 }
-                if let Some(Item {
-                    kind: ItemKind::Function(callee),
-                    ..
-                }) = self.items.get(&n).copied()
-                {
-                    if !callee.requires.is_empty() || !callee.ensures.is_empty() {
-                        return Err(unsupported(
-                            "calls to contracted functions require separately discharged call obligations",
-                        ));
-                    }
-                }
                 // Check every argument before building a reducible application.
                 let f = self.function(&n)?;
                 if args.len() != f.domains.len() {
                     return Err(rejected("call arity mismatch"));
                 }
                 let mut term = f.term;
+                let mut precondition = f.precondition;
+                let mut calls = Vec::new();
                 for (arg, domain) in args.iter().zip(&f.domains) {
                     let value = self.expr(arg, env)?;
                     require_type(&value.ty, domain)?;
+                    // Arguments are eager, including arguments ignored by the
+                    // callee. Their call obligations survive beta reduction.
+                    calls.extend(value.calls);
+                    precondition = Term::app(precondition, value.term.clone());
                     term = Term::app(term, value.term);
                 }
-                Ok(Value { term, ty: f.result })
+                if f.requires_count != 0 {
+                    calls.push(CallRequirement {
+                        callee: n,
+                        span: expr.span,
+                        predicate: precondition,
+                    });
+                }
+                Ok(Value {
+                    term,
+                    ty: f.result,
+                    calls,
+                })
             }
             ExprKind::Unary {
                 op: UnOp::Not,
@@ -476,16 +617,28 @@ impl Elab<'_> {
                 Ok(Value {
                     term: choose(value.term, boolean(), truth(false), truth(true)),
                     ty: boolean(),
+                    calls: value.calls,
                 })
             }
             ExprKind::Binary { op, left, right } => {
                 let left = self.expr(left, env)?;
-                let right = self.expr(right, env)?;
+                let mut right = self.expr(right, env)?;
                 // User-defined Eq implementations are outside this closed profile.
                 require_type(&left.ty, &boolean())?;
                 require_type(&right.ty, &boolean())?;
                 let a = left.term;
                 let b = right.term;
+                for call in &mut right.calls {
+                    match op {
+                        BinOp::And => call.guard(a.clone()),
+                        BinOp::Or => {
+                            call.guard(choose(a.clone(), boolean(), truth(false), truth(true)))
+                        }
+                        _ => {}
+                    }
+                }
+                let mut calls = left.calls;
+                calls.extend(right.calls);
                 let term = match op {
                     BinOp::And => and(a, b),
                     BinOp::Or => choose(a, boolean(), truth(true), b),
@@ -506,6 +659,7 @@ impl Elab<'_> {
                 Ok(Value {
                     term,
                     ty: boolean(),
+                    calls,
                 })
             }
             ExprKind::If {
@@ -520,12 +674,27 @@ impl Elab<'_> {
                 };
                 let condition = self.expr(condition, env)?;
                 require_type(&condition.ty, &boolean())?;
-                let yes = self.block(then_branch, env)?;
-                let no = self.expr(other, env)?;
+                let mut yes = self.block(then_branch, env)?;
+                let mut no = self.expr(other, env)?;
                 require_type(&yes.ty, &no.ty)?;
+                for call in &mut yes.calls {
+                    call.guard(condition.term.clone());
+                }
+                for call in &mut no.calls {
+                    call.guard(choose(
+                        condition.term.clone(),
+                        boolean(),
+                        truth(false),
+                        truth(true),
+                    ));
+                }
+                let mut calls = condition.calls;
+                calls.extend(yes.calls);
+                calls.extend(no.calls);
                 Ok(Value {
                     term: choose(condition.term, yes.ty.clone(), yes.term, no.term),
                     ty: yes.ty,
+                    calls,
                 })
             }
             ExprKind::Match { expr, arms } => {
@@ -534,6 +703,7 @@ impl Elab<'_> {
                     return Err(rejected("non-finite match"));
                 };
                 let mut cases = vec![None; constructors.len()];
+                let mut calls = value.calls;
                 let mut result = None;
                 for arm in arms {
                     if arm.guard.is_some()
@@ -576,7 +746,7 @@ impl Elab<'_> {
                         }
                     };
                     // Validate even unreachable branches before any normalization.
-                    let body = self.expr(&arm.body, env)?;
+                    let mut body = self.expr(&arm.body, env)?;
                     if let Some(ty) = &result {
                         require_type(&body.ty, ty)?;
                     }
@@ -584,6 +754,15 @@ impl Elab<'_> {
                     if indices.is_empty() {
                         return Err(rejected("unreachable match arm"));
                     }
+                    for call in &mut body.calls {
+                        let mut branches = vec![truth(true); constructors.len()];
+                        for index in &indices {
+                            branches[*index] = call.predicate.clone();
+                        }
+                        call.predicate =
+                            select(value.term.clone(), value.ty.clone(), boolean(), branches);
+                    }
+                    calls.extend(body.calls);
                     for index in indices {
                         if cases[index].replace(body.term.clone()).is_some() {
                             return Err(rejected("overlapping match arms"));
@@ -598,6 +777,7 @@ impl Elab<'_> {
                 Ok(Value {
                     term: select(value.term, value.ty, ty.clone(), cases),
                     ty,
+                    calls,
                 })
             }
             _ => Err(unsupported(
@@ -605,14 +785,20 @@ impl Elab<'_> {
             )),
         }
     }
-    fn predicates(&mut self, expressions: &[Expr], env: &mut Env) -> Result<Term> {
-        let mut term = truth(true);
+    fn predicates(&mut self, expressions: &[Expr], env: &mut Env) -> Result<Value> {
+        let mut predicate = Value::plain(truth(true), boolean());
         for expression in expressions {
-            let value = self.expr(expression, env)?;
+            let mut value = self.expr(expression, env)?;
             require_type(&value.ty, &boolean())?;
-            term = and(term, value.term);
+            // Contract clauses form an ordered short-circuit conjunction.
+            // Later clauses cannot retroactively establish earlier calls.
+            for call in &mut value.calls {
+                call.guard(predicate.term.clone());
+            }
+            predicate.calls.extend(value.calls);
+            predicate.term = and(predicate.term, value.term);
         }
-        Ok(term)
+        Ok(predicate)
     }
 }
 
@@ -645,7 +831,8 @@ pub fn elaborate(source: &str, module: &Module, selected: &str) -> Result<Artifa
         active: BTreeSet::new(),
         dependencies: BTreeSet::new(),
         remaining: 20_000,
-        selected,
+        remaining_cases: 16_384,
+        candidates: Vec::new(),
     };
     let f = e.function(selected)?;
     let item = *e
@@ -658,35 +845,8 @@ pub fn elaborate(source: &str, module: &Module, selected: &str) -> Result<Artifa
     if decl.ensures.is_empty() {
         return Err(unsupported("at least one explicit postcondition required"));
     }
-    let (mut env, _) = e.signature(decl)?;
-    let pre = e.predicates(&decl.requires, &mut env)?;
-    // A checked local definition binds the actual computed result exactly once.
-    let actual = (0..env.len())
-        .rev()
-        .fold(f.term.clone(), |call, i| Term::app(call, Term::var(i)));
-    env.push(("result".into(), f.result.clone()));
-    let post = e.predicates(&decl.ensures, &mut env)?;
-    let post = Term::Let {
-        value: Box::new(actual),
-        body: Box::new(post),
-    };
-    let body = choose(pre, boolean(), post, truth(true));
-    let predicate = f
-        .domains
-        .iter()
-        .rev()
-        .fold(body, |term, ty| Term::lam(ty.clone(), term));
-    let certificate = proof::certificate(&f.domains, &predicate, &boolean())?;
-    let input_cases = f.domains.iter().try_fold(1usize, |n, ty| {
-        let Term::Data { constructors, .. } = ty else {
-            return Err(rejected("non-finite parameter"));
-        };
-        n.checked_mul(constructors.len())
-            .ok_or_else(|| Error::Inconclusive {
-                code: "finite_case_limit",
-                message: "finite input cardinality overflow".into(),
-            })
-    })?;
+    let certificate = obligations::bundle(&e.candidates);
+    let input_cases = input_cases(&f.domains)?;
     let function_type = f
         .domains
         .iter()
@@ -706,8 +866,10 @@ pub fn elaborate(source: &str, module: &Module, selected: &str) -> Result<Artifa
             function_type,
             dependencies,
             input_cases,
-            requires_count: decl.requires.len(),
-            ensures_count: decl.ensures.len(),
+            requires_count: f.requires_count,
+            ensures_count: f.ensures_count,
+            obligations: e.candidates.iter().map(|c| c.binding.clone()).collect(),
         },
+        candidates: e.candidates,
     })
 }

@@ -114,7 +114,13 @@ fn strict_envelope_and_resource_failures_never_become_certificates() {
 #[test]
 fn real_source_worker_uses_the_shared_bounded_supervisor() {
     let executable = Path::new(env!("CARGO_BIN_EXE_verum-source-replay"));
-    let bytes = process::run_worker(executable, "--worker", &request(ID, "identity")).unwrap();
+    let bytes = process::run_worker_with_limits(
+        executable,
+        "--worker",
+        &request(ID, "identity"),
+        verum_source_proof::WORKER_LIMITS,
+    )
+    .unwrap();
     let report: SourceReport = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(report.status, "verified");
     let native = serde_json::to_vec(&report.judgment.unwrap()).unwrap();
@@ -140,6 +146,64 @@ fn real_source_worker_uses_the_shared_bounded_supervisor() {
         .code,
         "worker_unavailable"
     );
+}
+
+#[test]
+fn source_artifact_transport_preserves_resource_refusals() {
+    let executable = Path::new(env!("CARGO_BIN_EXE_verum-source-replay"));
+    let input = request(ID, "identity");
+    for (limits, code) in [
+        (
+            {
+                let mut l = verum_source_proof::WORKER_LIMITS;
+                l.process.output_bytes = 1;
+                l
+            },
+            "output_limit",
+        ),
+        (
+            {
+                let mut l = verum_source_proof::WORKER_LIMITS;
+                l.process.output_bytes = 0;
+                l
+            },
+            "invalid_limits",
+        ),
+        (
+            {
+                let mut l = verum_source_proof::WORKER_LIMITS;
+                l.process.wall_time_ms = 0;
+                l
+            },
+            "wall_limit",
+        ),
+        (
+            {
+                let mut l = verum_source_proof::WORKER_LIMITS;
+                l.admission.max_bytes = input.len() - 1;
+                l
+            },
+            "byte_limit",
+        ),
+    ] {
+        let error =
+            process::run_worker_with_limits(executable, "--worker", &input, limits).unwrap_err();
+        assert_eq!(error.code, code);
+    }
+    // Submitted requests cannot select a larger resource policy.
+    let mut input: serde_json::Value = serde_json::from_slice(&input).unwrap();
+    input["limits"] = serde_json::to_value(verum_source_proof::WORKER_LIMITS).unwrap();
+    let bytes = process::run_worker_with_limits(
+        executable,
+        "--worker",
+        &serde_json::to_vec(&input).unwrap(),
+        verum_source_proof::WORKER_LIMITS,
+    )
+    .unwrap();
+    let report: SourceReport = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(report.status, "rejected");
+    assert_eq!(report.diagnostic.unwrap().code, "invalid_source_request");
+    assert!(report.judgment.is_none());
 }
 
 #[test]

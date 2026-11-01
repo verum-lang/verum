@@ -1,0 +1,36 @@
+fn finish(ready: Bool, accepted: Bool) -> Bool
+    requires ready
+    ensures result == accepted
+{
+    ready && accepted
+}
+
+fn checked_finish(ready: Bool, accepted: Bool) -> Bool
+    requires ready
+    ensures result == accepted
+{
+    let permission = ready;
+    finish(permission, accepted)
+}
+
+fn publish(ready: Bool, requested: Bool, accepted: Bool) -> Bool
+    ensures result == (ready && requested && accepted)
+{
+    if ready && requested {
+        checked_finish(ready, accepted)
+    } else {
+        false
+    }
+}
+
+fn main() {
+    assert(!publish(false, false, false));
+    assert(!publish(false, false, true));
+    assert(!publish(false, true, false));
+    assert(!publish(false, true, true));
+    assert(!publish(true, false, false));
+    assert(!publish(true, false, true));
+    assert(!publish(true, true, false));
+    assert(publish(true, true, true));
+    print("contracted-transition: all input cases passed");
+}
