@@ -18,8 +18,11 @@ use tokio::{
 };
 use verum_common::{List, Text};
 use verum_common::runtime_diagnostics::RuntimeReport;
+use verum_source_proof::{SourceOutcome, SourceReport, SourceRequest, WORKER_LIMITS};
 
 const OUTPUT_LIMIT: usize = 256 * 1024;
+// Includes the structured proof and escaped raw worker output in a receipt.
+const RECEIPT_LIMIT: u64 = 4 * WORKER_LIMITS.process.output_bytes;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Receipt {
     pub id: Text,
@@ -64,7 +67,7 @@ impl Jobs {
             let Ok(meta) = std::fs::symlink_metadata(&path) else {
                 continue;
             };
-            if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 1024 * 1024 {
+            if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > RECEIPT_LIMIT {
                 continue;
             }
             let Ok(mut receipt) = serde_json::from_slice::<Receipt>(&std::fs::read(path)?) else {
@@ -83,6 +86,21 @@ impl Jobs {
             if receipt.status == "running" {
                 receipt.status = "inconclusive".into();
                 receipt.termination = "Studio stopped before receiving a terminal result".into();
+            }
+            if receipt.plan.kind == OperationKind::Proof && receipt.status == "succeeded" {
+                let valid = (|| {
+                    let request = SourceRequest {
+                        profile: receipt.plan.proof_profile?.as_str().into(),
+                        source: std::str::from_utf8(&source).ok()?.into(),
+                        declaration: receipt.plan.declaration.as_ref()?.to_string(),
+                    };
+                    let proof: SourceReport = serde_json::from_value(receipt.proof.clone()?).ok()?;
+                    (proof.validate_for(&request).ok()? == SourceOutcome::Verified).then_some(())
+                })().is_some();
+                if !valid {
+                    receipt.status = "inconclusive".into();
+                    receipt.termination = "Retained proof evidence does not match this request and checker version".into();
+                }
             }
             load_runtime_report(&mut receipt);
             receipts.push(receipt);
@@ -143,11 +161,16 @@ impl Jobs {
             use std::os::unix::process::CommandExt;
             command.as_std_mut().process_group(0);
         }
-        let input = if plan.kind == OperationKind::Proof {
+        let proof_request = if plan.kind == OperationKind::Proof {
+            Some(SourceRequest {
+                profile: plan.proof_profile.expect("validated proof profile").as_str().into(),
+                source: source.into(),
+                declaration: plan.declaration.as_ref().expect("validated declaration").to_string(),
+            })
+        } else { None };
+        let input = if let Some(request) = &proof_request {
             command.arg("--worker");
-            Some(List::from(serde_json::to_vec(
-                &json!({"profile":"verum-source-pi-id/1", "source":source,"declaration":plan.declaration}),
-            )?))
+            Some(List::from(serde_json::to_vec(request)?))
         } else if plan.kind == OperationKind::Run {
             // The CLI stdin entry selects script syntax without inventing a
             // wrapper or a second compiler in Studio.
@@ -199,6 +222,7 @@ impl Jobs {
             execute(
                 child,
                 input,
+                proof_request,
                 receipt,
                 receiver,
                 Duration::from_millis(timeout),
@@ -245,6 +269,8 @@ async fn capture(
     receipt: Arc<Mutex<Receipt>>,
     stderr: bool,
 ) -> Result<()> {
+    let artifact = !stderr && receipt.lock().await.plan.kind == OperationKind::Proof;
+    let limit = if artifact { WORKER_LIMITS.process.output_bytes as usize } else { OUTPUT_LIMIT };
     let mut bytes = List::<u8>::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -252,10 +278,13 @@ async fn capture(
         if n == 0 {
             break;
         }
-        if bytes.len() + n > OUTPUT_LIMIT {
+        if bytes.len() + n > limit {
             return Err(OutputBudget.into());
         }
         bytes.extend_from_slice(&chunk[..n]);
+        // A proof report is one JSON artifact, not a text stream. Publish it
+        // once instead of repeatedly copying a growing multi-megabyte document.
+        if artifact { continue; }
         let text = Text::from_utf8_lossy(&bytes);
         let mut record = receipt.lock().await;
         if stderr {
@@ -265,11 +294,17 @@ async fn capture(
         }
         record.version += 1;
     }
+    if artifact {
+        let mut record = receipt.lock().await;
+        record.stdout = Text::from_utf8_lossy(&bytes);
+        record.version += 1;
+    }
     Ok(())
 }
 async fn execute(
     mut child: tokio::process::Child,
     input: Option<List<u8>>,
+    proof_request: Option<SourceRequest>,
     receipt: Arc<Mutex<Receipt>>,
     mut cancel: watch::Receiver<bool>,
     timeout: Duration,
@@ -318,24 +353,25 @@ async fn execute(
     record.version += 1;
     load_runtime_report(&mut record);
     if record.plan.kind == OperationKind::Proof && state == "succeeded" {
-        match serde_json::from_str::<Value>(&record.stdout) {
-            Ok(proof)
-                if proof["source"]["sha256"].as_str() == Some(record.plan.source_hash.as_str()) =>
-            {
-                record.status = match proof["status"].as_str() {
-                    Some("verified") => "succeeded",
-                    Some("rejected") => "failed",
-                    Some("resource_exhausted") => "exhausted",
-                    _ => "inconclusive",
-                }
-                .into();
-                record.proof = Some(proof);
+        let validated = serde_json::from_str::<SourceReport>(&record.stdout)
+            .map_err(|_| "Proof worker returned an invalid source report")
+            .and_then(|proof| {
+                let outcome = proof.validate_for(proof_request.as_ref().expect("proof request retained"))?;
+                Ok((proof, outcome))
+            });
+        match validated {
+            Ok((proof, outcome)) => {
+                record.status = match outcome {
+                    SourceOutcome::Verified => "succeeded",
+                    SourceOutcome::Rejected => "failed",
+                    SourceOutcome::Unsupported => "unsupported",
+                    SourceOutcome::Inconclusive | SourceOutcome::Unavailable => "inconclusive",
+                }.into();
+                record.proof = Some(serde_json::to_value(proof).expect("serializable source report"));
             }
-            _ => {
+            Err(message) => {
                 record.status = "inconclusive".into();
-                record
-                    .stderr
-                    .push_str("\nProof worker did not return evidence for this source.");
+                record.stderr.push_str(&format!("\n{message}"));
             }
         }
     }

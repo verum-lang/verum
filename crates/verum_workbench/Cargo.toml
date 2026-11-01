@@ -9,6 +9,7 @@ description = "Local graphical workspace for Verum programs and proof evidence"
 [dependencies]
 verum_common.workspace = true
 verum_lsp.workspace = true
+verum_source_proof = { path = "../verum_source_proof" }
 futures.workspace = true
 tower = { version = "0.4", features = ["util"] }
 tower-lsp = "0.20"

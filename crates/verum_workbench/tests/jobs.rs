@@ -166,7 +166,7 @@ async fn zero_exit_is_not_sufficient_for_a_proof() {
         dir.path().join("proof.vr"),
     )
     .unwrap();
-    assert_eq!(done(&jobs).await["status"], "failed");
+    assert_eq!(done(&jobs).await["status"], "inconclusive", "An incomplete refusal is not validated evidence");
     let mut jobs = runner(
         dir.path(),
         "cat >/dev/null\nprintf '%s' '{\"status\":\"verified\",\"source\":{\"sha256\":\"another-source\"}}'",
@@ -177,6 +177,71 @@ async fn zero_exit_is_not_sufficient_for_a_proof() {
     )
     .unwrap();
     assert_eq!(done(&jobs).await["status"], "inconclusive");
+}
+
+#[tokio::test]
+async fn proof_receipts_bind_scope_declaration_and_complete_native_evidence() {
+    let source = "fn t(x:Bool)->Bool ensures result == x { x }";
+    let request = verum_source_proof::SourceRequest {
+        profile: verum_source_proof::SourceProfile::Finite.as_str().into(),
+        source: source.into(), declaration: "t".into(),
+    };
+    let report = serde_json::to_value(verum_source_proof::replay(&serde_json::to_vec(&request).unwrap())).unwrap();
+    for mutation in ["none", "declaration", "profile", "judgment", "native"] {
+        let root = tempfile::tempdir().unwrap();
+        let mut response = report.clone();
+        match mutation {
+            "declaration" => response["source"]["declaration"] = json!("other"),
+            "profile" => response["profile"] = json!(verum_source_proof::SourceProfile::Logical),
+            "judgment" => response["judgment"] = Value::Null,
+            "native" => response["native"]["accepted"] = json!(false),
+            _ => {}
+        }
+        std::fs::write(root.path().join("response.json"), serde_json::to_vec(&response).unwrap()).unwrap();
+        let mut jobs = runner(root.path(), "cat >/dev/null\ncat response.json");
+        jobs.start(&json!({"kind":"proof","path":"proof.vr","source":source,"declaration":"t","proof_profile":request.profile}), root.path().join("proof.vr")).unwrap();
+        let receipt = done(&jobs).await;
+        assert_eq!(receipt["status"], if mutation == "none" { "succeeded" } else { "inconclusive" }, "{mutation}: {receipt}");
+        if mutation == "none" {
+            assert_eq!(receipt["proof_profile"], request.profile);
+            let mut restored = runner(root.path(), "exit 0");
+            restored.restore().unwrap();
+            assert_eq!(restored.list().await[0]["status"], "succeeded");
+            let mut tampered = receipt.clone();
+            tampered["proof"]["source"]["declaration"] = json!("other");
+            std::fs::write(Path::new(receipt["evidence_path"].as_str().unwrap()).join("receipt.json"), serde_json::to_vec(&tampered).unwrap()).unwrap();
+            let mut restored = runner(root.path(), "exit 0");
+            restored.restore().unwrap();
+            assert_eq!(restored.list().await[0]["status"], "inconclusive");
+        }
+    }
+}
+
+#[tokio::test]
+async fn complete_proof_artifacts_use_the_worker_budget_and_survive_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let arguments = (0..8).map(|n| format!("x{n}:Bool")).collect::<Vec<_>>().join(",");
+    let request = verum_source_proof::SourceRequest {
+        profile: verum_source_proof::SourceProfile::Finite.as_str().into(),
+        source: format!("fn t({arguments})->Bool ensures result == x0 {{ x0 }}"),
+        declaration: "t".into(),
+    };
+    let report = verum_source_proof::replay(&serde_json::to_vec(&request).unwrap());
+    assert_eq!(report.validate_for(&request), Ok(verum_source_proof::SourceOutcome::Verified));
+    let bytes = serde_json::to_vec(&report).unwrap();
+    assert!(bytes.len() > 256 * 1024, "Exercise a proof larger than the text stream budget");
+    std::fs::write(root.path().join("response.json"), &bytes).unwrap();
+    let mut jobs = runner(root.path(), "cat > received.json\ncat response.json");
+    jobs.start(&json!({"kind":"proof","path":"proof.vr","source":request.source,"declaration":request.declaration,"proof_profile":request.profile}), root.path().join("proof.vr")).unwrap();
+    let receipt = done(&jobs).await;
+    assert_eq!(receipt["status"], "succeeded", "{}", receipt["stderr"]);
+    assert_eq!(receipt["stdout"].as_str().unwrap().as_bytes(), bytes);
+    let received: Value = serde_json::from_slice(&std::fs::read(root.path().join("received.json")).unwrap()).unwrap();
+    assert_eq!(received, serde_json::to_value(&request).unwrap());
+    let mut restored = runner(root.path(), "exit 0");
+    restored.restore().unwrap();
+    assert_eq!(restored.list().await[0]["status"], "succeeded");
+    assert_eq!(restored.list().await[0]["proof"], serde_json::to_value(report).unwrap());
 }
 
 #[tokio::test]

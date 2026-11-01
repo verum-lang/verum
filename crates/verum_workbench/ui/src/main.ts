@@ -250,7 +250,7 @@ async function newDocument(source = '', suggestion = 'experiment.vr') {
     if (files.some(file => file.path === path)) throw new Error(t(m('{path} already exists. Open it from the explorer or choose a different name.', { path })));
     return { path, source, hash: null };
   });
-    if (replaced === 'applied' && source === IDENTITY) { input('declaration').value = 'identity'; $('execution-settings').hidden = false; $('run-settings').setAttribute('aria-expanded', 'true'); }
+    if (replaced === 'applied' && source === IDENTITY) { input('declaration').value = 'identity'; $<HTMLSelectElement>('proof-profile').value = 'verum-source-pi-id/1'; $('execution-settings').hidden = false; $('run-settings').setAttribute('aria-expanded', 'true'); }
   } finally { switching = false; }
 }
 bind('save', save); bind('refresh-files', refreshFiles); bind('new-file', () => newDocument());
@@ -405,11 +405,12 @@ function operationRequest(kind: Receipt['kind'], diagnostics = input('runtime-di
   const seconds = Number(input('timeout').value);
   if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300) throw new Error(t(m('Choose a time budget between 1 and 300 seconds.')));
   const declaration = input('declaration').value.trim();
-  if (kind === 'proof' && !declaration) { $('execution-settings').hidden = false; input('declaration').focus(); throw new Error(t(m('Enter the logical declaration to check.'))); }
+  if (kind === 'proof' && !declaration) { $('execution-settings').hidden = false; input('declaration').focus(); throw new Error(t(m('Enter the declaration to check.'))); }
+  const proof_profile = $<HTMLSelectElement>('proof-profile').value;
   const permissions = $<HTMLSelectElement>('run-permissions').value as RunPermissions;
-  return { kind, source, path, ...(kind === 'proof' ? { declaration } : {}), ...(kind === 'run' ? { permissions, runtime_diagnostics: diagnostics } : {}), timeout_ms: Math.round(seconds * 1000) };
+  return { kind, source, path, ...(kind === 'proof' ? { declaration, proof_profile } : {}), ...(kind === 'run' ? { permissions, runtime_diagnostics: diagnostics } : {}), timeout_ms: Math.round(seconds * 1000) };
 }
-for (const id of ['run-permissions', 'runtime-diagnostics', 'timeout', 'declaration']) $(id).addEventListener('input', () => { $('execution-plan').hidden = true; });
+for (const id of ['run-permissions', 'runtime-diagnostics', 'timeout', 'declaration', 'proof-profile']) $(id).addEventListener('input', () => { $('execution-plan').hidden = true; });
 bind('preview-run', async () => {
   const request = operationRequest('run'), revision = documentRevision();
   const plan = await api<ExecutionPlan>('operation.plan', request);
@@ -514,11 +515,25 @@ function renderResults() {
   if (receipt.termination) context.append(node('p', 'termination', receipt.termination));
   if (receipt.kind === 'proof') {
     const proof = node('div', 'proof-outcome');
-    const report = parseArguments(receipt.proof), source = parseArguments(report.source), diagnostic = parseArguments(report.diagnostic);
-    proof.append(node('h3', '', typeof report.status === 'string' ? m('Checker judgment: {status}', { status: report.status }) : m('Logical proof evidence')));
-    if (typeof source.declaration === 'string') proof.append(node('p', '', m('Declaration: {declaration}', { declaration: source.declaration })));
+    const report = parseArguments(receipt.proof), diagnostic = parseArguments(report.diagnostic);
+    proof.append(node('h3', '', m('Proof evidence')));
+    if (receipt.declaration) proof.append(node('p', '', m('Declaration: {declaration}', { declaration: receipt.declaration })));
     if (typeof diagnostic.message === 'string') proof.append(node('p', '', diagnostic.message));
-    proof.append(node('p', '', m('This judgment applies to the selected logical declaration and source revision. Runtime implementation correspondence is a separate obligation.'))); detail.append(proof);
+    proof.append(node('p', '', m(receipt.proof_profile === 'verum-source-finite/1' ? 'Finite function contract' : receipt.proof_profile === 'verum-source-pi-id/1' ? 'Logical theorem' : 'Not recorded')));
+    const implementation = parseArguments(report.implementation);
+    if (receipt.status === 'succeeded' && Array.isArray(implementation.obligations)) {
+      const obligations = node('details'); obligations.dataset.key = 'obligations';
+      const summary = node('summary', '', m('Checked obligations: {count}', { count: implementation.obligations.length })); summary.dataset.focusKey = 'obligations'; obligations.append(summary);
+      const labels: Record<string, Content> = { function_contract: m('Function contract'), body_call: m('Call in function body'), precondition_call: m('Call in precondition'), postcondition_call: m('Call in postcondition') };
+      for (const raw of implementation.obligations) {
+        const obligation = parseArguments(raw), owner = parseArguments(obligation.owner), callee = parseArguments(obligation.callee);
+        const label = labels[String(obligation.kind)] ?? m('Proof obligation');
+        const row = node('p', 'muted', `${String(owner.declaration ?? '')} · `);
+        row.append(node('span', '', label), document.createTextNode(typeof callee.declaration === 'string' ? ` → ${callee.declaration}` : '')); obligations.append(row);
+      }
+      proof.append(obligations);
+    }
+    proof.append(node('p', '', m('This judgment applies to the selected declaration, proof scope and source revision. Native implementation correspondence is separate.'))); detail.append(proof);
     if (receipt.proof !== undefined && receipt.proof !== null) appendDetails(detail, m('Full checker report'), receipt.proof, 'proof');
   } else if (receipt.kind === 'run') context.append(node('p', 'muted', m('Observed execution for this source revision; not a proof of all behaviors.')));
   if (receipt.stdout) {
@@ -792,7 +807,7 @@ const commandRegistry = new CommandRegistry([
   control('save', m('Save source'), 'Mod+S'), control('new-file', m('New Verum file')),
   control('reload-source', m('Review the saved file before reloading')), control('refresh-files', m('Refresh files')),
   control('run', m('Run source'), 'Mod+Enter', ['editor']), control('check', m('Check source'), 'Mod+Shift+Enter', ['editor']),
-  control('prove', m('Check a logical declaration'), 'Alt+Shift+Enter', ['editor']),
+  control('prove', m('Check a declaration'), 'Alt+Shift+Enter', ['editor']),
   command('run.cbgr', m('Run with CBGR diagnostics'), '', () => startOperation('run', true), ['editor'], () => currentPath.endsWith('.vr') && !starting),
   control('run-settings', m('Execution options')), control('preview-run', m('Inspect run plan')),
   control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),

@@ -243,6 +243,7 @@ pub fn tools() -> Value {
     let permissions = json!({"type":"string","enum":["source","deny-all","allow-all"],"description":"Script permission mode: source follows CLI/frontmatter defaults; deny-all clears grants; allow-all grants all kinds. Not an OS sandbox."});
     let timeout = json!({"type":"integer","minimum":1,"maximum":300000,"description":"Wall time budget in milliseconds; default 60000"});
     let runtime_diagnostics = json!({"type":"boolean","description":"Capture bounded CBGR dispatch errors for this execution. Not allocation tracing or a proof of memory safety. Default false."});
+    let proof_profile = json!({"type":"string","enum":verum_source_proof::SourceProfile::ALL,"description":"Source proof scope: logical theorem (default), or closed finite function contracts with proved helper-call obligations. Neither proves native compiler correspondence."});
     let mut tools = List::new();
     for (name, description, properties, required) in [
         (
@@ -284,7 +285,7 @@ pub fn tools() -> Value {
         (
             "verum_plan",
             "Inspect the exact execution contract without launching a process or writing run evidence. Run permission overrides apply only to scripts.",
-            json!({"kind":{"type":"string","enum":["run","check","proof"]},"path":{"type":"string"},"source":source,"permissions":permissions,"runtime_diagnostics":runtime_diagnostics,"timeout_ms":timeout,"declaration":{"type":"string"}}),
+            json!({"kind":{"type":"string","enum":["run","check","proof"]},"path":{"type":"string"},"source":source,"permissions":permissions,"runtime_diagnostics":runtime_diagnostics,"timeout_ms":timeout,"declaration":{"type":"string"},"proof_profile":proof_profile}),
             json!(["kind", "path", "source"]),
         ),
         (
@@ -301,8 +302,8 @@ pub fn tools() -> Value {
         ),
         (
             "verum_proof",
-            "Check one closed logical theorem using verum-source-pi-id/1; not a runtime refinement proof",
-            json!({"path":{"type":"string"},"source":source,"declaration":{"type":"string"},"timeout_ms":timeout}),
+            "Check a logical theorem or finite source function contract using the selected proof_profile; not native implementation correspondence",
+            json!({"path":{"type":"string"},"source":source,"declaration":{"type":"string"},"timeout_ms":timeout,"proof_profile":proof_profile}),
             json!(["path", "source", "declaration"]),
         ),
     ] {

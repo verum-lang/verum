@@ -5062,6 +5062,7 @@ dependencies = [
  "uuid",
  "verum_common",
  "verum_lsp",
+ "verum_source_proof",
 ]
 
 [[package]]

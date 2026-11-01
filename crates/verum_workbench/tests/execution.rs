@@ -59,6 +59,17 @@ async fn shared_planning_is_read_only_and_uses_the_workspace_boundary() {
         assert_eq!(planning["properties"][field], running["properties"][field]);
     }
     assert_eq!(planning["additionalProperties"], false);
+    assert_eq!(planning["properties"]["proof_profile"], schema("verum_proof")["properties"]["proof_profile"]);
+    assert_eq!(schema("verum_proof")["properties"]["proof_profile"]["enum"], json!(verum_source_proof::SourceProfile::ALL));
+    for profile in verum_source_proof::SourceProfile::ALL {
+        let plan = studio.call("operation.plan", json!({"kind":"proof","path":"main.vr","source":"fn t()->Bool ensures result { true }","declaration":"t","proof_profile":profile})).await.unwrap();
+        assert_eq!(plan["proof_profile"], json!(profile));
+    }
+    for params in [
+        json!({"kind":"proof","path":"main.vr","source":"","declaration":"t","proof_profile":"guess"}),
+        json!({"kind":"proof","path":"main.vr","source":"","declaration":"t","proof_profile":null}),
+        json!({"kind":"run","path":"main.vr","source":"","proof_profile":"verum-source-finite/1"}),
+    ] { assert!(studio.call("operation.plan", params).await.is_err()); }
     assert_eq!(
         schema("verum_check")["properties"]["permissions"],
         json!(null)

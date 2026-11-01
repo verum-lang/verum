@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use verum_common::Text;
+use verum_source_proof::SourceProfile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -48,6 +49,8 @@ pub struct ExecutionPlan {
     pub runtime_diagnostics: Option<bool>,
     #[serde(default)]
     pub declaration: Option<Text>,
+    #[serde(default)]
+    pub proof_profile: Option<SourceProfile>,
 }
 
 impl ExecutionPlan {
@@ -83,7 +86,7 @@ impl ExecutionPlan {
                 params["declaration"]
                     .as_str()
                     .filter(|name| !name.trim().is_empty())
-                    .context("Choose a theorem declaration")?
+                    .context("Choose a proof declaration")?
                     .into(),
             )
         } else {
@@ -91,6 +94,16 @@ impl ExecutionPlan {
                 params.get("declaration").is_none(),
                 "A declaration applies only to proof checks"
             );
+            None
+        };
+        let proof_profile = if kind == OperationKind::Proof {
+            Some(match params.get("proof_profile") {
+                None => SourceProfile::default(),
+                Some(value) => serde_json::from_value(value.clone())
+                    .context("Choose a supported source proof profile")?,
+            })
+        } else {
+            ensure!(params.get("proof_profile").is_none(), "A proof profile applies only to proof checks");
             None
         };
         let runtime_diagnostics = if kind == OperationKind::Run {
@@ -117,6 +130,7 @@ impl ExecutionPlan {
             permissions,
             runtime_diagnostics,
             declaration,
+            proof_profile,
         })
     }
 }
