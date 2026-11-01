@@ -210,11 +210,8 @@ fn call_with_single_segment_callee(expr: &Expr) -> Option<(&str, &[Expr])> {
         } => (func, args, type_args),
         _ => return None,
     };
-    // V0: skip calls carrying explicit type arguments — Coq/Lean
-    // unify implicits, so we can drop them safely, but recording
-    // the choice as a future-V1 enhancement keeps the contract
-    // explicit. For now, fall back so the renderer reverts to
-    // admitted; a future translator can render `apply (<name> @T)`.
+    // Explicit generic arguments require a typed parameter correspondence.
+    // Refuse this shape until that evidence is available.
     if !type_args.is_empty() {
         return None;
     }
@@ -240,6 +237,9 @@ fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(String, &[Expr])> {
         TacticExpr::Apply { lemma, args } => (lemma, args),
         _ => return None,
     };
+    if matches!(lemma.kind, ExprKind::Call { .. }) && !outer_args.is_empty() {
+        return None; // Ambiguous AST: neither argument list may be discarded.
+    }
     // Single-segment bare path: `apply foo;`
     if let Some(name) = single_segment_path_name(lemma.as_ref()) {
         return Some((name.to_string(), outer_args.as_slice()));
@@ -310,61 +310,19 @@ fn classify_single_apply(body: &ProofBody) -> Option<(String, &[Expr])> {
     }
 }
 
-/// One recognised step in a multi-step tactic chain. Either an
-/// `apply <name>` (with optional args, currently dropped per V0
-/// convention) or a primitive tactic that the per-backend renderer
-/// already knows how to translate. Used by
-/// [`classify_tactic_chain`].
+/// A supported application or primitive, retaining every explicit operand.
 #[derive(Debug, Clone)]
 enum ChainStep<'a> {
-    /// `apply <name>` step. Args dropped at render-time — the
-    /// foreign tool's unifier supplies implicits.
-    Apply { name: String },
+    /// Explicit argument expressions are retained in declaration order.
+    Apply { name: String, args: &'a [Expr] },
     /// A primitive tactic — `Trivial`, `Reflexivity`, `Auto{...}`,
     /// `Ring`, `Field`, `Omega`, `Assumption` — that has a direct
     /// per-backend translation.
     Primitive(&'a TacticExpr),
 }
 
-/// If `body` is `ProofBody::Structured` with **all** steps + the
-/// optional conclusion classifying as either `apply <name>` or one
-/// of the recognised primitive tactics, return the ordered chain.
-/// Otherwise return `None`.
-///
-/// Single-step shapes are NOT returned here — they're already
-/// handled by [`classify_single_apply`] / [`primitive_tactic`] and
-/// the existing per-backend single-step renderers. This classifier
-/// targets the **N≥2** shapes (multi-`apply` proofs, mixed
-/// `apply` + primitive sequences, steps + conclusion) that
-/// previously fell through to `Admitted.`/`sorry`.
-///
-/// **Why this matters for #153**: corpus theorems with two or
-/// more sequential `apply` steps (composition lemmas, transport
-/// chains) used to emit unconditional admits — the foreign tool
-/// only verified the proposition's TYPE, not the proof structure.
-/// With chain support, the foreign tool re-runs every step.
-///
-/// ## Structural transparency (#153 V3)
-///
-/// `ProofStepKind::Let` and `ProofStepKind::Obtain` introduce
-/// Verum-internal bindings — they are **transparent** at the
-/// cross-format gate. The foreign tool's unifier resolves apply
-/// arguments from the lemma signatures it has on hand; it doesn't
-/// need the Verum binding scaffolding. Dropping the lets keeps the
-/// gate's verdict honest: "Coq accepts the apply skeleton" matches
-/// what the foreign tool can independently verify.
-///
-/// `ProofStepKind::Have`, `Show`, `Suffices` carry a tactic
-/// justification + a (possibly complex) proposition. The proposition
-/// is dropped (translation is V1+); the justification tactic is
-/// extracted as a regular chain step. Sound for the same reason as
-/// argument-dropping in single-apply: the foreign tool's unifier
-/// fills in what we drop.
-///
-/// `Calc`, `Cases`, `Focus` carry nested sub-structures whose
-/// translation needs more machinery (calc requires per-relation
-/// Coq tactics; cases requires per-case bodies). They still bail
-/// out — chain falls back, body emits `Admitted.`/`sorry`.
+/// A chain is translated only if every step has a complete representation.
+/// Unsupported steps refuse the entire chain; none are transparent.
 fn classify_tactic_chain(body: &ProofBody) -> Option<Vec<ChainStep<'_>>> {
     let s = match body {
         ProofBody::Structured(s) => s,
@@ -387,53 +345,19 @@ fn classify_tactic_chain(body: &ProofBody) -> Option<Vec<ChainStep<'_>>> {
         chain.extend(nested);
     }
 
-    // Empty chains (body is purely transparent — only Lets/Obtains
-    // with no actual tactic) fall back so the body emits admitted/sorry.
-    // Single-element chains are accepted: the parser may produce
-    // `Tactic(Apply foo)` standalone (where `classify_single_apply`
-    // would have already fired upstream and we'd never reach here),
-    // or `Let x = e; apply foo;` where `classify_single_apply`
-    // doesn't see through the transparent prefix. Accepting len=1
-    // closes the latter case without disrupting the former.
     if chain.is_empty() {
         return None;
     }
     Some(chain)
 }
 
-/// Classify a structural-step kind. Returns:
-///   * `Some(steps)` — emitted as a (possibly empty, possibly multi-)
-///     vec of chain steps. Empty for transparent steps (Let/Obtain);
-///     multi-element for `Tactic(Seq(...))` shapes the parser produces
-///     when consecutive applies share a single `;`-separated step.
-///   * `None` — un-renderable (Calc/Cases/Focus, alternatives,
-///     unrecognised tactics) — abort the chain.
-fn classify_proof_step_kind(
-    kind: &ProofStepKind,
-) -> Option<Vec<ChainStep<'_>>> {
+/// Only bare tactics have full chain representations here.
+fn classify_proof_step_kind(kind: &ProofStepKind) -> Option<Vec<ChainStep<'_>>> {
     match kind {
-        // Bare tactic — flatten through the chain-aware classifier.
-        ProofStepKind::Tactic(t) => classify_tactic_for_chain(t),
-        // Have/Show/Suffices: extract the justification tactic. Drop
-        // the proposition — the foreign tool's unifier doesn't need it,
-        // and translating arbitrary propositions is V1.
-        ProofStepKind::Have { justification, .. }
-        | ProofStepKind::Show { justification, .. }
-        | ProofStepKind::Suffices { justification, .. } => {
-            classify_tactic_for_chain(justification)
-        }
-        // Let/Obtain: transparent. Verum-internal binding scaffolding —
-        // the foreign tool unifies apply arguments from lemma signatures,
-        // it doesn't need the binding name. Empty vec signals "skip
-        // this step but don't reject the chain".
-        ProofStepKind::Let { .. } | ProofStepKind::Obtain { .. } => {
-            Some(Vec::new())
-        }
-        // Calc/Cases/Focus: nested sub-structures. V1+ work — for
-        // now the chain falls back so the body emits admitted/sorry.
-        ProofStepKind::Calc(_)
-        | ProofStepKind::Cases { .. }
-        | ProofStepKind::Focus { .. } => None,
+        ProofStepKind::Tactic(tactic) => classify_tactic_for_chain(tactic),
+        // Propositions and scoped bindings are proof input, not scaffolding.
+        // Until a backend renders their full semantics, refuse the whole body.
+        _ => None,
     }
 }
 
@@ -484,8 +408,8 @@ fn classify_tactic_for_chain(tactic: &TacticExpr) -> Option<Vec<ChainStep<'_>>> 
 /// the whole chain bails out rather than emitting a half-translated
 /// proof.
 fn classify_chain_step(tactic: &TacticExpr) -> Option<ChainStep<'_>> {
-    if let Some((name, _args)) = classify_apply_tactic(tactic) {
-        return Some(ChainStep::Apply { name });
+    if let Some((name, args)) = classify_apply_tactic(tactic) {
+        return Some(ChainStep::Apply { name, args });
     }
     // Recognise primitives whose per-backend tactic forms exist —
     // probing each translator with this tactic and accepting the
@@ -497,6 +421,18 @@ fn classify_chain_step(tactic: &TacticExpr) -> Option<ChainStep<'_>> {
         return Some(ChainStep::Primitive(tactic));
     }
     None
+}
+
+fn render_apply_term(renderer: &impl ExprRenderer, name: &str, args: &[Expr]) -> Result<String, String> {
+    if args.is_empty() { return Ok(name.to_string()); }
+    let mut term = name.to_string();
+    for argument in args {
+        match renderer.render(argument) {
+            TranslatedExpr::Translated { text } => term.push_str(&format!(" ({text})")),
+            TranslatedExpr::Fallback { reason, .. } => return Err(format!("apply argument cannot be translated: {reason}")),
+        }
+    }
+    Ok(format!("({term})"))
 }
 
 // =============================================================================
@@ -557,9 +493,7 @@ fn render_term_coq(body: &ProofBody) -> TranslatedProofBody {
     }
 }
 
-/// Coq single-apply proof: `apply <name>.` Args are not rendered
-/// yet (Coq apply unification usually figures out the implicit
-/// arguments from the goal). Covers both `ProofBody::Tactic(Apply)`
+/// Coq single-apply proof with every explicit operand preserved. Covers both `ProofBody::Tactic(Apply)`
 /// and the equivalent `ProofBody::Structured` shapes produced for
 /// `proof { apply <name>(args); }` blocks. Also covers the simple
 /// primitive tactics (Auto / Trivial / Reflexivity / Assumption /
@@ -567,9 +501,10 @@ fn render_term_coq(body: &ProofBody) -> TranslatedProofBody {
 /// of the same name. Multi-step shapes route through
 /// [`render_tactic_chain_coq`].
 fn render_single_apply_coq(body: &ProofBody) -> TranslatedProofBody {
-    if let Some((name, _args)) = classify_single_apply(body) {
-        return TranslatedProofBody::Translated {
-            text: format!("apply {}.", name),
+    if let Some((name, args)) = classify_single_apply(body) {
+        return match render_apply_term(&CoqExprRenderer::new(), &name, args) {
+            Ok(term) => TranslatedProofBody::Translated { text: format!("apply {}.", term) },
+            Err(reason) => TranslatedProofBody::Fallback { reason },
         };
     }
     if let Some(tactic) = primitive_tactic(body) {
@@ -603,7 +538,10 @@ fn render_tactic_chain_coq(chain: &[ChainStep<'_>]) -> TranslatedProofBody {
     let mut lines: Vec<String> = Vec::with_capacity(chain.len());
     for step in chain {
         match step {
-            ChainStep::Apply { name } => lines.push(format!("apply {}.", name)),
+            ChainStep::Apply { name, args } => match render_apply_term(&CoqExprRenderer::new(), name, args) {
+                Ok(term) => lines.push(format!("apply {term}.")),
+                Err(reason) => return TranslatedProofBody::Fallback { reason },
+            },
             ChainStep::Primitive(t) => match primitive_tactic_to_coq(t) {
                 Some(text) => lines.push(text),
                 None => {
@@ -677,9 +615,10 @@ fn render_term_lean(body: &ProofBody) -> TranslatedProofBody {
 /// translation. Multi-step shapes route through
 /// [`render_tactic_chain_lean`].
 fn render_single_apply_lean(body: &ProofBody) -> TranslatedProofBody {
-    if let Some((name, _args)) = classify_single_apply(body) {
-        return TranslatedProofBody::Translated {
-            text: format!("by apply {}", name),
+    if let Some((name, args)) = classify_single_apply(body) {
+        return match render_apply_term(&LeanExprRenderer::new(), &name, args) {
+            Ok(term) => TranslatedProofBody::Translated { text: format!("by apply {}", term) },
+            Err(reason) => TranslatedProofBody::Fallback { reason },
         };
     }
     if let Some(tactic) = primitive_tactic(body) {
@@ -714,7 +653,10 @@ fn render_tactic_chain_lean(chain: &[ChainStep<'_>]) -> TranslatedProofBody {
     lines.push("by".to_string());
     for step in chain {
         match step {
-            ChainStep::Apply { name } => lines.push(format!("  apply {}", name)),
+            ChainStep::Apply { name, args } => match render_apply_term(&LeanExprRenderer::new(), name, args) {
+                Ok(term) => lines.push(format!("  apply {term}")),
+                Err(reason) => return TranslatedProofBody::Fallback { reason },
+            },
             ChainStep::Primitive(t) => match primitive_tactic_to_lean(t) {
                 Some(text) => {
                     // Strip the standalone `by ` prefix since we're
@@ -809,15 +751,14 @@ fn render_term_agda(body: &ProofBody) -> TranslatedProofBody {
 
 /// Agda single-apply proof: `<name>` — Agda has no `apply` keyword
 /// and no tactic mode in vanilla form, so the translation is just
-/// the bare lemma name as a term. The args are dropped — Agda's
-/// unification fills in implicit arguments when the proof is
-/// type-checked against the goal. Also covers the small set of
+/// the lemma application as a term, preserving all explicit arguments. Also covers the small set of
 /// primitive tactics that have direct term-mode equivalents in
 /// Agda's stdlib.
 fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
-    if let Some((name, _args)) = classify_single_apply(body) {
-        return TranslatedProofBody::Translated {
-            text: name.to_string(),
+    if let Some((name, args)) = classify_single_apply(body) {
+        return match render_apply_term(&AgdaExprRenderer::new(), &name, args) {
+            Ok(term) => TranslatedProofBody::Translated { text: term },
+            Err(reason) => TranslatedProofBody::Fallback { reason },
         };
     }
     if let Some(tactic) = primitive_tactic(body) {
@@ -919,9 +860,10 @@ fn render_term_dedukti(body: &ProofBody) -> TranslatedProofBody {
 }
 
 fn render_single_apply_dedukti(body: &ProofBody) -> TranslatedProofBody {
-    if let Some((name, _args)) = classify_single_apply(body) {
-        return TranslatedProofBody::Translated {
-            text: name.to_string(),
+    if let Some((name, args)) = classify_single_apply(body) {
+        return match render_apply_term(&DeduktiExprRenderer::new(), &name, args) {
+            Ok(term) => TranslatedProofBody::Translated { text: term },
+            Err(reason) => TranslatedProofBody::Fallback { reason },
         };
     }
     if let Some(tactic) = primitive_tactic(body) {
@@ -1014,9 +956,11 @@ fn render_term_isabelle(body: &ProofBody) -> TranslatedProofBody {
 }
 
 fn render_single_apply_isabelle(body: &ProofBody) -> TranslatedProofBody {
-    if let Some((name, _args)) = classify_single_apply(body) {
-        return TranslatedProofBody::Translated {
-            text: format!("by (rule {})", name),
+    if let Some((name, args)) = classify_single_apply(body) {
+        return if args.is_empty() {
+            TranslatedProofBody::Translated { text: format!("by (rule {})", name) }
+        } else {
+            TranslatedProofBody::Fallback { reason: "Isabelle apply requires explicit theorem-parameter correspondence".into() }
         };
     }
     if let Some(tactic) = primitive_tactic(body) {
@@ -1050,7 +994,10 @@ fn render_tactic_chain_isabelle(chain: &[ChainStep<'_>]) -> TranslatedProofBody 
     let mut lines: Vec<String> = Vec::with_capacity(chain.len() + 1);
     for step in chain {
         match step {
-            ChainStep::Apply { name } => lines.push(format!("apply (rule {})", name)),
+            ChainStep::Apply { name, args } if args.is_empty() => lines.push(format!("apply (rule {})", name)),
+            ChainStep::Apply { .. } => return TranslatedProofBody::Fallback {
+                reason: "Isabelle apply requires explicit theorem-parameter correspondence".into(),
+            },
             ChainStep::Primitive(t) => match primitive_tactic_to_isabelle(t) {
                 Some(text) => {
                     // primitive_tactic_to_isabelle returns the
@@ -1231,18 +1178,6 @@ fn render_by_method_coq(body: &ProofBody) -> TranslatedProofBody {
                 },
             }
         }
-        ProofMethod::StrongInduction { on, cases } if cases.iter().count() == 0 => {
-            // Coq's strong-induction tactic is `induction ... using
-            // strong_induction.` (or `well_founded_induction`); the
-            // bare-name form is library-dependent. Default emits the
-            // generic-induction form and lets Coq's automation
-            // pick up the strong-induction principle from context.
-            TranslatedProofBody::Translated {
-                text: format!("induction {} using strong_induction.", on.name.as_str()),
-            }
-        }
-        // Contradiction: requires per-step rendering of the proof
-        // body. falls back.
         ProofMethod::Contradiction { .. } => TranslatedProofBody::Fallback {
             reason: "Coq contradiction: multi-step body not yet rendered (V0)".to_string(),
         },
@@ -1280,14 +1215,6 @@ fn render_by_method_lean(body: &ProofBody) -> TranslatedProofBody {
                 },
             }
         }
-        ProofMethod::StrongInduction { on, cases } if cases.iter().count() == 0 => {
-            TranslatedProofBody::Translated {
-                text: format!(
-                    "by induction {} using Nat.strong_induction_on",
-                    on.name.as_str(),
-                ),
-            }
-        }
         ProofMethod::Contradiction { .. } => TranslatedProofBody::Fallback {
             reason: "Lean contradiction: multi-step body not yet rendered (V0)".to_string(),
         },
@@ -1323,11 +1250,6 @@ fn render_by_method_isabelle(body: &ProofBody) -> TranslatedProofBody {
                 TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
                     reason: format!("Isabelle cases: scrutinee untranslatable — {}", reason),
                 },
-            }
-        }
-        ProofMethod::StrongInduction { on, cases } if cases.iter().count() == 0 => {
-            TranslatedProofBody::Translated {
-                text: format!("by (induct {} rule: less_induct)", on.name.as_str()),
             }
         }
         ProofMethod::Contradiction { .. } => TranslatedProofBody::Fallback {
@@ -1440,12 +1362,12 @@ mod tests {
     }
 
     #[test]
-    fn coq_renders_apply_with_args_drops_args_in_v0() {
+    fn coq_renders_supplied_apply_arguments() {
         // emits `apply <name>.` and lets Coq unification figure
         // out the args. Future V1 may emit `apply (<name> arg1 arg2).`
         let body = apply_body("h", vec![name_path_expr("x"), name_path_expr("y")]);
         let r = CoqProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("apply h."));
+        assert_eq!(r.text(), Some("apply (h (x) (y))."));
     }
 
     #[test]
@@ -1457,7 +1379,7 @@ mod tests {
             vec![name_path_expr("x"), name_path_expr("membership")],
         );
         let r = CoqProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("apply syn_mod_lemma_3_4_steps_2_3."));
+        assert_eq!(r.text(), Some("apply (syn_mod_lemma_3_4_steps_2_3 (x) (membership))."));
     }
 
     #[test]
@@ -1467,7 +1389,7 @@ mod tests {
             vec![name_path_expr("x"), name_path_expr("membership")],
         );
         let r = LeanProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("by apply syn_mod_lemma_3_4_steps_2_3"));
+        assert_eq!(r.text(), Some("by apply (syn_mod_lemma_3_4_steps_2_3 (x) (membership))"));
     }
 
     #[test]
@@ -1496,9 +1418,9 @@ mod tests {
             span: span(),
         });
         let r = CoqProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("apply backbone_full."));
+        assert_eq!(r.text(), Some("apply (backbone_full (n))."));
         let r = LeanProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("by apply backbone_full"));
+        assert_eq!(r.text(), Some("by apply (backbone_full (n))"));
     }
 
     #[test]
@@ -1535,10 +1457,10 @@ mod tests {
     }
 
     #[test]
-    fn lean_renders_apply_with_args_drops_args_in_v0() {
+    fn lean_renders_supplied_apply_arguments() {
         let body = apply_body("h", vec![name_path_expr("x")]);
         let r = LeanProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("by apply h"));
+        assert_eq!(r.text(), Some("by apply (h (x))"));
     }
 
     #[test]
@@ -1617,14 +1539,14 @@ mod tests {
     fn coq_translates_structured_apply_step() {
         let body = structured_apply_step("backbone_full", vec![name_path_expr("n")]);
         let r = CoqProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("apply backbone_full."));
+        assert_eq!(r.text(), Some("apply (backbone_full (n))."));
     }
 
     #[test]
     fn lean_translates_structured_apply_step() {
         let body = structured_apply_step("backbone_full", vec![name_path_expr("n")]);
         let r = LeanProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("by apply backbone_full"));
+        assert_eq!(r.text(), Some("by apply (backbone_full (n))"));
     }
 
     #[test]
@@ -1889,14 +1811,8 @@ mod tests {
     }
 
     #[test]
-    fn classify_tactic_chain_accepts_single_step_after_transparent() {
-        // V3 contract: a body whose only renderable step survives
-        // after stripping transparent prefixes (Let/Obtain) is
-        // accepted by the chain classifier. The bare-single-step
-        // case (no transparent prefix) is still preferentially
-        // routed through `classify_single_apply` upstream, so this
-        // gate's relaxation only affects shapes upstream couldn't
-        // see through.
+    fn classify_tactic_chain_accepts_one_complete_tactic() {
+        // A single complete application is still supported.
         let body = structured_apply_chain(&["foo"]);
         let chain = classify_tactic_chain(&body)
             .expect("single-apply structured body classifies as a 1-step chain");
@@ -1904,12 +1820,8 @@ mod tests {
     }
 
     #[test]
-    fn classify_tactic_chain_extracts_have_justification() {
-        // `have h: P by t;` — the V3 contract makes this transparent
-        // at the proposition level (drop P) but extracts the
-        // justification tactic `t` as a regular chain step.
-        // Verum-internal Hypothesis binding is dropped; the foreign
-        // tool's unifier handles whatever the apply chain needs.
+    fn classify_tactic_chain_refuses_unrendered_propositions() {
+        // Dropping the proposition changes the supplied evidence.
         use verum_ast::decl::{ProofStep, ProofStructure};
         let have_step = ProofStep {
             kind: ProofStepKind::Have {
@@ -1931,19 +1843,14 @@ mod tests {
             conclusion: Maybe::None,
             span: span(),
         });
-        let chain = classify_tactic_chain(&body)
-            .expect("V3 must accept have-step + apply-step chain");
-        // Two steps: Trivial (extracted from have justification) + apply foo.
-        assert_eq!(chain.len(), 2);
-        assert!(matches!(chain[0], ChainStep::Primitive(TacticExpr::Trivial)));
-        assert!(matches!(&chain[1], ChainStep::Apply { name } if name == "foo"));
+        assert!(classify_tactic_chain(&body).is_none(), "supplied evidence cannot be erased");
+        assert!(!LeanProofBodyRenderer::new().render(&body).is_translated());
+        assert!(!CoqProofBodyRenderer::new().render(&body).is_translated());
     }
 
     #[test]
-    fn classify_tactic_chain_treats_let_step_as_transparent() {
-        // `let x = expr;` — V3 contract: structural-only step, dropped
-        // from the rendered chain. Verum's verifier needs the binding;
-        // foreign tools don't.
+    fn classify_tactic_chain_refuses_unrendered_bindings() {
+        // A later application does not justify erasing a scoped binding.
         use verum_ast::decl::{ProofStep, ProofStructure};
         use verum_ast::pattern::{Pattern, PatternKind};
         let let_step = ProofStep {
@@ -1981,16 +1888,14 @@ mod tests {
             conclusion: Maybe::None,
             span: span(),
         });
-        let chain = classify_tactic_chain(&body).expect("let + applies must classify");
-        // The let step is transparent — only the two applies emit.
-        assert_eq!(chain.len(), 2);
-        assert!(matches!(&chain[0], ChainStep::Apply { name } if name == "foo"));
-        assert!(matches!(&chain[1], ChainStep::Apply { name } if name == "bar"));
+        assert!(classify_tactic_chain(&body).is_none(), "supplied evidence cannot be erased");
+        assert!(!LeanProofBodyRenderer::new().render(&body).is_translated());
+        assert!(!CoqProofBodyRenderer::new().render(&body).is_translated());
     }
 
     #[test]
     fn classify_tactic_chain_rejects_only_let_steps() {
-        // A body with ONLY transparent steps (no actual tactic) must
+        // A body with only unsupported binding steps must
         // fall back — there's nothing to render.
         use verum_ast::decl::{ProofStep, ProofStructure};
         use verum_ast::pattern::{Pattern, PatternKind};
@@ -2017,7 +1922,7 @@ mod tests {
         });
         assert!(
             classify_tactic_chain(&body).is_none(),
-            "body with only transparent steps must fall back",
+            "unsupported scoped bindings must refuse translation",
         );
     }
 
@@ -2052,7 +1957,7 @@ mod tests {
         let names: Vec<String> = chain
             .iter()
             .filter_map(|c| match c {
-                ChainStep::Apply { name } => Some(name.clone()),
+                ChainStep::Apply { name, .. } => Some(name.clone()),
                 _ => None,
             })
             .collect();
@@ -2117,10 +2022,8 @@ mod tests {
     }
 
     #[test]
-    fn coq_renders_msfs_theorem_5_1_shape() {
-        // The MSFS theorem 5.1 shape — let bindings then a string of
-        // applies. End-to-end pin: the chain must render with all
-        // applies preserved and the lets transparent.
+    fn coq_refuses_scoped_bindings_in_msfs_proof() {
+        // Historical exported bodies also require faithful scoped bindings.
         use verum_ast::decl::{ProofStep, ProofStructure};
         use verum_ast::pattern::{Pattern, PatternKind};
         let let_step = |name: &str| ProofStep {
@@ -2158,17 +2061,8 @@ mod tests {
             span: span(),
         });
         let r = CoqProofBodyRenderer::new().render(&body);
-        assert_eq!(
-            r.text(),
-            Some(
-                "apply msfs_lemma_3_4_outputs_in_s_s_global.\n\
-                 apply kernel_grothendieck_construction_strict.\n\
-                 apply kernel_compute_colimit_strict."
-            ),
-        );
+        assert!(!r.is_translated(), "scoped bindings cannot be dropped from a proof replay");
     }
-
-    // ----- TranslatedProofBody surface -----
 
     #[test]
     fn translated_proof_body_text_returns_some_only_when_translated() {
@@ -2329,7 +2223,7 @@ mod tests {
         // lemma name as a term (Agda unification fills implicits).
         let body = apply_body("backbone_full", vec![name_path_expr("n")]);
         let r = AgdaProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("backbone_full"));
+        assert_eq!(r.text(), Some("(backbone_full (n))"));
     }
 
     #[test]
@@ -2339,7 +2233,7 @@ mod tests {
             vec![name_path_expr("x"), name_path_expr("membership")],
         );
         let r = AgdaProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("syn_mod_lemma_3_4_steps_2_3"));
+        assert_eq!(r.text(), Some("(syn_mod_lemma_3_4_steps_2_3 (x) (membership))"));
     }
 
     #[test]
@@ -2443,7 +2337,7 @@ mod tests {
     fn isabelle_renders_call_shape_apply() {
         let body = apply_body_via_call("lemma_x", vec![name_path_expr("p")]);
         let r = IsabelleProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("by (rule lemma_x)"));
+        assert_eq!(r.text(), None);
     }
 
     // -------------------------------------------------------------
@@ -2498,7 +2392,7 @@ mod tests {
     fn dedukti_renders_call_shape_apply() {
         let body = apply_body_via_call("lemma_x", vec![name_path_expr("p")]);
         let r = DeduktiProofBodyRenderer::new().render(&body);
-        assert_eq!(r.text(), Some("lemma_x"));
+        assert_eq!(r.text(), Some("(lemma_x (p))"));
     }
 
     // -------------------------------------------------------------
@@ -2674,7 +2568,7 @@ mod tests {
         });
         assert_eq!(
             CoqProofBodyRenderer::new().render(&body).text(),
-            Some("apply mathlib4.foo.bar."),
+            Some("apply (mathlib4.foo.bar (x) (y))."),
         );
     }
 
@@ -2706,11 +2600,11 @@ mod tests {
     }
 
     #[test]
-    fn coq_renders_strong_induction() {
+    fn coq_refuses_unselected_strong_induction_principle() {
         let body = strong_induction_body("n");
         assert_eq!(
             CoqProofBodyRenderer::new().render(&body).text(),
-            Some("induction n using strong_induction."),
+            None,
         );
     }
 

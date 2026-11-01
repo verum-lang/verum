@@ -176,7 +176,7 @@ fn render_expr_coq(expr: &Expr) -> Option<String> {
                 parens_if_complex(&r)
             ))
         }
-        ExprKind::Call { func, args, .. } => {
+        ExprKind::Call { func, args, type_args } if type_args.is_empty() => {
             // Curry-style function application: `f a b c`.
             let head = render_expr_coq(func)?;
             let mut out = head;
@@ -191,11 +191,11 @@ fn render_expr_coq(expr: &Expr) -> Option<String> {
             receiver,
             method,
             args,
+            type_args,
             ..
-        } => {
-            // `obj.method(a, b)` → `(method obj a b)`. Type args are
-            // dropped; both Coq and Lean infer them from the receiver
-            // and arg types in the surrounding context.
+        } if type_args.is_empty() => {
+            // `obj.method(a, b)` → `(method obj a b)`. Explicit generic
+            // arguments are excluded by the guard; none are discarded.
             let receiver_text = render_expr_coq(receiver)?;
             let mut out = method.as_str().to_string();
             out.push(' ');
@@ -401,7 +401,7 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
                 parens_if_complex(&r)
             ))
         }
-        ExprKind::Call { func, args, .. } => {
+        ExprKind::Call { func, args, type_args } if type_args.is_empty() => {
             let head = render_expr_lean(func)?;
             let mut out = head;
             for a in args.iter() {
@@ -415,8 +415,9 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
             receiver,
             method,
             args,
+            type_args,
             ..
-        } => {
+        } if type_args.is_empty() => {
             // Lean 4 dot-notation: `obj.method args...` (#147 /
             // MSFS-L4.16). Lean's namespace-resolution machinery uses
             // the receiver's type to find the method declaration
@@ -1035,7 +1036,7 @@ fn render_expr_agda(expr: &Expr) -> Option<String> {
                 parens_if_complex(&r)
             ))
         }
-        ExprKind::Call { func, args, .. } => {
+        ExprKind::Call { func, args, type_args } if type_args.is_empty() => {
             // Agda uses left-associative juxtaposition for
             // application — same shape as Lean.
             let head = render_expr_agda(func)?;
@@ -1051,8 +1052,9 @@ fn render_expr_agda(expr: &Expr) -> Option<String> {
             receiver,
             method,
             args,
+            type_args,
             ..
-        } => {
+        } if type_args.is_empty() => {
             // Agda has no method-call dot-notation; fall back to
             // `method receiver args...` so the proposition
             // type-checks structurally.
@@ -1346,7 +1348,7 @@ fn render_expr_isabelle(expr: &Expr) -> Option<String> {
                 parens_if_complex(&r)
             ))
         }
-        ExprKind::Call { func, args, .. } => {
+        ExprKind::Call { func, args, type_args } if type_args.is_empty() => {
             // Isabelle uses curried-juxtaposition application —
             // same shape as Lean / Agda.
             let head = render_expr_isabelle(func)?;
@@ -1362,8 +1364,9 @@ fn render_expr_isabelle(expr: &Expr) -> Option<String> {
             receiver,
             method,
             args,
+            type_args,
             ..
-        } => {
+        } if type_args.is_empty() => {
             // Isabelle has no method-call dot-notation; fall back to
             // function-application form.
             let receiver_text = render_expr_isabelle(receiver)?;
@@ -1647,7 +1650,7 @@ fn render_expr_dedukti(expr: &Expr) -> Option<String> {
                 parens_if_complex(&r),
             ))
         }
-        ExprKind::Call { func, args, .. } => {
+        ExprKind::Call { func, args, type_args } if type_args.is_empty() => {
             // Dedukti uses left-associative juxtaposition.
             let head = render_expr_dedukti(func)?;
             let mut out = head;
@@ -1662,8 +1665,9 @@ fn render_expr_dedukti(expr: &Expr) -> Option<String> {
             receiver,
             method,
             args,
+            type_args,
             ..
-        } => {
+        } if type_args.is_empty() => {
             let receiver_text = render_expr_dedukti(receiver)?;
             let mut out = format!("{} {}", method.as_str(), parens_if_complex(&receiver_text),);
             for a in args.iter() {
