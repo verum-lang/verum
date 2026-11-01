@@ -29,7 +29,6 @@ members = [
     # Dev-only shared test utilities (median wall-clock measurement)
     "crates/verum_test_support",
     "crates/verum_lsp",
-    "crates/verum_interactive",
     "crates/verum_workbench",
     # DAP (Debug Adapter Protocol) server
     "crates/verum_dap",
@@ -93,7 +92,6 @@ verum_compiler = { path = "crates/verum_compiler" }
 verum_diagnostics = { path = "crates/verum_diagnostics" }
 verum_smt = { path = "crates/verum_smt" }
 verum_lsp = { path = "crates/verum_lsp" }
-verum_interactive = { path = "crates/verum_interactive" }
 verum_modules = { path = "crates/verum_modules" }
 verum_verification = { path = "crates/verum_verification" }
 verum_kernel = { path = "crates/verum_kernel" }

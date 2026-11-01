@@ -42,7 +42,7 @@ changes require a MAJOR bump.
   version `N.x.y` must be loadable by every `N.*.*` runtime. Tracked
   under #175 (bytecode versioning + migration path).
 - **CLI subcommand surface** — `verum build`, `verum run`, `verum
-  test`, `verum check`, `verum playbook`, etc. Subcommand names,
+  test`, `verum check`, `verum studio`, etc. Subcommand names,
   flag names, and exit-code semantics. New flags / subcommands are
   MINOR; removals are MAJOR.
 - **LSP protocol** — JSON-RPC method names, parameter shapes, and

@@ -1,6 +1,6 @@
 //! T0272: reliable in-process repro of the Int128 pipeline truncation via the
 //! full compiler pipeline (compile_to_vbc = type-check+codegen; compile_script_to_vbc
-//! = the exact path `verum run` uses). Avoids the verum_interactive build.
+//! = the exact path `verum run` uses).
 //!
 //! The `_typecheck_path` variants run the minimal-type-check compile
 //! (`compile_to_vbc`); the `_verumrun_path` / `script_*` variants run the

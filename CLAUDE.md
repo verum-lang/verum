@@ -241,8 +241,8 @@ use std::collections::*;  // Use Map/Set
 | **verum_modules** | Module resolution | `loader.rs`, `resolver.rs` |
 | **verum_compiler** | Compilation pipeline | `pipeline.rs`, `session.rs`, `phases/` |
 | **verum_lsp** | IDE support, script parsing | `backend.rs`, `completion.rs`, `script/` |
-| **verum_interactive** | REPL and Playbook TUI | `playbook/`, re-exports from verum_lsp |
-| **verum_cli** | CLI toolchain | `commands/` (build, run, test, playbook) |
+| **verum_workbench** | Studio workspace, agent tools and browser UI | `src/`, `ui/` |
+| **verum_cli** | CLI toolchain | `commands/` (build, run, test, studio, repl) |
 | **verum_kernel** | Proof kernel (trusted core) | `proof_tree.rs` (KernelRule) |
 | **verum_syntax** | Lossless red-green tree parser infra | grammar-facing surface |
 | **verum_dap** | Debug Adapter Protocol | debugger integration |

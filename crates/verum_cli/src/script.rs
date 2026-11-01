@@ -81,7 +81,6 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
     "mod",
     "new",
     "owl2",
-    "playbook",
     "profile",
     "property",
     "publish",

@@ -994,7 +994,7 @@ pub struct SearchQuery {
 }
 
 // =============================================================================
-// MemoryRegistry — in-process reference (tests + playbook)
+// MemoryRegistry — in-process reference for tests and embedders
 // =============================================================================
 
 #[derive(Debug, Default)]

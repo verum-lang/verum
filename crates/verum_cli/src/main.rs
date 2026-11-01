@@ -75,7 +75,7 @@ QUICK START
     verum run file.vr                            Run a single file (AOT by default)
     verum run --interp file.vr                   Run via interpreter
     verum check file.vr                          Type-check without building
-    verum playbook                               Launch the interactive notebook
+    verum studio .                              Open the graphical workspace
 
 COMMANDS BY GROUP
     Project           new   init   clean   deps   tree   workspace   package   config
@@ -87,7 +87,7 @@ COMMANDS BY GROUP
     Interop           export   export-proofs   extract   import   foreign-import   doc-render
     Cog Distribution  cog   cog-registry   stdlib   vbc-version
     Diagnostics       doctor   diagnose   cache   info   version   explain   arch   benchmark
-    Interactive/IDE   repl   playbook   playbook-convert   lsp   dap   hooks   completions
+    Interactive/IDE   studio   repl   lsp   dap   hooks   completions
 
 Run `verum <COMMAND> --help` for detailed help on any command.
 "
@@ -808,59 +808,6 @@ enum Commands {
         #[clap(long, default_value = "verum-source-replay")]
         proof: PathBuf,
     },
-
-    /// Start interactive notebook (Playbook). `verum play` is the
-    /// same door with the newcomer's name — one entry command.
-    #[command(display_order = 701, visible_alias = "play")]
-    Playbook {
- /// Optional .vrbook file to open
-        #[clap(value_name = "FILE")]
-        file: Option<Text>,
-
- /// Execution tier: 0=interpreter (safe), 1=AOT (fast)
-        #[clap(long, short = 't', value_name = "TIER", default_value = "0")]
-        tier: u8,
-
- /// Enable vim-style keybindings
-        #[clap(long)]
-        vim: bool,
-
- /// Preload definitions from a .vr file
-        #[clap(long, value_name = "FILE")]
-        preload: Option<Text>,
-
- /// Start with interactive language tutorial
-        #[clap(long)]
-        tutorial: bool,
-
- /// Enable performance profiling display
-        #[clap(long)]
-        profile: bool,
-
- /// Export to .vr script on exit
-        #[clap(long, value_name = "FILE")]
-        export: Option<Text>,
-
- /// Disable ANSI colors
-        #[clap(long)]
-        no_color: bool,
-
- /// Headless: re-run the book's chain from scratch and compare
- /// outputs bit-for-bit (exit 2: chain out of step, 3: divergence)
-        #[clap(long, conflicts_with_all = ["vim", "preload", "tutorial", "export"])]
-        replay: bool,
-
- /// Headless: replay, then write a frozen snapshot report
- /// (markdown with chain addresses and the outputs that ACTUALLY
- /// happened) to the given path
-        #[clap(long, value_name = "REPORT", conflicts_with_all = ["vim", "preload", "tutorial", "export", "replay"])]
-        freeze: Option<Text>,
-    },
-
-    /// Convert between Playbook formats
-    #[command(display_order = 702)]
-    #[clap(subcommand, name = "playbook-convert")]
-    PlaybookConvert(PlaybookConvertCommands),
 
     /// Show version information
     #[command(display_order = 604)]
@@ -2625,35 +2572,6 @@ enum PackageCommands {
     },
 }
 
-/// Playbook conversion utilities
-#[derive(Subcommand)]
-enum PlaybookConvertCommands {
- /// Export playbook to Verum script (.vr)
-    #[clap(name = "to-script")]
-    ToScript {
- /// Input .vrbook file
-        #[clap(value_name = "INPUT")]
-        input: Text,
- /// Output .vr file (defaults to same name with .vr extension)
-        #[clap(short, long, value_name = "OUTPUT")]
-        output: Option<Text>,
- /// Include output comments in exported script
-        #[clap(long)]
-        include_outputs: bool,
-    },
-
- /// Import Verum script into playbook format
-    #[clap(name = "from-script")]
-    FromScript {
- /// Input .vr file
-        #[clap(value_name = "INPUT")]
-        input: Text,
- /// Output .vrbook file (defaults to same name with .vrbook extension)
-        #[clap(short, long, value_name = "OUTPUT")]
-        output: Option<Text>,
-    },
-}
-
 #[derive(Subcommand)]
 enum StdlibSub {
     /// Precompile `core/` to a `.vbca` archive embedded into the
@@ -3665,55 +3583,6 @@ fn run_command(cli: Cli) -> Result<()> {
             runtime.block_on(verum_workbench::server::serve_with_library(verum_workbench::Config {
                 workspace, port, codex, proof, verum,
             }, commands::lsp::release_library()?)).map_err(|e| CliError::Custom(e.to_string()))
-        },
-        Commands::Playbook {
-            file,
-            tier,
-            vim,
-            preload,
-            tutorial,
-            profile,
-            export,
-            no_color,
-            replay,
-            freeze,
-        } => {
-            if replay || freeze.is_some() {
-                let Some(file) = file.as_ref() else {
-                    return Err(CliError::Custom(
-                        "--replay/--freeze need a .vrbook file".to_string(),
-                    ));
-                };
-                commands::playbook::replay(file.as_str(), freeze.as_ref().map(|s| s.as_str()))
-            } else {
-                commands::playbook::execute(commands::playbook::PlaybookOptions {
-                    file: file.as_ref().map(|s| s.as_str()),
-                    tier,
-                    vim_mode: vim,
-                    preload: preload.as_ref().map(|s| s.as_str()),
-                    tutorial,
-                    profile,
-                    export: export.as_ref().map(|s| s.as_str()),
-                    no_color,
-                })
-            }
-        }
-        Commands::PlaybookConvert(convert_cmd) => match convert_cmd {
-            PlaybookConvertCommands::ToScript {
-                input,
-                output,
-                include_outputs,
-            } => commands::playbook::export_to_script(
-                input.as_str(),
-                output.as_ref().map(|s| s.as_str()),
-                include_outputs,
-            ),
-            PlaybookConvertCommands::FromScript { input, output } => {
-                commands::playbook::import_from_script(
-                    input.as_str(),
-                    output.as_ref().map(|s| s.as_str()),
-                )
-            }
         },
         Commands::Version { verbose } => commands::version::execute(verbose),
         Commands::VbcVersion { archive, raw, dump_fn, string } => match (dump_fn, string) {

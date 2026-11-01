@@ -132,23 +132,11 @@ impl IncrementalScriptParser {
 
     /// Create with a specific cache size limit
     pub fn with_cache_limit(limit: usize) -> Self {
-        // Phase-not-realised tracing: `IncrementalScriptParser::with_cache_limit`
-        // builds a parser with a custom cache cap, but no production
-        // caller invokes it. The 3 production sites
-        // (verum_interactive: state.rs:61, pipeline.rs:155, 166) and
-        // the LSP script module all use `::new()` (default 1000-entry
-        // cap). Surface a debug trace when an embedder selects a
-        // non-default cap so they see the value lands on the parser
-        // but is not threaded by any built-in CLI flag — there's no
-        // `verum repl --cache-size N` or LSP setting today.
+        // Embedders can select a cache cap directly. There is no CLI flag
+        // or LSP setting for this limit; `new()` retains the default.
         if limit != 1000 {
             tracing::debug!(
-                "IncrementalScriptParser::with_cache_limit({}) — value lands on \
-                 the parser but no built-in CLI flag or LSP setting threads a \
-                 custom limit through to the production callers \
-                 (verum_interactive + LSP). The standard `verum repl` and LSP \
-                 surfaces both use the default 1000-entry cap. Forward-looking \
-                 knob for embedders constructing the parser directly.",
+                "IncrementalScriptParser uses an embedder-selected cache limit: {}",
                 limit
             );
         }

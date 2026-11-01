@@ -636,7 +636,7 @@ fn now_secs() -> u64 {
 // =============================================================================
 
 /// Per-theorem cache store. Implementations may be in-memory
-/// (test / playbook) or disk-backed (production), and may layer
+/// or disk-backed, and may layer
 /// (in-memory L1 in front of disk L2).
 ///
 /// Contract:
@@ -711,8 +711,7 @@ impl CacheStats {
 // MemoryCacheStore — V0 in-memory reference
 // =============================================================================
 
-/// In-memory store. Used by tests and the LSP-backed playbook (no
-/// disk persistence needed for live editing).
+/// In-memory store for tests and sessions that do not require disk persistence.
 #[derive(Debug, Default)]
 pub struct MemoryCacheStore {
     entries: Mutex<BTreeMap<Text, CacheEntry>>,

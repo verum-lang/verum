@@ -7,9 +7,9 @@
 //! immediate, kernel-grade feedback: did the step type-check, what
 //! does the new goal stack look like, and what's the proof tree
 //! built so far? This module ships the **protocol** + **state
-//! machine** that drive such a REPL. Interactive TUI is a UI
-//! concern (`verum_interactive`); LSP integration is a separate
-//! transport — both consume the same trait surface defined here.
+//! machine** that drive such a REPL. Presentation and transport
+//! are separate concerns; clients can use the same trait surface
+//! defined here.
 //!
 //! ## Architectural pattern
 //!

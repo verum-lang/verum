@@ -92,15 +92,10 @@ verum_lexer = { workspace = true }
 verum_ast = { workspace = true }
 verum_common = { workspace = true }
 verum_lsp = { workspace = true }
-verum_interactive = { workspace = true, features = ["playbook"] }
 verum_diagnostics = { workspace = true }
 verum_dap = { workspace = true }
 verum_vbc = { workspace = true }
 verum_error = { workspace = true }
-
-# TUI support for playbook
-ratatui = "0.30"
-crossterm = "0.29"
 
 # LSP support
 tower-lsp = "0.20"
