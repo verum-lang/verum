@@ -362,6 +362,47 @@ library.prove('fixed_histogram_parent_ml_ratio', [('k', N), ('width', N), ('rows
         call('fixed_histogram_bound', k, width, rows, xs, var('same_counts')), call('fraction_refl', inverse_parent(xs))),
     order(times(product(k, rows), inverse_parent(xs)), times(pure_product(k, xs), inverse_parent(xs))))
 
+# Counter correspondence: each symbol starts occurrence at zero while the
+# denominator cursor continues across symbols. This is an exact factor-range
+# theorem, independent of the order in which the frozen frequencies are read.
+shifted = lambda a, offset, n: call('shifted_factors', a, offset, n)
+offset = var('offset')
+library.define('shifted_factors', bind(lam, [('a', N), ('offset', N), ('n', N)],
+    induction('n', lambda _: N, ONE, lambda t, ih: mul(ih, factor(a, add(offset, t))))))
+base_range = law('mul_one', mul(rise(a, offset), ONE), rise(a, offset), rise(a, offset)).then(
+    law('add_zero', add(offset, Z), offset, offset).under(lambda z: rise(a, z)).reverse())
+def range_step(t, ih):
+    f = factor(a, add(offset, t))
+    return law('mul_assoc', mul(mul(rise(a, offset), shifted(a, offset, t)), f),
+        mul(rise(a, offset), mul(shifted(a, offset, t), f)), rise(a, offset), shifted(a, offset, t), f).reverse().then(
+        Path(mul(rise(a, offset), shifted(a, offset, t)), rise(a, add(offset, t)), ih).under(lambda z: mul(z, f))).then(
+        law('add_succ', add(offset, S(t)), S(add(offset, t)), offset, t).under(lambda z: rise(a, z)).reverse()).proof
+library.prove('rising_factor_range', [('a', N), ('offset', N), ('n', N)],
+    induction('n', lambda t: eq(mul(rise(a, offset), shifted(a, offset, t)), rise(a, add(offset, t))),
+        base_range.proof, range_step), eq(mul(rise(a, offset), shifted(a, offset, n)), rise(a, add(offset, n))))
+library.define('counter_denominator', bind(lam, [('a', N), ('xs', L)],
+    list_induction('xs', lambda _: pi('offset', N, N), lam('offset', N, ONE),
+        lambda h, _, ih: lam('offset', N, mul(shifted(a, offset, h), app(ih, add(offset, h)))))))
+
+# The producer orders arguments as (a, xs, offset), matching the list fold.
+counter_den = lambda a, offset, xs: call('counter_denominator', a, xs, offset)
+def counter_range_step(h, t, ih):
+    r, s, d = rise(a, offset), shifted(a, offset, h), counter_den(a, add(offset, h), t)
+    path = law('mul_assoc', mul(mul(r, s), d), mul(r, mul(s, d)), r, s, d).reverse().then(
+        Path(mul(r, s), rise(a, add(offset, h)), call('rising_factor_range', a, offset, h)).under(lambda z: mul(z, d))).then(
+        Path(mul(rise(a, add(offset, h)), d), rise(a, add(add(offset, h), sum_(t))), app(ih, add(offset, h)))).then(
+        law('add_assoc', add(add(offset, h), sum_(t)), add(offset, add(h, sum_(t))), offset, h, sum_(t)).under(lambda z: rise(a, z)))
+    return lam('offset', N, path.proof)
+library.prove('counter_denominator_range', [('a', N), ('xs', L), ('offset', N)],
+    app(list_induction('xs', lambda x: pi('offset', N,
+        eq(mul(rise(a, offset), counter_den(a, offset, x)), rise(a, add(offset, sum_(x))))),
+        lam('offset', N, base_range.proof), counter_range_step), offset),
+    eq(mul(rise(a, offset), counter_den(a, offset, xs)), rise(a, add(offset, sum_(xs)))))
+library.prove('counter_zero_origin', [('a', N), ('xs', L)],
+    law('add_zero', add(counter_den(a, Z, xs), Z), counter_den(a, Z, xs), counter_den(a, Z, xs)).reverse().then(
+        Path(mul(ONE, counter_den(a, Z, xs)), rise(a, sum_(xs)), call('counter_denominator_range', a, xs, Z))).proof,
+    eq(counter_den(a, Z, xs), rise(a, sum_(xs))))
+
 
 def cases():
     from portable_terms import lower

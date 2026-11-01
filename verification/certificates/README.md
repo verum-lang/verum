@@ -46,7 +46,9 @@ same coordinate-wise histogram, the maximum is
 The certificates prove positivity, mixed-cell splitting, same-outcome merging,
 the bound, the diagonal witness's histogram and width, attainment, zero-cell
 deletion and division by the fixed empirical parent likelihood (`0^0 = 1`).
-They assume neither the inequalities nor field/order axioms.
+The factor-range and counter-fold laws identify zero-origin grouped denominator
+traversal with `R(K,sum_y n_y)`. They assume neither the inequalities nor
+field/order axioms.
 
 `test_fixed_kt_terms.py` checks the exact exported terms in Lean's kernel with
 empty axiom rosters. False controls change K, replace per-outcome counts with
@@ -55,6 +57,27 @@ attainment or admit K=0. The algebra is diagnostic only: a frozen Rust bridge
 must separately establish coordinate identity, count conservation, actual
 factors, exact arithmetic and refusal boundaries. No predictor, causal test,
 admission, pruning or repricing authority follows from the maximum.
+
+`verification/external/lean/check_fixed_kt_export.py` checks a frozen diagnostic
+export against an independently supplied candidate roster. It reconstructs all
+counts from ordered context/cell/outcome IDs and replays exact KT/ML fractions,
+denominator traversal and envelope comparisons in Lean. Comparison requires
+positive numerators and denominators; undefined fractions cannot pass by cross
+multiplication. The report binds the export, captured model, producer, toolchain
+and supplied native provenance to this invocation. It establishes finite
+export correspondence, not a verified translation of Rust or laws for generic
+`Clone`/`Ord`, BigUint arithmetic or physical ownership. Those remain separate
+implementation obligations even when the native exporter reproduces exactly.
+
+The frozen fixture's source bridge retains hashes for `Intake`, `Counter`,
+`Positive`, the common-window caller and the test exporter. In those sources,
+declared alphabets are retained by the same owner, parent and child increments
+use the same outcome, the counter starts at zero, and positive ratios use
+BigUint cross-cancellation. Intake invalidity and panic poison survive sealing;
+count overflow is refused, work refusal precedes mutation, and unfinished or
+invalid cursors cannot return a score. This is a source audit, not a formal Rust
+semantics. In particular, equal completion totals alone do not prove outcome
+conservation, and logical work units do not bound BigUint or generic `Ord` costs.
 
 ## Adaptive observations
 

@@ -1,0 +1,69 @@
+{
+  "export_sha256": "90691322cdc23243e0bd511f804197ad84dcb1f2117d22d196dcfd1a1239dd45",
+  "derivation": "Exact original native bytes, independently reproduced byte for byte from the frozen test executable; no schema or JSON transformation.",
+  "scope": "Diagnostic frozen row/count/fraction correspondence. Source review and native tests are not a universal Rust refinement proof.",
+  "expected_names": [
+    "107442957652",
+    "107444288772",
+    "198938062982"
+  ],
+  "synarc_head": "aeb6bc681f0f5e003fdc5d9ba1a60ed450177c41",
+  "archive_root": "reference/research/2026-10-28-shared-learning/streaming-language-v183",
+  "native_build_receipt": {
+    "archive": "r232/receipt.json.gz",
+    "decoded_sha256": "1f58adf012c5e807e93ba1d2a43507166166f9806344c2fa7dfe95972194087f"
+  },
+  "source_bridge": [
+    {
+      "source": "rust/crates/synarc-kan/src/exhaust/outcome_code.rs",
+      "sha256": "006b46fe9935c3f08c83dbf3639de652a7937bc42b2ac801f058ee074d2cc423",
+      "archive": "fixed-envelope-v273/native/rust/crates/synarc-kan/src/exhaust/outcome_code.rs"
+    },
+    {
+      "source": "rust/crates/synarc-kan/src/exhaust/outcome_code/incremental.rs",
+      "sha256": "faee3ec5dbb117d29af818d3013e6dbbc7d9f2edf626c4b72fdd33e350c39605",
+      "archive": "fixed-envelope-v273/native/rust/crates/synarc-kan/src/exhaust/outcome_code/incremental.rs"
+    },
+    {
+      "source": "rust/crates/synarc-kan/src/exhaust/outcome_code/exact.rs",
+      "sha256": "c3160b86bc3a8365737e1fc082d0dc126d12d0635897066066a877c60c01ccb4",
+      "archive": "fixed-envelope-v273/native/rust/crates/synarc-kan/src/exhaust/outcome_code/exact.rs"
+    },
+    {
+      "source": "rust/crates/synarc-kan/src/exhaust/outcome_code/positive.rs",
+      "sha256": "0a6b8124c61db545b63d3f6486ad55532c7699c511f1e5c1040d8fd32d1369b8",
+      "archive": "fixed-envelope-v273/native/rust/crates/synarc-kan/src/exhaust/outcome_code/positive.rs"
+    },
+    {
+      "source": "rust/crates/synarc-kan/src/program/observer/acquisition/common_window.rs",
+      "sha256": "78c8278e7e3f7b6bbddca85cf9f101288656cbc9b91bbfef02f0913fc80505f2",
+      "archive": "fixed-envelope-v273/native/rust/crates/synarc-kan/src/program/observer/acquisition/common_window.rs"
+    },
+    {
+      "source": "rust/crates/synarc-kan/src/exhaust/outcome_code/exact/courts.rs",
+      "sha256": "4f7ee262bef3776acbf98b71177cfd763db1d03c903f8db50c018dd12f8757d4",
+      "archive": "fixed-envelope-v273/native/rust/crates/synarc-kan/src/exhaust/outcome_code/exact/courts.rs"
+    },
+    {
+      "source": "rust/crates/synarc-kan/src/organism/observer_acceptance/automatic/mechanism_probe.rs",
+      "archive": "r232/native/mechanism_probe.rs",
+      "sha256": "90a76f2966c353c299a855ebc6f2e12139f6769673e50965e20b5862dcf63dcc"
+    }
+  ],
+  "native_execution": {
+    "binary_sha256": "7820f2694d428f70edf5dda9562a5ce6841ccd8fc65936cb5a685ebc2409b3cc",
+    "export_sha256": "90691322cdc23243e0bd511f804197ad84dcb1f2117d22d196dcfd1a1239dd45",
+    "tests": [
+      {
+        "name": "exhaust::outcome_code::exact::courts::pure_outcome_envelope_bounds_all_partitions_of_small_fixed_samples",
+        "returncode": 0,
+        "log_sha256": "75ad224dc58b9127c7bc4196bae00e7da84f13c9b745c66252b4d777134c022d"
+      },
+      {
+        "name": "organism::observer_acceptance::automatic::mechanism_probe::actual_frozen_family_and_native_windows_expose_cyclic_witness_score_without_installing_it",
+        "returncode": 0,
+        "log_sha256": "312cd714fd95a3ffe59ddddb57cb0113a67541a8e4f47a46e1b0a79a8719da18"
+      }
+    ]
+  }
+}
