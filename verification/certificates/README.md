@@ -83,6 +83,12 @@ conservation, and logical work units do not bound BigUint or generic `Ord` costs
 
 ## Prefix codes and exact allocation
 
+`check_categorical_bounds.py` derives that a categorical KT cell and any finite
+product of child-cell scores are at most one. It uses the existing exact rising
+products and a positive fixed alphabet, with empty and zero-count cells included.
+This upper bound does not establish the separate empirical parent-likelihood
+lower bound or certify a native closed-support stopping policy.
+
 `check_prefix_codes.py` derives suffix-preserving decoding, prefix-freeness,
 dependent sequencing and Kraft subprobability for binary parsing trees with
 explicit rejection leaves. Concrete MSB-first fixed-width fields and gamma
