@@ -1155,6 +1155,7 @@ impl<'a> RecursiveParser<'a> {
             Some(TokenKind::Proof) => {
                 self.stream.advance(); // consume 'proof'
                 let proof = self.parse_structured_proof()?;
+                self.stream.consume(&TokenKind::Semicolon);
                 self.expect_proof_body_close()?;
                 Ok(proof)
             }
@@ -1266,42 +1267,7 @@ impl<'a> RecursiveParser<'a> {
                 | Some(TokenKind::Cases)
                 | Some(TokenKind::Contradiction) => {
                     let method = self.parse_proof_method_inner()?;
-                    // Consume trailing tactic chain: `; omega; simp`
-                    // These are additional tactics applied after the proof method.
-                    // IMPORTANT: Only consume `;` if followed by a tactic keyword,
-                    // not if `;` is the theorem terminator.
-                    while self.stream.check(&TokenKind::Semicolon) {
-                        // Look ahead: is the token after `;` a tactic expression?
-                        let next = self.stream.peek_nth_kind(1);
-                        let is_tactic_follow = matches!(
-                            next,
-                            Some(TokenKind::Trivial)
-                                | Some(TokenKind::Assumption)
-                                | Some(TokenKind::Simp)
-                                | Some(TokenKind::Ring)
-                                | Some(TokenKind::Field)
-                                | Some(TokenKind::Omega)
-                                | Some(TokenKind::Auto)
-                                | Some(TokenKind::Induction)
-                                | Some(TokenKind::Cases)
-                                | Some(TokenKind::Contradiction)
-                                | Some(TokenKind::LParen)
-                        ) || matches!(next, Some(TokenKind::Ident(n)) if matches!(n.as_str(),
-                            "exact" | "apply" | "rewrite" | "unfold" | "intro" | "intros"
-                            | "split" | "left" | "right" | "destruct" | "invert" | "specialize"
-                            | "generalize" | "clear" | "rename" | "subst" | "symmetry"
-                        ));
-                        if !is_tactic_follow {
-                            break;
-                        }
-                        self.stream.advance(); // consume `;`
-                        if self.stream.check(&TokenKind::RBrace) || self.stream.at_end() {
-                            break;
-                        }
-                        // Parse and discard additional tactic
-                        let _tactic = self.parse_tactic_expr()?;
-                    }
-                    return Ok(ProofBody::ByMethod(method));
+                    return self.finish_proof_method(method);
                 }
                 // Handle named proof methods like `strong_induction on n { ... }`
                 // Also handles: well_founded_induction on (m, n) ordered_by ... { ... }
@@ -2237,7 +2203,7 @@ impl<'a> RecursiveParser<'a> {
     fn parse_proof_by_method(&mut self) -> ParseResult<ProofBody> {
         self.stream.expect(TokenKind::By)?;
         let method = self.parse_proof_method_inner()?;
-        Ok(ProofBody::ByMethod(method))
+        self.finish_proof_method(method)
     }
 
     /// Parse the inner proof method after 'by'.
@@ -2300,6 +2266,8 @@ impl<'a> RecursiveParser<'a> {
                     // No scrutinee - empty expression placeholder
                     Expr::new(ExprKind::Tuple(List::new()), self.stream.current_span())
                 } else if self.stream.check(&TokenKind::Semicolon)
+                    || self.stream.check(&TokenKind::Comma)
+                    || self.stream.check(&TokenKind::Pipe)
                     || self.stream.at_end()
                     || self.stream.check(&TokenKind::RBrace)
                 {
@@ -2604,80 +2572,105 @@ impl<'a> RecursiveParser<'a> {
         Ok(tactic)
     }
 
+    /// Whether the current semicolon joins tactics, rather than ending an
+    /// enclosing proof step, calculation or declaration.
+    fn tactic_sequence_continues(&mut self) -> bool {
+        if !self.stream.check(&TokenKind::Semicolon) {
+            return false;
+        }
+        // The ENCLOSING construct owns this `;`. A `calc` step ends at
+        // one, and the token after it is a calc relation (`=`, `==`,
+        // `<`, …) — on no stop list below, so without this the tactic
+        // parser ate the step terminator and then demanded a tactic
+        // where the next relation stood (A75).
+        if self.semicolon_ends_construct {
+            return false;
+        }
+        // Check if what follows the semicolon is a proof step keyword - if so, don't consume it
+        // as the semicolon belongs to the proof step, not the tactic sequence
+        let structured_cases = if self.stream.peek_nth_kind(1) == Some(&TokenKind::Cases) {
+            let saved = self.stream.position();
+            self.stream.advance();
+            let structured = !self.starts_named_elimination_tactic();
+            self.stream.reset_to(saved);
+            structured
+        } else {
+            false
+        };
+        let next_after_semi = self.stream.peek_nth_kind(1);
+        let is_proof_step_or_item = matches!(
+            next_after_semi,
+            Some(TokenKind::Have)
+                | Some(TokenKind::Show)
+                | Some(TokenKind::Suffices)
+                | Some(TokenKind::Let)
+                | Some(TokenKind::Obtain)
+                | Some(TokenKind::Calc)
+                | Some(TokenKind::RBrace)
+                | Some(TokenKind::Qed)
+                // Top-level item keywords — stop tactic sequence at item boundaries
+                | Some(TokenKind::Fn)
+                | Some(TokenKind::Type)
+                | Some(TokenKind::Implement)
+                | Some(TokenKind::Theorem)
+                | Some(TokenKind::Lemma)
+                | Some(TokenKind::Corollary)
+                | Some(TokenKind::Axiom)
+                | Some(TokenKind::Module)
+                | Some(TokenKind::Mount)
+                | Some(TokenKind::Const)
+                | Some(TokenKind::Static)
+                | Some(TokenKind::Pub)
+                | Some(TokenKind::Public)
+                | Some(TokenKind::Internal)
+                | Some(TokenKind::Protected)
+                | Some(TokenKind::At)
+                // End-of-file: the lexer emits an explicit Eof token
+                // *and* `peek_nth_kind` may also return `None` when we
+                // ask past the last token. Handle both.
+                | Some(TokenKind::Eof)
+                | None
+        );
+
+        // Also check for contextual proof step keywords (identifiers used as proof commands)
+        let is_proof_step_or_item = is_proof_step_or_item
+            || matches!(
+                next_after_semi,
+                Some(TokenKind::Ident(name)) if matches!(
+                    name.as_str(),
+                    "conclude" | "assume" | "take" | "witness" | "left" | "right"
+                    | "Trivial" | "assumed"
+                )
+            );
+
+        if is_proof_step_or_item || structured_cases {
+            return false;
+        }
+
+        true
+    }
+
+    /// A structured method owns its branch evidence. Applying more tactics to
+    /// its remaining goals needs explicit composition semantics in the AST and
+    /// elaborator; accepting and erasing those tactics changes the proof.
+    fn finish_proof_method(&mut self, method: ProofMethod) -> ParseResult<ProofBody> {
+        if self.tactic_sequence_continues()
+            || self.stream.check(&TokenKind::Comma)
+            || self.stream.check(&TokenKind::Pipe)
+        {
+            return Err(ParseError::malformed_tactic(
+                "tactic composition after a structured proof method is not supported; put each branch proof inside the method",
+                self.stream.current_span(),
+            ));
+        }
+        Ok(ProofBody::ByMethod(method))
+    }
+
     /// Parse tactic sequence: t1; t2
     fn parse_tactic_seq(&mut self) -> ParseResult<TacticExpr> {
         let mut tactics = vec![self.parse_tactic_primary()?];
 
-        while self.stream.check(&TokenKind::Semicolon) {
-            // The ENCLOSING construct owns this `;`. A `calc` step ends at
-            // one, and the token after it is a calc relation (`=`, `==`,
-            // `<`, …) — on no stop list below, so without this the tactic
-            // parser ate the step terminator and then demanded a tactic
-            // where the next relation stood (A75).
-            if self.semicolon_ends_construct {
-                break;
-            }
-            // Check if what follows the semicolon is a proof step keyword - if so, don't consume it
-            // as the semicolon belongs to the proof step, not the tactic sequence
-            let structured_cases = if self.stream.peek_nth_kind(1) == Some(&TokenKind::Cases) {
-                let saved = self.stream.position();
-                self.stream.advance();
-                let structured = !self.starts_named_elimination_tactic();
-                self.stream.reset_to(saved);
-                structured
-            } else {
-                false
-            };
-            let next_after_semi = self.stream.peek_nth_kind(1);
-            let is_proof_step_or_item = matches!(
-                next_after_semi,
-                Some(TokenKind::Have)
-                    | Some(TokenKind::Show)
-                    | Some(TokenKind::Suffices)
-                    | Some(TokenKind::Let)
-                    | Some(TokenKind::Obtain)
-                    | Some(TokenKind::Calc)
-                    | Some(TokenKind::RBrace)
-                    | Some(TokenKind::Qed)
-                    // Top-level item keywords — stop tactic sequence at item boundaries
-                    | Some(TokenKind::Fn)
-                    | Some(TokenKind::Type)
-                    | Some(TokenKind::Implement)
-                    | Some(TokenKind::Theorem)
-                    | Some(TokenKind::Lemma)
-                    | Some(TokenKind::Corollary)
-                    | Some(TokenKind::Axiom)
-                    | Some(TokenKind::Module)
-                    | Some(TokenKind::Mount)
-                    | Some(TokenKind::Const)
-                    | Some(TokenKind::Static)
-                    | Some(TokenKind::Pub)
-                    | Some(TokenKind::Public)
-                    | Some(TokenKind::Internal)
-                    | Some(TokenKind::Protected)
-                    | Some(TokenKind::At)
-                    // End-of-file: the lexer emits an explicit Eof token
-                    // *and* `peek_nth_kind` may also return `None` when we
-                    // ask past the last token. Handle both.
-                    | Some(TokenKind::Eof)
-                    | None
-            );
-
-            // Also check for contextual proof step keywords (identifiers used as proof commands)
-            let is_proof_step_or_item = is_proof_step_or_item
-                || matches!(
-                    next_after_semi,
-                    Some(TokenKind::Ident(name)) if matches!(
-                        name.as_str(),
-                        "conclude" | "assume" | "take" | "witness" | "left" | "right"
-                        | "Trivial" | "assumed"
-                    )
-                );
-
-            if is_proof_step_or_item || structured_cases {
-                break;
-            }
-
+        while self.tactic_sequence_continues() {
             // Safe to consume semicolon and continue tactic sequence
             self.stream.advance();
             tactics.push(self.parse_tactic_primary()?);

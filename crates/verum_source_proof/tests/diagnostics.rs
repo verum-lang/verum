@@ -61,6 +61,24 @@ fn production_parser_reports_a_valid_location_including_end_of_input() {
         range(source, &report);
     }
 }
+
+#[test]
+fn structured_method_continuations_fail_at_the_separator_before_admission() {
+    for continuation in ["; exact(x)", ", assumption", " | trivial"] {
+        let source = format!(
+            "// Ω🙂\r\ntheorem t(A:Type,x:A):A proof by contradiction h {{ trivial; }}{continuation};"
+        );
+        let report = check(&source);
+        assert_eq!(report.status, "rejected", "{report:?}");
+        assert_eq!(report.diagnostic.as_ref().unwrap().code, "source_parse_error");
+        assert!(report.native.is_none());
+        assert_eq!(range(&source, &report), &continuation.trim_start()[..1]);
+        assert_eq!(
+            report.diagnostic_span.unwrap().start as usize,
+            source.rfind(continuation.trim_start()).unwrap()
+        );
+    }
+}
 #[test]
 fn success_and_legacy_reports_have_no_diagnostic_location() {
     let report = check("theorem t(A:Type,x:A):A proof=x;");

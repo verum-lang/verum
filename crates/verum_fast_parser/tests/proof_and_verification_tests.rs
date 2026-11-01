@@ -392,6 +392,68 @@ fn named_elimination_tactics_retain_following_evidence_and_item_boundaries() {
     }
 }
 
+#[test]
+fn structured_method_continuations_are_rejected_without_erasing_evidence() {
+    let methods = [
+        "induction on n { case 0 => { trivial; } }",
+        "cases n { case 0 => { trivial; } }",
+        "contradiction h { trivial; }",
+        "induction",
+        "cases",
+        "contradiction",
+    ];
+    for method in methods {
+        for continuation in [
+            "; omega",
+            "; exact(base)",
+            "; custom_tactic()",
+            "; (simp)",
+            "; try { simp }",
+            ", simp",
+            " | simp",
+        ] {
+            for enclosed in [false, true] {
+                let source = if enclosed {
+                    format!("theorem t(n:Int) {{ proof by {method}{continuation}; }}")
+                } else {
+                    format!("theorem t(n:Int) proof by {method}{continuation}; theorem next() proof by trivial;")
+                };
+                let file = FileId::new(0);
+                let errors = VerumParser::new()
+                    .parse_module(Lexer::new(&source, file), file)
+                    .expect_err("a continuation cannot disappear from an accepted proof");
+                let error = &errors[0];
+                assert_eq!(
+                    error.code.as_ref().map(|c| c.as_str()),
+                    Some("E028"),
+                    "{source}: {errors:?}"
+                );
+                assert!(format!("{error:?}").contains("composition after a structured proof method"));
+            }
+        }
+    }
+}
+
+#[test]
+fn structured_method_terminators_preserve_following_declarations() {
+    for method in [
+        "induction on n { case 0 => { trivial; } }",
+        "cases n { case 0 => { trivial; } }",
+        "contradiction h { trivial; }",
+    ] {
+        assert_parses(&format!("theorem t(n:Int) proof by {method};"));
+        assert_parses(&format!("theorem t(n:Int) {{ proof by {method}; }}"));
+        for next in [
+            "theorem next() proof by trivial;",
+            "pub theorem next() proof by trivial;",
+            "fn next() -> Int { 1 }",
+        ] {
+            let module = parse_module(&format!("theorem t(n:Int) proof by {method}; {next}"));
+            assert_eq!(module.items.len(), 2);
+        }
+    }
+}
+
 // ============================================================================
 // SECTION 7: STRUCTURED PROOF STEPS
 // ============================================================================
