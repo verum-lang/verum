@@ -20,6 +20,9 @@ use verum_fast_parser::VerumParser;
 use verum_lexer::Lexer;
 use walkdir::WalkDir;
 
+#[path = "fmt_trivia.rs"]
+mod trivia;
+
 /// Behaviour when the parser cannot turn a source file into an AST.
 ///
 /// - **Fallback** (default): silently apply whitespace normalisation
@@ -341,8 +344,9 @@ fn format_file(
     //  - Error: leave the file untouched, return Err. The caller
     //  accumulates errors and propagates them via exit code.
     let formatted = match try_ast_format(&content, config) {
-        Some(f) => f,
-        None => match config.on_parse_error {
+        Ok(Some(f)) => f,
+        Ok(None) => normalize_and_sort(&content, config),
+        Err(_) => match config.on_parse_error {
             OnParseError::Fallback => {
                 ui::warn(&format!(
                     "parse failed on {}; emitting whitespace-normalised form. \
@@ -384,38 +388,41 @@ fn format_file(
 }
 
 /// Try AST-based formatting via PrettyPrinter.
-fn try_ast_format(content: &str, config: &FormatterConfig) -> Option<Text> {
+fn try_ast_format(content: &str, config: &FormatterConfig) -> Result<Option<Text>> {
     let file_id = FileId::new(1);
     let lexer = Lexer::new(content, file_id);
     let parser = VerumParser::new();
 
-    let module = parser.parse_module(lexer, file_id).ok()?;
+    let module = parser.parse_module(lexer, file_id)
+        .map_err(|error| CliError::Custom(format!("Parse failed: {error:?}")))?;
 
     let pretty_config = PrettyConfig::from(config);
     let mut printer = PrettyPrinter::new(pretty_config);
     let formatted: Text = printer.format_module(&module).into();
 
-    // Sanity check: formatted output should be non-empty and re-parseable
+    // A missing layout is different from a parse error: source can be valid
+    // even when the printer cannot preserve all of its lexical information.
     if formatted.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    // Apply post-processing: import sorting, blank line normalization
+    // Obtain a layout proposal; source lexemes and attached trivia remain
+    // authoritative even when the AST pretty-printer lacks a construct.
     let mut result = formatted.to_string();
-
-    if config.sort_imports {
-        result = sort_imports(&result);
-    }
 
     if config.normalize_blanks {
         result = normalize_blank_lines(&result);
     }
 
+    let Some(preserved) = trivia::preserve(content, &result) else { return Ok(None); };
+    result = preserved.to_string();
+    if config.sort_imports { result = sort_imports(&result); }
+
     if config.trailing_newline && !result.ends_with('\n') {
         result.push('\n');
     }
 
-    Some(Text::from(result.as_str()))
+    Ok(Some(Text::from(result.as_str())))
 }
 
 /// Fallback: normalize whitespace and sort imports.
@@ -444,7 +451,7 @@ fn normalize_and_sort(content: &str, config: &FormatterConfig) -> Text {
             };
 
             result.push_str(&indent_str);
-            result.push_str(trimmed);
+            result.push_str(trimmed.trim_start());
             result.push('\n');
             prev_empty = false;
         }
@@ -458,15 +465,19 @@ fn normalize_and_sort(content: &str, config: &FormatterConfig) -> Text {
         result.push('\n');
     }
 
-    if config.sort_imports {
-        result = sort_imports(&result);
-    }
+    // Whitespace inside a literal is data; comments must keep their tokens and
+    // positions. Malformed lexical input is left intact, never guessed at.
+    let Some(preserved) = trivia::preserve(content, &result) else { return content.into(); };
+    result = preserved.to_string();
+    if config.trailing_newline && !result.ends_with('\n') { result.push('\n'); }
+    if config.sort_imports { result = sort_imports(&result); }
 
     Text::from(result.as_str())
 }
 
 /// Sort `mount` import statements alphabetically within contiguous groups.
 fn sort_imports(content: &str) -> String {
+    if !trivia::can_reorder_lines(content) { return content.to_owned(); }
     let lines: Vec<&str> = content.lines().collect();
     let mut result = Vec::new();
     let mut import_group: Vec<&str> = Vec::new();
@@ -630,8 +641,8 @@ pub fn format_path(path: &Path, check: bool, verbose: bool) -> Result<()> {
 pub fn format_string(source: &str) -> Result<Text> {
     let config = load_config();
     match try_ast_format(source, &config) {
-        Some(formatted) => Ok(formatted),
-        None => Ok(normalize_and_sort(source, &config)),
+        Ok(Some(formatted)) => Ok(formatted),
+        Ok(None) | Err(_) => Ok(normalize_and_sort(source, &config)),
     }
 }
 
@@ -653,8 +664,9 @@ pub fn execute_stdin(filename_hint: Option<String>) -> Result<()> {
 
     let config = load_config();
     let formatted: Text = match try_ast_format(&source, &config) {
-        Some(t) => t,
-        None => {
+        Ok(Some(t)) => t,
+        Ok(None) => normalize_and_sort(&source, &config),
+        Err(_) => {
             // Parse failed — surface a stderr warning so the editor
             // can show it without polluting the formatted-output
             // pipe to stdout. We still emit the whitespace-fallback
