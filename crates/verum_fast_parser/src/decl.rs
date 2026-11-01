@@ -764,6 +764,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Function name - allow contextual keywords as function names (e.g., `show` which is a proof keyword)
         // E030: Missing function name - check if next token is '(' instead of identifier
+        let name_span = self.stream.current_span();
         let name = match self.stream.peek_kind() {
             Some(TokenKind::LParen) => {
                 // fn () { } - missing function name
@@ -775,7 +776,6 @@ impl<'a> RecursiveParser<'a> {
             }
             _ => self.consume_ident_or_keyword()?,
         };
-        let name_span = self.stream.current_span();
 
         // Generic parameters: <T, U>
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -1156,8 +1156,8 @@ impl<'a> RecursiveParser<'a> {
             self.stream.expect(TokenKind::Fn)?;
 
             // Parse function name - allow keywords as names (e.g., `link`, `select`, `mount`)
-            let name = self.consume_ident_or_any_keyword()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident_or_any_keyword()?;
 
             // Parse generic parameters if present
             let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -2041,14 +2041,14 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // Must start with identifier (cfg, platform, or type param)
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Check for config: cfg.flag
         if name.as_str() == "cfg" && self.stream.check(&TokenKind::Dot) {
             self.stream.advance();
-            let flag = self.consume_ident()?;
             let flag_span = self.stream.current_span();
+            let flag = self.consume_ident()?;
             let span = self.stream.make_span(start);
             // Create a config access expression: cfg.flag
             return Ok(Expr::new(
@@ -2071,8 +2071,8 @@ impl<'a> RecursiveParser<'a> {
         // Check for platform: platform.linux
         if name.as_str() == "platform" && self.stream.check(&TokenKind::Dot) {
             self.stream.advance();
-            let platform = self.consume_ident()?;
             let platform_span = self.stream.current_span();
+            let platform = self.consume_ident()?;
             let span = self.stream.make_span(start);
             return Ok(Expr::new(
                 ExprKind::Field {
@@ -2124,8 +2124,8 @@ impl<'a> RecursiveParser<'a> {
         let mut transforms = Vec::new();
         while self.stream.consume(&TokenKind::Dot).is_some() {
             let start = self.stream.position();
-            let name = self.consume_ident()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident()?;
             self.stream.expect(TokenKind::LParen)?;
             let args = if self.stream.check(&TokenKind::RParen) {
                 Vec::new()
@@ -2277,13 +2277,13 @@ impl<'a> RecursiveParser<'a> {
 
         // Type name
         // E043: Missing type name - check if 'is' or '{' comes immediately after 'type'
+        let name_span = self.stream.current_span();
         let name = match self.stream.peek_kind() {
             Some(TokenKind::Is) | Some(TokenKind::LBrace) | Some(TokenKind::Eq) => {
                 return Err(ParseError::missing_type_name(self.stream.current_span()));
             }
             _ => self.consume_ident_or_keyword()?,
         };
-        let name_span = self.stream.current_span();
 
         // Generic parameters
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -2796,8 +2796,8 @@ impl<'a> RecursiveParser<'a> {
         };
 
         // Type name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Generic parameters
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -2961,8 +2961,8 @@ impl<'a> RecursiveParser<'a> {
             self.stream.expect(TokenKind::Dot)?;
 
             // Observation name
-            let obs_name = self.consume_ident_or_keyword()?;
             let obs_span = self.stream.current_span();
+            let obs_name = self.consume_ident_or_keyword()?;
             let observation = verum_ast::ty::Ident::new(obs_name, obs_span);
 
             // `=>`
@@ -3963,8 +3963,8 @@ impl<'a> RecursiveParser<'a> {
         // `trunc_path`, `push`, etc. — following the canonical names
         // in Kapulkin–Lumsdaine and Univalent Foundations without
         // having to rename them for our lexer's benefit.
-        let name = self.consume_ident_or_any_keyword()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident_or_any_keyword()?;
 
         // Parse optional generic parameters on variant (GADT constructors):
         // | IntLit<T>(Int) where T == Int
@@ -4291,9 +4291,8 @@ impl<'a> RecursiveParser<'a> {
             false
         };
         let _ = is_ghost; // ghost fields are parsed but ghost annotation is informational
-
-        let name = self.consume_ident_or_keyword()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident_or_keyword()?;
 
         // E046: Missing colon - identifier followed by identifier (e.g., `x y: Int`)
         if self.is_ident() && !self.stream.check(&TokenKind::Colon) {
@@ -4489,8 +4488,8 @@ impl<'a> RecursiveParser<'a> {
         if self.stream.check(&TokenKind::Type) {
             self.stream.advance();
             // Use consume_ident_or_any_keyword to allow keywords like Err as type names
-            let name = self.consume_ident_or_any_keyword()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident_or_any_keyword()?;
 
             // Type parameters (for GATs)
             let type_params: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -4581,8 +4580,8 @@ impl<'a> RecursiveParser<'a> {
         // Associated constant
         if self.stream.check(&TokenKind::Const) {
             self.stream.advance();
-            let name = self.consume_ident()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident()?;
 
             self.stream.expect(TokenKind::Colon)?;
             let ty = self.parse_type()?;
@@ -4654,8 +4653,8 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Allow contextual keywords as function names (e.g., `show` which is a proof keyword)
-            let name = self.consume_ident_or_keyword()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident_or_keyword()?;
 
             // Generic parameters: fn foo<T, U>
             let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -4822,8 +4821,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Protocol)?;
 
         // Protocol name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Generic parameters: <F<_>, T>
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -5178,8 +5177,8 @@ impl<'a> RecursiveParser<'a> {
         // proposition instead of the default auto_prove.
         if self.stream.check(&TokenKind::Proof) {
             self.stream.advance();
-            let axiom_name_str = self.consume_ident_or_any_keyword()?;
             let axiom_name_span = self.stream.current_span();
+            let axiom_name_str = self.consume_ident_or_any_keyword()?;
             self.stream.expect(TokenKind::By)?;
             // Use parse_tactic_primary (single tactic) rather than
             // parse_tactic_expr (sequence) so that `;` terminates the
@@ -5203,8 +5202,8 @@ impl<'a> RecursiveParser<'a> {
         if self.stream.check(&TokenKind::Type) {
             self.stream.advance();
             // Use consume_ident_or_any_keyword to allow keywords like Err, Error as type names
-            let name = self.consume_ident_or_any_keyword()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident_or_any_keyword()?;
 
             // Generic parameters for GATs: type F<T>
             // GATs: associated types with own type params, e.g., `type Item<T> = List<T>;`
@@ -5254,8 +5253,8 @@ impl<'a> RecursiveParser<'a> {
         // Const value (const NAME: TYPE = VALUE;)
         if self.stream.check(&TokenKind::Const) {
             self.stream.advance();
-            let name = self.consume_ident()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident()?;
 
             self.stream.expect(TokenKind::Colon)?;
             let ty = self.parse_type()?;
@@ -5321,8 +5320,8 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Allow contextual keywords as function names (e.g., `show` which is a proof keyword)
-            let name = self.consume_ident_or_keyword()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident_or_keyword()?;
 
             // E056: Missing parentheses - `fn name 123`
             if !self.stream.check(&TokenKind::LParen) && !self.stream.check(&TokenKind::Lt) {
@@ -5497,8 +5496,8 @@ impl<'a> RecursiveParser<'a> {
         if self.stream.consume(&TokenKind::Const).is_none() {
             self.stream.expect(TokenKind::Let)?;
         }
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Optional generic parameters: const ZERO<T: Default>: T = T.default();
         let generics = if self.stream.check(&TokenKind::Lt) {
@@ -5559,9 +5558,8 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::Static)?;
         let is_mut = self.stream.consume(&TokenKind::Mut).is_some();
-
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // E067: Missing static type annotation - check if '=' instead of ':'
         if self.stream.check(&TokenKind::Eq) {
@@ -5612,9 +5610,9 @@ impl<'a> RecursiveParser<'a> {
 
         // Parse module name with optional dot-separated path (e.g., `module runtime.recovery;`)
         // This allows hierarchical module naming like Python packages
+        let name_start = self.stream.position();
         let first_name = self.consume_ident_or_any_keyword()?;
         let mut full_name = first_name.to_string();
-        let name_start = self.stream.current_span();
 
         // Parse optional dot-separated path segments
         while self.stream.check(&TokenKind::Dot) {
@@ -5625,7 +5623,7 @@ impl<'a> RecursiveParser<'a> {
         }
 
         let name = Text::from(full_name);
-        let name_span = name_start;
+        let name_span = self.stream.make_span(name_start);
 
         // Module can be forward declaration (;) or have a body ({...})
         // E062: Missing module brace - check if neither '{' nor ';' is present
@@ -5825,8 +5823,8 @@ impl<'a> RecursiveParser<'a> {
             }
             // Allow keywords like Ok, Err, Some, None as alias names
             // These are valid identifiers in mount alias context
-            let name = self.consume_ident_or_keyword()?;
             let name_span = self.stream.current_span();
+            let name = self.consume_ident_or_keyword()?;
             Maybe::Some(Ident::new(name, name_span))
         } else {
             Maybe::None
@@ -5940,8 +5938,8 @@ impl<'a> RecursiveParser<'a> {
 
                             // Check for 'as' alias within nested mounts
                             if self.stream.consume(&TokenKind::As).is_some() {
-                                let alias_name = self.consume_ident_or_keyword()?;
                                 let alias_span = self.stream.current_span();
+                                let alias_name = self.consume_ident_or_keyword()?;
                                 tree.alias = Maybe::Some(Ident::new(alias_name, alias_span));
                             }
 
@@ -6262,9 +6260,8 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.current_span(),
             ));
         }
-
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Optional generic parameters: <T, U>
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -6315,8 +6312,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Meta)?;
 
         // Meta name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Parameters: (param1: fragment, param2: fragment)
         self.stream.expect(TokenKind::LParen)?;
@@ -6348,8 +6345,8 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a meta parameter: name: fragment
     fn parse_meta_param(&mut self) -> ParseResult<MetaParam> {
         let start_pos = self.stream.position();
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Optional fragment specifier: :fragment
         let fragment = if self.stream.consume(&TokenKind::Colon).is_some() {
@@ -6481,9 +6478,8 @@ impl<'a> RecursiveParser<'a> {
         if self.stream.check(&TokenKind::LBrace) {
             return Err(ParseError::missing_context_name(self.stream.current_span()));
         }
-
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Parse optional generic parameters: context State<S> { ... }
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -6614,8 +6610,8 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // Allow keywords as function names (e.g., `show` which is a proof keyword)
-        let name = self.consume_ident_or_any_keyword()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident_or_any_keyword()?;
 
         // E060: Missing parentheses - `fn connect missing_paren`
         if !self.stream.check(&TokenKind::LParen) && !self.stream.check(&TokenKind::Lt) {
@@ -6733,9 +6729,8 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.current_span(),
             ));
         }
-
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         self.stream.expect(TokenKind::LBrace)?;
 
@@ -6779,8 +6774,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Using)?;
 
         // Group name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // = token
         self.stream.expect(TokenKind::Eq)?;
@@ -6957,8 +6952,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Layer)?;
 
         // Layer name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         let kind = if self.stream.check(&TokenKind::LBrace) {
             // Inline layer: layer Name { provide ... ; ... }
@@ -6969,8 +6964,8 @@ impl<'a> RecursiveParser<'a> {
                 // Each item is a provide statement:
                 // 'provide' identifier '=' expr ';'
                 self.stream.expect(TokenKind::Provide)?;
-                let ctx_name = self.consume_ident()?;
                 let ctx_span = self.stream.current_span();
+                let ctx_name = self.consume_ident()?;
                 self.stream.expect(TokenKind::Eq)?;
                 let value = self.parse_expr()?;
                 self.stream.expect(TokenKind::Semicolon)?;
@@ -6984,13 +6979,13 @@ impl<'a> RecursiveParser<'a> {
             }
         } else if self.stream.consume(&TokenKind::Eq).is_some() {
             // Composite layer: layer Name = Layer1 + Layer2 + ... ;
-            let first = self.consume_ident()?;
             let first_span = self.stream.current_span();
+            let first = self.consume_ident()?;
             let mut layers = vec![Ident::new(first, first_span)];
 
             while self.stream.consume(&TokenKind::Plus).is_some() {
-                let next = self.consume_ident()?;
                 let next_span = self.stream.current_span();
+                let next = self.consume_ident()?;
                 layers.push(Ident::new(next, next_span));
             }
 
@@ -7042,14 +7037,14 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::Ffi)?;
         // Allow keywords as FFI boundary names (e.g., `ffi internal { ... }`)
-        let name = self.consume_ident_or_any_keyword()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident_or_any_keyword()?;
 
         // Parse optional 'extends' clause
         let extends = if self.stream.check(&TokenKind::Extends) {
             self.stream.advance();
-            let parent_name = self.consume_ident()?;
             let parent_span = self.stream.current_span();
+            let parent_name = self.consume_ident()?;
             Maybe::Some(Ident::new(parent_name, parent_span))
         } else {
             Maybe::None
@@ -7127,8 +7122,8 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::Fn)?;
         // Allow keywords as function names (e.g., `show` which is a proof keyword)
-        let name = self.consume_ident_or_any_keyword()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident_or_any_keyword()?;
 
         // Parameters (with variadic support)
         self.stream.expect(TokenKind::LParen)?;
@@ -7145,8 +7140,8 @@ impl<'a> RecursiveParser<'a> {
                 }
 
                 // FFI parameters can use keywords as names (e.g., protocol, type, stream, etc.)
-                let param_name = self.consume_ident_or_any_keyword()?;
                 let param_name_span = self.stream.current_span();
+                let param_name = self.consume_ident_or_any_keyword()?;
                 self.stream.expect(TokenKind::Colon)?;
                 let ty = self.parse_type()?;
                 params.push((Ident::new(param_name, param_name_span), ty));
@@ -8250,8 +8245,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::View)?;
 
         // View name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Optional generic parameters
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -8323,8 +8318,8 @@ impl<'a> RecursiveParser<'a> {
         let start_pos = self.stream.position();
 
         // Constructor name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Optional type parameters
         let type_params: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -8425,8 +8420,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::ActivePattern)?;
 
         // Pattern name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Optional generic parameters: pattern Empty<T>(list: List<T>) -> Bool
         let generics = if self.stream.check(&TokenKind::Lt) {

@@ -166,8 +166,8 @@ impl<'a> RecursiveParser<'a> {
         // Theorem name — accept contextual keywords (e.g., `trivial`)
         // as theorem identifiers so that `theorem trivial() proof by
         // trivial;` is valid.
-        let name = self.consume_ident_or_any_keyword()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident_or_any_keyword()?;
 
         // Optional generic parameters: <T, U>
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -459,8 +459,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Axiom)?;
 
         // Axiom name
-        let name = self.consume_ident()?;
         let name_span = self.stream.current_span();
+        let name = self.consume_ident()?;
 
         // Optional generic parameters
         let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
@@ -885,6 +885,7 @@ impl<'a> RecursiveParser<'a> {
         // swallowed the warnings so the structured-proof tactic library
         // failed to load silently. Same override pattern as the
         // tactic-decl name handler.
+        let name_span = self.stream.current_span();
         let name = match self.stream.peek_kind() {
             Some(TokenKind::Have) => {
                 self.stream.advance();
@@ -918,7 +919,6 @@ impl<'a> RecursiveParser<'a> {
             // authors rename to `lemma_name` etc. instead.
             _ => self.consume_ident()?,
         };
-        let name_span = self.stream.current_span();
 
         // Colon
         self.stream.expect(TokenKind::Colon)?;
@@ -2448,8 +2448,8 @@ impl<'a> RecursiveParser<'a> {
             // the tactic-sequence separator.
             Some(TokenKind::Let) => {
                 self.stream.advance();
-                let name_text = self.consume_ident()?;
                 let name_span = self.stream.current_span();
+                let name_text = self.consume_ident()?;
                 let ty = if self.stream.consume(&TokenKind::Colon).is_some() {
                     Maybe::Some(self.parse_type()?)
                 } else {
