@@ -224,6 +224,7 @@ pub mod protocol;
 pub mod references; // Deref protocol implementations for reference types
 pub mod refinement;
 pub mod refinement_diagnostics;
+pub mod refinement_entailment;
 pub mod refinement_evidence; // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Flow-sensitive refinement propagation
 pub mod region_calculus; // Tofte-Talpin region calculus
 pub mod sdg; // Synthetic differential geometry
@@ -236,6 +237,8 @@ pub mod source_files; // Source file registry for span→line:col conversion
 pub mod subtype;
 pub mod termination; // Termination checking for recursive functions (Termination checking: ensuring recursive functions terminate via structural recursion on well-founded orderings — )
 pub mod ty;
+pub mod type_algebra;
+pub mod type_algebra_replay;
 pub mod type_level_computation; // Type-level computation for dependent types (Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — )
 pub mod type_registry; // AST → Type mapping for codegen
 pub mod unify;

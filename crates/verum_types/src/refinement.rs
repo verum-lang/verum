@@ -254,6 +254,19 @@ impl RefinementPredicate {
         }
     }
 
+    /// Whether an unqualified name denotes this refinement's subject.
+    /// Inline and bare refinements accept both documented implicit spellings;
+    /// explicit binders shadow that convention and bind only their own name.
+    pub fn binds_subject(&self, name: &str) -> bool {
+        match &self.binding {
+            RefinementBinding::Inline | RefinementBinding::Bare => matches!(name, "self" | "it"),
+            RefinementBinding::Lambda(bound) | RefinementBinding::Sigma(bound) => {
+                bound.as_str() == name
+            }
+            RefinementBinding::Named(_) => false,
+        }
+    }
+
     /// Create a trivially true predicate (unrefined)
     pub fn trivial(span: Span) -> Self {
         Self {

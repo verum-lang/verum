@@ -154,10 +154,13 @@ Type(i) ↪ Type(j)   when i ≤ j
 #### Quantity flow
 
 ```
-Many ↪ One     (forbidden — an unrestricted value cannot be linear)
-One  ↪ Many    (allowed — a value that *may* be used once can be
-                used arbitrarily when we relax the linearity claim)
-Zero ↪ *  at type level;   * ↪ Zero only via explicit erasure
+allowed_use_counts(target) ⊆ allowed_use_counts(source)
+
+One ↪ Many    forbidden: exactly-once ownership cannot authorize copying
+                        or discarding the value
+Many ↪ One    compatible with the use-count restriction: the target
+              must still establish its complete ownership contract
+Zero          compile-time erasure does not authorize a runtime use
 ```
 
 #### Refinement flow

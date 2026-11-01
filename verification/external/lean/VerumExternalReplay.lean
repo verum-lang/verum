@@ -7,6 +7,8 @@
 -- undefined references, or shape drift would fail elaboration and
 -- hence `lake build`.
 import VerumExternalReplay.KernelSoundness
+import VerumExternalReplay.TypeAlgebra
+import VerumExternalReplay.IntegerBoundEntailment
 import VerumExternalReplay.StructuredElimination
 import VerumExternalReplay.ReferenceChecker
 import VerumExternalReplay.TermOperations
