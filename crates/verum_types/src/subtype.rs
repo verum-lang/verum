@@ -40,8 +40,7 @@ thread_local! {
 /// instance registration when it encounters
 /// `implement ArrayCoercible for X {}` blocks during stdlib
 /// bootstrap.
-static GLOBAL_ARRAY_COERCIBLE: OnceLock<RwLock<std::collections::HashSet<Text>>> =
-    OnceLock::new();
+static GLOBAL_ARRAY_COERCIBLE: OnceLock<RwLock<std::collections::HashSet<Text>>> = OnceLock::new();
 
 fn array_coercible_lock() -> &'static RwLock<std::collections::HashSet<Text>> {
     GLOBAL_ARRAY_COERCIBLE.get_or_init(|| RwLock::new(std::collections::HashSet::new()))
@@ -108,26 +107,17 @@ impl Subtyping {
         is_global_array_coercible(name)
     }
 
-    /// Helper to check if a path represents an array-coercible collection type.
-    /// Uses the data-driven `array_coercible_types` set instead of hardcoding "List".
     /// Get variance for each type parameter of a Named type.
-    /// Uses well-known type names for standard library types,
-    /// defaults to covariant for unknown types (safe for read-only containers).
+    /// A qualified path must not inherit variance from an unrelated leaf name.
     fn get_named_type_variances(
         &self,
         path: &verum_ast::ty::Path,
         arg_count: usize,
     ) -> List<Variance> {
-        use verum_common::well_known_types::type_names as wkt;
-        let type_name = path
-            .segments
-            .last()
-            .map(|seg| match seg {
-                verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                _ => "",
-            })
-            .unwrap_or("");
-        Self::variances_for_type_name(type_name, arg_count)
+        match path.as_ident() {
+            Some(ident) => Self::variances_for_type_name(ident.name.as_str(), arg_count),
+            None => vec![Variance::Invariant; arg_count].into(),
+        }
     }
 
     /// Get variance for each type parameter of a Generic type.
@@ -141,10 +131,7 @@ impl Subtyping {
     /// the private associated function as part of the public
     /// API.
     #[cfg(test)]
-    pub(crate) fn variances_for_type_name_for_test(
-        name: &str,
-        arg_count: usize,
-    ) -> List<Variance> {
+    pub(crate) fn variances_for_type_name_for_test(name: &str, arg_count: usize) -> List<Variance> {
         Self::variances_for_type_name(name, arg_count)
     }
 
@@ -152,7 +139,8 @@ impl Subtyping {
     /// Well-known types get their correct variance from the
     /// canonical [`DEFAULT_CONSTRUCTOR_VARIANCES`] table in the
     /// sibling [`crate::variance`] module — single source of truth.
-    /// Unknown types default to covariant for `arg_count`.
+    /// Unknown types and unrecognized arities are invariant: no declaration
+    /// evidence establishes that their parameters occur only covariantly.
     ///
     /// Pre-fix this function carried its own hardcoded match arm
     /// that contradicted the canonical table on `Shared`
@@ -166,21 +154,31 @@ impl Subtyping {
     /// same table).
     fn variances_for_type_name(name: &str, arg_count: usize) -> List<Variance> {
         for (entry_name, entry_variances) in DEFAULT_CONSTRUCTOR_VARIANCES {
-            if *entry_name == name {
-                // The table's slice may be shorter or longer than
-                // the caller's `arg_count` (e.g. a generic type
-                // declaration with stale arity); pad with the
-                // last variance (or covariant default) and clamp.
-                let mut out: Vec<Variance> = entry_variances.iter().copied().collect();
-                while out.len() < arg_count {
-                    out.push(Variance::Covariant);
-                }
-                out.truncate(arg_count);
-                return out.into();
+            if *entry_name == name && entry_variances.len() == arg_count {
+                return entry_variances.iter().copied().collect();
             }
         }
-        // Unknown name → covariant default for every arg.
-        vec![Variance::Covariant; arg_count].into()
+        vec![Variance::Invariant; arg_count].into()
+    }
+
+    fn check_type_arguments(
+        &self,
+        source: &[Type],
+        target: &[Type],
+        variances: &[Variance],
+    ) -> bool {
+        source.len() == target.len()
+            && source
+                .iter()
+                .zip(target.iter())
+                .enumerate()
+                .all(
+                    |(i, (a, b))| match variances.get(i).copied().unwrap_or(Variance::Invariant) {
+                        Variance::Covariant => self.is_subtype(a, b),
+                        Variance::Contravariant => self.is_subtype(b, a),
+                        Variance::Invariant => self.is_subtype(a, b) && self.is_subtype(b, a),
+                    },
+                )
     }
 
     fn path_is_array_coercible(&self, path: &verum_ast::ty::Path) -> bool {
@@ -229,26 +227,14 @@ impl Subtyping {
                 // Contravariant: a2_i <: a1_i
                 // Invariant: a1_i == a2_i (both directions)
                 let variances = self.get_named_type_variances(p1, a1.len());
-                a1.iter()
-                    .zip(a2.iter())
-                    .enumerate()
-                    .all(|(i, (arg1, arg2))| {
-                        match variances.get(i).copied().unwrap_or(Variance::Covariant) {
-                            Variance::Covariant => self.is_subtype(arg1, arg2),
-                            Variance::Contravariant => self.is_subtype(arg2, arg1),
-                            Variance::Invariant => {
-                                self.is_subtype(arg1, arg2) && self.is_subtype(arg2, arg1)
-                            }
-                        }
-                    })
+                self.check_type_arguments(a1, a2, &variances)
             }
 
             // Generic types (stdlib types like List<T>, Map<K,V>, etc.)
             // Core semantics: value semantics by default, explicit reference/heap allocation, no implicit copying — Semantic types
             //
 
-            // Generic types are covariant in their type arguments.
-            // List<Int{> 0}> <: List<Int> because Int{> 0} <: Int
+            // Constructor variance determines whether type arguments may change.
             //
 
             // CRITICAL FIX: Generic types need explicit handling for subtyping
@@ -260,39 +246,20 @@ impl Subtyping {
                 }
                 // Check type arguments with proper variance
                 let variances = self.get_generic_type_variances(n1, a1.len());
-                a1.iter()
-                    .zip(a2.iter())
-                    .enumerate()
-                    .all(|(i, (arg1, arg2))| {
-                        match variances.get(i).copied().unwrap_or(Variance::Covariant) {
-                            Variance::Covariant => self.is_subtype(arg1, arg2),
-                            Variance::Contravariant => self.is_subtype(arg2, arg1),
-                            Variance::Invariant => {
-                                self.is_subtype(arg1, arg2) && self.is_subtype(arg2, arg1)
-                            }
-                        }
-                    })
+                self.check_type_arguments(a1, a2, &variances)
             }
 
             // Cross-comparison: Generic <-> Named
-            // Handles cases where the same type is represented differently
+            // Without declaration identity, only matching single-segment names
+            // establish that both representations designate the same constructor.
+            // Preserve source/target direction in both representation orders.
             (Generic { name, args: a1 }, Named { path, args: a2 })
-            | (Named { path, args: a2 }, Generic { name, args: a1 }) => {
-                let path_name = path
-                    .segments
-                    .last()
-                    .map(|seg| match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                        _ => "",
-                    })
-                    .unwrap_or("");
-
-                if name.as_str() != path_name || a1.len() != a2.len() {
+            | (Named { path, args: a1 }, Generic { name, args: a2 }) => {
+                if path.as_ident().map(|ident| &ident.name) != Some(name) || a1.len() != a2.len() {
                     return false;
                 }
-                a1.iter()
-                    .zip(a2.iter())
-                    .all(|(t1, t2)| self.is_subtype(t1, t2))
+                let variances = self.get_generic_type_variances(name, a1.len());
+                self.check_type_arguments(a1, a2, &variances)
             }
 
             // Reflexivity: T <: T
@@ -358,7 +325,14 @@ impl Subtyping {
             // Base does not erase to refinement: T <: T{p} only if p always holds
             // Conservative: reject unless we can prove it
             // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9566-9568
-            (t, Refined { base, .. }) => self.is_subtype(t, base),
+            (t, Refined { base, predicate }) => {
+                let truth = verum_ast::Expr::literal(verum_ast::literal::Literal::bool(
+                    true,
+                    predicate.span,
+                ));
+                self.is_subtype(t, base)
+                    && check_syntactic_subsumption(&truth, &predicate.predicate) == Some(true)
+            }
 
             // Function subtyping (contravariant in params, covariant in return)
             // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9574-9576
@@ -366,18 +340,31 @@ impl Subtyping {
                 Function {
                     params: p1,
                     return_type: r1,
-                    type_params: _,
+                    type_params: tp1,
                     contexts: c1,
-                    properties: _,
+                    properties: properties1,
                 },
                 Function {
                     params: p2,
                     return_type: r2,
-                    type_params: _,
+                    type_params: tp2,
                     contexts: c2,
-                    properties: _,
+                    properties: properties2,
                 },
-            ) => self.check_function_subtype(p1, r1, c1, p2, r2, c2),
+            ) => {
+                // Differently bound polymorphic contracts need instantiation and
+                // bound entailment, neither of which this boolean checker proves.
+                let properties_compatible = match (properties1, properties2) {
+                    (Some(source), Some(target)) => source.is_subset_of(target),
+                    (None, None) => true,
+                    // None means not yet inferred, not a proof of purity or an
+                    // unrestricted property contract.
+                    _ => false,
+                };
+                tp1 == tp2
+                    && properties_compatible
+                    && self.check_function_subtype(p1, r1, c1, p2, r2, c2)
+            }
 
             // Tuple subtyping (covariant in components)
             // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9578-9585
@@ -479,7 +466,7 @@ impl Subtyping {
                 },
             ) => {
                 // Checked -> Managed: Implicit upcast (forgetful)
-                m1 == m2 && self.is_subtype(i1, i2)
+                m1 == m2 && self.check_reference_subtype(*m1, i1, *m2, i2)
             }
 
             (
@@ -504,36 +491,9 @@ impl Subtyping {
                 }
             }
 
-            // UnsafeReference subtyping
-            // Three-tier reference model: &T (managed, CBGR ~15ns), &checked T (statically verified, 0ns), &unsafe T (unchecked, 0ns). Memory layouts: ThinRef 16 bytes (ptr+generation+epoch), FatRef 24 bytes (+len) — line 636
-            // &unsafe T <: &checked T <: &T (forgetful upcasts)
-            (
-                UnsafeReference {
-                    mutable: m1,
-                    inner: i1,
-                },
-                CheckedReference {
-                    mutable: m2,
-                    inner: i2,
-                },
-            ) => {
-                // Unsafe -> Checked: Implicit upcast
-                m1 == m2 && self.is_subtype(i1, i2)
-            }
-
-            (
-                UnsafeReference {
-                    mutable: m1,
-                    inner: i1,
-                },
-                Reference {
-                    mutable: m2,
-                    inner: i2,
-                },
-            ) => {
-                // Unsafe -> Managed: Implicit upcast (via Checked)
-                m1 == m2 && self.is_subtype(i1, i2)
-            }
+            // An unchecked reference carries neither a static lifetime proof
+            // nor CBGR registration. Subtyping cannot manufacture either.
+            (UnsafeReference { .. }, CheckedReference { .. } | Reference { .. }) => false,
 
             (
                 UnsafeReference {
@@ -1321,12 +1281,13 @@ impl Subtyping {
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9663-9666
     /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context requirement subtyping
     ///
-    /// This allows passing pure functions where effectful functions are expected.
+    /// This allows passing functions requiring no contexts where dependencies are available.
     ///
     /// Rules:
-    /// - None (no contexts) is a subtype of any context requirement (pure functions can be used anywhere)
+    /// - None (no contexts) is a subtype of any context requirement
     /// - Some(Concrete(req1)) <: Some(Concrete(req2)) if req1.is_subset_of(req2)
-    /// - Variable contexts are handled conservatively (assume compatible during inference)
+    /// - An unresolved variable compares only with itself; an empty source
+    ///   requirement is a subset of every possible variable instantiation
     ///
     /// Example:
     /// ```verum
@@ -1342,18 +1303,20 @@ impl Subtyping {
         use crate::di::requirement::ContextExpr;
 
         match (contexts1, contexts2) {
-            // No contexts (pure) is a subtype of any context requirement
+            // No requirements are a subset of every instantiation; do not bind
+            // a target context variable to empty to establish this relation.
             (None, _) => true,
-            // Some contexts cannot be a subtype of no contexts (unless variable)
-            (Some(ContextExpr::Variable(_)), None) => true, // Variable might be empty
-            (Some(ContextExpr::Concrete(_)), None) => false,
+            (Some(ContextExpr::Concrete(req)), None) => req.is_empty(),
+            (Some(ContextExpr::Variable(_)), None) => false,
             // Both concrete: check subset relationship
             (Some(ContextExpr::Concrete(req1)), Some(ContextExpr::Concrete(req2))) => {
                 req1.is_subset_of(req2)
             }
-            // Variables: assume compatible during inference (will be checked at unification)
-            (Some(ContextExpr::Variable(_)), Some(_)) => true,
-            (Some(_), Some(ContextExpr::Variable(_))) => true,
+            (Some(ContextExpr::Variable(source)), Some(ContextExpr::Variable(target))) => {
+                source == target
+            }
+            (Some(ContextExpr::Concrete(req)), Some(ContextExpr::Variable(_))) => req.is_empty(),
+            (Some(ContextExpr::Variable(_)), Some(ContextExpr::Concrete(_))) => false,
         }
     }
 
@@ -1457,14 +1420,6 @@ fn check_syntactic_subsumption(phi1: &verum_ast::Expr, phi2: &verum_ast::Expr) -
 
     // Boolean tautologies
     match (&phi1.kind, &phi2.kind) {
-        // true => φ (always valid - true is strongest predicate)
-        (
-            ExprKind::Literal(Literal {
-                kind: LiteralKind::Bool(true),
-                ..
-            }),
-            _,
-        ) => return Some(true),
         // φ => true (always valid - true is weakest constraint)
         (
             _,

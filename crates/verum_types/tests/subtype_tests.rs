@@ -395,10 +395,10 @@ fn test_checked_to_managed_upcast() {
 }
 
 #[test]
-fn test_unsafe_to_checked_upcast() {
+fn test_unsafe_to_checked_requires_a_proof() {
     let s = Subtyping::new();
 
-    // &unsafe Int <: &checked Int (forgetful upcast)
+    // An unchecked reference does not establish compile-time safety.
     let r1 = Type::UnsafeReference {
         mutable: false,
         inner: Box::new(Type::int()),
@@ -408,14 +408,14 @@ fn test_unsafe_to_checked_upcast() {
         inner: Box::new(Type::int()),
     };
 
-    assert!(s.is_subtype(&r1, &r2));
+    assert!(!s.is_subtype(&r1, &r2));
 }
 
 #[test]
-fn test_unsafe_to_managed_upcast() {
+fn test_unsafe_to_managed_requires_registration() {
     let s = Subtyping::new();
 
-    // &unsafe Int <: &Int (forgetful upcast via checked)
+    // An unchecked reference does not carry CBGR registration.
     let r1 = Type::UnsafeReference {
         mutable: false,
         inner: Box::new(Type::int()),
@@ -425,7 +425,7 @@ fn test_unsafe_to_managed_upcast() {
         inner: Box::new(Type::int()),
     };
 
-    assert!(s.is_subtype(&r1, &r2));
+    assert!(!s.is_subtype(&r1, &r2));
 }
 
 #[test]
