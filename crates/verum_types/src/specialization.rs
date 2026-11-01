@@ -1302,26 +1302,14 @@ impl SpecializationValidator {
         }
     }
 
-    /// Check if two universe levels are compatible.
-    ///
-    /// Levels are compatible if:
-    /// 1. Both are concrete and equal
-    /// 2. At least one is a variable (can be unified)
-    /// 3. Both have the same structure (Max, Succ)
+    /// This compatibility path has no universe substitution to carry evidence.
+    /// Accept only universally equivalent levels, never a guessed instantiation.
     fn universe_levels_compatible(
         &self,
         l1: &crate::ty::UniverseLevel,
         l2: &crate::ty::UniverseLevel,
     ) -> bool {
-        use crate::ty::UniverseLevel;
-
-        match (l1, l2) {
-            (UniverseLevel::Concrete(n1), UniverseLevel::Concrete(n2)) => n1 == n2,
-            (UniverseLevel::Variable(_), _) | (_, UniverseLevel::Variable(_)) => true,
-            (UniverseLevel::Max(a1, b1), UniverseLevel::Max(a2, b2)) => a1 == a2 && b1 == b2,
-            (UniverseLevel::Succ(n1), UniverseLevel::Succ(n2)) => n1 == n2,
-            _ => false,
-        }
+        l1.equivalent(l2)
     }
 
     /// Check if bounds are more restrictive

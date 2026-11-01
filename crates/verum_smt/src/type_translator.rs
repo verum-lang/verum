@@ -99,7 +99,7 @@ pub struct TypeTranslator {
     /// Inductive datatype sorts
     inductive_sorts: Map<Text, Sort>,
     /// Universe levels (for type-level computation)
-    universe_sorts: Map<u32, Sort>,
+    universe_sorts: Map<u64, Sort>,
     /// Quantity tracking for QTT
     quantity_map: Map<Text, Quantity>,
 }
@@ -541,15 +541,13 @@ impl TypeTranslator {
 
     /// Translate Universe level
     fn translate_universe(&mut self, level: &UniverseLevel) -> Result<Sort, TypeTranslationError> {
-        // Universes as uninterpreted sorts. Pattern matching against a
-        // `&UniverseLevel` binds inner fields by reference, so we deref
-        // explicitly before the arithmetic/max.
-        let level_num = match level {
-            UniverseLevel::Concrete(n) => *n,
-            UniverseLevel::Variable(v) => *v,
-            UniverseLevel::Max(a, b) => (*a).max(*b),
-            UniverseLevel::Succ(n) => *n + 1,
-        };
+        // This backend represents concrete universes as uninterpreted sorts.
+        // It cannot interpret an opaque level-variable ID as its valuation.
+        let level_num = level.evaluate(&Map::new()).ok_or_else(|| {
+            TypeTranslationError::InvalidUniverse(
+                "universe level must be resolved before SMT sort translation".into(),
+            )
+        })?;
 
         if let Some(sort) = self.universe_sorts.get(&level_num) {
             return Ok(sort.clone());

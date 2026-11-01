@@ -23,258 +23,7 @@ use crate::refinement::RefinementPredicate;
 // DEPENDENT TYPES INFRASTRUCTURE (Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — )
 // =============================================================================
 
-/// Universe level for dependent type theory.
-/// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
-///
-/// Types have types (called universes) forming an infinite hierarchy:
-/// ```text
-/// Type₀ : Type₁ : Type₂ : ...
-/// ```
-///
-/// This hierarchy prevents Girard's paradox (similar to Russell's paradox).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum UniverseLevel {
-    /// Concrete level (0, 1, 2, ...)
-    Concrete(u32),
-    /// Universe variable for universe polymorphism
-    Variable(u32),
-    /// Maximum of two levels: max(u, v)
-    Max(u32, u32),
-    /// Successor of a level: u + 1
-    Succ(u32),
-}
-
-impl UniverseLevel {
-    /// The base universe Type₀ (or just Type)
-    pub const TYPE: Self = UniverseLevel::Concrete(0);
-
-    /// The first universe Type₁
-    pub const TYPE1: Self = UniverseLevel::Concrete(1);
-
-    /// The second universe Type₂
-    pub const TYPE2: Self = UniverseLevel::Concrete(2);
-
-    /// Create a concrete universe level
-    pub fn concrete(n: u32) -> Self {
-        UniverseLevel::Concrete(n)
-    }
-
-    /// Create a universe variable
-    pub fn variable(id: u32) -> Self {
-        UniverseLevel::Variable(id)
-    }
-
-    /// Successor universe level.
-    /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Succ levels
-    ///
-    /// For concrete levels, directly computes n + 1.
-    /// For variable levels, creates a Succ expression that will be resolved
-    /// during constraint solving.
-    pub fn succ(self) -> Self {
-        match self {
-            // Concrete: directly compute successor
-            UniverseLevel::Concrete(n) => UniverseLevel::Concrete(n.saturating_add(1)),
-            // Variable: create a Succ that references this variable
-            UniverseLevel::Variable(v) => UniverseLevel::Succ(v),
-            // Max(a, b) + 1: succ(max(a, b)) - encode as Max with offset
-            // The constraint solver will resolve the actual values
-            UniverseLevel::Max(a, b) => {
-                UniverseLevel::Max(a.saturating_add(1), b.saturating_add(1))
-            }
-            // Succ(v) + 1 = Succ(Succ(v)) - chain of successors
-            // We track this as Succ with an incremented variable ID marker
-            UniverseLevel::Succ(v) => UniverseLevel::Succ(v.saturating_add(1)),
-        }
-    }
-
-    /// Maximum of two universe levels.
-    /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Max levels
-    ///
-    /// For concrete levels, directly computes the maximum.
-    /// For levels involving variables, creates constraint expressions
-    /// that will be resolved during constraint solving via UniverseContext.
-    pub fn max(self, other: Self) -> Self {
-        match (self, other) {
-            // Both concrete: directly compute max
-            (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => {
-                UniverseLevel::Concrete(a.max(b))
-            }
-
-            // Both variables: straightforward Max(var_a, var_b)
-            (UniverseLevel::Variable(v1), UniverseLevel::Variable(v2)) => {
-                UniverseLevel::Max(v1, v2)
-            }
-
-            // Variable with concrete: encode concrete in the Max structure
-            // The constraint solver (UniverseContext) resolves these
-            (UniverseLevel::Concrete(a), UniverseLevel::Variable(v)) => {
-                // Use the concrete value as a bound marker
-                UniverseLevel::Max(a, v)
-            }
-            (UniverseLevel::Variable(v), UniverseLevel::Concrete(b)) => UniverseLevel::Max(v, b),
-
-            // Variable with Succ: need constraint-based resolution
-            (UniverseLevel::Variable(v), UniverseLevel::Succ(s)) => {
-                // max(v, s+1) - encode with v and s for constraint solver
-                UniverseLevel::Max(v, s.saturating_add(1000)) // Offset to distinguish from concrete
-            }
-            (UniverseLevel::Succ(s), UniverseLevel::Variable(v)) => {
-                UniverseLevel::Max(s.saturating_add(1000), v)
-            }
-
-            // Both Succ: max(a+1, b+1) = max(a, b) + 1
-            (UniverseLevel::Succ(a), UniverseLevel::Succ(b)) => UniverseLevel::Max(a, b).succ(),
-
-            // Max with Max: compose into new Max (simplified - full impl uses constraints)
-            (UniverseLevel::Max(a1, b1), UniverseLevel::Max(a2, b2)) => {
-                // max(max(a1, b1), max(a2, b2)) = max(a1, b1, a2, b2)
-                // We pick the larger pair for approximation
-                UniverseLevel::Max(a1.max(a2), b1.max(b2))
-            }
-
-            // Max with Succ
-            (UniverseLevel::Max(a, b), UniverseLevel::Succ(s)) => {
-                // max(max(a, b), s+1)
-                UniverseLevel::Max(a.max(s.saturating_add(1)), b)
-            }
-            (UniverseLevel::Succ(s), UniverseLevel::Max(a, b)) => {
-                UniverseLevel::Max(s.saturating_add(1).max(a), b)
-            }
-
-            // Concrete with Max
-            (UniverseLevel::Concrete(c), UniverseLevel::Max(a, b)) => {
-                UniverseLevel::Max(c.max(a), b)
-            }
-            (UniverseLevel::Max(a, b), UniverseLevel::Concrete(c)) => {
-                UniverseLevel::Max(a, b.max(c))
-            }
-
-            // Concrete with Succ: max(c, s+1)
-            (UniverseLevel::Concrete(c), UniverseLevel::Succ(s)) => {
-                // The result depends on whether c > s+1
-                // For constraint-based handling, encode both
-                UniverseLevel::Max(c, s.saturating_add(1000))
-            }
-            (UniverseLevel::Succ(s), UniverseLevel::Concrete(c)) => {
-                UniverseLevel::Max(s.saturating_add(1000), c)
-            }
-
-            // Variable with Max: encode for constraint solver
-            (UniverseLevel::Variable(v), UniverseLevel::Max(a, b)) => {
-                // max(v, max(a, b)) - compose with existing max
-                UniverseLevel::Max(v.max(a), b)
-            }
-            (UniverseLevel::Max(a, b), UniverseLevel::Variable(v)) => {
-                // max(max(a, b), v) - compose with existing max
-                UniverseLevel::Max(a, b.max(v))
-            }
-        }
-    }
-
-    /// Check if this level is strictly less than another.
-    /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
-    ///
-    /// Returns true only when we can definitively prove the relationship.
-    /// For variable levels, returns false (conservative) and the constraint
-    /// solver in UniverseContext handles these cases.
-    pub fn is_less_than(&self, other: &Self) -> bool {
-        match (self, other) {
-            // Concrete comparisons are definite
-            (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => a < b,
-
-            // Concrete is less than Succ of same or higher value
-            (UniverseLevel::Concrete(a), UniverseLevel::Succ(v)) => {
-                // Succ(v) >= 1, so Concrete(0) is always less
-                *a == 0 || *a < *v
-            }
-
-            // v < Succ(v) is always true (definitionally)
-            (UniverseLevel::Variable(v1), UniverseLevel::Succ(v2)) if v1 == v2 => true,
-
-            // Succ(u) < Succ(v) if u < v
-            (UniverseLevel::Succ(u), UniverseLevel::Succ(v)) => u < v,
-
-            // Max(a, b) < c if both a < c and b < c
-            (UniverseLevel::Max(a, b), UniverseLevel::Concrete(c)) => a < c && b < c,
-
-            // a < Max(b, c) if a < b or a < c (cannot determine statically for variables)
-            (UniverseLevel::Concrete(a), UniverseLevel::Max(b, c)) => *a < *b || *a < *c,
-
-            // For other cases involving variables, we cannot decide statically
-            // The constraint solver in UniverseContext handles these
-            _ => false,
-        }
-    }
-
-    /// Check if this level is less than or equal to another.
-    pub fn is_less_or_equal(&self, other: &Self) -> bool {
-        self == other || self.is_less_than(other)
-    }
-
-    /// Get all variable IDs referenced in this level.
-    pub fn variables(&self) -> Vec<u32> {
-        match self {
-            UniverseLevel::Concrete(_) => vec![],
-            UniverseLevel::Variable(v) => vec![*v],
-            UniverseLevel::Max(a, b) => vec![*a, *b],
-            UniverseLevel::Succ(v) => vec![*v],
-        }
-    }
-
-    /// Try to compute a concrete lower bound for this level.
-    /// Returns the minimum possible value, or 0 if unknown.
-    pub fn lower_bound(&self) -> u32 {
-        match self {
-            UniverseLevel::Concrete(n) => *n,
-            UniverseLevel::Variable(_) => 0, // Variables have minimum 0
-            UniverseLevel::Max(a, b) => (*a).max(*b), // Max is at least max(a, b)
-            UniverseLevel::Succ(_) => 1,     // Succ is at least 1
-        }
-    }
-
-    /// Check if this level contains any variables (is polymorphic).
-    pub fn is_polymorphic(&self) -> bool {
-        !matches!(self, UniverseLevel::Concrete(_))
-    }
-}
-
-impl Default for UniverseLevel {
-    fn default() -> Self {
-        UniverseLevel::TYPE
-    }
-}
-
-impl fmt::Display for UniverseLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            UniverseLevel::Concrete(0) => write!(f, "Type"),
-            UniverseLevel::Concrete(n) => write!(f, "Type{}", subscript(*n)),
-            UniverseLevel::Variable(v) => write!(f, "u{}", v),
-            UniverseLevel::Max(a, b) => write!(f, "max({}, {})", a, b),
-            UniverseLevel::Succ(v) => write!(f, "u{} + 1", v),
-        }
-    }
-}
-
-/// Helper to create subscript digits for universe display
-fn subscript(n: u32) -> String {
-    n.to_string()
-        .chars()
-        .map(|c| match c {
-            '0' => '₀',
-            '1' => '₁',
-            '2' => '₂',
-            '3' => '₃',
-            '4' => '₄',
-            '5' => '₅',
-            '6' => '₆',
-            '7' => '₇',
-            '8' => '₈',
-            '9' => '₉',
-            _ => c,
-        })
-        .collect()
-}
+pub use crate::universe_level::UniverseLevel;
 
 /// Term representation for equality types.
 /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution
@@ -2456,7 +2205,7 @@ impl Type {
     /// Get the universe level of a type (if applicable)
     pub fn universe_level(&self) -> Option<UniverseLevel> {
         match self {
-            Type::Universe { level } => Some(*level),
+            Type::Universe { level } => Some(level.clone()),
             Type::Prop => Some(UniverseLevel::Concrete(0)), // Prop is at level 0
             _ => None,
         }
@@ -2503,7 +2252,7 @@ impl Type {
                 let return_univ = return_type.type_of();
                 match (param_univ, return_univ) {
                     (Type::Universe { level: l1 }, Type::Universe { level: l2 }) => {
-                        Type::Universe { level: l1.max(l2) }
+                        Type::Universe { level: l1.max(&l2) }
                     }
                     _ => Type::Universe {
                         level: UniverseLevel::TYPE,
@@ -2521,7 +2270,7 @@ impl Type {
                 let snd_univ = snd_type.type_of();
                 match (fst_univ, snd_univ) {
                     (Type::Universe { level: l1 }, Type::Universe { level: l2 }) => {
-                        Type::Universe { level: l1.max(l2) }
+                        Type::Universe { level: l1.max(&l2) }
                     }
                     _ => Type::Universe {
                         level: UniverseLevel::TYPE,
@@ -2550,7 +2299,7 @@ impl Type {
 
             // Inductive types live in their declared universe
             // Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .1
-            Type::Inductive { universe, .. } => Type::Universe { level: *universe },
+            Type::Inductive { universe, .. } => Type::Universe { level: universe.clone() },
 
             // Most other types live in Type₀
             _ => Type::Universe {
@@ -3216,7 +2965,7 @@ impl Type {
                 face: face.clone(), // CubicalTerms are value-level
             },
             Type::Interval => Type::Interval,
-            Type::Universe { level } => Type::Universe { level: *level },
+            Type::Universe { level } => Type::Universe { level: level.clone() },
             Type::Prop => Type::Prop,
             Type::Inductive {
                 name,
@@ -3244,7 +2993,7 @@ impl Type {
                         )
                     })
                     .collect(),
-                universe: *universe,
+                universe: universe.clone(),
                 constructors: constructors.clone(), // Constructors have their own type context
             },
             Type::Coinductive {

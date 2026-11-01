@@ -5703,7 +5703,7 @@ impl Unifier {
                     .iter()
                     .map(|(n, t)| (n.clone(), Box::new(Self::rename_bound_var(t, from, to))))
                     .collect(),
-                universe: *universe,
+                universe: universe.clone(),
                 constructors: constructors.clone(),
             },
 
@@ -5955,21 +5955,7 @@ impl Unifier {
     ///
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe hierarchy
     fn universe_levels_unify(l1: &UniverseLevel, l2: &UniverseLevel) -> bool {
-        match (l1, l2) {
-            // Concrete levels must match exactly
-            (UniverseLevel::Concrete(n1), UniverseLevel::Concrete(n2)) => n1 == n2,
-
-            // Level variables unify (constraint recorded elsewhere)
-            (UniverseLevel::Variable(_), _) | (_, UniverseLevel::Variable(_)) => true,
-
-            // Max of levels - both components must match
-            (UniverseLevel::Max(a1, b1), UniverseLevel::Max(a2, b2)) => a1 == a2 && b1 == b2,
-
-            // Successor levels must have same base
-            (UniverseLevel::Succ(n1), UniverseLevel::Succ(n2)) => n1 == n2,
-
-            _ => false,
-        }
+        l1.equivalent(l2)
     }
 
     /// Check if two quantities are compatible for unification.

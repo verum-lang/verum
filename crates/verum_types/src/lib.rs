@@ -166,6 +166,7 @@ pub mod expr_to_eqterm; // AST Expr → EqTerm lowering (used by HIT metadata)
 pub mod instance_search; // Protocol instance search + coherence (used by DependentVerifier)
 pub mod qtt_usage; // QTT usage counting (used by check_function_qtt)
 pub mod qtt_walker; // QTT AST walker (used by check_function_qtt)
+pub mod universe_level;
 pub mod universe_solver; // Universe constraint solving (used by Phase 2.5)
 
 // =========================================================================

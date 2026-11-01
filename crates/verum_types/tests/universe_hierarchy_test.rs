@@ -22,8 +22,8 @@ fn test_universe_context_creation() {
     let mut ctx = TypeContext::new();
 
     // Should be able to generate fresh universe variables
-    let u1 = ctx.fresh_universe_var();
-    let u2 = ctx.fresh_universe_var();
+    let u1 = ctx.fresh_universe_var().unwrap();
+    let u2 = ctx.fresh_universe_var().unwrap();
 
     assert_ne!(u1, u2);
 }
@@ -84,16 +84,9 @@ fn test_function_type_universe() {
     // Should be Type₀ since both Int and Bool are in Type₀
     // Result is max(Type₀, Type₀) = Type₀
     ctx.solve_universe_constraints().unwrap();
-    let resolved = ctx.resolve_universe(&func_level);
+    let resolved = ctx.resolve_universe(&func_level).unwrap();
 
-    match resolved {
-        UniverseLevel::Concrete(n) => assert_eq!(n, 0),
-        UniverseLevel::Variable(_) => {
-            // Variable is ok, constraint should be satisfied
-            // In a complete implementation, this would be resolved to 0
-        }
-        _ => panic!("Unexpected universe level: {:?}", resolved),
-    }
+    assert_eq!(resolved, UniverseLevel::TYPE);
 }
 
 #[test]
@@ -106,15 +99,9 @@ fn test_tuple_type_universe() {
     let tuple_level = ctx.universe_of(&tuple_ty).unwrap();
 
     ctx.solve_universe_constraints().unwrap();
-    let resolved = ctx.resolve_universe(&tuple_level);
+    let resolved = ctx.resolve_universe(&tuple_level).unwrap();
 
-    match resolved {
-        UniverseLevel::Concrete(n) => assert_eq!(n, 0),
-        UniverseLevel::Variable(_) => {
-            // Variable is ok for now
-        }
-        _ => panic!("Unexpected universe level: {:?}", resolved),
-    }
+    assert_eq!(resolved, UniverseLevel::TYPE);
 }
 
 #[test]
@@ -134,22 +121,22 @@ fn test_refinement_type_universe() {
 fn test_universe_constraint_solving() {
     let mut ctx = TypeContext::new();
 
-    let u1 = ctx.fresh_universe_var();
-    let u2 = ctx.fresh_universe_var();
+    let u1 = ctx.fresh_universe_var().unwrap();
+    let u2 = ctx.fresh_universe_var().unwrap();
 
     // Add constraint: u1 < u2
-    ctx.add_universe_constraint(UniverseConstraint::StrictlyLess(u1, u2));
+    ctx.add_universe_constraint(UniverseConstraint::StrictlyLess(u1.clone(), u2.clone()));
 
     // Add constraint: u1 = Type₀
-    ctx.add_universe_constraint(UniverseConstraint::Equal(u1, UniverseLevel::TYPE));
+    ctx.add_universe_constraint(UniverseConstraint::Equal(u1.clone(), UniverseLevel::TYPE));
 
     // Solve should succeed and u2 should be at least Type₁
     ctx.solve_universe_constraints().unwrap();
 
-    let resolved_u2 = ctx.resolve_universe(&u2);
+    let resolved_u2 = ctx.resolve_universe(&u2).unwrap();
     if let UniverseLevel::Concrete(n) = resolved_u2 {
         assert!(n >= 1)
-    }
+    } else { panic!("expected a concrete solved universe"); }
 }
 
 #[test]
@@ -161,7 +148,7 @@ fn test_universe_violation_detected() {
     let level1 = UniverseLevel::Concrete(1);
 
     // Add: level1 < level0 (should fail)
-    ctx.add_universe_constraint(UniverseConstraint::StrictlyLess(level1, level0));
+    ctx.add_universe_constraint(UniverseConstraint::StrictlyLess(level1.clone(), level0.clone()));
 
     // Solve should fail
     let result = ctx.solve_universe_constraints();
@@ -174,17 +161,17 @@ fn test_max_constraint() {
 
     let u1 = UniverseLevel::Concrete(1);
     let u2 = UniverseLevel::Concrete(2);
-    let result = ctx.fresh_universe_var();
+    let result = ctx.fresh_universe_var().unwrap();
 
     // result = max(u1, u2) = 2
-    ctx.add_universe_constraint(UniverseConstraint::Max(result, u1, u2));
+    ctx.add_universe_constraint(UniverseConstraint::Max(result.clone(), u1.clone(), u2.clone()));
 
     ctx.solve_universe_constraints().unwrap();
 
-    let resolved = ctx.resolve_universe(&result);
+    let resolved = ctx.resolve_universe(&result).unwrap();
     if let UniverseLevel::Concrete(n) = resolved {
         assert_eq!(n, 2)
-    }
+    } else { panic!("expected a concrete solved universe"); }
 }
 
 #[test]
@@ -192,13 +179,13 @@ fn test_universe_polymorphism() {
     let mut ctx = TypeContext::new();
 
     // Test that we can have universe-polymorphic types
-    let u = ctx.fresh_universe_var();
-    let poly_type = Type::universe(u);
+    let u = ctx.fresh_universe_var().unwrap();
+    let poly_type = Type::universe(u.clone());
 
     // The type of this universe should be u + 1
     let poly_level = ctx.universe_of(&poly_type).unwrap();
 
-    ctx.add_universe_constraint(UniverseConstraint::Successor(poly_level, u));
+    ctx.add_universe_constraint(UniverseConstraint::Successor(poly_level.clone(), u.clone()));
 
     // Should solve without errors
     ctx.solve_universe_constraints().unwrap();
@@ -298,7 +285,7 @@ fn test_self_less_than_succ() {
     let type1 = type0.succ();
     assert_eq!(type1, UniverseLevel::TYPE1);
 
-    ctx.add_universe_constraint(UniverseConstraint::StrictlyLess(type0, type1));
+    ctx.add_universe_constraint(UniverseConstraint::StrictlyLess(type0.clone(), type1.clone()));
     ctx.solve_universe_constraints().unwrap();
 }
 
@@ -310,22 +297,22 @@ fn test_max_commutative() {
     let v = UniverseLevel::TYPE2;
 
     // max(Type₁, Type₂) = Type₂
-    let r1 = u.max(v);
+    let r1 = u.max(&v);
     // max(Type₂, Type₁) = Type₂
-    let r2 = v.max(u);
+    let r2 = v.max(&u);
 
     assert_eq!(r1, UniverseLevel::TYPE2);
     assert_eq!(r2, UniverseLevel::TYPE2);
 
     // And both are accepted by the solver as Max(Type₁, Type₂)
-    let w1 = ctx.fresh_universe_var();
-    ctx.add_universe_constraint(UniverseConstraint::Max(w1, u, v));
+    let w1 = ctx.fresh_universe_var().unwrap();
+    ctx.add_universe_constraint(UniverseConstraint::Max(w1.clone(), u.clone(), v.clone()));
     ctx.solve_universe_constraints().unwrap();
 
-    let resolved = ctx.resolve_universe(&w1);
+    let resolved = ctx.resolve_universe(&w1).unwrap();
     if let UniverseLevel::Concrete(n) = resolved {
         assert_eq!(n, 2, "max(Type₁, Type₂) must be Type₂, got Type_{}", n);
-    }
+    } else { panic!("expected a concrete solved universe"); }
 }
 
 #[test]
@@ -334,7 +321,7 @@ fn test_max_idempotent() {
     for n in 0u32..5 {
         let level = UniverseLevel::Concrete(n);
         assert_eq!(
-            level.max(level),
+            level.max(&level),
             level,
             "max(Type_{}, Type_{}) must equal Type_{}",
             n,
@@ -363,14 +350,14 @@ fn test_succ_strictly_increasing() {
 fn test_variable_equal_to_concrete_is_bound() {
     let mut ctx = TypeContext::new();
 
-    let u = ctx.fresh_universe_var();
-    ctx.add_universe_constraint(UniverseConstraint::Equal(u, UniverseLevel::TYPE1));
+    let u = ctx.fresh_universe_var().unwrap();
+    ctx.add_universe_constraint(UniverseConstraint::Equal(u.clone(), UniverseLevel::TYPE1));
     ctx.solve_universe_constraints().unwrap();
 
-    let resolved = ctx.resolve_universe(&u);
+    let resolved = ctx.resolve_universe(&u).unwrap();
     if let UniverseLevel::Concrete(n) = resolved {
         assert_eq!(n, 1, "u = Type₁ must resolve u to concrete level 1");
-    }
+    } else { panic!("expected a concrete solved universe"); }
 }
 
 #[test]
@@ -378,25 +365,25 @@ fn test_variable_chain_unification() {
     let mut ctx = TypeContext::new();
 
     // u1 = u2, u2 = u3, u3 = Type₂
-    let u1 = ctx.fresh_universe_var();
-    let u2 = ctx.fresh_universe_var();
-    let u3 = ctx.fresh_universe_var();
+    let u1 = ctx.fresh_universe_var().unwrap();
+    let u2 = ctx.fresh_universe_var().unwrap();
+    let u3 = ctx.fresh_universe_var().unwrap();
 
-    ctx.add_universe_constraint(UniverseConstraint::Equal(u1, u2));
-    ctx.add_universe_constraint(UniverseConstraint::Equal(u2, u3));
-    ctx.add_universe_constraint(UniverseConstraint::Equal(u3, UniverseLevel::TYPE2));
+    ctx.add_universe_constraint(UniverseConstraint::Equal(u1.clone(), u2.clone()));
+    ctx.add_universe_constraint(UniverseConstraint::Equal(u2.clone(), u3.clone()));
+    ctx.add_universe_constraint(UniverseConstraint::Equal(u3.clone(), UniverseLevel::TYPE2));
 
     ctx.solve_universe_constraints().unwrap();
 
     // All three should resolve to Type₂
     for u in &[u1, u2, u3] {
-        let resolved = ctx.resolve_universe(u);
+        let resolved = ctx.resolve_universe(u).unwrap();
         if let UniverseLevel::Concrete(n) = resolved {
             assert_eq!(
                 n, 2,
                 "chain u1 = u2 = u3 = Type₂ must resolve each to Type₂"
             );
-        }
+        } else { panic!("expected a concrete solved universe"); }
     }
 }
 
@@ -422,22 +409,22 @@ fn test_successor_of_variable() {
     let mut ctx = TypeContext::new();
 
     // v = succ(u), u = Type₀ ⇒ v = Type₁
-    let u = ctx.fresh_universe_var();
-    let v = ctx.fresh_universe_var();
+    let u = ctx.fresh_universe_var().unwrap();
+    let v = ctx.fresh_universe_var().unwrap();
 
-    ctx.add_universe_constraint(UniverseConstraint::Successor(v, u));
-    ctx.add_universe_constraint(UniverseConstraint::Equal(u, UniverseLevel::TYPE));
+    ctx.add_universe_constraint(UniverseConstraint::Successor(v.clone(), u.clone()));
+    ctx.add_universe_constraint(UniverseConstraint::Equal(u.clone(), UniverseLevel::TYPE));
 
     ctx.solve_universe_constraints().unwrap();
 
-    let resolved_v = ctx.resolve_universe(&v);
+    let resolved_v = ctx.resolve_universe(&v).unwrap();
     if let UniverseLevel::Concrete(n) = resolved_v {
         assert_eq!(
             n, 1,
             "Successor(v, Type₀) must resolve v to Type₁, got Type_{}",
             n
         );
-    }
+    } else { panic!("expected a concrete solved universe"); }
 }
 
 #[test]
@@ -445,8 +432,8 @@ fn test_successor_below_zero_rejected() {
     let mut ctx = TypeContext::new();
 
     // Succ(u) = Type₀ is impossible (there is no predecessor of Type₀)
-    let u = ctx.fresh_universe_var();
-    ctx.add_universe_constraint(UniverseConstraint::Successor(UniverseLevel::TYPE, u));
+    let u = ctx.fresh_universe_var().unwrap();
+    ctx.add_universe_constraint(UniverseConstraint::Successor(UniverseLevel::TYPE, u.clone()));
 
     let result = ctx.solve_universe_constraints();
     assert!(
@@ -469,14 +456,8 @@ fn test_function_type_level_is_max() {
     let level = ctx.universe_of(&fn_ty).unwrap();
     ctx.solve_universe_constraints().unwrap();
 
-    let resolved = ctx.resolve_universe(&level);
-    match resolved {
-        UniverseLevel::Concrete(_) | UniverseLevel::Variable(_) => { /* ok */ }
-        _ => panic!(
-            "function type universe must be concrete or variable, got {:?}",
-            resolved
-        ),
-    }
+    let resolved = ctx.resolve_universe(&level).unwrap();
+    assert_eq!(resolved, UniverseLevel::TYPE);
 }
 
 #[test]
@@ -536,17 +517,17 @@ fn test_polymorphic_identity_type_universe() {
     // essence of universe polymorphism.
     let mut ctx = TypeContext::new();
 
-    let u = ctx.fresh_universe_var();
-    let t = Type::universe(u);
+    let u = ctx.fresh_universe_var().unwrap();
+    let t = Type::universe(u.clone());
 
     // t : succ(u)
     let level_of_t = ctx.universe_of(&t).unwrap();
-    ctx.add_universe_constraint(UniverseConstraint::Successor(level_of_t, u));
+    ctx.add_universe_constraint(UniverseConstraint::Successor(level_of_t.clone(), u.clone()));
 
     ctx.solve_universe_constraints().unwrap();
 
     // u should be assigned some concrete level (typically 0)
-    let resolved_u = ctx.resolve_universe(&u);
+    let resolved_u = ctx.resolve_universe(&u).unwrap();
     match resolved_u {
         UniverseLevel::Concrete(_) => { /* ok */ }
         _ => panic!(
@@ -561,7 +542,7 @@ fn test_fresh_universe_vars_are_distinct() {
     let mut ctx = TypeContext::new();
 
     // Generate 100 fresh variables and ensure they're all distinct
-    let vars: Vec<UniverseLevel> = (0..100).map(|_| ctx.fresh_universe_var()).collect();
+    let vars: Vec<UniverseLevel> = (0..100).map(|_| ctx.fresh_universe_var().unwrap()).collect();
 
     for i in 0..vars.len() {
         for j in (i + 1)..vars.len() {
@@ -585,8 +566,8 @@ fn test_empty_constraint_set_solves() {
 fn test_resolve_unbound_variable_returns_variable() {
     let mut ctx = TypeContext::new();
 
-    let u = ctx.fresh_universe_var();
-    let resolved = ctx.resolve_universe(&u);
+    let u = ctx.fresh_universe_var().unwrap();
+    let resolved = ctx.resolve_universe(&u).unwrap();
 
     // Before solving, an unbound variable must resolve to itself (or a var)
     match resolved {
@@ -608,7 +589,7 @@ fn test_resolve_concrete_is_identity() {
 
     for level in &levels {
         assert_eq!(
-            ctx.resolve_universe(level),
+            ctx.resolve_universe(level).unwrap(),
             *level,
             "resolve on concrete level must be identity"
         );
@@ -630,7 +611,7 @@ fn test_lower_bound_progressively_increases() {
     for n in 0u32..10 {
         assert_eq!(
             UniverseLevel::Concrete(n).lower_bound(),
-            n,
+            u64::from(n),
             "concrete level Type_{} must have lower_bound = {}",
             n,
             n

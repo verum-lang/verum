@@ -1170,10 +1170,10 @@ mod universe_hierarchy {
 
     #[test]
     fn test_universe_max_concrete() {
-        let max = UniverseLevel::TYPE.max(UniverseLevel::TYPE1);
+        let max = UniverseLevel::TYPE.max(&UniverseLevel::TYPE1);
         assert_eq!(max, UniverseLevel::TYPE1);
 
-        let max2 = UniverseLevel::TYPE2.max(UniverseLevel::TYPE);
+        let max2 = UniverseLevel::TYPE2.max(&UniverseLevel::TYPE);
         assert_eq!(max2, UniverseLevel::TYPE2);
     }
 
@@ -1201,13 +1201,13 @@ mod universe_hierarchy {
     #[test]
     fn test_universe_substitution_resolve() {
         let mut subst = UniverseSubstitution::new();
-        subst.insert(0, UniverseLevel::Concrete(1));
+        subst.insert(0, UniverseLevel::Concrete(1)).unwrap();
 
-        let resolved = subst.resolve(&UniverseLevel::Variable(0));
+        let resolved = subst.resolve(&UniverseLevel::Variable(0)).unwrap();
         assert_eq!(resolved, UniverseLevel::Concrete(1));
 
         // Unresolved variable stays as-is
-        let unresolved = subst.resolve(&UniverseLevel::Variable(99));
+        let unresolved = subst.resolve(&UniverseLevel::Variable(99)).unwrap();
         assert_eq!(unresolved, UniverseLevel::Variable(99));
     }
 
@@ -1215,8 +1215,8 @@ mod universe_hierarchy {
     fn test_universe_context_fresh_vars() {
         let mut ctx = UniverseContext::new();
 
-        let v1 = ctx.fresh_universe_var();
-        let v2 = ctx.fresh_universe_var();
+        let v1 = ctx.fresh_universe_var().unwrap();
+        let v2 = ctx.fresh_universe_var().unwrap();
 
         // Fresh variables should be different
         assert_ne!(v1, v2);
@@ -1227,8 +1227,8 @@ mod universe_hierarchy {
         let mut ctx = UniverseContext::new();
 
         // u0 = Type_0
-        let u0 = ctx.fresh_universe_var();
-        ctx.add_constraint(UniverseConstraint::Equal(u0, UniverseLevel::TYPE));
+        let u0 = ctx.fresh_universe_var().unwrap();
+        ctx.add_constraint(UniverseConstraint::Equal(u0.clone(), UniverseLevel::TYPE));
 
         // Should solve successfully
         ctx.solve().unwrap();
@@ -1262,7 +1262,7 @@ mod universe_hierarchy {
         let mut ctx = UniverseContext::new();
 
         // result = max(Type_0, Type_1) should be Type_1
-        let result = ctx.fresh_universe_var();
+        let result = ctx.fresh_universe_var().unwrap();
         ctx.add_max_constraint(
             result,
             List::from_iter([UniverseLevel::TYPE, UniverseLevel::TYPE1]),
@@ -1283,19 +1283,19 @@ mod universe_hierarchy {
     #[test]
     fn test_universe_substitution_merge() {
         let mut subst1 = UniverseSubstitution::new();
-        subst1.insert(0, UniverseLevel::Concrete(1));
+        subst1.insert(0, UniverseLevel::Concrete(1)).unwrap();
 
         let mut subst2 = UniverseSubstitution::new();
-        subst2.insert(1, UniverseLevel::Concrete(2));
+        subst2.insert(1, UniverseLevel::Concrete(2)).unwrap();
 
-        subst1.merge(&subst2);
+        subst1.merge(&subst2).unwrap();
 
         assert_eq!(
-            subst1.resolve(&UniverseLevel::Variable(0)),
+            subst1.resolve(&UniverseLevel::Variable(0)).unwrap(),
             UniverseLevel::Concrete(1)
         );
         assert_eq!(
-            subst1.resolve(&UniverseLevel::Variable(1)),
+            subst1.resolve(&UniverseLevel::Variable(1)).unwrap(),
             UniverseLevel::Concrete(2)
         );
     }

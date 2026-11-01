@@ -9,6 +9,7 @@
 import VerumExternalReplay.KernelSoundness
 import VerumExternalReplay.TypeAlgebra
 import VerumExternalReplay.IntegerBoundEntailment
+import VerumExternalReplay.UniverseLevels
 import VerumExternalReplay.StructuredElimination
 import VerumExternalReplay.ReferenceChecker
 import VerumExternalReplay.TermOperations

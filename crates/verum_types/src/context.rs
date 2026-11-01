@@ -512,259 +512,195 @@ pub enum UniverseConstraint {
 }
 
 impl UniverseConstraint {
-    /// Check if this constraint is satisfied given a substitution.
-    /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
-    ///
-    /// Returns:
-    /// - `true` if the constraint is definitely satisfied or cannot be falsified
-    /// - `false` if the constraint is definitely violated
-    ///
-    /// For constraints involving unresolved variables, we use structural analysis:
-    /// - Variables with equal IDs are considered equal
-    /// - Succ(v) > v is always true
-    /// - Max constraints propagate through resolved values
+    pub(crate) fn levels(&self) -> List<&UniverseLevel> {
+        match self {
+            Self::LessOrEqual(u, v)
+            | Self::StrictlyLess(u, v)
+            | Self::Equal(u, v)
+            | Self::Successor(u, v) => vec![u, v].into(),
+            Self::Max(w, u, v) => vec![w, u, v].into(),
+        }
+    }
+
+    /// Check a complete assignment by exact natural-number evaluation.
+    /// Missing variables, bounded-evaluation failure and arithmetic overflow
+    /// are unproved, never satisfied. This is independent of solver search.
+    pub fn evaluate(&self, assignment: &Map<u32, u64>) -> Option<bool> {
+        match self {
+            Self::LessOrEqual(u, v) => Some(u.evaluate(assignment)? <= v.evaluate(assignment)?),
+            Self::StrictlyLess(u, v) => Some(u.evaluate(assignment)? < v.evaluate(assignment)?),
+            Self::Equal(u, v) => Some(u.evaluate(assignment)? == v.evaluate(assignment)?),
+            Self::Max(w, u, v) => Some(
+                w.evaluate(assignment)? == u.evaluate(assignment)?.max(v.evaluate(assignment)?),
+            ),
+            Self::Successor(v, u) => {
+                Some(v.evaluate(assignment)? == u.evaluate(assignment)?.checked_add(1)?)
+            }
+        }
+    }
+
+    /// Validate a model, rather than assume unresolved metas are satisfiable.
+    /// Universal ordering judgments belong to `UniverseLevel` instead.
     pub fn is_satisfied(&self, subst: &UniverseSubstitution) -> bool {
+        let empty = Map::new();
+        let value = |level: &UniverseLevel| subst.resolve(level).ok()?.evaluate(&empty);
+        let result = match self {
+            Self::LessOrEqual(u, v) => value(u).zip(value(v)).map(|(u, v)| u <= v),
+            Self::StrictlyLess(u, v) => value(u).zip(value(v)).map(|(u, v)| u < v),
+            Self::Equal(u, v) => value(u).zip(value(v)).map(|(u, v)| u == v),
+            Self::Max(w, u, v) => value(w)
+                .zip(value(u).zip(value(v)))
+                .map(|(w, (u, v))| w == u.max(v)),
+            Self::Successor(v, u) => value(v)
+                .zip(value(u).and_then(|u| u.checked_add(1)))
+                .map(|(v, successor)| v == successor),
+        };
+        result == Some(true)
+    }
+
+    /// Get every variable mentioned by the structural level expressions.
+    pub fn variables(&self) -> List<u32> {
+        let mut vars = List::new();
         match self {
-            UniverseConstraint::LessOrEqual(u, v) => {
-                let u_resolved = subst.resolve(u);
-                let v_resolved = subst.resolve(v);
-                Self::check_less_or_equal(&u_resolved, &v_resolved)
-            }
-            UniverseConstraint::StrictlyLess(u, v) => {
-                let u_resolved = subst.resolve(u);
-                let v_resolved = subst.resolve(v);
-                Self::check_strictly_less(&u_resolved, &v_resolved)
-            }
-            UniverseConstraint::Equal(u, v) => {
-                let u_resolved = subst.resolve(u);
-                let v_resolved = subst.resolve(v);
-                Self::check_equal(&u_resolved, &v_resolved)
-            }
-            UniverseConstraint::Max(w, u, v) => {
-                let w_resolved = subst.resolve(w);
-                let u_resolved = subst.resolve(u);
-                let v_resolved = subst.resolve(v);
-                Self::check_max(&w_resolved, &u_resolved, &v_resolved)
-            }
-            UniverseConstraint::Successor(v, u) => {
-                let v_resolved = subst.resolve(v);
-                let u_resolved = subst.resolve(u);
-                Self::check_successor(&v_resolved, &u_resolved)
-            }
-        }
-    }
-
-    /// Check u <= v with structural analysis
-    fn check_less_or_equal(u: &UniverseLevel, v: &UniverseLevel) -> bool {
-        // Equal levels satisfy <=
-        if u == v {
-            return true;
-        }
-
-        match (u, v) {
-            // Concrete comparison
-            (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => a <= b,
-
-            // v <= Succ(v) is always true
-            (UniverseLevel::Variable(v1), UniverseLevel::Succ(v2)) if v1 == v2 => true,
-
-            // Concrete <= Succ (since Succ >= 1)
-            (UniverseLevel::Concrete(a), UniverseLevel::Succ(_)) => *a <= 1,
-
-            // Max(a,b) <= c if both a <= c and b <= c
-            (UniverseLevel::Max(a, b), UniverseLevel::Concrete(c)) => a <= c && b <= c,
-
-            // Succ(u) <= Succ(v) if u <= v
-            (UniverseLevel::Succ(u1), UniverseLevel::Succ(u2)) => u1 <= u2,
-
-            // Same variable is equal
-            (UniverseLevel::Variable(v1), UniverseLevel::Variable(v2)) if v1 == v2 => true,
-
-            // For unresolved different variables, assume satisfiable
-            _ => true,
-        }
-    }
-
-    /// Check u < v with structural analysis
-    fn check_strictly_less(u: &UniverseLevel, v: &UniverseLevel) -> bool {
-        // Equal levels don't satisfy <
-        if u == v {
-            return false;
-        }
-
-        match (u, v) {
-            // Concrete comparison
-            (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => a < b,
-
-            // Concrete 0 is always < Succ(anything)
-            (UniverseLevel::Concrete(0), UniverseLevel::Succ(_)) => true,
-
-            // v < Succ(v) is always true
-            (UniverseLevel::Variable(v1), UniverseLevel::Succ(v2)) if v1 == v2 => true,
-
-            // Succ(u) < Succ(v) if u < v
-            (UniverseLevel::Succ(u1), UniverseLevel::Succ(u2)) => u1 < u2,
-
-            // Same variable is not strictly less
-            (UniverseLevel::Variable(v1), UniverseLevel::Variable(v2)) if v1 == v2 => false,
-
-            // For other cases with variables, assume satisfiable
-            _ => true,
-        }
-    }
-
-    /// Check u = v with structural analysis
-    fn check_equal(u: &UniverseLevel, v: &UniverseLevel) -> bool {
-        // Direct equality
-        if u == v {
-            return true;
-        }
-
-        match (u, v) {
-            // Concrete must match exactly
-            (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => a == b,
-
-            // Same variable is equal
-            (UniverseLevel::Variable(v1), UniverseLevel::Variable(v2)) => v1 == v2,
-
-            // Succ(v) = Succ(w) if v = w
-            (UniverseLevel::Succ(v1), UniverseLevel::Succ(v2)) => v1 == v2,
-
-            // Max(a,b) = Max(c,d) if sets are equal (order doesn't matter)
-            (UniverseLevel::Max(a, b), UniverseLevel::Max(c, d)) => {
-                (a == c && b == d) || (a == d && b == c)
-            }
-
-            // For mixed cases, cannot determine
-            _ => false,
-        }
-    }
-
-    /// Check w = max(u, v) with structural analysis
-    fn check_max(w: &UniverseLevel, u: &UniverseLevel, v: &UniverseLevel) -> bool {
-        match (w, u, v) {
-            // All concrete: direct computation
-            (
-                UniverseLevel::Concrete(wc),
-                UniverseLevel::Concrete(uc),
-                UniverseLevel::Concrete(vc),
-            ) => *wc == (*uc).max(*vc),
-
-            // w = max(u, u) = u
-            (w, u, v) if u == v => Self::check_equal(w, u),
-
-            // max(u, v) represented as Max(u_var, v_var)
-            (UniverseLevel::Max(a, b), UniverseLevel::Variable(u), UniverseLevel::Variable(v)) => {
-                (*a == *u && *b == *v) || (*a == *v && *b == *u)
-            }
-
-            // Partial concrete cases
-            (UniverseLevel::Concrete(wc), UniverseLevel::Concrete(uc), _) => *wc >= *uc,
-            (UniverseLevel::Concrete(wc), _, UniverseLevel::Concrete(vc)) => *wc >= *vc,
-
-            // For other cases involving variables, assume satisfiable
-            _ => true,
-        }
-    }
-
-    /// Check v = u + 1 (successor) with structural analysis
-    fn check_successor(v: &UniverseLevel, u: &UniverseLevel) -> bool {
-        match (v, u) {
-            // Concrete successor
-            (UniverseLevel::Concrete(vc), UniverseLevel::Concrete(uc)) => *vc == *uc + 1,
-
-            // Succ(u) = u + 1 by definition
-            (UniverseLevel::Succ(v_inner), UniverseLevel::Variable(u_var)) => v_inner == u_var,
-
-            // Chain of successors: Succ(a) = Succ(b) + 1 requires a = b + 1
-            (UniverseLevel::Succ(a), UniverseLevel::Succ(b)) => *a == *b + 1,
-
-            // For other cases, assume satisfiable
-            _ => true,
-        }
-    }
-
-    /// Get the variables involved in this constraint.
-    pub fn variables(&self) -> Vec<u32> {
-        match self {
-            UniverseConstraint::LessOrEqual(u, v)
-            | UniverseConstraint::StrictlyLess(u, v)
-            | UniverseConstraint::Equal(u, v)
-            | UniverseConstraint::Successor(u, v) => {
-                let mut vars = u.variables();
-                vars.extend(v.variables());
-                vars
-            }
-            UniverseConstraint::Max(w, u, v) => {
-                let mut vars = w.variables();
+            Self::LessOrEqual(u, v)
+            | Self::StrictlyLess(u, v)
+            | Self::Equal(u, v)
+            | Self::Successor(u, v) => {
                 vars.extend(u.variables());
                 vars.extend(v.variables());
-                vars
+            }
+            Self::Max(w, u, v) => {
+                vars.extend(w.variables());
+                vars.extend(u.variables());
+                vars.extend(v.variables());
             }
         }
+        vars.sort_unstable();
+        vars.dedup();
+        vars
     }
 }
 
-/// Universe substitution maps universe variables to concrete levels
+/// A checked universe substitution. Insertions and merges are transactional;
+/// neither cycles nor resource exhaustion produce a partially updated map.
 #[derive(Debug, Clone, Default)]
 pub struct UniverseSubstitution {
-    /// Mapping from universe variable IDs to universe levels
     bindings: Map<u32, UniverseLevel>,
 }
 
 impl UniverseSubstitution {
-    /// Create a new empty substitution
     pub fn new() -> Self {
         Self {
             bindings: Map::new(),
         }
     }
 
-    /// Insert a binding for a universe variable
-    pub fn insert(&mut self, var: u32, level: UniverseLevel) {
-        self.bindings.insert(var, level);
-    }
-
-    /// Resolve a universe level by applying substitutions
-    pub fn resolve(&self, level: &UniverseLevel) -> UniverseLevel {
-        match level {
-            UniverseLevel::Variable(v) => {
-                if let Some(bound_level) = self.bindings.get(v) {
-                    // Recursively resolve in case bound_level contains variables
-                    self.resolve(bound_level)
-                } else {
-                    *level
-                }
+    pub fn insert(&mut self, var: u32, level: UniverseLevel) -> Result<(), Text> {
+        let previous = self.bindings.insert(var, level);
+        if let Err(error) = self.resolve(&UniverseLevel::Variable(var)) {
+            self.bindings.remove(&var);
+            if let Some(previous) = previous {
+                self.bindings.insert(var, previous);
             }
-            UniverseLevel::Succ(v) => {
-                if let Some(bound_level) = self.bindings.get(v) {
-                    self.resolve(bound_level).succ()
-                } else {
-                    *level
-                }
-            }
-            UniverseLevel::Max(a, b) => {
-                let a_resolved = if let Some(a_level) = self.bindings.get(a) {
-                    self.resolve(a_level)
-                } else {
-                    UniverseLevel::Variable(*a)
-                };
-                let b_resolved = if let Some(b_level) = self.bindings.get(b) {
-                    self.resolve(b_level)
-                } else {
-                    UniverseLevel::Variable(*b)
-                };
-                a_resolved.max(b_resolved)
-            }
-            UniverseLevel::Concrete(_) => *level,
+            return Err(error);
         }
+        Ok(())
     }
 
-    /// Merge another substitution into this one
-    pub fn merge(&mut self, other: &UniverseSubstitution) {
+    /// Iterative structural substitution with an active-variable cycle check.
+    /// Unbound variables remain opaque; callers needing a model must evaluate
+    /// the result and reject missing variables.
+    pub fn resolve(&self, level: &UniverseLevel) -> Result<UniverseLevel, Text> {
+        enum Work<'a> {
+            Enter(&'a UniverseLevel),
+            LeaveVariable(u32),
+            Successor,
+            Maximum,
+        }
+        let mut work = List::from_single(Work::Enter(level));
+        let mut values = List::new();
+        let mut active = Set::new();
+        let mut remaining = crate::universe_level::MAX_LEVEL_NODES;
+        while let Some(item) = work.pop() {
+            match item {
+                Work::Enter(level) => {
+                    if remaining == 0 {
+                        return Err("universe substitution exceeds its expression budget".into());
+                    }
+                    remaining -= 1;
+                    match level {
+                        UniverseLevel::Concrete(value) => {
+                            values.push(UniverseLevel::Concrete(*value))
+                        }
+                        UniverseLevel::Variable(var) => {
+                            if let Some(bound) = self.bindings.get(var) {
+                                if !active.insert(*var) {
+                                    return Err("cyclic universe substitution".into());
+                                }
+                                work.push(Work::LeaveVariable(*var));
+                                work.push(Work::Enter(bound));
+                            } else {
+                                values.push(UniverseLevel::Variable(*var));
+                            }
+                        }
+                        UniverseLevel::Succ(inner) => {
+                            work.push(Work::Successor);
+                            work.push(Work::Enter(inner));
+                        }
+                        UniverseLevel::Max(left, right) => {
+                            work.push(Work::Maximum);
+                            work.push(Work::Enter(right));
+                            work.push(Work::Enter(left));
+                        }
+                    }
+                }
+                Work::LeaveVariable(var) => {
+                    active.remove(&var);
+                }
+                Work::Successor => {
+                    let value = values
+                        .pop()
+                        .ok_or_else(|| Text::from("invalid universe resolution stack"))?;
+                    values.push(match value {
+                        UniverseLevel::Concrete(n) if n < u32::MAX => {
+                            UniverseLevel::Concrete(n + 1)
+                        }
+                        other => UniverseLevel::Succ(Box::new(other)),
+                    });
+                }
+                Work::Maximum => {
+                    let right = values
+                        .pop()
+                        .ok_or_else(|| Text::from("invalid universe resolution stack"))?;
+                    let left = values
+                        .pop()
+                        .ok_or_else(|| Text::from("invalid universe resolution stack"))?;
+                    values.push(match (left, right) {
+                        (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => {
+                            UniverseLevel::Concrete(a.max(b))
+                        }
+                        (UniverseLevel::Concrete(0), other)
+                        | (other, UniverseLevel::Concrete(0)) => other,
+                        (left, right) => UniverseLevel::Max(Box::new(left), Box::new(right)),
+                    });
+                }
+            }
+        }
+        if values.len() != 1 {
+            return Err("invalid universe resolution result".into());
+        }
+        values
+            .pop()
+            .ok_or_else(|| "missing universe resolution result".into())
+    }
+
+    pub fn merge(&mut self, other: &UniverseSubstitution) -> Result<(), Text> {
+        let mut candidate = self.clone();
         for (var, level) in &other.bindings {
-            self.bindings.insert(*var, *level);
+            candidate.insert(*var, level.clone())?;
         }
+        *self = candidate;
+        Ok(())
     }
 }
 
@@ -776,8 +712,10 @@ pub struct UniverseContext {
     constraints: List<UniverseConstraint>,
     /// Current substitution (solution to constraints)
     substitution: UniverseSubstitution,
-    /// Counter for fresh universe variables
-    next_var: u32,
+    /// Every explicit or allocated ID is reserved independently of its magnitude.
+    known_variables: Set<u32>,
+    /// Candidate ID; u64 preserves the exhausted state beyond u32::MAX.
+    next_var: u64,
 }
 
 impl UniverseContext {
@@ -791,19 +729,34 @@ impl UniverseContext {
         Self {
             constraints: List::new(),
             substitution: UniverseSubstitution::new(),
+            known_variables: Set::new(),
             next_var: 0,
         }
     }
 
-    /// Generate a fresh universe variable
-    pub fn fresh_universe_var(&mut self) -> UniverseLevel {
-        let var = self.next_var;
-        self.next_var += 1;
-        UniverseLevel::Variable(var)
+    /// Allocate a previously unused ID, bounded by variable count rather than
+    /// the numeric magnitude of externally supplied IDs.
+    pub fn fresh_universe_var(&mut self) -> Result<UniverseLevel, Text> {
+        if self.known_variables.len()
+            >= crate::universe_solver::SolverLimits::default().max_variables
+        {
+            return Err("universe context exceeds its variable budget".into());
+        }
+        loop {
+            let id = u32::try_from(self.next_var)
+                .map_err(|_| Text::from("universe variable supply exhausted"))?;
+            self.next_var += 1; // id was u32, so this u64 addition cannot overflow.
+            if self.known_variables.insert(id) {
+                self.substitution = UniverseSubstitution::new();
+                return Ok(UniverseLevel::Variable(id));
+            }
+        }
     }
 
     /// Add a universe constraint
     pub fn add_constraint(&mut self, constraint: UniverseConstraint) {
+        self.substitution = UniverseSubstitution::new();
+        self.known_variables.extend(constraint.variables());
         self.constraints.push(constraint);
     }
 
@@ -815,370 +768,43 @@ impl UniverseContext {
     /// Constrain that a type at level u forms a type at level max(u1, u2, ...)
     /// For example: (A: Type_u1) -> (B: Type_u2) : Type_max(u1, u2)
     pub fn add_max_constraint(&mut self, result: UniverseLevel, levels: List<UniverseLevel>) {
-        if levels.is_empty() {
-            return;
+        let mut maximum = UniverseLevel::TYPE;
+        for level in levels {
+            maximum = maximum.max(&level);
         }
-
-        if levels.len() == 1 {
-            self.add_constraint(UniverseConstraint::Equal(result, levels[0]));
-            return;
-        }
-
-        // For multiple levels, create a chain of max constraints
-        let mut current = levels[0];
-        for level in levels.iter().skip(1) {
-            let fresh = self.fresh_universe_var();
-            self.add_constraint(UniverseConstraint::Max(fresh, current, *level));
-            current = fresh;
-        }
-        self.add_constraint(UniverseConstraint::Equal(result, current));
+        self.add_constraint(UniverseConstraint::Equal(result, maximum));
     }
 
-    /// Solve universe constraints using iterative constraint propagation.
-    /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe polymorphism
-    ///
-    /// The algorithm uses a multi-phase approach:
-    /// 1. Propagate equality constraints (unification)
-    /// 2. Propagate successor constraints (v = u + 1)
-    /// 3. Propagate max constraints (w = max(u, v))
-    /// 4. Propagate ordering constraints (u < v, u <= v)
-    /// 5. Assign concrete levels to remaining variables using lower bounds
-    ///
-    /// Returns Ok(()) if all constraints are satisfiable, Err otherwise.
+    /// Find a complete model and validate every original constraint before
+    /// publishing it. Failed searches never leave an earlier solution visible.
     pub fn solve(&mut self) -> Result<(), Text> {
-        let max_iterations = 100;
-        let mut iteration = 0;
-
-        // Phase 1: Iterative constraint propagation
-        loop {
-            let mut changed = false;
-            iteration += 1;
-
-            if iteration > max_iterations {
-                return Err("Universe constraint solving did not converge".into());
-            }
-
-            for constraint in &self.constraints.clone() {
-                match constraint {
-                    // === Equality Constraints ===
-                    UniverseConstraint::Equal(u, v) => {
-                        let u_resolved = self.substitution.resolve(u);
-                        let v_resolved = self.substitution.resolve(v);
-
-                        if u_resolved != v_resolved {
-                            match (&u_resolved, &v_resolved) {
-                                // Variable = Concrete: bind variable
-                                (
-                                    UniverseLevel::Variable(var),
-                                    concrete @ UniverseLevel::Concrete(_),
-                                )
-                                | (
-                                    concrete @ UniverseLevel::Concrete(_),
-                                    UniverseLevel::Variable(var),
-                                ) => {
-                                    self.substitution.insert(*var, *concrete);
-                                    changed = true;
-                                }
-                                // Concrete = Concrete: must be equal
-                                (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => {
-                                    if a != b {
-                                        return Err(format!(
-                                            "Universe constraint violation: Type_{} ≠ Type_{}",
-                                            a, b
-                                        )
-                                        .into());
-                                    }
-                                }
-                                // Variable = Variable: unify (prefer lower ID)
-                                (UniverseLevel::Variable(var1), UniverseLevel::Variable(var2)) => {
-                                    if var1 != var2 {
-                                        let (from, to) = if var1 > var2 {
-                                            (*var1, *var2)
-                                        } else {
-                                            (*var2, *var1)
-                                        };
-                                        self.substitution.insert(from, UniverseLevel::Variable(to));
-                                        changed = true;
-                                    }
-                                }
-                                // Variable = Succ/Max: bind to expression
-                                (UniverseLevel::Variable(var), other)
-                                | (other, UniverseLevel::Variable(var)) => {
-                                    self.substitution.insert(*var, *other);
-                                    changed = true;
-                                }
-                                // Succ = Succ: propagate to inner
-                                (UniverseLevel::Succ(v1), UniverseLevel::Succ(v2)) => {
-                                    if v1 != v2 {
-                                        self.substitution.insert(*v1, UniverseLevel::Variable(*v2));
-                                        changed = true;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    // === Strictly Less Constraints ===
-                    UniverseConstraint::StrictlyLess(u, v) => {
-                        let u_resolved = self.substitution.resolve(u);
-                        let v_resolved = self.substitution.resolve(v);
-
-                        match (u_resolved, v_resolved) {
-                            // Both concrete: verify
-                            (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => {
-                                if a >= b {
-                                    return Err(format!(
-                                        "Universe constraint violation: Type_{} must be < Type_{}",
-                                        a, b
-                                    )
-                                    .into());
-                                }
-                            }
-                            // u concrete, v variable: v >= u + 1
-                            (UniverseLevel::Concrete(a), UniverseLevel::Variable(var)) => {
-                                if self.substitution.bindings.get(&var).is_none() {
-                                    self.substitution
-                                        .insert(var, UniverseLevel::Concrete(a + 1));
-                                    changed = true;
-                                }
-                            }
-                            // u variable, v concrete: u <= v - 1
-                            (UniverseLevel::Variable(var), UniverseLevel::Concrete(b)) => {
-                                if b == 0 {
-                                    return Err(
-                                        "Universe constraint violation: u < Type₀ is impossible"
-                                            .into(),
-                                    );
-                                }
-                                if self.substitution.bindings.get(&var).is_none() {
-                                    self.substitution.insert(var, UniverseLevel::Concrete(0));
-                                    changed = true;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // === Less Or Equal Constraints ===
-                    UniverseConstraint::LessOrEqual(u, v) => {
-                        let u_resolved = self.substitution.resolve(u);
-                        let v_resolved = self.substitution.resolve(v);
-
-                        if u_resolved != v_resolved {
-                            match (&u_resolved, &v_resolved) {
-                                (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => {
-                                    if a > b {
-                                        return Err(format!(
-                                            "Universe constraint violation: Type_{} must be <= Type_{}",
-                                            a, b
-                                        )
-                                        .into());
-                                    }
-                                }
-                                (UniverseLevel::Concrete(a), UniverseLevel::Variable(var)) => {
-                                    if self.substitution.bindings.get(var).is_none() {
-                                        self.substitution.insert(*var, UniverseLevel::Concrete(*a));
-                                        changed = true;
-                                    }
-                                }
-                                (UniverseLevel::Variable(var), UniverseLevel::Concrete(_)) => {
-                                    if self.substitution.bindings.get(var).is_none() {
-                                        self.substitution.insert(*var, UniverseLevel::Concrete(0));
-                                        changed = true;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    // === Successor Constraints ===
-                    UniverseConstraint::Successor(v, u) => {
-                        let u_resolved = self.substitution.resolve(u);
-                        let v_resolved = self.substitution.resolve(v);
-
-                        match (&v_resolved, &u_resolved) {
-                            // v variable, u concrete: v = u + 1
-                            (UniverseLevel::Variable(var), UniverseLevel::Concrete(uc)) => {
-                                self.substitution
-                                    .insert(*var, UniverseLevel::Concrete(uc + 1));
-                                changed = true;
-                            }
-                            // v concrete, u variable: u = v - 1
-                            (UniverseLevel::Concrete(vc), UniverseLevel::Variable(var)) => {
-                                if *vc == 0 {
-                                    return Err(
-                                        "Universe constraint violation: Succ(u) = 0 is impossible"
-                                            .into(),
-                                    );
-                                }
-                                self.substitution
-                                    .insert(*var, UniverseLevel::Concrete(vc - 1));
-                                changed = true;
-                            }
-                            // Both concrete: verify
-                            (UniverseLevel::Concrete(vc), UniverseLevel::Concrete(uc)) => {
-                                if *vc != *uc + 1 {
-                                    return Err(format!(
-                                        "Universe constraint violation: Type_{} ≠ Type_{} + 1",
-                                        vc, uc
-                                    )
-                                    .into());
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // === Max Constraints ===
-                    UniverseConstraint::Max(w, u, v) => {
-                        let w_resolved = self.substitution.resolve(w);
-                        let u_resolved = self.substitution.resolve(u);
-                        let v_resolved = self.substitution.resolve(v);
-
-                        match (&w_resolved, &u_resolved, &v_resolved) {
-                            // w variable, u and v concrete
-                            (
-                                UniverseLevel::Variable(var),
-                                UniverseLevel::Concrete(uc),
-                                UniverseLevel::Concrete(vc),
-                            ) => {
-                                self.substitution
-                                    .insert(*var, UniverseLevel::Concrete((*uc).max(*vc)));
-                                changed = true;
-                            }
-                            // All concrete: verify
-                            (
-                                UniverseLevel::Concrete(wc),
-                                UniverseLevel::Concrete(uc),
-                                UniverseLevel::Concrete(vc),
-                            ) => {
-                                if *wc != (*uc).max(*vc) {
-                                    return Err(format!(
-                                        "Universe constraint violation: max({}, {}) = {}, not {}",
-                                        uc,
-                                        vc,
-                                        (*uc).max(*vc),
-                                        wc
-                                    )
-                                    .into());
-                                }
-                            }
-                            // w and u concrete, v variable: infer v
-                            (
-                                UniverseLevel::Concrete(wc),
-                                UniverseLevel::Concrete(uc),
-                                UniverseLevel::Variable(var),
-                            ) => {
-                                if *uc > *wc {
-                                    return Err(format!(
-                                        "Universe constraint violation: max({}, v) = {} but {} > {}",
-                                        uc, wc, uc, wc
-                                    )
-                                    .into());
-                                } else if *uc < *wc && self.substitution.bindings.get(var).is_none()
-                                {
-                                    self.substitution.insert(*var, UniverseLevel::Concrete(*wc));
-                                    changed = true;
-                                }
-                            }
-                            // w and v concrete, u variable (symmetric)
-                            (
-                                UniverseLevel::Concrete(wc),
-                                UniverseLevel::Variable(var),
-                                UniverseLevel::Concrete(vc),
-                            ) => {
-                                if *vc > *wc {
-                                    return Err(format!(
-                                        "Universe constraint violation: max(u, {}) = {} but {} > {}",
-                                        vc, wc, vc, wc
-                                    )
-                                    .into());
-                                } else if *vc < *wc && self.substitution.bindings.get(var).is_none()
-                                {
-                                    self.substitution.insert(*var, UniverseLevel::Concrete(*wc));
-                                    changed = true;
-                                }
-                            }
-                            // w variable, u and v same: w = u
-                            (UniverseLevel::Variable(w_var), _, _) if u_resolved == v_resolved => {
-                                self.substitution.insert(*w_var, u_resolved);
-                                changed = true;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            if !changed {
-                break;
+        self.substitution = UniverseSubstitution::new();
+        if self.known_variables.len()
+            > crate::universe_solver::SolverLimits::default().max_variables
+        {
+            return Err("universe context exceeds its variable budget".into());
+        }
+        let mut candidate = crate::universe_solver::solve_universe_constraints(&self.constraints)?;
+        for var in &self.known_variables {
+            if matches!(
+                candidate.resolve(&UniverseLevel::Variable(*var))?,
+                UniverseLevel::Variable(_)
+            ) {
+                candidate.insert(*var, UniverseLevel::Concrete(0))?;
             }
         }
-
-        // Phase 2: Assign concrete levels to remaining unconstrained variables
-        self.assign_remaining_variables();
-
-        // Phase 3: Verify all constraints are satisfied
-        for constraint in &self.constraints {
-            if !constraint.is_satisfied(&self.substitution) {
-                return Err(format!("Universe constraint not satisfied: {:?}", constraint).into());
-            }
+        if !self
+            .constraints
+            .iter()
+            .all(|constraint| constraint.is_satisfied(&candidate))
+        {
+            return Err("universe model failed independent constraint validation".into());
         }
-
+        self.substitution = candidate;
         Ok(())
     }
 
-    /// Assign concrete levels to remaining unconstrained variables.
-    /// Uses the minimum valid value (typically 0) for unconstrained variables.
-    fn assign_remaining_variables(&mut self) {
-        // Collect all variable IDs mentioned in constraints
-        let mut all_vars = std::collections::HashSet::new();
-        for constraint in &self.constraints {
-            for var in constraint.variables() {
-                all_vars.insert(var);
-            }
-        }
-
-        // Add local variables from next_var counter
-        for var in 0..self.next_var {
-            all_vars.insert(var);
-        }
-
-        // Assign concrete level to any unbound variable
-        for var in all_vars {
-            let level = UniverseLevel::Variable(var);
-            let resolved = self.substitution.resolve(&level);
-
-            match resolved {
-                UniverseLevel::Variable(_) => {
-                    // Unbound variable: assign 0
-                    self.substitution.insert(var, UniverseLevel::Concrete(0));
-                }
-                UniverseLevel::Succ(inner_var) => {
-                    // Succ of unbound: assign inner to 0
-                    if self.substitution.bindings.get(&inner_var).is_none() {
-                        self.substitution
-                            .insert(inner_var, UniverseLevel::Concrete(0));
-                    }
-                }
-                UniverseLevel::Max(a, b) => {
-                    // Max of unbound: assign both to 0
-                    if self.substitution.bindings.get(&a).is_none() {
-                        self.substitution.insert(a, UniverseLevel::Concrete(0));
-                    }
-                    if self.substitution.bindings.get(&b).is_none() {
-                        self.substitution.insert(b, UniverseLevel::Concrete(0));
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Get the resolved level for a universe level
-    pub fn resolve(&self, level: &UniverseLevel) -> UniverseLevel {
+    pub fn resolve(&self, level: &UniverseLevel) -> Result<UniverseLevel, Text> {
         self.substitution.resolve(level)
     }
 
@@ -1189,8 +815,8 @@ impl UniverseContext {
             // Type₀ : Type₁
             Type::Universe { level } => Ok(level.succ()),
 
-            // Prop : Type₀
-            Type::Prop => Ok(UniverseLevel::TYPE),
+            // Prop : Type₁, as in Type::type_of and the source grammar.
+            Type::Prop => Ok(UniverseLevel::TYPE1),
 
             // Primitives are in Type₀
             Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text => {
@@ -1212,8 +838,8 @@ impl UniverseContext {
                 }
                 levels.push(self.universe_of(return_type)?);
 
-                let result = self.fresh_universe_var();
-                self.add_max_constraint(result, levels);
+                let result = self.fresh_universe_var()?;
+                self.add_max_constraint(result.clone(), levels);
                 Ok(result)
             }
 
@@ -1227,8 +853,8 @@ impl UniverseContext {
                 if levels.is_empty() {
                     Ok(UniverseLevel::TYPE)
                 } else {
-                    let result = self.fresh_universe_var();
-                    self.add_max_constraint(result, levels);
+                    let result = self.fresh_universe_var()?;
+                    self.add_max_constraint(result.clone(), levels);
                     Ok(result)
                 }
             }
@@ -1247,13 +873,13 @@ impl UniverseContext {
             } => {
                 let fst_level = self.universe_of(fst_type)?;
                 let snd_level = self.universe_of(snd_type)?;
-                let result = self.fresh_universe_var();
-                self.add_max_constraint(result, List::from(vec![fst_level, snd_level]));
+                let result = self.fresh_universe_var()?;
+                self.add_max_constraint(result.clone(), List::from(vec![fst_level, snd_level]));
                 Ok(result)
             }
 
             // Type variables - generate fresh universe variable
-            Type::Var(_) => Ok(self.fresh_universe_var()),
+            Type::Var(_) => self.fresh_universe_var(),
 
             // Other types default to Type₀
             _ => Ok(UniverseLevel::TYPE),
@@ -1759,7 +1385,7 @@ impl TypeEnv {
     }
 
     /// Generate a fresh universe variable
-    pub fn fresh_universe_var(&mut self) -> UniverseLevel {
+    pub fn fresh_universe_var(&mut self) -> Result<UniverseLevel, Text> {
         self.universe_ctx.fresh_universe_var()
     }
 
@@ -1784,7 +1410,7 @@ impl TypeEnv {
     }
 
     /// Resolve a universe level with current substitutions
-    pub fn resolve_universe(&self, level: &UniverseLevel) -> UniverseLevel {
+    pub fn resolve_universe(&self, level: &UniverseLevel) -> Result<UniverseLevel, Text> {
         self.universe_ctx.resolve(level)
     }
 
@@ -1796,7 +1422,7 @@ impl TypeEnv {
 
         // For let-polymorphism, we generalize over universe variables
         // that don't appear in the environment
-        let resolved = self.resolve_universe(&level);
+        let resolved = self.resolve_universe(&level)?;
 
         Ok(resolved)
     }
@@ -2737,7 +2363,7 @@ impl TypeContext {
     }
 
     /// Generate a fresh universe variable
-    pub fn fresh_universe_var(&mut self) -> UniverseLevel {
+    pub fn fresh_universe_var(&mut self) -> Result<UniverseLevel, Text> {
         self.env.fresh_universe_var()
     }
 
@@ -2762,7 +2388,7 @@ impl TypeContext {
     }
 
     /// Resolve a universe level with current substitutions
-    pub fn resolve_universe(&self, level: &UniverseLevel) -> UniverseLevel {
+    pub fn resolve_universe(&self, level: &UniverseLevel) -> Result<UniverseLevel, Text> {
         self.env.resolve_universe(level)
     }
 
@@ -2790,7 +2416,7 @@ impl TypeContext {
         let result = level.succ();
 
         // Add cumulative constraint
-        self.add_universe_constraint(UniverseConstraint::StrictlyLess(level, result));
+        self.add_universe_constraint(UniverseConstraint::StrictlyLess(level, result.clone()));
 
         Ok(result)
     }
@@ -2814,10 +2440,10 @@ impl TypeContext {
         levels.push(self.universe_of(return_type)?);
 
         // Result is max of all levels
-        let result = self.fresh_universe_var();
+        let result = self.fresh_universe_var()?;
         self.env
             .universe_ctx_mut()
-            .add_max_constraint(result, levels);
+            .add_max_constraint(result.clone(), levels);
 
         Ok(result)
     }
@@ -2833,10 +2459,10 @@ impl TypeContext {
         let base_level = self.universe_of(base_type)?;
         let dep_level = self.universe_of(dependent_type)?;
 
-        let result = self.fresh_universe_var();
+        let result = self.fresh_universe_var()?;
         self.env
             .universe_ctx_mut()
-            .add_max_constraint(result, List::from(vec![base_level, dep_level]));
+            .add_max_constraint(result.clone(), List::from(vec![base_level, dep_level]));
 
         Ok(result)
     }

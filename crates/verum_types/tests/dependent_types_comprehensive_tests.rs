@@ -1041,8 +1041,8 @@ fn test_type_level_universe_polymorphism() {
     // Test universe polymorphic types: identity<u: Level>(T: Type u) -> T
     let mut ctx = TypeContext::new();
 
-    let u = ctx.fresh_universe_var();
-    let type_u = Type::universe(u);
+    let u = ctx.fresh_universe_var().unwrap();
+    let type_u = Type::universe(u.clone());
 
     // Verify we can create universe-polymorphic types
     assert!(matches!(type_u, Type::Universe { .. }));

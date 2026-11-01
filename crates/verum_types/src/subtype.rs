@@ -700,13 +700,7 @@ impl Subtyping {
             // But Type₀ ≢ Prop (different universes for data vs proofs)
             (Prop, Universe { level }) => {
                 // Prop is in Type₁, so Prop <: Type_n for n >= 1
-                use crate::ty::UniverseLevel;
-                match level {
-                    UniverseLevel::Concrete(n) => *n >= 1,
-                    UniverseLevel::Succ(_) => true, // succ(k) >= 1 for any k
-                    UniverseLevel::Max(_, _) => true, // max(a,b) >= 1 if either >= 1
-                    UniverseLevel::Variable(_) => true, // conservative: allow (resolved at use-site)
-                }
+                crate::ty::UniverseLevel::TYPE1.is_less_or_equal(level)
             }
 
             // Pi type subtyping
@@ -1318,45 +1312,7 @@ impl Subtyping {
         l1: &crate::ty::UniverseLevel,
         l2: &crate::ty::UniverseLevel,
     ) -> bool {
-        use crate::ty::UniverseLevel;
-
-        match (l1, l2) {
-            // Concrete levels: n <= m for cumulativity
-            (UniverseLevel::Concrete(n1), UniverseLevel::Concrete(n2)) => n1 <= n2,
-
-            // Level variables: constraint-checked later, conservatively accept
-            (UniverseLevel::Variable(_), _) | (_, UniverseLevel::Variable(_)) => true,
-
-            // Successor levels: Succ(n) <: Succ(m) if n <= m
-            (UniverseLevel::Succ(n1), UniverseLevel::Succ(n2)) => n1 <= n2,
-
-            // Succ(n) <: Concrete(m) if n + 1 <= m
-            (UniverseLevel::Succ(n), UniverseLevel::Concrete(m)) => (*n + 1) <= *m,
-
-            // Concrete(n) <: Succ(m) if n <= m + 1
-            (UniverseLevel::Concrete(n), UniverseLevel::Succ(m)) => *n <= (*m + 1),
-
-            // Max(a, b) <: Concrete(n) if both a <= n and b <= n
-            (UniverseLevel::Max(a, b), UniverseLevel::Concrete(n)) => *a <= *n && *b <= *n,
-
-            // Concrete(n) <: Max(a, b) if n <= min(a, b) - conservative
-            (UniverseLevel::Concrete(n), UniverseLevel::Max(a, b)) => {
-                // Conservative: n must be <= max(a, b) = min(a, b) for soundness
-                *n <= std::cmp::min(*a, *b)
-            }
-
-            // Max(a1, b1) <: Max(a2, b2) if both components are <=
-            (UniverseLevel::Max(a1, b1), UniverseLevel::Max(a2, b2)) => {
-                // max(a1, b1) <= max(a2, b2) if a1 <= max(a2, b2) && b1 <= max(a2, b2)
-                let max_rhs = std::cmp::max(*a2, *b2);
-                *a1 <= max_rhs && *b1 <= max_rhs
-            }
-
-            // Max to Succ: conservative
-            (UniverseLevel::Max(a, b), UniverseLevel::Succ(m)) => *a <= (*m + 1) && *b <= (*m + 1),
-
-            (UniverseLevel::Succ(n), UniverseLevel::Max(a, b)) => (*n + 1) <= std::cmp::max(*a, *b),
-        }
+        l1.is_less_or_equal(l2)
     }
 }
 

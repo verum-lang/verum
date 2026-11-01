@@ -12543,7 +12543,7 @@ impl ProtocolChecker {
             // Interval is a primitive type — no inner types to substitute
             Type::Interval => Type::Interval,
 
-            Type::Universe { level } => Type::Universe { level: *level },
+            Type::Universe { level } => Type::Universe { level: level.clone() },
             Type::Prop => Type::Prop,
 
             Type::Inductive {
@@ -12572,7 +12572,7 @@ impl ProtocolChecker {
                         )
                     })
                     .collect(),
-                universe: *universe,
+                universe: universe.clone(),
                 constructors: constructors.clone(),
             },
 

@@ -626,7 +626,7 @@ impl TypeChecker {
             verum_ast::UniverseLevelExpr::Max(a, b) => {
                 let la = self.ast_universe_level_to_internal(a);
                 let lb = self.ast_universe_level_to_internal(b);
-                la.max(lb)
+                la.max(&lb)
             }
             verum_ast::UniverseLevelExpr::Succ(inner) => {
                 let l = self.ast_universe_level_to_internal(inner);
@@ -1297,7 +1297,7 @@ impl TypeChecker {
                     verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(a, b)) => {
                         let la = self.ast_universe_level_to_internal(a);
                         let lb = self.ast_universe_level_to_internal(b);
-                        la.max(lb)
+                        la.max(&lb)
                     }
                     verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(inner)) => {
                         let l = self.ast_universe_level_to_internal(inner);
@@ -5044,7 +5044,7 @@ fn substitute_refinement_binder(
             // Interval is a built-in primitive; nothing to normalize
             Interval => Interval,
 
-            Universe { level } => Universe { level: *level },
+            Universe { level } => Universe { level: level.clone() },
             Prop => Prop,
 
             Inductive {
@@ -5065,7 +5065,7 @@ fn substitute_refinement_binder(
                         .iter()
                         .map(|(n, t)| (n.clone(), Box::new(self.normalize_type_impl(t, d))))
                         .collect(),
-                    universe: *universe,
+                    universe: universe.clone(),
                     constructors: constructors.clone(),
                 }
             }
@@ -6024,7 +6024,7 @@ fn substitute_refinement_binder(
                     name: name.clone(),
                     params: new_params,
                     indices: new_indices,
-                    universe: *universe,
+                    universe: universe.clone(),
                     constructors: constructors.clone(),
                 }
             }
