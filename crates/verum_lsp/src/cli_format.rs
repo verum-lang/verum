@@ -10,9 +10,10 @@
 //!
 //! Cost: a subprocess spawn (~30 ms cold on macOS, ~10 ms on
 //! Linux). Format-on-save is human-paced, so this overhead is
-//! invisible. The old in-LSP formatter remains as a fallback for
-//! cases where the binary can't be located.
+//! invisible. Failures are explicit; substituting a different formatter can
+//! change source semantics and must never happen silently.
 
+use anyhow::{Context, ensure};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -50,16 +51,15 @@ impl FmtSettings {
     }
 }
 
-/// Format `text` by piping it through `verum fmt --stdin`. Returns
-/// `None` on any subprocess failure so the caller can fall back to
-/// the in-LSP formatter without breaking the user's save flow.
+/// Format `text` through `verum fmt --stdin`. `None` means disabled;
+/// subprocess failures retain their cause and never authorize substitute edits.
 pub async fn format_via_cli(
     text: &str,
     settings: &FmtSettings,
     filename_hint: Option<&str>,
-) -> Option<String> {
+) -> anyhow::Result<Option<String>> {
     if !settings.enabled {
-        return None;
+        return Ok(None);
     }
     let binary = settings.binary.clone().unwrap_or_else(|| "verum".into());
     // Cancellation drops and kills the child. Concurrent input/output avoids
@@ -75,9 +75,14 @@ pub async fn format_via_cli(
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        let mut child = cmd.spawn().ok()?;
-        let mut stdin = child.stdin.take()?;
-        let stdout = child.stdout.take()?;
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("Start formatter {}", binary.display()))?;
+        let mut stdin = child.stdin.take().context("Formatter stdin unavailable")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("Formatter stdout unavailable")?;
         let (_, output, status) = tokio::try_join!(
             async {
                 stdin.write_all(text.as_bytes()).await?;
@@ -97,15 +102,14 @@ pub async fn format_via_cli(
             },
             child.wait(),
         )
-        .ok()?;
-        status
-            .success()
-            .then(|| String::from_utf8(output).ok())
-            .flatten()
+        .context("Formatter input/output failed")?;
+        ensure!(status.success(), "Formatter exited with {status}");
+        String::from_utf8(output).context("Formatter output is not UTF-8")
     };
     tokio::time::timeout(Duration::from_secs(10), operation)
         .await
-        .ok()?
+        .context("Formatter timed out after 10 seconds")?
+        .map(Some)
 }
 
 /// Build a single full-document `TextEdit` if the formatted output

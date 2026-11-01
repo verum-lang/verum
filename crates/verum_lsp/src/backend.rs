@@ -64,7 +64,9 @@ impl Backend {
     ) -> Self {
         let config = Arc::new(SharedLspConfig::new());
         Self {
-            project: parking_lot::Mutex::new(crate::project_context::ProjectContext::with_library(library)),
+            project: parking_lot::Mutex::new(crate::project_context::ProjectContext::with_library(
+                library,
+            )),
             project_gate: tokio::sync::Mutex::new(()),
             client,
             documents: DocumentStore::new(),
@@ -854,53 +856,25 @@ impl LanguageServer for Backend {
 
         tracing::debug!("Format document requested: {}", uri);
 
-        // The CLI binary is the canonical formatter. Pipe the
-        // buffer through `verum fmt --stdin` so the editor and
-        // `verum fmt` produce byte-identical output — no drift
-        // between formatters. On any subprocess failure the in-LSP
-        // formatter takes over as a fallback so the save flow never
-        // breaks.
-        let original = self.documents.with_document(&uri, |doc| doc.text.clone());
-        if let Some(text) = original {
-            let settings = self.fmt_settings();
-            let filename = uri.to_file_path().ok().map(|p| p.display().to_string());
-            if let Some(formatted) =
-                crate::cli_format::format_via_cli(&text, &settings, filename.as_deref()).await
-            {
-                let edits = crate::cli_format::diff_to_text_edits(&text, &formatted);
-                if edits.is_empty() {
-                    return Ok(None);
-                }
-                return Ok(Some(edits.into_iter().collect()));
-            }
-        }
-
-        // Fallback: in-LSP formatter for cases where the binary is
-        // unavailable (e.g. tests, sandboxes without PATH). Map the
-        // client's `FormattingOptions` (tab size from the editor's
-        // own settings) into our `VerumFormatConfig` so the fallback
-        // honours the user's preferences instead of hardcoding the
-        // 4-space default. `insert_spaces=false` means the editor
-        // expects tabs — we still emit spaces because Verum
-        // formatting is canonically space-indented; the contract
-        // is documented.
-        let mut format_cfg = formatting::VerumFormatConfig::default();
-        let tab_size = params.options.tab_size as usize;
-        if tab_size > 0 {
-            format_cfg.indent_size = tab_size;
-        }
-        let edits = self
-            .documents
-            .with_document(&uri, |doc| {
-                formatting::format_document_with_config(&doc.text, format_cfg.clone())
-            })
-            .unwrap_or_default();
-
-        if edits.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(edits.into_iter().collect()))
-        }
+        // One canonical formatter. Failure is an error with no edits, never a
+        // switch to a second implementation with different source semantics.
+        let Some(text) = self.documents.with_document(&uri, |doc| doc.text.clone()) else {
+            return Ok(None);
+        };
+        let filename = uri.to_file_path().ok().map(|p| p.display().to_string());
+        let formatted =
+            crate::cli_format::format_via_cli(&text, &self.fmt_settings(), filename.as_deref())
+                .await
+                .map_err(|cause| {
+                    let mut error = tower_lsp::jsonrpc::Error::internal_error();
+                    error.message = format!("Formatting failed: {cause:#}").into();
+                    error
+                })?;
+        let Some(formatted) = formatted else {
+            return Ok(None);
+        };
+        let edits = crate::cli_format::diff_to_text_edits(&text, &formatted);
+        Ok((!edits.is_empty()).then(|| edits.into_iter().collect()))
     }
 
     async fn range_formatting(

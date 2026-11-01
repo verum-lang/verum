@@ -12,6 +12,9 @@ use std::process::{Command, Stdio};
 use verum_lsp::cli_format::{FmtSettings, format_via_cli};
 
 fn binary_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("VERUM_TEST_FORMATTER") {
+        return path.into();
+    }
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     p.pop();
     p.pop();
@@ -36,6 +39,11 @@ fn run_cli_fmt_stdin(input: &str) -> String {
         .write_all(input.as_bytes())
         .expect("write stdin");
     let out = child.wait_with_output().expect("wait_with_output");
+    assert!(
+        out.status.success(),
+        "canonical formatter failed: {}",
+        out.status
+    );
     String::from_utf8(out.stdout).expect("UTF-8 stdout")
 }
 
@@ -63,7 +71,8 @@ async fn cli_and_lsp_routes_produce_identical_output() {
         let cli_output = run_cli_fmt_stdin(src);
         let lsp_output = format_via_cli(src, &settings, None)
             .await
-            .unwrap_or_else(|| panic!("LSP format returned None for `{label}`"));
+            .unwrap_or_else(|e| panic!("LSP format failed for `{label}`: {e:#}"))
+            .expect("formatter enabled");
         assert_eq!(
             cli_output, lsp_output,
             "fixture `{label}`: CLI and LSP routes diverged.\n\
@@ -80,7 +89,7 @@ async fn fmt_disabled_via_settings_returns_none() {
     };
     let result = format_via_cli("fn main() {}\n", &settings, None).await;
     assert!(
-        result.is_none(),
+        result.unwrap().is_none(),
         "disabled settings should bypass the formatter"
     );
 }
