@@ -393,6 +393,13 @@ fn register_module_metadata(
         })
         .collect();
 
+    let declaration_names: verum_common::Map<u32, Text> = module.types.iter()
+        .filter_map(|ty| {
+            let name = module.get_string(ty.name)?;
+            let owner = ty.origin_module.and_then(|id| module.get_string(id))
+                .unwrap_or(module_name);
+            Some((ty.id.0, verum_common::qualified_name::qualify_module_name(owner, name).into()))
+        }).collect();
     let module_path = Text::from(module_name);
 
     // Pass 1: types + protocol-types.
@@ -1183,7 +1190,19 @@ fn register_module_metadata(
         let params: List<ParamDescriptor> = fn_desc
             .params
             .iter()
-            .map(|p| {
+            .enumerate()
+            .map(|(index, p)| {
+                let semantic = fn_desc.semantic_parameter_types()
+                    .and_then(|params| params[index].as_ref())
+                    .and_then(|ty| {
+                        // A bare callable generic retains its structural bound
+                        // in the ABI descriptor; declared_ty reconnects its result.
+                        let ty = match (ty, &p.type_ref) {
+                            (TypeRef::Generic(_), bound @ TypeRef::Function { .. }) => bound,
+                            _ => ty,
+                        };
+                        declaration_type_to_text(ty, &declaration_names)
+                    });
                 let rendered = type_ref_to_text(&p.type_ref, &type_id_to_name);
                 // PARAMNAME-CARRY (T0701): the v2.10 source-verbatim
                 // declared spelling.  Two uses:
@@ -1206,18 +1225,12 @@ fn register_module_metadata(
                 }
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
-                let ty = match &carried {
-                    Some(v) if rendered.contains("__opaque_type_") => v.clone(),
-                    // T0690 R1: reference-ness is CALL SEMANTICS the
-                    // TypeRef render structurally lacks (VBC TypeRefs have
-                    // no reference form — `&Shared<T>` renders as the bare
-                    // pointee). When the v2.10 carried spelling opens with
-                    // `&` and the render does not, the render is lossy in
-                    // exactly the T0701 sense — prefer the declared
-                    // spelling so the checker's scheme keeps the `&` and
-                    // `a.ptr_eq(&b)` unifies against a reference, not the
-                    // peeled value type.
-                    Some(v) if v.as_str().starts_with('&') && !rendered.starts_with('&') => {
+                let ty = match (semantic, &carried) {
+                    (Some(semantic), _) => semantic.to_string(),
+                    (_, Some(v)) if rendered.contains("__opaque_type_") => v.clone(),
+                    // Legacy or unsupported declarations lack semantic types.
+                    // Their ABI descriptors can erase the reference wrapper.
+                    (_, Some(v)) if v.as_str().starts_with('&') && !rendered.starts_with('&') => {
                         v.clone()
                     }
                     // T0108/T0188/T0133: RAW-POINTER spellings are the same
@@ -1228,7 +1241,7 @@ fn register_module_metadata(
                     // 'core.intrinsics' as the param type and every mounted
                     // pointer intrinsic failed its pin). The carried
                     // declared spelling is the truth.
-                    Some(v)
+                    (_, Some(v))
                         if (v.as_str().starts_with("*const ")
                             || v.as_str().starts_with("*mut "))
                             && !rendered.starts_with('*') =>
@@ -1333,8 +1346,11 @@ fn register_module_metadata(
                     // changes nothing.
                     || type_ref_mentions_ptr_carrier(&fn_desc.return_type)
             });
-        let return_type = match carried_return {
-            Some(verbatim) => {
+        let semantic_return = fn_desc.semantic_return.as_ref()
+            .and_then(|ty| declaration_type_to_text(ty, &declaration_names));
+        let return_type = match (semantic_return, carried_return) {
+            (Some(semantic), _) => semantic,
+            (_, Some(verbatim)) => {
                 // The carried spelling wins because the RENDER lost
                 // something — but it can be lossy in the other
                 // direction: it is a bare name, while the descriptor
@@ -1365,7 +1381,7 @@ fn register_module_metadata(
                     _ => Text::from(verbatim),
                 }
             }
-            None => Text::from(rendered_return),
+            (_, None) => Text::from(rendered_return),
         };
 
         // Task #21 — disambiguate aliased-TypeId types in param /
@@ -2003,6 +2019,22 @@ fn type_ref_to_text_with_params(
     param_id_to_name: &HashMap<u16, String>,
 ) -> String {
     render_type_ref(ty, &|id| type_id_to_name.get(&id).cloned(), param_id_to_name)
+}
+
+/// Semantic types name the declaration, never its private import alias. Keep
+/// generic slot IDs (including method shadow slots) intact across serialization.
+/// An absent nominal owner cannot establish a semantic metadata signature.
+fn declaration_type_to_text(
+    ty: &TypeRef,
+    names: &verum_common::Map<u32, Text>,
+) -> Maybe<Text> {
+    let complete = std::cell::Cell::new(true);
+    let rendered = render_type_ref(ty, &|id| {
+        let name = names.get(&id).map(|name| name.to_string());
+        if name.is_none() { complete.set(false); }
+        name
+    }, &HashMap::new());
+    complete.get().then(|| Text::from(rendered))
 }
 
 /// One structural renderer; callers select the exact declaration-name authority.
