@@ -272,6 +272,7 @@ jobs:
           python3 -m unittest discover -s verification/certificates -p test_fixed_kt_terms.py
           python3 -m unittest discover -s verification/certificates -p test_prefix_codes.py
           python3 -m unittest discover -s verification/external/lean -p test_prefix_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_closed_evidence_export.py
           python3 -m unittest discover -s verification/certificates -p test_categorical_bounds.py
           python3 -m unittest discover -s verification/external/lean -p test_fixed_kt_export.py
           python3 verification/certificates/check_peano_arithmetic.py \

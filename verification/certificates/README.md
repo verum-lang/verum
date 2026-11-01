@@ -129,6 +129,17 @@ cost theorem. Numeric scope identifiers do not establish physical pointer
 ownership. Complete finite catalogs and successful samples do not establish
 general Rust refinement, exhaustive enumeration or recursive VM correctness.
 
+`../external/lean/check_closed_evidence_export.py` reconstructs histograms from
+the frozen ordered rows and declared alphabets, retaining zero-count outcomes.
+It checks each captured prefix's empirical likelihood bound and derives the
+optimistic threshold from the complete catalogs' mandatory headers, paid look
+and risk. This threshold remains distinct from the actual candidate charge.
+The captured missing-alphabet boundary and retained tail are checked separately;
+the native same-owner flag is an observation, not a proved lifetime property.
+These are finite diagnostics, not the universal empirical ML lower bound or a
+certificate for the complete native stopping rule. The frozen fixture retains
+the passing selected court and the failed aggregate run as separate evidence.
+
 ## Adaptive observations
 
 `check_adaptive_observation.py` replays the universal laws in

@@ -1,0 +1,17 @@
+{
+  "status": "reproduced",
+  "export_sha256": "ade566663060f0fc2a18d835c075e921e236d33a29bf08560954f3302d0772ac",
+  "binary_sha256": "a781a80737e194e13b54b5ccd6c47bcacb4a336fc26d4e2a2e05914892e61a05",
+  "receipt_sha256": "60455129f961acbadf498515f188bc3368cc1d7144a30f5c93c1a44f7689861e",
+  "native_test": "organism::observer_acceptance::automatic::cumulative::courts::closed_insufficient_prefix_retires_with_original_code_look_and_every_row",
+  "log_sha256": "b4bd7573fde98ee791ec6ced6d562e6f6a42efc2cf74a17a1f79aeb4d36d4446",
+  "aggregate_status": "failed",
+  "source_sha256": {
+    "rust/crates/synarc-kan/src/exhaust/outcome_code/exact.rs": "c3160b86bc3a8365737e1fc082d0dc126d12d0635897066066a877c60c01ccb4",
+    "rust/crates/synarc-kan/src/organism/observer_acceptance/automatic/attempt.rs": "576202919539d6c1529008d69bee3a27f997c015244b5df0b16d356adda4dccd",
+    "rust/crates/synarc-kan/src/organism/observer_acceptance/automatic/cumulative.rs": "2d989ec879b24c64b77f3ef1fd6665af5bc3c199ec687544705f802be73bcc43",
+    "rust/crates/synarc-kan/src/organism/observer_acceptance/automatic/cumulative/courts.rs": "5f005f3864131b388d56adef07b55764ae989c0e75644e6d0fcc24a0e8c19beb",
+    "rust/crates/synarc-kan/src/program/observer/acquisition/joint.rs": "c3c0941dd38a6b0ae3f1fcd1b7d587a3d7d1ab8c4f49d1063b7e533d46d2db8a"
+  },
+  "scope": "Finite closed-prefix diagnostics only; universal empirical ML bound and native closure lifetime remain unproved."
+}

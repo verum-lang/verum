@@ -176,8 +176,8 @@ def bitword(value):
     return value
 
 
-def emit(data, versions, required_controls=()):
-    fields(data, 'schema scope library_origin source_order language_versions candidate definition_receipt '
+def emit(data, versions, required_controls=(), *, embedded=False):
+    fields(data, 'schema scope '+('' if embedded else 'library_origin ')+'source_order language_versions candidate definition_receipt '
                  'concatenated_input prefix_receipts suffix_start suffix name_bits name_denominator look '
                  'look_denominator selection_denominator')
     require(data['schema'] == 'synarc-generated-prefix-source-v1', 'Unsupported source export')
