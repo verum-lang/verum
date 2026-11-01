@@ -23,6 +23,18 @@ def transport {A : Type u} {x y : A} (motive : A → Type v)
   match path with
   | .refl => base
 
+-- Structural implementation of the same list recursor. Lean's executable
+-- code generator does not directly compile a Type-valued List.rec motive.
+def listInduction {A : Type u} {motive : List A → Type v}
+    (base : motive [])
+    (step : (head : A) → (tail : List A) → motive tail → motive (head :: tail)) :
+    (xs : List A) → motive xs
+  | [] => base
+  | head :: tail => step head tail (listInduction base step tail)
+
+def pairValue {A : Type u} {B : Type v} (a : A) (b : B) : Sigma (fun _ : A => B) :=
+  ⟨a, b⟩
+
 '''
 
 
@@ -130,12 +142,13 @@ class Exporter:
             if len(value['cases']) != arity:
                 raise ValueError('invalid arithmetic induction cases')
             cases = ' '.join(f'({emit(case)})' for case in value['cases'])
-            return f'({name}.rec (motive := {emit(value["motive"])}) {cases} ({emit(value["scrutinee"])}))'
+            recursor = 'listInduction' if name == 'List' else name + '.rec'
+            return f'({recursor} (motive := {emit(value["motive"])}) {cases} ({emit(value["scrutinee"])}))'
         if kind in ('App', 'Pair'):
             if not isinstance(value, list) or len(value) != 2:
                 raise ValueError('malformed arithmetic pair/application')
             a, b = map(emit, value)
-            return f'(({a}) ({b}))' if kind == 'App' else f'⟨{a}, {b}⟩'
+            return f'(({a}) ({b}))' if kind == 'App' else f'(pairValue ({a}) ({b}))'
         if kind in ('Fst', 'Snd'):
             return f'(({emit(value)}).{1 if kind == "Fst" else 2})'
         if kind == 'Id':

@@ -25,8 +25,9 @@ the property being checked; admission-limit rejection is not a passing control.
 positive cancellation and polynomial identities. Their proofs use natural
 induction and identity elimination; arithmetic and order laws are not assumed.
 The untrusted polynomial normalizer emits ordinary proof terms. Supplied lemma
-proofs are checked at explicit function applications, keeping proof reuse
-separate from unfolding computational definitions.
+proofs are checked at explicit function applications. Independent lemmas share
+balanced products within dependency layers, avoiding repeated proof expansion
+and a linear-depth tower of cuts. Computational definitions remain transparent.
 
 `test_arithmetic_terms.py` also exports the exact wire terms to Lean definitions
 and asks Lean's kernel to check them, with empty axiom rosters. This is separate
@@ -35,6 +36,25 @@ natural/list/unit/empty arithmetic fragment; unsupported declarations are
 refused. Both replay routes reject false order, zero-factor cancellation and
 altered polynomial claims. These arithmetic laws alone do not establish a KT
 partition bound or correspondence with a native scorer.
+
+`check_fixed_kt.py` supplies that partition proof using the same arithmetic.
+For declared alphabet `K = k + 1`, define
+`R(a,n) = product(i < n, a + 2*i)`. A cell with counts `n_y` has likelihood
+`product_y R(1,n_y) / R(K,sum_y n_y)`. For every finite partition with the
+same coordinate-wise histogram, the maximum is
+`product_y (R(1,n_y) / R(K,n_y))`.
+The certificates prove positivity, mixed-cell splitting, same-outcome merging,
+the bound, the diagonal witness's histogram and width, attainment, zero-cell
+deletion and division by the fixed empirical parent likelihood (`0^0 = 1`).
+They assume neither the inequalities nor field/order axioms.
+
+`test_fixed_kt_terms.py` checks the exact exported terms in Lean's kernel with
+empty axiom rosters. False controls change K, replace per-outcome counts with
+equal totals, omit histogram evidence, reverse merging, claim mixed-cell
+attainment or admit K=0. The algebra is diagnostic only: a frozen Rust bridge
+must separately establish coordinate identity, count conservation, actual
+factors, exact arithmetic and refusal boundaries. No predictor, causal test,
+admission, pruning or repricing authority follows from the maximum.
 
 ## Adaptive observations
 

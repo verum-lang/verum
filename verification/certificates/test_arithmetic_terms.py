@@ -12,10 +12,12 @@ from portable_terms import data, lower, RECURSIVE
 
 
 class ArithmeticTerms(unittest.TestCase):
+    CASES = staticmethod(generate_peano_arithmetic.cases)
+
     def test_exact_terms_and_false_controls(self):
         lean = shutil.which('lean')
         self.assertIsNotNone(lean, 'Lean is required; replay must not be skipped')
-        cases = generate_peano_arithmetic.cases()
+        cases = self.CASES()
         batches = [[case for case in cases if case[2]]]
         batches.extend([case] for case in cases if not case[2])
         with tempfile.TemporaryDirectory(prefix='verum-arithmetic-terms-') as temporary:

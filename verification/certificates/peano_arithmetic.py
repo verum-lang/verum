@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from portable_terms import (RECURSIVE, app, arrow, bind, congruence, construct,
     data, identity, induct, j, lam, local, lower, pi, refl, symm, transitive,
-    tt, unit, universe, var)
+    tt, unit, universe, var, sigma, pair, first, second)
 
 
 def names(term):
@@ -36,17 +36,56 @@ class Library:
 
     def close(self, term):
         used = names(term)
+        selected = []
         for name, value in reversed(self.definitions):
             if name in used:
                 if name in self.claims:
-                    # A checked cut: validate the supplied proof, then reason
-                    # from its type. No proof-body unfolding or new kernel
-                    # rule is needed. Computational definitions remain lets.
-                    term = app(lam(name, self.claims[name], term), value)
                     used.update(names(self.claims[name]))
-                else:
-                    term = local(name, value, term)
+                selected.append((name, value))
                 used.update(names(value))
+        selected.reverse()
+        proof_names = {name for name, _ in selected if name in self.claims}
+        # Arithmetic computations do not depend on proof inhabitants. Check
+        # that boundary before separating computation from the proof DAG.
+        for name, value in selected:
+            if name not in proof_names and names(value) & proof_names:
+                raise ValueError('computational definition depends on a proof')
+        for name in proof_names:
+            if names(self.claims[name]) & proof_names:
+                raise ValueError('proof-dependent claim requires a dependent library')
+        levels, groups = {}, {}
+        for name, value in selected:
+            if name in proof_names:
+                dependencies = names(value) & proof_names
+                level = 1 + max((levels[parent] for parent in dependencies), default=-1)
+                levels[name] = level
+                groups.setdefault(level, []).append((name, value))
+        substitutions, bundles = {}, []
+        for level, group in groups.items():
+            binder = f'__arithmetic_library_{level}'
+            if binder in used:
+                raise ValueError('reserved proof-library binder')
+            def bundle(items, projection):
+                if len(items) == 1:
+                    name, value = items[0]
+                    return (substitute(self.claims[name], substitutions), substitute(value, substitutions),
+                            {name: projection})
+                split = len(items) // 2
+                left_type, left, left_refs = bundle(items[:split], first(projection))
+                right_type, right, right_refs = bundle(items[split:], second(projection))
+                return sigma('_bundle_left', left_type, right_type), pair(left, right), left_refs | right_refs
+            ty, value, refs = bundle(group, var(binder))
+            bundles.append((binder, ty, value))
+            substitutions.update(refs)
+        term = substitute(term, substitutions)
+        # One checked cut per dependency layer, with balanced products for
+        # independent lemmas. This keeps proofs opaque while checking their
+        # users, without a linear-depth tower or new trusted kernel syntax.
+        for binder, ty, value in reversed(bundles):
+            term = app(lam(binder, ty, term), value)
+        for name, value in reversed(selected):
+            if name not in proof_names:
+                term = local(name, value, term)
         return term
 
     def certificate(self, name):
@@ -55,6 +94,20 @@ class Library:
 
     def cases(self):
         return [(name, self.certificate(name), True) for name in self.claims]
+
+
+def substitute(term, replacements):
+    if not isinstance(term, (tuple, list)):
+        return term
+    if isinstance(term, tuple) and term:
+        if term[0] == 'Var':
+            return replacements.get(term[1], term)
+        if term[0] in ('Pi', 'Lam', 'Sigma', 'Let'):
+            kind, binder, value, body = term
+            scoped = {name: replacement for name, replacement in replacements.items() if name != binder}
+            return kind, binder, substitute(value, replacements), substitute(body, scoped)
+    values = [substitute(value, replacements) for value in term]
+    return tuple(values) if isinstance(term, tuple) else values
 
 
 library = Library()
@@ -84,32 +137,39 @@ class Path:
     left: tuple
     right: tuple
     proof: tuple
+    carrier: tuple = N
 
     def then(self, other):
         # Definitional conversion is checked by the kernels; endpoints may
         # differ syntactically after unfolding a recursive equation.
         if self.left == self.right:
-            return Path(self.left, other.right, other.proof)
+            return Path(self.left, other.right, other.proof, self.carrier)
         if other.left == other.right:
-            return Path(self.left, other.right, self.proof)
+            return Path(self.left, other.right, self.proof, self.carrier)
         return Path(self.left, other.right,
-                    call('nat_eq_trans', self.left, self.right, other.right, self.proof, other.proof))
+                    call('nat_eq_trans', self.left, self.right, other.right, self.proof, other.proof)
+                    if self.carrier == N else transitive(self.carrier, self.left, self.right, other.right, self.proof, other.proof),
+                    self.carrier)
 
     def reverse(self):
         if self.left == self.right:
-            return same(self.left)
-        return Path(self.right, self.left, call('nat_eq_symm', self.left, self.right, self.proof))
+            return same(self.left, carrier=self.carrier)
+        return Path(self.right, self.left,
+                    call('nat_eq_symm', self.left, self.right, self.proof) if self.carrier == N
+                    else symm(self.carrier, self.left, self.right, self.proof), self.carrier)
 
-    def under(self, function):
+    def under(self, function, carrier=None):
+        target = self.carrier if carrier is None else carrier
         if self.left == self.right:
-            return same(function(self.left))
+            return same(function(self.left), carrier=target)
+        fn = lam('_rewrite', self.carrier, function(var('_rewrite')))
         return Path(function(self.left), function(self.right),
-                    call('nat_congr', lam('_rewrite', N, function(var('_rewrite'))),
-                         self.left, self.right, self.proof))
+                    call('nat_congr', fn, self.left, self.right, self.proof) if self.carrier == target == N
+                    else congruence(self.carrier, target, fn, self.left, self.right, self.proof), target)
 
 
-def same(left, right=None):
-    return Path(left, left if right is None else right, refl(left))
+def same(left, right=None, carrier=N):
+    return Path(left, left if right is None else right, refl(left), carrier)
 
 
 def law(name, left, right, *args):
