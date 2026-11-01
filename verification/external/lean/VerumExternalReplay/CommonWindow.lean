@@ -211,4 +211,58 @@ theorem comparison_exact [DecidableEq Window] [DecidableEq Label]
     exact ⟨facts.1, facts.2.1, weighted_ratio_exact old new facts.2.2⟩
   · cases accepted
 
+/-- Equal positive child masses cancel as well as the shared reference.
+The remaining ratio contains exactly the original name and paid-look prices. -/
+theorem equal_child_ratio (old new : Assessment Window Label)
+    (sameReference : Equal old.reference new.reference)
+    (sameChild : Equal old.child new.child) :
+    Equal (ratio old new) (divide new.price.mass old.price.mass old.price.positive) := by
+  apply eq_trans (weighted_ratio_exact old new sameReference)
+  apply eq_trans (divide_congr (mul_congr_right new.price.mass (eq_symm sameChild))
+    (eq_refl (mul old.child old.price.mass))
+    (Nat.mul_pos old.childPositive old.price.positive)
+    (Nat.mul_pos old.childPositive old.price.positive))
+  exact divide_common_scale new.price.mass old.price.mass old.child
+    old.price.positive old.childPositive
+
+theorem equal_child_comparison [DecidableEq Window] [DecidableEq Label]
+    (old new : Assessment Window Label) (mass : Fraction)
+    (accepted : compare old new = some mass) (sameChild : Equal old.child new.child) :
+    Equal mass (divide new.price.mass old.price.mass old.price.positive) := by
+  unfold compare at accepted
+  split at accepted
+  · rename_i guard
+    cases Option.some.inj accepted
+    exact equal_child_ratio old new ((compatible_exact old new).mp guard).2.2 sameChild
+  · cases accepted
+
+/-- Each completed comparison has its own compatible observation space.
+No equality of windows, references, or child masses *between* the two times
+is required: only the pair's child masses agree at each time, and its original
+prices persist. Establishing those facts for native evaluation is separate. -/
+theorem equal_child_comparison_transport [DecidableEq Window] [DecidableEq Label]
+    (old new laterOld laterNew : Assessment Window Label) (mass laterMass : Fraction)
+    (accepted : compare old new = some mass)
+    (laterAccepted : compare laterOld laterNew = some laterMass)
+    (sameChild : Equal old.child new.child)
+    (laterSameChild : Equal laterOld.child laterNew.child)
+    (oldPrice : Equal old.price.mass laterOld.price.mass)
+    (newPrice : Equal new.price.mass laterNew.price.mass) : Equal mass laterMass :=
+  eq_trans (equal_child_comparison old new mass accepted sameChild)
+    (eq_trans (divide_congr newPrice oldPrice old.price.positive laterOld.price.positive)
+      (eq_symm (equal_child_comparison laterOld laterNew laterMass laterAccepted laterSameChild)))
+
+/-- Transport an observed non-improvement, not a hypothesized future verdict. -/
+theorem not_better_transport [DecidableEq Window] [DecidableEq Label]
+    (old new laterOld laterNew : Assessment Window Label) (mass laterMass : Fraction)
+    (accepted : compare old new = some mass)
+    (laterAccepted : compare laterOld laterNew = some laterMass)
+    (sameChild : Equal old.child new.child)
+    (laterSameChild : Equal laterOld.child laterNew.child)
+    (oldPrice : Equal old.price.mass laterOld.price.mass)
+    (newPrice : Equal new.price.mass laterNew.price.mass)
+    (notBetter : AtMost mass one) : AtMost laterMass one :=
+  le_trans (eq_le (eq_symm (equal_child_comparison_transport old new laterOld laterNew
+    mass laterMass accepted laterAccepted sameChild laterSameChild oldPrice newPrice))) notBetter
+
 end CommonWindow

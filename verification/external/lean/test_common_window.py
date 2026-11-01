@@ -30,6 +30,26 @@ def wrongReference : Assessment Nat Nat :=
   { new with reference := unit 4 (by decide), referencePositive := by decide }
 def noLookPrice : Assessment Nat Nat :=
   { new with price := price 8 1 (by decide) (by decide) }
+def equalNew : Assessment Nat Nat :=
+  { new with child := ⟨2,16,by decide⟩, childPositive := by decide }
+def laterOld : Assessment Nat Nat :=
+  { old with
+    window := 9
+    alphabet := wider
+    child := unit 9 (by decide)
+    reference := unit 3 (by decide)
+    childPositive := by decide
+    referencePositive := by decide }
+def laterNew : Assessment Nat Nat :=
+  { laterOld with child := ⟨2,18,by decide⟩, childPositive := by decide, price := new.price }
+def changedChild : Assessment Nat Nat :=
+  { laterNew with child := one, childPositive := by decide }
+def changedName : Assessment Nat Nat :=
+  { laterNew with price := price 1 5 (by decide) (by decide) }
+def changedLook : Assessment Nat Nat :=
+  { laterNew with price := price 8 1 (by decide) (by decide) }
+def changedOldPrice : Assessment Nat Nat :=
+  { laterOld with price := price 20 5 (by decide) (by decide) }
 def checkMass (p : Partition alphabet C) [DecidableEq C] (word : List Nat) (q : Fraction) : Bool :=
   match likelihood p [] word with | some actual => decide (Equal actual q) | none => false
 def matched (result : Option Fraction) (expected : Fraction) : Bool :=
@@ -120,6 +140,44 @@ example : Equal (add (predict singleton ⟨0,by decide⟩) (predict singleton �
         }
         for name,claim in claims.items():
             with self.subTest(control=name):self.prove(f'example : {claim} := by decide_cbv\n',True)
+
+    def test_equal_child_fixed_price_transport(self):
+        self.prove('''
+example : old.child ≠ equalNew.child := by decide_cbv
+example : Equal old.child equalNew.child := by decide_cbv
+example : old.window ≠ laterOld.window := by decide_cbv
+example : old.alphabet.labels ≠ laterOld.alphabet.labels := by decide_cbv
+example : ¬ Equal old.reference laterOld.reference := by decide_cbv
+example : ¬ Equal old.child laterOld.child := by decide_cbv
+example : Equal (ratio old equalNew) (unit 2 (by decide)) := by decide_cbv
+example : Equal (ratio laterOld laterNew) (unit 2 (by decide)) := by decide_cbv
+example : Equal (ratio old equalNew) (ratio laterOld laterNew) :=
+  equal_child_comparison_transport old equalNew laterOld laterNew
+    (ratio old equalNew) (ratio laterOld laterNew)
+    (by decide_cbv) (by decide_cbv) (by decide_cbv) (by decide_cbv)
+    (by decide_cbv) (by decide_cbv)
+example : AtMost (ratio laterOld laterNew) one :=
+  not_better_transport old equalNew laterOld laterNew
+    (ratio old equalNew) (ratio laterOld laterNew)
+    (by decide_cbv) (by decide_cbv) (by decide_cbv) (by decide_cbv)
+    (by decide_cbv) (by decide_cbv) (by decide_cbv)
+example : Less one (ratio laterOld changedChild) := by decide_cbv
+example : Less one (ratio laterOld changedName) := by decide_cbv
+example : Less one (ratio laterOld changedLook) := by decide_cbv
+example : Less one (ratio changedOldPrice laterNew) := by decide_cbv
+''')
+
+    def test_changed_child_or_original_price_cannot_preserve_the_verdict(self):
+        for name, pair in {
+            'child': 'laterOld changedChild',
+            'name': 'laterOld changedName',
+            'look': 'laterOld changedLook',
+            'old_price': 'changedOldPrice laterNew',
+        }.items():
+            for claim in [f'AtMost (ratio {pair}) one',
+                          f'Equal (ratio old equalNew) (ratio {pair})']:
+                with self.subTest(control=name, claim=claim):
+                    self.prove(f'example : {claim} := by decide_cbv\n', True)
 
     def test_constructive_axiom_roster(self):
         names=[]
