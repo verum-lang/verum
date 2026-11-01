@@ -7,6 +7,7 @@ closed. Panic outcomes retain all preceding writes. Compiler metadata and this
 frontend are trusted; generated judgments are independently kernel checked.
 """
 from dataclasses import dataclass
+from native_layout import validate_layout
 import re
 from mir_to_lean import Translation, Value, Overflow, require, function_body, basic_blocks, pair
 
@@ -119,9 +120,12 @@ class Layout:
 
 
 class RecordTranslation(Translation):
-    def __init__(self, mir, function, layout, bits=64):
+    def __init__(self, mir, function, layout, native_layout_mir, bits=64):
+        validate_layout(native_layout_mir, layout)
         require(type(bits) is int and 0 < bits <= 128, 'Invalid target width')
         parameters, body = function_body(mir, function, '()')
+        require(function_body(native_layout_mir, function, '()') == (parameters, body),
+                'Layout witness compilation changed the selected native method')
         expected = ['_1: &mut ' + layout.record] + [f'_{i+2}: {kind}' for i, kind in enumerate(layout.parameters)]
         require(parameters.split(', ') == expected, 'MIR/metadata parameter mismatch')
         self.layout, self.bits = layout, bits

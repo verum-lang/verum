@@ -8,6 +8,7 @@ import unittest
 
 from record_mir import Layout, RecordTranslation
 from runtime import execute
+from native_layout import witness_source, validate_layout
 
 
 def metadata():
@@ -38,8 +39,27 @@ def mir(body, locals='', blocks=''):
             '    let mut _0: ();\n' + locals + '    bb0: {\n' + body + '\n    }\n' + blocks + '}\n')
 
 
+def unit_witness():
+    return """fn verumNativeRecordLayout(_1: State) -> State {
+    debug value => _1;
+    let mut _0: State;
+    let mut _2: usize;
+    let mut _3: bool;
+    let mut _4: std::vec::Vec<usize>;
+    bb0: {
+        _2 = copy (_1.0: usize);
+        _3 = copy (_1.1: bool);
+        _4 = move (_1.2: std::vec::Vec<usize>);
+        _0 = State { value: move _2, flag: move _3, owned: move _4 };
+        return;
+    }
+}
+"""
+
+
 def translate(source, data=None):
-    return RecordTranslation(source, 'update', Layout(data or metadata(), 'State', 'update')).lean()
+    layout = Layout(data or metadata(), 'State', 'update')
+    return RecordTranslation(source, 'update', layout, source + unit_witness()).lean()
 
 
 class RecordTests(unittest.TestCase):
@@ -161,7 +181,12 @@ impl State {
                 code, stdout, stderr = execute(command, root, root/f'{name}.log')
                 self.assertEqual(code, 0, stdout+stderr)
             layout = Layout(json.loads((root/'metadata/state.json').read_bytes()), 'State', 'update')
-            text = RecordTranslation((root/'state.mir').read_text(), 'update', layout).lean()
+            (root/'witness.rs').write_text(source + witness_source(layout))
+            code, stdout, stderr = execute([str(rustc), '--crate-type=lib', '--emit=mir', '-C',
+                'overflow-checks=yes', 'witness.rs', '-o', 'witness.mir'], root, root/'witness.log')
+            self.assertEqual(code, 0, stdout+stderr)
+            text = RecordTranslation((root/'state.mir').read_text(), 'update', layout,
+                                     (root/'witness.mir').read_text()).lean()
             text += '''
 theorem exact_state {Frame2 : Type} (s : Record Frame2) (x : Nat) (flag : Bool) :
     extracted s x flag =

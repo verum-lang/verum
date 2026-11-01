@@ -44,6 +44,17 @@ field, additional references, calls and cyclic control flow are refused.
 Return and panic both retain the complete resulting record, including writes
 that precede a failed arithmetic check.
 
+Rustdoc enables `cfg(doc)`, so its declarations alone cannot authorize a native
+projection. The adapter appends an exhaustive record reconstruction and enum
+matches to the unchanged selected source, then compiles these witnesses with
+the same options as native MIR. Rust checks field and variant completeness;
+the frontend checks native field names, indices and types. The selected method's
+MIR must also remain identical when the witnesses are present. Missing witnesses,
+configuration drift or unexpected lowering refuse admission. The witnesses are
+never executed and supply no assumed behavioral contracts. This is a separate
+source compilation, not metadata claimed to come from the original native build.
+
+
 `check_constructor_merge.py` selects the unchanged `Constructor::merge` method
 and its complete original type declarations from the frozen native sources.
 The manifest retains reviewed byte ranges and both the build and run receipts.

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent / 'kani'))
 from rust_replay import load, read, require, sha, write
 from record_mir import Layout, RecordTranslation
+from native_layout import witness_source
 from runtime import RUST_VERSION, execute, runtime_identity
 
 FIXTURES = ROOT.parent / 'lean/fixtures'
@@ -253,7 +254,15 @@ def main():
             require(code == 0, 'Rust field metadata failed to compile')
             mir, metadata = read(case/'transaction.mir'), read(case/'metadata/transaction.json')
             layout = Layout(load(metadata), 'Constructor', 'merge')
-            generated = RecordTranslation(mir.decode(), 'merge', layout).lean()
+            witness = data + witness_source(layout).encode()
+            (case/'layout.rs').write_bytes(witness)
+            # Reuse the native compiler flags; rustdoc's implicit cfg(doc) is
+            # deliberately absent. The original declarations remain unchanged.
+            witness_command = [*command[:-3], 'layout.rs', '-o', 'layout.mir']
+            code, _, _ = execute(witness_command, case, case/'layout-compiler.log')
+            require(code == 0, 'Native metadata witness failed to compile')
+            layout_mir = read(case/'layout.mir')
+            generated = RecordTranslation(mir.decode(), 'merge', layout, layout_mir.decode()).lean()
             projection, proof, counterexample = specification(layout)
             generated = HEADER + generated + (counterexample if negative else projection + proof)
             (case/'Replay.lean').write_text(generated)
@@ -273,11 +282,14 @@ def main():
                                   ['full_record_exact', 'model_exact', 'enabled_wake_exact']],
                         'Unexpected theorem axiom roster')
             require(read(case/'transaction.rs') == data and read(case/'transaction.mir') == mir and
-                    read(case/'metadata/transaction.json') == metadata and
+                    read(case/'metadata/transaction.json') == metadata and read(case/'layout.rs') == witness and
+                    read(case/'layout.mir') == layout_mir and
                     (case/'Replay.lean').read_text() == generated, 'Replay input changed')
             report['results'].append({'case': name, 'source_sha256': sha(data), 'mir_sha256': sha(mir),
-                'metadata_sha256': sha(metadata), 'lean_sha256': sha(generated.encode()),
-                'compiler_command': command, 'metadata_command': doc_command, 'diagnostics': diagnostics})
+                'metadata_sha256': sha(metadata), 'layout_source_sha256': sha(witness),
+                'layout_mir_sha256': sha(layout_mir), 'lean_sha256': sha(generated.encode()),
+                'compiler_command': command, 'metadata_command': doc_command,
+                'layout_command': witness_command, 'diagnostics': diagnostics})
             print(name, 'passed', flush=True)
         require(all(read(p) == data for p,data in inputs.items()), 'Verifier/model changed during replay')
         require(all(runtime_identity(tool) == identity for tool,identity in identities.items()), 'Toolchain changed')
