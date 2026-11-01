@@ -61,6 +61,83 @@ fn check(checker: &mut TypeChecker, module: &Module) -> List<Text> {
 }
 
 #[test]
+fn const_generic_alias_keeps_constructor_and_receiver_arguments() {
+    let source = r#"
+        type Alloc<const SIZE: Int> is { top: Int };
+        implement<const SIZE: Int> Alloc<SIZE> {
+            public fn new() -> Self { Self { top: 0 } }
+            public fn capacity(&self) -> Int { SIZE }
+        }
+        type Tiny is Alloc<1024>;
+        type Nested is Tiny;
+        fn probe() -> Int { let value = Nested.new(); value.capacity() }
+    "#;
+    for owner in ["cog", "fixture", "cog.nested"] {
+        let errors = errors(owner, source);
+        assert!(errors.is_empty(), "owner={owner}: {errors:?}");
+    }
+}
+
+#[test]
+fn aliased_static_calls_enforce_the_selected_type_arguments() {
+    for argument in ["7", "false"] {
+        let source = format!(r#"
+            type Factory<T> is {{ value: T }};
+            implement<T> Factory<T> {{
+                public fn new(value: T) -> Self {{ Self {{ value }} }}
+                public fn get(&self) -> T {{ self.value }}
+            }}
+            type Selected is Factory<Int>;
+            fn probe() {{ let value = Selected.new({argument}); value.get(); }}
+        "#);
+        let errors = errors("fixture", &source);
+        if argument == "7" {
+            assert!(errors.is_empty(), "{errors:?}");
+        } else {
+            assert!(errors.iter().any(|error| error.contains("Mismatch")
+                && error.contains("Bool") && error.contains("Int")), "{errors:?}");
+        }
+    }
+}
+
+#[test]
+fn alias_receiver_uses_the_declared_owner_in_both_registration_orders() {
+    let alpha = Parser::new(r#"
+        type Factory<T> is { value: T };
+        implement<T> Factory<T> {
+            public fn new(value: T) -> Self { Self { value } }
+            public fn get(&self) -> T { self.value }
+        }
+    "#).parse_module().expect("alpha syntax");
+    let beta = Parser::new(r#"
+        type Factory<T> is { value: T };
+        implement<T> Factory<T> {
+            public fn new(value: T) -> Self { Self { value } }
+            public fn get(&self) -> Bool { false }
+        }
+    "#).parse_module().expect("beta syntax");
+    for reverse in [false, true] {
+        for result_type in ["Int", "Bool"] {
+            let mut checker = TypeChecker::new();
+            let modules = if reverse { [("beta", &beta), ("alpha", &alpha)] }
+                else { [("alpha", &alpha), ("beta", &beta)] };
+            for (owner, module) in modules { register(&mut checker, owner, module); }
+            let source = format!("type Selected is alpha.Factory<Int>; type Chained is Selected; fn probe(value: Chained) -> {result_type} {{ value.get() }}");
+            let consumer = Parser::new(&source).parse_module().expect("consumer syntax");
+            register(&mut checker, "consumer", &consumer);
+            let errors = check(&mut checker, &consumer);
+            if result_type == "Int" {
+                assert!(errors.is_empty(), "reverse={reverse}: {errors:?}");
+            } else {
+                assert!(errors.iter().any(|error| error.contains("Mismatch")
+                    && error.contains("Bool") && error.contains("Int")),
+                    "wrong return must be rejected: reverse={reverse}: {errors:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn owned_generic_method_result_needs_no_annotation() {
     let source = r#"
         type Answer is { value: Int };

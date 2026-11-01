@@ -19419,33 +19419,10 @@ impl TypeChecker {
         // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
         let recv_ty_derefed = Self::auto_deref_for_method_call(&recv_ty_raw);
 
-        // TYPE ALIAS RESOLUTION: If recv_ty is a Named type that is a type alias,
-        // resolve it to the underlying type so method lookups (e.g., .to_string())
-        // find methods on the underlying primitive type.
-        // Example: type Epoch = u32; -> Epoch.current() returns Epoch, .to_string() should work
-        let recv_ty = if let Type::Named { ref path, .. } = recv_ty_derefed {
-            let type_name: verum_common::Text = if path.segments.len() == 1 {
-                if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
-                    id.name.as_str().into()
-                } else {
-                    "".into()
-                }
-            } else {
-                "".into()
-            };
-            if !type_name.is_empty() {
-                if let Some(target) = self.ctx.type_aliases.get(&type_name) {
-                    // Resolve the alias to underlying type
-                    target.clone()
-                } else {
-                    recv_ty_derefed
-                }
-            } else {
-                recv_ty_derefed
-            }
-        } else {
-            recv_ty_derefed
-        };
+        // Use the same transparent-alias substitution as unification. This
+        // retains qualified declaration owners and instantiated arguments
+        // through alias chains without expanding nominal records structurally.
+        let recv_ty = self.unifier.normalize_aliases(&recv_ty_derefed);
 
         // ============================================================
         // DYN PROTOCOL METHOD RESOLUTION
@@ -25166,13 +25143,21 @@ bake to have this verified.",
             return Ok(Some(r));
         }
 
-        // GENERIC TYPE STATIC METHOD CALL: Handle Wrapper<Person>.default() syntax
-        // When receiver is a TypeExpr, extract the type and use it for method lookup.
-        // The type arguments (like Person) are used to instantiate generic implementations.
-        // Generic type instantiation: substituting concrete types for type parameters, checking bounds
-        if let ExprKind::TypeExpr(ty) = &receiver.kind {
-            // Convert AST type to internal Type representation
-            let receiver_ty = self.ast_to_type(ty)?;
+        // An alias denotes the same applied type as explicit type syntax.
+        // Route both through one static-method instantiation path, retaining
+        // the declared owner and arguments. A local value still owns its name.
+        let explicit_receiver = match &receiver.kind {
+            ExprKind::TypeExpr(ty) => Some(self.ast_to_type(ty)?),
+            ExprKind::Path(path) if !skip_static_lookup => path.as_ident()
+                .filter(|name| !self.ctx.env.is_locally_bound(name.name.as_str()))
+                .and_then(|name| self.resolve_type_name(name.name.as_str(), span).ok())
+                .and_then(|declared| {
+                    let expanded = self.unifier.normalize_aliases(&declared);
+                    (expanded != declared).then_some(expanded)
+                }),
+            _ => None,
+        };
+        if let Some(receiver_ty) = explicit_receiver {
             let method_name = method.name.as_str();
 
             // Extract base type name for method lookup
