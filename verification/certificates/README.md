@@ -110,6 +110,19 @@ A V2/V3 catalog whose selected address uses no control does not demonstrate a
 lexical or recursive encoding. Native VM semantics and physical ownership remain
 separate from a code-word replay.
 
+`../external/lean/check_prefix_export.py` binds frozen native catalogs to an
+executable structural decoder and materializer, including Branch/Fold child
+ordering and Recur ancestor/member/arity fields. Joint I/U/R receipts and
+standalone enumerated components have separate input formats. Replay records
+actual selected controls, checks full bodies and arbitrary trailing suffixes,
+and checks exact word/name/look prices. Original native fixture bytes and
+provenance are retained under `../external/lean/fixtures/prefix-*`; negative
+controls alter owners, words, bodies, child order, recursive edges and prices.
+The work audit checks recorded arithmetic and allowance bounds, not a universal
+cost theorem. Numeric scope identifiers do not establish physical pointer
+ownership. Complete finite catalogs and successful samples do not establish
+general Rust refinement, exhaustive enumeration or recursive VM correctness.
+
 ## Adaptive observations
 
 `check_adaptive_observation.py` replays the universal laws in

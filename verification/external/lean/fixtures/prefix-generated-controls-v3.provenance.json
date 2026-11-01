@@ -1,0 +1,30 @@
+{
+  "export_sha256": "a72f8bc6d7cf099d37ab45868a815845f0e240adffaeefda77c42db06ba1d878",
+  "scope": "Completed generated native source courts: original joint samples plus separate actual enumerated Branch/Fold/Recur component samples; no exhaustive joint coverage or empirical admission claim",
+  "synarc_head": "9fe1529c9dd22cda7ef811b1d67962ef03c2f025",
+  "source_patch_sha256": "58479ac69c70c54d604a4a9af1317a766f50650d40262e412905663c9789b9c3",
+  "source_manifest_sha256": "7f2ee8c3341a033cae1fe052df3ca53dfcccbe3a3f3bf56360812d33c340da3a",
+  "source_packet_sha256": "8a09851ef2ec2692f5d8b8ba598f58625b91f9c55cabe875bd9e3f54cb2629f4",
+  "native_execution": {
+    "status": "passed",
+    "source_packet_sha256": "8a09851ef2ec2692f5d8b8ba598f58625b91f9c55cabe875bd9e3f54cb2629f4",
+    "binary_sha256": "854014d211f4d007ce589fab866fceb3e4b99c146d4dbe77e26685eb58bc1e2f",
+    "tests": [
+      "organism::observer_acquired::structural_source::courts::aggregate_capacity_refusal_is_paid_and_resumable_before_any_copy",
+      "organism::observer_acquired::structural_source::courts::closed_nested_production_envelopes_keep_prefix_authority_and_original_names",
+      "organism::observer_acquired::structural_source::courts::lowered_retention_grant_cannot_bypass_declaration_or_paid_prefix_handoff",
+      "organism::observer_acquired::structural_source::courts::prospective_priority_survives_library_declaration_but_controls_still_use_complete_fallback",
+      "organism::observer_acquired::structural_source::prefix_export_courts::generated_control_components_export_branch_fold_and_nested_recursive_words",
+      "organism::observer_acquired::structural_source::prefix_export_courts::generated_prefix_sources_export_actual_v1_v2_v3_catalogues_and_decoder_suffixes"
+    ],
+    "log_sha256": "0d7089eec9a5f4947468dcdd118d894da02d47dc200264cbf91a18a7563a49b9",
+    "exports": {
+      "generated-controls-v2.json": "c3d978bd4bc35b61f891ccd33384a6654073f196a1f79706f1eb3f09753c1eba",
+      "generated-controls-v3.json": "a72f8bc6d7cf099d37ab45868a815845f0e240adffaeefda77c42db06ba1d878",
+      "generated-v1.json": "4fd6e561652f24f4a86a072b43c3839097721e83c24e399a02616b79df23fc6c",
+      "generated-v2.json": "4ace7d5c266065edcce26c8ab3297194289d61c89ff6ea4f0d63d226c1bb595d",
+      "generated-v3.json": "eaa5bdf5b6b7a0d53ef0d9bbbb901a0fc17dab9a54007df8988b2206f541d5c7"
+    }
+  },
+  "derivation": "Exact frozen native bytes, independently reproduced byte for byte; no schema transformation."
+}
