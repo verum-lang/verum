@@ -265,15 +265,6 @@ fn write_core_metadata_alongside_archive(
         // upgrades.
         metadata.content_hash = compute_source_blake3_for_root(root);
 
-        // #101 — populate `decl_span` on every `TypeDescriptor`,
-        // `FunctionDescriptor`, and `ProtocolDescriptor` in the
-        // metadata so the diagnostic emitter can point at stdlib
-        // declaration sites without consulting source.  Single
-        // source-walk visits every `.vr`; the resulting map is keyed
-        // by `<module_path>.<simple_name>` so injection is O(1) per
-        // descriptor.
-        inject_decl_spans(&mut metadata, root, verbose);
-
         // Task #20 — populate `module_reexports` from each .vr file's
         // `public mount X.{...}` declarations so user-compile's
         // `load_stdlib_from_embedded` can apply them to ExportTables.
@@ -283,7 +274,7 @@ fn write_core_metadata_alongside_archive(
         // not the modules that re-export it.  This populates the
         // chain `core.base ← (replace, core.base.memory)` so the
         // user-side ExportTable picks it up.
-        scan_module_reexports(&mut metadata, root, verbose);
+        scan_module_reexports(&mut metadata, root, verbose)?;
 
         // Task #23 — populate `implementations[].protocol_args` from
         // each .vr file's `implement<...> Protocol<Args> for Type { ... }`
@@ -776,27 +767,72 @@ fn scan_context_declarations(
     (names, decl_map, module_map)
 }
 
-/// Task #20 — scan every `.vr` file under `root` for public
-/// `mount` declarations and populate `metadata.module_reexports`
-/// with `(reexporting_module_path → [(item_name, source_module_path)])`
-/// pairs.
-///
-/// Resolves leading-dot / `super.` / `cog.` segments relative to the
-/// re-exporting file's own dotted module path.  Glob mounts and
-/// relative-file mounts are skipped — only specific item re-exports
-/// (Path with a final `Name` segment) survive into the metadata.
-///
-/// Without this pass, free functions re-exported through
-/// `public mount .submod.{fn};` are unreachable at user-compile
-/// time because the user-side `load_stdlib_from_embedded` builds
-/// ExportTables from each function's DECLARING module only —
-/// the re-export chains live in source and are otherwise lost when
-/// the precompile artefact crosses the archive boundary.
+/// Qualified identities take precedence over collision-prone bare indices.
+/// A bare candidate is usable only for its exact declaring module, not a
+/// prefix-related module or the archive entry that happened to contain it.
+fn reexport_declaring_module(
+    metadata: &verum_types::core_metadata::CoreMetadata,
+    name: &str,
+    source: &str,
+) -> verum_common::Maybe<verum_common::Text> {
+    use verum_common::{Maybe, Text};
+    fn owner<'a>(entry: &'a Text, origin: &'a Maybe<Text>) -> &'a Text {
+        origin
+            .as_ref()
+            .filter(|path| !path.is_empty())
+            .unwrap_or(entry)
+    }
+    let candidates = |key: &Text| {
+        [
+            metadata
+                .types
+                .get(key)
+                .map(|d| owner(&d.module_path, &d.origin_module_path)),
+            metadata
+                .protocols
+                .get(key)
+                .map(|d| owner(&d.module_path, &d.origin_module_path)),
+            metadata
+                .functions
+                .get(key)
+                .filter(|d| d.parent_type.is_none())
+                .map(|d| owner(&d.module_path, &d.origin_module_path)),
+        ]
+    };
+    let exact = candidates(&Text::from(format!("{source}.{name}")));
+    let mut owners = exact.into_iter().flatten();
+    if let Some(first) = owners.next() {
+        return owners.all(|other| other == first).then(|| first.clone());
+    }
+    candidates(&Text::from(name))
+        .into_iter()
+        .flatten()
+        .find(|declared| declared.as_str() == source)
+        .cloned()
+}
+
+/// Resolve exported identities after source binding has repaired copied shells.
+/// Expanding/chasing the mount graph precedes binding; declaration lookup must
+/// follow it, otherwise a root glob can retain an obsolete archive-entry owner.
+fn resolve_reexport_declarations(metadata: &mut verum_types::core_metadata::CoreMetadata) {
+    let mut exports = std::mem::take(&mut metadata.module_reexports);
+    for items in exports.values_mut() {
+        for (_, original, source) in items.iter_mut() {
+            if let Some(owner) = reexport_declaring_module(metadata, original, source) {
+                *source = owner;
+            }
+        }
+    }
+    metadata.module_reexports = exports;
+}
+
+/// Scan public mounts into `(local name, original name, declaring module)`
+/// exports, resolving relative paths, aliases, globs and inline modules.
 fn scan_module_reexports(
     metadata: &mut verum_types::core_metadata::CoreMetadata,
     root: &Path,
     verbose: bool,
-) {
+) -> Result<()> {
     use std::collections::BTreeMap;
     use verum_ast::decl::Visibility;
     use verum_ast::ty::PathSegment;
@@ -1028,7 +1064,6 @@ fn scan_module_reexports(
         dir: &Path,
         accum: &mut BTreeMap<String, BTreeMap<String, (String, String)>>,
         glob_pairs: &mut Vec<(String, String)>,
-        explicit_leaves: &mut Vec<(String, String, String, String)>,
         inline_edges: &mut Vec<(String, String)>,
         files_visited: &mut usize,
         files_parsed: &mut usize,
@@ -1046,7 +1081,7 @@ fn scan_module_reexports(
                 continue;
             }
             if path.is_dir() {
-                visit_dir(root, &path, accum, glob_pairs, explicit_leaves, inline_edges, files_visited, files_parsed, files_with_reexports);
+                visit_dir(root, &path, accum, glob_pairs, inline_edges, files_visited, files_parsed, files_with_reexports);
                 continue;
             }
             if path.extension().and_then(|s| s.to_str()) != Some("vr") {
@@ -1146,17 +1181,6 @@ fn scan_module_reexports(
             // all of them. Pre-fix the flat file-keying dropped every
             // concrete prelude mount into the `core` bucket.
             for leaf in leaves {
-                // Record every EXPLICIT (Path/Nested) leaf under its
-                // re-exporting module so the inline-submodule → parent
-                // post-pass can replay a child's explicit re-exports onto
-                // its parent without also dragging up the child's greedy
-                // glob over-captures (the flattening guard).
-                explicit_leaves.push((
-                    leaf.reexporting_module.clone(),
-                    leaf.local_name.clone(),
-                    leaf.true_name.clone(),
-                    leaf.source_module.clone(),
-                ));
                 let bucket = accum.entry(leaf.reexporting_module).or_default();
                 // First-wins under name collision so the BTreeMap
                 // iteration order is reproducible across runs.
@@ -1169,10 +1193,6 @@ fn scan_module_reexports(
 
     let mut accum: BTreeMap<String, BTreeMap<String, (String, String)>> = BTreeMap::new();
     let mut glob_pairs: Vec<(String, String)> = Vec::new();
-    // (reexporting_module, local_name, true_name, source_module) for every
-    // EXPLICIT Path/Nested leaf — the flattening-safe input to the
-    // inline-submodule → parent propagation post-pass below.
-    let mut explicit_leaves: Vec<(String, String, String, String)> = Vec::new();
     // (parent_module, child_module) for every inline `public module X { … }`.
     let mut inline_edges: Vec<(String, String)> = Vec::new();
     let mut files_visited = 0usize;
@@ -1183,432 +1203,69 @@ fn scan_module_reexports(
         root,
         &mut accum,
         &mut glob_pairs,
-        &mut explicit_leaves,
         &mut inline_edges,
         &mut files_visited,
         &mut files_parsed,
         &mut files_with_reexports,
     );
 
-    // Task #27 — expand glob mounts against the already-built
-    // metadata.types / .functions / .protocols tables.  Every
-    // public symbol whose `module_path` starts with the glob's
-    // source prefix becomes a leaf under the re-exporting module.
-    //
-    // The expansion runs after the source-walk so nested-inline-module
-    // collections (`core/mod.vr`'s `module prelude { mount super.base.*; }`)
-    // and direct globs at file scope share one code path.  Pre-fix the
-    // implicit prelude (`mount core.prelude.*`) lost every transitively
-    // re-exported stdlib name because the glob branch in walk_tree was
-    // a TODO.
-    //
-    // Source-shape considerations:
-    //   * `core.base.*` matches `core.base.<simple>` for every simple
-    //     in module_paths under that prefix (one level deep).  Stdlib
-    //     convention is that submodules re-export themselves through
-    //     mod.vr's specific mounts; deeper-than-one expansion would
-    //     duplicate.
-    //   * Glob TARGETs (the prefix) often resolve to a parent
-    //     module that has its own re-exports.  We use the metadata's
-    //     declaring-module path, not the glob-prefix's own exports —
-    //     that's what the existing typechecker's `import_all_from_module`
-    //     fallback does at runtime, so the precompile capture must
-    //     mirror it.
-    fn glob_matches(source_prefix: &str, candidate_module: &str) -> bool {
-        // Task #27 — archive structure caveat: the VBC archive
-        // collapses every `core/base/<sub>.vr` into a single
-        // module entry named `core.base` (the mod.vr's path).  So
-        // a glob `mount super.base.*` from `core.prelude` has
-        // source_prefix=`core.base` and the matching declarations
-        // live under candidate_module=`core.base` exactly — NOT
-        // `core.base.iterator` (which doesn't exist in the
-        // archive's module path indexing).
-        //
-        // Equal-match is the dominant case for stdlib glob
-        // expansion; submodule-prefix matching (`core.X.*` with
-        // `core.X.Y.Z` declarations) is the secondary case that
-        // surfaces for hierarchies the archive DOES keep
-        // distinct.  Both forms are valid — accept either.
-        if candidate_module == source_prefix {
-            return true;
-        }
-        if !candidate_module.starts_with(source_prefix) {
-            return false;
-        }
-        let rest = &candidate_module[source_prefix.len()..];
-        rest.starts_with('.')
-    }
-    // FN-ORIGIN-MODULE (v2.13): a declaration must be matched by its
-    // DECLARING module as well as by the archive ENTRY module.
-    //
-    // `module_path` is the entry (directory) module — `core.base` for
-    // everything in `core/base/*.vr`.  The prelude re-exports
-    // `super.base.iterator.*`, i.e. source_prefix `core.base.iterator`,
-    // which `glob_matches` rejects against `core.base` (it is a PARENT,
-    // not a child).  So the nested-glob re-export captured nothing from
-    // any file submodule, and `mount core.prelude.*` delivered only the
-    // names the prelude mounts BY NAME.  Measured: 31 lowercase names
-    // reached a prelude glob — exactly the 21 math + 5 io + 3 format + 2
-    // tier functions the prelude names explicitly — and zero of the
-    // glob-re-exported ones.
-    let owns_decl = |source_prefix: &str,
-                     module_path: &str,
-                     origin: &verum_common::Maybe<verum_common::Text>|
-     -> bool {
-        if glob_matches(source_prefix, module_path) {
-            return true;
-        }
-        // BISECTED 2026-08-09 — this one leg carries BOTH effects of the
-        // glob fix, measured by disabling it and re-baking:
-        //     with origin matching:  text/text 465/0,  base/panic 141
-        //     without it:            text/text 187/278, base/panic 135
-        // So it earns 278 tests and costs 6, and the 6 are a distinct
-        // defect it merely exposes: `core.base.panic.PanicInfo` loses
-        // `message` / `location` / `fmt_debug` once the prelude's
-        // re-export set includes the file-submodule names, and
-        // base/panic's failure changes from `E400 expected 'T', found
-        // 'Int'` to method-not-found. Kept: +272 net. The PanicInfo
-        // method loss is tracked separately — do not "fix" it by
-        // removing this match.
-        match origin {
-            verum_common::Maybe::Some(om) => glob_matches(source_prefix, om.as_str()),
-            verum_common::Maybe::None => false,
-        }
-    };
-    for (reexporting_mp, source_prefix) in glob_pairs.iter() {
-        let bucket = accum.entry(reexporting_mp.clone()).or_default();
-        for (name, td) in metadata.types.iter() {
-            if !owns_decl(
-                source_prefix,
-                td.module_path.as_str(),
-                &td.origin_module_path,
-            ) {
-                continue;
-            }
-            // Glob expansion never renames — true_name == local_name.
-            bucket.entry(name.as_str().to_string()).or_insert_with(|| {
-                (name.as_str().to_string(), td.module_path.as_str().to_string())
-            });
-            // Also surface variant constructors so pattern matches
-            // through globbed prelude work.
-            if let verum_types::core_metadata::TypeDescriptorKind::Variant { cases } = &td.kind {
-                for case in cases.iter() {
-                    bucket.entry(case.name.as_str().to_string()).or_insert_with(|| {
-                        (case.name.as_str().to_string(), td.module_path.as_str().to_string())
-                    });
-                }
-            }
-        }
-        for (name, fd) in metadata.functions.iter() {
-            if !owns_decl(
-                source_prefix,
-                fd.module_path.as_str(),
-                &fd.origin_module_path,
-            ) {
-                continue;
-            }
-            // Task #27 — extract the leaf-level simple name.
-            //
-            // archive_metadata's Pass 2 stores free functions under
-            // TWO key shapes:
-            //   1. Bare simple name (`"range"`) — first-wins under
-            //      cross-module collisions.
-            //   2. Module-path-qualified name
-            //      (`"core.base.iterator.range"`) — registered
-            //      unconditionally so a same-name free fn in
-            //      another module still has a unique slot.
-            //
-            // Plus inherent-method entries (`"Type.method"`) we
-            // need to skip — they belong to a Type carrier, not a
-            // namespace leaf.
-            //
-            // Heuristic: for keys containing dots, take the last
-            // segment as the leaf NAME.  Skip when the last
-            // segment starts with an uppercase letter (it's a
-            // variant constructor like `Maybe.Some`) AND the
-            // second-to-last segment starts uppercase (it's
-            // `Type.method` form, not module-path leaf).  Plain
-            // module-path leaves (`core.base.iterator.range`)
-            // pass through with last segment = `range`.
-            let leaf_name = if let Some(dot) = name.as_str().rfind('.') {
-                let tail = &name.as_str()[dot + 1..];
-                let head = &name.as_str()[..dot];
-                let head_last = head.rsplit('.').next().unwrap_or(head);
-                let tail_upper = tail.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
-                let head_last_upper = head_last
-                    .chars()
-                    .next()
-                    .map(|c| c.is_uppercase())
-                    .unwrap_or(false);
-                // Inherent-method shape: previous segment is
-                // a Type (uppercase) — skip.  Variant
-                // constructors (e.g. `Maybe.Some`) also
-                // hit this shape and are properly skipped
-                // (they're propagated through the variant-case
-                // walk on the type).
-                if head_last_upper {
-                    continue;
-                }
-                // Suppress closure synthetics (`foo$closure$N`)
-                // — they're VBC-codegen artefacts, not
-                // user-visible names.
-                if tail.contains('$') {
-                    continue;
-                }
-                // Suppress duplicate keys produced by the
-                // `core.base.core.base.iterator.range`
-                // path-doubling artefact (lazy-load
-                // dispatch fallback registers them too).
-                // Keep only the non-doubled form.
-                if head.starts_with("core.") {
-                    if let Some(rest) = head.strip_prefix("core.") {
-                        if rest.starts_with("core.") {
-                            continue;
-                        }
-                    }
-                }
-                let _ = tail_upper; // not used; reserved for future Type-vs-fn disambig
-                tail.to_string()
-            } else {
-                // Bare simple key — leaf is the key itself.
-                if name.as_str().contains('$') {
-                    continue;
-                }
-                name.as_str().to_string()
-            };
-            // Glob expansion never renames — true_name == local_name
-            // (`leaf_name` here, the leaf extracted from the metadata key).
-            bucket
-                .entry(leaf_name.clone())
-                .or_insert_with(|| (leaf_name, fd.module_path.as_str().to_string()));
-        }
-        for (name, pd) in metadata.protocols.iter() {
-            if !owns_decl(
-                source_prefix,
-                pd.module_path.as_str(),
-                &pd.origin_module_path,
-            ) {
-                continue;
-            }
-            bucket.entry(name.as_str().to_string()).or_insert_with(|| {
-                (name.as_str().to_string(), pd.module_path.as_str().to_string())
-            });
-        }
-    }
+    // Named source exports disambiguate imported shells before glob expansion.
+    // Bind once against this graph, then build globs from the declared owners;
+    // archive entry paths must never become the emitted declaration identity.
+    metadata.module_reexports = accum.iter().map(|(module, items)| {
+        let leaves = items.iter().map(|(local, (name, owner))| {
+            let (name, owner) = chase(name.clone(), owner.clone(), &accum);
+            (Text::from(local.as_str()), Text::from(name), Text::from(owner))
+        }).collect();
+        (Text::from(module.as_str()), leaves)
+    }).collect();
+    bind_source_declarations(metadata, root, &glob_pairs, verbose);
 
-    // T0281 — inline-submodule → parent re-export propagation.
-    //
-    // The "prelude pattern" at `core/mod.vr` re-exports every
-    // fundamental name ONLY through an inline
-    // `public module prelude { public mount super.base.*;
-    // public mount super.collections.List; … }`.  `core/mod.vr` itself
-    // has NO top-level `public mount`, so the scan above keys every
-    // prelude re-export under `accum["core.prelude"]` and leaves
-    // `accum["core"]` empty of them.  A user's `mount core.{Maybe}`
-    // then reads `core`'s (empty) export surface and fails E401 — the
-    // group-mount cascade (base/data/unit_test.vr = 160 fails) — while
-    // `mount core.prelude.Maybe` resolves.
-    //
-    // Mirror `verum_modules::exports::propagate_submodule_reexports`
-    // (the source-path AST propagator) over the metadata buckets:
-    // surface an inline public submodule's re-exports onto its parent.
-    // Fully general — every inline `public module X { … }` edge
-    // captured during the source walk propagates; no `prelude` name is
-    // hardcoded.
-    //
-    // Flattening guard (the negative invariant: `core.base.data.Data`
-    // must NOT become resolvable as `core.Data`).  A child contributes
-    // to its parent ONLY:
-    //   (1) its EXPLICIT Path/Nested leaves (`explicit_leaves`), and
-    //   (2) for each `X.*` glob it holds, the glob TARGET's OWN
-    //       re-export surface (`accum[target]`) — NOT the greedy
-    //       path-prefix expansion that fills the child's own bucket.
-    // `core.base`'s surface is exactly what `core/base/mod.vr`
-    // re-exports (`public mount .maybe.{Maybe}`, `.memory.{Heap,
-    // Shared}`, `collections.{List, Map, Set}`, …) — Maybe / Result /
-    // List / Map / Heap / Shared, but NEVER `Data`, which `core.base`
-    // only declares as a `public module data;` submodule and never
-    // re-exports.  So the fundamental names surface at the root while
-    // deep-submodule types stay unreachable there.
-    //
-    // Runs before canonicalisation so propagated leaves get the same
-    // `source_module` truth-fixing as directly-scanned leaves.  Driven
-    // to a fixed point (bounded) so a multi-level inline chain
-    // converges; `added` counts only genuinely-new entries.
-    {
-        const MAX_PROP_DEPTH: usize = 16;
-        for _ in 0..MAX_PROP_DEPTH {
-            let mut added = 0usize;
-            for (parent, child) in inline_edges.iter() {
-                // (1) The child's explicit Path/Nested re-exports.
-                for (rx, local, true_name, source) in explicit_leaves.iter() {
-                    if rx != child {
-                        continue;
-                    }
-                    let bucket = accum.entry(parent.clone()).or_default();
-                    if !bucket.contains_key(local) {
-                        bucket.insert(local.clone(), (true_name.clone(), source.clone()));
-                        added += 1;
-                    }
-                }
-                // (2) For every `X.*` glob the child holds, the glob
-                //     target's OWN re-export surface — the flattening
-                //     guard (deep-submodule members are excluded because
-                //     the target module never re-exports them).
-                for (rx, source_prefix) in glob_pairs.iter() {
-                    if rx != child {
-                        continue;
-                    }
-                    let surface: Vec<(String, (String, String))> = accum
-                        .get(source_prefix)
-                        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                        .unwrap_or_default();
-                    let bucket = accum.entry(parent.clone()).or_default();
-                    for (local, pair) in surface {
-                        if !bucket.contains_key(&local) {
-                            bucket.insert(local, pair);
-                            added += 1;
-                        }
-                    }
-                }
-            }
-            if added == 0 {
-                break;
-            }
+    // Reuse the same public declaration projection as the compiler and LSP.
+    // A glob imports a module's exact public surface, not names guessed from
+    // archive prefixes or identifier capitalization. In particular, an inline
+    // prelude can re-export declarations owned by a file module with no mounts.
+    let mut next_id = 0;
+    let modules = verum_types::module_projection::project_modules(metadata, None, |_| {
+        next_id += 1;
+        verum_modules::ModuleId::new(next_id)
+    })?;
+    let paths: std::collections::HashMap<_, _> = modules.iter()
+        .map(|module| (module.id, module.path.to_string())).collect();
+    let mut declared: BTreeMap<String, BTreeMap<String, (String, String)>> = BTreeMap::new();
+    for module in &modules {
+        let surface = declared.entry(module.path.to_string()).or_default();
+        for (name, item) in module.exports.all_exports() {
+            let owner = paths.get(&item.source_module).context("Missing projected export owner")?;
+            let original = item.original_name.as_ref().unwrap_or(&item.name);
+            surface.insert(name.as_str().to_owned(), (original.as_str().to_owned(), owner.clone()));
         }
     }
-
-    // Canonicalise every Path-arm leaf's `source_module` against the
-    // metadata tables before persisting. A mount like
-    // `public mount super.text.format.format_display;` records the
-    // MOUNT-CHAIN module path (`core.text.format`), but the archive
-    // indexes each declaration under its DECLARING module path — which
-    // for collapsed hierarchies is the parent (`core.text`), and for
-    // free fns is also reachable via the qualified key
-    // (`core.text.format.format_display` → fd.module_path). The
-    // consumer (`import_all_from_module`'s metadata-driven leaf replay)
-    // resolves leaves via `import_item_from_module(source, name)` and
-    // silently drops any leaf whose module path the registry can't
-    // serve — pre-fix the prelude's CONCRETE mounts (`format_debug`,
-    // `format_display`, `read_to_string`, …) were captured with
-    // unresolvable module paths and every `f"{x:?}"` failed
-    // `unbound variable: format_debug` at user sites. Glob-expanded
-    // leaves never had the problem because the expansion reads
-    // `fd.module_path` (the truth) directly; this pass gives Path-arm
-    // leaves the same truth source.
-    let leaf_resolves = |local: &str, source: &str| -> bool {
-        let qualified = Text::from(format!("{source}.{local}").as_str());
-        if metadata.functions.get(&qualified).is_some() {
-            return true;
-        }
-        let local_t = Text::from(local);
-        if let Some(td) = metadata.types.get(&local_t) {
-            if td.module_path.as_str() == source {
-                return true;
-            }
-        }
-        if let Some(pd) = metadata.protocols.get(&local_t) {
-            if pd.module_path.as_str() == source {
-                return true;
-            }
-        }
-        if let Some(fd) = metadata.functions.get(&local_t) {
-            if fd.module_path.as_str() == source {
-                return true;
-            }
-        }
-        false
-    };
-    let canonical_source = |local: &str, source: &str| -> Option<String> {
-        // 1. Qualified free-fn key at the recorded path — the
-        //    descriptor's own module_path is the declaring truth.
-        let qualified = Text::from(format!("{source}.{local}").as_str());
-        if let Some(fd) = metadata.functions.get(&qualified) {
-            return Some(fd.module_path.as_str().to_string());
-        }
-        let local_t = Text::from(local);
-        // 2. Type / protocol simple-name lookup, accepted when the
-        //    declared path and the mount path agree up to hierarchy
-        //    collapsing (one is a dotted prefix of the other).
-        let path_compatible = |declared: &str| -> bool {
-            declared == source
-                || (source.starts_with(declared)
-                    && source.as_bytes().get(declared.len()) == Some(&b'.'))
-                || (declared.starts_with(source)
-                    && declared.as_bytes().get(source.len()) == Some(&b'.'))
-        };
-        if let Some(td) = metadata.types.get(&local_t) {
-            if path_compatible(td.module_path.as_str()) {
-                return Some(td.module_path.as_str().to_string());
-            }
-        }
-        if let Some(pd) = metadata.protocols.get(&local_t) {
-            if path_compatible(pd.module_path.as_str()) {
-                return Some(pd.module_path.as_str().to_string());
-            }
-        }
-        // 3. Bare free-fn simple key with the same compatibility bound.
-        if let Some(fd) = metadata.functions.get(&local_t) {
-            if path_compatible(fd.module_path.as_str()) {
-                return Some(fd.module_path.as_str().to_string());
-            }
-        }
-        // 4. Ancestor probe: walk the mount path upward and retry the
-        //    qualified key at each level — catches declarations homed
-        //    under a collapsed parent (`core.text.format_display` when
-        //    the mount said `core.text.format`).
-        let mut prefix = source.to_string();
-        while let Some(dot) = prefix.rfind('.') {
-            prefix.truncate(dot);
-            let q = Text::from(format!("{prefix}.{local}").as_str());
-            if let Some(fd) = metadata.functions.get(&q) {
-                return Some(fd.module_path.as_str().to_string());
-            }
-        }
-        None
-    };
-    let mut canonicalised = 0usize;
-    let mut unresolved: Vec<(String, String)> = Vec::new();
-    for items in accum.values_mut() {
-        for (local, (true_name, source)) in items.iter_mut() {
-            // Probe/canonicalise by `true_name` — the metadata tables
-            // are keyed by the item's OWN declared name, which for a
-            // `mount X as Y` rename-alias (T0244) differs from `local`
-            // (the alias key). Un-aliased leaves have `true_name ==
-            // local`, so this is a no-op change for the common case.
-            if leaf_resolves(true_name.as_str(), source.as_str()) {
-                continue;
-            }
-            match canonical_source(true_name.as_str(), source.as_str()) {
-                Some(fixed) => {
-                    if fixed != *source {
-                        *source = fixed;
-                        canonicalised += 1;
-                    }
+    // Monotone closure over finite source names: no arbitrary nesting limit.
+    // Named exports keep precedence. Inline modules contribute only re-exports,
+    // not arbitrary members from their descendant modules.
+    loop {
+        let mut added = 0;
+        for (target, source) in &glob_pairs {
+            let mut surface = declared.get(source).cloned().unwrap_or_default();
+            if let Some(exports) = accum.get(source) { surface.extend(exports.clone()); }
+            let bucket = accum.entry(target.clone()).or_default();
+            for (name, identity) in surface {
+                if let std::collections::btree_map::Entry::Vacant(entry) = bucket.entry(name) {
+                    entry.insert(identity); added += 1;
                 }
-                None => unresolved.push((local.clone(), source.clone())),
             }
         }
-    }
-    if verbose {
-        eprintln!(
-            "verum stdlib precompile: canonicalised {} re-export leaves; {} left unresolved{}",
-            canonicalised,
-            unresolved.len(),
-            if unresolved.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    " (first: {})",
-                    unresolved
-                        .iter()
-                        .take(5)
-                        .map(|(l, s)| format!("{s}.{l}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+        for (parent, child) in &inline_edges {
+            let exports = accum.get(child).cloned().unwrap_or_default();
+            let bucket = accum.entry(parent.clone()).or_default();
+            for (name, identity) in exports {
+                if let std::collections::btree_map::Entry::Vacant(entry) = bucket.entry(name) {
+                    entry.insert(identity); added += 1;
+                }
             }
-        );
+        }
+        if added == 0 { break; }
     }
 
     // **DECLARER-FIXPOINT (T0691, ROOT-B):** each leaf's `source`
@@ -1629,13 +1286,12 @@ fn scan_module_reexports(
     // (`next == module && true == name`) is the umbrella-surface
     // terminal; a repeated node is a malformed cycle — keep the last
     // sound hop and report.
-    let chase = |mut name: String, mut module: String,
-                 accum: &BTreeMap<String, BTreeMap<String, (String, String)>>|
-     -> (String, String) {
+    fn chase(mut name: String, mut module: String,
+             accum: &BTreeMap<String, BTreeMap<String, (String, String)>>) -> (String, String) {
         let mut seen: std::collections::HashSet<(String, String)> =
             std::collections::HashSet::new();
         seen.insert((name.clone(), module.clone()));
-        for _ in 0..16usize {
+        loop {
             let Some((next_name, next_module)) = accum
                 .get(&module)
                 .and_then(|b| b.get(&name))
@@ -1658,7 +1314,8 @@ fn scan_module_reexports(
             module = next_module;
         }
         (name, module)
-    };
+    }
+
 
     let mut total_leaves = 0usize;
     let mut fixpointed = 0usize;
@@ -1682,6 +1339,7 @@ fn scan_module_reexports(
             .module_reexports
             .insert(Text::from(reexporting_mp.as_str()), list);
     }
+    resolve_reexport_declarations(metadata);
     if verbose && fixpointed > 0 {
         eprintln!(
             "verum stdlib precompile: declarer-fixpoint rewrote {} umbrella \
@@ -1700,6 +1358,7 @@ fn scan_module_reexports(
             metadata.module_reexports.len(),
         );
     }
+    Ok(())
 }
 
 /// Task #23 — scan every `.vr` file under `root` for
@@ -2354,7 +2013,11 @@ fn scan_protocol_supers(
     }
 }
 
-/// #101 — populate `decl_span` on every `TypeDescriptor`,
+/// Bind source declaration ownership, visibility and diagnostic spans.
+/// Ownership requires an exact or unambiguous declaration of the same kind;
+/// the diagnostic fallback below must never authorize an export.
+///
+/// Populate `decl_span` on every `TypeDescriptor`,
 /// `FunctionDescriptor`, and `ProtocolDescriptor` in `metadata` by
 /// walking the stdlib source tree under `root`.
 ///
@@ -2369,9 +2032,10 @@ fn scan_protocol_supers(
 /// `decl_span: Maybe::None` (the field's `#[serde(default)]` value).
 /// This is graceful degradation — non-fatal — and surfaces in the
 /// `verbose` log line as a populated/total ratio.
-fn inject_decl_spans(
+fn bind_source_declarations(
     metadata: &mut verum_types::core_metadata::CoreMetadata,
     root: &Path,
+    glob_sources: &[(String, String)],
     verbose: bool,
 ) {
     use std::collections::HashMap;
@@ -2379,18 +2043,27 @@ fn inject_decl_spans(
     use verum_common::{Maybe, Text};
     use verum_types::core_metadata::DeclSpan;
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum DeclarationKind {
+        Nominal,
+        Function,
+        Value,
+    }
+
     /// Per-name source-side decl candidate. The metadata's
     /// `module_path` is COARSER than the source-walk's file-grained
     /// path (multiple files coalesce into one VBC archive entry —
     /// e.g. `core/architecture/{types,anti_patterns}.vr` both land
-    /// under archive entry `core.architecture`).  We index every
-    /// candidate by name and resolve to the closest matching
-    /// descriptor via descendant-or-equal `module_path` matching.
+    /// under archive entry `core.architecture`). Semantic ownership uses
+    /// exact declarations/re-exports or an unambiguous source declaration.
+    /// Diagnostic spans may additionally use the nearest source module.
     struct Candidate {
         /// File-grained module path the source walk would assign,
         /// e.g. `core.architecture.types` for
         /// `core/architecture/types.vr`.
         source_module: String,
+        /// Only a top-level declaration of the same kind authorizes identity.
+        declaration: Option<(DeclarationKind, bool)>,
         /// Span+filename the diagnostic emitter ultimately renders.
         decl_span: DeclSpan,
     }
@@ -2444,6 +2117,7 @@ fn inject_decl_spans(
             let source_module = crate::stdlib_index::file_path_to_module_path(&rel_str);
 
             let record_decl = |ident: &verum_ast::Ident,
+                               declaration: Option<(DeclarationKind, bool)>,
                                name_index: &mut HashMap<String, Vec<Candidate>>| {
                 let span = ident.span;
                 name_index
@@ -2451,6 +2125,7 @@ fn inject_decl_spans(
                     .or_default()
                     .push(Candidate {
                         source_module: source_module.clone(),
+                        declaration,
                         decl_span: DeclSpan {
                             file: Text::from(rel_str.as_str()),
                             start: span.start,
@@ -2465,7 +2140,7 @@ fn inject_decl_spans(
             let record_qualified = |receiver: &str,
                                     ident: &verum_ast::Ident,
                                     name_index: &mut HashMap<String, Vec<Candidate>>| {
-                record_decl(ident, name_index);
+                record_decl(ident, None, name_index);
                 let qualified = format!("{}.{}", receiver, ident.name.as_str());
                 let span = ident.span;
                 name_index
@@ -2473,6 +2148,7 @@ fn inject_decl_spans(
                     .or_default()
                     .push(Candidate {
                         source_module: source_module.clone(),
+                        declaration: None,
                         decl_span: DeclSpan {
                             file: Text::from(rel_str.as_str()),
                             start: span.start,
@@ -2515,11 +2191,11 @@ fn inject_decl_spans(
             // must register them too.
             let mut on_item = |item: &verum_ast::Item| {
                 match &item.kind {
-                    ItemKind::Function(d) => record_decl(&d.name, name_index),
-                    ItemKind::Type(d) => record_decl(&d.name, name_index),
-                    ItemKind::Protocol(d) => record_decl(&d.name, name_index),
-                    ItemKind::Const(d) => record_decl(&d.name, name_index),
-                    ItemKind::Static(d) => record_decl(&d.name, name_index),
+                    ItemKind::Function(d) => record_decl(&d.name, None, name_index),
+                    ItemKind::Type(d) => record_decl(&d.name, None, name_index),
+                    ItemKind::Protocol(d) => record_decl(&d.name, None, name_index),
+                    ItemKind::Const(d) => record_decl(&d.name, None, name_index),
+                    ItemKind::Static(d) => record_decl(&d.name, None, name_index),
                     _ => {}
                 }
             };
@@ -2553,11 +2229,31 @@ fn inject_decl_spans(
 
             for item in &module.items {
                 match &item.kind {
-                    ItemKind::Function(d) => record_decl(&d.name, name_index),
-                    ItemKind::Type(d) => record_decl(&d.name, name_index),
-                    ItemKind::Protocol(d) => record_decl(&d.name, name_index),
-                    ItemKind::Const(d) => record_decl(&d.name, name_index),
-                    ItemKind::Static(d) => record_decl(&d.name, name_index),
+                    ItemKind::Function(d) => record_decl(
+                        &d.name,
+                        Some((DeclarationKind::Function, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        name_index,
+                    ),
+                    ItemKind::Type(d) => record_decl(
+                        &d.name,
+                        Some((DeclarationKind::Nominal, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        name_index,
+                    ),
+                    ItemKind::Protocol(d) => record_decl(
+                        &d.name,
+                        Some((DeclarationKind::Nominal, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        name_index,
+                    ),
+                    ItemKind::Const(d) => record_decl(
+                        &d.name,
+                        Some((DeclarationKind::Value, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        name_index,
+                    ),
+                    ItemKind::Static(d) => record_decl(
+                        &d.name,
+                        Some((DeclarationKind::Value, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        name_index,
+                    ),
                     // Contexts register BOTH a TypeDescriptor and a
                     // ProtocolDescriptor on the metadata side (the
                     // context itself is a type; its method surface is
@@ -2565,7 +2261,11 @@ fn inject_decl_spans(
                     // simple name and module_path, so a single index
                     // entry covers both.
                     ItemKind::Context(d) => {
-                        record_decl(&d.name, name_index);
+                        record_decl(
+                            &d.name,
+                            Some((DeclarationKind::Nominal, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                            name_index,
+                        );
                         // Register every method as
                         // `<ContextName>.<method>` — context-impl
                         // methods land in metadata.functions with
@@ -2638,7 +2338,7 @@ fn inject_decl_spans(
                                     if let Some(ref recv) = receiver_name {
                                         record_qualified(recv, &fd.name, name_index);
                                     } else {
-                                        record_decl(&fd.name, name_index);
+                                        record_decl(&fd.name, None, name_index);
                                     }
                                 }
                                 verum_ast::decl::ImplItemKind::Type { name, .. }
@@ -2646,7 +2346,7 @@ fn inject_decl_spans(
                                     if let Some(ref recv) = receiver_name {
                                         record_qualified(recv, name, name_index);
                                     } else {
-                                        record_decl(name, name_index);
+                                        record_decl(name, None, name_index);
                                     }
                                 }
                                 _ => {}
@@ -2660,6 +2360,126 @@ fn inject_decl_spans(
     }
 
     visit_dir(root, root, &mut name_index, &mut files_visited, &mut files_parsed);
+
+    // Imported shells can retain the archive entry as their owner. Recover
+    // provenance only from exact or unambiguous declarations of the same kind.
+    // Public glob routes are source evidence too. Compute exact reachable
+    // module surfaces once, without treating directory descendants as exports.
+    let mut glob_reach: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+    for (target, _) in glob_sources {
+        let reached = glob_reach.entry(target.as_str()).or_default();
+        let mut pending = vec![target.as_str()];
+        while let Some(module) = pending.pop() {
+            for (_, source) in glob_sources.iter().filter(|(from, _)| from == module) {
+                if reached.insert(source.as_str()) { pending.push(source.as_str()); }
+            }
+        }
+    }
+    let reexports = &metadata.module_reexports;
+    let declaration =
+        |name: &str, declared: &str, entry: &str, kind: DeclarationKind| -> Option<(Text, bool)> {
+            // Descriptors may store either a local name or a name qualified by
+            // their recorded owner/entry. Do not strip an arbitrary dotted prefix:
+            // method names and unrelated modules are not top-level declarations.
+            let name = name
+                .strip_prefix(declared)
+                .and_then(|s| s.strip_prefix('.'))
+                .or_else(|| name.strip_prefix(entry).and_then(|s| s.strip_prefix('.')))
+                .unwrap_or(name);
+            if name.contains('.') {
+                return None;
+            }
+            let candidates = name_index.get(name)?;
+            let matches_kind = |c: &&Candidate| c.declaration.is_some_and(|(k, _)| k == kind);
+            let exact = candidates
+                .iter()
+                .filter(matches_kind)
+                .any(|c| c.source_module == declared);
+            let exported_owner = reexports
+                .get(&Text::from(declared))
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|(local, original, _)| local == name && original == name)
+                })
+                .map(|(_, _, owner)| owner.as_str());
+            let source_owner = if exact {
+                Some(declared)
+            } else {
+                exported_owner
+            };
+            let through_glob = |candidate: &&Candidate| {
+                glob_reach.get(declared).is_some_and(|sources| sources.iter().any(|source| {
+                    candidate.source_module == *source || reexports.get(&Text::from(*source))
+                        .is_some_and(|items| items.iter().any(|(local, original, owner)|
+                            local == name && original == name && owner.as_str() == candidate.source_module))
+                }))
+            };
+            let has_glob_owner = source_owner.is_none() && candidates.iter().filter(matches_kind).any(|c| through_glob(&c));
+            let mut declarations = candidates
+                .iter()
+                .filter(matches_kind)
+                .filter(|c| source_owner.is_none_or(|owner| c.source_module == owner))
+                .filter(|c| !has_glob_owner || through_glob(c))
+                .filter_map(|c| {
+                    c.declaration
+                        .map(|(_, public)| (c.source_module.as_str(), public))
+                });
+            let first = declarations.next()?;
+            declarations
+                .all(|declaration| declaration == first)
+                .then(|| (Text::from(first.0), first.1))
+        };
+    for descriptor in metadata.types.values_mut() {
+        let declared = descriptor
+            .origin_module_path
+            .as_ref()
+            .unwrap_or(&descriptor.module_path);
+        if let Some((owner, public)) = declaration(
+            &descriptor.name,
+            declared,
+            &descriptor.module_path,
+            DeclarationKind::Nominal,
+        ) {
+            descriptor.origin_module_path = (owner != descriptor.module_path).then_some(owner);
+            descriptor.is_public = public;
+        }
+    }
+    for descriptor in metadata.protocols.values_mut() {
+        let declared = descriptor
+            .origin_module_path
+            .as_ref()
+            .unwrap_or(&descriptor.module_path);
+        if let Some((owner, _)) = declaration(
+            &descriptor.name,
+            declared,
+            &descriptor.module_path,
+            DeclarationKind::Nominal,
+        ) {
+            descriptor.origin_module_path = (owner != descriptor.module_path).then_some(owner);
+        }
+    }
+    for descriptor in metadata
+        .functions
+        .values_mut()
+        .filter(|d| d.parent_type.is_none())
+    {
+        let declared = descriptor
+            .origin_module_path
+            .as_ref()
+            .unwrap_or(&descriptor.module_path);
+        let kind = if descriptor.is_const {
+            DeclarationKind::Value
+        } else {
+            DeclarationKind::Function
+        };
+        if let Some((owner, public)) =
+            declaration(&descriptor.name, declared, &descriptor.module_path, kind)
+        {
+            descriptor.origin_module_path = (owner != descriptor.module_path).then_some(owner);
+            descriptor.is_public = public;
+        }
+    }
 
     /// Pick the candidate whose `source_module` is the descriptor's
     /// `module_path` (exact match) or its strict descendant (e.g.
@@ -2819,7 +2639,7 @@ fn inject_decl_spans(
     if verbose {
         let total_candidates: usize = name_index.values().map(|v| v.len()).sum();
         eprintln!(
-            "verum stdlib precompile: inject_decl_spans — {}/{} types, {}/{} functions, {}/{} protocols populated from {} parsed files ({} visited, {} unique names / {} candidates indexed)",
+            "verum stdlib precompile: bind_source_declarations — {}/{} types, {}/{} functions, {}/{} protocols populated from {} parsed files ({} visited, {} unique names / {} candidates indexed)",
             populated_types, total_types,
             populated_fns, total_fns,
             populated_protos, total_protos,
@@ -3618,7 +3438,7 @@ version = "0.1.0"
         // to resolve to module `core` (and its inline prelude to
         // `core.prelude`).
         let mut metadata = verum_types::core_metadata::CoreMetadata::default();
-        scan_module_reexports(&mut metadata, &core_dir, true);
+        scan_module_reexports(&mut metadata, &core_dir, true).unwrap();
         let bucket = metadata
             .module_reexports
             .get(&verum_common::Text::from("core.prelude"))
@@ -3691,3 +3511,7 @@ version = "0.1.0"
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/precompile_reexports.rs"]
+mod reexport_tests;
