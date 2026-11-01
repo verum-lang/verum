@@ -1,8 +1,9 @@
 import Std.Tactic
 
 /-! Paid visitation of append-only slots, independent of a member's VM outcome.
-`beginRound` snapshots a completed round before its next native invocation;
+`beginRound` prepares a candidate snapshot before the next native invocation;
 `handoff` consumes the invocation's counted work or reserves one routing unit.
+`attempt` publishes that candidate only on a successful paid handoff.
 Native counted work, actual reservation, finite-return of an invocation and
 recurrent eligible lane service require separate implementation evidence.
 These are finite visitation bounds, not unconditional fairness or termination.
@@ -29,6 +30,36 @@ def handoff (r : Round) (nativePaid grant : Nat) : Option (Round × Nat) :=
     else if 0 < grant then some (⟨r.next + 1, r.stop⟩, grant - 1)
     else none
   else none
+
+/-- Speculative restart metadata is not published on refusal. This models only
+the round cursor and remaining grant, not VM mutation or wake activation. -/
+def attempt (r : Round) (members nativePaid grant : Nat) : Round × Nat :=
+  (handoff (beginRound r members) nativePaid grant).getD (r, grant)
+
+theorem refused_attempt_preserves_snapshot (r : Round) (members paid grant : Nat)
+    (refused : handoff (beginRound r members) paid grant = none) :
+    attempt r members paid grant = (r, grant) := by
+  simp [attempt, refused]
+
+theorem committed_attempt_publishes_handoff (r after : Round)
+    (members paid grant rest : Nat)
+    (admitted : handoff (beginRound r members) paid grant = some (after, rest)) :
+    attempt r members paid grant = (after, rest) := by
+  simp [attempt, admitted]
+
+theorem unpaid_attempt_preserves_snapshot (r : Round) (members : Nat) :
+    attempt r members 0 0 = (r, 0) := by
+  simp [attempt, handoff]
+
+theorem paid_restart_visits_first_slot (r : Round) (members paid grant : Nat)
+    (complete : r.next = r.stop) (present : 0 < members) (positive : 0 < paid) :
+    attempt r members paid grant = (⟨1, members⟩, grant) := by
+  simp [attempt, beginRound, complete, handoff, present, positive]
+
+theorem routing_restart_visits_first_slot (r : Round) (members grant : Nat)
+    (complete : r.next = r.stop) (present : 0 < members) (positive : 0 < grant) :
+    attempt r members 0 grant = (⟨1, members⟩, grant - 1) := by
+  simp [attempt, beginRound, complete, handoff, present, positive]
 
 theorem unfinished_snapshot_stable (r : Round) (members : Nat)
     (unfinished : r.next < r.stop) : beginRound r members = r := by
