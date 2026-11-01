@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CommandRegistry, parseShortcut, type KeyInput, type StudioCommand } from '../src/commands.ts';
+import { CommandRegistry, parseShortcut, isControlKey, type KeyInput, type StudioCommand } from '../src/commands.ts';
 const commands: StudioCommand[] = [
   { id: 'run', label: () => 'Run', shortcut: 'Mod+Enter', contexts: ['editor'], enabled: () => true, run() {} },
   { id: 'send', label: () => 'Send', shortcut: 'Mod+Enter', contexts: ['agent'], enabled: () => true, run() {} },
@@ -50,4 +50,19 @@ test('explicit Ctrl bindings remain portable without colliding with platform Mod
   for (const mac of [true, false]) assert.equal(registry.match({ ...key, code: 'Space' }, 'editor', mac)?.id, 'run');
   assert.throws(() => registry.set('run', 'Ctrl+S'), /conflict/);
   assert.throws(() => registry.set('run', 'Meta+S'), /conflict/);
+});
+
+test('local controls require direct input and exact supported modifiers', () => {
+  const plain = { ...key, ctrlKey: false };
+  assert.equal(isControlKey(plain), true);
+  assert.equal(isControlKey({ ...plain, repeat: true }), true, 'navigation may repeat; activation handlers gate repeat separately');
+  for (const change of [{ isComposing: true }, { defaultPrevented: true }, { ctrlKey: true },
+    { metaKey: true }, { altKey: true }, { shiftKey: true }, { getModifierState: () => true }]) {
+    assert.equal(isControlKey({ ...plain, ...change }), false);
+  }
+  assert.equal(isControlKey({ ...plain, altKey: true }, { alt: true }), true);
+  assert.equal(isControlKey({ ...plain, altKey: true, shiftKey: true }, { alt: true }), false);
+  assert.equal(isControlKey(plain, { alt: true }), false);
+  assert.equal(isControlKey({ ...plain, shiftKey: true }, { shift: true }), true);
+  assert.equal(isControlKey({ ...plain, altKey: true, getModifierState: () => true }, { alt: true }), false);
 });

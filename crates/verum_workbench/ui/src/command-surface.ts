@@ -1,4 +1,4 @@
-import { CommandRegistry, ShortcutError, displayShortcut, shortcutAttribute, type CommandContext, type StudioCommand } from './commands';
+import { CommandRegistry, ShortcutError, displayShortcut, shortcutAttribute, isControlKey, type CommandContext, type StudioCommand } from './commands';
 import { icon } from './icons';
 import { m, setText, setAttribute, type Content } from './i18n';
 
@@ -91,10 +91,10 @@ export function installCommands(registry: CommandRegistry, failure: (error: unkn
     }
     search.addEventListener('input', render);
     search.addEventListener('keydown', event => {
-      if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!isControlKey(event)) return;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault(); if (filtered.length) select((selected + (event.key === 'ArrowDown' ? 1 : -1) + filtered.length) % filtered.length);
-      } else if (event.key === 'Enter') { event.preventDefault(); if (filtered[selected]) choose(filtered[selected]); }
+      } else if (event.key === 'Enter') { event.preventDefault(); if (!event.repeat && filtered[selected]) choose(filtered[selected]); }
     });
     render(); modal.showModal(); search.focus();
   }
@@ -125,7 +125,7 @@ export function installCommands(registry: CommandRegistry, failure: (error: unkn
         const scope = element('small', 'muted', command.contexts.length === 3 ? m('Workspace') : command.contexts.includes('editor') ? m('Editor') : m('Agent'));
         label.append(scope);
         const apply = () => { if (change(() => registry.set(command.id, field.value))) { field.value = registry.shortcut(command); field.removeAttribute('aria-invalid'); } else field.setAttribute('aria-invalid', 'true'); };
-        field.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); apply(); } });
+        field.addEventListener('keydown', event => { if (event.key === 'Enter' && isControlKey(event)) { event.preventDefault(); if (!event.repeat) apply(); } });
         row.append(label, field, action(m('Apply shortcut for {command}', { command: command.label() }), apply, 'check'), action(m('Reset shortcut for {command}', { command: command.label() }), () => {
           if (change(() => registry.set(command.id, null))) { field.value = registry.shortcut(command); field.removeAttribute('aria-invalid'); }
         }, 'refresh')); list.append(row);

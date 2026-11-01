@@ -1,5 +1,6 @@
 import { api } from './api';
 import { icon } from './icons';
+import { isControlKey } from './commands';
 import { m, t, setText, setAttribute, currentLocale } from './i18n';
 import { parentPath, fileName, projectedTree, visibleTree, changedDirectories, retainedTreeFocus, type ProjectEntry, type ProjectListing, type GitSnapshot, type GitChange, type TreeRow } from './project-tree';
 
@@ -164,7 +165,7 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
   // Do not dispatch through stale results while a newer query is in flight.
   filter.setAttribute('aria-controls', tree.id);
   filter.addEventListener('keydown', event => {
-    if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!isControlKey(event)) return;
     if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
     event.preventDefault();
     if (searchPending || searchError || !rows.length) return;
@@ -178,6 +179,9 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
   document.getElementById('collapse-folders')!.addEventListener('click', () => { expanded.clear(); changesOnly = false; filter.value = ''; persist(); searchFiles().catch(hooks.failure); });
   tree.addEventListener('keydown', event => {
     if (!(event.target instanceof HTMLElement) || event.target.getAttribute('role') !== 'treeitem') return;
+    const review = event.key === 'Enter' && event.altKey;
+    const typeaheadKey = event.key.length === 1 && event.key !== ' ';
+    if (!isControlKey(event, { alt: review, shift: typeaheadKey && event.shiftKey })) return;
     const path = event.target.getAttribute('data-path');
     const index = rows.findIndex(row => row.path === path), row = rows[index]; if (!row) return;
     let next = index;
@@ -189,8 +193,9 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
       case 'ArrowRight': if (row.kind === 'directory' && !expanded.has(row.path) && !changesOnly && !filter.value.trim()) { activate(row).catch(hooks.failure); } else if (rows[index + 1]?.depth > row.depth) next++; break;
       case 'ArrowLeft': if (row.kind === 'directory' && expanded.has(row.path) && !changesOnly && !filter.value.trim()) { activate(row).catch(hooks.failure); } else { const parent = rows.findIndex(entry => entry.path === parentPath(row.path)); if (parent >= 0) next = parent; } break;
       case 'Enter': case ' ': {
+        if (event.repeat) break;
         const change = changes.entries.find(change => change.path === row.path);
-        if (event.altKey && change) hooks.review(change).catch(hooks.failure); else activate(row).catch(hooks.failure);
+        if (review) { if (change) hooks.review(change).catch(hooks.failure); } else activate(row).catch(hooks.failure);
         break;
       }
       default:

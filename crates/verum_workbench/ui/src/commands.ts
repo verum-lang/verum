@@ -10,6 +10,11 @@ export type KeyInput = {
   getModifierState?: (key: string) => boolean;
 };
 type Shortcut = { code: string; mod: boolean; ctrl: boolean; meta: boolean; alt: boolean; shift: boolean; text: string };
+/** A local control consumes only direct input with its explicitly supported modifiers. */
+export function isControlKey(event: KeyInput, modifiers: { alt?: boolean; shift?: boolean } = {}): boolean {
+  return !event.defaultPrevented && !event.isComposing && !event.getModifierState?.('AltGraph')
+    && !event.ctrlKey && !event.metaKey && event.altKey === !!modifiers.alt && event.shiftKey === !!modifiers.shift;
+}
 export class ShortcutError extends Error {
   readonly kind: 'invalid' | 'reserved' | 'conflict' | 'settings';
   readonly command?: StudioCommand;
