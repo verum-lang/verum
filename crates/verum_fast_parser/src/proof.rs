@@ -1825,10 +1825,7 @@ impl<'a> RecursiveParser<'a> {
                     // Not a valid case continuation - parse as expression instead
                     self.stream.reset_to(checkpoint);
                     let expr = self.parse_expr_bp(4)?;
-                    let pat = Pattern::new(
-                        verum_ast::PatternKind::Literal(verum_ast::Literal::bool(true, expr.span)),
-                        expr.span,
-                    );
+                    let pat = Pattern::new(verum_ast::PatternKind::Wildcard, expr.span);
                     // Preserve the expression as the case condition so
                     // the verifier can thread it as a hypothesis into
                     // the case body.
@@ -1838,10 +1835,7 @@ impl<'a> RecursiveParser<'a> {
             } else {
                 // Parse as expression and wrap in a pattern
                 let expr = self.parse_expr_bp(4)?;
-                let pat = Pattern::new(
-                    verum_ast::PatternKind::Literal(verum_ast::Literal::bool(true, expr.span)),
-                    expr.span,
-                );
+                let pat = Pattern::new(verum_ast::PatternKind::Wildcard, expr.span);
                 condition = Maybe::Some(Heap::new(expr));
                 pat
             };
@@ -1851,12 +1845,18 @@ impl<'a> RecursiveParser<'a> {
             // can use it alongside (or in place of) the case condition
             // as a hypothesis in the body.
             if self.stream.consume(&TokenKind::Where).is_some() {
-                let guard = self.parse_expr_no_struct()?;
-                // If no fallback-expression condition was set, use the
-                // where-guard as the case condition. If both are set,
-                // prefer the `where` guard — it's semantically the
-                // stronger surface form.
-                condition = Maybe::Some(Heap::new(guard));
+                let guard = self.parse_expr_bp(4)?;
+                condition = Maybe::Some(Heap::new(match condition {
+                    Maybe::Some(predicate) => {
+                        let span = predicate.span.merge(guard.span);
+                        Expr::new(ExprKind::Binary {
+                            op: verum_ast::BinOp::And,
+                            left: predicate,
+                            right: Heap::new(guard),
+                        }, span)
+                    }
+                    Maybe::None => guard,
+                }));
             }
 
             // => or {
@@ -1886,29 +1886,19 @@ impl<'a> RecursiveParser<'a> {
                 } else {
                     let tactic = self.parse_tactic_expr()?;
                     let case_span = self.stream.make_span(start_pos);
-                    // When a proof case has a single tactic without a body,
-                    // we synthesize a "show true" proposition. Use the case_span
-                    // for the synthetic literal to ensure proper error reporting.
+                    // A branch tactic operates on the branch's actual goal.
                     cases.push(ProofCase {
                         pattern,
                         condition: condition.clone(),
                         proof: List::from_iter([ProofStep {
-                            kind: ProofStepKind::Show {
-                                proposition: Heap::new(Expr::new(
-                                    ExprKind::Literal(verum_ast::Literal::bool(true, case_span)),
-                                    case_span,
-                                )),
-                                justification: tactic,
-                            },
+                            kind: ProofStepKind::Tactic(tactic),
                             span: case_span,
                         }]),
                         span: case_span,
                     });
                 }
             } else {
-                self.stream.expect(TokenKind::LBrace)?;
                 let steps = self.parse_proof_case_body()?;
-                self.stream.expect(TokenKind::RBrace)?;
                 cases.push(ProofCase {
                     pattern,
                     condition: condition.clone(),

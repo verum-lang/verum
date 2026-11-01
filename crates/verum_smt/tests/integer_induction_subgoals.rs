@@ -1,26 +1,6 @@
-//! Regression: `induction n` on an INTEGER variable.
-//!
-//! Structural induction needs a variant type with constructors.  An
-//! `Int` has neither, so `infer_variable_type` refused it — correctly —
-//! and `try_induction` then failed outright.  The result was that the
-//! single most common induction in mathematics could not be written:
-//!
-//!     theorem t(n: Int) requires n >= 0 ensures P(n) {
-//!         proof by induction on n {
-//!             case 0 => trivial
-//!             case succ(k) => { have ih: P(k); conclude by auto }
-//!         }
-//!     }
-//!
-//! reported "Proof method 'induction' failed — verify the induction
-//! variable or case split is correct", advice naming a cause the author
-//! had no way to act on: the variable was fine, the principle was
-//! missing.
-//!
-//! Post-fix an integer-sorted variable (registered by the caller from
-//! its DECLARED type, never guessed from its name) takes the Peano
-//! path, whose two subgoals line up with the `case 0` / `case succ(k)`
-//! arms the proof text already writes.
+//! Signed integer induction retains preconditions at each target and covers
+//! zero, positive successors and negative predecessors. Constructor metadata
+//! alone must never be mistaken for a checked structural eliminator.
 
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::{IntLit, Literal, LiteralKind};
@@ -85,7 +65,7 @@ fn goal_lhs(g: &ProofGoal) -> Expr {
 }
 
 #[test]
-fn integer_variable_yields_base_and_step() {
+fn integer_variable_yields_base_and_both_signed_steps() {
     let mut engine = ProofSearchEngine::new();
     engine.register_integer_variable(Text::from("n"));
 
@@ -100,12 +80,13 @@ fn integer_variable_yields_base_and_step() {
 
     assert_eq!(
         subgoals.len(),
-        2,
-        "Peano induction produces exactly a base case and a step; got labels {:?}",
+        3,
+        "signed induction needs base, upward and downward obligations; got labels {:?}",
         subgoals.iter().map(label_of).collect::<Vec<_>>()
     );
     assert_eq!(label_of(&subgoals[0]), "base_case_0");
     assert_eq!(label_of(&subgoals[1]), "inductive_case_succ");
+    assert_eq!(label_of(&subgoals[2]), "inductive_case_pred");
 }
 
 #[test]
@@ -225,38 +206,58 @@ fn unregistered_variable_still_fails_with_the_real_reason() {
     );
 }
 
-/// Control: the structural path is untouched.  A variable resolvable
-/// through `variant_map` still splits on constructors.
 #[test]
-fn variant_variable_still_takes_the_structural_path() {
+fn names_of_constructors_are_not_a_typed_eliminator() {
     let mut engine = ProofSearchEngine::new();
-    engine.register_variant_type(
-        Text::from("Color"),
-        vec![Text::from("Red"), Text::from("Green"), Text::from("Blue")],
-    );
+    engine.register_variant_type("Color".into(), vec!["Red".into(), "Green".into(), "Blue".into()]);
+    let goal = ProofGoal::new(binary(BinOp::Eq, ident_expr("c"), ident_expr("Red")));
+    let error = engine.execute_tactic(&ProofTactic::Induction { var: "c".into() }, &goal)
+        .expect_err("constructor names alone cannot justify elimination");
+    assert!(error.to_string().contains("checked typed eliminator"), "{error}");
+}
 
-    let goal = ProofGoal::with_hypotheses(
-        binary(BinOp::Eq, ident_expr("c"), ident_expr("Red")),
-        List::new(),
-    );
-    let subgoals = engine
-        .execute_tactic(
-            &ProofTactic::Induction {
-                var: Text::from("c"),
-            },
-            &goal,
-        )
-        .expect("structural induction still runs");
+#[test]
+fn nonnegative_induction_cannot_claim_all_integers_are_nonnegative() {
+    let mut engine = ProofSearchEngine::new();
+    engine.register_integer_variable("n".into());
+    let goal = ProofGoal::new(binary(BinOp::Ge, ident_expr("n"), int_expr(0)));
+    let obligations = engine.execute_tactic(&ProofTactic::Induction { var: "n".into() }, &goal).unwrap();
+    for obligation in obligations.iter().take(2) {
+        assert!(engine.execute_tactic(&ProofTactic::Auto, obligation).unwrap().is_empty());
+    }
+    // k = 0 falsifies the downward obligation: P(0) does not imply P(-1).
+    let down = &obligations[2];
+    assert!(engine.execute_tactic(&ProofTactic::Auto, down).is_err());
+    let ExprKind::Binary { left, .. } = &down.goal.kind else { panic!("comparison") };
+    assert!(matches!(left.kind, ExprKind::Binary { op: BinOp::Sub, .. }));
+    assert!(down.hypotheses.iter().any(|h| matches!(h.kind, ExprKind::Binary { op: BinOp::Le, .. })));
+}
 
-    assert_eq!(
-        subgoals.len(),
-        3,
-        "one subgoal per constructor; got {:?}",
-        subgoals.iter().map(label_of).collect::<Vec<_>>()
-    );
-    assert!(
-        subgoals.iter().all(|g| label_of(g).contains("case")),
-        "structural labels must not have been replaced by the Peano ones: {:?}",
-        subgoals.iter().map(label_of).collect::<Vec<_>>()
-    );
+#[test]
+fn domain_restricted_and_signed_neighboring_proofs_remain_valid() {
+    let mut engine = ProofSearchEngine::new();
+    engine.register_integer_variable("n".into());
+    for goal in [goal_over_n(), ProofGoal::new(binary(
+        BinOp::Ge, binary(BinOp::Mul, ident_expr("n"), ident_expr("n")), int_expr(0),
+    ))] {
+        let obligations = engine.execute_tactic(&ProofTactic::Induction { var: "n".into() }, &goal).unwrap();
+        assert_eq!(obligations.len(), 3);
+        for obligation in &obligations {
+            assert!(engine.execute_tactic(&ProofTactic::Auto, obligation).unwrap().is_empty(), "{obligation:?}");
+        }
+    }
+}
+
+#[test]
+fn methods_cannot_discard_strong_or_well_founded_evidence() {
+    let mut engine = ProofSearchEngine::new();
+    engine.register_integer_variable("n".into());
+    let true_goal = ProofGoal::new(Expr::new(ExprKind::Literal(Literal::bool(true, Span::dummy())), Span::dummy()));
+    for tactic in [
+        ProofTactic::StrongInduction { var: "n".into() },
+        ProofTactic::WellFoundedInduction { var: "n".into(), relation: "arbitrary_relation".into() },
+    ] {
+        let error = engine.execute_tactic(&tactic, &true_goal).expect_err("no method substitution");
+        assert!(error.to_string().contains("evidence"), "{error}");
+    }
 }

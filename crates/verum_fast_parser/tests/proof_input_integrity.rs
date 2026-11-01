@@ -82,3 +82,19 @@ fn nested_tactic_sequences_and_explicit_arguments_remain_intact() {
     assert_eq!(generic_args.len(), 1);
     assert_eq!(args.len(), 1);
 }
+
+#[test]
+fn case_tactics_keep_the_ambient_goal_and_guards_are_conjoined() {
+    let source = "theorem t(b:Bool) proof by cases { case b == true where b != false => exact(seed), case _ { trivial; } };";
+    let ProofBody::ByMethod(ProofMethod::Cases { cases, .. }) = body(source)
+        else { panic!("cases") };
+    assert_eq!(cases.len(), 2);
+    assert!(matches!(cases[0].proof[0].kind, ProofStepKind::Tactic(TacticExpr::Exact(_))));
+    assert!(matches!(cases[0].pattern.kind, verum_ast::PatternKind::Wildcard));
+    let Maybe::Some(condition) = &cases[0].condition else { panic!("condition") };
+    let verum_ast::ExprKind::Binary { op: verum_ast::BinOp::And, left, right } = &condition.kind
+        else { panic!("both written guards must survive") };
+    assert_eq!(&source[left.span.start as usize..left.span.end as usize], "b == true");
+    assert_eq!(&source[right.span.start as usize..right.span.end as usize], "b != false");
+    assert!(matches!(cases[1].proof[0].kind, ProofStepKind::Tactic(TacticExpr::Trivial)));
+}

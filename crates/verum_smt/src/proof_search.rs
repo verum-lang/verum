@@ -2670,15 +2670,8 @@ impl ProofSearchEngine {
         self.bool_typed_hypotheses.insert(name);
     }
 
-    /// Mark a variable as integer-sorted so `induction n` on it runs the
-    /// arithmetic (Peano) principle rather than looking for constructors.
-    /// Idempotent.
-    ///
-    /// This registry is read by `try_induction` alone.  It deliberately
-    /// does not touch the solver context: pushing parameter sorts into
-    /// the context at large was measured to make the corpus WORSE
-    /// (23/68 specs -> 21/68), which is a separate question from
-    /// unlocking a tactic that otherwise cannot run at all.
+    /// Register the integer domain for induction. This does not assert a
+    /// nonnegative precondition: the generated obligations cover both signs.
     pub fn register_integer_variable(&mut self, name: Text) {
         self.integer_induction_vars.insert(name);
     }
@@ -3303,45 +3296,8 @@ impl ProofSearchEngine {
         tactic: &ProofTactic,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Universal trivially-closable fast path. Two shapes count as
-        // "already proved" for the purposes of tactic dispatch:
-        //
-
-        //  (1) The goal is the boolean literal `true`. This matches the
-        //  mathematical fact that an already-true proposition doesn't
-        //  need a proof step, and it prevents an otherwise-valid
-        //  theorem from failing just because e.g. `by ring` can't
-        //  handle a bare boolean goal.
-        //
-
-        //  (2) The goal is a structural reflexivity `E == E` — both
-        //  sides are structurally equal modulo spans. Any tactic
-        //  that reaches a `refl`-shaped goal should close it
-        //  regardless of whether the tactic itself specialises in
-        //  equality reasoning.
-        //
-
-        // Explicit failure tactics (`admit`, `sorry`, `fail`) are kept
-        // outside the fast path so they don't silently discharge trivial
-        // goals that the author intended to flag.
-        let trivial_close = match &goal.goal.kind {
-            ExprKind::Literal(lit) => matches!(lit.kind, verum_ast::LiteralKind::Bool(true)),
-            ExprKind::Binary {
-                op: BinOp::Eq,
-                left,
-                right,
-            } => Self::expr_eq(left, right),
-            _ => false,
-        };
-        if trivial_close
-            && !matches!(
-                tactic,
-                ProofTactic::Admit | ProofTactic::Sorry | ProofTactic::Fail { .. }
-            )
-        {
-            return Ok(List::new());
-        }
-
+        // Dispatch the written tactic even when the proposition is trivial.
+        // Each tactic is responsible for its own evidence and preconditions.
         match tactic {
             ProofTactic::Reflexivity => self.try_reflexivity(goal),
             ProofTactic::Assumption => self.try_assumption(goal),
@@ -3893,199 +3849,68 @@ impl ProofSearchEngine {
         }
     }
 
-    /// Try induction tactic
-    ///
-    /// Generate induction subgoals
-    ///
-    /// The Induction tactic performs structural induction on a variable:
-    /// 1. Identifies the type of the induction variable from context
-    /// 2. Determines the constructors for that type
-    /// 3. Generates a base case goal for each non-recursive constructor
-    /// 4. Generates an inductive case goal for each recursive constructor,
-    ///  adding the inductive hypothesis (IH) to the context
-    ///
-    /// # Example
-    /// ```ignore
-    /// // Goal: forall n: Nat. P(n)
-    /// // Induction on n:
-    /// // Base case: P(0)
-    /// // Inductive case: forall k. P(k) => P(succ(k))
-    /// ```
-    ///
-    /// Structural induction: generates base case P(0) and inductive step forall k. P(k) => P(succ(k)).
-    /// Infers the variable type from the goal context to determine constructors.
+    /// Apply induction only when its elimination principle is known. A list
+    /// of constructor names/recursive argument positions is not a typed
+    /// eliminator certificate and cannot justify arbitrary structural IHs.
     fn try_induction(
         &mut self,
         var: &Text,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Determine the type of the induction variable.  Structural
-        // induction needs a variant type; when none is observable, an
-        // integer-sorted variable still has an induction principle.
-        let var_type = match self.infer_variable_type(var, goal) {
-            Ok(t) => t,
-            Err(e) => {
-                if self.integer_induction_vars.contains(var) {
-                    return Ok(Self::integer_induction_subgoals(var, goal));
-                }
-                return Err(e);
-            }
-        };
-
-        // Get constructors for this type
-        let constructors = self.get_type_constructors(&var_type)?;
-
-        if constructors.is_empty() {
-            return Err(ProofError::TacticFailed(
-                format!("Type '{}' has no constructors for induction", var_type).into(),
-            ));
+        if self.integer_induction_vars.contains(var) {
+            return Self::integer_induction_subgoals(var, goal);
         }
-
-        // Generate subgoals for each constructor
-        let mut subgoals = List::new();
-
-        for (ctor_idx, constructor) in constructors.iter().enumerate() {
-            let is_recursive = Self::is_recursive_constructor(constructor, &var_type);
-
-            if is_recursive {
-                // Inductive case: add inductive hypothesis
-                let mut inductive_goal = goal.clone();
-
-                // Construct inductive hypothesis: P(recursive_arg)
-                // For example, if constructor is Succ(n), IH is P(n)
-                let ih_var = format!("{}_pred", var).into();
-                let ih = Self::instantiate_goal_for_var(&goal.goal, var, &ih_var);
-
-                // Add inductive hypothesis to context
-                inductive_goal.add_hypothesis(ih);
-
-                // Instantiate goal for constructor application
-                // For Succ(n), goal becomes P(Succ(n))
-                let ctor_term = Self::make_constructor_term(&constructor.name, &ih_var);
-                inductive_goal.goal = Self::instantiate_goal_for_term(&goal.goal, var, &ctor_term);
-                inductive_goal.label =
-                    Maybe::Some(format!("inductive_case_{}_{}", ctor_idx, constructor.name).into());
-
-                subgoals.push(inductive_goal);
-            } else {
-                // Base case: no inductive hypothesis
-                let mut base_goal = goal.clone();
-
-                // Instantiate goal for base constructor
-                // For Zero, goal becomes P(Zero)
-                let ctor_term = Self::make_constructor_term(&constructor.name, &"".into());
-                base_goal.goal = Self::instantiate_goal_for_term(&goal.goal, var, &ctor_term);
-                base_goal.label =
-                    Maybe::Some(format!("base_case_{}_{}", ctor_idx, constructor.name).into());
-
-                subgoals.push(base_goal);
-            }
-        }
-
-        Ok(subgoals)
+        let ty = self.infer_variable_type(var, goal)?;
+        Err(ProofError::TacticFailed(format!(
+            "induction over '{ty}' requires checked typed eliminator evidence; constructor metadata alone is insufficient"
+        ).into()))
     }
 
-    /// Infer the type of a variable from the goal context.
+    /// Signed integer induction on Q(n) = (H(n) -> P(n)). The base and
+    /// BOTH directions are obligations, so negative inputs cannot disappear:
     ///
-    /// Pre-fix this function used hardcoded naming heuristics ("starts
-    /// with `n` → Nat", "contains `list` → List", etc.) — a textbook
-    /// instance of compiler-side stdlib-type-name knowledge that
-    /// CLAUDE.md forbids. The fallback default of "Nat" silently
-    /// misclassified any non-numeric variable as natural-number-typed
-    /// induction.
+    ///   H(0)                         |- P(0)
+    ///   k >= 0, H(k+1), H(k) -> P(k) |- P(k+1)
+    ///   k <= 0, H(k-1), H(k) -> P(k) |- P(k-1)
     ///
-    /// Post-fix: walk the goal looking for an equality `var == Ctor(...)`
-    /// or `var == Ctor`. Resolve the constructor through the existing
-    /// `variant_map` registry (populated externally via
-    /// `register_variant_type`). The parent type's name comes from
-    /// metadata, never from string matching.
-    ///
-    /// Returns `ProofError::TacticFailed` when no constructor for `var`
-    /// is observable in the goal — the caller is expected to either
-    /// register the type via `register_variant_type` or provide an
-    /// explicit type annotation. No silent fallback.
-    /// Peano induction subgoals for an integer-sorted variable.
-    ///
-    /// The theorem under proof is `H(n) => P(n)`, and splitting it keeps
-    /// the precondition inside the induction:
-    ///
-    /// ```text
-    ///   base:  H(0)                          |-  P(0)
-    ///   step:  k >= 0,  H(k+1),  H(k) => P(k) |-  P(k+1)
-    /// ```
-    ///
-    /// The step assumes the IMPLICATION `H(k) => P(k)`, not `H(k)` on its
-    /// own.  Admitting `H(k)` unconditionally would hand a precondition
-    /// like `n >= 5` to the base case, where it does not hold — the base
-    /// case would then be provable from a false assumption and the whole
-    /// principle would be unsound.
-    ///
-    /// The two subgoals line up one-for-one with the `case 0` and
-    /// `case succ(k)` arms the proof text writes.
-    fn integer_induction_subgoals(var: &Text, goal: &ProofGoal) -> List<ProofGoal> {
+    /// The original hypotheses are substituted at every target; none are
+    /// granted independently at the predecessor. See StructuredElimination
+    /// in the independent Lean replay for the general elimination law.
+    fn integer_induction_subgoals(var: &Text, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         use verum_ast::literal::{IntLit, Literal, LiteralKind};
         use verum_ast::span::Span;
-
         let sp = Span::dummy();
-        let int_lit = |v: i128| {
-            Expr::new(
-                ExprKind::Literal(Literal::new(LiteralKind::Int(IntLit::new(v)), sp)),
-                sp,
-            )
-        };
-        let bin = |op: BinOp, l: Expr, r: Expr| {
-            Expr::new(
-                ExprKind::Binary {
-                    op,
-                    left: Heap::new(l),
-                    right: Heap::new(r),
-                },
-                sp,
-            )
-        };
-        let var_expr = Expr::new(
-            ExprKind::Path(Path::from_ident(Ident::new(var.as_str(), sp))),
-            sp,
+        let int_lit = |v: i128| Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Int(IntLit::new(v)), sp)), sp,
         );
-
-        let mut subgoals = List::new();
-
-        // Base case: H(0) |- P(0)
-        let zero = int_lit(0);
-        let mut base = goal.clone();
-        base.goal = Self::substitute_var_with_expr(&goal.goal, var, &zero);
-        base.hypotheses = goal
-            .hypotheses
-            .iter()
-            .map(|h| Self::substitute_var_with_expr(h, var, &zero))
-            .collect();
-        base.label = Maybe::Some(Text::from("base_case_0"));
-        subgoals.push(base);
-
-        // Inductive case: k >= 0, H(k+1), H(k) => P(k) |- P(k+1)
-        let succ = bin(BinOp::Add, var_expr.clone(), int_lit(1));
-        let mut step = goal.clone();
-        step.hypotheses = goal
-            .hypotheses
-            .iter()
-            .map(|h| Self::substitute_var_with_expr(h, var, &succ))
-            .collect();
-        step.add_hypothesis(bin(BinOp::Ge, var_expr.clone(), int_lit(0)));
-        let ih = match goal
-            .hypotheses
-            .iter()
-            .cloned()
-            .reduce(|a, b| bin(BinOp::And, a, b))
-        {
+        let bin = |op: BinOp, left: Expr, right: Expr| Expr::new(ExprKind::Binary {
+            op, left: Heap::new(left), right: Heap::new(right),
+        }, sp);
+        let var_expr = Expr::new(ExprKind::Path(Path::from_ident(Ident::new(var.as_str(), sp))), sp);
+        let instantiate = |target: &Expr| -> Result<ProofGoal, ProofError> {
+            Ok(ProofGoal::with_hypotheses(
+                Self::substitute_var_with_expr(&goal.goal, var, target)?,
+                goal.hypotheses.iter().map(|h| Self::substitute_var_with_expr(h, var, target))
+                    .collect::<Result<List<_>, _>>()?,
+            ))
+        };
+        let base = instantiate(&int_lit(0))?.with_label("base_case_0".into());
+        let ih = match goal.hypotheses.iter().cloned().reduce(|a, b| bin(BinOp::And, a, b)) {
             Some(h) => bin(BinOp::Imply, h, goal.goal.clone()),
             None => goal.goal.clone(),
         };
-        step.add_hypothesis(ih);
-        step.goal = Self::substitute_var_with_expr(&goal.goal, var, &succ);
-        step.label = Maybe::Some(Text::from("inductive_case_succ"));
-        subgoals.push(step);
-
-        subgoals
+        let mut subgoals = List::from_iter([base]);
+        for (operation, domain, label) in [
+            (BinOp::Add, BinOp::Ge, "inductive_case_succ"),
+            (BinOp::Sub, BinOp::Le, "inductive_case_pred"),
+        ] {
+            let target = bin(operation, var_expr.clone(), int_lit(1));
+            let mut step = instantiate(&target)?.with_label(label.into());
+            step.add_hypothesis(bin(domain, var_expr.clone(), int_lit(0)));
+            step.add_hypothesis(ih.clone());
+            subgoals.push(step);
+        }
+        Ok(subgoals)
     }
 
     fn infer_variable_type(&self, var: &Text, goal: &ProofGoal) -> Result<Text, ProofError> {
@@ -4235,127 +4060,38 @@ impl ProofSearchEngine {
         Ok(constructors)
     }
 
-    /// Check if a constructor is recursive
-    fn is_recursive_constructor(ctor: &SimpleConstructor, _type_name: &Text) -> bool {
-        !ctor.recursive_args.is_empty()
-    }
-
-    /// Instantiate a goal for a different variable
-    ///
-    /// Replaces var with new_var in the goal expression.
-    fn instantiate_goal_for_var(goal: &Expr, var: &Text, new_var: &Text) -> Expr {
-        Self::substitute_var(goal, var, new_var)
-    }
-
-    /// Instantiate a goal for a constructor term
-    ///
-    /// Replaces var with a constructor application in the goal.
-    fn instantiate_goal_for_term(goal: &Expr, var: &Text, ctor_term: &Expr) -> Expr {
-        Self::substitute_var_with_expr(goal, var, ctor_term)
-    }
-
-    /// Make a constructor term expression
-    fn make_constructor_term(ctor_name: &Text, arg: &Text) -> Expr {
-        use verum_ast::{Ident, span::Span};
-
-        if arg.is_empty() {
-            // Nullary constructor: just the name
-            let ident = Ident::new(ctor_name.as_str(), Span::dummy());
-            Expr::new(ExprKind::Path(Path::from_ident(ident)), Span::dummy())
-        } else {
-            // Unary constructor: Ctor(arg)
-            let ctor_ident = Ident::new(ctor_name.as_str(), Span::dummy());
-            let ctor_path = Path::from_ident(ctor_ident);
-            let ctor_expr = Expr::new(ExprKind::Path(ctor_path), Span::dummy());
-
-            let arg_ident = Ident::new(arg.as_str(), Span::dummy());
-            let arg_path = Path::from_ident(arg_ident);
-            let arg_expr = Expr::new(ExprKind::Path(arg_path), Span::dummy());
-
-            Expr::new(
-                ExprKind::Call {
-                    func: Box::new(ctor_expr),
-                    type_args: List::new(),
-                    args: vec![arg_expr].into(),
-                },
-                Span::dummy(),
-            )
-        }
-    }
-
-    /// Substitute a variable with another variable in an expression
-    fn substitute_var(expr: &Expr, old_var: &Text, new_var: &Text) -> Expr {
-        use verum_ast::{Ident, span::Span};
-
-        let new_var_ident = Ident::new(new_var.as_str(), Span::dummy());
-        let new_var_path = Path::from_ident(new_var_ident);
-        let new_var_expr = Expr::new(ExprKind::Path(new_var_path), Span::dummy());
-
-        Self::substitute_var_with_expr(expr, old_var, &new_var_expr)
-    }
-
-    /// Substitute a variable with an expression
-    fn substitute_var_with_expr(expr: &Expr, var: &Text, replacement: &Expr) -> Expr {
+    /// Capture-free substitution for the binder-free induction fragment.
+    /// Unsupported binding/control forms are rejected, never left unchanged.
+    fn substitute_var_with_expr(expr: &Expr, var: &Text, replacement: &Expr) -> Result<Expr, ProofError> {
         use ExprKind::*;
-
-        match &expr.kind {
-            Path(p) if p.as_ident().is_some() => {
-                let ident_name = p.as_ident().unwrap().as_str().to_text();
-                if &ident_name == var {
-                    replacement.clone()
-                } else {
-                    expr.clone()
+        let kind = match &expr.kind {
+            Path(path) => {
+                if path.as_ident().is_some_and(|name| name.as_str() == var.as_str()) {
+                    return Ok(replacement.clone());
                 }
+                return Ok(expr.clone());
             }
-
-            Binary { op, left, right } => {
-                let new_left = Self::substitute_var_with_expr(left, var, replacement);
-                let new_right = Self::substitute_var_with_expr(right, var, replacement);
-                Expr::new(
-                    Binary {
-                        op: *op,
-                        left: Box::new(new_left),
-                        right: Box::new(new_right),
-                    },
-                    expr.span,
-                )
-            }
-
-            Unary { op, expr: inner } => {
-                let new_inner = Self::substitute_var_with_expr(inner, var, replacement);
-                Expr::new(
-                    Unary {
-                        op: *op,
-                        expr: Box::new(new_inner),
-                    },
-                    expr.span,
-                )
-            }
-
-            Call { func, args, .. } => {
-                let new_func = Self::substitute_var_with_expr(func, var, replacement);
-                let new_args = args
-                    .iter()
-                    .map(|arg| Self::substitute_var_with_expr(arg, var, replacement))
-                    .collect();
-                Expr::new(
-                    Call {
-                        func: Box::new(new_func),
-                        type_args: List::new(),
-                        args: new_args,
-                    },
-                    expr.span,
-                )
-            }
-
-            Paren(inner) => {
-                let new_inner = Self::substitute_var_with_expr(inner, var, replacement);
-                Expr::new(Paren(Box::new(new_inner)), expr.span)
-            }
-
-            // Literals and other atoms remain unchanged
-            _ => expr.clone(),
-        }
+            Literal(_) => return Ok(expr.clone()),
+            Binary { op, left, right } => Binary {
+                op: *op,
+                left: Heap::new(Self::substitute_var_with_expr(left, var, replacement)?),
+                right: Heap::new(Self::substitute_var_with_expr(right, var, replacement)?),
+            },
+            Unary { op, expr: inner } => Unary {
+                op: *op, expr: Heap::new(Self::substitute_var_with_expr(inner, var, replacement)?),
+            },
+            Call { func, type_args, args } => Call {
+                func: Heap::new(Self::substitute_var_with_expr(func, var, replacement)?),
+                type_args: type_args.clone(),
+                args: args.iter().map(|arg| Self::substitute_var_with_expr(arg, var, replacement))
+                    .collect::<Result<List<_>, _>>()?,
+            },
+            Paren(inner) => Paren(Heap::new(Self::substitute_var_with_expr(inner, var, replacement)?)),
+            _ => return Err(ProofError::TacticFailed(
+                "induction substitution requires a supported binder-free expression; use a certified eliminator for this expression".into(),
+            )),
+        };
+        Ok(Expr::new(kind, expr.span))
     }
 
     /// Try simplify tactic
@@ -5763,27 +5499,22 @@ impl ProofSearchEngine {
         }
     }
 
-    /// Try strong induction
+    /// Strong and relation-based induction need their own checked eliminators.
+    /// Silently substituting ordinary induction loses the written evidence.
     fn try_strong_induction(
-        &mut self,
-        var: &Text,
-        goal: &ProofGoal,
+        &mut self, _var: &Text, _goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Strong induction: assume P(k) for all k < n to prove P(n)
-        // For now, reduce to regular induction with stronger IH
-        self.try_induction(var, goal)
+        Err(ProofError::TacticFailed(
+            "strong induction requires checked strong eliminator evidence, which this backend does not support".into(),
+        ))
     }
 
-    /// Try well-founded induction
     fn try_well_founded_induction(
-        &mut self,
-        var: &Text,
-        _relation: &Text,
-        goal: &ProofGoal,
+        &mut self, _var: &Text, _relation: &Text, _goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Well-founded induction on a relation
-        // For now, reduce to regular induction
-        self.try_induction(var, goal)
+        Err(ProofError::TacticFailed(
+            "well-founded induction requires checked relation and well-foundedness evidence, which this backend does not support".into(),
+        ))
     }
 
     /// Try simp with specific lemmas
@@ -7078,18 +6809,9 @@ impl ProofSearchEngine {
                 Ok(result)
             }
 
-            // Destruct existential: ∃x. P(x) => introduce witness and property
-            ExprKind::Exists { bindings: _, body } => {
-                let mut new_goal = goal.clone();
-                // Remove the original hypothesis
-                new_goal.hypotheses.remove(hyp_idx);
-                // Add the body (with witness substituted)
-                new_goal.add_hypothesis((**body).clone());
-
-                let mut result = List::new();
-                result.push(new_goal);
-                Ok(result)
-            }
+            ExprKind::Exists { .. } => Err(ProofError::TacticFailed(
+                "existential destruction requires checked scoped binding semantics, which this backend does not support".into(),
+            )),
 
             // Destruct implication: P => Q with P available => derive Q
             ExprKind::Binary { op: BinOp::Imply, left, right } => {

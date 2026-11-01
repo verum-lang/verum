@@ -37,7 +37,6 @@ use verum_ast::{Expr, Ident};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_smt::context::Context;
 use verum_smt::proof_search::{MatchArm, ProofError, ProofGoal, ProofSearchEngine, ProofTactic};
-use verum_smt::verify::VerificationError;
 use verum_verification::tactic_evaluation::{Goal, GoalMetadata, Hypothesis};
 use verum_verification::tactic_heuristics::{TacticSuggestion, suggest_next_tactics};
 
@@ -634,81 +633,11 @@ fn verify_proof_method(
         }
 
         ProofMethod::Cases { on, cases } => {
-            let mut steps = List::new();
-            let step_start = Instant::now();
-
-            // When the `by cases` method has no explicit scrutinee (the
-            // parser leaves an empty tuple placeholder) we fall back to
-            // the goal's disjunction structure: split `A || B || …` into
-            // one subgoal per disjunct. This matches the idiomatic usage
-            //  proof by cases {
-            //  case x >= 0 => { … }
-            //  case x < 0 => { … }
-            //  }
-            // on a theorem like `ensures x >= 0 || x < 0`, where there
-            // *is* no hypothesis to case-analyse — the user is partitioning
-            // the disjunctive goal itself.
-            let is_empty_scrutinee = matches!(
-                &on.kind,
-                ExprKind::Tuple(items) if items.is_empty()
-            );
-
-            // Try closing the whole goal outright with `Auto` first.
-            // A classical disjunctive tautology like `x >= 0 || x < 0`
-            // or `b == true || b == false` needs no real case analysis
-            // — the SMT decides it directly. Covers both the empty-
-            // scrutinee and the `on <param>` surfaces: in practice
-            // users write the case block as documentation of the
-            // intended case structure even when the ambient goal is
-            // a tautology that auto can dispatch outright. Only if
-            // Auto produces further subgoals do we fall through to
-            // the explicit Split / CasesOn dispatch below.
-            if let Ok(auto_sub) = engine.execute_tactic(&ProofTactic::Auto, goal) {
-                if auto_sub.is_empty() {
-                    steps.push(VerifiedStep {
-                        description: Text::from("cases (goal closed by auto)"),
-                        tactic_used: Text::from("cases→auto"),
-                        duration: step_start.elapsed(),
-                    });
-                    return Ok(steps);
-                }
-            }
-
-            let (tactic, tactic_label) = if is_empty_scrutinee {
-                (ProofTactic::Split, "cases (split goal)")
-            } else {
-                (
-                    ProofTactic::CasesOn {
-                        hypothesis: format_expr(on),
-                    },
-                    "cases (on scrutinee)",
-                )
+            let scrutinee = match &on.kind {
+                ExprKind::Tuple(items) if items.is_empty() => None,
+                _ => Some(on.as_ref()),
             };
-
-            let sub_goals = engine.execute_tactic(&tactic, goal).map_err(|e| {
-                ProofVerificationError::MethodFailed {
-                    method: "cases".into(),
-                    reason: format!("{}", e).into(),
-                }
-            })?;
-
-            steps.push(VerifiedStep {
-                description: Text::from(format!(
-                    "{} on {}",
-                    tactic_label,
-                    if is_empty_scrutinee {
-                        Text::from("goal disjunction")
-                    } else {
-                        format_expr(on)
-                    }
-                )),
-                tactic_used: Text::from(tactic_label),
-                duration: step_start.elapsed(),
-            });
-
-            let case_steps = verify_proof_cases(engine, smt_ctx, cases, &sub_goals)?;
-            steps.extend(case_steps);
-            Ok(steps)
+            verify_guarded_cases(engine, smt_ctx, scrutinee, cases, goal)
         }
 
         ProofMethod::Contradiction { assumption, proof } => {
@@ -730,32 +659,11 @@ fn verify_induction(
     let mut steps = List::new();
     let step_start = Instant::now();
 
-    // Auto-first: if the SMT solver can close the claim outright
-    // (e.g. `n * 2 >= 0` given `n >= 0`) there's no need to run the
-    // full case-split machinery. Many textbook induction-shaped
-    // goals in L3 specs are actually decidable arithmetic; the
-    // induction block serves as exposition of *why* the claim holds,
-    // not as the only way to check it. Same pattern as `by cases`.
-    if let Ok(auto_sub) = engine.execute_tactic(&ProofTactic::Auto, goal) {
-        if auto_sub.is_empty() {
-            let label = if strong {
-                "strong induction"
-            } else {
-                "induction"
-            };
-            steps.push(VerifiedStep {
-                description: Text::from(format!("{label} (goal closed by auto)")),
-                tactic_used: Text::from(format!("{label}→auto")),
-                duration: step_start.elapsed(),
-            });
-            return Ok(steps);
-        }
-    }
-
-    // Determine the variable name (auto-detect if None)
     let var_name: Text = match on {
         Maybe::Some(ident) => ident.name.clone(),
-        Maybe::None => Text::from("_auto"),
+        Maybe::None => return Err(ProofVerificationError::MethodFailed {
+            method: "induction".into(), reason: "induction requires an explicit variable".into(),
+        }),
     };
 
     let tactic = if strong {
@@ -793,13 +701,7 @@ fn verify_induction(
 
     // Verify each case with InductionCase context so `have IH: …;`
     // without an explicit `by` clause is admitted as the IH.
-    let case_steps = verify_proof_cases_ctx(
-        engine,
-        smt_ctx,
-        cases,
-        &sub_goals,
-        StepContext::InductionCase,
-    )?;
+    let case_steps = verify_proof_cases(engine, smt_ctx, cases, &sub_goals)?;
     steps.extend(case_steps);
     Ok(steps)
 }
@@ -813,181 +715,168 @@ fn verify_contradiction(
     proof_steps: &List<ProofStep>,
     goal: &ProofGoal,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
-    let mut steps = List::new();
-    let step_start = Instant::now();
-
-    // Introduce the negation as a hypothesis
-    let intro_tactic = ProofTactic::IntroNamed {
-        names: {
-            let mut ns = List::new();
-            ns.push(assumption.name.clone());
-            ns
-        },
-    };
-    let sub_goals = engine.execute_tactic(&intro_tactic, goal).map_err(|e| {
-        ProofVerificationError::MethodFailed {
-            method: "contradiction (intro)".into(),
-            reason: format!("{}", e).into(),
-        }
-    })?;
-
-    steps.push(VerifiedStep {
-        description: Text::from(format!("assume negation as '{}'", assumption.name)),
-        tactic_used: Text::from("intro (contradiction)"),
-        duration: step_start.elapsed(),
-    });
-
-    // Verify the inner proof steps against the resulting goals, passing
-    // along accumulated hypotheses.
-    let inner_hypotheses: List<Expr> = if let Some(sg) = sub_goals.first() {
-        sg.hypotheses.clone()
-    } else {
-        goal.hypotheses.clone()
-    };
-
-    // Walk the inner steps under the dedicated `Contradiction`
-    // context — un-justified `have` statements are rejected with
-    // a contradiction-specific diagnostic surface (currently the
-    // same rejection path as `TopLevel`, but distinct in the AST
-    // so future diagnostics can attribute the rejection to the
-    // surrounding `proof by contradiction`).
-    let mut accumulated = inner_hypotheses;
-    // Under `proof by contradiction` the goal the steps work on is the
-    // negated one the tactic produced, not the theorem's own.
-    let contradiction_goal = sub_goals
-        .first()
-        .map(|sg| sg.goal.clone())
-        .unwrap_or_else(|| goal.goal.clone());
-    let inner_steps = verify_proof_steps_accumulating_ctx(
-        engine,
-        smt_ctx,
-        proof_steps,
-        &mut accumulated,
-        StepContext::Contradiction,
-        &contradiction_goal,
+    let start = Instant::now();
+    // Classical contradiction: H, not G |- false. Introducing an unrelated
+    // implication, or merely creating a false subgoal, is not a proof of it.
+    let mut hypotheses = goal.hypotheses.clone();
+    hypotheses.push(Expr::new(ExprKind::Unary {
+        op: verum_ast::UnOp::Not,
+        expr: Heap::new(goal.goal.clone()),
+    }, goal.goal.span));
+    let false_goal = proof_bool(false, goal.goal.span);
+    let mut steps = verify_proof_steps_accumulating(
+        engine, smt_ctx, proof_steps, &mut hypotheses, &false_goal,
     )?;
-    steps.extend(inner_steps);
-
-    // After the steps, the goal should be `False`; close with contradiction
-    let contra_start = Instant::now();
-    let false_goal = if let Some(sg) = sub_goals.first() {
-        sg.clone()
-    } else {
-        goal.clone()
-    };
-    engine
-        .execute_tactic(&ProofTactic::Contradiction, &false_goal)
-        .or_else(|_| engine.execute_tactic(&ProofTactic::Exfalso, &false_goal))
-        .map_err(|e| ProofVerificationError::MethodFailed {
-            method: "contradiction (close)".into(),
-            reason: format!("{}", e).into(),
-        })?;
-
+    discharge_subgoals(engine, smt_ctx, &List::from_iter([
+        ProofGoal::with_hypotheses(false_goal, hypotheses),
+    ]), "contradiction")?;
     steps.push(VerifiedStep {
-        description: Text::from("derive contradiction"),
-        tactic_used: Text::from("contradiction"),
-        duration: contra_start.elapsed(),
+        description: format!("derive contradiction under '{}'", assumption.name).into(),
+        tactic_used: "contradiction".into(),
+        duration: start.elapsed(),
     });
-
     Ok(steps)
 }
 
-/// Verify each branch of a case proof against the subgoals generated by the
-/// case split tactic.
+fn proof_bool(value: bool, span: verum_common::Span) -> Expr {
+    Expr::new(ExprKind::Literal(verum_ast::Literal::bool(value, span)), span)
+}
+
+fn proof_binary(op: verum_ast::BinOp, left: Expr, right: Expr) -> Expr {
+    let span = left.span.merge(right.span);
+    Expr::new(ExprKind::Binary { op, left: Heap::new(left), right: Heap::new(right) }, span)
+}
+
+/// A binding-free pattern denotes a proposition about the scrutinee. Bindings
+/// and constructors need typed eliminator evidence; diagnostic labels and
+/// branch positions cannot provide that evidence.
+fn proof_case_guard(
+    pattern: &verum_ast::Pattern,
+    scrutinee: Option<&Expr>,
+) -> Result<Expr, ProofVerificationError> {
+    use verum_ast::{BinOp, PatternKind};
+    match &pattern.kind {
+        PatternKind::Wildcard => Ok(proof_bool(true, pattern.span)),
+        PatternKind::Paren(inner) => proof_case_guard(inner, scrutinee),
+        PatternKind::Literal(literal) => {
+            let value = Expr::new(ExprKind::Literal(literal.clone()), pattern.span);
+            match scrutinee {
+                Some(scrutinee) => Ok(proof_binary(BinOp::Eq, scrutinee.clone(), value)),
+                None if matches!(literal.kind, LiteralKind::Bool(_)) => Ok(value),
+                None => Err(ProofVerificationError::MethodFailed {
+                    method: "cases".into(),
+                    reason: "literal case patterns require a scrutinee".into(),
+                }),
+            }
+        }
+        PatternKind::Or(patterns) => {
+            let mut guard = proof_bool(false, pattern.span);
+            for pattern in patterns {
+                guard = proof_binary(BinOp::Or, guard, proof_case_guard(pattern, scrutinee)?);
+            }
+            Ok(guard)
+        }
+        _ => Err(ProofVerificationError::MethodFailed {
+            method: "cases".into(),
+            reason: "this case pattern requires checked typed binding or constructor correspondence, which this backend does not support".into(),
+        }),
+    }
+}
+
+/// Case elimination checks coverage before assuming a guard. Overlap is safe:
+/// each guard must imply the same original goal under the original context.
+fn verify_guarded_cases(
+    engine: &mut ProofSearchEngine,
+    smt_ctx: &Context,
+    scrutinee: Option<&Expr>,
+    cases: &List<ProofCase>,
+    goal: &ProofGoal,
+) -> Result<List<VerifiedStep>, ProofVerificationError> {
+    let start = Instant::now();
+    if cases.is_empty() {
+        return Err(ProofVerificationError::MethodFailed {
+            method: "cases".into(), reason: "case analysis requires explicit covering branches".into(),
+        });
+    }
+    let mut guards = Vec::with_capacity(cases.len());
+    let mut coverage = proof_bool(false, goal.goal.span);
+    for case in cases {
+        let pattern_guard = proof_case_guard(&case.pattern, scrutinee)?;
+        let guard = match &case.condition {
+            Maybe::Some(condition) if matches!(case.pattern.kind, verum_ast::PatternKind::Wildcard) => condition.as_ref().clone(),
+            Maybe::Some(condition) => proof_binary(verum_ast::BinOp::And, pattern_guard, condition.as_ref().clone()),
+            Maybe::None => pattern_guard,
+        };
+        coverage = proof_binary(verum_ast::BinOp::Or, coverage, guard.clone());
+        guards.push(guard);
+    }
+    discharge_subgoals(engine, smt_ctx, &List::from_iter([
+        ProofGoal::with_hypotheses(coverage, goal.hypotheses.clone()),
+    ]), "case coverage")?;
+    let mut steps = List::from_iter([VerifiedStep {
+        description: "case guards cover the original context".into(),
+        tactic_used: "cases (coverage)".into(), duration: start.elapsed(),
+    }]);
+    for (case, guard) in cases.iter().zip(guards) {
+        let mut branch = goal.clone();
+        branch.add_hypothesis(guard);
+        steps.extend(verify_case_body(engine, smt_ctx, case, &branch)?);
+    }
+    Ok(steps)
+}
+
+/// Generated induction obligations must be covered exactly. This legacy
+/// backend has no typed pattern substitution certificate, so only wildcard
+/// cases are admissible here. Conditions must follow from the generated
+/// context before they can be used in a body.
 fn verify_proof_cases(
     engine: &mut ProofSearchEngine,
     smt_ctx: &Context,
     cases: &List<ProofCase>,
     sub_goals: &List<ProofGoal>,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
-    verify_proof_cases_ctx(engine, smt_ctx, cases, sub_goals, StepContext::CaseBody)
+    if cases.len() != sub_goals.len() {
+        return Err(ProofVerificationError::IncompleteCases {
+            expected: sub_goals.len(), provided: cases.len(),
+            uncovered_count: sub_goals.len().saturating_sub(cases.len()),
+        });
+    }
+    let mut steps = List::new();
+    for (case, goal) in cases.iter().zip(sub_goals) {
+        if !matches!(case.pattern.kind, verum_ast::PatternKind::Wildcard) {
+            return Err(ProofVerificationError::MethodFailed {
+                method: "induction cases".into(),
+                reason: "named induction patterns require checked typed constructor correspondence; use wildcard obligations or a certified eliminator".into(),
+            });
+        }
+        if let Maybe::Some(condition) = &case.condition {
+            discharge_subgoals(engine, smt_ctx, &List::from_iter([
+                ProofGoal::with_hypotheses(condition.as_ref().clone(), goal.hypotheses.clone()),
+            ]), "generated case condition")?;
+        }
+        steps.extend(verify_case_body(engine, smt_ctx, case, goal)?);
+    }
+    Ok(steps)
 }
 
-/// The goal a sequence of proof steps is working on.
-///
-/// Threaded through the step walker because a step can SPLIT the goal —
-/// `cases b { … }` turns `G` into `G under b` and `G under !b`. Before
-/// this existed the `Cases` arm had no goal to split and built one out of
-/// the SCRUTINEE instead, so `theorem em(b: Bool): b || !b` case-split on
-/// the goal `b`, produced subgoals about `b`, and the theorem's own goal
-/// was never reached (T0960). Measured: the same theorem discharges under
-/// `proof by trivial`, `proof { trivial }` and `proof { left; trivial }`,
-/// and fails the moment a `cases` block appears — the proof structure
-/// destroyed a goal the solver proves in 10ms without it.
-
-fn verify_proof_cases_ctx(
+fn verify_case_body(
     engine: &mut ProofSearchEngine,
     smt_ctx: &Context,
-    cases: &List<ProofCase>,
-    sub_goals: &List<ProofGoal>,
-    ctx_kind: StepContext,
+    case: &ProofCase,
+    goal: &ProofGoal,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
-    let mut steps = List::new();
-
-    // Match cases to subgoals positionally. If there are more cases than
-    // subgoals (or vice versa), we still verify what we can and error on
-    // unmatched subgoals.
-    for (i, case) in cases.iter().enumerate() {
-        let case_start = Instant::now();
-
-        // Determine the goal for this case
-        let case_goal = if i < sub_goals.len() {
-            sub_goals[i].clone()
-        } else {
-            // Extra case beyond subgoals — still verify the steps
-            // using a synthetic goal from the case pattern
-            ProofGoal::new(Expr::new(
-                ExprKind::Literal(verum_ast::Literal::bool(true, case.span)),
-                case.span,
-            ))
-        };
-
-        // Thread the case's condition expression as a hypothesis into
-        // the body. For `case a >= b => { ... }` the parser stored the
-        // expression `a >= b` in `case.condition`; inside that case's
-        // proof body it's a known fact. Without this, the verifier
-        // treated the case's condition as irrelevant and decidable
-        // arithmetic like `max(a, b) == a` (under `a >= b`) failed
-        // even though the SMT could discharge it in microseconds given
-        // the hypothesis.
-        let mut case_hypotheses = case_goal.hypotheses.clone();
-        if let Maybe::Some(cond) = &case.condition {
-            case_hypotheses.push(cond.as_ref().clone());
-        }
-
-        // Verify the proof steps within this case with the right
-        // context kind so `have` steps are admitted only when the
-        // parent is an induction case (the IH surface).
-        let mut acc = case_hypotheses.clone();
-        // The case's OWN goal is what its body works on — a nested
-        // `cases` inside it must split that, not the enclosing one.
-        let inner_steps = verify_proof_steps_accumulating_ctx(
-            engine,
-            smt_ctx,
-            &case.proof,
-            &mut acc,
-            ctx_kind,
-            &case_goal.goal,
-        )?;
-
-        steps.push(VerifiedStep {
-            description: Text::from(format!("case {}: pattern {:?}", i + 1, case.pattern)),
-            tactic_used: Text::from("case"),
-            duration: case_start.elapsed(),
-        });
-        steps.extend(inner_steps);
-    }
-
-    // Check for subgoals not covered by any case
-    if sub_goals.len() > cases.len() {
-        let uncovered = sub_goals.len() - cases.len();
-        return Err(ProofVerificationError::IncompleteCases {
-            expected: sub_goals.len(),
-            provided: cases.len(),
-            uncovered_count: uncovered,
-        });
-    }
-
+    let start = Instant::now();
+    let mut hypotheses = goal.hypotheses.clone();
+    let mut steps = verify_proof_steps_accumulating(
+        engine, smt_ctx, &case.proof, &mut hypotheses, &goal.goal,
+    )?;
+    discharge_subgoals(engine, smt_ctx, &List::from_iter([
+        ProofGoal::with_hypotheses(goal.goal.clone(), hypotheses),
+    ]), "case conclusion")?;
+    steps.push(VerifiedStep {
+        description: format!("case concludes {}", format_expr(&goal.goal)).into(),
+        tactic_used: "case".into(), duration: start.elapsed(),
+    });
     Ok(steps)
 }
 
@@ -995,83 +884,13 @@ fn verify_proof_cases_ctx(
 // Structured proof step verification
 // ---------------------------------------------------------------------------
 
-/// Verify a sequence of `ProofStep`s, threading hypotheses through.
-///
-/// Each step may introduce new hypotheses (via `Have`, `Obtain`, `Let`) or
-/// discharge intermediate goals (via `Show`, `Suffices`, `Tactic`). The
-/// function tracks a mutable hypothesis list that grows as the proof
-/// progresses.
-fn verify_proof_steps(
-    engine: &mut ProofSearchEngine,
-    smt_ctx: &Context,
-    steps: &List<ProofStep>,
-    initial_hypotheses: &List<Expr>,
-    current_goal: &Expr,
-) -> Result<List<VerifiedStep>, ProofVerificationError> {
-    let mut accumulated = initial_hypotheses.clone();
-    verify_proof_steps_accumulating_ctx(
-        engine,
-        smt_ctx,
-        steps,
-        &mut accumulated,
-        StepContext::TopLevel,
-        current_goal,
-    )
-}
-
-/// Context in which a step sequence is being verified. Admitted
-/// `have` statements (no justification) are only sound inside an
-/// inductive case body — there the missing justification is the
-/// induction hypothesis. Anywhere else an un-justified `have` is a
-/// soundness hole and must be rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StepContext {
-    /// Root-level proof body. Un-justified `have` is rejected.
-    TopLevel,
-    /// Inside a `proof by induction { case … => … }` body.
-    /// Un-justified `have` is admitted as the induction hypothesis.
-    InductionCase,
-    /// Inside a `proof by cases { case … => … }` body. Un-justified
-    /// `have` is rejected (cases-bodies have access to the case
-    /// condition but no additional axioms).
-    CaseBody,
-    /// Inside a `proof by contradiction` body. Un-justified `have`
-    /// is rejected.
-    Contradiction,
-}
-
-/// Inner worker for [`verify_proof_steps`]. Accumulates intermediate
-/// `have` / `show` / `let` / `suffices` / `obtain` propositions into
-/// the caller's hypothesis list so the outer closer tactic can see
-/// them. The outer wrapper drops the mutated list; structured-proof
-/// verification in `verify_structured_proof` calls this worker
-/// directly to reuse the extended context when discharging the final
-/// goal.
+/// Check steps under one actual goal. Only discharged propositions enter the
+/// context; no proof method grants a privileged assumption channel.
 fn verify_proof_steps_accumulating(
     engine: &mut ProofSearchEngine,
     smt_ctx: &Context,
     steps: &List<ProofStep>,
     hypotheses: &mut List<Expr>,
-    current_goal: &Expr,
-) -> Result<List<VerifiedStep>, ProofVerificationError> {
-    verify_proof_steps_accumulating_ctx(
-        engine,
-        smt_ctx,
-        steps,
-        hypotheses,
-        StepContext::TopLevel,
-        current_goal,
-    )
-}
-
-
-
-fn verify_proof_steps_accumulating_ctx(
-    engine: &mut ProofSearchEngine,
-    smt_ctx: &Context,
-    steps: &List<ProofStep>,
-    hypotheses: &mut List<Expr>,
-    ctx_kind: StepContext,
     current_goal: &Expr,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut verified = List::new();
@@ -1089,59 +908,13 @@ fn verify_proof_steps_accumulating_ctx(
                 let goal =
                     ProofGoal::with_hypotheses(proposition.as_ref().clone(), hypotheses.clone());
                 let tactic = convert_tactic(justification);
-                let exec_result = engine.execute_tactic(&tactic, &goal);
-
-                // `have NAME: P;` without an explicit `by CLAUSE` is
-                // the idiomatic induction-hypothesis form: inside
-                // `case succ(k) => ...` the IH for `k` is available
-                // without needing to be proved again — it's what
-                // induction provides. The parser sugars the missing
-                // justification to `TacticExpr::Trivial`, so the
-                // check for "implicit IH" is `justification is
-                // Trivial AND P is not itself trivially closable".
-                // When exec_result succeeds, treat as normal Have;
-                // when it fails under an implicit Trivial, admit the
-                // proposition as an axiomatic hypothesis (with an
-                // admit-flag in the tactic_used name so the
-                // certificate still tracks it).
-                let implicit_trivial =
-                    matches!(justification, verum_ast::decl::TacticExpr::Trivial);
-                let mut admitted = false;
-                match exec_result {
-                    Ok(sub_goals) => {
-                        discharge_subgoals(
-                            engine,
-                            smt_ctx,
-                            &sub_goals,
-                            &format!("have {}", name.name),
-                        )?;
+                let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
+                    ProofVerificationError::StepFailed {
+                        step: format!("have {}", name.name).into(), reason: e.to_string().into(),
                     }
-                    Err(e) => {
-                        // Only admit un-justified `have` inside an
-                        // inductive case body — that's the IH
-                        // surface. Anywhere else (top-level,
-                        // cases body, contradiction body) the
-                        // unjustified hypothesis is a soundness
-                        // hole and must be rejected.
-                        if implicit_trivial && ctx_kind == StepContext::InductionCase {
-                            admitted = true;
-                        } else {
-                            return Err(ProofVerificationError::StepFailed {
-                                step: format!("have {}", name.name).into(),
-                                reason: format!("{}", e).into(),
-                            });
-                        }
-                    }
-                }
-
-                // Add the proposition as a hypothesis for subsequent steps
+                })?;
+                discharge_subgoals(engine, smt_ctx, &sub_goals, &format!("have {}", name.name))?;
                 hypotheses.push(proposition.as_ref().clone());
-
-                let tactic_label = if admitted {
-                    Text::from(format!("admitted(implicit IH: {:?})", justification))
-                } else {
-                    format!("{:?}", justification).into()
-                };
 
                 verified.push(VerifiedStep {
                     description: Text::from(format!(
@@ -1149,7 +922,7 @@ fn verify_proof_steps_accumulating_ctx(
                         name.name,
                         format_expr(proposition)
                     )),
-                    tactic_used: tactic_label,
+                    tactic_used: format!("{:?}", justification).into(),
                     duration: step_start.elapsed(),
                 });
             }
@@ -1223,33 +996,11 @@ fn verify_proof_steps_accumulating_ctx(
                 });
             }
 
-            // ---- Obtain: extract witness from existential ----
-            ProofStepKind::Obtain { pattern, from } => {
-                // `obtain x from h` destructs an existential hypothesis `h`
-                // into a witness `x` and its proof. We execute a destruct
-                // tactic on the `from` expression.
-                let from_text = format_expr(from);
-                let goal = ProofGoal::with_hypotheses(from.as_ref().clone(), hypotheses.clone());
-                let tactic = ProofTactic::Destruct {
-                    hypothesis: from_text.clone(),
-                };
-
-                let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
-                    ProofVerificationError::StepFailed {
-                        step: Text::from("obtain"),
-                        reason: format!("{}", e).into(),
-                    }
-                })?;
-
-                // Add the destructed components as hypotheses
-                for sg in &sub_goals {
-                    hypotheses.push(sg.goal.clone());
-                }
-
-                verified.push(VerifiedStep {
-                    description: Text::from(format!("obtain {:?} from {}", pattern, from_text)),
-                    tactic_used: Text::from("obtain/destruct"),
-                    duration: step_start.elapsed(),
+            // Witness introduction must preserve scope and freshness.
+            ProofStepKind::Obtain { .. } => {
+                return Err(ProofVerificationError::StepFailed {
+                    step: "obtain".into(),
+                    reason: "existential witnesses require checked scoped binding semantics, which this backend does not support".into(),
                 });
             }
 
@@ -1259,35 +1010,22 @@ fn verify_proof_steps_accumulating_ctx(
                 verified.extend(calc_steps);
             }
 
-            // ---- Cases: case analysis within structured proof ----
             ProofStepKind::Cases { scrutinee, cases } => {
-                // Split the GOAL on the scrutinee. The scrutinee is what
-                // we case on; it is not itself the thing to prove. See
-                // the note on `current_goal` above.
-                let goal =
-                    ProofGoal::with_hypotheses(current_goal.clone(), hypotheses.clone());
-                let tactic = ProofTactic::CasesOn {
-                    hypothesis: format_expr(scrutinee),
-                };
-                let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
-                    ProofVerificationError::StepFailed {
-                        step: Text::from("cases"),
-                        reason: format!("{}", e).into(),
-                    }
-                })?;
-
-                let case_steps = verify_proof_cases(engine, smt_ctx, cases, &sub_goals)?;
-                verified.extend(case_steps);
+                let goal = ProofGoal::with_hypotheses(current_goal.clone(), hypotheses.clone());
+                verified.extend(verify_guarded_cases(engine, smt_ctx, Some(scrutinee), cases, &goal)?);
+                hypotheses.push(current_goal.clone());
             }
 
-            // ---- Focus: work on a specific subgoal ----
-            ProofStepKind::Focus {
-                goal_index: _,
-                steps: inner_steps,
-            } => {
-                let inner =
-                    verify_proof_steps(engine, smt_ctx, inner_steps, &hypotheses, current_goal)?;
-                verified.extend(inner);
+            ProofStepKind::Focus { goal_index, steps: inner_steps } => {
+                if *goal_index != 0 {
+                    return Err(ProofVerificationError::StepFailed {
+                        step: "focus".into(),
+                        reason: "structured proofs have one active goal; only focus(0) is available".into(),
+                    });
+                }
+                verified.extend(verify_proof_steps_accumulating(
+                    engine, smt_ctx, inner_steps, hypotheses, current_goal,
+                )?);
             }
 
             // ---- Tactic: bare tactic application ----
@@ -1344,24 +1082,14 @@ fn verify_proof_steps_accumulating_ctx(
                         duration: step_start.elapsed(),
                     });
                 } else {
-                    // Other standalone tactics operate on whatever the
-                    // ambient goal is. Structured proofs thread goals
-                    // implicitly, so execute against a trivial goal;
-                    // soundness: this can neither close nor corrupt the
-                    // theorem's goal — the primary goal is discharged
-                    // independently by the conclusion tactic / implicit
-                    // `Auto` closer in `verify_structured_proof`, and an
-                    // `admit`/`sorry` written here is surfaced through
-                    // the AST-level `ProofStructure::contains_unsafe`
-                    // walk, not through this execution.
-                    let trivial_goal = ProofGoal::with_hypotheses(
-                        Expr::new(
-                            ExprKind::Literal(verum_ast::Literal::bool(true, step.span)),
-                            step.span,
-                        ),
-                        hypotheses.clone(),
-                    );
-                    let _ = engine.execute_tactic(&tactic, &trivial_goal);
+                    let goal = ProofGoal::with_hypotheses(current_goal.clone(), hypotheses.clone());
+                    let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
+                        ProofVerificationError::StepFailed {
+                            step: format!("tactic {:?}", tactic_expr).into(), reason: e.to_string().into(),
+                        }
+                    })?;
+                    discharge_subgoals(engine, smt_ctx, &sub_goals, "structured tactic")?;
+                    hypotheses.push(current_goal.clone());
                     verified.push(VerifiedStep {
                         description: Text::from(format!("tactic {:?}", tactic_expr)),
                         tactic_used: format!("{:?}", tactic_expr).into(),
@@ -1885,37 +1613,20 @@ pub fn verify_proof_body_with_aliases_and_graph(
         ProofBody::Term(proof_term) => {
             let step_start = Instant::now();
 
-            // In a full dependent type system the proof term's type would be
-            // checked against the proposition. Here we approximate: use the
-            // proof term expression as an `exact` hint, then fall back to
-            // `auto_prove` if that fails.
-            let exact_tactic = ProofTactic::Exact {
+            // The supplied term must justify this exact goal. A different
+            // automatically found proof cannot stand in for invalid evidence.
+            let result = engine.execute_tactic(&ProofTactic::Exact {
                 term: format_expr(proof_term),
-            };
-
-            // execute_tactic returns Result<_, ProofError>, auto_prove returns
-            // Result<_, VerificationError>. Unify to VerificationError.
-            let result: Result<(), VerificationError> = engine
-                .execute_tactic(&exact_tactic, &primary_goal)
-                .map_err(|e| VerificationError::Unknown(format!("{}", e).into()))
-                .and_then(|sub_goals| {
-                    // If exact produces subgoals, try to discharge them
-                    for sg in &sub_goals {
-                        engine.auto_prove(smt_ctx, &sg.goal)?;
-                    }
-                    Ok(())
-                })
-                .or_else(|_: VerificationError| {
-                    // Fall back to auto_prove on the proposition
-                    engine.auto_prove(smt_ctx, &proposition).map(|_| ())
-                });
+            }, &primary_goal).map_err(ProofVerificationError::from).and_then(|sub_goals| {
+                discharge_subgoals(engine, smt_ctx, &sub_goals, "proof term")
+            });
 
             match result {
                 Ok(()) => {
                     let mut steps = List::new();
                     steps.push(VerifiedStep {
                         description: Text::from(format!("proof term: {}", format_expr(proof_term))),
-                        tactic_used: Text::from("exact/auto"),
+                        tactic_used: Text::from("exact"),
                         duration: step_start.elapsed(),
                     });
                     ProofVerificationResult::Verified(ProofSummary {
@@ -1930,7 +1641,7 @@ pub fn verify_proof_body_with_aliases_and_graph(
                     let mut unproved = List::new();
                     let mut suggestions =
                         heuristic_suggestions(&proposition, &hypotheses, Maybe::None);
-                    suggestions.extend(build_suggestions_from_error(&e));
+                    suggestions.extend(build_suggestions_from_pv_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
                         hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
@@ -2252,7 +1963,7 @@ pub enum ProofVerificationError {
     /// A proof method (induction/cases/contradiction) failed.
     MethodFailed { method: Text, reason: Text },
 
-    /// Case analysis is incomplete (fewer cases than subgoals).
+    /// The number of written cases differs from the generated obligations.
     IncompleteCases {
         expected: usize,
         provided: usize,
@@ -2294,7 +2005,7 @@ impl std::fmt::Display for ProofVerificationError {
             } => {
                 write!(
                     f,
-                    "incomplete case analysis: {} cases expected, {} provided ({} uncovered)",
+                    "case count mismatch: {} cases expected, {} provided ({} uncovered)",
                     expected, provided, uncovered_count
                 )
             }
@@ -2377,44 +2088,6 @@ fn split_tactic_reason(input: &str) -> (Text, Text) {
 // Suggestion generation
 // ---------------------------------------------------------------------------
 
-/// Build suggestions from a `VerificationError`.
-fn build_suggestions_from_error(err: &VerificationError) -> List<Text> {
-    let mut suggestions = List::new();
-    match err {
-        VerificationError::CannotProve {
-            suggestions: smt_suggs,
-            ..
-        } => {
-            suggestions.extend(smt_suggs.clone());
-        }
-        VerificationError::Timeout { .. } => {
-            suggestions.push(Text::from(
-                "Try increasing the SMT timeout or simplifying the goal",
-            ));
-            suggestions.push(Text::from(
-                "Consider breaking the proof into smaller lemmas",
-            ));
-        }
-        VerificationError::Unknown(_) => {
-            suggestions.push(Text::from("Try providing explicit proof steps"));
-            suggestions.push(Text::from(
-                "Consider using 'simp', 'ring', or 'omega' for decidable fragments",
-            ));
-        }
-        VerificationError::Translation(_) => {
-            suggestions.push(Text::from(
-                "The goal could not be translated to SMT — check for unsupported constructs",
-            ));
-        }
-        VerificationError::SolverError(_) => {
-            suggestions.push(Text::from(
-                "SMT solver encountered an internal error — try a different tactic",
-            ));
-        }
-    }
-    suggestions
-}
-
 /// Build suggestions from a `ProofVerificationError`.
 /// Suggestions derived from what ACTUALLY happened.
 ///
@@ -2468,12 +2141,9 @@ fn build_suggestions_from_pv_error(err: &ProofVerificationError) -> List<Text> {
                 method, reason
             )));
         }
-        ProofVerificationError::IncompleteCases {
-            uncovered_count, ..
-        } => {
+        ProofVerificationError::IncompleteCases { expected, provided, .. } => {
             suggestions.push(Text::from(format!(
-                "{} case(s) not covered — add missing case branches",
-                uncovered_count
+                "case count mismatch: expected {expected}, received {provided}; cover each generated obligation exactly once"
             )));
         }
     }

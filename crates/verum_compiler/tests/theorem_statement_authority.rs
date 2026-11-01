@@ -187,3 +187,86 @@ fn proof_summary_preserves_the_goal_and_evidence_kind() {
     assert_eq!(summary.evidence, ProofEvidence::Assumed);
     assert!(!summary.has_incomplete_steps());
 }
+
+#[test]
+fn written_branch_and_term_evidence_cannot_be_replaced_by_automatic_success() {
+    for source in [
+        "theorem t(b:Bool): true proof by cases on b { case true => fail(\"invalid evidence\"), case false => trivial };",
+        "theorem t(b:Bool): true proof by cases on b { case true => { fail(\"invalid evidence\"); } case false => {} };",
+        "theorem t(n:Int): true proof by induction on n { case _ => { have invented: false; } case _ => {} case _ => {} };",
+        "theorem t(): true proof { fail(\"invalid evidence\"); }",
+        "theorem t(): true proof { exact(missing); }",
+        "theorem t(): true proof = missing;",
+    ] {
+        let result = verify(source);
+        assert!(matches!(result, ProofVerificationResult::Failed { .. }), "{source}: {result:?}");
+    }
+}
+
+#[test]
+fn case_coverage_and_each_actual_conclusion_are_obligations() {
+    for source in [
+        "theorem t(b:Bool): b proof by cases on b { case true => {} case false => {} };",
+        "theorem t(b:Bool): false proof by cases { case b == true => {} case b == false => {} };",
+        "theorem t(b:Bool): true proof by cases { case b == true => trivial };",
+        "theorem t(b:Bool): true proof by cases on b { case true where false => {} case false => {} };",
+        "theorem t(b:Bool): true proof by cases { case b == true where false => {} case b == false => {} };",
+        "theorem t(b:Bool): false proof by cases { case b && !b => {} };",
+        "theorem t(): true proof by cases {};",
+        "theorem t(b:Bool): true proof by cases on b { case unused => trivial };",
+        "theorem t(n:Int): true proof by induction on n { case _ => {} };",
+        "theorem t(n:Int): true proof by induction on n { case _ => {} case _ => {} case _ => {} case _ => {} };",
+    ] {
+        let result = verify(source);
+        assert!(matches!(result, ProofVerificationResult::Failed { .. }), "{source}: {result:?}");
+    }
+}
+
+#[test]
+fn guarded_elimination_retains_valid_boolean_and_arithmetic_proofs() {
+    for source in [
+        "theorem t(b:Bool): b || !b proof by cases on b { case true => trivial, case false => trivial };",
+        "theorem t(b:Bool): b || !b proof { cases b { case true => { show b by auto; } case false => { show !b by auto; } } }",
+        "theorem t(n:Int): n >= 0 || n < 0 proof by cases { case n >= 0 => { show n >= 0 by assumption; } case n < 0 => { show n < 0 by assumption; } };",
+        "theorem t(n:Int) requires n == 0 || n == 1 : n >= 0 proof by cases on n { case 0 => auto, case 1 => auto };",
+        "theorem t(b:Bool): true proof by cases { case b == true => trivial, case b == false => trivial, case _ => trivial };",
+        "theorem t(): true proof { show true by trivial; trivial; }",
+        "theorem t(): true proof by contradiction { show false by auto; };",
+        "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 { proof { have lower_bound: n >= 0 by assumption; show n * 2 >= 0 by omega; } }",
+        "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 proof by induction on n { case _ => auto, case _ => auto, case _ => auto };",
+        "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 proof by { induction n; all_goals { auto } };",
+    ] {
+        let result = verify(source);
+        let ProofVerificationResult::Verified(summary) = result else { panic!("{source}: {result:?}") };
+        assert!(!summary.has_incomplete_steps(), "{source}: {summary:?}");
+    }
+}
+
+#[test]
+fn contradiction_cannot_discard_an_unproved_false_goal() {
+    for source in [
+        "theorem t(): true => false proof by contradiction {};",
+        "theorem t(b:Bool): b proof by contradiction { trivial; };",
+        "theorem t(): true proof by contradiction { fail(\"invalid evidence\"); };",
+    ] {
+        let result = verify(source);
+        assert!(matches!(result, ProofVerificationResult::Failed { .. }), "{source}: {result:?}");
+    }
+}
+
+#[test]
+fn integer_induction_requires_negative_and_positive_obligations() {
+    for source in [
+        "theorem t(n:Int): n >= 0 proof by induction on n { case _ => {} case _ => {} case _ => {} };",
+        "theorem t(n:Int): n >= 0 proof by { induction n; auto };",
+        "theorem t(n:Int): true proof by induction on n { case _ => {} case _ => {} };",
+        "theorem t(n:Int): true proof by strong_induction on n { case _ => trivial };",
+        "theorem t(n:Int): true proof by well_founded_induction on n ordered_by invalid { case _ => trivial };",
+    ] {
+        let result = verify(source);
+        assert!(matches!(result, ProofVerificationResult::Failed { .. }), "{source}: {result:?}");
+    }
+    let source = "theorem t(n:Int) requires n >= 0 : n * 2 >= 0 proof by induction on n { case _ => {} case _ => { have ih: n >= 0 => n * 2 >= 0 by assumption; } case _ => {} };";
+    let result = verify(source);
+    assert!(matches!(result, ProofVerificationResult::Verified(_)), "{result:?}");
+}
