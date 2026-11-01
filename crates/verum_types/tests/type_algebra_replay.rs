@@ -87,6 +87,17 @@ fn independent_lean_replays_every_rule_and_rejects_changed_conclusions() {
         let source_text =
             export_lean(&dag, source, target, &proof, Limits::default(), 1_000_000).unwrap();
         let path = directory.path().join(format!("Replay{index}.lean"));
+        // Inline the canonical module in this isolated fixture so no stale
+        // compiled Lean library can satisfy the import during the test.
+        let source_text = verum_common::Text::from(format!(
+            "{}\n{}",
+            include_str!(
+                "../../../verification/external/lean/VerumExternalReplay/TypeAlgebra.lean"
+            ),
+            source_text
+                .strip_prefix("import VerumExternalReplay.TypeAlgebra\n")
+                .unwrap()
+        ));
         std::fs::write(&path, source_text.as_bytes()).unwrap();
         let result = lean(&path);
         let stdout = std::string::String::from_utf8_lossy(&result.stdout);

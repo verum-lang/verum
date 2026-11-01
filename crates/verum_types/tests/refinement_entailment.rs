@@ -303,6 +303,25 @@ fn booleans_preserve_vacuity_without_arbitrary_strengthening() {
 }
 
 #[test]
+fn boolean_constants_do_not_require_an_integer_subject() {
+    let truth = RefinementPredicate::trivial(Span::dummy());
+    let falsity = RefinementPredicate::inline(
+        Expr::literal(Literal::bool(false, Span::dummy())),
+        Span::dummy(),
+    );
+    let unproved = predicate("x", comparison("x", BinOp::Gt, 0));
+    for base in [Type::Bool, Type::Float, Type::Text, Type::Unit] {
+        assert!(entails(&base, &truth, &base, &truth));
+        assert!(entails(&base, &falsity, &base, &truth));
+        assert!(!entails(&base, &truth, &base, &falsity));
+        assert!(!entails(&base, &truth, &base, &unproved));
+        let subtype = verum_types::subtype::Subtyping::new();
+        assert!(subtype.is_subtype(&base, &Type::refined(base.clone(), truth.clone())));
+        assert!(!subtype.is_subtype(&base, &Type::refined(base.clone(), falsity.clone())));
+    }
+}
+
+#[test]
 fn stateful_partial_and_unresolved_atoms_are_not_assumed_stable() {
     let call = Expr::new(
         ExprKind::Call {

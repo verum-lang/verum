@@ -1,6 +1,7 @@
 //! Export an exact lattice query and its checked derivation for Lean replay.
 //!
-//! The output is self-contained. Every proof step uses a proved semantic rule;
+//! The output imports `VerumExternalReplay.TypeAlgebra`. Every proof step uses
+//! a proved semantic rule;
 //! Lean checks context rearrangements and the final endpoints independently.
 //! This proves the lattice judgment for opaque atoms, not the caller's mapping
 //! from source types to atoms or any runtime representation correspondence.
@@ -12,9 +13,6 @@ use verum_common::{List, Text};
 use crate::type_algebra::{
     self, Certificate, CheckError, Expression, ExpressionDag, ExpressionId, Limits, ProofId, Rule,
 };
-
-const SEMANTICS: &str =
-    include_str!("../../../verification/external/lean/VerumExternalReplay/TypeAlgebra.lean");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayError {
@@ -81,8 +79,9 @@ fn premise(
 }
 
 /// Render only a certificate that the native checker accepts for this exact
-/// graph and endpoints. `max_bytes` bounds the entire generated source, including
-/// the semantic model. Successful export is not a claim that Lean was executed.
+/// graph and endpoints. `max_bytes` bounds the entire generated source. Replay
+/// requires the independent Lean model to be available in Lean's import path;
+/// successful export is not a claim that Lean was executed.
 pub fn export_lean(
     dag: &ExpressionDag,
     source: ExpressionId,
@@ -108,7 +107,7 @@ fn render(
     target: ExpressionId,
     certificate: &Certificate,
 ) -> fmt::Result {
-    out.write_str(SEMANTICS)?;
+    out.write_str("import VerumExternalReplay.TypeAlgebra\n")?;
     out.write_str("\nnamespace Verum.TypeAlgebraReplay\nopen Verum.TypeAlgebra\n")?;
     for (index, expression) in dag.nodes().iter().enumerate() {
         write!(out, "private def e{index} : Formula := ")?;

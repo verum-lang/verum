@@ -1,10 +1,11 @@
-//! Conservative entailment for total predicates on the canonical `Int` binder.
+//! Conservative entailment for total predicates, with canonical `Int` comparisons.
 //!
 //! Supported syntax is Boolean literals, `&&`, `||`, and comparisons between
 //! the recorded refinement binder and an unsuffixed integer literal exactly
 //! representable by canonical signed-64-bit `Int`. Names are
 //! resolved only against that binder; calls, fields, arithmetic on the binder,
-//! other types and unknown atoms are refused even when their ASTs are identical.
+//! other comparison domains and unknown atoms are refused even when their ASTs
+//! are identical. Boolean constants and their combinations are domain-independent.
 //!
 //! The trusted projection alpha-renames the recorded binder and preserves each
 //! comparison's operator and exact literal value in i128. A source atom may be conjoined
@@ -99,7 +100,7 @@ pub fn entails_with_limits(
     target: &RefinementPredicate,
     limits: Limits,
 ) -> bool {
-    if !matches!((source_base, target_base), (Type::Int, Type::Int)) {
+    if source_base != target_base {
         return false;
     }
     let mut projection = Projection {
@@ -107,6 +108,7 @@ pub fn entails_with_limits(
         atoms: List::new(),
         remaining_syntax: limits.max_expression_nodes,
         max_depth: limits.max_depth,
+        integer_comparisons: matches!(source_base, Type::Int),
     };
     let Some(source_id) = projection.predicate(source) else {
         return false;
@@ -138,6 +140,7 @@ struct Projection {
     atoms: List<IntegerComparison>,
     remaining_syntax: usize,
     max_depth: usize,
+    integer_comparisons: bool,
 }
 
 impl Projection {
@@ -185,6 +188,9 @@ impl Projection {
                             continue;
                         }
                         ExprKind::Binary { op, left, right } => {
+                            if !self.integer_comparisons {
+                                return None;
+                            }
                             let atom = comparison(*op, left, right, predicate)?;
                             let index = match self.atoms.iter().position(|known| *known == atom) {
                                 Some(index) => index,
