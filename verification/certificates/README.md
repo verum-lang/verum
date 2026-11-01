@@ -31,9 +31,11 @@ and a linear-depth tower of cuts. Computational definitions remain transparent.
 
 `test_arithmetic_terms.py` also exports the exact wire terms to Lean definitions
 and asks Lean's kernel to check them, with empty axiom rosters. This is separate
-from running the Lean reference checker. The exporter accepts only its explicit
-natural/list/unit/empty arithmetic fragment; unsupported declarations are
-refused. Both replay routes reject false order, zero-factor cancellation and
+from running the Lean reference checker. The exporter handles natural/list/unit/
+empty arithmetic and nonindexed algebraic data with value and recursive fields.
+Each complete schema gets a distinct Lean inductive declaration; value-field
+types are explicit parameters and recursive hypotheses retain native order.
+Dependent fields and unsupported declarations are refused. Both replay routes reject false order, zero-factor cancellation and
 altered polynomial claims. These arithmetic laws alone do not establish a KT
 partition bound or correspondence with a native scorer.
 
@@ -78,6 +80,30 @@ count overflow is refused, work refusal precedes mutation, and unfinished or
 invalid cursors cannot return a score. This is a source audit, not a formal Rust
 semantics. In particular, equal completion totals alone do not prove outcome
 conservation, and logical work units do not bound BigUint or generic `Ord` costs.
+
+## Prefix codes and exact allocation
+
+`check_prefix_codes.py` derives suffix-preserving decoding, prefix-freeness,
+dependent sequencing and Kraft subprobability for binary parsing trees with
+explicit rejection leaves. Concrete MSB-first fixed-width fields and gamma
+cutoffs use the same definitions. Full fields have mass one; a gamma cutoff
+allowing fewer than `d` leading zeros retains exactly `2^-d` outside its language.
+Unused ordinal patterns are rejected without redistributing their mass.
+
+Word concatenation multiplies its exact dyadic prices. The paid-look schedule
+`1/((n+1)*(n+2))` has finite sum `n/(n+1)` and unspent tail `1/(n+1)`.
+The certificates bound the joint name/look rectangle and distinguish the
+optimistic opening allocation from the actual word price. They assume neither
+the concrete decoder law nor the Kraft inequality. Direct Lean term replay has
+empty axiom rosters; false controls cover truncation, discarded suffixes,
+undefined ordinals, altered schemas, renormalized holes and reused look prices.
+
+These are model laws for the stated constructors. A native grammar adapter must
+bind the complete frozen catalogs, field widths, lexical child order, recursive
+edges, actual code words, materialized bodies and retained pricing authority.
+A V2/V3 catalog whose selected address uses no control does not demonstrate a
+lexical or recursive encoding. Native VM semantics and physical ownership remain
+separate from a code-word replay.
 
 ## Adaptive observations
 

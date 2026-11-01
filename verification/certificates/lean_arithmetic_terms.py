@@ -1,9 +1,10 @@
 """Untrusted structural export of arithmetic certificates into Lean terms.
 
 This checks the *proof term* with Lean's kernel, separately from executing the
-reference checker. It deliberately supports only the explicit arithmetic data
-fragment below. Unsupported syntax is refused, never replaced by an axiom.
+reference checker. It supports the explicit arithmetic fragment and nonindexed algebraic
+data with value and recursive fields. Unsupported syntax is refused, never replaced by an axiom.
 """
+import hashlib
 import json
 
 
@@ -39,8 +40,66 @@ def pairValue {A : Type u} {B : Type v} (a : A) (b : B) : Sigma (fun _ : A => B)
 
 
 class Exporter:
-    def __init__(self):
+    def __init__(self, declarations=None):
         self.counter = 0
+        self.declarations = {} if declarations is None else declarations
+
+    @staticmethod
+    def data_type(kind):
+        if not isinstance(kind, tuple):
+            return kind
+        return f'(List {kind[1]})' if kind[0] == 'List' else '(' + ' '.join([kind[1], *kind[3]]) + ')'
+
+    def algebraic_data(self, decl, context):
+        """Export a complete nonindexed data schema with explicit type parameters.
+
+        Each nonrecursive field becomes a Type parameter instantiated by its
+        actual field type. This preserves open types without capturing local
+        Lean names in a global declaration. Native induction hypotheses are
+        interleaved with recursive fields, unlike Lean's generated recursor.
+        """
+        if type(decl['name']) is not str or type(decl['constructors']) is not list:
+            raise ValueError('malformed algebraic data')
+        fields, arguments = [], []
+        for constructor in decl['constructors']:
+            if type(constructor) is not list:
+                raise ValueError('malformed constructor fields')
+            row = []
+            for field in constructor:
+                if field == 'Recursive':
+                    row.append(None)
+                elif isinstance(field, dict) and set(field) == {'Value'}:
+                    row.append(f'A{len(arguments)}')
+                    arguments.append(self.term(field['Value'], context))
+                else:
+                    raise ValueError('unsupported algebraic data field')
+            fields.append(tuple(row))
+        key = json.dumps([decl['name'], fields], separators=(',', ':'))
+        name = 'WireData_' + hashlib.sha256(key.encode()).hexdigest()
+        if name not in self.declarations:
+            params = [f'A{i}' for i in range(len(arguments))]
+            applied_type = '(' + ' '.join([name, *params]) + ')'
+            constructors, parameters, branches = [], [], []
+            for index, row in enumerate(fields):
+                args = [f'a{i}' for i in range(len(row))]
+                constructors.append(f'  | c{index} : ' + ' → '.join([ty or applied_type for ty in row] + [applied_type]))
+                telescope, applied = [], []
+                for a, ty in zip(args, row):
+                    telescope.append(f'({a} : {ty or applied_type})'); applied.append(a)
+                    if ty is None:
+                        telescope.append(f'(_ih_{a} : motive {a})')
+                        applied.append(f'({name}.fold ' + ' '.join(f'case{i}' for i in range(len(fields))) + f' {a})')
+                target = f'motive ({name}.c{index} ' + ' '.join(args) + ')'
+                parameters.append(f'(case{index} : ' + ('∀ ' + ' '.join(telescope) + ', ' if telescope else '') + target + ')')
+                branches.append(f'  | .c{index} ' + ' '.join(args) + ' => ' + f'case{index} ' + ' '.join(applied))
+            declaration = f'inductive {name} ' + ' '.join(f'({p} : Type)' for p in params)
+            declaration += ' : Type where\n' + '\n'.join(constructors) + '\n'
+            declaration += f'def {name}.fold ' + ' '.join(f'{{{p} : Type}}' for p in params)
+            declaration += f' {{motive : {applied_type} → Type u}} ' + ' '.join(parameters)
+            declaration += f' : (x : {applied_type}) → motive x'
+            declaration += '\n' + '\n'.join(branches) + '\n' if branches else ' := fun x => nomatch x\n'
+            self.declarations[name] = declaration
+        return ('Wire', name, tuple(fields), tuple(arguments))
 
     def fresh(self):
         self.counter += 1
@@ -72,7 +131,9 @@ class Exporter:
                 and len(constructors[1]) == 2 and constructors[1][1] == 'Recursive'
                 and set(constructors[1][0]) == {'Value'}):
             return ('List', self.term(constructors[1][0]['Value'], context))
-        raise ValueError('unsupported arithmetic constructors')
+        if decl['name'] in ('Nat', 'Unit', 'Empty', 'List'):
+            raise ValueError('changed builtin arithmetic constructors')
+        return self.algebraic_data(decl, context)
 
     def term(self, term, context=()):
         if not isinstance(term, dict) or len(term) != 1:
@@ -116,7 +177,7 @@ class Exporter:
             return f'(let {name} := {definition};\n{body})'
         if kind == 'Data':
             data_kind = self.data(term, context)
-            return f'(List {data_kind[1]})' if isinstance(data_kind, tuple) else data_kind
+            return self.data_type(data_kind)
         if kind == 'Construct':
             if set(value) != {'data', 'constructor', 'args'}:
                 raise ValueError('malformed arithmetic constructor')
@@ -124,7 +185,10 @@ class Exporter:
             choices = {'Nat': [('Nat.zero', 0), ('Nat.succ', 1)],
                        'Unit': [('Unit.unit', 0)], 'Empty': [],
                        'List': [('List.nil', 0), ('List.cons', 2)]}
-            constructors = choices['List' if isinstance(data_kind, tuple) else data_kind]
+            if isinstance(data_kind, tuple) and data_kind[0] == 'Wire':
+                constructors = [(data_kind[1] + f'.c{i}', len(row)) for i, row in enumerate(data_kind[2])]
+            else:
+                constructors = choices['List' if isinstance(data_kind, tuple) else data_kind]
             index = value['constructor']
             if type(index) is not int or not 0 <= index < len(constructors):
                 raise ValueError('invalid arithmetic constructor index')
@@ -137,12 +201,12 @@ class Exporter:
             if set(value) != {'scrutinee', 'motive', 'cases'} or set(value['motive']) != {'Lam'}:
                 raise ValueError('unsupported arithmetic induction motive')
             data_kind = self.data(value['motive']['Lam'][0], context)
-            name = 'List' if isinstance(data_kind, tuple) else data_kind
-            arity = {'Nat': 2, 'List': 2, 'Unit': 1, 'Empty': 0}[name]
+            name = data_kind[0] if isinstance(data_kind, tuple) else data_kind
+            arity = len(data_kind[2]) if name == 'Wire' else {'Nat': 2, 'List': 2, 'Unit': 1, 'Empty': 0}[name]
             if len(value['cases']) != arity:
                 raise ValueError('invalid arithmetic induction cases')
             cases = ' '.join(f'({emit(case)})' for case in value['cases'])
-            recursor = 'listInduction' if name == 'List' else name + '.rec'
+            recursor = data_kind[1] + '.fold' if name == 'Wire' else ('listInduction' if name == 'List' else name + '.rec')
             return f'({recursor} (motive := {emit(value["motive"])}) {cases} ({emit(value["scrutinee"])}))'
         if kind in ('App', 'Pair'):
             if not isinstance(value, list) or len(value) != 2:
@@ -165,13 +229,13 @@ class Exporter:
 
 
 def source(cases):
-    parts = [PRELUDE]
+    parts, declarations = [], {}
     for index, (name, certificate, _) in enumerate(cases):
         # JSON round-trip forces the exact portable wire representation.
         certificate = json.loads(json.dumps(certificate))
-        exporter = Exporter()
+        exporter = Exporter(declarations)
         claim = exporter.term(certificate['claimed_type'])
         proof = exporter.term(certificate['term'])
         parts.append(f'-- {name}\ndef proof{index} : {claim} :=\n{proof}\n#print axioms proof{index}\n')
     parts.append('end PortableArithmetic\n')
-    return '\n'.join(parts)
+    return '\n'.join([PRELUDE, *declarations.values(), *parts])

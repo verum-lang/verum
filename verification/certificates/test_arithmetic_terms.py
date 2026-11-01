@@ -43,7 +43,7 @@ class ArithmeticTerms(unittest.TestCase):
 
     def test_exporter_refuses_unimplemented_or_changed_data(self):
         for term in ({'SmtProof': {}}, {'Var': -1}, {'Universe': {'Var': 'u'}},
-                     lower(data('Nat', [[]])), lower(data('PretendNat', [[], [RECURSIVE]])),
+                     lower(data('Nat', [[]])), {'Data': {'name': 'Bad', 'level': {'Concrete': 0}, 'constructors': [[{'Dependent': {'Var': 0}}]]}},
                      lower(data('Nat', [[], [RECURSIVE]], level=1))):
             with self.subTest(term=term), self.assertRaises(ValueError):
                 lean_arithmetic_terms.Exporter().term(term)
