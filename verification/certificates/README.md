@@ -19,6 +19,23 @@ hashes and producer sources. CI runs the dispatch, candidate-locality, diagnosti
 batteries. Rejection controls change the policy or evidence while retaining
 the property being checked; admission-limit rejection is not a passing control.
 
+## Constructive natural arithmetic
+
+`check_peano_arithmetic.py` checks addition, multiplication, structural order,
+positive cancellation and polynomial identities. Their proofs use natural
+induction and identity elimination; arithmetic and order laws are not assumed.
+The untrusted polynomial normalizer emits ordinary proof terms. Supplied lemma
+proofs are checked at explicit function applications, keeping proof reuse
+separate from unfolding computational definitions.
+
+`test_arithmetic_terms.py` also exports the exact wire terms to Lean definitions
+and asks Lean's kernel to check them, with empty axiom rosters. This is separate
+from running the Lean reference checker. The exporter accepts only its explicit
+natural/list/unit/empty arithmetic fragment; unsupported declarations are
+refused. Both replay routes reject false order, zero-factor cancellation and
+altered polynomial claims. These arithmetic laws alone do not establish a KT
+partition bound or correspondence with a native scorer.
+
 ## Adaptive observations
 
 `check_adaptive_observation.py` replays the universal laws in
