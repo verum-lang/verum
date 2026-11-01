@@ -108,6 +108,8 @@ class AcquiredDecoder:
         require(depth <= 64, 'Value tree exceeds extraction depth limit')
         require(type(item) is dict and 'kind' in item, 'Expected structured value')
         kind = item['kind']
+        if kind == 'ValueDag':
+            return self.value_dag(item)
         if kind == 'Unit':
             fields(item, 'kind'); return '.unit'
         if kind == 'Pair':
@@ -133,6 +135,93 @@ class AcquiredDecoder:
             fields(v, 'kind key')
             out = tag(v['kind'], ['Next', 'Refused']) + ' ' + natural(v['key'])
         return '(.outcome (' + out + '))'
+
+
+    def validate_value(self, item):
+        """Structural admission without emitting or comparing semantic terms.
+
+        Historical JSON trees may exceed the term emitter's nesting budget.
+        Visit them iteratively, retaining exact leaf checks. Object identities
+        detect cycles in in-memory callers only; they never establish equality.
+        """
+        active, visited, pending = set(), set(), [(item, False)]
+        while pending:
+            node, finish = pending.pop()
+            identity = id(node)
+            if finish:
+                active.remove(identity)
+                visited.add(identity)
+                continue
+            if identity in visited:
+                continue
+            require(identity not in active, 'Cyclic value tree')
+            require(type(node) is dict and 'kind' in node, 'Expected structured value')
+            active.add(identity)
+            pending.append((node, True))
+            if node['kind'] == 'Pair':
+                fields(node, 'kind first second')
+                pending.extend(((node['second'], False), (node['first'], False)))
+            elif node['kind'] == 'ValueDag':
+                self._value_dag(node)
+            else:
+                self.value(node)
+
+
+    def _value_dag(self, item):
+        """Validate the node table and order its local bindings, never a tree.
+
+        IDs are references, not values or equality witnesses. The topological
+        traversal accepts forward/back references independently of the native
+        encoder's BFS order. Lean must still check any resulting semantic claim;
+        linear extraction does not bound the cost of that separate proof.
+        """
+        fields(item, 'kind schema root nodes')
+        require(item['kind'] == 'ValueDag' and item['schema'] == 'synarc.value-dag.v1',
+                'Unknown value DAG schema')
+        require(type(item['root']) is int and item['root'] == 0, 'Value DAG root must be zero')
+        nodes = sequence(item['nodes'])
+        require(nodes, 'Empty value DAG')
+        children, expressions = [], []
+        for node in nodes:
+            require(type(node) is dict and 'kind' in node, 'Expected structured DAG node')
+            kind = node['kind']
+            if kind == 'Pair':
+                fields(node, 'kind first second')
+                refs = (node['first'], node['second'])
+                require(all(type(ref) is int and 0 <= ref < len(nodes) for ref in refs),
+                        'Invalid value DAG reference')
+                children.append(refs)
+                expressions.append(f'(.pair _dag{refs[0]} _dag{refs[1]})')
+            else:
+                require(kind != 'ValueDag', 'Nested value DAG node')
+                children.append(())
+                expressions.append(self.value(node))
+
+        # Enter/exit frames keep validation linear even for a deep graph whose
+        # two edges repeatedly share one child. No Python recursion is involved.
+        colour = bytearray(len(nodes))
+        order, pending = [], [(0, False)]
+        while pending:
+            index, finish = pending.pop()
+            if finish:
+                colour[index] = 2
+                order.append(index)
+                continue
+            if colour[index] == 2:
+                continue
+            require(colour[index] == 0, 'Cyclic value DAG')
+            colour[index] = 1
+            pending.append((index, True))
+            pending.extend((child, False) for child in reversed(children[index]))
+        require(len(order) == len(nodes), 'Unreachable value DAG node')
+        return order, expressions
+
+
+    def value_dag(self, item):
+        order, expressions = self._value_dag(item)
+        bindings = (f'let _dag{index} : AcquiredObserver.Value := {expressions[index]};'
+                    for index in order)
+        return '(' + ' '.join(bindings) + ' _dag0)'
 
 
     def primitive(self, item):

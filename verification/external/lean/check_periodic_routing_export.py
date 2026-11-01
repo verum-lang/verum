@@ -5,6 +5,8 @@ incumbent retention, allocation, or the complete engine. Source/binary provenanc
 and an independent native replay are required separately.
 """
 from fractions import Fraction
+from acquired_export_codec import SENSORY
+from observer_export_replay import fields
 
 
 def require(condition, message):
@@ -23,10 +25,18 @@ def natural(value):
 def check_incumbent(data):
     """Check only exported periodic boundaries, not the private VM transition.
 
+    Cut values are decoded strictly, including shared DAGs, but their contents
+    are not replayed through the VM by this boundary projection.
     The native court separately asserts actual acquisition, source/floor ownership
     and absence of legacy acquisition. Those fields are not exported here and
     cannot be inferred from a cut's current value or a successful test name.
     """
+    def validate_cut(cut):
+        fields(cut, 'definition owner state value')
+        for key in ('definition', 'owner', 'state'):
+            natural(cut[key])
+        SENSORY.validate_value(cut['value'])
+
     require(data['schema'] == 'synarc.native-routing-incumbent.v1', 'unsupported schema')
     initial, *boundaries = data['events']
     require(initial['kind'] == 'AcquiredIncumbent' and boundaries, 'missing acquired execution')
@@ -38,6 +48,7 @@ def check_incumbent(data):
     require(0 < numerator <= denominator, 'invalid acquired mass')
     ordinal, sitting = natural(initial['ordinal']), natural(initial['sitting'])
     cut = initial['cut']
+    validate_cut(cut)
     refusal = boundaries[0]['first_refused']
     require(natural(refusal['ordinal']) == ordinal, 'refusal moved beyond acquisition')
     probation = None
@@ -53,6 +64,7 @@ def check_incumbent(data):
                 'boundary phase or acquisition lease changed')
         require(natural(event['requests']) == natural(initial['ordinal']), 'acquisition resumed')
         current = event['cut']
+        validate_cut(current)
         require(all(current[key] == cut[key] for key in ('definition', 'owner')), 'cut owner replaced')
         require(natural(current['state']) == natural(cut['state']) + 1, 'missing native cut commit')
         remaining = natural(event['probation_left'])

@@ -81,5 +81,19 @@ class PeriodicRouting(unittest.TestCase):
         data['schema'] = 'synarc.native-periodic-routing.v0'
         with self.assertRaises(ValueError): check(data)
 
+    def test_incumbent_cut_value_structure_is_checked_without_vm_claims(self):
+        raw = gzip.decompress((FIXTURES / 'routing-incumbent-v1.json.gz').read_bytes())
+        data = json.loads(raw)
+        dag = dict(kind='ValueDag', schema='synarc.value-dag.v1', root=0, nodes=[
+            dict(kind='Pair', first=1, second=1), dict(kind='Nat', value=5)])
+        for event in data['events']:
+            event['cut']['value'] = copy.deepcopy(dag)
+        # Arbitrary well-formed values cannot establish native VM semantics.
+        self.assertEqual(check_incumbent(data), {'periodic_boundaries': 3, 'cut_commits': 3})
+        for index in (0, -1):
+            bad = copy.deepcopy(data)
+            bad['events'][index]['cut']['value']['nodes'][0]['first'] = 0
+            with self.subTest(index=index), self.assertRaises(ValueError): check_incumbent(bad)
+
 
 if __name__ == '__main__': unittest.main()
