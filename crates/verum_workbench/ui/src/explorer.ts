@@ -1,10 +1,11 @@
 import { api } from './api';
 import { icon } from './icons';
-import { m, t, setText, setAttribute } from './i18n';
-import { parentPath, fileName, projectedTree, visibleTree, changedDirectories, type ProjectEntry, type ProjectListing, type GitSnapshot, type GitChange, type TreeRow } from './project-tree';
+import { m, t, setText, setAttribute, currentLocale } from './i18n';
+import { parentPath, fileName, projectedTree, visibleTree, changedDirectories, retainedTreeFocus, type ProjectEntry, type ProjectListing, type GitSnapshot, type GitChange, type TreeRow } from './project-tree';
 
 export function installExplorer(hooks: { open(path: string): Promise<void>; review(change: GitChange): Promise<void>; failure(error: unknown): void; listed(root: string, entries: ProjectEntry[], directory: string): void }) {
   const tree = document.getElementById('file-list')!;
+  tree.replaceChildren(); // Remove the static loading placeholder once, before keyed rows exist.
   const filter = document.getElementById('file-filter') as HTMLInputElement;
   const changesButton = document.getElementById('changes-filter') as HTMLButtonElement;
   const gitStatus = document.getElementById('git-status')!;
@@ -18,7 +19,6 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
   let rows: TreeRow[] = [], typeahead = '', typeTimer = 0;
   const persist = () => { try { localStorage.setItem(`verum.studio.tree:${root}`, JSON.stringify([...expanded])); } catch { /* Session state remains usable. */ } };
   function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', value = '') { const item = document.createElement(tag); item.className = className; item.textContent = value; return item; }
-  function focused() { return tree.contains(document.activeElement) ? (document.activeElement as HTMLElement).closest<HTMLElement>('[data-path]')?.dataset.path : undefined; }
   function focus(path: string) {
     focusPath = path;
     for (const row of tree.querySelectorAll<HTMLElement>('[role="treeitem"]')) {
@@ -26,8 +26,33 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
       if (row.tabIndex === 0) { row.focus({ preventScroll: true }); row.scrollIntoView({ block: 'nearest' }); }
     }
   }
+  type Entry = {
+    item: HTMLDivElement; chevron: HTMLSpanElement; glyph: Element;
+    dot: HTMLSpanElement; badge: HTMLButtonElement; count: HTMLSpanElement;
+    row: TreeRow; change?: GitChange; signature: string;
+  };
+  const entries = new Map<string, Entry>();
+  function createEntry(row: TreeRow): Entry {
+    const item = element('div', 'tree-entry'); item.dataset.path = row.path;
+    item.setAttribute('role', 'treeitem'); item.title = row.path;
+    const chevron = element('span', 'tree-chevron'); chevron.setAttribute('aria-hidden', 'true');
+    const glyph = icon('file', 'tree-file-icon'), name = element('span', 'tree-name', fileName(row.path));
+    const dot = element('span', 'draft-dot', '●'); setAttribute(dot, 'aria-label', m('Unsaved changes'));
+    const badge = element('button', 'git-badge'); badge.type = 'button'; badge.tabIndex = -1;
+    setAttribute(badge, 'title', m('Review changes for {path} · Alt+Enter', { path: row.path }));
+    setAttribute(badge, 'aria-label', m('Review changes for {path} · Alt+Enter', { path: row.path }));
+    const count = element('span', 'tree-change-count');
+    item.append(chevron, glyph, name, dot, badge, count);
+    const entry: Entry = { item, chevron, glyph, dot, badge, count, row, signature: '' };
+    // Handlers read the current row/change even when its DOM node is retained.
+    badge.addEventListener('click', event => { event.stopPropagation(); if (entry.change) hooks.review(entry.change).catch(hooks.failure); });
+    item.addEventListener('click', () => { focusPath = entry.row.path; activate(entry.row).catch(hooks.failure); });
+    item.addEventListener('focus', () => { focusPath = entry.row.path; });
+    return entry;
+  }
   function render() {
-    const oldFocus = focused();
+    const active = tree.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+    const previousRows = rows;
     const changeMap = new Map(changes.entries.map(change => [change.path, change]));
     const counts = changedDirectories(changes.entries);
     const query = filter.value.trim().toLowerCase();
@@ -35,29 +60,45 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
       ? projectedTree(changes.entries.filter(change => change.path.toLowerCase().includes(query)).map(change => ({ path: change.path, kind: 'file', size: 0 })))
       : query ? projectedTree(search?.entries ?? []) : directories;
     rows = visibleTree(projection, expanded, changesOnly || !!query);
-    if (!rows.some(row => row.path === focusPath)) focusPath = rows.find(row => row.path === current)?.path ?? rows[0]?.path ?? '';
-    tree.replaceChildren();
+    const activePath = active?.closest<HTMLElement>('[data-path]')?.dataset.path;
+    focusPath = retainedTreeFocus(previousRows, rows, activePath ?? focusPath, current);
+    const retained = new Set(rows.map(row => row.path));
+    for (const [path, entry] of entries) if (!retained.has(path)) { entry.item.remove(); entries.delete(path); }
+    let cursor = tree.firstElementChild;
     for (const row of rows) {
       const change = changeMap.get(row.path), directory = row.kind === 'directory';
-      const item = element('div', 'tree-entry'); item.dataset.path = row.path;
-      item.setAttribute('role', 'treeitem'); item.setAttribute('aria-level', String(row.depth)); item.setAttribute('aria-posinset', String(row.position)); item.setAttribute('aria-setsize', String(row.siblings));
+      const opened = directory && (changesOnly || !!query || expanded.has(row.path));
+      const busy = directory && loading.has(row.path);
+      let entry = entries.get(row.path);
+      if (!entry) { entry = createEntry(row); entries.set(row.path, entry); }
+      entry.row = row; entry.change = change;
+      const { item, chevron, dot, badge, count } = entry;
       item.tabIndex = row.path === focusPath ? 0 : -1;
-      item.style.setProperty('--depth', String(row.depth - 1)); item.title = row.path;
-      item.setAttribute('aria-selected', String(row.path === current));
-      const chevron = element('span', 'tree-chevron'); if (directory) chevron.append(icon('chevronRight')); chevron.setAttribute('aria-hidden', 'true');
-      if (directory) { item.setAttribute('aria-expanded', String(changesOnly || !!query || expanded.has(row.path))); if (loading.has(row.path)) item.setAttribute('aria-busy', 'true'); }
-      const glyph = icon(directory ? expanded.has(row.path) || changesOnly || !!query ? 'folderOpen' : 'folder' : row.path.endsWith('.vr') ? 'source' : 'file', directory ? 'folder-icon' : 'tree-file-icon');
-      item.append(chevron, glyph, element('span', 'tree-name', fileName(row.path)));
-      if (row.path === current && unsaved) { const dot = element('span', 'draft-dot', '●'); setAttribute(dot, 'aria-label', m('Unsaved changes')); item.append(dot); }
-      if (change) {
-        const badge = element('button', 'git-badge', `${change.index}${change.worktree}`.replaceAll(' ', '·')); badge.type = 'button'; badge.tabIndex = -1;
-        badge.dataset.conflict = String(change.index === 'U' || change.worktree === 'U' || ['AA', 'DD'].includes(change.index + change.worktree));
-        setAttribute(badge, 'title', m('Review changes for {path} · Alt+Enter', { path: row.path })); setAttribute(badge, 'aria-label', m('Review changes for {path} · Alt+Enter', { path: row.path }));
-        badge.addEventListener('click', event => { event.stopPropagation(); hooks.review(change).catch(hooks.failure); }); item.append(badge);
-      } else if (counts.has(row.path)) { const count = element('span', 'tree-change-count', String(counts.get(row.path))); setAttribute(count, 'title', m('{count} changed files', { count: counts.get(row.path)! })); item.append(count); }
-      item.addEventListener('click', () => { focusPath = row.path; activate(row).catch(hooks.failure); });
-      item.addEventListener('focus', () => { focusPath = row.path; });
-      tree.append(item);
+      const signature = JSON.stringify([row.kind, row.depth, row.position, row.siblings, row.path === current,
+        row.path === current && unsaved, opened, busy, change?.index, change?.worktree, counts.get(row.path), currentLocale()]);
+      if (entry.signature !== signature) {
+        entry.signature = signature;
+        item.setAttribute('aria-level', String(row.depth)); item.setAttribute('aria-posinset', String(row.position)); item.setAttribute('aria-setsize', String(row.siblings));
+        item.style.setProperty('--depth', String(row.depth - 1));
+        item.setAttribute('aria-selected', String(row.path === current));
+        chevron.replaceChildren(...(directory ? [icon('chevronRight')] : []));
+        if (directory) item.setAttribute('aria-expanded', String(opened)); else item.removeAttribute('aria-expanded');
+        if (busy) item.setAttribute('aria-busy', 'true'); else item.removeAttribute('aria-busy');
+        const glyph = icon(directory ? opened ? 'folderOpen' : 'folder' : row.path.endsWith('.vr') ? 'source' : 'file', directory ? 'folder-icon' : 'tree-file-icon');
+        entry.glyph.replaceWith(glyph); entry.glyph = glyph;
+        dot.hidden = !(row.path === current && unsaved);
+        badge.hidden = !change;
+        if (change) {
+          badge.textContent = `${change.index}${change.worktree}`.replaceAll(' ', '·');
+          badge.dataset.conflict = String(change.index === 'U' || change.worktree === 'U' || ['AA', 'DD'].includes(change.index + change.worktree));
+        }
+        count.hidden = !!change || !counts.has(row.path);
+        if (!count.hidden) { count.textContent = String(counts.get(row.path)); setAttribute(count, 'title', m('{count} changed files', { count: counts.get(row.path)! })); }
+      }
+      // Unchanged rows never leave the DOM. Reordering may blur a descendant in
+      // older browsers; restore that exact element below without scrolling.
+      if (item !== cursor) tree.insertBefore(item, cursor);
+      cursor = item.nextElementSibling;
     }
     const status = searchError || (searchPending && !changesOnly ? t(m('Searching project…')) : search?.truncated && query && !changesOnly ? t(m('Search limit reached. Narrow the query.')) : !rows.length ? t(m(changesOnly ? 'No visible changed files.' : query ? 'No matching files.' : 'This folder is empty.')) : '');
     setText(searchStatus, status); searchStatus.hidden = !status;
@@ -66,7 +107,10 @@ export function installExplorer(hooks: { open(path: string): Promise<void>; revi
     setText(document.getElementById('changes-count')!, String(changes.entries.length));
     changesButton.disabled = changes.state !== 'ready'; changesButton.setAttribute('aria-pressed', String(changesOnly));
     setText(document.getElementById('files-rail-status')!, changes.entries.length ? `${changes.entries.length} Δ` : '');
-    if (oldFocus && rows.some(row => row.path === oldFocus)) focus(oldFocus);
+    if (active) {
+      const target = active.isConnected && !active.closest('[hidden]') ? active : entries.get(focusPath)?.item ?? filter;
+      if (target && document.activeElement !== target) target.focus({ preventScroll: true });
+    }
   }
   async function load(path: string, force = false) {
     if (loading.has(path)) return loading.get(path);

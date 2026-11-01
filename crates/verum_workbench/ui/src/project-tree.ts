@@ -38,3 +38,13 @@ export function changedDirectories(changes: GitChange[]): Map<string, number> {
   for (const change of changes) for (let parent = parentPath(change.path); parent; parent = parentPath(parent)) result.set(parent, (result.get(parent) ?? 0) + 1);
   return result;
 }
+
+/** Keep the logical keyboard position when a refreshed path disappears. */
+export function retainedTreeFocus(previous: TreeRow[], next: TreeRow[], focused: string, current: string): string {
+  const paths = new Set(next.map(row => row.path));
+  if (paths.has(focused)) return focused;
+  for (let parent = parentPath(focused); parent; parent = parentPath(parent)) if (paths.has(parent)) return parent;
+  const index = previous.findIndex(row => row.path === focused);
+  if (index >= 0 && next.length) return next[Math.min(index, next.length - 1)].path;
+  return paths.has(current) ? current : next[0]?.path ?? '';
+}
