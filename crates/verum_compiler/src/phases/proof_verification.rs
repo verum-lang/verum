@@ -1213,15 +1213,13 @@ fn verify_proof_steps_accumulating_ctx(
             }
 
             // ---- Let: bind a local definition ----
-            ProofStepKind::Let { pattern: _, value } => {
-                // Let bindings in proofs introduce definitional equalities.
-                // We add the value expression as a hypothesis.
-                hypotheses.push(value.as_ref().clone());
-
-                verified.push(VerifiedStep {
-                    description: Text::from(format!("let := {}", format_expr(value))),
-                    tactic_used: Text::from("let"),
-                    duration: step_start.elapsed(),
+            ProofStepKind::Let { .. } => {
+                // A definition is not a proposition. Scoped substitution,
+                // annotation checking and definedness need evidence before a
+                // local binding can affect the logical context.
+                return Err(ProofVerificationError::StepFailed {
+                    step: Text::from("let"),
+                    reason: Text::from("local proof definitions require checked scoped binding semantics, which this backend does not support"),
                 });
             }
 

@@ -252,16 +252,11 @@ impl<'a> RecursiveParser<'a> {
                     reqs.extend(self.parse_contract_expr_list()?);
                     continue;
                 }
-                // given clause: `given name: Type` - treat as named hypothesis (like requires)
                 if self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("given"))) {
-                    self.stream.advance(); // consume "given"
-                    // Parse `name: expr` as a requires
-                    let _name = self.consume_ident()?;
-                    if self.stream.consume(&TokenKind::Colon).is_some() {
-                        let expr = self.parse_expr_no_struct()?;
-                        reqs.push(expr);
-                    }
-                    continue;
+                    return Err(ParseError::invalid_theorem(
+                        "named given clauses are not supported; declare a typed theorem parameter",
+                        self.stream.current_span(),
+                    ));
                 }
                 // ensures clause
                 self.skip_ghost_prefix_before(&TokenKind::Ensures);
@@ -269,15 +264,11 @@ impl<'a> RecursiveParser<'a> {
                     enss.extend(self.parse_contract_expr_list()?);
                     continue;
                 }
-                // `from <ident>` clause — provenance marker used by
-                // corollaries to name the theorem they follow from.
-                // Parsed and discarded at the parser level; the trace
-                // is preserved in documentation and the SMT backend
-                // re-derives the obligation independently.
                 if self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("from"))) {
-                    self.stream.advance();
-                    let _parent = self.consume_ident()?;
-                    continue;
+                    return Err(ParseError::invalid_theorem(
+                        "corollary provenance clauses are not supported; state the conclusion and apply its theorem explicitly",
+                        self.stream.current_span(),
+                    ));
                 }
                 break;
             }
@@ -1089,25 +1080,14 @@ impl<'a> RecursiveParser<'a> {
         ))
     }
 
-    /// Skip a balanced brace block `{ ... }`, including nested braces.
-    /// Used to skip optional configuration blocks on tactics.
-    fn skip_balanced_braces(&mut self) {
-        if self.stream.consume(&TokenKind::LBrace).is_none() {
-            return;
+    fn reject_unrepresented_tactic_config(&self) -> ParseResult<()> {
+        if self.stream.check(&TokenKind::LBrace) {
+            return Err(ParseError::malformed_tactic(
+                "configuration blocks are not supported for this tactic",
+                self.stream.current_span(),
+            ));
         }
-        let mut depth: u32 = 1;
-        while depth > 0 && !self.stream.at_end() {
-            if self.stream.check(&TokenKind::LBrace) {
-                depth += 1;
-            } else if self.stream.check(&TokenKind::RBrace) {
-                depth -= 1;
-                if depth == 0 {
-                    self.stream.advance(); // consume closing brace
-                    return;
-                }
-            }
-            self.stream.advance();
-        }
+        Ok(())
     }
 
     pub fn parse_proof_body(&mut self) -> ParseResult<ProofBody> {
@@ -1161,9 +1141,10 @@ impl<'a> RecursiveParser<'a> {
             }
             // By method inside block
             Some(TokenKind::By) => {
-                let method = self.parse_proof_method_inner()?;
-                self.stream.expect(TokenKind::RBrace)?;
-                Ok(ProofBody::ByMethod(method))
+                let body = self.parse_proof_by_method()?;
+                self.stream.consume(&TokenKind::Semicolon);
+                self.expect_proof_body_close()?;
+                Ok(body)
             }
             // Tactic proof
             Some(TokenKind::Trivial)
@@ -1252,107 +1233,8 @@ impl<'a> RecursiveParser<'a> {
     /// Parse structured proof after 'proof' keyword.
     /// Handles: `proof by tactic`, `proof = term`, `proof { ... }`
     fn parse_structured_proof(&mut self) -> ParseResult<ProofBody> {
-        // proof by method/tactic
-        if self.stream.consume(&TokenKind::By).is_some() {
-            // A named induction/cases tactic without a case block belongs to
-            // the ordinary tactic sequence. Routing it through ProofMethod
-            // would discard subsequent tactics instead of preserving evidence.
-            if self.starts_named_elimination_tactic() {
-                return Ok(ProofBody::Tactic(self.parse_tactic_expr_with_commas()?));
-            }
-            // Check if this is a proof method (induction, cases, contradiction) that has a body
-            // vs a simple tactic (simp, ring, omega, etc.)
-            match self.stream.peek_kind() {
-                Some(TokenKind::Induction)
-                | Some(TokenKind::Cases)
-                | Some(TokenKind::Contradiction) => {
-                    let method = self.parse_proof_method_inner()?;
-                    return self.finish_proof_method(method);
-                }
-                // Handle named proof methods like `strong_induction on n { ... }`
-                // Also handles: well_founded_induction on (m, n) ordered_by ... { ... }
-                //  mutual_induction on is_even, is_odd { ... }
-                //  contrapositive { ... }
-                Some(TokenKind::Ident(_)) => {
-                    // Check if the identifier is followed by "on" (induction-like method)
-                    // or directly by `{` (contradiction-like method)
-                    let next1 = self.stream.peek_nth_kind(1);
-                    let is_on = matches!(next1, Some(TokenKind::Ident(n)) if n.as_str() == "on");
-                    let is_brace = matches!(next1, Some(TokenKind::LBrace));
-
-                    if is_on {
-                        // Pattern: <name> on <expr/ident> [ordered_by <expr>] { cases }
-                        let _method_name = self.consume_ident()?;
-                        self.stream.advance(); // consume "on"
-
-                        // Parse the "on" target: could be ident, tuple, or comma-separated idents
-                        let var = if self.stream.check(&TokenKind::LParen) {
-                            // Tuple form: on (m, n)
-                            let _tuple = self.parse_expr()?;
-                            Ident::new(Text::from("_tuple"), self.stream.current_span())
-                        } else {
-                            Ident::new(self.consume_ident()?, self.stream.current_span())
-                        };
-
-                        // Consume additional comma-separated targets: on is_even, is_odd
-                        while self.stream.consume(&TokenKind::Comma).is_some() {
-                            if self.stream.check(&TokenKind::LBrace) || self.stream.at_end() {
-                                break;
-                            }
-                            let _extra = self.consume_ident()?;
-                        }
-
-                        // Optional `ordered_by expr`
-                        if self.stream.peek_kind()
-                            == Some(&TokenKind::Ident(Text::from("ordered_by")))
-                        {
-                            self.stream.advance();
-                            let _order = self.parse_expr_no_struct()?;
-                        }
-
-                        // Optional cases block
-                        if self.stream.check(&TokenKind::LBrace) {
-                            self.stream.advance();
-                            let cases = self.parse_proof_cases()?;
-                            self.stream.expect(TokenKind::RBrace)?;
-                            return Ok(ProofBody::ByMethod(ProofMethod::Induction {
-                                on: Maybe::Some(var),
-                                cases: cases.into_iter().collect(),
-                            }));
-                        } else {
-                            return Ok(ProofBody::ByMethod(ProofMethod::Induction {
-                                on: Maybe::Some(var),
-                                cases: List::new(),
-                            }));
-                        }
-                    } else if is_brace {
-                        // Pattern: <name> { ... } - like `contrapositive { ... }`
-                        let _method_name = self.consume_ident()?;
-                        self.stream.advance(); // consume {
-                        let mut steps = Vec::new();
-                        while !self.stream.check(&TokenKind::RBrace) && !self.stream.at_end() {
-                            let step = self.parse_proof_step()?;
-                            steps.push(step);
-                            self.stream.consume(&TokenKind::Semicolon);
-                        }
-                        self.stream.expect(TokenKind::RBrace)?;
-                        return Ok(ProofBody::ByMethod(ProofMethod::Contradiction {
-                            assumption: Ident::new(
-                                Text::from("_contrapositive"),
-                                self.stream.current_span(),
-                            ),
-                            proof: steps.into_iter().collect(),
-                        }));
-                    }
-
-                    let tactic = self.parse_tactic_expr_with_commas()?;
-                    return Ok(ProofBody::Tactic(tactic));
-                }
-                _ => {
-                    let tactic = self.parse_tactic_expr_with_commas()?;
-                    return Ok(ProofBody::Tactic(tactic));
-                }
-            }
+        if self.stream.check(&TokenKind::By) {
+            return self.parse_proof_by_method();
         }
 
         // proof = term
@@ -1462,77 +1344,27 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.advance();
                 let pattern = self.parse_pattern()?;
 
-                // Handle comma-separated bindings: let p, q such that expr
-                // Skip additional comma-separated identifiers
-                while self.stream.consume(&TokenKind::Comma).is_some() {
-                    if self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("such"))) {
-                        break;
-                    }
-                    // Parse and discard additional binding names
-                    let _ = self.parse_pattern()?;
+                if self.stream.check(&TokenKind::Comma)
+                    || self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("such")))
+                {
+                    return Err(ParseError::malformed_tactic(
+                        "existential let bindings are not supported; use an explicit obtain pattern",
+                        self.stream.current_span(),
+                    ));
                 }
-
-                // Check for "such that" syntax: let a, b such that expr
-                if self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("such"))) {
-                    self.stream.advance(); // consume "such"
-                    // expect "that"
-                    if self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("that"))) {
-                        self.stream.advance(); // consume "that"
+                let ty = if self.stream.consume(&TokenKind::Colon).is_some() {
+                    if self.stream.check(&TokenKind::Eq)
+                        || matches!(self.stream.peek_kind(), Some(TokenKind::Integer(_) | TokenKind::Float(_)))
+                    {
+                        return Err(ParseError::let_invalid_type_or_pattern(
+                            "expected a type after ':'", self.stream.current_span(),
+                        ));
                     }
-                    let constraint = self.parse_expr()?;
-                    // Treat as a tactic step (existential elimination)
-                    ProofStepKind::Tactic(TacticExpr::Named {
-                        name: Ident::new(Text::from("such_that"), self.stream.current_span()),
-                        args: List::from_iter(std::iter::once(constraint)),
-                        generic_args: List::new(),
-                    })
-                } else {
-                    // Optional type annotation (`let x: Type = expr` form).
-                    // Mirrors the regular `let_stmt` parser at
-                    // `stmt.rs::parse_let_stmt` (line ~348). Pre-fix
-                    // proof-block lets had to be untyped — the parser
-                    // saw the `:` and immediately demanded `=`, which
-                    // surfaced as a "unexpected `:`, expected operator
-                    // `=`" error for any `let X: T = e` inside `proof`.
-                    // The pre-existing stdlib worked around this by
-                    // emitting `let X = e` (no annotation) AND swallowed
-                    // warnings for files like core/action/monads/{pure,
-                    // probability, state}.vr that DID write annotations
-                    // (those produced parse cascades that
-                    // lenient-skip-codegen absorbed). This restores the
-                    // documented `[ ':' , type_expr ]` slot from
-                    // `grammar/verum.ebnf::let_stmt`. The annotation is
-                    // currently discarded — `ProofStepKind::Let` carries
-                    // only `{ pattern, value }`, so the type annotation
-                    // is informational. Adding a `ty` field is a
-                    // ripple-through AST change tracked separately.
-                    if self.stream.consume(&TokenKind::Colon).is_some() {
-                        // Mirror E043 from stmt.rs: catch missing-type
-                        // and literal-as-type before they cascade.
-                        if self.stream.check(&TokenKind::Eq) {
-                            return Err(ParseError::let_invalid_type_or_pattern(
-                                "missing type after ':'",
-                                self.stream.current_span(),
-                            ));
-                        }
-                        if matches!(
-                            self.stream.peek_kind(),
-                            Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                        ) {
-                            return Err(ParseError::let_invalid_type_or_pattern(
-                                "literals cannot be used as types",
-                                self.stream.current_span(),
-                            ));
-                        }
-                        let _ty = self.parse_type()?;
-                    }
-                    self.stream.expect(TokenKind::Eq)?;
-                    let value = self.parse_expr()?;
-                    ProofStepKind::Let {
-                        pattern,
-                        value: Heap::new(value),
-                    }
-                }
+                    Maybe::Some(self.parse_type()?)
+                } else { Maybe::None };
+                self.stream.expect(TokenKind::Eq)?;
+                let value = self.parse_expr()?;
+                ProofStepKind::Let { pattern, ty, value: Heap::new(value) }
             }
 
             // obtain pattern from source
@@ -1712,20 +1544,10 @@ impl<'a> RecursiveParser<'a> {
                         if self.is_ident() {
                             let ident_name = self.consume_ident()?;
                             if self.stream.consume(&TokenKind::Colon).is_some() {
-                                // assume name: proposition; - named hypothesis
-                                // Parse as expression (proposition), not type
-                                let _prop = self.parse_expr()?;
-                                self.stream.consume(&TokenKind::Semicolon);
-                                ProofStepKind::Tactic(TacticExpr::Named {
-                                    name: Ident::new(
-                                        Text::from("assume"),
-                                        self.stream.current_span(),
-                                    ),
-                                    generic_args: List::new(),
-                                    args: List::from_iter(std::iter::once(Expr::ident(
-                                        Ident::new(ident_name, self.stream.current_span()),
-                                    ))),
-                                })
+                                return Err(ParseError::malformed_tactic(
+                                    "named assume clauses are not supported; introduce a declared hypothesis explicitly",
+                                    self.stream.current_span(),
+                                ));
                             } else {
                                 // Not a binding, restore and parse as expression
                                 self.stream.reset_to(checkpoint);
@@ -1779,87 +1601,15 @@ impl<'a> RecursiveParser<'a> {
                 })
             }
 
-            // Proof keyword as a proof step (e.g., `proof by omega` inside a block)
-            Some(TokenKind::Proof) => {
+            // Nested bodies must not turn into trivial or placeholder calls.
+            Some(TokenKind::Proof) | Some(TokenKind::By) => {
                 let body = self.parse_proof_body()?;
                 match body {
-                    ProofBody::Tactic(t) => ProofStepKind::Tactic(t),
-                    ProofBody::ByMethod(m) => ProofStepKind::Tactic(TacticExpr::Named {
-                        name: Ident::new(Text::from("proof_method"), self.stream.current_span()),
-                        args: List::new(),
-                        generic_args: List::new(),
-                    }),
-                    _ => ProofStepKind::Tactic(TacticExpr::Trivial),
-                }
-            }
-
-            // By keyword as a proof step (e.g., `by omega` inside a structured block)
-            // Also handles: `by induction on n { case ... }`, `by cases { ... }`
-            Some(TokenKind::By) => {
-                self.stream.advance(); // consume 'by'
-                // Check if this is a proof method (induction/cases/contradiction) with a body
-                match self.stream.peek_kind() {
-                    Some(TokenKind::Induction)
-                    | Some(TokenKind::Cases)
-                    | Some(TokenKind::Contradiction) => {
-                        let method = self.parse_proof_method_inner()?;
-                        ProofStepKind::Tactic(TacticExpr::Named {
-                            name: Ident::new(
-                                Text::from("_proof_method"),
-                                self.stream.current_span(),
-                            ),
-                            args: List::new(),
-                            generic_args: List::new(),
-                        })
-                    }
-                    // Named proof methods: strong_induction, well_founded_induction, etc.
-                    Some(TokenKind::Ident(name))
-                        if {
-                            let next = self.stream.peek_nth_kind(1);
-                            matches!(next, Some(TokenKind::Ident(n)) if n.as_str() == "on")
-                                || matches!(next, Some(TokenKind::LBrace))
-                        } =>
-                    {
-                        // Check if this looks like a proof method with cases
-                        let checkpoint = self.stream.position();
-                        let _method_name = self.consume_ident()?;
-                        if self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("on"))) {
-                            self.stream.advance(); // consume "on"
-                            // Skip the "on" target
-                            if self.stream.check(&TokenKind::LParen) {
-                                let _ = self.parse_expr()?;
-                            } else if self.is_ident() {
-                                self.stream.advance();
-                            }
-                            // Skip comma-separated additional targets
-                            while self.stream.consume(&TokenKind::Comma).is_some() {
-                                if self.stream.check(&TokenKind::LBrace) || self.stream.at_end() {
-                                    break;
-                                }
-                                if self.is_ident() {
-                                    self.stream.advance();
-                                }
-                            }
-                        }
-                        // Parse optional cases block
-                        if self.stream.check(&TokenKind::LBrace) {
-                            self.stream.advance();
-                            let cases = self.parse_proof_cases()?;
-                            self.stream.expect(TokenKind::RBrace)?;
-                        }
-                        ProofStepKind::Tactic(TacticExpr::Named {
-                            name: Ident::new(
-                                Text::from("_proof_method"),
-                                self.stream.current_span(),
-                            ),
-                            args: List::new(),
-                            generic_args: List::new(),
-                        })
-                    }
-                    _ => {
-                        let tactic = self.parse_tactic_expr_with_commas()?;
-                        ProofStepKind::Tactic(tactic)
-                    }
+                    ProofBody::Tactic(tactic) => ProofStepKind::Tactic(tactic),
+                    _ => return Err(ParseError::malformed_tactic(
+                        "nested structured methods and term proofs are not supported as proof steps",
+                        self.stream.make_span(start_pos),
+                    )),
                 }
             }
 
@@ -2067,20 +1817,10 @@ impl<'a> RecursiveParser<'a> {
                 {
                     pat
                 } else if self.is_ident() {
-                    // Constructor pattern with space-separated argument: `left a`, `succ(k)`
-                    // Consume additional argument identifiers until we see => or {
-                    while self.is_ident()
-                        && !self.stream.check(&TokenKind::FatArrow)
-                        && !self.stream.check(&TokenKind::LBrace)
-                        && !self.stream.check(&TokenKind::Where)
-                    {
-                        self.stream.advance();
-                        // If we see `(`, consume a parenthesized sub-expression
-                        if self.stream.check(&TokenKind::LParen) {
-                            let _ = self.parse_expr()?;
-                        }
-                    }
-                    pat
+                    return Err(ParseError::malformed_tactic(
+                        "constructor case arguments require a parenthesized pattern",
+                        self.stream.current_span(),
+                    ));
                 } else {
                     // Not a valid case continuation - parse as expression instead
                     self.stream.reset_to(checkpoint);
@@ -2202,13 +1942,66 @@ impl<'a> RecursiveParser<'a> {
     /// Parse proof by method.
     fn parse_proof_by_method(&mut self) -> ParseResult<ProofBody> {
         self.stream.expect(TokenKind::By)?;
-        let method = self.parse_proof_method_inner()?;
-        self.finish_proof_method(method)
+        if self.starts_named_elimination_tactic() {
+            return Ok(ProofBody::Tactic(self.parse_tactic_expr_with_commas()?));
+        }
+        let named_method = matches!(self.stream.peek_kind(), Some(TokenKind::Ident(name))
+            if matches!(name.as_str(), "strong_induction" | "well_founded_induction"));
+        if named_method || matches!(self.stream.peek_kind(),
+            Some(TokenKind::Induction | TokenKind::Cases | TokenKind::Contradiction))
+        {
+            let method = self.parse_proof_method_inner()?;
+            return self.finish_proof_method(method);
+        }
+        if matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
+            && (matches!(self.stream.peek_nth_kind(1), Some(TokenKind::Ident(name)) if name.as_str() == "on")
+                || self.stream.peek_nth_kind(1) == Some(&TokenKind::LBrace))
+        {
+            return Err(ParseError::malformed_tactic(
+                "unknown structured proof method; it cannot be interpreted as induction or contradiction",
+                self.stream.current_span(),
+            ));
+        }
+        Ok(ProofBody::Tactic(self.parse_tactic_expr_with_commas()?))
     }
 
     /// Parse the inner proof method after 'by'.
     fn parse_proof_method_inner(&mut self) -> ParseResult<ProofMethod> {
         match self.stream.peek_kind() {
+            Some(TokenKind::Ident(name))
+                if matches!(name.as_str(), "strong_induction" | "well_founded_induction") =>
+            {
+                let method = self.consume_ident()?;
+                if self.stream.peek_kind() != Some(&TokenKind::Ident(Text::from("on"))) {
+                    return Err(ParseError::malformed_tactic(
+                        "named induction requires 'on' followed by one variable",
+                        self.stream.current_span(),
+                    ));
+                }
+                self.stream.advance();
+                let span = self.stream.current_span();
+                let on = Ident::new(self.consume_ident()?, span);
+                let relation = if method.as_str() == "well_founded_induction" {
+                    if self.stream.peek_kind() != Some(&TokenKind::Ident(Text::from("ordered_by"))) {
+                        return Err(ParseError::malformed_tactic(
+                            "well-founded induction requires an explicit ordered_by relation",
+                            self.stream.current_span(),
+                        ));
+                    }
+                    self.stream.advance();
+                    Some(Heap::new(self.parse_expr_no_struct()?))
+                } else { None };
+                let cases = if self.stream.consume(&TokenKind::LBrace).is_some() {
+                    let cases = self.parse_proof_cases()?;
+                    self.stream.expect(TokenKind::RBrace)?;
+                    cases.into_iter().collect()
+                } else { List::new() };
+                Ok(match relation {
+                    Some(relation) => ProofMethod::WellFoundedInduction { relation, on, cases },
+                    None => ProofMethod::StrongInduction { on, cases },
+                })
+            }
+
             Some(TokenKind::Induction) => {
                 self.stream.advance();
 
@@ -2487,44 +2280,13 @@ impl<'a> RecursiveParser<'a> {
     pub fn parse_tactic_expr(&mut self) -> ParseResult<TacticExpr> {
         let tactic = self.parse_tactic_or()?;
 
-        // Handle optional `using` modifier: `tactic using [hints]` or `tactic using hint`
-        // This allows: `proof by smt using LRA`, `proof by auto using [lemma1, lemma2]`
         if self.stream.check(&TokenKind::Using) {
-            self.stream.advance();
-            // Parse the hints - either a bracketed list or a single identifier
-            let _hints = if self.stream.check(&TokenKind::LBracket) {
-                self.stream.advance();
-                let hints = self.comma_separated(|p| p.parse_expr())?;
-                self.stream.expect(TokenKind::RBracket)?;
-                hints
-            } else if self.is_ident() {
-                // Single hint or hint category followed by [hint_list]
-                // Parse just the identifier (not as a full expression) to prevent
-                // `using hints [list]` from being parsed as `hints[list]` index
-                let hint_name = self.consume_ident()?;
-                let hint = Expr::ident(Ident::new(hint_name, self.stream.current_span()));
-                // Check for optional bracket list after hint category name
-                // E.g., `using hints [list_hints, set_hints]`
-                if self.stream.check(&TokenKind::LBracket) {
-                    self.stream.advance();
-                    let mut hints = self.comma_separated(|p| p.parse_expr())?;
-                    self.stream.expect(TokenKind::RBracket)?;
-                    hints.insert(0, hint);
-                    hints
-                } else {
-                    vec![hint]
-                }
-            } else {
-                // Fallback: parse as expression
-                let hint = self.parse_expr()?;
-                vec![hint]
-            };
-            // For now, we discard the hints and return the base tactic
-            // A future implementation would attach hints to the tactic
-            Ok(tactic)
-        } else {
-            Ok(tactic)
+            return Err(ParseError::malformed_tactic(
+                "using modifiers are not supported for proof tactics; pass supported tactic arguments explicitly",
+                self.stream.current_span(),
+            ));
         }
+        Ok(tactic)
     }
 
     /// Parse a tactic expression that may include comma-separated justifications.
@@ -2877,10 +2639,7 @@ impl<'a> RecursiveParser<'a> {
             }
             Some(TokenKind::Omega) => {
                 self.stream.advance();
-                // Skip optional config block: omega { theory: divmod }
-                if self.stream.check(&TokenKind::LBrace) {
-                    self.skip_balanced_braces();
-                }
+                self.reject_unrepresented_tactic_config()?;
                 Ok(TacticExpr::Omega)
             }
 
@@ -2897,26 +2656,17 @@ impl<'a> RecursiveParser<'a> {
                     } else {
                         List::new()
                     };
-                // Skip optional config block: auto { depth: 10, ... }
-                if self.stream.check(&TokenKind::LBrace) {
-                    self.skip_balanced_braces();
-                }
+                self.reject_unrepresented_tactic_config()?;
                 Ok(TacticExpr::Auto { with_hints })
             }
             Some(TokenKind::Blast) => {
                 self.stream.advance();
-                // Skip optional config block: blast { depth: 5 }
-                if self.stream.check(&TokenKind::LBrace) {
-                    self.skip_balanced_braces();
-                }
+                self.reject_unrepresented_tactic_config()?;
                 Ok(TacticExpr::Blast)
             }
             Some(TokenKind::Smt) => {
                 self.stream.advance();
-                // Skip optional config block: smt { solver: z3, timeout: 5000 }
-                if self.stream.check(&TokenKind::LBrace) {
-                    self.skip_balanced_braces();
-                }
+                self.reject_unrepresented_tactic_config()?;
                 let solver = Maybe::None;
                 let timeout = Maybe::None;
                 Ok(TacticExpr::Smt { solver, timeout })

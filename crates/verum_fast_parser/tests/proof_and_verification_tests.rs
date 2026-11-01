@@ -246,8 +246,8 @@ fn test_corollary_basic() {
             proof by ring
 
         corollary zero_add(x: Int)
-            from base_theorem
-            proof by auto
+            ensures x + 0 == x
+            proof by apply(base_theorem)
     "#;
     let module = parse_module(source);
     assert!(module.items.len() >= 2);
@@ -1256,7 +1256,7 @@ fn test_rank2_fn_type_as_parameter() {
 // grammar (grammar/verum.ebnf) documents the optional type slot — proof
 // blocks should honour the same syntax. The pre-existing stdlib was
 // silently emitting parse warnings (lenient-skip codegen swallowed them);
-// post-fix the warnings are gone and the type-annotated lets parse cleanly.
+// An accepted annotation must also survive in the AST for the proof backend.
 // ============================================================================
 
 #[test]

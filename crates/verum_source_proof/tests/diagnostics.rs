@@ -79,6 +79,25 @@ fn structured_method_continuations_fail_at_the_separator_before_admission() {
         );
     }
 }
+
+#[test]
+fn unsupported_modifiers_and_method_aliases_fail_before_proof_admission() {
+    for proof in [
+        "proof by assumption using [x]",
+        "proof by auto { depth: 0 }",
+        "proof by invented_method on x {}",
+        "proof by contrapositive { exact(x); }",
+        "proof { proof = x; }",
+        "proof { assume h: false; }",
+    ] {
+        let source = format!("// Ω🙂\r\ntheorem t(A:Type,x:A):A {proof};");
+        let report = check(&source);
+        assert_eq!(report.status, "rejected", "{source}: {report:?}");
+        assert_eq!(report.diagnostic.as_ref().unwrap().code, "source_parse_error");
+        assert!(report.native.is_none());
+        range(&source, &report);
+    }
+}
 #[test]
 fn success_and_legacy_reports_have_no_diagnostic_location() {
     let report = check("theorem t(A:Type,x:A):A proof=x;");

@@ -50,6 +50,24 @@ fn verify(source: &str) -> ProofVerificationResult {
 }
 
 #[test]
+fn local_values_are_neither_assumptions_nor_equations_about_free_parameters() {
+    for source in [
+        "theorem t(): false proof { let x = false; show false by assumption; }",
+        "theorem t(): false proof { let x: Bool = false; show false by assumption; }",
+        "theorem t(x:Bool): x == false proof by { let x = false; assumption };",
+        "theorem t(x:Bool): x == false proof by { let x: Bool = false; assumption };",
+    ] {
+        let result = verify(source);
+        let ProofVerificationResult::Failed { unproved, .. } = result else {
+            panic!("unsupported local binding verified: {source}\n{result:?}");
+        };
+        assert!(format!("{unproved:?}").contains("checked scoped binding semantics"), "{source}: {unproved:?}");
+    }
+    assert!(matches!(verify("theorem t(x:Bool) requires x == false : x == false proof by assumption;"),
+        ProofVerificationResult::Verified(_)));
+}
+
+#[test]
 fn matching_contracts_cannot_discharge_a_different_proposition() {
     let result = verify(
         r#"

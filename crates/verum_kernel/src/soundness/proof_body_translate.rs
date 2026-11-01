@@ -1948,6 +1948,7 @@ mod tests {
         use verum_ast::pattern::{Pattern, PatternKind};
         let let_step = ProofStep {
             kind: ProofStepKind::Let {
+                ty: Maybe::None,
                 pattern: Pattern::new(
                     PatternKind::Ident {
                         by_ref: false,
@@ -1995,6 +1996,7 @@ mod tests {
         use verum_ast::pattern::{Pattern, PatternKind};
         let let_step = |name: &str| ProofStep {
             kind: ProofStepKind::Let {
+                ty: Maybe::None,
                 pattern: Pattern::new(
                     PatternKind::Ident {
                         by_ref: false,
@@ -2123,6 +2125,7 @@ mod tests {
         use verum_ast::pattern::{Pattern, PatternKind};
         let let_step = |name: &str| ProofStep {
             kind: ProofStepKind::Let {
+                ty: Maybe::None,
                 pattern: Pattern::new(
                     PatternKind::Ident {
                         by_ref: false,

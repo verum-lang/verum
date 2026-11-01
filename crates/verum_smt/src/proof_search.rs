@@ -3469,7 +3469,9 @@ impl ProofSearchEngine {
             ProofTactic::Named { name, args } => self.try_named_tactic(name, args, goal),
 
             // Tactic-DSL control flow
-            ProofTactic::Let { name, value, body } => self.try_let(name, value, body, goal),
+            ProofTactic::Let { .. } => Err(ProofError::TacticFailed(
+                "local proof definitions require checked scoped binding semantics, which this backend does not support".to_text(),
+            )),
             ProofTactic::Match { scrutinee, arms } => self.try_match_tactic(scrutinee, arms, goal),
             ProofTactic::Fail { message } => Err(ProofError::TacticFailed(message.clone())),
             ProofTactic::If {
@@ -4818,41 +4820,11 @@ impl ProofSearchEngine {
 
     // ==================== Tactic-DSL control flow ====================
 
-    /// Execute a `ProofTactic::Let`: simplify the bound value, push
-    /// `name = value` onto the goal's hypothesis list (so SMT sees the
-    /// binding as an ordinary equation), then run `body` against the
-    /// extended goal.
-    fn try_let(
-        &mut self,
-        name: &Text,
-        value: &Expr,
-        body: &ProofTactic,
-        goal: &ProofGoal,
-    ) -> Result<List<ProofGoal>, ProofError> {
-        let simplified = Self::simplify_expr(value);
-        let span = value.span;
-        let var_expr = Expr::new(
-            ExprKind::Path(Path::from_ident(Ident::new(name.clone(), span))),
-            span,
-        );
-        let eq_expr = Expr::new(
-            ExprKind::Binary {
-                op: BinOp::Eq,
-                left: Heap::new(var_expr),
-                right: Heap::new(simplified),
-            },
-            span,
-        );
-        let mut extended = goal.clone();
-        extended.hypotheses.push(eq_expr);
-        self.execute_tactic(body, &extended)
-    }
-
     /// Execute a `ProofTactic::Match`: simplify the scrutinee, try arms
     /// left-to-right with committed semantics. The first arm whose pattern
-    /// matches and whose guard (if any) simplifies to `true` wins; its
-    /// pattern bindings are pushed as equation hypotheses and its body is
-    /// executed. Body failure is a match failure — cross-arm back-tracking
+    /// matches and whose guard (if any) simplifies to `true` wins. Literal
+    /// and wildcard arms add no hypotheses. Binding arms require a scoped
+    /// elaboration and are refused here. Body failure is a match failure — cross-arm back-tracking
     /// is opt-in via `first { … }`.
     fn try_match_tactic(
         &mut self,
@@ -4872,20 +4844,12 @@ impl ProofSearchEngine {
                     continue;
                 }
             }
-            let mut extended = goal.clone();
-            for (ident, bound) in bindings {
-                let span = bound.span;
-                let var_expr = Expr::new(ExprKind::Path(Path::from_ident(ident)), span);
-                extended.hypotheses.push(Expr::new(
-                    ExprKind::Binary {
-                        op: BinOp::Eq,
-                        left: Heap::new(var_expr),
-                        right: Heap::new(bound),
-                    },
-                    span,
+            if !bindings.is_empty() {
+                return Err(ProofError::TacticFailed(
+                    "local proof pattern bindings require checked scoped binding semantics, which this backend does not support".to_text(),
                 ));
             }
-            return self.execute_tactic(&arm.body, &extended);
+            return self.execute_tactic(&arm.body, goal);
         }
         Err(ProofError::TacticFailed(
             "match: no arm matched the scrutinee".to_text(),

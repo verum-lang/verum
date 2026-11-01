@@ -2808,7 +2808,13 @@ pub enum ProofStepKind {
     },
 
     /// Let binding in proof: `let x := e`
-    Let { pattern: Pattern, value: Heap<Expr> },
+    Let {
+        pattern: Pattern,
+        /// An annotation belongs to the binding and must survive parsing.
+        #[serde(default)]
+        ty: Maybe<Type>,
+        value: Heap<Expr>,
+    },
 
     /// Obtain existential witness: `obtain pattern from proof`
     /// Grammar: obtain_step = 'obtain' , pattern , 'from' , expression ;

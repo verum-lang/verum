@@ -2473,8 +2473,11 @@ fn walk_proof_step<V: Visitor>(visitor: &mut V, step: &crate::decl::ProofStep) {
             visit_child!(visitor, justification, TacticExpr);
         }
 
-        ProofStepKind::Let { pattern, value } => {
+        ProofStepKind::Let { pattern, ty, value } => {
             visit_child!(visitor, pattern, Pattern);
+            if let Maybe::Some(ty) = ty {
+                visit_child!(visitor, ty, Type);
+            }
             visit_child!(visitor, value, Expr);
         }
 
