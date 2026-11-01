@@ -17,11 +17,10 @@
 //! Every field is part of the digest because a source file alone does NOT
 //! determine the compilation output:
 //!
-//!  * the **compiler identity** is the build-unique fingerprint of the
-//!  running `verum` binary (its on-disk length + mtime). Any recompile of
-//!  the executable — including a codegen change in a dependency crate that
-//!  leaves `CARGO_PKG_VERSION` untouched — relinks the binary with a fresh
-//!  mtime, so this component auto-invalidates the cache (T0387);
+//!  * the **compiler identity** is the BLAKE3 digest of the executable's
+//!  bytes. Copying a binary preserves its identity; changing bytes invalidates
+//!  it even when length and timestamps are preserved. An unreadable or
+//!  concurrently changing executable refuses key creation;
 //!  * a different compiler **version** string may emit different VBC for
 //!  the same source (e.g. an intrinsic-name change, a codegen optimisation
 //!  pass that landed mid-release);
@@ -30,8 +29,8 @@
 //!  * the **wire schema** version is a manual belt-and-suspenders bump for
 //!  bytecode wire-format changes (see [`WIRE_SCHEMA_VERSION`]).
 //!
-//! Including everything in the key means a cache hit is always a *valid*
-//! reuse — there is no "stale cache" failure mode.
+//! Executables must remain immutable while running. Cache lookup also checks
+//! the source/dependency metadata; a key alone is not a validity certificate.
 //!
 //! # Atomicity
 //!
@@ -54,7 +53,8 @@
 //!
 //! # Performance
 //!
-//! - `key_for`: single-pass blake3 over `source ++ compiler_version ++
+//! - First `key_for` also streams the executable once per process.
+//! - Subsequent `key_for`: single-pass blake3 over `source ++ compiler_version ++
 //!  flags`, ~1 GB/s on modern CPUs. A 10 KB source = ~10 µs.
 //! - `lookup`: 2 fs reads + 1 TOML parse. Cold lookup ~200 µs on SSD;
 //!  warm (page cache) ~30 µs.
@@ -152,15 +152,16 @@ impl std::fmt::Display for CacheKey {
 /// lockstep with the stdlib bake schema (see T0219 BAKE-CACHE-COMPILER-IDENTITY).
 ///
 /// As of T0387 this is belt-and-suspenders: `key_for` also mixes in a
-/// build-unique compiler identity ([`compiler_identity`]), so any rebuild of
-/// the `verum` binary auto-invalidates the cache even without a hand-bump.
+/// content-based compiler identity ([`compiler_identity`]), so changed compiler
+/// bytes invalidate the cache even without a manual schema bump.
 /// Still bump this on a deliberate wire-format change — it is the portable,
-/// cross-machine signal (a binary copied to another host keeps its bytes but
-/// gets a new mtime; the schema version travels with the source).
+/// cross-machine format signal, independent of executable identity.
 pub const WIRE_SCHEMA_VERSION: u32 = 4; // 2: GPU GpuExtended [dst][args...] realign (T0177); 3: simd reduce-trio emission LoadNil→SimdExtended (T0116 — same stale-replay class); 4: T0852 opcode-map re-homing — Time/Sys/Mach/Sync family gateways at 0xF0-0xF3 and the CbgrExtended 0x60-0x6A band replace ~58 FfiExtended SystemSubOpcode squatters. T0387 added a build-unique compiler identity to the key so a codegen-output change for fixed source now auto-invalidates; this manual bump remains the portable belt-and-suspenders signal.
 
-pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKey {
-    key_with_identity(source, compiler_version, flags, compiler_identity())
+pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> io::Result<CacheKey> {
+    Ok(key_with_identity(
+        source, compiler_version, flags, compiler_identity()?,
+    ))
 }
 
 /// The single hashing authority behind [`key_for`]. `compiler_identity` is
@@ -180,12 +181,7 @@ fn key_with_identity(
     // so re-shaped bytecode is never re-run against a mismatched interpreter.
     hasher.update(&WIRE_SCHEMA_VERSION.to_le_bytes());
     hasher.update(&[0]);
-    // Build-unique compiler identity SECOND (T0387): the on-disk fingerprint
-    // (len + mtime) of the running `verum` binary. Any recompile — including
-    // a codegen change in a dependency crate that leaves CARGO_PKG_VERSION
-    // AND WIRE_SCHEMA_VERSION untouched — relinks the executable with a fresh
-    // mtime, so this component auto-invalidates the whole script cache. This
-    // is the ROOT that WIRE_SCHEMA_VERSION previously only hand-approximated.
+    // Content identity, independent of file timestamps and package versions.
     hasher.update(compiler_identity);
     hasher.update(&[0]);
     hasher.update(source);
@@ -201,45 +197,41 @@ fn key_with_identity(
     CacheKey(bytes)
 }
 
-/// Build-unique identity of the running compiler binary, mixed into every
-/// script-cache key so a rebuild auto-invalidates stale bytecode (T0387).
-///
-/// Computed once per process and cached. The identity is the current
-/// executable's on-disk `(len, mtime)` — a rebuilt binary is always
-/// rewritten with a fresh mtime (and usually a new length), so this changes
-/// on every `cargo build` of `verum` regardless of *which* crate's codegen
-/// moved. That property is why runtime `current_exe()` metadata is used
-/// rather than a build-time-baked hash: `verum_cli/build.rs` declares
-/// `rerun-if-changed=build.rs`, so a codegen change confined to `verum_vbc`
-/// would NOT re-run it — a baked value would go stale on exactly the change
-/// this key must catch. Reading the linked binary sidesteps that entirely.
-fn compiler_identity() -> &'static [u8] {
-    static IDENTITY: OnceLock<Vec<u8>> = OnceLock::new();
-    IDENTITY.get_or_init(compute_compiler_identity).as_slice()
+/// Content identity of the executable, read once per process. Errors remain
+/// errors: a package-version-only key could reuse incompatible bytecode.
+fn compiler_identity() -> io::Result<&'static [u8]> {
+    static IDENTITY: OnceLock<io::Result<blake3::Hash>> = OnceLock::new();
+    IDENTITY
+        .get_or_init(|| compiler_file_identity(&std::env::current_exe()?))
+        .as_ref()
+        .map(|hash| hash.as_bytes().as_slice())
+        .map_err(|error| io::Error::new(error.kind(), error.to_string()))
 }
 
-/// Compute the build-unique compiler identity. Falls back to the
-/// compile-time `CARGO_PKG_VERSION` when the executable path or its metadata
-/// is unavailable (e.g. the binary was deleted while running) so the key
-/// stays deterministic — that fallback is the pre-T0387 discrimination floor
-/// (`compiler_version` alone), never an empty component.
-fn compute_compiler_identity() -> Vec<u8> {
-    let mut id = Vec::with_capacity(24);
-    if let Ok(path) = std::env::current_exe() {
-        if let Ok(meta) = fs::metadata(&path) {
-            id.extend_from_slice(&meta.len().to_le_bytes());
-            if let Ok(mtime) = meta.modified() {
-                if let Ok(dur) = mtime.duration_since(UNIX_EPOCH) {
-                    id.extend_from_slice(&dur.as_nanos().to_le_bytes());
-                }
-            }
-        }
+fn compiler_file_identity(path: &Path) -> io::Result<blake3::Hash> {
+    let mut file = fs::File::open(path)?;
+    let before = file.metadata()?;
+    if !before.is_file() || before.len() == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "compiler is not a nonempty regular file",
+        ));
     }
-    if id.is_empty() {
-        id.extend_from_slice(env!("CARGO_PKG_VERSION").as_bytes());
+    let mut hash = blake3::Hasher::new();
+    hash.update_reader(&mut file)?;
+    let after = file.metadata()?;
+    if before.len() != after.len() || before.modified()? != after.modified()? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "compiler changed while computing its identity",
+        ));
     }
-    id
+    Ok(hash.finalize())
 }
+
+#[cfg(test)]
+#[path = "../../tests/script_cache/identity.rs"]
+mod identity_tests;
 
 /// Schema version for `meta.toml`. Bumped on incompatible layout changes
 /// so older cache entries are evicted automatically (see `lookup`).
@@ -724,7 +716,7 @@ mod tests {
 
     #[test]
     fn cache_key_hex_round_trip() {
-        let k = key_for(b"hello", "0.6.0", &["tier=0"]);
+        let k = key_for(b"hello", "0.6.0", &["tier=0"]).unwrap();
         let s = k.to_hex();
         assert_eq!(s.len(), 64, "hex length");
         let k2 = CacheKey::from_hex(&s).expect("round-trip");
@@ -740,29 +732,29 @@ mod tests {
 
     #[test]
     fn key_for_is_deterministic() {
-        let a = key_for(b"src", "0.6", &["a", "b"]);
-        let b = key_for(b"src", "0.6", &["a", "b"]);
+        let a = key_for(b"src", "0.6", &["a", "b"]).unwrap();
+        let b = key_for(b"src", "0.6", &["a", "b"]).unwrap();
         assert_eq!(a, b);
     }
 
     #[test]
     fn key_for_distinguishes_compiler() {
-        let a = key_for(b"src", "0.6.0", &["tier=0"]);
-        let b = key_for(b"src", "0.7.0", &["tier=0"]);
+        let a = key_for(b"src", "0.6.0", &["tier=0"]).unwrap();
+        let b = key_for(b"src", "0.7.0", &["tier=0"]).unwrap();
         assert_ne!(a, b);
     }
 
     #[test]
     fn key_for_distinguishes_flags() {
-        let a = key_for(b"src", "0.6", &["tier=0"]);
-        let b = key_for(b"src", "0.6", &["tier=1"]);
+        let a = key_for(b"src", "0.6", &["tier=0"]).unwrap();
+        let b = key_for(b"src", "0.6", &["tier=1"]).unwrap();
         assert_ne!(a, b);
     }
 
     #[test]
     fn key_for_distinguishes_source() {
-        let a = key_for(b"a", "0.6", &[]);
-        let b = key_for(b"b", "0.6", &[]);
+        let a = key_for(b"a", "0.6", &[]).unwrap();
+        let b = key_for(b"b", "0.6", &[]).unwrap();
         assert_ne!(a, b);
     }
 
@@ -770,8 +762,8 @@ mod tests {
     fn key_for_no_length_extension_collision() {
         // ("ab", []) vs ("a", ["b"]) — without separators these would
         // hash to the same digest. With null separators they don't.
-        let a = key_for(b"ab", "0.6", &[]);
-        let b = key_for(b"a", "0.6", &["b"]);
+        let a = key_for(b"ab", "0.6", &[]).unwrap();
+        let b = key_for(b"a", "0.6", &["b"]).unwrap();
         assert_ne!(a, b);
     }
 
@@ -784,11 +776,11 @@ mod tests {
         // — carry different build-unique identities and so MUST NOT collide
         // on the cache key. Before the fix the key was identical and the
         // stale bytecode from build A was silently replayed under build B.
-        let a = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-A-mtime-len");
-        let b = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-B-mtime-len");
+        let a = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-A-content");
+        let b = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-B-content");
         assert_ne!(a, b, "different compiler identity must change the key");
         // Same identity + same inputs is still deterministic.
-        let a2 = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-A-mtime-len");
+        let a2 = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-A-content");
         assert_eq!(a, a2, "same identity + inputs must be stable");
     }
 
@@ -797,8 +789,8 @@ mod tests {
         // The process identity must be discoverable (current_exe present
         // under the test harness) and constant across calls within a run —
         // otherwise the cache would never hit.
-        let a = compiler_identity();
-        let b = compiler_identity();
+        let a = compiler_identity().unwrap();
+        let b = compiler_identity().unwrap();
         assert!(!a.is_empty(), "compiler identity must never be empty");
         assert_eq!(a, b, "compiler identity is process-constant");
     }
@@ -808,8 +800,8 @@ mod tests {
         // key_for must fold in compiler_identity(): it equals the explicit
         // form fed the real process identity, and differs from one built
         // with a deliberately different identity.
-        let via_public = key_for(b"src", "0.6.0", &["tier=0"]);
-        let via_same = key_with_identity(b"src", "0.6.0", &["tier=0"], compiler_identity());
+        let via_public = key_for(b"src", "0.6.0", &["tier=0"]).unwrap();
+        let via_same = key_with_identity(b"src", "0.6.0", &["tier=0"], compiler_identity().unwrap());
         assert_eq!(
             via_public, via_same,
             "key_for must fold in compiler_identity()"
@@ -827,7 +819,7 @@ mod tests {
     fn store_then_lookup_round_trip() {
         let root = temp_root("rt");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"fn main() {}", "0.6", &["tier=0"]);
+        let key = key_for(b"fn main() {}", "0.6", &["tier=0"]).unwrap();
         let bytecode = b"VBC\x00\x01\x02fake".as_ref();
         cache
             .store(key, bytecode, "/tmp/x.vr", 100, "0.6.0", vec![])
@@ -846,7 +838,7 @@ mod tests {
     fn lookup_miss_returns_none() {
         let root = temp_root("miss");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"never-stored", "0.6", &[]);
+        let key = key_for(b"never-stored", "0.6", &[]).unwrap();
         assert!(cache.lookup(key).unwrap().is_none());
         let _ = fs::remove_dir_all(&root);
     }
@@ -855,7 +847,7 @@ mod tests {
     fn store_overwrite_is_safe() {
         let root = temp_root("overwrite");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"src", "0.6", &[]);
+        let key = key_for(b"src", "0.6", &[]).unwrap();
         cache.store(key, b"first", "p", 1, "0.6.0", vec![]).unwrap();
         cache.store(key, b"second", "p", 1, "0.6.0", vec![]).unwrap();
         let e = cache.lookup(key).unwrap().expect("hit");
@@ -867,7 +859,7 @@ mod tests {
     fn evict_removes_entry() {
         let root = temp_root("evict");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"x", "0.6", &[]);
+        let key = key_for(b"x", "0.6", &[]).unwrap();
         cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         assert!(cache.lookup(key).unwrap().is_some());
         cache.evict(key).unwrap();
@@ -879,7 +871,7 @@ mod tests {
     fn evict_missing_is_idempotent() {
         let root = temp_root("evict-miss");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"never", "0.6", &[]);
+        let key = key_for(b"never", "0.6", &[]).unwrap();
         cache.evict(key).unwrap();
         cache.evict(key).unwrap();
         let _ = fs::remove_dir_all(&root);
@@ -890,7 +882,7 @@ mod tests {
         let root = temp_root("list");
         let cache = ScriptCache::at(root.clone()).unwrap();
         // Stash a real entry, plus a junk dir, plus an orphan tempdir.
-        let key = key_for(b"x", "0.6", &[]);
+        let key = key_for(b"x", "0.6", &[]).unwrap();
         cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         fs::create_dir_all(root.join("not-a-key")).unwrap();
         fs::create_dir_all(root.join("aaaa.tmp.99.123")).unwrap();
@@ -908,7 +900,7 @@ mod tests {
     fn lookup_evicts_corrupt_meta_and_surfaces_error() {
         let root = temp_root("corrupt");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"x", "0.6", &[]);
+        let key = key_for(b"x", "0.6", &[]).unwrap();
         cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         // Trash the meta.toml.
         let meta_path = cache.entry_dir(key).join("meta.toml");
@@ -924,7 +916,7 @@ mod tests {
     fn schema_version_skew_evicts_silently() {
         let root = temp_root("schema");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"x", "0.6", &[]);
+        let key = key_for(b"x", "0.6", &[]).unwrap();
         cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         // Manually rewrite meta with a bumped schema version.
         let meta_path = cache.entry_dir(key).join("meta.toml");
@@ -944,9 +936,9 @@ mod tests {
         let root = temp_root("gc");
         let cache = ScriptCache::at(root.clone()).unwrap();
         // Three entries; we'll backdate access timestamps to force order.
-        let k1 = key_for(b"1", "0.6", &[]);
-        let k2 = key_for(b"2", "0.6", &[]);
-        let k3 = key_for(b"3", "0.6", &[]);
+        let k1 = key_for(b"1", "0.6", &[]).unwrap();
+        let k2 = key_for(b"2", "0.6", &[]).unwrap();
+        let k3 = key_for(b"3", "0.6", &[]).unwrap();
         cache.store(k1, &vec![0xAA; 1024], "p", 1, "0.6.0", vec![]).unwrap();
         cache.store(k2, &vec![0xBB; 1024], "p", 1, "0.6.0", vec![]).unwrap();
         cache.store(k3, &vec![0xCC; 1024], "p", 1, "0.6.0", vec![]).unwrap();
@@ -977,7 +969,7 @@ mod tests {
         let root = temp_root("clear");
         let cache = ScriptCache::at(root.clone()).unwrap();
         for i in 0u8..5 {
-            let key = key_for(&[i], "0.6", &[]);
+            let key = key_for(&[i], "0.6", &[]).unwrap();
             cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         }
         assert_eq!(cache.list().unwrap().len(), 5);
@@ -991,7 +983,7 @@ mod tests {
     fn lookup_refreshes_last_accessed_at() {
         let root = temp_root("touch");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"x", "0.6", &[]);
+        let key = key_for(b"x", "0.6", &[]).unwrap();
         cache.store(key, b"v", "p", 1, "0.6.0", vec![]).unwrap();
         // Manually backdate the last-access time.
         let meta_path = cache.entry_dir(key).join("meta.toml");
@@ -1018,7 +1010,7 @@ mod tests {
         use std::thread;
         let root = temp_root("concurrent");
         let cache = ScriptCache::at(root.clone()).unwrap();
-        let key = key_for(b"shared", "0.6", &[]);
+        let key = key_for(b"shared", "0.6", &[]).unwrap();
         let bytecode = b"AAAA";
         let handles: Vec<_> = (0..4)
             .map(|_| {

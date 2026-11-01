@@ -23,7 +23,7 @@ fn populate(root: &Path, n: u64) {
     let cache = ScriptCache::at(root.to_path_buf()).expect("cache");
     for i in 0..n {
         let src = format!("// entry {i}\nfn main() -> Int {{ {i} }}\n");
-        let key = key_for(src.as_bytes(), "0.1.0", &[]);
+        let key = key_for(src.as_bytes(), "0.1.0", &[]).unwrap();
         cache
             .store(
                 key,

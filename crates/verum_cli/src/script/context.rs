@@ -23,7 +23,8 @@
 //!  ScriptContext { everything above }
 //! ```
 //!
-//! No I/O happens beyond `fs::read` of the script itself — cache and
+//! The executable is hashed once per process alongside reading the script;
+//! cache and
 //! lockfile *paths* are computed but not opened. The caller decides
 //! when to consult them via [`ScriptContext::cache_lookup`] /
 //! [`ScriptContext::cache_store`] / [`ScriptContext::lockfile_path`].
@@ -104,6 +105,8 @@ pub enum ScriptContextError {
     Io { path: PathBuf, source: io::Error },
     /// Frontmatter extraction or validation failed.
     Frontmatter(FrontmatterError),
+    /// Compiler content identity could not be established. No cache key is usable.
+    CompilerIdentity(io::Error),
     /// Permission flag merging failed (bad scope, conflicting overrides).
     Permissions(PermissionBuildError),
 }
@@ -115,6 +118,7 @@ impl std::fmt::Display for ScriptContextError {
                 write!(f, "read script {}: {source}", path.display())
             }
             Self::Frontmatter(e) => write!(f, "frontmatter: {e}"),
+            Self::CompilerIdentity(e) => write!(f, "identify script compiler: {e}"),
             Self::Permissions(e) => write!(f, "permissions: {e}"),
         }
     }
@@ -125,6 +129,7 @@ impl std::error::Error for ScriptContextError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Frontmatter(e) => Some(e),
+            Self::CompilerIdentity(e) => Some(e),
             Self::Permissions(e) => Some(e),
         }
     }
@@ -196,7 +201,8 @@ impl ScriptContext {
             cache_flags.push(format!("allow={grant}"));
         }
         let extra_refs: Vec<&str> = cache_flags.iter().map(|s| s.as_str()).collect();
-        let cache_key = key_for(&source, &opts.compiler_version, &extra_refs);
+        let cache_key = key_for(&source, &opts.compiler_version, &extra_refs)
+            .map_err(ScriptContextError::CompilerIdentity)?;
 
         Ok(Self {
             source_path,
