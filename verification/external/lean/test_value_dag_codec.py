@@ -1,5 +1,7 @@
 """Graph extraction controls; synthetic graphs are not native execution evidence."""
 import copy
+import gzip
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -7,6 +9,16 @@ import unittest
 
 from acquired_export_codec import LEGACY, SENSORY
 from check_typed_programs import check, require_success, run
+
+FIXTURES = Path(__file__).parent / 'fixtures'
+
+
+def native_fixture(name):
+    provenance = json.loads((FIXTURES / 'value-dag-native.provenance.json').read_text())
+    raw = gzip.decompress((FIXTURES / f'value-dag-native-{name}.json.gz').read_bytes())
+    if hashlib.sha256(raw).hexdigest() != provenance['cases'][name]['sha256']:
+        raise ValueError('Frozen native value DAG hash mismatch')
+    return json.loads(raw)
 
 
 def graph(nodes):
@@ -21,6 +33,13 @@ def fixture():
 
 
 class ValueDagCodec(unittest.TestCase):
+    def test_frozen_native_wires_preserve_every_node_without_expansion(self):
+        for name, count in [('shared-ordered-pair', 4), ('shared-depth-10000', 10001)]:
+            value = native_fixture(name)
+            self.assertEqual(len(value['nodes']), count)
+            self.assertIsNone(LEGACY.validate_value(value))
+            self.assertEqual(LEGACY.value(value).count('let _dag'), count)
+
     def test_shared_children_emit_once_in_dependency_order(self):
         text = LEGACY.value(fixture())
         self.assertEqual(text.count('let _dag'), 4)
@@ -111,7 +130,7 @@ class ValueDagLean(unittest.TestCase):
             return check(path, expected, memory_mib=1024)
 
     def test_exact_order_sharing_and_reference_renaming(self):
-        original = fixture()
+        original = native_fixture('shared-ordered-pair')
         # Reindex the same graph without preserving BFS numbering.
         reordered = graph([dict(kind='Pair', first=3, second=2), dict(kind='Unit'),
                            dict(kind='Nat', value=5), dict(kind='Pair', first=2, second=1)])

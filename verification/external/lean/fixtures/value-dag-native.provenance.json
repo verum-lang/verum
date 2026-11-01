@@ -1,0 +1,20 @@
+{
+  "schema": "verum.value-dag-native-fixture/1",
+  "native_head": "80a75e837bfa7105bcd6958a28ea0c191b76cf60",
+  "native_binary_sha256": "41c1c87ed0982eb2d63dac18529b6e445fd9da59e77f549d0d061692fcf13128",
+  "source_sha256": {
+    "rust/crates/synarc-kan/src/organism/observer_acquired/lifecycle_export.rs": "3c42292495ee774ee4661d00c8baec721398a94e594db867b49a4806bd434a3e",
+    "rust/crates/synarc-kan/src/organism/observer_acquired/lifecycle_export/value_graph.rs": "3801c7ae917f208a731480465bd216c6e57cc48ec8b588a2149392877615a969"
+  },
+  "cases": {
+    "shared-ordered-pair": {
+      "sha256": "74a5ad3da44090823632201a8c6b43365cc540307bd302fea61fad34548937ca",
+      "nodes": 4
+    },
+    "shared-depth-10000": {
+      "sha256": "dddee45fdb05e0360abd1591b7e7bc731464485ba56bbe20834d16eb5cee7d60",
+      "nodes": 10001
+    }
+  },
+  "scope": "Frozen native wires independently re-exported byte-identically. Small graph equality replayed by Lean. Deep graph structural decoding and native roundtrip passed; full Lean Value replay is resource-inconclusive, not accepted."
+}
