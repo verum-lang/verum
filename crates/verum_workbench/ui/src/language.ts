@@ -1,5 +1,6 @@
 export type Position = { line: number; character: number };
 export type Range = { start: Position; end: Position };
+export type FormattingOptions = { tabSize: number; insertSpaces: boolean };
 export type Diagnostic = { range: Range; severity?: number; message: string; source?: string; code?: string | number };
 export type Declaration = { id: string; name: string; kind: string; type_display?: string | null; range: Range; selection_range: Range; requirements: Array<{ source: string; range: Range }>; preconditions?: Array<{ source: string; range: Range }>; postconditions?: Array<{ source: string; range: Range }> };
 export type Binding = { name: string; type_display: string; source_module?: string; definition: { uri: string; range: Range } | null };
@@ -28,7 +29,28 @@ export function rangeOffsets(source: string, range: Range): { from: number; to: 
   const from = offsetAt(source, range.start), to = offsetAt(source, range.end);
   return from !== null && to !== null && from <= to ? { from, to } : null;
 }
-export async function languageRequest<T>(revision: DocumentRevision, method = 'analyze', position?: Position) {
+// Validate the complete edit set before changing a buffer. Invalid, overlapping
+// or ambiguous edits must never partially apply or split a Unicode scalar.
+export function textEditChanges(source: string, edits: unknown): Array<{ from: number; to: number; insert: string }> | null {
+  if (edits === null) return [];
+  if (!Array.isArray(edits)) return null;
+  const changes = [];
+  const position = (value: unknown): value is Position => !!value && typeof value === 'object' && 'line' in value && 'character' in value;
+  for (const edit of edits) {
+    if (!edit || typeof edit.newText !== 'string' || !position(edit.range?.start) || !position(edit.range?.end)) return null;
+    const range = rangeOffsets(source, edit.range);
+    if (!range) return null;
+    // Navigation clamps long columns; a mutation needs exact endpoints.
+    if (positionAt(source, range.from).character !== edit.range.start.character || positionAt(source, range.to).character !== edit.range.end.character) return null;
+    changes.push({ ...range, insert: edit.newText });
+  }
+  changes.sort((left, right) => left.from - right.from || left.to - right.to);
+  for (let i = 1; i < changes.length; i++) {
+    if (changes[i].from < changes[i - 1].to || changes[i].from === changes[i - 1].from) return null;
+  }
+  return changes;
+}
+export async function languageRequest<T>(revision: DocumentRevision, method = 'analyze', argument?: Position | FormattingOptions) {
   const { api } = await import('./api');
-  return api<LanguageReply<T>>('language.request', { ...revision, method, ...(position ? { position } : {}) });
+  return api<LanguageReply<T>>('language.request', { ...revision, method, ...(argument ? { [method === 'textDocument/formatting' ? 'options' : 'position']: argument } : {}) });
 }

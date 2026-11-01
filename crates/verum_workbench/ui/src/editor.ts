@@ -1,14 +1,14 @@
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, hoverTooltip } from '@codemirror/view';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
-import { defaultKeymap, history, historyKeymap, undo, redo, toggleComment } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, undo, redo, toggleComment, isolateHistory } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches, searchPanelOpen, closeSearchPanel, openSearchPanel, gotoLine, SearchQuery, getSearchQuery, setSearchQuery } from '@codemirror/search';
 import { autocompletion, completionKeymap, snippet, startCompletion } from '@codemirror/autocomplete';
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching, indentOnInput } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { translations } from './translations';
 import { currentLocale, m, t } from './i18n';
-import { languageRequest, sameRevision, positionAt, rangeOffsets, type DocumentRevision, type Diagnostic, type Range } from './language';
+import { languageRequest, sameRevision, positionAt, rangeOffsets, textEditChanges, type DocumentRevision, type Diagnostic, type Range } from './language';
 
 type Location = { uri: string; range: Range };
 type LanguageHooks = { revision: () => DocumentRevision; navigate: (location: Location) => Promise<void>; failure: (error: unknown) => void };
@@ -98,6 +98,16 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
     const location = Array.isArray(reply.result) ? reply.result[0] : reply.result;
     if (location) await hooks.navigate(location);
   }
+  async function format() {
+    if (!hooks || !verumEnabled) return;
+    const revision = hooks.revision(), document = view.state.doc;
+    const reply = await languageRequest<unknown>(revision, 'textDocument/formatting', { tabSize: view.state.tabSize, insertSpaces: true });
+    if (!sameRevision(revision, hooks.revision()) || document !== view.state.doc) throw new Error(t(m('The document changed while formatting. Run the command again.')));
+    const changes = textEditChanges(revision.source, reply.result);
+    if (!changes) throw new Error(t(m('The formatter returned invalid edits. No changes were applied.')));
+    if (changes.length) view.dispatch({ changes, annotations: isolateHistory.of('full'), userEvent: 'input.format' });
+    view.focus();
+  }
   const stateFor = (source: string) => EditorState.create({ doc: source, extensions: [
       lineNumbers(), lintGutter(), highlightActiveLineGutter(), history(), drawSelection(), rectangularSelection(),
       highlightActiveLine(), highlightSelectionMatches(), bracketMatching(), indentOnInput(), syntax.of(verumEnabled ? verum : []),
@@ -157,6 +167,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
     connectLanguage(value: LanguageHooks) { hooks = value; },
     document(path: string) { verumEnabled = path.endsWith('.vr'); view.dispatch({ effects: [syntax.reconfigure(verumEnabled ? verum : []), language.reconfigure(editorLanguage(verumEnabled))] }); },
     definition,
+    format,
     actions: Object.fromEntries(Object.entries(actions).map(([id, action]) => [id, () => { view.focus(); return action(view); }])) as Record<keyof typeof actions, () => boolean>,
     diagnostics(source: string, diagnostics: Diagnostic[]) {
       if (view.state.doc.toString() !== source) return;

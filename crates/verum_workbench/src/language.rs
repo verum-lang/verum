@@ -19,7 +19,7 @@ struct Command {
     path: PathBuf,
     source: Text,
     method: Text,
-    position: Value,
+    argument: Value,
     reply: oneshot::Sender<Result<Value>>,
 }
 // Dropping a timed-out or disconnected caller also cancels synchronous work
@@ -27,7 +27,9 @@ struct Command {
 // document-version ledger cannot diverge from the language server.
 struct CancelOnDrop(verum_lsp::AnalysisControl);
 impl Drop for CancelOnDrop {
-    fn drop(&mut self) { self.0.cancel(); }
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
 }
 
 pub struct Language {
@@ -35,11 +37,12 @@ pub struct Language {
 }
 impl Language {
     pub fn start(root: PathBuf) -> Result<Self> {
-        Self::start_with_library(root, None)
+        Self::start_with_library(root, None, None)
     }
     pub fn start_with_library(
         root: PathBuf,
         library: Option<std::sync::Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+        formatter: Option<PathBuf>,
     ) -> Result<Self> {
         let (requests, mut receiver) = mpsc::channel::<Command>(8);
         std::thread::Builder::new()
@@ -55,18 +58,21 @@ impl Language {
                     return;
                 };
                 runtime.block_on(async move {
-                    let mut session = Session::new(root, library).await;
+                    let mut session = Session::new(root, library, formatter).await;
                     while let Some(command) = receiver.recv().await {
                         if command.reply.is_closed() || command.control.is_cancelled() {
                             continue;
                         }
                         let result = match &mut session {
                             Ok(session) => {
-                                session.service.inner().set_analysis_control(Some(command.control.clone()));
+                                session
+                                    .service
+                                    .inner()
+                                    .set_analysis_control(Some(command.control.clone()));
                                 let result = session.call(&command).await;
                                 session.service.inner().set_analysis_control(None);
                                 result
-                            },
+                            }
                             Err(error) => {
                                 Err(anyhow::anyhow!("Language service unavailable: {error}"))
                             }
@@ -82,7 +88,7 @@ impl Language {
         path: PathBuf,
         source: Text,
         method: &str,
-        position: Value,
+        argument: Value,
     ) -> Result<Value> {
         ensure!(
             source.len() <= crate::workspace::SOURCE_LIMIT,
@@ -96,6 +102,7 @@ impl Language {
                     | "textDocument/hover"
                     | "textDocument/completion"
                     | "textDocument/definition"
+                    | "textDocument/formatting"
             ),
             "Unsupported language operation"
         );
@@ -110,7 +117,7 @@ impl Language {
                 path,
                 source,
                 method: method.into(),
-                position,
+                argument,
                 reply,
             })
             .map_err(|_| {
@@ -135,6 +142,7 @@ impl Session {
     async fn new(
         root: PathBuf,
         library: Option<std::sync::Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+        formatter: Option<PathBuf>,
     ) -> Result<Self> {
         let (service, socket) = verum_lsp::service::service_with_library(library);
         tokio::spawn(async move {
@@ -162,7 +170,7 @@ impl Session {
         session.capabilities = session.rpc("initialize", json!({
             "processId":std::process::id(), "rootUri":uri,
             "capabilities":{"general":{"positionEncodings":["utf-16"]},"textDocument":{"publishDiagnostics":{"versionSupport":true}}},
-            "initializationOptions":{"lint":{"enabled":false}}
+            "initializationOptions":{"lint":{"enabled":false},"fmt":{"enabled":true,"binary":formatter}}
         }), true).await?;
         session.rpc("initialized", json!({}), false).await?;
         Ok(session)
@@ -230,9 +238,23 @@ impl Session {
                 true,
             )
             .await?
+        } else if command.method == "textDocument/formatting" {
+            let options: tower_lsp::lsp_types::FormattingOptions =
+                serde_json::from_value(command.argument.clone())
+                    .context("Expected formatting options")?;
+            ensure!(
+                (1..=16).contains(&options.tab_size),
+                "Tab size must be between 1 and 16"
+            );
+            self.rpc(
+                &command.method,
+                json!({"textDocument":{"uri":uri},"options":options}),
+                true,
+            )
+            .await?
         } else {
             let position: tower_lsp::lsp_types::Position =
-                serde_json::from_value(command.position.clone())
+                serde_json::from_value(command.argument.clone())
                     .context("Expected LSP position")?;
             ensure!(
                 verum_common::span_utils::lsp::lsp_position_to_offset(position, &command.source)

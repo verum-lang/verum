@@ -885,6 +885,7 @@ const commandRegistry = new CommandRegistry([
   command('focus.agent', m('Focus collaborator'), 'Alt+2', () => { setPane('agent'); $(input('agent-input').disabled ? 'agent-connect' : 'agent-input').focus(); }),
   command('focus.results', m('Focus results'), 'Alt+3', () => { setPane('results'); $( $('diagnostics-panel').hidden ? 'operations-tab' : 'diagnostics-tab').focus(); }),
   command('editor.definition', m('Go to definition'), 'F12', editorAction(editor.definition), ['editor'], () => currentPath.endsWith('.vr')),
+  command('editor.format', m('Format document'), 'Alt+Shift+F', editorAction(editor.format), ['editor'], () => currentPath.endsWith('.vr')),
   command('editor.find', m('Find in source'), 'Mod+F', editorAction(editor.actions.find), ['editor']),
   command('editor.line', m('Go to line'), 'Alt+G', editorAction(editor.actions.gotoLine), ['editor']),
   command('editor.undo', m('Undo edit'), 'Mod+Z', editorAction(editor.actions.undo), ['editor']),

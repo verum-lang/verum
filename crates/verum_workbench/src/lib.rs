@@ -52,7 +52,11 @@ impl Studio {
         };
         jobs.restore()?;
         Ok(Self {
-            language: language::Language::start_with_library(workspace.root.clone(), library)?,
+            language: language::Language::start_with_library(
+                workspace.root.clone(),
+                library,
+                Some(config.verum.clone()),
+            )?,
             workspace: Mutex::new(workspace),
             jobs: Mutex::new(jobs),
             agent: Mutex::new(None),
@@ -236,6 +240,13 @@ impl Studio {
             }
             "verum_project" => self.project().await,
             "verum_analyze" => self.language_request(&args).await,
+            "verum_format" => {
+                args["method"] = json!("textDocument/formatting");
+                if args.get("options").is_none() {
+                    args["options"] = json!({"tabSize":4,"insertSpaces":true});
+                }
+                self.language_request(&args).await
+            }
             "verum_read" => self.workspace.lock().await.read(field(&args, "path")?),
             "verum_propose" => {
                 self.workspace.lock().await.write(
@@ -290,7 +301,12 @@ impl Studio {
                 path,
                 source,
                 params["method"].as_str().unwrap_or("analyze"),
-                params["position"].clone(),
+                params[if params["method"] == "textDocument/formatting" {
+                    "options"
+                } else {
+                    "position"
+                }]
+                .clone(),
             )
             .await
     }

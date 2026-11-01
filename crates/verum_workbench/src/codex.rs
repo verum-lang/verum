@@ -266,8 +266,14 @@ pub fn tools() -> Value {
         ),
         (
             "verum_analyze",
-            "Inspect exact source through the same LSP analysis as Studio: versioned diagnostics, declarations and context requirements. Single-module analysis with builtins, not a whole-project or runtime proof. Omit source to read the saved file.",
+            "Inspect exact source through Studio's shared LSP: versioned diagnostics, declarations and context requirements. Read analysis_scope and library_metadata for coverage; this is not a whole-project or runtime proof. Omit source to read the saved file.",
             json!({"path":{"type":"string"},"source":source}),
+            json!(["path"]),
+        ),
+        (
+            "verum_format",
+            "Return revision-bound formatting edits from Studio's shared Verum LSP. Does not write files. Omit source to format the saved file; propose the resulting source separately for review.",
+            json!({"path":{"type":"string"},"source":source,"options":{"type":"object","properties":{"tabSize":{"type":"integer","minimum":1,"maximum":16},"insertSpaces":{"type":"boolean"}},"required":["tabSize","insertSpaces"],"additionalProperties":false}}),
             json!(["path"]),
         ),
         (
