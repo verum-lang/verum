@@ -39,14 +39,14 @@ pub struct SourceRequest {
     pub source: String,
     pub declaration: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceSpan {
     pub start: u32,
     pub end: u32,
     pub sha256: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceBinding {
     pub sha256: String,
