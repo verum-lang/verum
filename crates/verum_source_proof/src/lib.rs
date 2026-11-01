@@ -6,8 +6,10 @@
 //! The wire protocol and binder IR deliberately use the portable native checker's
 //! Rust ownership types. They are not language-runtime values or a second checker.
 pub mod finite;
+mod profile;
 pub mod scoped;
 
+pub use profile::{SourceOutcome, SourceProfile};
 pub use scoped::PROFILE;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
