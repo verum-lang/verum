@@ -246,6 +246,20 @@ fn guarded_elimination_retains_valid_boolean_and_arithmetic_proofs() {
 }
 
 #[test]
+fn quantified_examples_preserve_their_domain_and_witness_constraints() {
+    for source in [
+        "theorem additive_identity(): forall n: Int. n + 0 == n proof by smt;",
+        "theorem zero_exists(): exists n: Int. n == 0 proof by smt;",
+    ] {
+        let result = verify(source);
+        assert!(matches!(result, ProofVerificationResult::Verified(_)), "{source}: {result:?}");
+    }
+    let source = "theorem impossible_bound(lower: Int) requires lower >= 1000000 : exists n: Int. n >= lower && n < 1000000 proof by smt;";
+    let result = verify(source);
+    assert!(matches!(result, ProofVerificationResult::Failed { .. }), "{result:?}");
+}
+
+#[test]
 fn contradiction_cannot_discard_an_unproved_false_goal() {
     for source in [
         "theorem t(): true => false proof by contradiction {};",
