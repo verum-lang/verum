@@ -19912,13 +19912,6 @@ impl VbcCodegen {
                                 } else {
                                     None
                                 }
-                            })
-                            .unwrap_or_else(|| {
-                                variant_name
-                                    .as_bytes()
-                                    .iter()
-                                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
-                                    % 256
                             });
                         if scrutinee_is_int {
                             // #109 guard: Int scrutinee + unresolved-constant arm.
@@ -19939,9 +19932,13 @@ impl VbcCodegen {
                             });
                             self.ctx.free_temp(zero_reg);
                             // Skip the tag-payload pattern walk below; nothing to bind.
-                            let _ = tag;
+
                             return Ok(());
                         }
+                        let tag = tag.ok_or_else(|| CodegenError::internal(format!(
+                            "no declared tag for variant pattern '{}' on {:?}",
+                            variant_name, self.ctx.match_scrutinee_type
+                        )))?;
                         self.ctx.emit(Instruction::IsVar {
                             dst: result,
                             value: scrutinee,
@@ -20077,44 +20074,20 @@ impl VbcCodegen {
                                         field: slot,
                                     });
                                     let sub_result = self.ctx.alloc_temp();
-                                    let prev_scrutinee_type =
-                                        self.ctx.match_scrutinee_type.clone();
-                                    if let Some(ref pts) = payload_types
-                                        && let Some(payload_ty) = pts.get(slot as usize)
-                                        && !payload_ty.is_empty()
-                                    {
-                                        // **Generic-param substitution** (4th
-                                        // defect class of task #22): when the
-                                        // outer variant's declared payload type
-                                        // is a bare generic-param name (`"T"`,
-                                        // `"E"`, `"Self"`), substitute the
-                                        // corresponding concrete type from the
-                                        // outer scrutinee's `<...>`
-                                        // instantiation.  Mirrors the
-                                        // construction-side substitution at
-                                        // `compile_variant_constructor_hinted`.
-                                        // For `Poll.Ready(Err(_))` with outer
-                                        // scrutinee `Poll<Result<Int,Int>>`:
-                                        // `Poll.Ready`'s payload_types = ["T"];
-                                        // substitute T → Result<Int,Int> using
-                                        // Poll's TypeDescriptor type-params
-                                        // index — inner `Err` lookup then
-                                        // resolves against Result's variant
-                                        // table (tag 1) instead of missing on
-                                        // "T" and falling through to the
-                                        // hash-of-name fallback.
-                                        let substituted = self
-                                            .ctx
-                                            .match_scrutinee_type
-                                            .as_ref()
-                                            .and_then(|outer| {
-                                                self.substitute_payload_generic(
-                                                    payload_ty, outer,
-                                                )
-                                            })
-                                            .unwrap_or_else(|| payload_ty.clone());
-                                        self.ctx.match_scrutinee_type = Some(substituted);
-                                    }
+                                    let payload_type = self
+                                        .declared_variant_payload_type(&dot_name, slot as usize)
+                                        .unwrap_or_else(|| {
+                                            let payload = payload_types.as_ref()?.get(slot as usize)?;
+                                            if payload.is_empty() {
+                                                return None;
+                                            }
+                                            Some(self.ctx.match_scrutinee_type.as_deref()
+                                                .and_then(|outer| self.substitute_payload_generic(payload, outer))
+                                                .unwrap_or_else(|| payload.clone()))
+                                        });
+                                    let prev_scrutinee_type = std::mem::replace(
+                                        &mut self.ctx.match_scrutinee_type, payload_type,
+                                    );
                                     self.compile_pattern_test(sub_pat, field_reg, sub_result)?;
                                     self.ctx.match_scrutinee_type = prev_scrutinee_type;
                                     self.ctx.emit(Instruction::Mov {

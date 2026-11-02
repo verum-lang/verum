@@ -151,3 +151,43 @@ fn probe() -> Int {
         7
     );
 }
+
+#[test]
+fn nested_variant_tests_use_the_instantiated_field_owner() {
+    assert_eq!(
+        run(
+            r#"
+type Answer is Busy | ReadyNow;
+type Decoy is ReadyNow | Ignored;
+type Pair<A, B> is First(A) | Second(B);
+fn classify(value: Pair<Decoy, Answer>) -> Int {
+    match value {
+        Pair.Second(ReadyNow) => 40,
+        Pair.Second(Busy) => 3,
+        _ => 1,
+    }
+}
+fn probe() -> Int {
+    classify(Pair.Second(Answer.ReadyNow)) +
+    classify(Pair.Second(Answer.Busy)) +
+    classify(Pair.First(Decoy.ReadyNow))
+}
+"#,
+            None,
+        ),
+        44
+    );
+}
+
+#[test]
+fn unresolved_variant_patterns_have_no_runtime_tag() {
+    let ast = Parser::new(
+        "type State is Open | Closed; fn test(s: State) -> Bool { match s { Unresolved => true, _ => false } }",
+    )
+    .parse_module()
+    .unwrap();
+    let error = VbcCodegen::with_config(CodegenConfig::new("pattern_test"))
+        .compile_module(&ast)
+        .expect_err("unresolved variant name must not become a discriminant");
+    assert!(error.to_string().contains("Unresolved"), "{error}");
+}
