@@ -209,7 +209,7 @@ fn file_local_and_mounted_constructors_execute_with_their_declared_tags() {
         "module first; public type A is Other | Clash(Int); fn first_probe() -> Int { let x = Clash(7); match x { A.Clash(v) => v, _ => -1 } }",
         "module second; public type B is Clash(Int) | Other; fn second_probe() -> Int { let x = Clash(9); match x { B.Clash(v) => v, _ => -2 } }",
         "module holder; public type Register is Blank | Num(Int);",
-        "module elsewhere; public type Pair is Num(Int, Int) | Empty;",
+        "module elsewhere; public type Pair is Num(Int) | Empty;",
         "module machine; mount holder.Register; fn make_num() -> Int { let v = Num(23); match v { Register.Num(x) => x, _ => -4 } }",
         "module client; mount first.Clash; fn mounted_probe() -> Int { let x = Clash(17); match x { A.Clash(v) => v, _ => -3 } }",
     ];
@@ -248,4 +248,19 @@ fn file_local_and_mounted_constructors_execute_with_their_declared_tags() {
             assert_eq!(result.as_i64(), expected, "{entry}, reverse={reverse}");
         }
     }
+}
+
+#[test]
+fn equally_visible_mounted_owners_are_ambiguous() {
+    use verum_vbc::codegen::ItemFailurePolicy;
+    let modules: Vec<_> = [
+        "module first; public type A is Other | Shared(Int);",
+        "module second; public type B is Shared(Int) | Empty;",
+        "module app; mount first.A; mount second.B; fn probe() { let x = Shared(1); }",
+    ].iter().map(|source| Parser::new(source).parse_module().unwrap()).collect();
+    let units: Vec<_> = modules.iter().collect();
+    let mut codegen = VbcCodegen::new();
+    codegen.collect_unit_declarations(&units).unwrap();
+    let err = codegen.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap_err();
+    assert!(err.to_string().contains("E431"), "{err}");
 }

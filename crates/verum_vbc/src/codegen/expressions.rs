@@ -11861,6 +11861,7 @@ impl VbcCodegen {
         let mut owners = verum_common::List::new();
         let mut local = Vec::new();
         let mut mounted = Vec::new();
+        let mut mounted_owners = Vec::new();
         let mount = self
             .mounted_type_path(name)
             .and_then(|path| path.rsplit_once('.'));
@@ -11886,23 +11887,22 @@ impl VbcCodegen {
             {
                 mounted.push(info);
             }
+            if let Some((_, leaf)) = owner.rsplit_once('.')
+                && self.mounted_type_path(leaf) == Some(owner)
+            {
+                mounted_owners.push(info);
+            }
             owners.push(verum_common::Text::from(owner));
         }
-        let visible = if local.is_empty() { &mounted } else { &local };
-        if let [info] = visible.as_slice() {
-            return Ok(Some(*info));
-        }
-        // Bootstrap registers both the local spelling and the canonical
-        // spelling of a mounted type. These are the same constructor only
-        // when this source's mount names that declaration and every candidate
-        // is one of its two spellings.
-        for owner in &owners {
-            if !owner.contains(".")
-                && let Some(path) = self.mounted_type_path(owner.as_str())
-                && owners.iter().all(|other| other == owner || other.as_str() == path)
-                && let Some(info) = candidate(path)
-            {
-                return Ok(Some(info));
+        // A named constructor import is more specific than importing its sum.
+        // Only fully qualified owners are candidates in the latter tier: the
+        // bootstrap's bare mirror does not constitute another declaration.
+        for candidates in [&local, &mounted, &mounted_owners] {
+            if let [info] = candidates.as_slice() {
+                return Ok(Some(*info));
+            }
+            if !candidates.is_empty() {
+                break;
             }
         }
         if owners.len() < 2 {
