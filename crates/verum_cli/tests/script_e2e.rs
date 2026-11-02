@@ -34,6 +34,23 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_verum")
 }
 
+#[test]
+fn explicit_permission_policy_keeps_stdout_for_the_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("app.vr");
+    std::fs::write(&entry, "fn main() { println(17); }").unwrap();
+    let output = Command::new(binary())
+        .args(["run", "--interp", "--deny-all"])
+        .arg(entry)
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "17");
+    assert!(stderr.contains("0 grants installed"), "{stderr}");
+}
+
 /// Build a uniquely-named temp directory for one fixture.
 fn fresh_dir(tag: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();

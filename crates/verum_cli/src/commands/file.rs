@@ -442,7 +442,7 @@ pub fn run_with_observation(
                 }
                 let aot_permission_policy = build_aot_permission_policy(&ctx);
                 if aot_permission_policy.is_some() {
-                    ui::detail(
+                    ui::status(
                         "Permissions",
                         &format!("{} grants baked into AOT binary", ctx.permissions.len()),
                     );
@@ -813,7 +813,7 @@ fn run_script_interpreted(
     // unrestricted mode.
     let permission_policy = build_script_permission_policy(&ctx);
     if permission_policy.is_some() {
-        ui::detail(
+        ui::status(
             "Permissions",
             &format!("{} grants installed", ctx.permissions.len()),
         );
@@ -1143,19 +1143,19 @@ fn resolve_script_dependencies(
     }
 
     if path_count > 0 {
-        ui::detail(
+        ui::status(
             "Dependencies",
             &format!("{path_count} path-cog(s) registered"),
         );
     }
     if registry_count > 0 {
-        ui::detail(
+        ui::status(
             "Dependencies",
             &format!("{registry_count} registry-cog(s) registered"),
         );
     }
     if git_count > 0 {
-        ui::detail(
+        ui::status(
             "Dependencies",
             &format!("{git_count} git-cog(s) registered"),
         );
