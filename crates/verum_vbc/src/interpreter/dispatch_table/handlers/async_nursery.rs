@@ -138,7 +138,7 @@ pub(in super::super) fn handle_await(
     {
         // If the task is already completed, return its result immediately
         if let Some(task) = state.tasks.get(task_id)
-            && let Some(result) = task.result
+            && let Some(result) = task.outcome()?
         {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
@@ -149,7 +149,7 @@ pub(in super::super) fn handle_await(
 
         // Retrieve the result
         if let Some(task) = state.tasks.get(task_id)
-            && let Some(result) = task.result
+            && let Some(result) = task.outcome()?
         {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
@@ -253,7 +253,7 @@ pub(in super::super) fn handle_select(
     for &(tid_opt, idx) in &task_entries {
         if let Some(tid) = tid_opt
             && let Some(task) = state.tasks.get(tid)
-            && let Some(result) = task.result
+            && let Some(result) = task.outcome()?
         {
             // Result over the winner's own future register, index in dst.
             state.set_reg(future_regs[idx], result);
@@ -273,7 +273,7 @@ pub(in super::super) fn handle_select(
         {
             execute_pending_task(state, tid)?;
             if let Some(task) = state.tasks.get(tid)
-                && let Some(result) = task.result
+                && let Some(result) = task.outcome()?
             {
                 state.set_reg(future_regs[idx], result);
                 state.set_reg(dst, Value::from_i64(idx as i64));
@@ -330,7 +330,7 @@ pub(in super::super) fn handle_join(
     for (i, &tid_opt) in task_entries.iter().enumerate() {
         if let Some(tid) = tid_opt
             && let Some(task) = state.tasks.get(tid)
-            && let Some(result) = task.result
+            && let Some(result) = task.outcome()?
         {
             results.push(result);
             continue;
@@ -385,7 +385,7 @@ pub(in super::super) fn handle_future_get(
     {
         // If completed, return result directly
         if let Some(task) = state.tasks.get(task_id)
-            && let Some(result) = task.result
+            && let Some(result) = task.outcome()?
         {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
@@ -400,7 +400,7 @@ pub(in super::super) fn handle_future_get(
         {
             execute_pending_task(state, task_id)?;
             if let Some(task) = state.tasks.get(task_id)
-                && let Some(result) = task.result
+                && let Some(result) = task.outcome()?
             {
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);

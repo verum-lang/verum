@@ -985,7 +985,7 @@ pub(crate) fn execute_pending_task(
                 state.tasks.complete(task_id, value);
             }
             Err(e) => {
-                state.tasks.fail(task_id);
+                state.tasks.fail_with(task_id, e.clone());
                 return Err(e);
             }
         }

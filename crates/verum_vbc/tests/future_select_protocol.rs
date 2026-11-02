@@ -148,6 +148,28 @@ fn keyword_tasks_remain_selectable() {
     );
 }
 #[test]
+fn a_pumped_task_preserves_its_panic_for_await_and_select() {
+    for observe in ["handle.await", "select { value = handle.await => value }"] {
+        let source = format!(
+            r#"{ENV}
+            async fn probe() -> Int {{
+                let handle = spawn {{ panic("worker failed"); 11 }};
+                let sibling = spawn {{ 5 }};
+                let _ = sibling.await;
+                {observe}
+            }}"#
+        );
+        let ast = Parser::new(&source).parse_module().expect("parse");
+        let module = VbcCodegen::with_config(CodegenConfig::new("task_failure"))
+            .compile_module(&ast).expect("compile");
+        let entry = module.find_function_by_name("task_failure.probe").unwrap();
+        let error = Interpreter::new(Arc::new(module)).execute_function(entry).unwrap_err();
+        assert!(matches!(error, verum_vbc::interpreter::InterpreterError::Panic { ref message }
+            if message == "worker failed"), "{observe}: {error}");
+    }
+}
+
+#[test]
 fn unsupported_eager_async_call_is_refused_before_execution() {
     let source = format!(
         "{ENV} async fn eager() -> Int {{ loop {{}} }} async fn probe() -> Int {{ select {{ x = eager().await => x }} }}"

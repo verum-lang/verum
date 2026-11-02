@@ -1517,6 +1517,8 @@ pub struct Task {
     pub saved_pc: u32,
     /// Task result (if completed).
     pub result: Option<Value>,
+    /// Original execution failure for observers that arrive after a scheduler turn.
+    error: Option<Box<InterpreterError>>,
     /// Deferred argument values (for cooperative scheduling).
     /// Stored at spawn time, consumed when the task is actually executed.
     pub arg_values: Vec<Value>,
@@ -1526,6 +1528,19 @@ pub struct Task {
     /// Snapshot of parent's context stack at spawn time.
     /// Restored into the child's context stack before execution.
     pub saved_contexts: Vec<ContextEntry>,
+}
+
+impl Task {
+    /// Poll the recorded outcome without consuming it.
+    pub fn outcome(&self) -> InterpreterResult<Option<Value>> {
+        match &self.error {
+            Some(error) => Err((**error).clone()),
+            None if self.status == TaskStatus::Failed => {
+                Err(InterpreterError::TaskFailed { task_id: self.id })
+            }
+            None => Ok(self.result),
+        }
+    }
 }
 
 /// Unique task identifier.
@@ -1589,6 +1604,7 @@ impl TaskQueue {
             saved_registers: Vec::new(),
             saved_pc: 0,
             result: None,
+            error: None,
             arg_values: Vec::new(),
             closure_val: None,
             saved_contexts: Vec::new(),
@@ -1623,6 +1639,7 @@ impl TaskQueue {
             saved_registers: Vec::new(),
             saved_pc: 0,
             result: None,
+            error: None,
             arg_values: args,
             closure_val: None,
             saved_contexts: contexts,
@@ -1655,6 +1672,7 @@ impl TaskQueue {
             saved_registers: Vec::new(),
             saved_pc: 0,
             result: None,
+            error: None,
             arg_values: Vec::new(),
             closure_val: Some(closure_val),
             saved_contexts: contexts,
@@ -1680,13 +1698,20 @@ impl TaskQueue {
         if let Some(task) = self.tasks.get_mut(&id) {
             task.status = TaskStatus::Completed;
             task.result = Some(result);
+            task.error = None;
         }
     }
 
     /// Marks a task as failed.
     pub fn fail(&mut self, id: TaskId) {
+        self.fail_with(id, InterpreterError::TaskFailed { task_id: id });
+    }
+
+    pub(crate) fn fail_with(&mut self, id: TaskId, error: InterpreterError) {
         if let Some(task) = self.tasks.get_mut(&id) {
             task.status = TaskStatus::Failed;
+            task.result = None;
+            task.error = Some(Box::new(error));
         }
     }
 
