@@ -232,15 +232,17 @@ fn argument_loans_survive_nested_calls_until_the_outer_invocation() {
 fn implicit_clone_borrows_only_duplicable_layouts() {
     for source in [
         "type Role is | Up | Down; type Entry is { role: Role }; fn read(e: &Entry) -> Role { e.role.clone() }",
-        "type Digest is (Text); type Envelope is { digest: Digest }; fn read(p: &Envelope) -> Envelope { p.clone() }",
+        "type Digest is (Text); fn read(p: &Digest) -> Digest { p.clone() }",
         "fn show(b: &Boxed) -> Text { b.value.to_text() }",
-        "type Pair is { x: Boxed, y: Text }; fn read(p: &Pair) -> Pair { p.clone() }",
+        "type Pair is { x: Int, y: Text }; fn read(p: &Pair) -> Pair { p.clone() }",
         "type Wrap<T> is { item: T }; fn read(p: &Wrap<Int>) -> Wrap<Int> { p.clone() }",
     ] {
         let messages = errors(source);
         assert!(messages.is_empty(), "{source}: {messages:?}");
     }
     for source in [
+        "type Outer is { inner: Boxed }; fn mutate(p: &Outer) -> Int { let mut replica = p.clone(); replica.inner.value = 13; p.inner.value }",
+        "type Code is (Text); type Box is { code: Code }; fn duplicate(t: &Box) -> Box { t.clone() }",
         "type affine Status is | Idle | Busy; fn duplicate(t: &Status) -> Status { t.clone() }",
         "type affine Status is | Idle | Busy; type Box is { status: Status }; fn duplicate(t: &Box) -> Box { t.clone() }",
         "type affine Ticket is { id: Int }; fn duplicate(t: &Ticket) -> Ticket { t.clone() }",

@@ -514,11 +514,14 @@ fn nested_archived_variant_pattern_uses_its_declaring_owner_and_payload_paramete
 #[test]
 fn imported_clone_uses_resource_and_layout_from_the_same_declaration() {
     let model = "public type Code is (Text); public type Role is | Up | Down;
-        public type Entry is { role: Role, code: Code };";
+        public type Entry is { role: Role, code: Text };";
     for discipline in ["", "affine "] {
         let other = format!("public type {discipline}Role is | Up | Down; public type Cell is {{ role: Role }};");
         let sources = [("project.model", model), ("project.other", other.as_str())];
-        let consumer = "fn copy(e: &project.model.Entry) -> project.model.Entry { e.clone() }
+        let consumer = "mount project.model.{Role};
+            fn copy_constructed() -> project.model.Role { let v = Role.Up; v.clone() }
+            fn copy(e: &project.model.Entry) -> project.model.Entry { e.clone() }
+            fn code(e: &project.model.Code) -> project.model.Code { e.clone() }
             fn again(e: &project.model.Entry) -> project.model.Entry { e.clone() }
             fn copy_role(e: &project.model.Role) -> project.model.Role { e.clone() }";
         let messages = check_with_modules("", "app", consumer, CoreMetadata::default(), false, &sources);
