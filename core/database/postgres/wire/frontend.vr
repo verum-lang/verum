@@ -20,7 +20,7 @@ module core.database.postgres.wire.frontend;
 mount base.{Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.types.WireBuf;
-mount core.database.postgres.wire.frame.frame;
+mount core.database.postgres.wire.frame.{frame, frame_payload};
 mount core.database.postgres.wire.frame.frame_untagged;
 mount core.database.postgres.wire.types.{
     FE_QUERY, FE_PARSE, FE_BIND, FE_DESCRIBE, FE_EXECUTE, FE_FLUSH,
@@ -187,10 +187,7 @@ public fn flush() -> List<Byte> {
 /// land in its own frame (one trailing newline) for cleanest server
 /// error reporting, but multiple rows per frame are accepted.
 public fn copy_data(bytes: &[Byte]) -> List<Byte> {
-    let owned = bytes_to_list(bytes);
-    frame(FE_COPY_DATA, |buf: &mut WireBuf| {
-        buf.put_bytes(owned.as_slice());
-    })
+    frame_payload(FE_COPY_DATA, bytes)
 }
 
 /// CopyDone (`c`) — terminate a COPY FROM stream successfully.
@@ -214,10 +211,7 @@ public fn copy_fail(reason: &Text) -> List<Byte> {
 // -----------------------------------------------------------------------------
 
 public fn password_message(payload: &[Byte]) -> List<Byte> {
-    let owned = bytes_to_list(payload);
-    frame(FE_PASSWORD, |buf: &mut WireBuf| {
-        buf.put_bytes(owned.as_slice());
-    })
+    frame_payload(FE_PASSWORD, payload)
 }
 
 /// SASL initial response: mechanism name + NUL + 4-byte BE length +
@@ -234,10 +228,7 @@ public fn sasl_initial_response(mechanism: &Text, initial_response: &[Byte]) -> 
 
 /// SASL response: subsequent client SCRAM messages after the initial.
 public fn sasl_response(client_message: &[Byte]) -> List<Byte> {
-    let body = bytes_to_list(client_message);
-    frame(FE_PASSWORD, |buf: &mut WireBuf| {
-        buf.put_bytes(body.as_slice());
-    })
+    frame_payload(FE_PASSWORD, client_message)
 }
 
 // -----------------------------------------------------------------------------

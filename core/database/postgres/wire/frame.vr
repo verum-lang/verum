@@ -100,18 +100,22 @@ fn frame_with_writer<F: fn(&mut WireBuf) -> ()>(
     let mut payload = WireBuf.new();
     (*write_payload)(&mut payload);
 
-    let mut out: List<Byte> = List.new();
+    frame_payload(tag, payload.as_bytes())
+}
+
+/// Encode an already-serialized payload without an intermediate writer buffer.
+public fn frame_payload(tag: Byte, body: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(body.len() + 5);
     if tag != (0 as Byte) {
         out.push(tag);
     }
     // 4-byte BE length INCLUDING the length field itself.
-    let len_total = (payload.len() + 4) as Int;
+    let len_total = (body.len() + 4) as Int;
     out.push(((len_total >> 24) & 0xFF) as Byte);
     out.push(((len_total >> 16) & 0xFF) as Byte);
     out.push(((len_total >> 8)  & 0xFF) as Byte);
     out.push((len_total & 0xFF) as Byte);
 
-    let body = payload.as_bytes();
     let mut i: Int = 0;
     while i < body.len() {
         out.push(body[i]);

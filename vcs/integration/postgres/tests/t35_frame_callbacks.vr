@@ -4,6 +4,7 @@
 // @description: Tagged and startup frames borrow their captured writers.
 module postgres_frame_callbacks.main;
 mount core.database.common.types.WireBuf;
+mount core.database.postgres.wire.frontend.copy_data;
 mount core.database.postgres.wire.frame.{frame, frame_untagged};
 
 fn main() {
@@ -28,5 +29,15 @@ fn main() {
     let empty = frame(88 as Byte, |_buf: &mut WireBuf| {});
     assert_eq(empty.len(), 5);
     assert_eq(empty[4] as Int, 4);
+    let mut payload = WireBuf.new();
+    payload.put_u8(0x72);
+    payload.put_i64_be(0x0102030405060708);
+    let data = copy_data(payload.as_bytes());
+    assert_eq(data.len(), 14);
+    assert_eq(data[0] as Int, 0x64);
+    assert_eq(data[4] as Int, 13);
+    assert_eq(data[5] as Int, 0x72);
+    assert_eq(data[6] as Int, 1);
+    assert_eq(data[13] as Int, 8);
     print("postgres frames: captured and empty writers passed");
 }

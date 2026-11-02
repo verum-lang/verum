@@ -572,7 +572,7 @@ implement PgReplicationConnection {
         buf.put_i64_be(apply_pos.raw());
         buf.put_i64_be(client_time_us);
         buf.put_u8(if reply_requested { 1 } else { 0 });
-        let frame = copy_data(buf.as_slice());
+        let frame = copy_data(buf.as_bytes());
         self.conn.write_replication_frame(frame.as_slice())?;
         Result.Ok(())
     }
