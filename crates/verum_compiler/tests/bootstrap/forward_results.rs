@@ -103,7 +103,6 @@ fn forward_result_case(serialized: bool, relative: bool) {
                 &[&files[0].1],
                 &config,
                 &target,
-                &Default::default(),
                 &interfaces,
             )
             .unwrap();

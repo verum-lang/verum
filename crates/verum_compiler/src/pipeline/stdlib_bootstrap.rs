@@ -34,7 +34,6 @@ use verum_vbc::codegen::VbcCodegen;
 
 use super::BuildMode;
 use crate::core_compiler::{CoreConfig, StdlibCompilationResult, StdlibModule};
-use crate::lint::{IntrinsicDiagnostics, IntrinsicLint};
 use crate::module_utils;
 
 use super::CompilationPipeline;
@@ -726,12 +725,6 @@ impl<'s> CompilationPipeline<'s> {
         // release binary that bakes the archive (T0758).
         let target = self.session.cfg_evaluator().config().clone();
 
-        // Build list of all module names for forward reference detection
-        let all_module_names: Vec<&str> = all_parsed_modules
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect();
-
         // T1192 — SIMPLE NAMES DECLARED BY MORE THAN ONE MODULE, computed
         // once so the transparency seed below can refuse them.
         //
@@ -783,7 +776,7 @@ one module and therefore never seeded",
             &all_parsed_modules, &config, &target,
         )?;
 
-        for (idx, (module_name, ast_modules_with_paths)) in all_parsed_modules.iter().enumerate() {
+        for (module_name, ast_modules_with_paths) in &all_parsed_modules {
             let module_start = std::time::Instant::now();
             let module = modules_to_compile
                 .iter()
@@ -798,10 +791,6 @@ one module and therefore never seeded",
                 );
             }
 
-            // Build set of modules that will be compiled AFTER this one (forward references)
-            let later_modules: std::collections::HashSet<&str> =
-                all_module_names[idx + 1..].iter().copied().collect();
-
             // Extract just the AST modules for compilation
             let ast_modules: Vec<&verum_ast::Module> =
                 ast_modules_with_paths.iter().map(|(_, ast)| ast).collect();
@@ -811,7 +800,6 @@ one module and therefore never seeded",
                 ast_modules.as_slice(),
                 &config,
                 &target,
-                &later_modules,
                 &declaration_interfaces,
             )?;
             functions_compiled += funcs;
@@ -891,50 +879,14 @@ one module and therefore never seeded",
     ) -> Result<Vec<(PathBuf, verum_ast::Module)>> {
         use crate::api::SourceFile;
 
-        let mut sources: Vec<(PathBuf, SourceFile)> = Vec::new();
-        for path in &module.source_files {
+        module.source_files.iter().map(|path| {
             let source = SourceFile::load(path)
-                .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
-            sources.push((path.clone(), source));
-        }
-
-        let mut ast_modules = Vec::new();
-
-        // Lenient parsing: emit a warning per file that fails to
-        // parse and continue with the remainder. The strict path
-        // failed the entire `precompile-stdlib` run when *any*
-        // mid-stdlib `.vr` file had a syntax error — even though the
-        // existing `Phase0CoreCompiler` is already lenient on the
-        // same files. Production precompile must tolerate transient
-        // stdlib hygiene issues so the archive can be refreshed
-        // independently from per-module fixes.
-        //
-        // The classifier (`stdlib_classifier::classify_stdlib`)
-        // surfaces the same parse errors as a separate audit gate;
-        // CI can fail on that gate without blocking precompile
-        // refreshes.
-        let mut parse_errors: Vec<String> = Vec::new();
-        for (path, source) in &sources {
-            let mut parser = verum_fast_parser::Parser::new(&source.content);
-            match parser.parse_module() {
-                Ok(ast_module) => ast_modules.push((path.clone(), ast_module)),
-                Err(e) => {
-                    let msg = format!("{}: {:?}", source.path, e);
-                    tracing::warn!(target: "stdlib_bootstrap", "lenient SKIP {msg}");
-                    parse_errors.push(msg);
-                }
-            }
-        }
-        if !parse_errors.is_empty() {
-            tracing::warn!(
-                target: "stdlib_bootstrap",
-                "{} stdlib module(s) failed to parse and were skipped — \
-                 see `verum audit --stdlib-layers` for the full list",
-                parse_errors.len()
-            );
-        }
-
-        Ok(ast_modules)
+                .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
+            let ast = verum_fast_parser::Parser::new(&source.content)
+                .parse_module()
+                .map_err(|e| anyhow::anyhow!("parsing {}: {e:?}", path.display()))?;
+            Ok((path.clone(), ast))
+        }).collect()
     }
 
     /// Global type registration across ALL stdlib modules.
@@ -2226,16 +2178,6 @@ one module and therefore never seeded",
         Ok(())
     }
 
-    /// Compile a stdlib module from pre-parsed AST.
-    ///
-    /// # Arguments
-    /// * `module` - The module to compile
-    /// * `ast_modules` - Pre-parsed AST modules for this module
-    /// * `config` - Stdlib compilation configuration
-    /// * `target` - Target platform configuration
-    /// * `later_modules` - Set of module names that will be compiled AFTER this module.
-    ///  Used for forward reference detection to suppress warnings for cross-module
-    ///  function calls that will be resolved later in the compilation sequence.
     /// Runs the user pipeline's VALIDATION phases over the stdlib's own
     /// files (T0692).
     ///
@@ -2442,7 +2384,6 @@ one module and therefore never seeded",
         ast_modules: &[&verum_ast::Module],
         config: &CoreConfig,
         target: &verum_ast::cfg::TargetConfig,
-        later_modules: &std::collections::HashSet<&str>,
         declaration_interfaces: &[verum_vbc::VbcModule],
     ) -> Result<(verum_vbc::VbcModule, usize)> {
         use verum_vbc::codegen::CodegenConfig;
@@ -2541,87 +2482,15 @@ one module and therefore never seeded",
         // and the bake does not.
         self.run_user_validation_phases(&module.name, ast_modules);
 
-        // Used by the later passes' warning paths.
-        let lint_diagnostics = IntrinsicDiagnostics::new(&self.session.options().lint_config);
-
         // After all declarations collected, resolve pending imports
         // This handles cross-file imports within the same module
         codegen.resolve_pending_imports();
 
-        // Pass 1c: Compile protocol-default-method monomorphisations
-        // queued by `generate_default_protocol_methods`.
-        //
-        // When `collect_non_protocol_declarations` processed each
-        // `implement P for T { ... }`, it called
-        // `generate_default_protocol_methods(P, T, implemented_methods)`
-        // which pushed every default body of P that T did NOT override
-        // into `codegen.pending_default_methods`.  Without this pass,
-        // the queue is left full at finalize time and the
-        // `<Type>.<method>` bodies are NEVER emitted into the archive —
-        // the user-side codegen then sees `DefaultHasher.new` (override
-        // body, real) but `DefaultHasher.write_int` (Hasher protocol's
-        // default body) missing.  At runtime, dispatch of
-        // `hasher.write_int(42)` panics with `method
-        // 'DefaultHasher.write_int' not found on receiver of runtime
-        // kind 'Object'`.
-        //
-        // Mirrors the user-side ordering at
-        // `pipeline/vbc_codegen.rs` — collect → resolve → default
-        // methods → bodies — so stdlib and user code agree on the
-        // protocol-default-method lifecycle.  Without this symmetry,
-        // every protocol with a default method (Hasher.write_int /
-        // .write_byte, Hash.hash_value forwarders, every Iterator
-        // combinator default, Display/Debug forwarders) silently
-        // loses its archive body.
-        //
-        // **Drift contract**: `archive_carries_protocol_default_method_monomorphisations`
-        // in `archive_ctx_loader::tests` pins this — removing the
-        // call below fails the drift-pin.
-        if let Err(e) = codegen.compile_pending_default_methods() {
-            let diag = lint_diagnostics.codegen_warning(
-                &module.name,
-                &format!("default-method monomorphisation: {}", e),
-                None,
-            );
-            let level = self
-                .session
-                .options()
-                .lint_config
-                .level_for(IntrinsicLint::MissingImplementation);
-            if level.is_error() {
-                self.stdlib_errors.push(diag);
-            } else if level.should_emit() {
-                self.stdlib_warnings.push(diag);
-            }
-        }
-
-        // Pass 2: Compile all function bodies into ONE shared codegen
-        // state, then emit a SINGLE coherent `VbcModule` at the end.
-        //
-        // Pre-fix the path here was per-file `compile_function_bodies`
-        // (returns a fresh VbcModule with the file's bodies) followed
-        // by `merge_stdlib_vbc_modules` to glue the per-file modules
-        // into one.  That merge re-interned strings and tried to remap
-        // StringIds inside FunctionDescriptors, but bytecode operands
-        // (which carry their OWN StringId offsets) stayed at SOURCE-
-        // local positions — and the per-file `build_module` had ALREADY
-        // run the function-id remap that turned the codegen's sparse
-        // `next_func_id`-allocated FunctionIds into 0..N-1 indices.
-        // The merge then concatenated those independently-renumbered
-        // function lists; any ID that was 0 in file A AND 0 in file B
-        // collapsed onto the same "merged" position via add_function's
-        // `len()`-based assignment, and whichever of the two file
-        // bodies pushed last won — the canonical case where the
-        // 158-method `core/text/text.vr` got its inherent-method
-        // bodies dropped down to 8.
-        //
-        // The fix: every file in the module shares ONE codegen
-        // instance — one string pool, one types table, one bytecode
-        // arena, one function table.  `compile_items_into_state`
-        // accumulates without finalising; `finalize_module_from_state`
-        // runs build_module ONCE at the end to perform the function-id
-        // remap on the union of all per-file bodies.  No merge step;
-        // no inherent-method drops.
+        // A published module promises executable bodies for all active declarations.
+        // Declaration-only interfaces supply forward references across module cycles.
+        use verum_vbc::codegen::ItemFailurePolicy;
+        codegen.compile_default_methods_with_policy(ItemFailurePolicy::Strict)
+            .map_err(|e| anyhow::anyhow!("compiling default methods for {}: {e}", module.name))?;
 
         // ARCH-P2 set-stability evidence channel + freeze contract.
         //
@@ -2640,46 +2509,8 @@ one module and therefore never seeded",
         let pre_body_layouts: Option<std::collections::BTreeMap<String, Vec<String>>> =
             trace_lazy_layout.then(|| codegen.export_type_layouts().into_iter().collect());
 
-        for ast_module in ast_modules {
-            // `compile_items_into_state` is the lenient single-pool
-            // accumulator: it walks the AST item-by-item via
-            // `compile_item_lenient`, so a single failing item
-            // (typically a forward-ref to a module compiled later)
-            // doesn't drop the rest of the file's bodies on the
-            // floor.  The lenient helper emits a panic-stub for the
-            // failed function so its slot in `self.functions` stays
-            // populated under its registered FunctionId.
-            if let Err(e) = codegen.compile_items_into_state(ast_module) {
-                let is_forward_ref = if let Some(func_name) = e.undefined_function_name() {
-                    Self::is_forward_reference_to_later_module(
-                        func_name,
-                        &module.name,
-                        later_modules,
-                    )
-                } else {
-                    false
-                };
-
-                if !is_forward_ref {
-                    let error_msg = if let Some(ref s) = e.span {
-                        format!("{} (byte {}-{})", e, s.start, s.end)
-                    } else {
-                        e.to_string()
-                    };
-                    let diag = lint_diagnostics.codegen_warning(&module.name, &error_msg, None);
-                    let level = self
-                        .session
-                        .options()
-                        .lint_config
-                        .level_for(IntrinsicLint::MissingImplementation);
-                    if level.is_error() {
-                        self.stdlib_errors.push(diag);
-                    } else if level.should_emit() {
-                        self.stdlib_warnings.push(diag);
-                    }
-                }
-            }
-        }
+        codegen.compile_unit_items(ast_modules, ItemFailurePolicy::Strict)
+            .map_err(|e| anyhow::anyhow!("compiling stdlib bodies for {}: {e}", module.name))?;
         let merged_vbc = codegen
             .finalize_module_from_state()
             .map_err(|e| anyhow::anyhow!("finalize stdlib module {}: {}", module.name, e))?;
@@ -2851,66 +2682,6 @@ one module and therefore never seeded",
 
         Ok((merged_vbc, total_func_count))
     }
-
-    /// Checks if an undefined function error is a forward reference to a module
-    /// that will be compiled later in the compilation sequence.
-    ///
-    /// # Arguments
-    /// * `func_path` - The function path from the error (e.g., "darwin::tls::init_main_thread_tls")
-    /// * `current_module` - The module currently being compiled (e.g., "sys")
-    /// * `later_modules` - Set of modules that will be compiled after the current one
-    ///
-    /// # Returns
-    /// `true` if this appears to be a forward reference to a later module
-    fn is_forward_reference_to_later_module(
-        func_path: &str,
-        current_module: &str,
-        later_modules: &std::collections::HashSet<&str>,
-    ) -> bool {
-        // The function path uses "::" as separator (e.g., "darwin::tls::init_main_thread_tls")
-        // We need to map this to module names which use "." as separator (e.g., "sys.darwin")
-
-        // Extract the first component of the path
-        let parts: Vec<&str> = func_path.split("::").collect();
-        if parts.is_empty() {
-            return false;
-        }
-
-        let first_component = parts[0];
-
-        // Case 1: Direct submodule reference (e.g., "darwin" from "sys" -> "sys.darwin")
-        let submodule_name = format!("{}.{}", current_module, first_component);
-        if later_modules.contains(submodule_name.as_str()) {
-            return true;
-        }
-
-        // Case 2: Direct module reference (e.g., "mem" -> "mem")
-        if later_modules.contains(first_component) {
-            return true;
-        }
-
-        // Case 3: Path with multiple components - try to match against later modules
-        // e.g., "mem::heap::init_thread_heap" should match "mem"
-        for later_module in later_modules {
-            // Check if the function path starts with the module name
-            let module_prefix = later_module.replace('.', "::");
-            if func_path.starts_with(&module_prefix) || func_path.starts_with(later_module) {
-                return true;
-            }
-
-            // Check if any component matches the module name (without parent prefix)
-            // e.g., "mem" in "mem::heap::..." should match later module "mem"
-            let module_parts: Vec<&str> = later_module.split('.').collect();
-            if let Some(last_part) = module_parts.last() {
-                if first_component == *last_part {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
 
     /// Build the VBC archive from compiled stdlib modules.
     fn build_stdlib_archive(&self, config: &CoreConfig) -> Result<verum_vbc::VbcArchive> {

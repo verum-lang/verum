@@ -376,7 +376,6 @@ fn current_semver_sources_publish_real_bodies_signatures_and_private_fields() {
             asts.as_slice(),
             &config,
             &verum_ast::cfg::TargetConfig::host(),
-            &Default::default(),
             &[],
         )
         .expect("actual source bootstrap producer");

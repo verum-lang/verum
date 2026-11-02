@@ -540,8 +540,8 @@ pub enum ItemFailurePolicy {
     /// user compiling their own file wants.
     Strict,
     /// Emit a panic-stub for the failing body and keep going, then
-    /// report the first failure. What the stdlib bake needs: one
-    /// unbuildable body must not cost the archive every other one.
+    /// report failures selected by the diagnostic configuration.
+    /// Available for loading incomplete source during diagnostic analysis.
     StubAndContinue,
 }
 
@@ -3536,6 +3536,14 @@ impl VbcCodegen {
     /// external symbols (FFI, intrinsics not yet available in VBC) that
     /// can't compile in every load context.
     pub fn compile_pending_default_methods(&mut self) -> CodegenResult<()> {
+        self.compile_default_methods_with_policy(ItemFailurePolicy::StubAndContinue)
+    }
+
+    /// Compile inherited bodies with the same failure policy as explicit bodies.
+    pub fn compile_default_methods_with_policy(
+        &mut self,
+        policy: ItemFailurePolicy,
+    ) -> CodegenResult<()> {
         // T0701: late-register the deferred default-method
         // materialisations FIRST — the whole collect phase has run, so
         // every explicit impl body already owns its unsuffixed slot
@@ -3639,7 +3647,7 @@ impl VbcCodegen {
                 // A `Fatal` error is never skipped, here as everywhere else:
                 // a class that means "never skipped" but IS skipped at one
                 // site is worse than no class at all.
-                if class == SkipClass::Fatal {
+                if policy == ItemFailurePolicy::Strict || class == SkipClass::Fatal {
                     return Err(e);
                 }
                 tracing::warn!(
@@ -5613,86 +5621,52 @@ impl VbcCodegen {
         }
     }
 
-    /// Compiles an item with lenient error handling - skips individual functions that fail.
-    /// This is used for imported stdlib modules where some functions may reference
-    /// FFI/external symbols not available in VBC interpreter.
-    ///
-    /// Returns `Err(CodegenError)` for every `SkipClass::Fatal` failure,
-    /// or when strict codegen encounters a `SkipClass::BugClass` failure.
-    /// Other failures (irreducible, or a bug-class failure in non-strict mode)
-    /// surface as warn-level traces and the function returns `Ok(())` —
-    /// the documented Tier-0 contract.
+    fn handle_body_failure(
+        &mut self,
+        func: &FunctionDecl,
+        owner: Option<&str>,
+        error: CodegenError,
+        policy: ItemFailurePolicy,
+        first: &mut Option<CodegenError>,
+    ) -> CodegenResult<()> {
+        if policy == ItemFailurePolicy::Strict {
+            return Err(error);
+        }
+        let name = match owner {
+            Some(owner) => format!("{owner}.{}", func.name.name),
+            None => format!("top-level fn {}", func.name.name),
+        };
+        let class = error.skip_class();
+        tracing::warn!("[lenient] SKIP {name} ({}): {error}", class.label());
+        self.emit_lenient_panic_stub(func, owner, &error.to_string());
+        if class == SkipClass::Fatal || (self.config.strict_codegen && class == SkipClass::BugClass) {
+            first.get_or_insert(error);
+        }
+        Ok(())
+    }
+
+    fn compile_item(&mut self, item: &Item) -> CodegenResult<()> {
+        self.compile_item_with_policy(item, ItemFailurePolicy::Strict)
+    }
+
     fn compile_item_lenient(&mut self, item: &Item) -> CodegenResult<()> {
+        self.compile_item_with_policy(item, ItemFailurePolicy::StubAndContinue)
+    }
+
+    fn compile_item_with_policy(
+        &mut self,
+        item: &Item,
+        policy: ItemFailurePolicy,
+    ) -> CodegenResult<()> {
         let mut first_strict_err: Option<CodegenError> = None;
         match &item.kind {
             ItemKind::Function(func) => {
                 self.ctx.generic_type_params.clear();
-            self.ctx.generic_type_params_ordered.clear();
-            self.ctx.current_generic_param_ids.clear();
+                self.ctx.generic_type_params_ordered.clear();
+                self.ctx.current_generic_param_ids.clear();
                 self.ctx.const_generic_params.clear();
                 if let Err(e) = self.compile_function(func, None) {
-                    // Symmetric with the impl-item branch below. Promoted to
-                    // warn-level (was debug) so silent skips of user-callable
-                    // top-level functions surface as "method/function not
-                    // found on value" only AFTER the warning fires, instead
-                    // of being completely silent.
-                    let fname = func.name.name.as_str();
-                    let class = e.skip_class();
-                    let err_text = format!("{}", e);
-                    tracing::warn!(
-                        "[lenient] SKIP top-level fn {} ({}): {} — runtime calls \
-                         will panic with the same message via auto-stub",
-                        fname,
-                        class.label(),
-                        e
-                    );
-                    // Replace the dropped function with a panic-stub
-                    // body so typed dispatch keeps finding it.  Only
-                    // actual calls hit the panic; pattern matching,
-                    // function-pointer references, and qualified-path
-                    // resolution all keep working.  See
-                    // `emit_lenient_panic_stub` doc for the full
-                    // rationale.
-                    self.emit_lenient_panic_stub(func, None, &err_text);
-                    if let Some(undef) = e.undefined_function_name() {
-                        let undef_owned = undef.to_string();
-                        let near: Vec<String> = self
-                            .ctx
-                            .functions
-                            .keys()
-                            .filter(|k| {
-                                k.ends_with(&format!(".{}", undef_owned))
-                                    || k.ends_with(&format!("::{}", undef_owned))
-                                    || k.as_str() == undef_owned.as_str()
-                            })
-                            .take(8)
-                            .cloned()
-                            .collect();
-                        if !near.is_empty() {
-                            tracing::warn!(
-                                "[lenient]   near-matches for '{}' in ctx.functions: {:?}",
-                                undef_owned,
-                                near
-                            );
-                        } else {
-                            tracing::warn!(
-                                "[lenient]   no near-matches for '{}' in ctx.functions ({} entries total)",
-                                undef_owned,
-                                self.ctx.functions.len()
-                            );
-                        }
-                    }
-                    tracing::debug!("[lenient] SKIP top-level fn {}: {}", fname, e);
-                    if (class == SkipClass::Fatal
-                            || (self.config.strict_codegen && class == SkipClass::BugClass))
-                        && first_strict_err.is_none()
-                    {
-                        first_strict_err = Some(e);
-                    }
-                }
-                // Compile nested functions even if parent failed
-                if let verum_common::Maybe::Some(ref body) = func.body {
-                    let _ = self.compile_nested_functions(body);
+                    self.handle_body_failure(func, None, e, policy, &mut first_strict_err)?;
                 }
             }
             ItemKind::Impl(impl_decl) => {
@@ -5708,7 +5682,7 @@ impl VbcCodegen {
                 // FN-BOUND-CARRY (T0701): arm the impl block's AST
                 // generics for the descriptor fill inside
                 // compile_function; cleared after the item loop.
-                self.current_impl_ast_generics = Some(impl_decl.generics.clone());
+                let previous_generics = self.current_impl_ast_generics.replace(impl_decl.generics.clone());
 
                 for impl_item in impl_decl.items.iter() {
                     // Honour `@cfg` gates on impl items. ImplItem and
@@ -5755,8 +5729,8 @@ impl VbcCodegen {
                             }
                         }
                         self.ctx.generic_type_params.clear();
-            self.ctx.generic_type_params_ordered.clear();
-            self.ctx.current_generic_param_ids.clear();
+                        self.ctx.generic_type_params_ordered.clear();
+                        self.ctx.current_generic_param_ids.clear();
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
                             self.ctx.generic_type_params.insert(g.clone());
@@ -5778,138 +5752,31 @@ impl VbcCodegen {
                             self.ctx.generic_type_params_ordered.push(g.clone());
                         }
 
-                        // Compile function individually - skip if it fails.
-                        //
-
-                        // Lenient skips were originally a debug-only diagnostic
-                        // because most are routine (FFI prototypes, conditional
-                        // platform stubs). But silent skips of *user-callable*
-                        // impl-block methods are insidious: they show up at
-                        // runtime as `method 'X.Y' not found on value` with no
-                        // hint that compilation dropped the body. Emit a
-                        // warn-level trace so the underlying cause (typically
-                        // an unresolved cross-module function reference) is
-                        // visible in normal CI / dev runs without RUST_LOG
-                        // tweaking.
-                        if let Err(e) = self.compile_declared_impl_function(func, &impl_decl.kind, type_name.as_ref()) {
-                            let fname = func.name.name.as_str();
-                            let ty = type_name.as_deref().unwrap_or("?");
-                            let class = e.skip_class();
-                            let err_text = format!("{}", e);
-                            tracing::warn!(
-                                "[lenient] SKIP {}.{} ({}): {} — runtime calls to \
-                                 this method will panic with the same message via \
-                                 auto-stub.  Add the missing dependency to the \
-                                 caller's mount list or fix the cross-module \
-                                 reference in {} stdlib.",
-                                ty,
-                                fname,
-                                class.label(),
-                                e,
-                                ty
-                            );
-                            // Auto-stub: replace the dropped body
-                            // with a Panic instruction so dispatch
-                            // (CallM by suffix-and-args, qualified
-                            // path resolution, function-pointer load)
-                            // keeps finding the method.  Pattern
-                            // matching against variants of the
-                            // carrier type is unaffected — the panic
-                            // only fires on actual call execution.
-                            self.emit_lenient_panic_stub(
-                                func,
-                                type_name.as_deref(),
-                                &err_text,
-                            );
-                            // For debugging stdlib hygiene: dump near-matches
-                            // from the ctx.functions table so the user can
-                            // see whether the missing name is registered
-                            // under a qualified form nearby (the most common
-                            // sign of a transitive-import gap).
-                            if let Some(undef) = e.undefined_function_name() {
-                                let undef_owned = undef.to_string();
-                                let near: Vec<String> = self
-                                    .ctx
-                                    .functions
-                                    .keys()
-                                    .filter(|k| {
-                                        k.ends_with(&format!(".{}", undef_owned))
-                                            || k.ends_with(&format!("::{}", undef_owned))
-                                            || k.as_str() == undef_owned.as_str()
-                                    })
-                                    .take(8)
-                                    .cloned()
-                                    .collect();
-                                if !near.is_empty() {
-                                    tracing::warn!(
-                                        "[lenient]   near-matches for '{}' in ctx.functions: {:?}",
-                                        undef_owned,
-                                        near
-                                    );
-                                } else {
-                                    tracing::warn!(
-                                        "[lenient]   no near-matches for '{}' in ctx.functions ({} entries total)",
-                                        undef_owned,
-                                        self.ctx.functions.len()
-                                    );
-                                }
-                            }
-                            tracing::debug!("[lenient] SKIP {}.{}: {}", ty, fname, e);
-                            if (class == SkipClass::Fatal
-                                    || (self.config.strict_codegen && class == SkipClass::BugClass))
-                                && first_strict_err.is_none()
-                            {
-                                first_strict_err = Some(e);
+                        if let Err(error) = self.compile_declared_impl_function(
+                            func, &impl_decl.kind, type_name.as_ref(),
+                        ) {
+                            if let Err(error) = self.handle_body_failure(
+                                func, type_name.as_deref(), error, policy, &mut first_strict_err,
+                            ) {
+                                self.current_impl_ast_generics = previous_generics;
+                                return Err(error);
                             }
                         }
 
-                        // Compile nested functions even if parent failed
-                        if let verum_common::Maybe::Some(ref body) = func.body {
-                            let _ = self.compile_nested_functions(body);
-                        }
                     }
                 }
-                self.current_impl_ast_generics = None;
+                self.current_impl_ast_generics = previous_generics;
             }
             ItemKind::Pattern(pat_decl) => {
                 self.ctx.generic_type_params.clear();
-            self.ctx.generic_type_params_ordered.clear();
-            self.ctx.current_generic_param_ids.clear();
+                self.ctx.generic_type_params_ordered.clear();
+                self.ctx.current_generic_param_ids.clear();
                 self.ctx.const_generic_params.clear();
-                let _ = self.compile_pattern_as_function(pat_decl);
+                self.compile_pattern_as_function(pat_decl)?;
             }
-            // #122 — process imported modules' Mount items so their
-            // aliases (`mount X.Y as Z`) get registered in
-            // ctx.functions. Without this, every alias-bearing
-            // mount in a stdlib module surfaced as bug-class lenient
-            // SKIP at the consumer's call site (the symptom that
-            // motivated #119 audit pass 1). The strict-mode
-            // semantics here mirror compile_item: any failure
-            // becomes the strict error if classified BugClass.
             ItemKind::Mount(import_decl) => {
-                if let Err(e) = self.register_import_aliases(import_decl) {
-                    let class = e.skip_class();
-                    if (class == SkipClass::Fatal
-                            || (self.config.strict_codegen && class == SkipClass::BugClass))
-                        && first_strict_err.is_none()
-                    {
-                        first_strict_err = Some(e);
-                    }
-                }
+                self.register_import_aliases(import_decl)?;
             }
-            // NESTED-MODULE-BODIES-1 (T0701 residual, Transducer class):
-            // an INLINE named module (`public module Transducer { … }`)
-            // must compile its items on the LENIENT path too.  This is
-            // the ONLY body-compilation path the stdlib bootstrap runs
-            // (`compile_items_into_state` → here), and the `_ => {}`
-            // catch-all silently swallowed the whole subtree — every
-            // nested-module function (Transducer.map/filter/compose2,
-            // result.vr's Validated factories) had declarations
-            // collected but NO body emitted into the archive: the baked
-            // .vbca contains ZERO occurrences of "Transducer.map"
-            // (measured, b60 bake).  Mirrors the strict `compile_item`
-            // arm: scope current_source_module to the inline module's
-            // name so descriptors qualify as `Transducer.map`.
             ItemKind::Module(mod_decl) => {
                 if let verum_common::Maybe::Some(ref items) = mod_decl.items {
                     let module_name = mod_decl.name.name.to_string();
@@ -5917,15 +5784,11 @@ impl VbcCodegen {
                     let previous_count_scope = self.count_module_scope.replace(count_scope);
                     let prev_source = self.scope_to_inline_module(&module_name);
                     for sub_item in items.iter() {
-                        if let Err(e) = self.compile_item_lenient(sub_item) {
-                            let class = e.skip_class();
-                            if (class == SkipClass::Fatal
-                                || (self.config.strict_codegen
-                                    && class == SkipClass::BugClass))
-                                && first_strict_err.is_none()
-                            {
-                                first_strict_err = Some(e);
-                            }
+                        if self.should_compile_item(sub_item)
+                            && let Err(error) = self.compile_item_with_policy(sub_item, policy)
+                        {
+                            first_strict_err.get_or_insert(error);
+                            if policy == ItemFailurePolicy::Strict { break; }
                         }
                     }
                     self.ctx.current_source_module = prev_source;
@@ -8569,17 +8432,8 @@ impl VbcCodegen {
         self.collect_unit_declarations(&[module])
     }
 
-    /// What a failing item does to the rest of the unit.
-    ///
-    /// This is the ONLY difference between how the bake compiles a
-    /// stdlib module and how a user compile handles a file, so it is
-    /// spelled as a policy rather than as two functions.
-    ///
-    /// The bake needs `StubAndContinue`: one unbuildable body in a
-    /// 2500-file library must not cost the archive every other body,
-    /// and the stub carries a panic so the failure is loud at runtime
-    /// rather than silent. A user compiling their own file wants the
-    /// opposite — the first error, immediately, about their code.
+    /// Compile all active items using one set of pools. Publication and user
+    /// compilation require complete bodies; diagnostic clients may recover.
     pub fn compile_unit_items(
         &mut self,
         files: &[&Module],
@@ -8598,15 +8452,9 @@ impl VbcCodegen {
                     if !self.should_compile_item(item) {
                         continue;
                     }
-                    match policy {
-                        ItemFailurePolicy::Strict => self.compile_item(item)?,
-                        ItemFailurePolicy::StubAndContinue => {
-                            if let Err(e) = self.compile_item_lenient(item)
-                                && first_error.is_none()
-                            {
-                                first_error = Some(e);
-                            }
-                        }
+                    if let Err(error) = self.compile_item_with_policy(item, policy) {
+                        if policy == ItemFailurePolicy::Strict { return Err(error); }
+                        first_error.get_or_insert(error);
                     }
                 }
                 if let Err(error) = self.compile_pending_constants_with_policy(policy) {
@@ -19498,227 +19346,6 @@ impl VbcCodegen {
             }
             _ => "?".to_string(),
         }
-    }
-
-    /// Compiles a top-level item.
-    fn compile_item(&mut self, item: &Item) -> CodegenResult<()> {
-        match &item.kind {
-            ItemKind::Function(func) => {
-                // Clear generic params for standalone functions (impl methods set them before calling)
-                self.ctx.generic_type_params.clear();
-            self.ctx.generic_type_params_ordered.clear();
-            self.ctx.current_generic_param_ids.clear();
-                self.ctx.const_generic_params.clear();
-                self.compile_function(func, None)?;
-                // Compile any nested functions in this function's body
-                if let verum_common::Maybe::Some(ref body) = func.body {
-                    self.compile_nested_functions(body)?;
-                }
-            }
-            ItemKind::Impl(impl_decl) => {
-                // Get the type name for qualified method lookup
-                let type_name = self.extract_impl_type_name(&impl_decl.kind);
-
-                // Pre-populate impl block generics - these will be added to function generics
-                // in compile_function. This enables recognizing T, U etc. in impl<T, U> Foo<T> { ... }
-                // BARE-IMPL-INHERIT-1 (#40): also binds `implement Type<P>`
-                // params inherited from the type decl when the `<...>` clause
-                // is omitted (see `resolve_impl_generics`).
-                let (impl_type_generics, impl_const_generics, impl_ordered_generics) =
-                    self.resolve_impl_generics(impl_decl);
-                if std::env::var("VERUM_TRACE_GP").is_ok()
-                    && type_name.as_deref() == Some("Maybe")
-                {
-                    eprintln!(
-                        "[compile_item Impl] type_name={:?} impl_decl.generics.len()={} impl_type_generics={:?}",
-                        type_name, impl_decl.generics.len(), impl_type_generics
-                    );
-                }
-
-                for impl_item in impl_decl.items.iter() {
-                    // Honour `@cfg` gates on impl items. Same pattern
-                    // as `compile_item_lenient`'s impl loop — walk both
-                    // ImplItem.attributes and FunctionDecl.attributes
-                    // because the parser places attrs on the inner
-                    // decl when present. Without this, an
-                    // `@cfg(target_os = "linux") fn …` inside a
-                    // cross-platform `implement Bar { … }` was
-                    // compiled on every host.
-                    if !impl_item.attributes.is_empty()
-                        && !self.cfg_evaluator.should_include(&impl_item.attributes)
-                    {
-                        continue;
-                    }
-                    if let verum_ast::decl::ImplItemKind::Function(func) = &impl_item.kind {
-                        if !func.attributes.is_empty()
-                            && !self.cfg_evaluator.should_include(&func.attributes)
-                        {
-                            continue;
-                        }
-                        // Set impl block generics before compiling function
-                        // compile_function will add function's own generics to this
-                        self.ctx.generic_type_params.clear();
-            self.ctx.generic_type_params_ordered.clear();
-            self.ctx.current_generic_param_ids.clear();
-                        self.ctx.const_generic_params.clear();
-                        for g in &impl_type_generics {
-                            self.ctx.generic_type_params.insert(g.clone());
-                        }
-                        for g in &impl_const_generics {
-                            self.ctx.const_generic_params.insert(g.clone());
-                        }
-                        // CONST-GENERIC-VALUE-CARRY-1 (task #19): the ORDERED
-                        // list is the positional witness-index authority the
-                        // body-side `LoadT { Generic(idx) }` form keys on, and
-                        // impl-level TYPE and CONST params share ONE
-                        // declaration-ordered numbering — the same slot order
-                        // the receiver's instantiation args carry
-                        // (`implement<const SIZE: Int> StackAllocator<SIZE>`
-                        // ⇒ SIZE = slot 0).  `impl_ordered_generics` already
-                        // mixes type+const in declaration order (and, for the
-                        // bare-impl form, inherits from the target's args).
-                        for g in &impl_ordered_generics {
-                            self.ctx.generic_type_params_ordered.push(g.clone());
-                        }
-                        // Per-method error containment.  Pre-fix the
-                        // `compile_function(...)?` propagated any single
-                        // method's compile error up through the impl
-                        // block's for-loop AND out of the surrounding
-                        // `compile_item`, aborting every subsequent
-                        // method in this impl block AND every
-                        // subsequent `ItemKind::Impl` in the same
-                        // module file.
-                        //
-                        // Concrete impact on `core/base/memory.vr`:
-                        // `Heap.into_inner` (or another mid-impl-block
-                        // method using a not-yet-supported expression
-                        // form) failed and short-circuited the
-                        // remaining 30+ Heap.* methods AND every
-                        // `Shared.*` / `Weak.*` method in the same file.
-                        // Symptom: `metadata.functions` had only the
-                        // first 7 Heap.* entries, and every user-side
-                        // `Shared<T>.new(...)` died at typecheck with
-                        // "no method named 'new' found for type
-                        // 'Shared<Int>'" despite the source being
-                        // present.
-                        //
-                        // The per-file `compile_function_bodies` already
-                        // contains a stub-on-failure mechanism that
-                        // operates at FILE level — but that recovery
-                        // only fires when the FILE-level `?` propagates
-                        // out of a function-body chain.  Containing the
-                        // error at the per-method granularity here
-                        // preserves every body that compiles correctly
-                        // and lets `emit_missing_stub_descriptors`
-                        // fill placeholders for the dropped methods.
-                        // Pure recovery improvement; no successful
-                        // body is lost.  Pattern matches the existing
-                        // containment at compile_item_lenient
-                        // (~line 3276) and the per-default-method
-                        // containment at compile_pending_default_methods
-                        // (~line 1725).
-                        if let Err(e) =
-                            self.compile_declared_impl_function(func, &impl_decl.kind, type_name.as_ref())
-                        {
-                            tracing::trace!(
-                                "[compile_item Impl] {}.{} body compile failed: {}",
-                                type_name.as_deref().unwrap_or("?"),
-                                func.name.name.as_str(),
-                                e
-                            );
-                            // Don't propagate — let subsequent siblings
-                            // compile.  emit_missing_stub_descriptors
-                            // at file-level produces a panicking-stub
-                            // body for the dropped function so dispatch
-                            // by id still finds something callable.
-                        }
-                        // Compile any nested functions in this function's body
-                        if let verum_common::Maybe::Some(ref body) = func.body {
-                            // Same containment for nested-fn compilation.
-                            if let Err(e) = self.compile_nested_functions(body) {
-                                tracing::trace!(
-                                    "[compile_item Impl] {}.{} nested-fn compile failed: {}",
-                                    type_name.as_deref().unwrap_or("?"),
-                                    func.name.name.as_str(),
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-            // Active pattern declarations - compile body as a function
-            ItemKind::Pattern(pat_decl) => {
-                self.ctx.generic_type_params.clear();
-            self.ctx.generic_type_params_ordered.clear();
-            self.ctx.current_generic_param_ids.clear();
-                self.ctx.const_generic_params.clear();
-                self.compile_pattern_as_function(pat_decl)?;
-            }
-            // Inline `module X { ... }` body-compile recursion — closes
-            // task #38 dispatch surface for `Transducer.compose2` /
-            // `.compose` / etc.  The collect_declarations Module arm
-            // (above) registers SIGNATURES under qualified `X.fn` names;
-            // here we must compile the BODIES of those same functions
-            // with `current_source_module` set so generated bytecode
-            // tracks the right qualifier.  Without this arm, signatures
-            // exist but bodies are bytecode-empty — calls dispatch to
-            // empty body and produce wrong results.
-            ItemKind::Module(mod_decl) => {
-                if let verum_common::Maybe::Some(ref items) = mod_decl.items {
-                    let module_name = mod_decl.name.name.to_string();
-                    let count_scope = self.child_count_module_scope(&module_name);
-                    let previous_count_scope = self.count_module_scope.replace(count_scope);
-                    let prev_source = self.scope_to_inline_module(&module_name);
-                    // LENIENT — a single inner-fn compile failure must
-                    // NOT abort the outer module's compilation (would
-                    // drop top-level fn main, surfacing as "No main
-                    // function found in VBC module").  Log per-item
-                    // failures and continue — matches the lenient
-                    // discipline of `compile_module_items_lenient`
-                    // for imported stdlib modules.
-                    for sub_item in items.iter() {
-                        if let Err(e) = self.compile_item(sub_item) {
-                            tracing::warn!(
-                                "[lenient inline-module] failed to compile inner item: {}",
-                                e
-                            );
-                        }
-                    }
-                    self.ctx.current_source_module = prev_source;
-                    self.count_module_scope = previous_count_scope;
-                }
-            }
-            // Non-function items are handled during declaration collection
-            // or don't produce bytecode (types, protocols, etc.)
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// Compiles nested function bodies from a function body.
-    ///
-    /// This is called after the parent function is compiled to compile
-    /// any nested function declarations found in its body.
-    fn compile_nested_functions(&mut self, body: &FunctionBody) -> CodegenResult<()> {
-        match body {
-            FunctionBody::Block(block) => {
-                self.compile_nested_functions_from_block(block)?;
-            }
-            FunctionBody::Expr(_) => {
-                // Expression bodies can't contain function declarations
-            }
-        }
-        Ok(())
-    }
-
-    /// Compiles nested function bodies from a block.
-    ///
-    /// Since the statement-level compiler (statements.rs) now handles
-    /// ALL nested functions inline (with capture analysis for closures),
-    /// this post-hoc pass is a no-op. Kept for API compatibility.
-    fn compile_nested_functions_from_block(&mut self, _block: &Block) -> CodegenResult<()> {
-        Ok(())
     }
 
     /// Compiles a function declaration.

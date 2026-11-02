@@ -23,7 +23,6 @@ fn source_module(owner: &str, source: &str) -> verum_vbc::module::VbcModule {
             &[&ast],
             &config,
             &verum_ast::cfg::TargetConfig::host(),
-            &Default::default(),
             &[],
         )
         .expect("actual bootstrap source producer");

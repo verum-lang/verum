@@ -97,7 +97,6 @@ fn bootstrap(files: &[(&str, &str)], root_reexport: bool) -> (VbcModule, VbcArch
                 asts.as_slice(),
                 &config,
                 &verum_ast::cfg::TargetConfig::host(),
-                &Default::default(),
                 &[],
             )
             .expect("actual bootstrap producer accepts the source unit");
