@@ -290,6 +290,7 @@ fn reconcile_type_declarations(
 
 fn type_declaration_key(ty: &TypeDescriptor) -> Text {
     let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
+    if owner.is_empty() { return ty.name.clone(); }
     verum_common::qualified_name::qualify_module_name(owner.as_str(), ty.name.as_str())
 }
 
@@ -300,19 +301,55 @@ fn type_declaration_priority(ty: &TypeDescriptor) -> u8 {
     )
 }
 
+/// Write an exact declaration over a compatibility binding left by an earlier
+/// module. Peers that describe the same declaration retain first-wins order.
+fn register_declared_function(meta: &mut CoreMetadata, key: Text, function: &FunctionDescriptor) {
+    let is_exact = |existing: &FunctionDescriptor| {
+        let path = if let Some(parent) = &existing.parent_type {
+            let method = existing.name.as_str().rsplit('.').next().unwrap_or(existing.name.as_str());
+            join_module_path(parent.as_str(), method)
+        } else {
+            let owner = existing.origin_module_path.as_ref().unwrap_or(&existing.module_path);
+            join_module_path(owner.as_str(), existing.name.as_str())
+        };
+        path == key.as_str()
+    };
+    if !meta.functions.get(&key).is_some_and(is_exact) {
+        meta.functions.insert(key, function.clone());
+    }
+}
+
+fn builtin_record_declaration(ty: &TypeDescriptor) -> bool {
+    let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
+    matches!(ty.kind, TypeDescriptorKind::Record { .. })
+        && verum_common::well_known_types::WellKnownType::from_name(ty.name.as_str())
+            .and_then(|known| known.canonical_archive_modules().first().copied())
+            == Some(owner.as_str())
+}
+
 /// Assemble rosters after every declaration has arrived. Imported descriptors
 /// and lookup aliases share methods only when their declaring owner agrees.
 fn attach_declared_methods(meta: &mut CoreMetadata) {
     let mut methods = std::collections::BTreeMap::<Text, std::collections::BTreeSet<Text>>::new();
-    for function in meta.functions.values() {
+    let mut shadowed = Vec::new();
+    for (key, function) in meta.functions.iter() {
+        // Once a global scalar is known, Scalar.member is its method namespace.
+        // Nominal homonyms retain their declaration-qualified method keys.
+        if let Some((name, _)) = key.as_str().rsplit_once('.')
+            && verum_vbc::types::TypeId::from_well_known_scalar_name(name).is_some()
+            && meta.types.get(&Text::from(name)).is_some_and(|ty| ty.module_path.is_empty() && ty.origin_module_path.is_none())
+            && function.parent_type.as_ref().is_none_or(|owner| owner.as_str() != name)
+        {
+            shadowed.push(key.clone());
+            continue;
+        }
         if let Some(parent) = &function.parent_type {
             let name = function.name.as_str().rsplit('.').next().unwrap_or(function.name.as_str());
             methods.entry(parent.clone()).or_default().insert(name.into());
         }
     }
+    for key in shadowed { meta.functions.remove(&key); }
     for ty in meta.types.values_mut() {
-        // Synthetic scalar catalogues have no declaration owner.
-        if ty.module_path.is_empty() && ty.origin_module_path.is_none() { continue; }
         let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
         let key: Text = join_module_path(owner.as_str(), ty.name.as_str()).into();
         ty.methods = methods.get(&key).map(|names| names.iter().cloned().collect()).unwrap_or_default();
@@ -484,9 +521,13 @@ fn register_module_metadata(
     let declaration_names: verum_common::Map<u32, Text> = module.types.iter()
         .filter_map(|ty| {
             let name = module.get_string(ty.name)?;
-            let owner = ty.origin_module.and_then(|id| module.get_string(id))
-                .unwrap_or(module_name);
-            Some((ty.id.0, verum_common::qualified_name::qualify_module_name(owner, name).into()))
+            let declared = if ty.canonical_scalar_type_id(name).is_some() {
+                Text::from(name)
+            } else {
+                let owner = ty.origin_module.and_then(|id| module.get_string(id)).unwrap_or(module_name);
+                verum_common::qualified_name::qualify_module_name(owner, name)
+            };
+            Some((ty.id.0, declared))
         }).collect();
     let module_path = Text::from(module_name);
 
@@ -963,6 +1004,9 @@ fn register_module_metadata(
             })
             .collect();
 
+        // A built-in scalar can carry protocol implementations from many files.
+        // Those files own the implementations, never the scalar declaration.
+        let scalar = ty.canonical_scalar_type_id(type_name.as_str()).is_some();
         let descriptor = TypeDescriptor {
             source_declaration: ty.source_declaration.clone(),
             is_public: matches!(
@@ -970,13 +1014,13 @@ fn register_module_metadata(
                 verum_vbc::types::Visibility::Public
             ),
             name: type_name.clone(),
-            module_path: module_path.clone(),
+            module_path: if scalar { Text::default() } else { module_path.clone() },
             // v2.12: the precise declaring file submodule rides in its own
             // field — `module_path` stays the entry path every existing
             // resolver route (variant registration, protocol loading,
             // reexport chains) keys on. Only module-surface queries read
             // the origin.
-            origin_module_path: if ty_module_path.as_str() != module_path.as_str() {
+            origin_module_path: if !scalar && ty_module_path.as_str() != module_path.as_str() {
                 Maybe::Some(ty_module_path.clone())
             } else {
                 Maybe::None
@@ -1094,13 +1138,18 @@ fn register_module_metadata(
         }
         let qualified_key: Text =
             format!("{}.{}", module_name, type_name).into();
-        let insert_qualified = match meta.types.get(&qualified_key) {
-            None => true,
-            Some(existing) => {
+        let prefer_qualified = |key: &Text, existing: &TypeDescriptor| {
+            let incoming_owns_key = type_declaration_key(&descriptor) == *key;
+            let existing_owns_key = type_declaration_key(existing) == *key;
+            if incoming_owns_key != existing_owns_key {
+                incoming_owns_key
+            } else {
                 incoming_rank > rank(&existing.kind, &type_name)
                     || repairs_degraded(existing, &descriptor)
             }
         };
+        let insert_qualified = meta.types.get(&qualified_key)
+            .is_none_or(|existing| prefer_qualified(&qualified_key, existing));
         if insert_qualified {
             meta.types.insert(qualified_key, descriptor.clone());
         }
@@ -1112,13 +1161,8 @@ fn register_module_metadata(
         if ty_module_path.as_str() != module_name {
             let file_qualified: Text =
                 format!("{}.{}", ty_module_path, type_name).into();
-            let insert_file_q = match meta.types.get(&file_qualified) {
-                None => true,
-                Some(existing) => {
-                    incoming_rank > rank(&existing.kind, &type_name)
-                        || repairs_degraded(existing, &descriptor)
-                }
-            };
+            let insert_file_q = meta.types.get(&file_qualified)
+                .is_none_or(|existing| prefer_qualified(&file_qualified, existing));
             if insert_file_q {
                 meta.types.insert(file_qualified, descriptor.clone());
             }
@@ -1129,13 +1173,12 @@ fn register_module_metadata(
             .is_some_and(|existing| repairs_degraded(existing, &descriptor));
         // A built-in record's declared owner outranks an impl-only scalar
         // carrier or a foreign same-spelled type in its unqualified slot.
-        let canonical_record = ty.kind == TypeKind::Record
-            && verum_common::well_known_types::WellKnownType::from_name(type_name.as_str())
-                .and_then(|known| known.canonical_archive_modules().first().copied())
-                == Some(ty_module_path.as_str())
-            && meta.types.get(&type_name).is_none_or(|existing|
-                existing.origin_module_path.as_ref().unwrap_or(&existing.module_path) != &ty_module_path);
-        if !simple_slot_was_occupied || simple_needs_repair || canonical_record {
+        let existing = meta.types.get(&type_name);
+        let canonical_record = builtin_record_declaration(&descriptor)
+            && !existing.is_some_and(builtin_record_declaration);
+        let canonical_scalar = scalar && existing.is_some_and(|other|
+            !other.module_path.is_empty() && !builtin_record_declaration(other));
+        if !simple_slot_was_occupied || simple_needs_repair || canonical_record || canonical_scalar {
             meta.types.insert(type_name.clone(), descriptor);
         }
         // Declaration-order list records each SIMPLE name once —
@@ -1196,6 +1239,21 @@ fn register_module_metadata(
         let in_stage2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
         in_stage1 || in_stage2
     };
+    let mut scalar_method_owners = std::collections::BTreeSet::new();
+    // Several primitive spellings may share an ABI slot. Conflicting nominal
+    // declarations at the same numeric ID do not identify a method receiver.
+    let scalar_id = |ty: &verum_vbc::types::TypeDescriptor|
+        module.get_string(ty.name).and_then(|name| ty.canonical_scalar_type_id(name));
+    let mut parent_by_id = HashMap::new();
+    for ty in &module.types {
+        let slot = parent_by_id.entry(ty.id).or_insert(Some(ty));
+        if let Some(previous) = *slot
+            && (previous.kind != ty.kind || previous.name != ty.name || previous.origin_module != ty.origin_module)
+            && !(scalar_id(previous) == Some(ty.id) && scalar_id(ty) == Some(ty.id))
+        {
+            *slot = None;
+        }
+    }
     for fn_desc in &module.functions {
         if is_stub_id(fn_desc.id.0) && fn_desc.bytecode_length == 0 {
             continue;
@@ -1215,52 +1273,42 @@ fn register_module_metadata(
         }
         let simple_already_registered = meta.functions.contains_key(&simple_name);
 
-        // Task #21 — name-prefix takes precedence over TypeId map.
-        //
-        // TypeId aliasing problem: `type Byte is UInt8;` (declared in
-        // core/base/mod.vr) and `implement UInt8 { … }` plus
-        // `implement Byte { … }` BOTH allocate `TypeId(6)`.  The VBC
-        // codegen stores inherent methods with their qualified NAME
-        // (`"UInt8.wrapping_add"` and `"Byte.wrapping_add"` are two
-        // SEPARATE function descriptors), but the receiver / param /
-        // return TypeRefs all resolve to the SAME `TypeId(6)`.
-        // `type_id_to_name` maps each TypeId to the FIRST name it
-        // saw — which is whichever was registered first in the
-        // module's type table (typically `Byte`).
-        //
-        // Pre-fix every `UInt8.wrapping_add` descriptor got
-        // `parent_type = "Byte"` (and params/return rendered as
-        // "Byte"), so:
-        //  * `Byte.wrapping_add` qualified_key got registered first
-        //    via line ~612.
-        //  * `UInt8.wrapping_add` qualified_key construction said
-        //    `parent_name = "Byte"` → re-registered the same key
-        //    (no-op via the `contains_key` guard).
-        //  * `meta.types["UInt8"].methods` never got
-        //    "wrapping_add" pushed (parent_name = "Byte" → pushed to
-        //    `meta.types["Byte"]`).
-        //  * Pass 2.5's `synthesized_primitives` saw the
-        //    `UInt8.wrapping_add` simple-name slot from line ~637
-        //    but the methods list was already populated with the
-        //    canonical UInt8 set (BIT_WIDTH / from_bits / …) and the
-        //    existing methods didn't include `wrapping_add`.
-        //
-        // The fix: the NAME prefix is the authoritative source of
-        // truth for the user-visible parent type.  Use it whenever
-        // it matches a canonical primitive, regardless of whether
-        // `type_id_to_name` also offers a (potentially-aliased)
-        // mapping.
-        let prefix_recovered = recover_primitive_parent_from_name(
-            module.strings.get(fn_desc.name).unwrap_or(""),
-        );
-        let parent_type = match (&prefix_recovered, fn_desc.parent_type) {
-            (Maybe::Some(_), _) => prefix_recovered.clone(),
-            (Maybe::None, Some(tid)) => match type_id_to_name.get(&tid.0) {
-                Some(name) => Maybe::Some(Text::from(name.as_str())),
-                None => Maybe::None,
-            },
-            (Maybe::None, None) => Maybe::None,
+        // Built-in receivers share ABI IDs (e.g. Byte/UInt8). Keep the
+        // declared spelling only when its ABI identity agrees with the
+        // method's actual receiver. Free functions never acquire an owner.
+        let receiver = match fn_desc.parent_type.and_then(|id| parent_by_id.get(&id)) {
+            Some(None) => continue,
+            slot => slot.copied().flatten(),
         };
+        let spelled_scalar = simple_name.as_str().rsplit_once('.').and_then(|(name, _)|
+            verum_vbc::types::TypeId::from_well_known_scalar_name(name).map(|id| (name, id)));
+        let receiver_name = receiver.and_then(|ty| module.get_string(ty.name));
+        let scalar_receiver = spelled_scalar.and_then(|(name, id)|
+            (fn_desc.parent_type == Some(id) && receiver.is_none_or(|ty|
+                receiver_name.and_then(|declared| ty.canonical_scalar_type_id(declared)) == Some(id)))
+                .then_some(name));
+        let parent_type: Maybe<Text> = scalar_receiver.map(Text::from).or_else(|| {
+            let receiver = receiver?;
+            let name = receiver_name?;
+            // A genuine nominal homonym still owns its module-qualified
+            // methods. A contradictory scalar descriptor cannot grant either
+            // spelling the method.
+            (receiver.kind != TypeKind::Primitive
+                && spelled_scalar.is_none_or(|(spelling, _)| spelling == name)).then(|| name.into())
+        });
+        if spelled_scalar.is_some() && fn_desc.parent_type.is_some() && parent_type.is_none() {
+            continue;
+        }
+        let declaring_parent = parent_type.as_ref().map(|parent| {
+            if scalar_receiver.is_some() {
+                scalar_method_owners.insert(parent.clone());
+                parent.clone()
+            } else {
+                let owner = receiver.and_then(|ty| ty.origin_module)
+                    .and_then(|id| module.get_string(id)).unwrap_or(module_name);
+                Text::from(join_module_path(owner, parent.as_str()))
+            }
+        });
 
         let params: List<ParamDescriptor> = fn_desc
             .params
@@ -1366,7 +1414,9 @@ fn register_module_metadata(
             .return_type_name
             .and_then(|sid| module.strings.get(sid))
             .filter(|s| {
-                s.contains('[')
+                // The legacy display spelling erases fixed array extents.
+                // A positive VBC extent is exact; zero can also mean unresolved.
+                (s.contains('[') && !matches!(fn_desc.return_type, TypeRef::Array { length: 1.., .. }))
                     || rendered_return.contains("__opaque_type_")
                     // T0108: raw-pointer returns are the param-side class
                     // exactly (`ptr_offset -> *const T` rendered through
@@ -1501,8 +1551,8 @@ fn register_module_metadata(
             }
             Text::from(out.as_str())
         };
-        let (params, return_type) = if let Maybe::Some(parent_name) = &parent_type {
-            let (target, alias) = match parent_name.as_str() {
+        let (params, return_type) = if let Some(parent_name) = scalar_receiver {
+            let (target, alias) = match parent_name {
                 "UInt8" => Some(("UInt8", "Byte")),
                 "Byte" => Some(("Byte", "UInt8")),
                 _ => None,
@@ -1589,17 +1639,7 @@ fn register_module_metadata(
                 .contains(verum_vbc::types::PropertySet::ASYNC),
             is_unsafe: false,
             intrinsic_id: Maybe::None,
-            // A method can be implemented in a different module. Its declaring
-            // type is identified by the exact parent TypeId, not the function's
-            // origin or whichever type occupies a bare-name metadata slot.
-            parent_type: parent_type.as_ref().map(|parent| {
-                let parent_owner = fn_desc.parent_type
-                    .and_then(|id| module.types.iter().find(|ty| ty.id == id))
-                    .and_then(|ty| ty.origin_module)
-                    .and_then(|id| module.strings.get(id))
-                    .unwrap_or(module_name);
-                Text::from(join_module_path(parent_owner, parent.as_str()))
-            }),
+            parent_type: declaring_parent.clone(),
             impl_generic_names,
             // Empty legacy VBC rosters do not prove a declaration slot kind.
             explicit_type_param_ids: (!fn_desc.explicit_type_param_ids.is_empty()).then(||
@@ -1620,7 +1660,7 @@ fn register_module_metadata(
         // (`with_capacity`), so the inherent_methods bucket lookup
         // never matched — every `text.with_capacity(n)` call site
         // failed `no method named with_capacity found for type Text`.
-        if let Maybe::Some(parent_name) = &parent_type {
+        if let (Some(parent_name), Some(declaring_parent)) = (&parent_type, &declaring_parent) {
             let simple_method_name = if let Some(idx) = simple_name.as_str().rfind('.') {
                 Text::from(&simple_name.as_str()[idx + 1..])
             } else {
@@ -1629,16 +1669,8 @@ fn register_module_metadata(
             // Preserve the declaring type in a collision-immune method key.
             // A bare Container.new slot cannot distinguish alpha.Container from
             // beta.Container, even when both type descriptors survived import.
-            let parent_owner = fn_desc.parent_type
-                .and_then(|id| module.types.iter().find(|ty| ty.id == id))
-                .and_then(|ty| ty.origin_module)
-                .and_then(|id| module.strings.get(id))
-                .unwrap_or(module_name);
-            let declaring_parent = join_module_path(parent_owner, parent_name.as_str());
             let declaring_key: Text = format!("{declaring_parent}.{simple_method_name}").into();
-            meta.functions
-                .entry(declaring_key)
-                .or_insert_with(|| descriptor.clone());
+            register_declared_function(meta, declaring_key, &descriptor);
             // Also alias the descriptor under the qualified key so
             // `register_inherent_methods_from_metadata`'s
             // `metadata.functions.get("Text.with_capacity")` finds it.
@@ -1653,7 +1685,7 @@ fn register_module_metadata(
             // the declaring file and inline-module owner as a lookup key.
             let declaring_key: Text =
                 join_module_path(fn_module_path.as_str(), simple_name.as_str()).into();
-            meta.functions.entry(declaring_key).or_insert_with(|| descriptor.clone());
+            register_declared_function(meta, declaring_key, &descriptor);
             // Free function — register under MODULE-qualified key
             // ALWAYS, even when the simple-name slot is taken by an
             // earlier first-wins registration.  Required so
@@ -1687,25 +1719,21 @@ fn register_module_metadata(
         // Simple-name slot is first-wins (preserves the existing
         // discipline; collisions are resolved at use-sites via the
         // qualified key registered above).
-        if !simple_already_registered {
-            meta.functions.insert(simple_name, descriptor);
+        if !simple_already_registered && (spelled_scalar.is_none() || parent_type.is_some()) {
+            meta.functions.entry(simple_name).or_insert(descriptor);
         }
     }
 
-    // Scalars can have source methods without a nominal descriptor. Look up
-    // just their prefix in the ordered function index. Both declaration order
-    // and each method list stay deterministic across module registration.
-    for &parent in SCALAR_METHOD_OWNERS {
-        let parent_name = Text::from(parent);
-        if meta.types.contains_key(&parent_name) {
+    // A scalar with methods need not have a nominal declaration in this unit.
+    // Publish only witnessed receivers. The archive-wide pass assembles their
+    // method rosters after seeing all implementations.
+    for parent_name in scalar_method_owners {
+        let previous = meta.types.get(&parent_name);
+        if previous.is_some_and(|existing| existing.module_path.is_empty() || builtin_record_declaration(existing)) {
             continue;
         }
-        let prefix = format!("{parent}.");
-        let methods: List<Text> = meta.functions.range(Text::from(prefix.as_str())..)
-            .map_while(|(key, _)| key.as_str().strip_prefix(&prefix).map(Text::from))
-            .collect();
-        if methods.is_empty() {
-            continue;
+        if previous.is_none() {
+            meta.type_declaration_order.push(parent_name.clone());
         }
         let descriptor = TypeDescriptor {
             source_declaration: None,
@@ -1714,41 +1742,17 @@ fn register_module_metadata(
             module_path: Text::from(""),
             origin_module_path: Maybe::None,
             generic_params: List::new(),
-            // `Record` with no fields is the canonical "opaque
-            // primitive" stub — the typechecker's
-            // `type_descriptor_to_type` path treats this as a no-op
-            // when the type is already registered as a primitive in
-            // ctx, so the stub doesn't shadow the actual primitive's
-            // Type entry.
-            kind: TypeDescriptorKind::Record { fields: List::new() },
+            kind: TypeDescriptorKind::Opaque,
             size: Maybe::None,
             alignment: Maybe::None,
-            methods,
+            methods: List::new(),
             implements: List::new(),
             decl_span: Maybe::None,
-            // Primitive method-table stubs are never transparent
-            // wrappers — they're synthetic carriers for the inherent
-            // method table only.
             is_transparent_wrapper: false,
             resource_discipline: verum_common::ResourceDiscipline::Unknown,
         };
-        meta.types.insert(parent_name.clone(), descriptor);
-        meta.type_declaration_order.push(parent_name);
+        meta.types.insert(parent_name, descriptor);
     }
-}
-
-// Lexicographic order also determines synthetic descriptor publication order.
-const SCALAR_METHOD_OWNERS: &[&str] = &[
-    "Bool", "Byte", "Char", "Float", "Float32", "Float64", "ISize", "Int",
-    "Int128", "Int16", "Int32", "Int64", "Int8", "UInt128", "UInt16",
-    "UInt32", "UInt64", "UInt8", "USize",
-];
-
-/// A scalar's declared spelling distinguishes ABI aliases such as Byte and UInt8.
-fn recover_primitive_parent_from_name(name: &str) -> Maybe<Text> {
-    let (parent, method) = name.split_once('.')?;
-    (!method.contains('.') && SCALAR_METHOD_OWNERS.binary_search(&parent).is_ok())
-        .then(|| parent.into())
 }
 
 fn convert_generic_params(

@@ -489,7 +489,7 @@ impl TypeId {
     ///
     /// Round-trip with `well_known_name` is pinned by
     /// `well_known_scalar_names_round_trip` — for the spellings the
-    /// forward direction accepts.  Three more are accepted here only
+    /// forward direction accepts. Shared-ID spellings are accepted here only
     /// (see the comment on their arms).
     pub fn from_well_known_scalar_name(name: &str) -> Option<Self> {
         use verum_common::well_known_types::type_names as n;
@@ -510,11 +510,12 @@ impl TypeId {
             _ if name == n::INT16 => Self::I16,
             _ if name == n::INT32 => Self::I32,
             _ if name == n::FLOAT32 => Self::F32,
+            _ if name == n::INT64 => Self::I64,
+            _ if name == n::FLOAT64 => Self::F64,
             _ if name == n::CHAR => Self::CHAR,
             _ if name == n::INT128 => Self::I128,
             _ if name == n::UINT128 => Self::U128,
-            // Present here and ABSENT from `well_known_name` on
-            // purpose: these three share ids with spellings above
+            // These additional source spellings share ABI IDs
             // (`Byte` == `U8` == 6, `USize` == `ISize` == 14), so
             // id -> name is ambiguous and the forward direction
             // declines to guess.  name -> id has no such problem, and
