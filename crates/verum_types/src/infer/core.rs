@@ -1119,10 +1119,12 @@ impl TypeChecker {
     /// Share only indexes paired with their owning immutable metadata snapshot.
     /// Protocol registrations and admission receipts remain checker-local.
     pub fn new_with_core_snapshot(snapshot: std::sync::Arc<crate::CoreMetadataSnapshot>) -> Self {
-        let mut checker = Self::new_with_core(snapshot.metadata().clone());
-        if checker.core_metadata.is_none() {
+        let mut checker = Self::with_minimal_context();
+        let metadata = snapshot.metadata();
+        if !checker.install_core_metadata_scope(metadata.clone()) {
             return checker;
         }
+        checker.register_coercion_markers_from_metadata(metadata);
         checker.metadata_impls_by_owner = Some(snapshot.implementations.clone());
         checker.metadata_names = std::cell::OnceCell::from(snapshot.names.clone());
         checker
@@ -1174,6 +1176,19 @@ impl TypeChecker {
     /// Registration remains additive: already installed declarations/protocols
     /// are retained, but a new snapshot can contribute impls to completed names.
     fn install_core_metadata(
+        &mut self,
+        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
+    ) -> bool {
+        if let Err(message) = crate::core_metadata::validate_archive_array_extents(&metadata) {
+            self.deferred_soundness_errors.push(TypeError::Other(message));
+            return false;
+        }
+        self.install_core_metadata_scope(metadata)
+    }
+
+    // Raw installations and prepared snapshots have both validated the extents of
+    // this exact allocation. Declaration ownership is checked against this checker.
+    fn install_core_metadata_scope(
         &mut self,
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) -> bool {

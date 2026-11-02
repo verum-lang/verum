@@ -8,6 +8,10 @@
 use serde::{Deserialize, Serialize};
 use verum_common::{List, Maybe, OrderedMap, Text};
 
+#[path = "core_metadata_array_extents.rs"]
+mod array_extents;
+pub use array_extents::{parse_archive_array_extent, validate_archive_array_extents, validate_archive_array_spelling};
+
 #[path = "core_metadata_source_signature.rs"]
 mod source_signature_wire;
 
@@ -39,7 +43,7 @@ pub fn encode_metadata(metadata: &CoreMetadata) -> Result<Vec<u8>, verum_common:
     if metadata.version != CORE_METADATA_VERSION {
         return Err("metadata schema mismatch; rebuild the stdlib metadata archive".into());
     }
-    validate_source_signatures(metadata)?;
+    validate_metadata_descriptors(metadata)?;
     let payload = bincode::serialize(metadata).map_err(|error| verum_common::Text::from(error.to_string()))?;
     if payload.len() > MAX_CORE_METADATA_BYTES {
         return Err("metadata archive exceeds its byte budget".into());
@@ -65,11 +69,12 @@ pub fn decode_metadata(bytes: &[u8]) -> Result<CoreMetadata, verum_common::Text>
     if metadata.version != CORE_METADATA_VERSION {
         return Err("metadata header/payload schema mismatch; rebuild the stdlib metadata archive".into());
     }
-    validate_source_signatures(&metadata)?;
+    validate_metadata_descriptors(&metadata)?;
     Ok(metadata)
 }
 
-fn validate_source_signatures(metadata: &CoreMetadata) -> Result<(), Text> {
+fn validate_metadata_descriptors(metadata: &CoreMetadata) -> Result<(), Text> {
+    validate_archive_array_extents(metadata)?;
     NominalSourceOwners::default().admit(metadata)?;
     for descriptor in metadata.functions.values() {
         if let Some(signature) = &descriptor.source_signature {

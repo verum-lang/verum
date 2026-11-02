@@ -16,6 +16,9 @@ impl CoreMetadataSnapshot {
     /// Prepare transactionally. A cancelled build publishes no partial index;
     /// the preparation control is not retained by the completed snapshot.
     pub fn prepare(metadata: Arc<CoreMetadata>, control: &AnalysisControl) -> Result<Self> {
+        control.check()?;
+        crate::core_metadata::validate_archive_array_extents(&metadata)
+            .map_err(crate::TypeError::Other)?;
         let implementations = implementation_index(&metadata, Some(control), &mut 0)?;
         let names = MetadataNameIndex::prepare(&metadata, Some(control))?;
         Ok(Self {
