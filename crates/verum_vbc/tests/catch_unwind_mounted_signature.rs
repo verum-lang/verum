@@ -58,6 +58,14 @@ impl Drop for Fixture {
     }
 }
 
+#[test]
+fn malformed_mounted_file_reports_its_path() {
+    let fixture = Fixture::new("core.base");
+    fixture.write("base/result.vr", "module core.base.result; public type Result<");
+    let error = fixture.compile(fence_source()).expect_err("malformed dependency");
+    assert!(error.contains("parsing mounted file") && error.contains("base/result.vr"), "{error}");
+}
+
 fn fence_source() -> &'static str {
     r#"
 module core.intrinsics.control;

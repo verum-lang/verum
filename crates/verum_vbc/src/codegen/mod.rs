@@ -179,27 +179,13 @@ mod bare_method {
 }
 
 mod mount_cost {
-    // `add_parse` / `add_collect` are called only from the `codegen`-gated
-    // parse loop; without that feature the module is still compiled.
-    #![allow(dead_code)]
-
     use std::cell::Cell;
-    use std::cell::RefCell;
     use std::time::Duration;
-
-    /// Files per `declarations` timing bucket in the report.
-    const BUCKET_FILES: u64 = 500;
-
-    thread_local! {
-        /// `declarations` nanoseconds, bucketed by arrival order.
-        static BUCKETS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
-    }
 
     thread_local! {
         static FILES: Cell<u64> = const { Cell::new(0) };
         static BYTES: Cell<u64> = const { Cell::new(0) };
         static PARSE_NS: Cell<u64> = const { Cell::new(0) };
-        static PROTO_NS: Cell<u64> = const { Cell::new(0) };
         static DECLS_NS: Cell<u64> = const { Cell::new(0) };
         static DISCOVER_NS: Cell<u64> = const { Cell::new(0) };
         /// `register_import_aliases` — time and call count (T0753).
@@ -218,10 +204,8 @@ mod mount_cost {
         FILES.set(0);
         BYTES.set(0);
         PARSE_NS.set(0);
-        PROTO_NS.set(0);
         DECLS_NS.set(0);
         DISCOVER_NS.set(0);
-        BUCKETS.with_borrow_mut(|b| b.clear());
     }
 
     /// Time spent turning this module's `mount` declarations into a file
@@ -244,25 +228,10 @@ mod mount_cost {
         PARSE_NS.set(PARSE_NS.get() + took.as_nanos() as u64);
     }
 
-    pub(super) fn add_collect(protocols: Duration, decls: Duration) {
-        if !enabled() {
-            return;
+    pub(super) fn add_collect(took: Duration) {
+        if enabled() {
+            DECLS_NS.set(DECLS_NS.get() + took.as_nanos() as u64);
         }
-        PROTO_NS.set(PROTO_NS.get() + protocols.as_nanos() as u64);
-        DECLS_NS.set(DECLS_NS.get() + decls.as_nanos() as u64);
-        // Bucket by arrival order so the report answers, without a second
-        // run, whether `collect_all_declarations` costs the same for the
-        // 2500th file as for the 1st.  A flat profile means the 29 ms/file
-        // is inherent work; a rising one means the pass re-scans tables that
-        // grow as the closure is absorbed — a different defect with a
-        // different fix.
-        let bucket = (FILES.get() / BUCKET_FILES) as usize;
-        BUCKETS.with_borrow_mut(|b| {
-            if b.len() <= bucket {
-                b.resize(bucket + 1, 0);
-            }
-            b[bucket] += decls.as_nanos() as u64;
-        });
     }
 
     /// One `register_import_aliases` call (T0753).
@@ -309,32 +278,17 @@ mod mount_cost {
         }
         let ms = |ns: u64| ns as f64 / 1e6;
         eprintln!(
-            "[mount-cost] {} files={} bytes={} total={:.0}ms discover={:.0}ms parse={:.0}ms protocols={:.0}ms declarations={:.0}ms other={:.0}ms",
+            "[mount-cost] {} files={} bytes={} total={:.0}ms discover={:.0}ms parse={:.0}ms declarations={:.0}ms other={:.0}ms",
             source_path,
             FILES.get(),
             BYTES.get(),
             total.as_secs_f64() * 1e3,
             ms(DISCOVER_NS.get()),
             ms(PARSE_NS.get()),
-            ms(PROTO_NS.get()),
             ms(DECLS_NS.get()),
             total.as_secs_f64() * 1e3
-                - ms(DISCOVER_NS.get() + PARSE_NS.get() + PROTO_NS.get() + DECLS_NS.get()),
+                - ms(DISCOVER_NS.get() + PARSE_NS.get() + DECLS_NS.get()),
         );
-        BUCKETS.with_borrow(|b| {
-            if b.is_empty() {
-                return;
-            }
-            let per_bucket: Vec<String> = b
-                .iter()
-                .map(|ns| format!("{:.0}", ms(*ns) / BUCKET_FILES as f64))
-                .collect();
-            eprintln!(
-                "[mount-cost] declarations ms/file by arrival order (buckets of {}): {}",
-                BUCKET_FILES,
-                per_bucket.join(" ")
-            );
-        });
     }
 }
 
@@ -8190,8 +8144,9 @@ impl VbcCodegen {
         // conflict with built-in variants (None, Some, Ok, Err, etc.).
         // Use prefer_existing_functions to avoid overwriting builtins.
         self.set_prefer_existing_functions(true);
-        self.resolve_mounts(module, source_path, core_root);
+        let mounts = self.resolve_mounts(module, source_path, core_root);
         self.set_prefer_existing_functions(false);
+        mounts?;
 
         // AFTER `resolve_mounts`, which scopes and restores the scope for each
         // mounted file itself; from here on the items being compiled are this
@@ -8644,10 +8599,15 @@ impl VbcCodegen {
     /// # Example
     /// ```ignore
     /// let mut codegen = VbcCodegen::new();
-    /// codegen.resolve_mounts(&module, "core/sync/mutex.vr", "core/");
+    /// codegen.resolve_mounts(&module, "core/sync/mutex.vr", "core/")?;
     /// codegen.compile_module(&module)?;
     /// ```
-    pub fn resolve_mounts(&mut self, module: &Module, source_path: &str, core_root: &str) {
+    pub fn resolve_mounts(
+        &mut self,
+        module: &Module,
+        source_path: &str,
+        core_root: &str,
+    ) -> CodegenResult<()> {
         let mut resolved_files: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         // Prevent re-resolving the source file itself
@@ -8656,9 +8616,15 @@ impl VbcCodegen {
         }
         mount_cost::reset();
         let t0 = std::time::Instant::now();
-        // Resolve mounts recursively (depth-limited to prevent infinite loops)
-        self.resolve_mounts_recursive(module, source_path, core_root, &mut resolved_files, 0);
+        // Claim identities across the reachable graph before collecting any declaration.
+        let mut imported = Vec::new();
+        self.resolve_mounts_recursive(module, source_path, core_root, &mut resolved_files, &mut imported)?;
+        let files: Vec<_> = imported.iter().collect();
+        let collect = std::time::Instant::now();
+        let result = self.collect_unit_declarations(&files);
+        mount_cost::add_collect(collect.elapsed());
         mount_cost::report(source_path, t0.elapsed());
+        result
     }
 
     /// Resolve a glob over a module that exists INLINE in its parent's
@@ -8677,13 +8643,13 @@ impl VbcCodegen {
         source_path: &str,
         core_root: &str,
         resolved_files: &mut std::collections::HashSet<String>,
-        depth: u32,
-    ) {
+        imported: &mut Vec<Module>,
+    ) -> CodegenResult<()> {
         let Some((inline_name, parent_segments)) = module_path.split_last() else {
-            return;
+            return Ok(());
         };
         let parent_path: Vec<String> = if parent_segments.is_empty() {
-            return;
+            return Ok(());
         } else {
             parent_segments.to_vec()
         };
@@ -8711,7 +8677,7 @@ impl VbcCodegen {
             });
             let Some(inline) = inline else { continue };
             let verum_common::Maybe::Some(inline_items) = &inline.items else {
-                return;
+                return Ok(());
             };
             // A synthetic module holding just the inline module's mount
             // declarations — resolve_mounts_recursive does the rest.
@@ -8732,11 +8698,12 @@ impl VbcCodegen {
                     &candidate,
                     core_root,
                     resolved_files,
-                    depth + 1,
-                );
+                    imported,
+                )?;
             }
-            return;
+            return Ok(());
         }
+        Ok(())
     }
 
     /// Recursively resolves mount declarations to a FIXPOINT.
@@ -8760,8 +8727,8 @@ impl VbcCodegen {
         source_path: &str,
         core_root: &str,
         resolved_files: &mut std::collections::HashSet<String>,
-        depth: u32,
-    ) {
+        imported: &mut Vec<Module>,
+    ) -> CodegenResult<()> {
 
         // Collect all files to parse (avoid borrow issues with recursive calls)
         let mut to_parse: Vec<String> = Vec::new();
@@ -8856,8 +8823,8 @@ impl VbcCodegen {
                             source_path,
                             core_root,
                             resolved_files,
-                            depth,
-                        );
+                            imported,
+                        )?;
                     }
                 }
             }
@@ -8865,33 +8832,24 @@ impl VbcCodegen {
 
         mount_cost::add_discover(t_discover.elapsed());
 
-        // Parse and register each imported module
+        // Parse each reachable module once, including transitive dependencies.
         for file_path in to_parse {
-            #[cfg(feature = "codegen")]
-            if let Ok(source) = std::fs::read_to_string(&file_path) {
-                let t_parse = std::time::Instant::now();
-                let mut parser = verum_fast_parser::Parser::new(&source);
-                let parsed = parser.parse_module();
-                mount_cost::add_parse(source.len(), t_parse.elapsed());
-                if let Ok(imported_module) = parsed {
-                    // Recursively resolve mounts from this imported file first
-                    self.resolve_mounts_recursive(
-                        &imported_module,
-                        &file_path,
-                        core_root,
-                        resolved_files,
-                        depth + 1,
-                    );
-                    // Then register its declarations
-                    let t_proto = std::time::Instant::now();
-                    self.collect_protocol_definitions(&imported_module);
-                    let d_proto = t_proto.elapsed();
-                    let t_decls = std::time::Instant::now();
-                    let _ = self.collect_all_declarations(&imported_module);
-                    mount_cost::add_collect(d_proto, t_decls.elapsed());
-                }
-            }
+            let source = std::fs::read_to_string(&file_path).map_err(|error| {
+                CodegenError::internal(format!("reading mounted file {file_path}: {error}"))
+            })?;
+            let t_parse = std::time::Instant::now();
+            let mut parser = verum_fast_parser::Parser::new(&source);
+            let parsed = parser.parse_module();
+            mount_cost::add_parse(source.len(), t_parse.elapsed());
+            let dependency = parsed.map_err(|error| {
+                CodegenError::internal(format!("parsing mounted file {file_path}: {error:?}"))
+            })?;
+            self.resolve_mounts_recursive(
+                &dependency, &file_path, core_root, resolved_files, imported,
+            )?;
+            imported.push(dependency);
         }
+        Ok(())
     }
 
     /// Extracts only the module-path segments of GLOB-form mounts.
