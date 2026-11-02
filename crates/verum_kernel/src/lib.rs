@@ -759,6 +759,7 @@ pub use axiom::{
 /// `infer` function plus the `check` / `verify` / `verify_full`
 /// shells callers use to gate proof admission.
 pub mod infer;
+pub mod record_telescope;
 pub use infer::{
     check, infer, infer_with_full_context, infer_with_inductives, verify, verify_full, verify_with_inductives,
 };

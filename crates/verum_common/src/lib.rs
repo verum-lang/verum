@@ -81,6 +81,7 @@
 //
 
 pub mod qualified_name;
+pub mod record_telescope;
 pub mod resource_discipline;
 pub mod value_use;
 pub use resource_discipline::ResourceDiscipline;
