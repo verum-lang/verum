@@ -2582,6 +2582,7 @@ impl InterpreterState {
 
     /// Creates a new interpreter state with custom configuration.
     pub fn with_config(module: Arc<VbcModule>, config: InterpreterConfig) -> Self {
+        module.prepare_type_lookups();
         let mut modules = HashMap::new();
         modules.insert(module.name.clone(), Arc::clone(&module));
 
@@ -2745,6 +2746,7 @@ impl InterpreterState {
 
     /// Loads an additional module.
     pub fn load_module(&mut self, module: Arc<VbcModule>) {
+        module.prepare_type_lookups();
         // Extend the type-name index with the new module's types so
         // `lookup_type_id_by_name` keeps O(1) resolution after a
         // mid-run module load.  First-write-wins on collisions —

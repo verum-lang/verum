@@ -32,7 +32,7 @@ fn imported_sum_copies_cannot_replace_the_owning_declaration() {
         consumer.name = "aaa".into();
         let mut transitive = imported.clone();
         transitive.name = consumer.intern_string("Fault");
-        consumer.types = vec![transitive];
+        consumer.types = vec![transitive].into();
         owner.types.insert(if reverse { owner.types.len() } else { 0 }, imported);
 
         let foreign_ast = Parser::new("public type Fault is Failed { position: Text };")

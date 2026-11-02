@@ -113,6 +113,83 @@ pub enum EntryMain {
     },
 }
 
+/// Descriptor storage and its derived, first-declaration-wins ID index.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct TypeTable {
+    entries: Vec<TypeDescriptor>,
+    #[serde(skip)]
+    by_id: std::sync::OnceLock<HashMap<TypeId, usize>>,
+}
+
+impl TypeTable {
+    fn id_index(&self) -> &HashMap<TypeId, usize> {
+        self.by_id.get_or_init(|| {
+            let mut index = HashMap::with_capacity(self.entries.len());
+            for (position, descriptor) in self.entries.iter().enumerate() {
+                index.entry(descriptor.id).or_insert(position);
+            }
+            index
+        })
+    }
+
+    /// Append without discarding an already populated index.
+    pub fn push(&mut self, descriptor: TypeDescriptor) {
+        if let Some(index) = self.by_id.get_mut() {
+            index.entry(descriptor.id).or_insert(self.entries.len());
+        }
+        self.entries.push(descriptor);
+    }
+}
+
+impl From<Vec<TypeDescriptor>> for TypeTable {
+    fn from(entries: Vec<TypeDescriptor>) -> Self {
+        Self { entries, by_id: Default::default() }
+    }
+}
+
+impl std::ops::Deref for TypeTable {
+    type Target = Vec<TypeDescriptor>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl std::ops::DerefMut for TypeTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.by_id.take();
+        &mut self.entries
+    }
+}
+
+impl IntoIterator for TypeTable {
+    type Item = TypeDescriptor;
+    type IntoIter = std::vec::IntoIter<TypeDescriptor>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a TypeTable {
+    type Item = &'a TypeDescriptor;
+    type IntoIter = std::slice::Iter<'a, TypeDescriptor>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut TypeTable {
+    type Item = &'a mut TypeDescriptor;
+    type IntoIter = std::slice::IterMut<'a, TypeDescriptor>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 /// A complete VBC module: header, pools (strings/constants/types), function
 /// descriptors and their bytecode — the unit produced by codegen, serialized
 /// into a `.vbc`/`.vbca` archive and executed by the interpreter.
@@ -136,7 +213,7 @@ pub struct VbcModule {
     pub strings: StringTable,
 
     /// Type table.
-    pub types: Vec<TypeDescriptor>,
+    pub types: TypeTable,
 
     /// Function table.
     pub functions: Vec<FunctionDescriptor>,
@@ -415,26 +492,6 @@ pub struct VbcModule {
     /// by fid alone.
     pub mount_aliases: Vec<(StringId, FunctionId, StringId)>,
 
-    /// ARCHIVE-TYPE-GLUE-IDS-1: lazily-built `TypeId.0 → types-vec
-    /// index` reverse cache for id-correct descriptor resolution on
-    /// runtime hot paths (`DropRef` drop-glue dispatch).
-    ///
-    /// `TypeDescriptor.id` is NOT positional in `types` — well-known-id
-    /// backfills (Maybe / Result descriptors pushed under pre-allocated
-    /// ids) and codegen allocation gaps shift descriptors relative to
-    /// their ids; see `get_type`'s non-positional contract.  Any
-    /// `types[id - FIRST_USER]` indexing therefore resolves the WRONG
-    /// descriptor in general — latent while imported-type glue ids were
-    /// cleared (every descriptor's `drop_fn` was `None`, so a wrong hit
-    /// was still a no-op), loud once real drop glue is live.
-    ///
-    /// First-wins on duplicate ids, mirroring `get_type`'s `.find`
-    /// semantics.  `OnceLock` (not `OnceCell`) keeps `Arc<VbcModule>`
-    /// `Send + Sync`; skipped from serialize to keep the wire format
-    /// unchanged — mirrors `StringTable::id_to_idx`.
-    #[serde(skip, default)]
-    pub(crate) type_idx_by_id: std::sync::OnceLock<std::collections::HashMap<u32, usize>>,
-
     /// Function indices grouped by NAME, so a lookup by name does not scan
     /// the whole table.
     ///
@@ -462,7 +519,7 @@ pub struct VbcModule {
     ///
     /// `OnceLock` (not `OnceCell`) keeps `Arc<VbcModule>` `Send + Sync`;
     /// skipped from serialize to keep the wire format unchanged — mirrors
-    /// `type_idx_by_id` and `StringTable::id_to_idx`.
+    /// `TypeTable` and `StringTable::id_to_idx`.
     #[serde(skip, default)]
     pub(crate) fn_idx_by_name:
         std::sync::OnceLock<std::collections::HashMap<String, smallvec::SmallVec<[u32; 2]>>>,
@@ -567,7 +624,7 @@ impl VbcModule {
             name,
             declaration_type_bindings: Default::default(),
             strings,
-            types: Vec::new(),
+            types: TypeTable::default(),
             functions: Vec::new(),
             constants: Vec::new(),
             bytecode: Vec::new(),
@@ -606,7 +663,6 @@ impl VbcModule {
             resolved_band_map: std::collections::HashMap::new(),
             resolved_protocol_dispatch: std::collections::HashMap::new(),
             mount_aliases: Vec::new(),
-            type_idx_by_id: std::sync::OnceLock::new(),
             fn_idx_by_name: std::sync::OnceLock::new(),
             fn_idx_by_last_segment: std::sync::OnceLock::new(),
         }
@@ -745,38 +801,27 @@ impl VbcModule {
     /// Adds a type descriptor.
     pub fn add_type(&mut self, desc: TypeDescriptor) -> TypeId {
         let id = TypeId(self.types.len() as u32 + TypeId::FIRST_USER);
-        // Keep the id-correct reverse cache coherent when it is
-        // already materialised (first-wins, mirroring `get_type`).
-        if let Some(m) = self.type_idx_by_id.get_mut() {
-            m.entry(desc.id.0).or_insert(self.types.len());
-        }
         self.types.push(desc);
         id
     }
 
-    /// ARCHIVE-TYPE-GLUE-IDS-1: id-correct `types` index lookup —
-    /// O(1) amortised after the first call.  Returns the index of the
-    /// FIRST descriptor whose `id` field matches (identical semantics
-    /// to `get_type`, without the O(N) scan per call).  Use this —
-    /// never positional `types[id - FIRST_USER]` indexing — to resolve
-    /// a runtime `ObjectHeader.type_id` to its descriptor: descriptor
-    /// ids are not positional (see `type_idx_by_id` field docs).
+    /// The first descriptor declaring this ID. Descriptor IDs may be sparse,
+    /// duplicated, or in the builtin range, and are never vector positions.
     pub fn type_index_by_id(&self, id: TypeId) -> Option<usize> {
-        let map = self.type_idx_by_id.get_or_init(|| {
-            let mut m = std::collections::HashMap::with_capacity(self.types.len());
-            for (i, t) in self.types.iter().enumerate() {
-                m.entry(t.id.0).or_insert(i);
-            }
-            m
-        });
-        map.get(&id.0).copied()
+        self.types.id_index().get(&id).copied()
     }
 
-    /// Gets a type descriptor by ID.
+    /// Activates indexed reads for immutable VM modules. A builder that later
+    /// edits the descriptors automatically returns to ordinary linear reads.
+    pub(crate) fn prepare_type_lookups(&self) {
+        self.types.id_index();
+    }
+
+    /// Gets the first descriptor by ID, including IDs in the builtin range.
     pub fn get_type(&self, id: TypeId) -> Option<&TypeDescriptor> {
-        // Search by TypeId. Note: do NOT filter by is_builtin() because VBC TypeIds
-        // are assigned non-deterministically (HashMap iteration order in the compiler),
-        // so user-defined types like MapKeys can get assigned builtin-range IDs (< 16).
+        if let Some(index) = self.types.by_id.get() {
+            return index.get(&id).map(|&position| &self.types[position]);
+        }
         self.types.iter().find(|desc| desc.id == id)
     }
 

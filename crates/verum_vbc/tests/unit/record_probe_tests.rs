@@ -187,3 +187,70 @@ fn repeated_unrelated_intercepts_do_not_rescan_all_descriptors() {
         "three exact receiver probes should each inspect one selected descriptor, not all {TYPE_COUNT}"
     );
 }
+
+
+#[test]
+fn editing_an_indexed_descriptor_table_restores_first_declaration_authority() {
+    let mut module = module(&[(17, "first.Name"), (17, "second.Name"), (23, "last.Name")]);
+    let first_name = |module: &VbcModule, id| module.get_type_name(TypeId(id));
+    assert_eq!(module.type_index_by_id(TypeId(17)), Some(0));
+    module.types.swap(0, 1);
+    assert_eq!(first_name(&module, 17).as_deref(), Some("second.Name"));
+    assert_eq!(module.type_index_by_id(TypeId(17)), Some(0));
+    module.types[0].id = TypeId(23);
+    assert_eq!(module.type_index_by_id(TypeId(17)), Some(1));
+    assert_eq!(first_name(&module, 23).as_deref(), Some("second.Name"));
+    module.types.remove(0);
+    assert_eq!(first_name(&module, 23).as_deref(), Some("last.Name"));
+    assert_eq!(module.type_index_by_id(TypeId(23)), Some(1));
+}
+
+#[test]
+#[ignore = "measures descriptor dispatch on an explicit stdlib archive"]
+fn measure_archived_descriptor_lookup() {
+    use std::{hint::black_box, time::Instant};
+    let path = std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("archive path");
+    let archive = crate::archive::read_archive_from_file(path).unwrap();
+    for name in ["core.base", "core.collections", "core.math", "core.sys.linux"] {
+        let module = archive.load_module(name).unwrap();
+        let mut probes: Vec<_> = module.types.iter().map(|descriptor| descriptor.id).collect();
+        assert!(!probes.is_empty());
+        let n = probes.len();
+        for offset in 0..n.div_ceil(4) {
+            let absent = TypeId(u32::MAX - offset as u32);
+            assert!(module.get_type(absent).is_none());
+            probes.push(absent);
+        }
+        // Interleave successful and absent IDs in a reproducible permutation.
+        let mut seed = 1u32;
+        for i in (1..probes.len()).rev() {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            probes.swap(i, (seed as usize) % (i + 1));
+        }
+        let names = |module: &VbcModule| {
+            probes.iter().map(|&id| module.get_type(id).map(|d| d.name)).collect::<Vec<_>>()
+        };
+        let expected = names(&module);
+        let measure = |module: &VbcModule| {
+            let start = Instant::now();
+            let mut sum = 0u64;
+            let mut count = 0u32;
+            for _ in 0..(300_000usize.div_ceil(probes.len())) {
+                for &id in &probes {
+                    let descriptor = black_box(module).get_type(black_box(id));
+                    sum += descriptor.map_or(0, |d| u64::from(d.name.0) + 1);
+                    count += 1;
+                }
+            }
+            (start.elapsed(), count, black_box(sum))
+        };
+        let (linear, count, before) = measure(&module);
+        let start = Instant::now();
+        module.prepare_type_lookups();
+        let build = start.elapsed();
+        assert_eq!(names(&module), expected);
+        let (indexed, _, after) = measure(&module);
+        assert_eq!(before, after);
+        eprintln!("{name}: {n} descriptors, {count} lookups, build={build:?}, linear={linear:?}, indexed={indexed:?}");
+    }
+}

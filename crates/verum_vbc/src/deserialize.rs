@@ -442,7 +442,7 @@ impl<'a> Deserializer<'a> {
  strings,
  resolved_band_map: std::collections::HashMap::new(),
  resolved_protocol_dispatch: std::collections::HashMap::new(),
- types,
+ types: types.into(),
  functions,
  constants,
  bytecode,
@@ -523,7 +523,6 @@ impl<'a> Deserializer<'a> {
  // for legacy archives that predate the record.
  mount_aliases: extensions.mount_aliases,
  // Runtime-only reverse cache — never serialized.
- type_idx_by_id: std::sync::OnceLock::new(),
         fn_idx_by_name: std::sync::OnceLock::new(),
         fn_idx_by_last_segment: std::sync::OnceLock::new(),
  })
