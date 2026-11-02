@@ -851,7 +851,7 @@ impl TypeChecker {
                 // Named type (user-defined type or type alias)
                 // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module type resolution
                 // Use the new resolver for qualified paths
-                self.resolve_qualified_type(path, ast_ty.span)
+                self.resolve_value_annotation(path, ast_ty.span)
             }
 
             TypeKind::Generic { .. } => self.ast_to_generic_type(ast_ty),
@@ -1943,6 +1943,29 @@ fn substitute_refinement_binder(
                 Ok(result_type)
     }
 
+    /// Keep the selected variant declaration in value types. Opening a case
+    /// map here erases ownership and receiver identity before a call or pattern
+    /// can use it. Pattern checking can open the exact declaration on demand.
+    fn resolve_value_annotation(&mut self, path: &verum_ast::ty::Path, span: Span) -> Result<Type> {
+        let (ty, key) = self.resolve_qualified_type_with_parameter_key(path, span)?;
+        if let (Type::Variant(_), Some(key)) = (&ty, key)
+            && self.recorded_type_arity(&key).or_else(|| {
+                let metadata = self.core_metadata.as_ref()?;
+                Self::metadata_type_with_declaring_key(metadata, &key)
+                    .map(|descriptor| descriptor.generic_params.len())
+            }) == Some(0)
+        {
+            let segments = key.as_str().split('.')
+                .map(|part| verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(part, span)))
+                .collect();
+            return Ok(Type::Named {
+                path: verum_ast::ty::Path::new(segments, span),
+                args: List::new(),
+            });
+        }
+        Ok(ty)
+    }
+
     /// Resolve a qualified associated-type projection:
     /// `<T as Protocol>::Item`, `T.Item` (Verum sugar), or module-qualified path
     /// (`super.X`, `cog.X.Y`). Defers to a Generic projection when self-type
@@ -2047,7 +2070,7 @@ fn substitute_refinement_binder(
                             // The full segments include the assoc_name as the final segment
                             segments.push(verum_ast::ty::PathSegment::Name(assoc_name.clone()));
                             let full_path = verum_ast::ty::Path::new(segments.into(), ast_ty.span);
-                            return self.resolve_qualified_type(&full_path, ast_ty.span);
+                            return self.resolve_value_annotation(&full_path, ast_ty.span);
                         }
                     }
                 }

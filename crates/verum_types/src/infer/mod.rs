@@ -21,6 +21,7 @@ mod preparation;
 mod dependent_records;
 mod reference_origin;
 mod write_places;
+mod structural_clone;
 mod loan_ends;
 mod record_kernel;
 mod field_visibility;

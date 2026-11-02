@@ -510,3 +510,26 @@ fn nested_archived_variant_pattern_uses_its_declaring_owner_and_payload_paramete
         assert!(nested_packet_pattern("core.other", split, "Reply").is_err());
     }
 }
+
+#[test]
+fn imported_clone_uses_resource_and_layout_from_the_same_declaration() {
+    let model = "public type Code is (Text); public type Role is | Up | Down;
+        public type Entry is { role: Role, code: Code };";
+    for discipline in ["", "affine "] {
+        let other = format!("public type {discipline}Role is | Up | Down; public type Cell is {{ role: Role }};");
+        let sources = [("project.model", model), ("project.other", other.as_str())];
+        let consumer = "fn copy(e: &project.model.Entry) -> project.model.Entry { e.clone() }
+            fn again(e: &project.model.Entry) -> project.model.Entry { e.clone() }
+            fn copy_role(e: &project.model.Role) -> project.model.Role { e.clone() }";
+        let messages = check_with_modules("", "app", consumer, CoreMetadata::default(), false, &sources);
+        assert!(messages.is_empty(), "{messages:?}");
+        let consumer = "fn copy(e: &project.other.Cell) -> project.other.Cell { e.clone() }
+            fn copy_role(e: &project.other.Role) -> project.other.Role { e.clone() }";
+        let messages = check_with_modules("", "app", consumer, CoreMetadata::default(), false, &sources);
+        if discipline.is_empty() {
+            assert!(messages.is_empty(), "{messages:?}");
+        } else {
+            assert_eq!(messages.iter().filter(|m| m.contains("implicit clone")).count(), 2, "{messages:?}");
+        }
+    }
+}

@@ -227,3 +227,31 @@ fn argument_loans_survive_nested_calls_until_the_outer_invocation() {
         }
     }
 }
+
+#[test]
+fn implicit_clone_borrows_only_duplicable_layouts() {
+    for source in [
+        "type Role is | Up | Down; type Entry is { role: Role }; fn read(e: &Entry) -> Role { e.role.clone() }",
+        "type Digest is (Text); type Envelope is { digest: Digest }; fn read(p: &Envelope) -> Envelope { p.clone() }",
+        "fn show(b: &Boxed) -> Text { b.value.to_text() }",
+        "type Pair is { x: Boxed, y: Text }; fn read(p: &Pair) -> Pair { p.clone() }",
+        "type Wrap<T> is { item: T }; fn read(p: &Wrap<Int>) -> Wrap<Int> { p.clone() }",
+    ] {
+        let messages = errors(source);
+        assert!(messages.is_empty(), "{source}: {messages:?}");
+    }
+    for source in [
+        "type affine Status is | Idle | Busy; fn duplicate(t: &Status) -> Status { t.clone() }",
+        "type affine Status is | Idle | Busy; type Box is { status: Status }; fn duplicate(t: &Box) -> Box { t.clone() }",
+        "type affine Ticket is { id: Int }; fn duplicate(t: &Ticket) -> Ticket { t.clone() }",
+        "type affine Ticket is { id: Int }; type Box is { ticket: Ticket }; fn duplicate(t: &Box) -> Box { t.clone() }",
+        "type Access is { ptr: &mut Int }; fn duplicate(a: &Access) -> Access { a.clone() }",
+        "type Wrap<T> is { item: T }; type Pair is { a: Wrap<Int>, b: Wrap<&mut Int> }; fn duplicate(p: &Pair) -> Pair { p.clone() }",
+        "type Wrap<T> is { item: T }; fn duplicate<T>(p: &Wrap<T>) -> Wrap<T> { p.clone() }",
+    ] {
+        let messages = errors(source);
+        assert!(messages.iter().any(|m| m.contains("implicit clone")), "{source}: {messages:?}");
+    }
+    let messages = errors("implement Boxed { fn clone(&mut self) -> Boxed { self.value += 1; Boxed { value: self.value } } } fn duplicate(p: &Boxed) -> Boxed { p.clone() }");
+    assert!(messages.iter().any(|m| m.contains("shared reference")), "{messages:?}");
+}

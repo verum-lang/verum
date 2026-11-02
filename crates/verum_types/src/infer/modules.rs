@@ -19165,6 +19165,11 @@ impl TypeChecker {
             tc.check_call_loans(args, None, borrow)?;
             match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
+                // Passing an immediate scalar by value copies it out of its place.
+                // An exclusive receiver still borrows that place even on a scalar.
+                Some(crate::core_metadata::ReceiverKind::SelfValue) if receiver_type.as_ref().is_some_and(|ty|
+                    matches!(Self::auto_deref_for_method_call(ty), Type::Int | Type::Bool | Type::Char | Type::Float | Type::Unit)
+                ) => {}
                 _ => tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?,
             }
             Ok(result)
@@ -22781,22 +22786,16 @@ impl TypeChecker {
             for arg in args.iter() {
                 let _ = self.synth_expr(arg)?;
             }
-            return Ok(InferResult::new(return_ty));
+            return Ok(InferResult::method(return_ty, Some(crate::core_metadata::ReceiverKind::SelfValue)));
         }
 
-        // CLONE/DEFAULT FALLBACK: For record/named types, allow clone() to return Self.
-        // This handles cases where types don't have explicit @derive(Clone) but are
-        // semantically clonable (all fields are value types).
-        if method.name.as_str() == "clone" && args.is_empty() {
-            match &recv_ty {
-                Type::Named { .. }
-                | Type::Generic { .. }
-                | Type::Record(_)
-                | Type::Variant(_) => {
-                    return Ok(InferResult::new(recv_ty.clone()));
-                }
-                _ => {}
-            }
+        // A structural copy borrows its input. Only a checked layout can
+        // authorize the implicit operation after declared methods miss.
+        if method.name == "clone" && args.is_empty()
+            && matches!(recv_ty, Type::Named { .. } | Type::Generic { .. } | Type::Record(_) | Type::Variant(_))
+        {
+            self.check_structural_clone(&recv_ty, span)?;
+            return Ok(InferResult::method(recv_ty, Some(crate::core_metadata::ReceiverKind::SelfRef)));
         }
 
         if let Some(r) = self.try_fallback_name_dispatch(&recv_ty, recv_ty_raw, method, args, span)? {
