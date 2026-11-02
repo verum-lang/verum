@@ -423,3 +423,22 @@ fn probe() -> Int {
         73,
     );
 }
+
+#[test]
+fn incompatible_future_output_declarations_cannot_authorize_a_poll() {
+    refuse(
+        r#"
+type Ambiguous is { marker: Int };
+implement Future for Ambiguous {
+    type Output = Int;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Int> { Poll.Ready(self.marker) }
+}
+implement Future for Ambiguous {
+    type Output = Bool;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Bool> { Poll.Ready(true) }
+}
+async fn probe() -> Int { let pending = Ambiguous { marker: 9 }; pending.await }
+"#,
+        "Future.Output has no ownership declaration",
+    );
+}
