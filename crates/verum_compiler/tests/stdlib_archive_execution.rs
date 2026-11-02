@@ -370,6 +370,41 @@ fn cancelled_accept_preserves_the_pending_tcp_connection() {
 }
 
 #[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and loopback TCP"]
+fn an_empty_tcp_accept_can_be_polled_and_then_selected() {
+    let source = r#"
+        module app;
+        mount core.net.tcp.{TcpListener, TcpStream};
+        mount core.net.addr.{Ipv4Addr, SocketAddrV4, SocketAddr};
+        mount core.async.cancellation.CancellationToken;
+        mount core.async.future.Future;
+        mount core.async.waker.{Context, noop_waker};
+
+        async fn main() -> Int {
+            let listener = TcpListener.bind(SocketAddr.V4(SocketAddrV4.new(Ipv4Addr.localhost(), 0))).unwrap();
+            let bound = listener.local_addr().unwrap();
+            let token = CancellationToken.new();
+            let mut accepting = listener.accept_future();
+            let mut cancelling = token.cancelled();
+            let waker = noop_waker();
+            let mut cx = Context.from_waker(&waker);
+            assert(accepting.poll(&mut cx).is_pending(), "empty listener must yield");
+            assert(cancelling.poll(&mut cx).is_pending(), "uncancelled token must yield");
+            let client = TcpStream.connect(bound).unwrap();
+            let accepted = select biased {
+                result = accepting.await => result.unwrap(),
+                _ = cancelling.await => panic("unexpected cancellation"),
+            };
+            assert(accepted.1.port() == client.local_addr().unwrap().port());
+            token.cancel();
+            assert(listener.accept_cancellable(&token).await.is_err());
+            73
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 73);
+}
+
+#[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn sqlite_snapshot_checks_execute_from_the_published_archive() {
     let source = r#"

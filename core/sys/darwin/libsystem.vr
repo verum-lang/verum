@@ -103,11 +103,9 @@ extern {
     /// Darwin nfds_t is u32; the pollfd is borrowed for the duration of poll.
     public fn poll(fds: &mut core.sys.common.PollDescriptor, count: UInt32, timeout: Int32) -> Int32;
 
-    /// File control operations.
-    /// C: `int fcntl(int fd, int cmd, ...)`. T0.4.2: cmd is C `int`,
-    /// arg is variadic and varies per cmd; we keep `Int` for the
-    /// generic-arg slot at the FFI boundary.
-    fn fcntl(fd: Int32, cmd: Int32, arg: Int) -> Int32;
+    /// The command selects the variadic argument. Darwin arm64 passes this
+    /// argument on the stack, including integer flags for F_SETFL.
+    fn fcntl(fd: Int32, cmd: Int32, ...) -> Int32;
 
     /// Advisory file lock. C: `int flock(int fd, int operation)` —
     /// operation is LOCK_SH / LOCK_EX / LOCK_UN, optionally OR'd with

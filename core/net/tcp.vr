@@ -1296,17 +1296,16 @@ implement TcpListener {
         ))
     }
 
-    /// Accept a new connection asynchronously.
-    ///
-
-    /// Poll a nonblocking accept and yield while the listener is empty.
+    /// Await one incoming connection.
     public async fn accept_async(&self) -> Result<(TcpStream, SocketAddr), IoError> {
         let mut pending = self.accept_future();
         pending.await
     }
 
-    fn accept_future(&self) -> TcpAcceptFut {
-        TcpAcceptFut { listener: self, configured: false }
+    /// Construct a single accept for explicit polling or selection.
+    /// Dropping a pending operation leaves queued connections on the listener.
+    public fn accept_future(&self) -> TcpAcceptFut {
+        TcpAcceptFut { incoming: self.incoming_async(), completed: false }
     }
 
     /// Get the local address this listener is bound to.
@@ -1393,15 +1392,29 @@ implement Iterator for Incoming {
 
 // Enables `for await conn in listener.incoming_async() { ... }` pattern.
 
-type TcpAcceptFut<'a> is {
-    listener: &'a TcpListener,
-    configured: Bool,
+public type TcpAcceptFut<'a> is {
+    incoming: AsyncIncoming<'a>,
+    completed: Bool,
 };
 
 implement<'a> Future for TcpAcceptFut<'a> {
     type Output = Result<(TcpStream, SocketAddr), IoError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<(TcpStream, SocketAddr), IoError>> {
+        assert(!self.completed, "polled a completed TCP accept");
+        let result = self.incoming.poll_accept(cx);
+        self.completed = result.is_ready();
+        result
+    }
+}
+
+public type AsyncIncoming<'a> is {
+    listener: &'a TcpListener,
+    configured: Bool,
+};
+
+implement<'a> AsyncIncoming<'a> {
+    fn poll_accept(&mut self, cx: &mut Context) -> Poll<Result<(TcpStream, SocketAddr), IoError>> {
         if !self.configured {
             let setup = self.listener.set_nonblocking(true);
             if let Result.Err(error) = setup { return Poll.Ready(Result.Err(error)); }
@@ -1453,15 +1466,11 @@ implement<'a> Future for TcpAcceptFut<'a> {
     }
 }
 
-public type AsyncIncoming<'a> is {
-    pending: TcpAcceptFut<'a>,
-};
-
 implement<'a> Stream for AsyncIncoming<'a> {
     type Item = Result<TcpStream, IoError>;
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<TcpStream, IoError>>> {
-        match self.pending.poll(cx) {
+        match self.poll_accept(cx) {
             Poll.Ready(result) => Poll.Ready(Maybe.Some(result.map(|(stream, _)| stream))),
             Poll.Pending => Poll.Pending,
         }
@@ -1488,7 +1497,7 @@ implement TcpListener {
     ///  spawn handle(stream);
     ///  }
     public fn incoming_async(&self) -> AsyncIncoming {
-        AsyncIncoming { pending: self.accept_future() }
+        AsyncIncoming { listener: self, configured: false }
     }
 
     /// Cancellable async accept — single accept with cancel-aware shutdown.
