@@ -13458,81 +13458,16 @@ impl VbcCodegen {
         }
 
         // ──────────────────────────────────────────────────────────
-        // Phase 0.5: Target-type-aware `.into()` rewrite (task #123).
-        // ──────────────────────────────────────────────────────────
-        //
-        // `let x: TargetType = expr.into();` should dispatch to
-        // `<TargetType as From<E>>::from(expr)` where E is `expr`'s
-        // type. Without this, the runtime's identity-fallback at
-        // `dispatch_user_method` returns `expr` unchanged — `42.into()`
-        // becomes `42` regardless of the annotated `Maybe<Int>` target.
-        //
-        // The let-binding compiler at `statements.rs::compile_let`
-        // already stashes the annotated base type name in
-        // `current_return_type_name` before compiling the RHS, so the
-        // hint reaches here on a clean channel.
-        //
-        // Rewrite shape: emit `Call` to `<TargetType>.from(receiver)`
-        // exactly the same way a user-written `TargetType.from(expr)`
-        // would compile.
-        //
-        // Gates:
-        //   * Method must be exactly `into` with zero args.
-        //   * `current_return_type_name` must name a known type that
-        //     has a `<Name>.from` registered in the function table.
-        //   * Target must NOT be a generic-param-shaped identifier
-        //     (avoids dispatching to a typevar's `from`).
-        if method.name.as_str() == "into"
-            && args.is_empty()
-            && let Some(target_name) = self.ctx.current_return_type_name.clone()
-            && !target_name.is_empty()
-            && target_name
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_uppercase())
-            && !verum_common::well_known_types::looks_like_type_param(&target_name)
+        // `value.into()` uses the declared target's `from(value)` method.
+        // Ordinary call lowering supplies the same generic witnesses and
+        // argument handling as the explicit spelling.
+        if method.name.as_str() == "into" && args.is_empty()
+            && let Some(target) = self.ctx.current_return_type_name.as_deref()
+            && let Some(key) = self.registered_receiver_method(target, "from")
+            && let Some(conversion) = self.ctx.lookup_qualified_function(&key).cloned()
         {
-            // Strip generic args from the target name if any
-            // (`Maybe<Int>` → `Maybe`). The `From::from` function is
-            // monomorphised per concrete instantiation but registered
-            // under the base name in the function table.
-            let base = match target_name.find('<') {
-                Some(idx) => target_name[..idx].to_string(),
-                None => target_name.clone(),
-            };
-            let from_qualified = format!("{}.from", base);
-            // Check the function table BEFORE committing to the
-            // rewrite — if `<Base>.from` doesn't exist, fall through
-            // to the existing identity-fallback path so we don't
-            // regress reflexive `T.into() == T` cases that work today.
-            if self.ctx.lookup_function(&from_qualified).is_some() {
-                // Compile the receiver as the single argument.
-                let arg_reg = self
-                    .compile_expr(receiver)?
-                    .or_internal("into() rewrite: receiver has no value")?;
-                let dst = self.ctx.alloc_temp();
-                // Allocate a contiguous reg range for the call.
-                let args_start = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Mov {
-                    dst: args_start,
-                    src: arg_reg,
-                });
-                let info = self
-                    .ctx
-                    .lookup_function(&from_qualified)
-                    .expect("function exists per check above");
-                self.ctx.emit(Instruction::Call {
-                    dst,
-                    func_id: info.id.0,
-                    args: crate::instruction::RegRange {
-                        start: args_start,
-                        count: 1,
-                    },
-                });
-                self.ctx.free_temp(args_start);
-                self.ctx.free_temp(arg_reg);
-                return Ok(Some(dst));
-            }
+            let arguments = std::iter::once(receiver.clone()).collect();
+            return self.compile_static_method_call(&conversion, &arguments, type_args);
         }
 
         // Resolve the receiver as a static type name when the user wrote either
@@ -25255,7 +25190,22 @@ impl VbcCodegen {
         type_name: &str,
         field_name: &str,
     ) -> (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>, Option<verum_ast::Span>) {
-        if let Some(ft) = self.field_access_type_name(type_name, field_name) {
+        let dotted = self.resolve_variant_path_alias(&type_name.replace("::", "."));
+        let variant_field = dotted.rsplit_once('.').and_then(|(parent, variant)| {
+            let owner = self.type_by_id(self.nominal_type_id(Self::strip_generic_args(parent))?)?;
+            let variant = self.descriptor_variant(owner, variant)?;
+            let field = variant.fields.iter().find(|f| {
+                self.ctx.strings.get(f.name.0 as usize).is_some_and(|n| n == field_name)
+            })?;
+            let ty = field.declaration_type.as_ref()?;
+            let ty = if ty.is_generic() {
+                self.callable_owner_substitution(parent)?.apply(ty)
+            } else {
+                ty.clone()
+            };
+            self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)).map(|n| n.to_string())
+        });
+        if let Some(ft) = variant_field.or_else(|| self.field_access_type_name(type_name, field_name)) {
             // Variant lookup uses the base; generic constructors require the
             // complete declared field type, including nested arguments.
             let base = ft.split('<').next().unwrap_or(&ft).to_string();
@@ -25264,14 +25214,8 @@ impl VbcCodegen {
             self.ctx.expected_value_type = expected;
             saved
         } else {
-            // Field type unknown — keep existing context as-is (no
-            // override, no disturbance to `current_return_type_inner`).
-            (
-                self.ctx.current_return_type_name.clone(),
-                self.ctx.current_return_type_inner.clone(),
-                self.ctx.expected_value_type.take(),
-                self.ctx.expected_value_span.take(),
-            )
+            // An enclosing result cannot stand in for an unknown field's target.
+            self.ctx.push_disambig_context(None)
         }
     }
 

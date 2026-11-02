@@ -298,3 +298,33 @@ fn explicit_variant_test_reads_the_serialized_owner_tag() {
     let body = module.get_function(id).unwrap().instructions.as_ref().unwrap();
     assert!(body.iter().any(|op| matches!(op, Instruction::IsVar { tag: 1, .. })), "{body:?}");
 }
+
+#[test]
+fn imported_named_variant_field_owns_its_conversion_target() {
+    let dependency = Parser::new(r#"
+        module owner;
+        type Amount is { n: Int };
+        type Event is Present { amount: Amount } | Absent;
+    "#).parse_module().unwrap();
+    let dependency = VbcCodegen::with_config(CodegenConfig::new("owner")).compile_module(&dependency).unwrap();
+    let ast = Parser::new(r#"
+        module consumer;
+        mount owner.{Amount, Event};
+        type Envelope is Wrap(Event);
+        implement Envelope { fn from(n: Int) -> Envelope { panic("wrong target") } }
+        implement Amount { fn from(n: Int) -> Amount { Amount { n: n + 2 } } }
+        fn build() -> Envelope { Envelope.Wrap(Event.Present { amount: (40).into() }) }
+        fn main() -> Int {
+            match build() { Envelope.Wrap(Event.Present { amount }) => amount.n, _ => 0 }
+        }
+    "#).parse_module().unwrap();
+    let mut gen_ = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    gen_.import_archive_module_types(&dependency);
+    gen_.collect_unit_declarations(&[&ast]).unwrap();
+    gen_.resolve_pending_imports();
+    gen_.compile_unit_items(&[&ast], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+    let module = gen_.finalize_module_from_state().unwrap();
+    let id = module.find_function_by_name("consumer.main").unwrap();
+    assert_eq!(verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(id).unwrap().try_as_i64(), Some(42));
+}
