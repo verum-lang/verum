@@ -125,3 +125,23 @@ fn sqlite_snapshot_checks_execute_from_the_published_archive() {
     vm.run_global_ctors().unwrap();
     assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(13));
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn darwin_path_slices_refuse_truncation_before_opening_a_file() {
+    let source = r#"
+        module app;
+        mount core.sys.darwin.libsystem.{safe_open, safe_close, O_RDONLY};
+        fn main() -> Int {
+            let embedded: [Byte; 3] = [47, 0, 97];
+            let overlong: [Byte; 4096] = [97 as Byte; 4096];
+            let nul_terminated: [Byte; 2] = [47, 0];
+            assert_eq(safe_open(&embedded[..], O_RDONLY, 0).unwrap_err().code, 22);
+            assert_eq(safe_open(&overlong[..], O_RDONLY, 0).unwrap_err().code, 63);
+            safe_close(safe_open(&nul_terminated[..], O_RDONLY, 0).unwrap()).unwrap();
+            1
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 1);
+}
