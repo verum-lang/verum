@@ -28777,6 +28777,9 @@ impl VbcCodegen {
                             {
                                 return Some(type_name.clone());
                             }
+                            if self.ctx.lookup_var(&ident.name).is_some() {
+                                return None;
+                            }
                             // Static-mut bindings: declared `static mut NAME: T = init;`
                             // record T in `static_mut_type_names` at codegen time.
                             // `register_constant_with_value` populates `FunctionInfo.
@@ -29968,6 +29971,10 @@ impl VbcCodegen {
                                 Self::primitive_type_name(self.ctx.get_variable_type(&ident.name))
                             {
                                 return Some(n.to_string());
+                            }
+                            // A local without a type fact still owns this name.
+                            if self.ctx.lookup_var(&ident.name).is_some() {
+                                return None;
                             }
                             // Static-mut bindings carry their declared type in
                             // `static_mut_type_names` (populated at the

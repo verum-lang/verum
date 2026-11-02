@@ -368,3 +368,24 @@ fn archived_collection_payload_selects_native_iteration_by_owner() {
         }
     }
 }
+
+#[test]
+fn local_without_a_type_hint_shadows_an_unrelated_global() {
+    let source = r#"
+        module consumer;
+        const bytes: Int = 7;
+        fn main() -> Int {
+            let sum = |bytes| {
+                let mut result = 0;
+                for item in bytes { result = result + item; }
+                result
+            };
+            sum([17, 25])
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("consumer")).compile_module(&ast).unwrap();
+    let id = module.find_function_by_name("consumer.main").unwrap();
+    assert_eq!(verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(id).unwrap().try_as_i64(), Some(42));
+}
