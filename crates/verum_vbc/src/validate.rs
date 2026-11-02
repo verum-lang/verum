@@ -1503,6 +1503,7 @@ mod variant_layout_tests {
         // None (Unit, arity=0), Some (Tuple, arity=1).
         let mut variants = SmallVec::new();
         variants.push(VariantDescriptor {
+            method_dispatch: None,
             name: StringId::EMPTY,
             tag: 0,
             kind: VariantKind::Unit,
@@ -1511,6 +1512,7 @@ mod variant_layout_tests {
             fields: SmallVec::new(),
         });
         variants.push(VariantDescriptor {
+            method_dispatch: None,
             name: StringId::EMPTY,
             tag: 1,
             kind: VariantKind::Tuple,

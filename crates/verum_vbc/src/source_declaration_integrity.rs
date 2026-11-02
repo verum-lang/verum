@@ -20,6 +20,9 @@ pub fn validate_type_descriptor(
     descriptor: &TypeDescriptor,
     strings: &StringTable,
 ) -> Result<(), Text> {
+    if descriptor.kind != TypeKind::Protocol && descriptor.variants.iter().any(|v| v.method_dispatch.is_some()) {
+        return Err("data variant cannot declare a protocol method receiver".into());
+    }
     let Some(declaration) = &descriptor.source_declaration else {
         return Ok(());
     };
@@ -115,6 +118,11 @@ pub fn validate_type_descriptor(
                     let actual = actual_methods
                         .next()
                         .ok_or_else(|| fail("missing runtime protocol method"))?;
+                    if actual.method_dispatch.is_some_and(|dispatch|
+                        dispatch != verum_ast::method_dispatch::MethodDispatch::from_declaration(decl))
+                    {
+                        return Err(fail("protocol method dispatch differs from declaration"));
+                    }
                     let regular_params = decl
                         .params
                         .iter()

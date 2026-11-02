@@ -1103,10 +1103,30 @@ impl TypeChecker {
                 // Use the proper Type::DynProtocol representation
                 let mut bound_names = List::new();
                 for bound in bounds {
-                    if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind
-                        && let Some(ident) = path.as_ident()
-                    {
-                        bound_names.push(ident.name.clone());
+                    if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind {
+                        let lexical = self.path_to_string(path);
+                        let (ty, key) = self.resolve_qualified_type_with_parameter_key(path, ast_ty.span)?;
+                        let declaration = match &ty {
+                            Type::Named { path, .. } => self.path_to_string(path),
+                            Type::Generic { name, .. } => name.clone(),
+                            _ => key.clone().unwrap_or_else(|| lexical.clone()),
+                        };
+                        if !self.protocol_checker.read().has_protocol(&declaration)
+                            && let Some(metadata) = self.core_metadata.clone()
+                            && metadata.protocols.contains_key(&declaration)
+                        {
+                            self.register_stdlib_protocol_for_name(&declaration, &metadata);
+                        }
+                        let registry = self.protocol_checker.read();
+                        let selected = if registry.has_protocol(&declaration) {
+                            declaration
+                        } else {
+                            key.filter(|name| registry.has_protocol(name)).unwrap_or(lexical)
+                        };
+                        if !registry.has_protocol(&selected) {
+                            return Err(TypeError::Other(format!("dyn bound `{selected}` requires a protocol declaration").into()));
+                        }
+                        bound_names.push(selected);
                     }
                 }
 

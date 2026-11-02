@@ -2848,6 +2848,7 @@ impl VbcCodegen {
                         let method_name = method.name.name.to_string();
                         let name_id = StringId(self.ctx.intern_string_raw(&method_name));
                         type_desc.variants.push(crate::types::VariantDescriptor {
+                            method_dispatch: Some(verum_ast::method_dispatch::MethodDispatch::from_declaration(method)),
                             name: name_id,
                             tag: type_desc.variants.len() as u32,
                             payload: None,
@@ -16327,6 +16328,7 @@ impl VbcCodegen {
                         }
                     };
                     sum_desc.variants.push(crate::types::VariantDescriptor {
+                        method_dispatch: None,
                         name: variant_name_id,
                         tag: variant_index as u32,
                         payload: None,
@@ -16781,6 +16783,7 @@ impl VbcCodegen {
                         };
 
                         let variant_desc = crate::types::VariantDescriptor {
+                            method_dispatch: Some(verum_ast::method_dispatch::MethodDispatch::from_declaration(decl)),
                             name: method_name_id,
                             tag: type_desc.variants.len() as u32,
                             payload: Some(method_type_ref),
@@ -26533,6 +26536,7 @@ impl VbcCodegen {
                 _ => 0,
             };
             new_variants.push(crate::types::VariantDescriptor {
+                method_dispatch: v.method_dispatch,
                 name: intern(self, v.name),
                 tag: v.tag,
                 payload: v.payload.clone(),
@@ -29596,6 +29600,7 @@ mod tests {
         ];
         // 3 variants with tags 0, 2, 5 — gaps at 1, 3, 4.
         let mk_v = |name_idx: u32, tag: u32| VariantDescriptor {
+            method_dispatch: None,
             name: StringId(name_idx),
             tag,
             payload: None,

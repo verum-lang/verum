@@ -1296,6 +1296,9 @@ impl TryFrom<u8> for VariantKind {
 /// Variant descriptor for sum types.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VariantDescriptor {
+    /// Declared dispatch contract for protocol vtable slots, absent for data variants.
+    #[serde(default)]
+    pub method_dispatch: Option<verum_ast::method_dispatch::MethodDispatch>,
     /// Variant name.
     pub name: StringId,
     /// Variant tag (discriminant).
@@ -1314,6 +1317,7 @@ pub struct VariantDescriptor {
 impl Default for VariantDescriptor {
     fn default() -> Self {
         Self {
+            method_dispatch: None,
             name: StringId::EMPTY,
             tag: 0,
             payload: None,
@@ -2342,6 +2346,7 @@ mod tests {
         let mut td = TypeDescriptor::default();
         td.kind = TypeKind::Sum;
         td.variants.push(VariantDescriptor {
+            method_dispatch: None,
             name: StringId(1),
             tag: 0,
             payload: None,
@@ -2350,6 +2355,7 @@ mod tests {
             fields: SmallVec::new(),
         });
         td.variants.push(VariantDescriptor {
+            method_dispatch: None,
             name: StringId(2),
             tag: 1,
             payload: Some(TypeRef::Concrete(TypeId::INT)),
@@ -2473,6 +2479,7 @@ mod tests {
     #[test]
     fn test_variant_descriptor_unit() {
         let vd = VariantDescriptor {
+            method_dispatch: None,
             name: StringId(1),
             tag: 0,
             payload: None,
@@ -2487,6 +2494,7 @@ mod tests {
     #[test]
     fn test_variant_descriptor_tuple() {
         let vd = VariantDescriptor {
+            method_dispatch: None,
             name: StringId(2),
             tag: 1,
             payload: Some(TypeRef::Tuple(vec![
@@ -2516,6 +2524,7 @@ mod tests {
             visibility: Visibility::Public,
         });
         let vd = VariantDescriptor {
+            method_dispatch: None,
             name: StringId(3),
             tag: 2,
             payload: None,
@@ -2822,6 +2831,7 @@ mod tests {
     #[test]
     fn test_variant_descriptor_serde() {
         let vd = VariantDescriptor {
+            method_dispatch: None,
             name: StringId(1),
             tag: 0,
             payload: Some(TypeRef::Concrete(TypeId::INT)),

@@ -79,7 +79,7 @@ fn test_simple_method_call_eq() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-                    receiver_kind: Maybe::None,
+                    dispatch: None,
                 },
             );
             methods

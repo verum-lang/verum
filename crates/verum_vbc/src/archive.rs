@@ -1366,6 +1366,7 @@ mod tests {
 
         // Create a sum type with named variants
         let variant1 = VariantDescriptor {
+            method_dispatch: None,
             name: module.intern_string("None"),
             tag: 0,
             payload: None,
@@ -1374,6 +1375,7 @@ mod tests {
             fields: smallvec::smallvec![],
         };
         let variant2 = VariantDescriptor {
+            method_dispatch: None,
             name: module.intern_string("Some"),
             tag: 1,
             payload: Some(TypeRef::Concrete(TypeId::INT)),

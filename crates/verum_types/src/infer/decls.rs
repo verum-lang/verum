@@ -2130,7 +2130,6 @@ impl TypeChecker {
                         // Build method type from signature, EXCLUDING self parameter
                         // (it's implicit in method calls). Track receiver kind for
                         // object safety analysis.
-                        let resolved_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(method));
                         let param_types: Result<List<Type>> = method.params.iter()
                             .filter_map(|p| match &p.kind {
                                 FunctionParamKind::Regular { ty, .. } => Some(self.ast_to_type(ty)),
@@ -2209,7 +2208,7 @@ impl TypeChecker {
                                 method_ty,
                                 has_default,
                             );
-                            protocol_method.receiver_kind = resolved_receiver_kind;
+                            protocol_method.set_dispatch(verum_ast::method_dispatch::MethodDispatch::from_declaration(method));
                             // Record method-level type-param names so
                             // downstream substitution (e.g.
                             // lookup_all_protocol_methods) can exclude
@@ -3826,7 +3825,6 @@ impl TypeChecker {
                         // Build method type from signature, EXCLUDING self parameter
                         // (it's implicit in method calls). Track receiver kind for
                         // object safety analysis.
-                        let resolved_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(method));
                         let param_types: Result<List<Type>> = method.params.iter()
                             .filter_map(|p| match &p.kind {
                                 FunctionParamKind::Regular { ty, .. } => Some(self.ast_to_type(ty)),
@@ -3883,7 +3881,7 @@ impl TypeChecker {
                                 method_ty,
                                 has_default,
                             );
-                            protocol_method.receiver_kind = resolved_receiver_kind;
+                            protocol_method.set_dispatch(verum_ast::method_dispatch::MethodDispatch::from_declaration(method));
                             // Record method-level type-param names so
                             // downstream substitution (e.g.
                             // lookup_all_protocol_methods) can exclude
@@ -5005,7 +5003,6 @@ impl TypeChecker {
                     args: verum_common::List::new(),
                 };
                 // Track receiver kind for object safety checks
-                let method_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(func));
 
                 // Register method-level generic params as fresh TypeVars
                 // BEFORE lowering the signature. Without this step,
@@ -5098,7 +5095,7 @@ impl TypeChecker {
                     method_ty,
                     has_default,
                 );
-                pm.receiver_kind = method_receiver_kind;
+                pm.set_dispatch(verum_ast::method_dispatch::MethodDispatch::from_declaration(func));
                 pm.type_param_names = method_param_names;
                 pm.type_param_bounds = method_param_bounds;
                 protocol_methods.insert(method_name, pm);
@@ -6552,7 +6549,7 @@ impl TypeChecker {
                                 // like U in chain<U: Iterator<Item = Self.Item>> must NOT be bound to
                                 // receiver type args (Range's Int). Without this, bind_limit falls back
                                 // to fresh_vars.len() and pins U := Int (see #57).
-                                method_scheme.receiver_kind = proto_method.receiver_kind;
+                                method_scheme.receiver_kind = proto_method.receiver_kind();
                                 method_scheme.impl_var_count = impl_type_vars.len();
 
                                 // CRITICAL: Transfer type param bounds from the protocol method
@@ -8517,10 +8514,7 @@ impl TypeChecker {
                             verum_common::Maybe::Some(m) => m,
                             verum_common::Maybe::None => return None,
                         };
-                        // Archive-only protocol descriptors can erase self's
-                        // permission. Source declarations retain the contract.
-                        if self.protocols_with_known_defaults.contains_key(&proto_ident)
-                            && let Some(declared) = proto_method.receiver_kind
+                        if let Some(declared) = proto_method.receiver_kind()
                             && !declared.meta().allows_mutation
                             && crate::core_metadata::ReceiverKind::from_declaration(func).meta().allows_mutation
                         {

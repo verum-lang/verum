@@ -9145,7 +9145,6 @@ impl TypeChecker {
                                 // to handle types not yet in scope during protocol registration.
                                 // Self parameter is EXCLUDED from params (it's implicit in method calls)
                                 // but its receiver kind is tracked for object safety analysis.
-                                let proto_method_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(decl));
                                 let params: List<Type> = decl.params.iter()
                                     .filter_map(|p| match &p.kind {
                                         FunctionParamKind::Regular { ty, .. } => Some(self.ast_to_type_lenient(ty)),
@@ -9192,7 +9191,7 @@ impl TypeChecker {
                                             method_type_param_names.clone(),
                                             method_type_param_bounds.clone(),
                                         );
-                                    protocol_method.receiver_kind = proto_method_receiver_kind;
+                                    protocol_method.set_dispatch(verum_ast::method_dispatch::MethodDispatch::from_declaration(decl));
                                     protocol_methods.insert(method_name, protocol_method);
                                 }
 
@@ -19542,9 +19541,9 @@ impl TypeChecker {
                 }
                 let pc = self.protocol_checker.read();
                 if let Some(method_ty) = pc.get_method_type(bound_name.as_str(), method_name_str) {
-                    let receiver_kind = self.protocols_with_known_defaults.contains_key(bound_name)
-                        .then(|| pc.get_protocol(bound_name)?.methods.get(&method.name)?.receiver_kind)
-                        .flatten();
+                    let receiver_kind = pc.get_protocol(bound_name)
+                        .and_then(|protocol| protocol.methods.get(&method.name))
+                        .and_then(|method| method.receiver_kind());
                     drop(pc);
                     // Infer arguments (type check them)
                     for arg in args.iter() {
@@ -21513,11 +21512,10 @@ impl TypeChecker {
                             // Look up the method in the protocol definition AND its superprotocols.
                             // When Hashable extends Eq + Hash, calling hash() on T: Hashable
                             // must find hash() in the Hash superprotocol.
-                            if let Some((owner, declaration)) = self.find_method_in_protocol_hierarchy(
+                            if let Some((_, declaration)) = self.find_method_in_protocol_hierarchy(
                                 &protocol_key, &method_name_text,
                             ) {
-                                let receiver_kind = self.protocols_with_known_defaults
-                                    .contains_key(&owner).then_some(declaration.receiver_kind).flatten();
+                                let receiver_kind = declaration.receiver_kind();
                                 let method_ty = declaration.ty;
                                 // Substitute protocol type parameters with bound args.
                                 // E.g., for E: Module<Text, DynTensor<Float>>, substitute In->Text, Out->DynTensor<Float>
@@ -23242,9 +23240,7 @@ impl TypeChecker {
                                         // Apply substitution to return type
                                         let resolved_return = self.unifier.apply(return_type);
                                         let resolved_return = self.resolve_assoc_projections_deep(&resolved_return);
-                                        let receiver_kind = self.protocols_with_known_defaults
-                                            .contains_key(&protocol_name)
-                                            .then_some(method.receiver_kind).flatten();
+                                        let receiver_kind = method.receiver_kind();
                                         return Ok(Some(InferResult::method(resolved_return, receiver_kind)));
                                     }
                                 }
@@ -23347,7 +23343,7 @@ impl TypeChecker {
                                     &method_name,
                                 );
 
-                                if let Some((owner, protocol_method)) = found_method {
+                                if let Some((_, protocol_method)) = found_method {
                                     // Found the method in a bounded protocol!
                                     // CRITICAL: Instantiate fresh type variables for each call
                                     // Without this, multiple calls like fa.map(f).map(g) would
@@ -23432,8 +23428,7 @@ impl TypeChecker {
                                             constructor.as_ref(),
                                         );
 
-                                        let receiver_kind = self.protocols_with_known_defaults
-                                            .contains_key(&owner).then_some(protocol_method.receiver_kind).flatten();
+                                        let receiver_kind = protocol_method.receiver_kind();
                                         return Ok(Some(InferResult::method(final_return, receiver_kind)));
                                     }
                                 }

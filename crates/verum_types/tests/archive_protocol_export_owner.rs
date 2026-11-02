@@ -10,7 +10,7 @@ use verum_modules::{
     extract_exports_from_module,
 };
 use verum_types::core_metadata::{
-    CoreMetadata, MethodSignature, ProtocolDescriptor, ReceiverKind, TypeDescriptor,
+    CoreMetadata, MethodSignature, ProtocolDescriptor, TypeDescriptor,
     TypeDescriptorKind,
 };
 use verum_types::{TypeChecker, TypeError};
@@ -27,12 +27,14 @@ fn check(
     let mut metadata = CoreMetadata::default();
     if let Some(owner) = owner {
         let method = MethodSignature {
+            dispatch: verum_ast::method_dispatch::MethodDispatch {
+                receiver: verum_ast::method_dispatch::ReceiverKind::SelfRef,
+                is_async: false, has_generics: false, returns_self: false,
+            },
             name: "inspect".into(),
-            receiver: ReceiverKind::SelfRef,
             params: List::new(),
             return_type: "Int".into(),
             contexts: List::new(),
-            is_async: false,
         };
         let methods = List::from_iter([method]);
         let descriptor = TypeDescriptor {

@@ -25,7 +25,7 @@ fn scopes_roundtrip_without_other_extension_records() {
         serialize_archive_member(&module).unwrap(),
     ] {
         let decoded = deserialize_module(&bytes).unwrap();
-        assert_eq!(decoded.header.version_minor, 32);
+        assert!(decoded.header.version_minor >= 32);
         assert_eq!(
             decoded.declaration_type_bindings,
             module.declaration_type_bindings

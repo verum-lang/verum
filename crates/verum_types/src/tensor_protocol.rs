@@ -329,7 +329,7 @@ pub fn create_from_tensor_literal_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 

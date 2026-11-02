@@ -210,6 +210,7 @@ fn test_roundtrip_sum_type() {
         fields: smallvec::smallvec![],
         variants: smallvec::smallvec![
             VariantDescriptor {
+                method_dispatch: None,
                 name: none_name,
                 tag: 0,
                 payload: None,
@@ -218,6 +219,7 @@ fn test_roundtrip_sum_type() {
                 fields: smallvec::smallvec![],
             },
             VariantDescriptor {
+                method_dispatch: None,
                 name: some_name,
                 tag: 1,
                 payload: Some(TypeRef::Generic(TypeParamId(0))),
@@ -939,6 +941,7 @@ fn test_roundtrip_empty_and_full_variants() {
         fields: smallvec::smallvec![],
         variants: smallvec::smallvec![
             VariantDescriptor {
+                method_dispatch: None,
                 name: ok_name,
                 tag: 0,
                 payload: Some(TypeRef::Concrete(TypeId::INT)),
@@ -947,6 +950,7 @@ fn test_roundtrip_empty_and_full_variants() {
                 fields: smallvec::smallvec![],
             },
             VariantDescriptor {
+                method_dispatch: None,
                 name: err_name,
                 tag: 1,
                 payload: None,

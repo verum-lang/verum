@@ -556,6 +556,18 @@ impl Serializer {
             self.serialize_field(field)?;
         }
 
+        self.output.push(match variant.method_dispatch {
+            None => 0,
+            Some(method) => {
+                use verum_ast::method_dispatch::ReceiverKind::*;
+                let receiver = match method.receiver {
+                    None => 1, SelfValue => 2, SelfRef => 3, SelfMut => 4,
+                };
+                receiver | (u8::from(method.is_async) << 3)
+                    | (u8::from(method.has_generics) << 4)
+                    | (u8::from(method.returns_self) << 5)
+            }
+        });
         Ok(())
     }
 

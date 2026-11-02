@@ -366,3 +366,67 @@ fn actual_stdlib_ntype_refuses_index_substitution_and_private_field_access() {
             "wrong refusal for {body}: {result:?}\n{diagnostics}");
     }
 }
+
+#[test]
+fn archived_protocol_object_safety_uses_declared_receivers_and_binders() {
+    let declarations = Parser::new("module core.api;
+        public type Reader is protocol { fn read(&self) -> Int; };
+        public type Writer is protocol { fn write(&mut self, value: Int); };
+        public type Static is protocol { fn read(value: &Int) -> Int; };
+        public type Consuming is protocol { fn read(self, value: &Int) -> Int; };
+        public type Generic is protocol { fn read<T>(&self) -> Int; };
+        public type Factory is protocol { fn make(&self) -> Self; };")
+        .parse_module().unwrap();
+    for declaration_only in [false, true] {
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.api"));
+        let module = if declaration_only {
+            producer.collect_declaration_interface(&[&declarations]).unwrap()
+        } else {
+            producer.compile_module(&declarations).unwrap()
+        };
+        let mut erased = module.clone();
+        for ty in &mut erased.types {
+            for slot in &mut ty.variants {
+                slot.method_dispatch = None;
+            }
+        }
+        let mut incomplete = ArchiveBuilder::new();
+        incomplete.add_module("core.api", &erased, &[]).unwrap();
+        assert!(archive_to_core_metadata(&incomplete.finish()).unwrap_err()
+            .contains("lacks a protocol method declaration"));
+
+        let mut builder = ArchiveBuilder::new();
+        builder.add_module("core.api", &module, &[]).unwrap();
+        let homonym = Parser::new("module core.beta;
+            public type Reader is protocol { fn read(value: &Int) -> Int; };")
+            .parse_module().unwrap();
+        let other = VbcCodegen::with_config(CodegenConfig::new("core.beta"))
+            .compile_module(&homonym).unwrap();
+        builder.add_module("core.beta", &other, &[]).unwrap();
+        let mut bytes = List::new();
+        verum_vbc::archive::write_archive(&builder.finish(), &mut bytes).unwrap();
+        let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes.as_slice())).unwrap();
+        let metadata = archive_to_core_metadata(&archive).unwrap();
+        let bytes = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
+        let metadata = verum_types::core_metadata::decode_metadata(&bytes).unwrap();
+        for eager in [false, true] {
+            let collision = errors(&metadata, "mount core.api.{Reader as Safe};
+                mount core.beta.{Reader as StaticReader};
+                fn good(x: &dyn Safe) {} fn bad(x: &dyn StaticReader) {}", eager);
+            assert_eq!(collision.len(), 1, "eager={eager}: {collision:?}");
+            assert!(collision[0].contains("self parameter"), "{collision:?}");
+            for (protocol, expected) in [("Reader", None), ("Writer", None),
+                ("Static", Some("self parameter")), ("Consuming", Some("by value")),
+                ("Generic", Some("generic")), ("Factory", Some("returns self"))] {
+                let source = format!("mount core.api.{{{protocol} as Bound}}; fn accept(x: &dyn Bound) {{}}");
+                let result = errors(&metadata, &source, eager);
+                let messages = format!("{result:?}").to_lowercase();
+                if let Some(expected) = expected {
+                    assert!(messages.contains(expected), "{protocol}, eager={eager}: {result:?}");
+                } else {
+                    assert!(result.is_empty(), "{protocol}, eager={eager}: {result:?}");
+                }
+            }
+        }
+    }
+}

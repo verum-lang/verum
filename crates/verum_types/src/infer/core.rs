@@ -2609,7 +2609,7 @@ impl TypeChecker {
             let return_type = to_type(&m.return_type);
             let method_type = Type::function(params, return_type);
             let protocol_method =
-                ProtocolMethod::simple(m.name.clone(), method_type, false);
+                ProtocolMethod::from_metadata(m, method_type, false);
             methods.insert(m.name.clone(), protocol_method);
         }
         for m in protocol_desc.default_methods.iter() {
@@ -2617,7 +2617,7 @@ impl TypeChecker {
             let return_type = to_type(&m.return_type);
             let method_type = Type::function(params, return_type);
             let protocol_method =
-                ProtocolMethod::simple(m.name.clone(), method_type, true);
+                ProtocolMethod::from_metadata(m, method_type, true);
             methods.insert(m.name.clone(), protocol_method);
         }
 
@@ -4543,8 +4543,8 @@ impl TypeChecker {
                     crate::infer::helpers::parse_descriptor_type_string(m.return_type.as_str());
                 let method_type = Type::function(params, return_type);
 
-                let protocol_method = ProtocolMethod::simple(
-                    m.name.clone(),
+                let protocol_method = ProtocolMethod::from_metadata(
+                    m,
                     method_type,
                     false, // required methods don't have defaults
                 );
@@ -4568,8 +4568,8 @@ impl TypeChecker {
                     crate::infer::helpers::parse_descriptor_type_string(m.return_type.as_str());
                 let method_type = Type::function(params, return_type);
 
-                let protocol_method = ProtocolMethod::simple(
-                    m.name.clone(),
+                let protocol_method = ProtocolMethod::from_metadata(
+                    m,
                     method_type,
                     true, // default methods have implementations
                 );

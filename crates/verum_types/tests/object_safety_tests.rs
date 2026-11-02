@@ -44,7 +44,7 @@ fn test_object_safe_simple_protocol() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -98,7 +98,7 @@ fn test_not_object_safe_returns_self() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -158,7 +158,7 @@ fn test_not_object_safe_generic_method() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -219,7 +219,7 @@ fn test_not_object_safe_no_self_parameter() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -280,7 +280,7 @@ fn test_not_object_safe_takes_self_by_value() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -336,7 +336,7 @@ fn test_not_object_safe_has_associated_const() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -402,7 +402,7 @@ fn test_object_safe_multiple_methods() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
     methods.insert(
@@ -419,7 +419,7 @@ fn test_object_safe_multiple_methods() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
     methods.insert(
@@ -436,7 +436,7 @@ fn test_object_safe_multiple_methods() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -480,7 +480,7 @@ fn test_object_safe_checked_and_unsafe_references() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
     methods.insert(
@@ -497,7 +497,7 @@ fn test_object_safe_checked_and_unsafe_references() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 

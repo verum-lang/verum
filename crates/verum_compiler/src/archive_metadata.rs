@@ -41,7 +41,7 @@ use verum_common::{List, Maybe, OrderedMap, Text};
 use verum_types::core_metadata::{
     CoreMetadata, FieldDescriptor, FunctionDescriptor, GenericParam,
     ImplementationDescriptor, MethodSignature, ParamDescriptor, ProtocolDescriptor,
-    ReceiverKind, TypeDescriptor, TypeDescriptorKind, VariantCase, VariantPayload,
+    TypeDescriptor, TypeDescriptorKind, VariantCase, VariantPayload,
 };
 use verum_vbc::archive::VbcArchive;
 use verum_vbc::module::VbcModule;
@@ -162,8 +162,8 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
     for entry in sorted_index {
         let module = archive.load_module(&entry.name)
             .map_err(|error| Text::from(format!("cannot publish module {}: {error}", entry.name)))?;
-        if module.header.version_minor < 32 {
-            return Err(format!("module {} predates semantic universe signatures; rebuild the archive", entry.name).into());
+        if module.header.version_minor < 33 {
+            return Err(format!("module {} predates declaration-owned protocol dispatch; rebuild the archive", entry.name).into());
         }
         // Absence is evidence too: a copy without a declaration environment
         // cannot borrow one from another archive entry during map merging.
@@ -219,6 +219,11 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
             }
         }
         for t in module.types.iter() {
+            if t.kind == verum_vbc::types::TypeKind::Protocol
+                && t.variants.iter().any(|slot| slot.method_dispatch.is_none())
+            {
+                return Err(format!("module {} lacks a protocol method declaration; rebuild the archive", entry.name).into());
+            }
             verum_vbc::source_declaration_integrity::validate_type_descriptor(t, &module.strings)?;
             let Some(n) = module.strings.get(t.name) else {
                 continue;
@@ -791,26 +796,11 @@ fn register_module_metadata(
                             })
                             .collect();
                         Some(MethodSignature {
+                            dispatch: v.method_dispatch?,
                             name: method_name,
-                            // VBC erases self-receiver kind at
-                            // codegen time (codegen/mod.rs:8343
-                            // skips self params).  SelfRef is the
-                            // most common shape for protocol-
-                            // declared methods and round-trips for
-                            // the typechecker, which dispatches
-                            // receivers separately from method
-                            // params anyway.
-                            receiver: ReceiverKind::SelfRef,
                             params,
                             return_type,
                             contexts,
-                            // is_async also lost at codegen time
-                            // (TypeRef::Function carries no async
-                            // bit).  Best-effort default; affects
-                            // computational-property propagation
-                            // only.  Safe default for non-async
-                            // protocols (the majority).
-                            is_async: false,
                         })
                     })
                     .collect();
@@ -858,39 +848,40 @@ fn register_module_metadata(
                 // Two entries that both carry methods keep first-wins,
                 // which is the existing behaviour for genuine
                 // duplicates.
-                let incoming_has_methods = !required_methods.is_empty();
-                if incoming_has_methods
-                    && meta
-                        .protocols
-                        .get(&type_name)
-                        .is_some_and(|existing| existing.required_methods.is_empty())
-                {
-                    meta.protocols.remove(&type_name);
-                }
-                meta.protocols.entry(type_name.clone()).or_insert_with(|| {
-                    ProtocolDescriptor {
-                        name: type_name.clone(),
-                        module_path: module_path.clone(),
-                        // Same carry as the type branch above — a
-                        // protocol IS a VBC type, so `ty.origin_module`
-                        // is already decoded into `ty_module_path`.
-                        origin_module_path: if ty_module_path.as_str()
-                            != module_path.as_str()
-                        {
-                            Maybe::Some(ty_module_path.clone())
-                        } else {
-                            Maybe::None
-                        },
-                        generic_params: convert_generic_params(&ty.type_params, module),
-                        super_protocols: super_protocols.clone(),
-                        associated_types: List::new(),
-                        required_methods: required_methods.clone(),
-                        default_methods: List::new(),
-                        // #101 — span population deferred to a source-walk
-                        // pass in `precompile.rs::write_core_metadata_alongside_archive`.
-                        decl_span: verum_common::Maybe::None,
+                let protocol = ProtocolDescriptor {
+                    name: type_name.clone(),
+                    module_path: module_path.clone(),
+                    // Same carry as the type branch above — a
+                    // protocol IS a VBC type, so `ty.origin_module`
+                    // is already decoded into `ty_module_path`.
+                    origin_module_path: if ty_module_path.as_str()
+                        != module_path.as_str()
+                    {
+                        Maybe::Some(ty_module_path.clone())
+                    } else {
+                        Maybe::None
+                    },
+                    generic_params: convert_generic_params(&ty.type_params, module),
+                    super_protocols: super_protocols.clone(),
+                    associated_types: List::new(),
+                    required_methods: required_methods.clone(),
+                    default_methods: List::new(),
+                    // #101 — span population deferred to a source-walk
+                    // pass in `precompile.rs::write_core_metadata_alongside_archive`.
+                    decl_span: verum_common::Maybe::None,
+                };
+                let mut register = |key: Text| {
+                    let entry = meta.protocols.entry(key).or_insert_with(|| protocol.clone());
+                    if entry.required_methods.is_empty() && !protocol.required_methods.is_empty() {
+                        *entry = protocol.clone();
                     }
-                });
+                };
+                register(type_name.clone());
+                if !protocol.required_methods.is_empty() {
+                    register(verum_common::qualified_name::qualify_module_name(
+                        ty_module_path.as_str(), type_name.as_str(),
+                    ).into());
+                }
                 TypeDescriptorKind::Protocol {
                     super_protocols,
                     associated_types: List::new(),

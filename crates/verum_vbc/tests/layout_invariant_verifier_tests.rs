@@ -25,7 +25,9 @@ fn make_type_with_variants(name_idx: u32, variants: Vec<VariantDescriptor>) -> T
 }
 
 fn unit_variant(tag: u32, name_idx: u32) -> VariantDescriptor {
+    method_dispatch: None,
     VariantDescriptor {
+        method_dispatch: None,
         name: StringId(name_idx),
         tag,
         payload: None,
@@ -36,7 +38,9 @@ fn unit_variant(tag: u32, name_idx: u32) -> VariantDescriptor {
 }
 
 fn tuple_variant(tag: u32, name_idx: u32, arity: u8) -> VariantDescriptor {
+    method_dispatch: None,
     VariantDescriptor {
+        method_dispatch: None,
         name: StringId(name_idx),
         tag,
         payload: None,
@@ -47,7 +51,9 @@ fn tuple_variant(tag: u32, name_idx: u32, arity: u8) -> VariantDescriptor {
 }
 
 fn record_variant(tag: u32, name_idx: u32, fields: Vec<FieldDescriptor>) -> VariantDescriptor {
+    method_dispatch: None,
     VariantDescriptor {
+        method_dispatch: None,
         name: StringId(name_idx),
         tag,
         payload: None,

@@ -50,7 +50,7 @@ fn create_eq_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
     methods.insert(
@@ -64,7 +64,7 @@ fn create_eq_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -95,7 +95,7 @@ fn create_ord_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
     methods.insert(
@@ -109,7 +109,7 @@ fn create_ord_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
     methods.insert(
@@ -123,7 +123,7 @@ fn create_ord_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -162,7 +162,7 @@ fn create_iterator_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
     methods.insert(
@@ -176,7 +176,7 @@ fn create_iterator_protocol() -> Protocol {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -499,7 +499,7 @@ fn test_method_override_in_subprotocol() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 
@@ -529,7 +529,7 @@ fn test_method_override_in_subprotocol() {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         },
     );
 

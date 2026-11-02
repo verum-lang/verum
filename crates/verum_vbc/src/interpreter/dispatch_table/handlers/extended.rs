@@ -616,6 +616,7 @@ mod make_variant_typed_validation_tests {
             kind: TypeKind::Sum,
             variants: smallvec![
                 VariantDescriptor {
+                    method_dispatch: None,
                     name: name_id,
                     tag: 0,
                     payload: None,
@@ -624,6 +625,7 @@ mod make_variant_typed_validation_tests {
                     fields: smallvec![],
                 },
                 VariantDescriptor {
+                    method_dispatch: None,
                     name: name_id,
                     tag: 1,
                     payload: None,

@@ -204,6 +204,7 @@ pub(crate) fn compute_archive_key<'a>(
         // carries VERSION_MINOR, so wire-version bumps invalidate
         // automatically — no manual PRECOMPILE_SCHEMA_VERSION bump to
         // forget.
+        "crates/verum_ast/src/method_dispatch.rs",
         "crates/verum_vbc/src/serialize.rs",
         "crates/verum_vbc/src/deserialize.rs",
         "crates/verum_vbc/src/module.rs",

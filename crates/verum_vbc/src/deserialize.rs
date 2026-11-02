@@ -1290,7 +1290,26 @@ impl<'a> Deserializer<'a> {
  fields.push(self.parse_field()?);
  }
 
+ let method_dispatch = if self.header.as_ref().is_some_and(|h| h.version_minor >= 33) {
+     use verum_ast::method_dispatch::{MethodDispatch, ReceiverKind};
+     let bits = decode_u8(self.data, &mut self.offset)?;
+     match bits {
+         0 => None,
+         _ if bits & 0xc0 == 0 && (1..=4).contains(&(bits & 7)) => Some(MethodDispatch {
+             receiver: match bits & 7 {
+                 1 => ReceiverKind::None, 2 => ReceiverKind::SelfValue,
+                 3 => ReceiverKind::SelfRef, _ => ReceiverKind::SelfMut,
+             },
+             is_async: bits & 8 != 0,
+             has_generics: bits & 16 != 0,
+             returns_self: bits & 32 != 0,
+         }),
+         _ => return Err(VbcError::InvalidHeader { field: "protocol_method_dispatch", offset: self.offset }),
+     }
+ } else { None };
+
  Ok(VariantDescriptor {
+ method_dispatch,
  name,
  tag,
  payload,

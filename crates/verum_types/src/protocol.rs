@@ -512,13 +512,26 @@ pub struct ProtocolMethod {
     /// Maps param name to its bound type (e.g., "F" -> fn(Int) -> B).
     /// This enables closure type inference for methods like `fn map<B, F: fn(Self.Item) -> B>`.
     pub type_param_bounds: Map<Text, Type>,
-    /// Receiver kind for object safety checks.
-    /// When Some, used directly for NoSelfParameter / TakesSelfByValue checks.
-    /// When None, falls back to inferring from Function type params[0].
-    pub receiver_kind: Maybe<ReceiverKind>,
+    /// Declaration facts before ABI erasure. Synthetic built-ins may embed the receiver in their function type.
+    pub dispatch: Option<verum_ast::method_dispatch::MethodDispatch>,
 }
 
 impl ProtocolMethod {
+    pub fn receiver_kind(&self) -> Option<ReceiverKind> {
+        self.dispatch.map(|method| method.receiver)
+    }
+
+    pub(crate) fn set_dispatch(&mut self, dispatch: verum_ast::method_dispatch::MethodDispatch) {
+        self.dispatch = Some(dispatch);
+        self.is_async = dispatch.is_async;
+    }
+
+    pub(crate) fn from_metadata(signature: &crate::core_metadata::MethodSignature, ty: Type, has_default: bool) -> Self {
+        let mut method = Self::simple(signature.name.clone(), ty, has_default);
+        method.set_dispatch(signature.dispatch);
+        method
+    }
+
     /// Create a simple protocol method without refinement constraints
     ///
     /// This is the most common constructor for backward compatibility.
@@ -532,7 +545,7 @@ impl ProtocolMethod {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         }
     }
 
@@ -555,7 +568,7 @@ impl ProtocolMethod {
             context_requirements: List::new(),
             type_param_names,
             type_param_bounds,
-            receiver_kind: Maybe::None,
+            dispatch: None,
         }
     }
 
@@ -576,7 +589,7 @@ impl ProtocolMethod {
             context_requirements: List::new(),
             type_param_names: List::new(),
             type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         }
     }
 
@@ -591,7 +604,7 @@ impl ProtocolMethod {
             doc: Maybe::None,
             is_async: true,
             context_requirements: List::new(),
-            receiver_kind: Maybe::None,
+            dispatch: None,
         }
     }
 
@@ -2260,7 +2273,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods.insert(
@@ -2280,7 +2293,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2425,7 +2438,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2470,7 +2483,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2520,7 +2533,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2555,7 +2568,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2601,7 +2614,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 // Optional size_hint method
@@ -2621,7 +2634,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2678,7 +2691,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2718,7 +2731,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2761,7 +2774,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2804,7 +2817,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2853,7 +2866,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2908,7 +2921,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -2955,7 +2968,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods.insert(
@@ -2975,7 +2988,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3025,7 +3038,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3079,7 +3092,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods.insert(
@@ -3102,7 +3115,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3156,7 +3169,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods.insert(
@@ -3179,7 +3192,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3230,7 +3243,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3272,7 +3285,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3317,7 +3330,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3362,7 +3375,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3407,7 +3420,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -3452,7 +3465,7 @@ impl ProtocolChecker {
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
-                        receiver_kind: Maybe::None,
+                        dispatch: None,
                     },
                 );
                 methods
@@ -5228,59 +5241,6 @@ impl ProtocolChecker {
         protocol: Protocol,
     ) -> Result<ProtocolBindingReceipt, ProtocolError> {
         let name = protocol.name.clone();
-        let mut protocol = protocol;
-        // PROTOCOL-REREGISTRATION-KEEPS-THE-RECEIVER-1 (T1378).
-        //
-        // A protocol is registered MORE THAN ONCE — measured on `Any`,
-        // which `check_object_safety` sees three times, correct twice:
-        //
-        //   Any::type_id receiver_kind=Some(SelfRef) -> SelfRef
-        //   Any::type_id receiver_kind=Some(SelfRef) -> SelfRef
-        //   Any::type_id receiver_kind=None          -> None    <- third
-        //
-        // and the third then reports the OPPOSITE of what the declaration
-        // says: `fn type_id(&self)` "has no self parameter".
-        //
-        // The receiver kind is a field the four `ProtocolMethod`
-        // constructors CANNOT express — every one hardcodes
-        // `Maybe::None` — and the only site that sets it correctly
-        // (`infer/decls.rs:2036`) builds the struct literally, bypassing
-        // them. So any registration built through a constructor means
-        // "receiver unknown", and `check_object_safety` cannot recover it:
-        // its fallback infers from `params[0]`, and a protocol method's
-        // `params` never contains `self`, so an unknown receiver always
-        // reads as NO receiver.
-        //
-        // A re-registration must therefore not DOWNGRADE what is already
-        // known. `Maybe::None` here means "this path could not say", not
-        // "this method has no receiver" — the two are different claims and
-        // only the first is ever true of a constructor-built record.
-        //
-        // Deliberately narrow: it fills a gap, never overwrites. A later
-        // registration that DOES know its receiver kind still wins.
-        //
-        // `VERUM_NO_PROTOCOL_RECEIVER_CARRY=1` — A/B kill switch.
-        if std::env::var_os("VERUM_NO_PROTOCOL_RECEIVER_CARRY").is_none()
-            && let Some(prev) = self.protocols.get(&name)
-        {
-            for (mname, method) in protocol.methods.iter_mut() {
-                if matches!(method.receiver_kind, Maybe::None)
-                    && let Some(old) = prev.methods.get(mname)
-                    && let Maybe::Some(rk) = old.receiver_kind
-                {
-                    method.receiver_kind = Maybe::Some(rk);
-                    if std::env::var("VERUM_TRACE_OBJSAFE")
-                        .is_ok_and(|v| v == "1" || v.as_str() == name.as_str())
-                    {
-                        eprintln!(
-                            "[objsafe] re-registration of {}::{} carried \
-                             receiver_kind={:?} forward from the previous record",
-                            name, mname, rk
-                        );
-                    }
-                }
-            }
-        }
         let installed_revision = Arc::new(AtomicBool::new(true));
         let receipt = ProtocolBindingReceipt {
             name: name.clone(),
@@ -11669,7 +11629,7 @@ impl ProtocolChecker {
             {
                 // Rule 3a: No generic methods
                 // Basic protocols with simple associated types (initial release) — 2 line 11663
-                if !type_params.is_empty() {
+                if !type_params.is_empty() || !method.type_param_names.is_empty() || method.dispatch.is_some_and(|m| m.has_generics) {
                     errors.push(ObjectSafetyError::GenericMethod {
                         method_name: method_name.clone(),
                     });
@@ -11677,8 +11637,8 @@ impl ProtocolChecker {
 
                 // Rule 3b/3c: Check receiver kind for object safety.
                 // Use receiver_kind if explicitly set, otherwise infer from params[0].
-                let receiver = if let Maybe::Some(rk) = &method.receiver_kind {
-                    *rk
+                let receiver = if let Maybe::Some(rk) = method.receiver_kind() {
+                    rk
                 } else if params.is_empty() {
                     ReceiverKind::None
                 } else {
@@ -11708,7 +11668,7 @@ impl ProtocolChecker {
                 {
                     eprintln!(
                         "[objsafe] {}::{} receiver_kind={:?} params={} type_params={} -> {:?}",
-                        protocol_name, method_name, method.receiver_kind,
+                        protocol_name, method_name, method.receiver_kind(),
                         params.len(), type_params.len(), receiver
                     );
                     eprintln!(
@@ -11717,7 +11677,7 @@ impl ProtocolChecker {
                         protocol.methods.iter()
                             .map(|(n, m)| format!(
                                 "{}(recv={:?},{}p{})",
-                                n, m.receiver_kind,
+                                n, m.receiver_kind(),
                                 match &m.ty {
                                     Type::Function { params, .. } => params.len(),
                                     _ => 0,
@@ -11745,7 +11705,7 @@ impl ProtocolChecker {
 
                 // Rule 3d: Must not return Self
                 // Basic protocols with simple associated types (initial release) — 2 line 11662
-                if self.type_contains_self(return_type) {
+                if method.dispatch.is_some_and(|m| m.returns_self) || self.type_contains_self(return_type) {
                     errors.push(ObjectSafetyError::ReturnsSelf {
                         method_name: method_name.clone(),
                     });

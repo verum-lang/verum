@@ -127,6 +127,7 @@ pub mod ffi;
 pub mod literal;
 pub mod meta_fn;
 pub mod meta_value;
+pub mod method_dispatch;
 pub mod pattern;
 pub mod pretty;
 pub mod prelude;
