@@ -57,3 +57,18 @@ fn fixed_width_decoders_reject_an_unrepresentable_end_offset() {
     assert!(verum_vbc::encoding::decode_f64(&[0], &mut offset).is_err());
     assert_eq!(offset, usize::MAX);
 }
+
+#[test]
+fn extended_lengths_must_fit_the_enclosing_function_in_both_paths() {
+    use verum_vbc::instruction::MathSubOpcode;
+    for length in [4, u64::from(u32::MAX) + 1, u64::MAX] {
+        let mut body = vec![Opcode::MathExtended as u8, MathSubOpcode::SinF64 as u8];
+        verum_vbc::encoding::encode_varint(length, &mut body);
+        body.extend_from_slice(&[0, 1]);
+        assert!(verum_vbc::bytecode::decode_instruction(&body, &mut 0).is_err());
+        assert!(matches!(
+            run(&body, &[0; 8]),
+            Err(InterpreterError::InvalidBytecode { pc: 2, .. })
+        ));
+    }
+}

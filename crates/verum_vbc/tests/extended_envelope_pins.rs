@@ -1,27 +1,16 @@
 //! Envelope pins for the extended-carrier class-kill (T0409/T0410/T0411/
 //! T0412/T0414/T0415/T0416/T0418/T0429).
 //!
-//! Every extended carrier is encoded `[opcode][sub_op][varint len][operands]`,
-//! and `dispatch_enveloped` repositions pc to `operands_start + len` on every
-//! path. These tests pin the consequence that matters: an arm whose read count
-//! disagrees with the declared envelope may compute a wrong value, but the
-//! FOLLOWING instruction still decodes and executes.
-//!
-//! Both directions are covered, because they fail differently:
-//!   * over-declared (arm reads fewer bytes than declared) — the surplus bytes
-//!     must be skipped, not decoded as opcodes;
-//!   * under-declared (arm reads MORE than declared) — pc must be REWOUND.
-//!     This is the historically corrupting direction: the arm consumes the
-//!     next instruction's opcode byte as a register operand, and every
-//!     subsequent decode is misaligned (the T0177 gpu_memset SIGSEGV and the
-//!     task-#8 `GenerationalArena.new` NullPointer both had this shape).
+//! The length prefix bounds handler reads. Surplus bytes are skipped on
+//! success. An incomplete operand must fail before it consumes another
+//! instruction, even if that instruction begins with a valid register.
 
 use std::sync::Arc;
 use verum_vbc::bytecode;
 use verum_vbc::instruction::{
     ArithSubOpcode, CharSubOpcode, Instruction, LogSubOpcode, MathSubOpcode, Reg, SimdSubOpcode,
 };
-use verum_vbc::interpreter::Interpreter;
+use verum_vbc::interpreter::{Interpreter, InterpreterError};
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
 use verum_vbc::types::StringId;
 use verum_vbc::value::Value;
@@ -50,10 +39,6 @@ fn run_with_regs(instructions: &[Instruction], register_count: u16) -> Value {
         .expect("execution failed")
 }
 
-/// Wide frame on purpose: an under-declared envelope makes the arm read the
-/// FOLLOWING instruction's bytes as register indices, so the frame must be
-/// large enough that those bogus indices stay in range and the test observes
-/// the pc behaviour rather than an out-of-range panic.
 fn run(instructions: &[Instruction]) -> Value {
     run_with_regs(instructions, 256)
 }
@@ -75,57 +60,36 @@ fn survives(carrier: Instruction) -> i64 {
 }
 
 // ============================================================================
-// Under-declared envelopes — the arm over-reads; pc must be rewound.
+// Under-declared envelopes cannot supply operands from the next instruction.
 // ============================================================================
 
 #[test]
-fn math_carrier_under_declared_leaves_next_instruction_executable() {
-    // SinF64's arm reads dst + src = 2 registers; declare only 1 operand
-    // byte. The arm consumes the following LoadSmallI's opcode byte as its
-    // `src` register — the envelope must rewind pc to operands_start + 1.
-    assert_eq!(
-        survives(Instruction::MathExtended {
+fn incomplete_operands_fail_inside_the_envelope() {
+    for instruction in [
+        Instruction::MathExtended {
             sub_op: MathSubOpcode::SinF64 as u8,
             operands: vec![2],
-        }),
-        SENTINEL
-    );
-}
-
-#[test]
-fn arith_carrier_under_declared_leaves_next_instruction_executable() {
-    // CheckedAddI reads dst + a + b = 3 registers; declare 1.
-    assert_eq!(
-        survives(Instruction::ArithExtended {
+        },
+        Instruction::ArithExtended {
             sub_op: ArithSubOpcode::CheckedAddI as u8,
             operands: vec![2],
-        }),
-        SENTINEL
-    );
-}
-
-#[test]
-fn char_carrier_under_declared_leaves_next_instruction_executable() {
-    // IsAlphabeticAscii reads dst + src = 2 registers; declare 1.
-    assert_eq!(
-        survives(Instruction::CharExtended {
+        },
+        Instruction::CharExtended {
             sub_op: CharSubOpcode::IsAlphabeticAscii as u8,
             operands: vec![2],
-        }),
-        SENTINEL
-    );
-}
-
-#[test]
-fn simd_carrier_under_declared_leaves_next_instruction_executable() {
-    // Splat reads dst + src = 2 registers; declare 1.
-    assert_eq!(
-        survives(Instruction::SimdExtended {
+        },
+        Instruction::SimdExtended {
             sub_op: SimdSubOpcode::Splat as u8,
             operands: vec![2],
-        }),
-        SENTINEL
-    );
+        },
+    ] {
+        let mut bytes = Vec::new();
+        bytecode::encode_instruction(&instruction, &mut bytes);
+        let end = bytes.len();
+        bytecode::encode_instruction(&Instruction::RetV, &mut bytes);
+        let result = Interpreter::new(create_module(bytes, 256)).execute_function(FunctionId(0));
+        assert!(matches!(result, Err(InterpreterError::InvalidBytecode { pc, .. }) if pc == end));
+    }
 }
 
 // ============================================================================

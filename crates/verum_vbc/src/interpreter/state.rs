@@ -3136,10 +3136,18 @@ impl InterpreterState {
         self.module.bytecode.get(start..end)
     }
 
+    /// Bytes addressable by the current instruction, including its length envelope.
+    #[inline]
+    pub(super) fn operand_bytecode(&self) -> Option<&[u8]> {
+        let bytes = self.current_bytecode()?;
+        let limit = self.call_stack.current()?.operand_end as usize;
+        Some(&bytes[..limit.min(bytes.len())])
+    }
+
     /// Gets a byte from bytecode at the given offset.
     #[inline]
     pub fn read_byte(&self, offset: u32) -> Option<u8> {
-        self.current_bytecode()?.get(offset as usize).copied()
+        self.operand_bytecode()?.get(offset as usize).copied()
     }
 
     /// Resets the interpreter state (clears stack, registers, heap).

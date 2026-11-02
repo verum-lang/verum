@@ -313,47 +313,37 @@ pub fn encode_string(s: &str, output: &mut Vec<u8>) {
     output.extend_from_slice(s.as_bytes());
 }
 
+/// Validate a length-prefixed payload against its enclosing byte slice.
+#[inline]
+pub(crate) fn decode_payload_range(
+    data: &[u8],
+    offset: &mut usize,
+) -> VbcResult<std::ops::Range<usize>> {
+    let encoded_len = decode_varint(data, offset)?;
+    let start = *offset;
+    let len = usize::try_from(encoded_len).map_err(|_| VbcError::eof(start, usize::MAX))?;
+    if len > data.len() - start {
+        return Err(VbcError::eof(start, len));
+    }
+    *offset = start + len;
+    Ok(start..*offset)
+}
+
 /// Decodes a length-prefixed string.
 #[inline]
 pub fn decode_string(data: &[u8], offset: &mut usize) -> VbcResult<String> {
-    let len = decode_varint(data, offset)? as usize;
-    // `*offset + len` can wrap usize when `len` decodes from a
-    // hostile varint near `usize::MAX`. In release builds the
-    // overflow wraps silently, producing a small wrapped value
-    // that *passes* the bounds check `... > data.len()` while
-    // the slice `data[*offset..*offset + len]` would then read
-    // from the wrong region (or, for a wrap that lands on a
-    // valid offset, alias previously-read bytes). Use
-    // `checked_add` to surface the overflow as `eof`.
-    let end = offset
-        .checked_add(len)
-        .ok_or_else(|| VbcError::eof(*offset, len))?;
-    if end > data.len() {
-        return Err(VbcError::eof(*offset, len));
-    }
-    let bytes = &data[*offset..end];
-    *offset = end;
-
-    String::from_utf8(bytes.to_vec()).map_err(|e| VbcError::InvalidUtf8 {
-        offset: (*offset - len) as u32,
-        error: e,
+    let range = decode_payload_range(data, offset)?;
+    let start = range.start;
+    String::from_utf8(data[range].to_vec()).map_err(|error| VbcError::InvalidUtf8 {
+        offset: start as u32,
+        error,
     })
 }
 
 /// Decodes raw bytes with length prefix.
 #[inline]
 pub fn decode_bytes(data: &[u8], offset: &mut usize) -> VbcResult<Vec<u8>> {
-    let len = decode_varint(data, offset)? as usize;
-    // Same overflow defense as `decode_string` above.
-    let end = offset
-        .checked_add(len)
-        .ok_or_else(|| VbcError::eof(*offset, len))?;
-    if end > data.len() {
-        return Err(VbcError::eof(*offset, len));
-    }
-    let bytes = data[*offset..end].to_vec();
-    *offset = end;
-    Ok(bytes)
+    Ok(data[decode_payload_range(data, offset)?].to_vec())
 }
 
 // ============================================================================

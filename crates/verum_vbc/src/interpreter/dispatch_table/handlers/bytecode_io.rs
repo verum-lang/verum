@@ -14,12 +14,12 @@ use crate::value::Value;
 
 /// Decode against the active function and publish the new PC only on success.
 #[inline(always)]
-fn read_operand<T>(
+pub(super) fn read_operand<T>(
     state: &mut InterpreterState,
     decode: impl FnOnce(&[u8], &mut usize) -> VbcResult<T>,
 ) -> InterpreterResult<T> {
     let pc = state.pc() as usize;
-    let bytes = state.current_bytecode().ok_or_else(|| InterpreterError::InvalidBytecode {
+    let bytes = state.operand_bytecode().ok_or_else(|| InterpreterError::InvalidBytecode {
         pc,
         message: "missing current function bytecode".to_string(),
     })?;

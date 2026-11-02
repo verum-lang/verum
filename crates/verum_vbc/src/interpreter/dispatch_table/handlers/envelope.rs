@@ -1,49 +1,10 @@
 //! The single enforcement authority for extended-carrier stream advance.
 //!
-//! Every extended carrier — `FfiExtended`, `MathExtended`, `CbgrExtended`,
-//! `ArithExtended`, `CharExtended`, `TextExtended`, `LogExtended`,
-//! `MemExtended`, `SimdExtended`, `GpuExtended`, `TensorExtended` — is
-//! encoded by `encode_instruction` as
-//!
-//! ```text
-//! [opcode] [sub_op:u8] [varint operand_byte_count] [operand bytes]
-//! ```
-//!
-//! The length varint is written from `operands.len()`, so it is correct BY
-//! CONSTRUCTION: it always describes exactly the bytes the emitter packed,
-//! whatever the per-sub-op arity happens to be.
-//!
-//! That makes the envelope — not the arm's read sequence — the authority on
-//! where the next instruction begins. [`dispatch_enveloped`] is the ONE place
-//! that acts on it. A family body reads whatever operands it wants; when it
-//! returns, pc is repositioned to `operands_start + operand_byte_count`
-//! unconditionally. An arm that reads too few or too many registers can still
-//! compute a wrong VALUE, but it can no longer desync the instruction stream.
-//!
-//! # Why the authority lives outside the family body
-//!
-//! The previous convention placed a `set_pc` at the tail of each family
-//! handler, inside the same function as the `match`. That is bypassable: any
-//! `return` inside an arm — a fast path, a graceful-degradation path, a guard
-//! — jumps straight past the tail and desyncs the stream. The defect class
-//! recurred for exactly this reason (T0177 gpu_memset SIGSEGV, T0193, task #8
-//! MemExtended NullPointer, and the `Realloc` fast path of T0429 that
-//! re-opened the crack inside the very handler written to close it).
-//!
-//! Hoisting the reposition into the CALLER makes the failure structurally
-//! impossible rather than merely discouraged: an early `return` in an arm
-//! returns into [`dispatch_enveloped`], which then repositions. Early returns
-//! are harmless by construction, so no arm needs converting and no future arm
-//! can reintroduce the bug.
-//!
-//! # Why a new family cannot forget the envelope
-//!
-//! [`ExtendedFamilyBody`] takes the sub-op byte as a parameter, which makes it
-//! type-incompatible with the dispatch table's
-//! `fn(&mut InterpreterState) -> InterpreterResult<DispatchResult>`. A family
-//! body therefore CANNOT be registered in `DISPATCH_TABLE` directly — it only
-//! type-checks when routed through [`dispatch_enveloped`]. The guarantee is
-//! enforced by rustc, not by convention.
+//! The length prefix determines which bytes the handler may read and where
+//! execution resumes. Surplus bytes inside a valid envelope are skipped.
+//! Reading an operand past the declared length fails, including when the
+//! following instruction happens to begin with a valid register byte.
+//! Each call frame owns its limit so nested interpretation has its own bounds.
 //!
 //! # Control transfer
 //!
@@ -56,10 +17,10 @@
 //! ever need to leave pc where it put it, it must be given an explicit typed
 //! escape here rather than a bare `return`.
 
-use super::super::super::error::InterpreterResult;
+use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
-use super::bytecode_io::{read_u8, read_varint};
+use super::bytecode_io::{read_operand, read_u8};
 
 /// The body of one extended family: the `match sub_op { … }` and nothing else.
 ///
@@ -82,11 +43,24 @@ pub(in super::super) fn dispatch_enveloped(
     body: ExtendedFamilyBody,
 ) -> InterpreterResult<DispatchResult> {
     let sub_op = read_u8(state)?;
-    let operand_byte_count = read_varint(state)?;
-    let operands_start = state.pc();
+    let range = read_operand(state, crate::encoding::decode_payload_range)?;
+    let depth = state.call_stack.depth() - 1; // read_operand verified the current frame
+    let frame = state.call_stack.current_mut().unwrap();
+    let previous_end = std::mem::replace(&mut frame.operand_end, range.end as u32);
+    frame.pc = range.start as u32;
 
     let result = body(state, sub_op);
 
-    state.set_pc(operands_start.wrapping_add(operand_byte_count as u32));
+    // Nested execution may have left its failing frame above the caller.
+    let frame =
+        state
+            .call_stack
+            .at_mut(depth)
+            .ok_or_else(|| InterpreterError::InvalidBytecode {
+                pc: range.start,
+                message: "extended instruction removed its caller frame".into(),
+            })?;
+    frame.operand_end = previous_end;
+    frame.pc = range.end as u32;
     result
 }

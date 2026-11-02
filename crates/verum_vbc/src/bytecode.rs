@@ -48,7 +48,7 @@
 //! ```
 
 use crate::encoding::{
-    decode_f32, decode_f64, decode_reg, decode_reg_range, decode_signed_varint, decode_u8,
+    decode_bytes, decode_f32, decode_f64, decode_reg, decode_reg_range, decode_signed_varint, decode_u8,
     decode_varint, encode_f64, encode_reg, encode_reg_range, encode_signed_varint, encode_varint,
 };
 use crate::error::{VbcError, VbcResult};
@@ -4261,7 +4261,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             if crate::intrinsics::registry::tensor_carrier_sub_ops().contains(&sub_opcode_byte)
                 || registry_driven_tensor_arity(sub_opcode_byte).is_some()
             {
-                let operands = decode_extended_operands(data, offset)?;
+                let operands = decode_bytes(data, offset)?;
                 return Ok(Instruction::TensorExtended {
                     sub_op: sub_opcode_byte,
                     operands,
@@ -5073,7 +5073,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // causing systematic TruncatedBytecode failures in the linker.
         Opcode::GpuExtended => {
             let sub_op_byte = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::GpuExtended { sub_op: sub_op_byte, operands })
         }
         // ====================================================================
@@ -5108,7 +5108,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         Opcode::MemExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::MemExtended { sub_op, operands })
         }
 
@@ -5121,7 +5121,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // the consumed bytes keeps encode/decode a faithful round-trip.
         Opcode::MlExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             let mut raw = vec![sub_op];
             crate::encoding::encode_varint(operands.len() as u64, &mut raw);
             raw.extend_from_slice(&operands);
@@ -5395,63 +5395,63 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         Opcode::ArithExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::ArithExtended { sub_op, operands })
         }
         Opcode::FfiExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::FfiExtended { sub_op, operands })
         }
         // Family gateways (T0852) — same blob envelope as FfiExtended.
         Opcode::TimeExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::TimeExtended { sub_op, operands })
         }
         Opcode::SysExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::SysExtended { sub_op, operands })
         }
         Opcode::MachExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::MachExtended { sub_op, operands })
         }
         Opcode::SyncExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::SyncExtended { sub_op, operands })
         }
         Opcode::MathExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::MathExtended { sub_op, operands })
         }
         Opcode::SimdExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::SimdExtended { sub_op, operands })
         }
         Opcode::CharExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::CharExtended { sub_op, operands })
         }
         Opcode::CbgrExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::CbgrExtended { sub_op, operands })
         }
         Opcode::TextExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::TextExtended { sub_op, operands })
         }
         Opcode::LogExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let operands = decode_extended_operands(data, offset)?;
+            let operands = decode_bytes(data, offset)?;
             Ok(Instruction::LogExtended { sub_op, operands })
         }
 
@@ -5982,30 +5982,6 @@ fn decode_optional_reg(data: &[u8], offset: &mut usize) -> VbcResult<Option<Reg>
     } else {
         Ok(Some(decode_reg(data, offset)?))
     }
-}
-
-/// Decodes the operand-bytes block of an extended-opcode
-/// instruction.  Pairs with the encoder, which writes
-/// `[sub_op:u8][len:varint][bytes:len]`.  Returns the operand
-/// bytes verbatim — the linker / disassembler / validator passes
-/// them through unmodified, while the interpreter dispatches via
-/// `handle_*_extended` which skips the length varint then reads
-/// operands per-sub_op.
-///
-/// Used by the 9 "blob" extended opcodes whose decoders don't
-/// structurally parse operands: ArithExtended, FfiExtended,
-/// MathExtended, SimdExtended, CharExtended, CbgrExtended,
-/// TextExtended, MemExtended, LogExtended.  TensorExtended and
-/// GpuExtended use per-sub_op structural decoding and don't
-/// carry a length prefix.
-fn decode_extended_operands(data: &[u8], offset: &mut usize) -> VbcResult<Vec<u8>> {
-    let len = decode_varint(data, offset)? as usize;
-    if *offset + len > data.len() {
-        return Err(VbcError::eof(*offset, len));
-    }
-    let bytes = data[*offset..*offset + len].to_vec();
-    *offset += len;
-    Ok(bytes)
 }
 
 /// Decode `n` register operands of a generic `Opcode::Extended` sub-op,

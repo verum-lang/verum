@@ -33,6 +33,9 @@ pub struct CallFrame {
     /// Program counter (byte offset into bytecode).
     pub pc: u32,
 
+    /// Exclusive operand limit while executing a length-prefixed instruction.
+    pub(crate) operand_end: u32,
+
     /// Base offset in register file.
     pub reg_base: u32,
 
@@ -62,6 +65,7 @@ impl CallFrame {
         Self {
             function,
             pc: 0,
+            operand_end: u32::MAX,
             reg_base,
             reg_count,
             return_pc,
@@ -250,6 +254,10 @@ impl CallStack {
     /// Returns the frame at the specified depth (0 = bottom, len-1 = top).
     pub fn at(&self, depth: usize) -> Option<&CallFrame> {
         self.frames.get(depth)
+    }
+
+    pub(super) fn at_mut(&mut self, depth: usize) -> Option<&mut CallFrame> {
+        self.frames.get_mut(depth)
     }
 
     /// Returns the current stack depth.

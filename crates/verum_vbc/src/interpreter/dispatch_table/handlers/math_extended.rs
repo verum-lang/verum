@@ -32,14 +32,8 @@ use crate::interpreter::lenient::{f64_or_zero as lenient_f64, i64_or_zero as len
 /// - 0x68-0x6F: Classification F64 (is_nan, is_inf, is_finite)
 /// - 0x70-0x77: Classification F32
 
-/// T0714 — TOTAL register reads for envelope-family arms.  The
-/// envelope authority already guarantees stream re-alignment for a
-/// malformed carrier (under/over-declared operand counts), but an arm
-/// that reads a garbage register index gets a garbage VALUE — and the
-/// panicking accessors' debug_asserts turned that into a debug-build
-/// abort (the extended_envelope_pins contract is: wrong value maybe,
-/// dead stream never).  Release semantics are unchanged (the asserts
-/// compile out); these helpers make debug agree with release.
+/// The envelope bounds register encodings. Register values still need
+/// type-aware access in each mathematical operation.
 pub(in super::super) fn handle_math_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
