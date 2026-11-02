@@ -386,13 +386,14 @@ fn protocol_methods<'a>(
             _ => None,
         };
         if let Some(original) = original {
-            // A VBC protocol requirement's callable parameters exclude its
-            // receiver. The source and archived dispatch both attest that slot.
+            // Keep an explicit ABI receiver paired with its source slot so its
+            // own type is checked too. A value-only ABI starts after source self.
             let params = match original.params.split_first() {
-                Some((first, rest))
-                    if first.is_self() && method.dispatch.receiver.meta().has_self =>
-                {
-                    rest
+                Some((first, rest)) if first.is_self() && method.dispatch.receiver.meta().has_self => {
+                    if method.stores_receiver() { original.params.as_slice() } else { rest }
+                }
+                _ if method.stores_receiver() => {
+                    return Err("stored protocol receiver has no corresponding source receiver".into());
                 }
                 _ => original.params.as_slice(),
             };

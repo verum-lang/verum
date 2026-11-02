@@ -2519,10 +2519,7 @@ impl TypeChecker {
         ] {
             for signature in signatures {
                 // ProtocolMethod stores call arguments. The ABI can include the receiver in slot zero.
-                let values = match signature.params.split_first() {
-                    Some((first, rest)) if first.name == "self" && signature.dispatch.receiver.meta().has_self => rest,
-                    _ => signature.params.as_slice(),
-                };
+                let values = &signature.params.as_slice()[usize::from(signature.stores_receiver())..];
                 let params = values.iter()
                     .map(|param| parse_descriptor_type_string(&param.ty))
                     .collect();

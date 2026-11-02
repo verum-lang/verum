@@ -379,24 +379,40 @@ fn nominal_record_array_extents_follow_the_declared_field() {
 #[test]
 fn protocol_extent_uses_the_value_parameter_after_the_receiver() {
     use verum_ast::decl::{ProtocolItemKind, TypeDeclBody};
-    let base = metadata("test.provider",
+    let instance = metadata("test.provider",
         "public type Producer is protocol { fn measure(&self, x: [Int; 2]) -> Type(1); };");
-    for (abi, valid) in [("[Int; 2]", true), ("[Int; 3]", false)] {
+    let associated = metadata("test.provider",
+        "public type Producer is protocol { fn measure(x: [Int; 2]) -> Type(1); };");
+    let shared = ReceiverKind::SelfRef;
+    let static_method = ReceiverKind::None;
+    for (base, receiver, slots, valid) in [
+        (&instance, shared, vec![("p0", "[Int; 2]")], true),
+        (&instance, shared, vec![("p0", "[Int; 3]")], false),
+        (&instance, shared, vec![("self", "&Self"), ("p0", "[Int; 2]")], true),
+        (&instance, shared, vec![("self", "&Self"), ("p0", "[Int; 3]")], false),
+        (&instance, shared, vec![("p0", "&Self"), ("p1", "[Int; 2]")], false),
+        (&instance, shared, vec![("self", "[Int; 2]")], false),
+        (&instance, shared, vec![("self", "[Int; 3]"), ("p0", "[Int; 2]")], false),
+        (&associated, static_method, vec![("self", "[Int; 2]")], true),
+        (&associated, static_method, vec![("self", "[Int; 3]")], false),
+        (&associated, shared, vec![("self", "[Int; 2]")], false),
+    ] {
         let mut data = base.clone();
         let descriptor = data.types.values_mut().next().unwrap();
         let source = descriptor.source_declaration.as_ref().unwrap();
         let TypeDeclBody::Protocol(body) = &source.body else { panic!("protocol") };
         let ProtocolItemKind::Function { decl, .. } = &body.items[0].kind else { panic!("method") };
+        let dispatch = MethodDispatch { receiver, ..MethodDispatch::from_declaration(decl) };
         descriptor.kind = TypeDescriptorKind::Protocol {
             super_protocols: List::new(), associated_types: List::new(), default_methods: List::new(),
             required_methods: List::from_single(MethodSignature {
-                name: "measure".into(), dispatch: MethodDispatch::from_declaration(decl),
-                params: List::from_single(ParamDescriptor {
-                    name: "p0".into(), ty: abi.into(), declared_ty: "".into(), has_default: false, default_literal: None,
-                }),
+                name: "measure".into(), dispatch,
+                params: slots.iter().map(|&(name, ty)| ParamDescriptor {
+                    name: name.into(), ty: ty.into(), declared_ty: "".into(), has_default: false, default_literal: None,
+                }).collect(),
                 return_type: "__opaque_src".into(), contexts: List::new(),
             }),
         };
-        assert_eq!(encode_metadata(&data).is_ok(), valid, "{abi}");
+        assert_eq!(encode_metadata(&data).is_ok(), valid, "{receiver:?} {slots:?}");
     }
 }

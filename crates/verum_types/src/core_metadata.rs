@@ -605,6 +605,13 @@ pub struct MethodSignature {
     pub contexts: List<Text>,
 }
 
+impl MethodSignature {
+    /// Receiver-inclusive descriptors identify the receiver by both declaration and slot.
+    pub(crate) fn stores_receiver(&self) -> bool {
+        self.dispatch.receiver.meta().has_self && self.params.first().is_some_and(|p| p.name == "self")
+    }
+}
+
 pub use verum_ast::method_dispatch::{MethodDispatch, ReceiverKind, ReceiverKindMeta};
 
 /// Parameter descriptor
