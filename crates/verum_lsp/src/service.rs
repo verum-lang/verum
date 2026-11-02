@@ -79,6 +79,10 @@ pub fn service_with_library(
             boxed_handler!(handle_document_snapshot, crate::project::SnapshotParams),
         )
         .custom_method(
+            "verum/documentEvidence",
+            boxed_handler!(handle_document_evidence, crate::project::EvidenceParams),
+        )
+        .custom_method(
             "verum/projectSnapshot",
             boxed_handler!(handle_project_snapshot, serde_json::Value),
         )
