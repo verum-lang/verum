@@ -33,7 +33,7 @@ pub fn validate_archive_array_spelling(spelling: &str) -> Result<(), Text> {
     }
     check_brackets(spelling).map_err(|error| {
         let preview: String = spelling.chars().take(160).collect();
-        Text::from(format!("{error} in `{preview}`"))
+        Text::from(format!("{error} in {preview:?}"))
     })
 }
 
@@ -256,6 +256,13 @@ mod tests {
             },
         );
         metadata
+    }
+
+    #[test]
+    fn invalid_descriptor_preview_is_safe_to_display() {
+        let error = validate_archive_array_spelling("[Int;\n\u{009b}x]").unwrap_err();
+        assert!(error.contains("Int;") && error.contains("x]"));
+        assert!(!error.chars().any(char::is_control));
     }
 
     #[test]

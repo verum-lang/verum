@@ -80,8 +80,6 @@ pub fn get_runtime_metadata() -> Option<Arc<CoreMetadata>> {
                         panic!(
                             "FATAL: this compiler binary embeds stdlib typecheck metadata \
                              ({} KB) that failed to decode: {}\n\
-                             The embedded blob was generated with an older CoreMetadata \
-                             layout than this reader.\n\
                              Fix: regenerate and re-embed:\n\
                              \x20   verum stdlib precompile --out <CARGO_TARGET_DIR>/precompiled-stdlib/runtime.vbca\n\
                              \x20   touch crates/verum_compiler/build.rs && cargo build -p verum_cli\n\
