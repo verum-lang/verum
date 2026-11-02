@@ -95,3 +95,47 @@ fn probe() -> Int {
         42
     );
 }
+
+#[test]
+fn plain_record_clone_preserves_both_original_fields() {
+    assert_eq!(
+        run(
+            r#"
+type Coordinate is { name: Text, version: Text };
+fn probe() -> Int {
+    let mut original = Coordinate { name: "alpha", version: "0.1" };
+    let copy = original.clone();
+    original.name = "beta";
+    original.version = "0.2";
+    let mut flags = 0;
+    if copy.name == "alpha" { flags = flags + 1; }
+    if copy.version == "0.1" { flags = flags + 2; }
+    if original.name == "beta" { flags = flags + 4; }
+    if original.version == "0.2" { flags = flags + 8; }
+    flags
+}
+"#
+        ),
+        15
+    );
+}
+
+#[test]
+fn concrete_borrowed_record_clone_ignores_foreign_clone_body() {
+    assert_eq!(
+        run(&format!(
+            "{FOREIGN_CLONE}{}",
+            r#"
+type Authority is { id: Int };
+fn clone_authority(value: &Authority) -> Authority { value.clone() }
+fn probe() -> Int {
+    let mut original = Authority { id: 42 };
+    let copy = clone_authority(&original);
+    original.id = 99;
+    copy.id
+}
+"#
+        )),
+        42
+    );
+}

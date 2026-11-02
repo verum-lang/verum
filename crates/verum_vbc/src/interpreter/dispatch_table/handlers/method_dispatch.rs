@@ -4382,6 +4382,8 @@ pub(super) fn handle_bound_method(
         return Ok(DispatchResult::Continue);
     }
 
+    let is_clone_call = bare_method_name == "clone" && args.count == 0;
+
     // Receiver-TypeId qualified lookup safety net. When codegen
     // emits a CallM with a BARE method name (codegen couldn't
     // statically infer the receiver's type, e.g. for a let binding
@@ -4567,7 +4569,9 @@ pub(super) fn handle_bound_method(
             // `deref`. Nothing that resolves today changes route —
             // a receiver with no `deref` still takes the strategy, and
             // a body whose owner IS the receiver's type is untouched.
-            if found.is_none() {
+            // An unrelated type may be the only one with a declared clone.
+            // Keep looking for a receiver-specific body before using value_copy.
+            if found.is_none() && !is_clone_call {
                 let candidate = state
                     .module
                     .find_function_by_unique_bare_suffix(&bare_method_name);
@@ -4707,37 +4711,11 @@ pub(super) fn handle_bound_method(
         }
     }
 
-    // ──────────────────────────────────────────────────────────
-    // **Task #7 close-out 2026-05-24** — `T.clone()` / `clone()`
-    // identity-clone fallback for generic-T receivers.
-    //
-    // When the receiver's monomorphised T is generic-erased at
-    // Tier-0 and the qualified-type-resolution paths above have
-    // exhausted (every `<owner>.clone` candidate rejected on type
-    // match), fall back to an IDENTITY clone — return the receiver
-    // unchanged.
-    //
-    // Soundness argument:
-    //   * For primitive T (Int, Float, Bool, Byte, Char): NaN-boxed
-    //     value semantics make identity == structural clone.
-    //   * For reference-semantic T (Text — interned/shared,
-    //     Heap<U>, Shared<U>): copying the pointer yields a shared
-    //     reference to the same heap object.  Acceptable for
-    //     read-only consumers (the StreamRepeatN payload-clone
-    //     path is the archetypal site — yields used immediately,
-    //     never concurrently with the source).
-    //   * For record T: shallow copy of the pointer, sharing the
-    //     heap data.  Callers requiring isolated ownership must
-    //     use `<Type>.clone` explicitly with a concrete type.
-    //
-    // Mirror class to task #17's `T.default`/`T.zero`/`T.one`
-    // codegen intercept, but at the runtime layer since clone has
-    // no canonical literal substitute.  Cross-ref:
-    // `callg_emission_fix_blueprint_2026-05-19.md` for the
-    // long-term monomorphisation infrastructure.
-    let bare_for_clone = method_name.rsplit('.').next().unwrap_or(&method_name);
-    if bare_for_clone == "clone" && args.count == 0 {
-        state.set_reg(dst, dispatch_receiver);
+    // No declared clone matched this receiver. The structural fallback copies
+    // the outer object using the same contract as the Clone instruction.
+    if is_clone_call {
+        let copy = super::memory_collections::value_copy(state, dispatch_receiver)?;
+        state.set_reg(dst, copy);
         return Ok(DispatchResult::Continue);
     }
 
