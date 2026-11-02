@@ -340,14 +340,14 @@ public fn range_constraint(
     bits:       Int,
 ) -> Result<(), CircuitError> {
     if bits <= 0 || bits > 64 {
-        return Err(CircuitError.InvalidGateShape(f"range_constraint: bits={bits}"));
+        return Result.Err(CircuitError.InvalidGateShape(f"range_constraint: bits={bits}"));
     }
     let table = match @intrinsic(
         "verum.crypto.halo2_canonical_range_table",
         bits
     ) {
         TableResult.Ok(cols) => cols,
-        TableResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
+        TableResult.Err(why) => return Result.Err(CircuitError.InvalidGateShape(why)),
     };
     cfg.add_lookup(Lookup.new(
         name,
@@ -355,7 +355,7 @@ public fn range_constraint(
         [GateConstraint.column(advice)],
         table,
     ));
-    Ok(())
+    Result.Ok(())
 }
 
 /// Set-membership proof — `x ∈ {a_0, …, a_{k-1}}`. Implemented as a
@@ -369,7 +369,7 @@ public fn set_membership_constraint(
     table:      Column,    // CircuitColumnType.Fixed pre-loaded with the set
 ) -> Result<(), CircuitError> {
     if table.kind != CircuitColumnType.Fixed {
-        return Err(CircuitError.InvalidGateShape(
+        return Result.Err(CircuitError.InvalidGateShape(
             "set_membership: table must be CircuitColumnType.Fixed".into()));
     }
     cfg.add_lookup(Lookup.new(
@@ -378,7 +378,7 @@ public fn set_membership_constraint(
         [GateConstraint.column(advice)],
         [table],
     ));
-    Ok(())
+    Result.Ok(())
 }
 
 /// Hash-preimage gate: forces `out == H(in_0, …, in_k)` where H is one
@@ -398,10 +398,10 @@ public fn hash_preimage_constraint(
         name.clone(), selector, inputs, output, hash_name
     ) {
         HashGateResult.Ok(g) => g,
-        HashGateResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
+        HashGateResult.Err(why) => return Result.Err(CircuitError.InvalidGateShape(why)),
     };
     cfg.add_gate(gate);
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================

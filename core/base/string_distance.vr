@@ -55,6 +55,7 @@
 module core.base.string_distance;
 
 mount core.collections.list.{List};
+mount core.base.ordering.{Ordering};
 
 // =============================================================================
 // Levenshtein
@@ -320,7 +321,7 @@ public fn closest_n(query: &Text, candidates: &List<Text>, n: Int) -> List<(Text
         i = i + 1;
     }
     scored.sort_by(|a, b| {
-        if a.1 < b.1 { Less } else if a.1 > b.1 { Greater } else { Equal }
+        if a.1 < b.1 { Ordering.Less } else if a.1 > b.1 { Ordering.Greater } else { Ordering.Equal }
     });
     if scored.len() > n {
         scored.truncate(n);

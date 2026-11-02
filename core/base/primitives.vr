@@ -4679,11 +4679,11 @@ implement PartialOrd for Float32 {
         if self.is_nan() || other.is_nan() {
             Maybe.None
         } else if *self < *other {
-            Maybe.Some(Less)
+            Maybe.Some(Ordering.Less)
         } else if *self > *other {
-            Maybe.Some(Greater)
+            Maybe.Some(Ordering.Greater)
         } else {
-            Maybe.Some(Equal)
+            Maybe.Some(Ordering.Equal)
         }
     }
 }
@@ -4742,11 +4742,11 @@ implement PartialOrd for Float64 {
         if self.is_nan() || other.is_nan() {
             Maybe.None
         } else if *self < *other {
-            Maybe.Some(Less)
+            Maybe.Some(Ordering.Less)
         } else if *self > *other {
-            Maybe.Some(Greater)
+            Maybe.Some(Ordering.Greater)
         } else {
-            Maybe.Some(Equal)
+            Maybe.Some(Ordering.Equal)
         }
     }
 }

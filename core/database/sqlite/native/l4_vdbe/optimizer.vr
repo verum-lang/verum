@@ -439,7 +439,7 @@ public fn collapse_move_chains(program: &mut VdbeProgram) -> Int {
             _ => { i = i + 1; continue; }
         }
         // Replace [i] with the collapsed move; [i+1] becomes Noop.
-        program.instructions[i] = Move(lhs_src, rhs_dst, rhs_count);
+        program.instructions[i] = Opcode.Move(lhs_src, rhs_dst, rhs_count);
         program.instructions[i + 1] = Noop;
         edits = edits + 1;
         i = i + 2;

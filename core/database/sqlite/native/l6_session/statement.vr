@@ -217,7 +217,7 @@ implement PreparedStatement {
     /// Advance execution until a row, done, or error. Returns a tag
     /// the caller pattern-matches to decide whether to read a row.
     public fn step(&mut self) -> StepResult {
-        if self.done { return Done; }
+        if self.done { return StepResult.Done; }
         // Snapshot bindings into VdbeState before each step so Variable/
         // VariableNamed opcodes see the current binding table.
         self.state.install_bindings(self.bindings.clone());
@@ -230,7 +230,7 @@ implement PreparedStatement {
             }
             Done => {
                 self.done = true;
-                Done
+                StepResult.Done
             }
             ExecError(c, m) => {
                 self.done = true;

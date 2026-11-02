@@ -110,7 +110,7 @@ implement RecoveryRetryPolicy {
             config: config,
             current_attempt: 0,
             total_retries: 0,
-            last_error: None,
+            last_error: Maybe.None,
         }
     }
 

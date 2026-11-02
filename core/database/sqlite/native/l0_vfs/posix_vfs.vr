@@ -339,7 +339,7 @@ implement SqliteFile for PosixFile {
             // "Unlock to shared" — drop reserved/pending/exclusive but
             // keep the shared byte.
             Shared => {
-                if self.locks.state == Shared {
+                if self.locks.state == LockKind.Shared {
                     Result.Ok(())
                 } else {
                     // Drop the wider locks, re-acquire shared.
