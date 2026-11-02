@@ -9,6 +9,31 @@ use verum_vbc::{
 };
 
 #[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and loopback TCP"]
+fn cancelled_accept_preserves_the_pending_tcp_connection() {
+    let source = r#"
+        module app;
+        mount core.net.tcp.{TcpListener, TcpStream};
+        mount core.net.addr.{Ipv4Addr, SocketAddrV4, SocketAddr};
+        mount core.async.cancellation.CancellationToken;
+        async fn main() -> Int {
+            let listener = TcpListener.bind(SocketAddr.V4(SocketAddrV4.new(Ipv4Addr.localhost(), 0))).unwrap();
+            let bound = listener.local_addr().unwrap();
+            let client = TcpStream.connect(bound).unwrap();
+            let token = CancellationToken.new();
+            token.cancel();
+            let refused = listener.accept_cancellable(&token).await;
+            if refused.is_ok() { return 1; }
+            let (server, _) = listener.accept_async().await.unwrap();
+            if client.peer_addr().unwrap().port() != bound.port() { return 2; }
+            if server.peer_addr().unwrap().port() != client.local_addr().unwrap().port() { return 3; }
+            83
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 83);
+}
+
+#[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn sqlite_snapshot_checks_execute_from_the_published_archive() {
     let archive =

@@ -964,9 +964,10 @@ implement TcpStream {
         buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
-        select {
-            r = self.read_async(buf).await => Result.Ok(r),
+        let operation = AsyncReadFut { stream: self, buf: buf };
+        select biased {
             reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
+            r = operation.await => Result.Ok(r),
         }
     }
 
@@ -979,9 +980,10 @@ implement TcpStream {
         buf: &List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
-        select {
-            r = self.write_async(buf).await => Result.Ok(r),
+        let operation = AsyncWriteFut { stream: self, buf: buf };
+        select biased {
             reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
+            r = operation.await => Result.Ok(r),
         }
     }
 }
@@ -1297,49 +1299,14 @@ implement TcpListener {
     /// Accept a new connection asynchronously.
     ///
 
-    /// This version yields to the executor while waiting for incoming connections,
-    /// allowing other tasks to run. Uses io_uring (Linux) or kqueue (macOS)
-    /// for efficient event notification.
+    /// Poll a nonblocking accept and yield while the listener is empty.
     public async fn accept_async(&self) -> Result<(TcpStream, SocketAddr), IoError> {
-        // Ensure non-blocking mode for async accept
-        self.set_nonblocking(true)?;
+        let mut pending = self.accept_future();
+        pending.await
+    }
 
-        loop {
-            // Packed `[Byte; 128]`, not a NaN-boxed List — see `accept`
-            // and `local_addr`. This is the buffer Weft's accept loop
-            // actually reaches (T1135).
-            let mut addr_buf: [Byte; 128] = [0; 128];
-            let mut addr_len: UInt32 = 128;
-
-            // Try to accept immediately
-            @cfg(any(target_os = "linux", target_os = "windows"))
-            let accept_result = accept4(self.fd, &mut addr_buf[..], &mut addr_len, SOCK_CLOEXEC | SOCK_NONBLOCK);
-
-            @cfg(target_os = "macos")
-            let accept_result = sys_accept(self.fd, &mut addr_buf[..], &mut addr_len);
-
-            match accept_result {
-                Result.Ok(client_fd) => {
-                    @cfg(target_os = "macos")
-                    let _ = safe_set_nosigpipe(client_fd, true);
-
-                    let peer_addr = deserialize_socket_addr(&addr_buf[..(addr_len as Int)])?;
-                    return Result.Ok((
-                        TcpStream { fd: client_fd, peer_addr: peer_addr },
-                        peer_addr
-                    ));
-                }
-                Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
-                    // No connection ready - wait for read readiness
-                    AsyncIoReady.readable(self.fd).await;
-                    // Loop and try again
-                    continue;
-                }
-                Result.Err(e) => {
-                    return Result.Err(IoError.from_os(e));
-                }
-            }
-        }
+    fn accept_future(&self) -> TcpAcceptFut {
+        TcpAcceptFut { listener: self, configured: false }
     }
 
     /// Get the local address this listener is bound to.
@@ -1426,14 +1393,20 @@ implement Iterator for Incoming {
 
 // Enables `for await conn in listener.incoming_async() { ... }` pattern.
 
-public type AsyncIncoming<'a> is {
+type TcpAcceptFut<'a> is {
     listener: &'a TcpListener,
+    configured: Bool,
 };
 
-implement<'a> Stream for AsyncIncoming<'a> {
-    type Item = Result<TcpStream, IoError>;
+implement<'a> Future for TcpAcceptFut<'a> {
+    type Output = Result<(TcpStream, SocketAddr), IoError>;
 
-    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<TcpStream, IoError>>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<(TcpStream, SocketAddr), IoError>> {
+        if !self.configured {
+            let setup = self.listener.set_nonblocking(true);
+            if let Result.Err(error) = setup { return Poll.Ready(Result.Err(error)); }
+            self.configured = true;
+        }
         // Packed `[Byte; 128]`, not a NaN-boxed List — see `accept` (T1135).
         let mut addr_buf: [Byte; 128] = [0; 128];
         let mut addr_len: UInt32 = 128;
@@ -1451,18 +1424,46 @@ implement<'a> Stream for AsyncIncoming<'a> {
         match accept_result {
             Result.Ok(client_fd) => {
                 @cfg(target_os = "macos")
-                let _ = safe_set_nosigpipe(client_fd, true);
+                {
+                    let setup = safe_set_nonblocking(client_fd, true)
+                        .and_then(|_| safe_set_nosigpipe(client_fd, true));
+                    if let Result.Err(error) = setup {
+                        let _ = sys_close(client_fd);
+                        return Poll.Ready(Result.Err(IoError.from_os(error)));
+                    }
+                }
 
                 match deserialize_socket_addr(&addr_buf[..(addr_len as Int)]) {
-                    Result.Ok(peer) => Poll.Ready(Maybe.Some(Result.Ok(TcpStream { fd: client_fd, peer_addr: peer }))),
-                    Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(e))),
+                    Result.Ok(peer) => Poll.Ready(Result.Ok((TcpStream { fd: client_fd, peer_addr: peer }, peer))),
+                    Result.Err(e) => {
+                        @cfg(any(target_os = "linux", target_os = "windows"))
+                        let _ = close(client_fd);
+                        @cfg(target_os = "macos")
+                        let _ = sys_close(client_fd);
+                        Poll.Ready(Result.Err(e))
+                    }
                 }
             }
             Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
                 cx.waker().wake_by_ref();
                 Poll.Pending
             }
-            Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(IoError.from_os(e)))),
+            Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
+        }
+    }
+}
+
+public type AsyncIncoming<'a> is {
+    pending: TcpAcceptFut<'a>,
+};
+
+implement<'a> Stream for AsyncIncoming<'a> {
+    type Item = Result<TcpStream, IoError>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<TcpStream, IoError>>> {
+        match self.pending.poll(cx) {
+            Poll.Ready(result) => Poll.Ready(Maybe.Some(result.map(|(stream, _)| stream))),
+            Poll.Pending => Poll.Pending,
         }
     }
 }
@@ -1487,7 +1488,7 @@ implement TcpListener {
     ///  spawn handle(stream);
     ///  }
     public fn incoming_async(&self) -> AsyncIncoming {
-        AsyncIncoming { listener: self }
+        AsyncIncoming { pending: self.accept_future() }
     }
 
     /// Cancellable async accept — single accept with cancel-aware shutdown.
@@ -1495,9 +1496,10 @@ implement TcpListener {
         &self,
         token: &CancellationToken,
     ) -> Result<Result<(TcpStream, SocketAddr), IoError>, CancellationError> {
-        select {
-            r = self.accept_async().await => Result.Ok(r),
+        let pending = self.accept_future();
+        select biased {
             reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
+            r = pending.await => Result.Ok(r),
         }
     }
 }
