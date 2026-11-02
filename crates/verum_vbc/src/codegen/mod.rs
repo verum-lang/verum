@@ -741,6 +741,9 @@ pub struct VbcCodegen {
     /// cost time — never produce the wrong descriptor.  That property is
     /// what makes it safe to add to a table mutated from eleven places.
     type_index: std::collections::HashMap<u32, usize>,
+    /// Slots with source-level type declarations. Owner and AST comparisons
+    /// still read the descriptor in the current string pool.
+    source_declaration_slots: std::collections::BTreeSet<usize>,
 
     /// Slots whose original scalar descriptor carried more than implementations.
     /// Lazy import clears unresolved glue IDs, so the remapped shape alone
@@ -2244,6 +2247,7 @@ impl VbcCodegen {
             types: Vec::new(),
             source_declaration_error: None,
             type_index: std::collections::HashMap::new(),
+            source_declaration_slots: Default::default(),
             ineligible_record_carriers: Set::new(),
             next_func_id: 0,
             next_type_id: 0,
@@ -5939,6 +5943,7 @@ impl VbcCodegen {
         let ineligible = std::mem::take(&mut self.ineligible_record_carriers);
         self.types.reserve(original.len());
         self.type_index.clear();
+        self.source_declaration_slots.clear();
         let mut scalar_slots = Map::<TypeId, usize>::new();
         for (original_slot, ty) in original.into_iter().enumerate() {
             if let Some(owner) = self.type_declaration_identity(&ty)
@@ -5961,8 +5966,10 @@ impl VbcCodegen {
                     if (!has_source || same_owner)
                         && runtime_shape(&self.types[slot]) == runtime_shape(&ty)
                     {
-                        if self.types[slot].source_declaration.is_none() {
-                            self.types[slot].source_declaration = ty.source_declaration.clone();
+                        if self.types[slot].source_declaration.is_none()
+                            && let Some(source) = ty.source_declaration
+                        {
+                            self.attach_source_declaration(slot, source);
                         }
                         if carrier_ineligible {
                             self.ineligible_record_carriers.insert(slot);
@@ -7118,6 +7125,21 @@ impl VbcCodegen {
         ).into())
     }
 
+    fn attach_source_declaration(&mut self, slot: usize, declaration: verum_ast::TypeDecl) {
+        self.types[slot].source_declaration = Some(declaration);
+        self.source_declaration_slots.insert(slot);
+    }
+
+    fn source_declarations(&self) -> impl Iterator<Item = &TypeDescriptor> {
+        self.source_declaration_slots.iter().map(|&slot| &self.types[slot])
+    }
+
+    fn has_source_declaration(&self, owner: &str) -> bool {
+        self.source_declarations().any(|ty| {
+            self.type_declaration_identity(ty).as_deref() == Some(owner)
+        })
+    }
+
     /// Require the same typed declaration before changing an accepted owner's
     /// ABI. Equality is deliberately conservative, including source spans.
     fn ensure_source_declaration(
@@ -7132,7 +7154,7 @@ impl VbcCodegen {
                     "type declaration `{owner}`: {message}",
                 ).into());
             }
-            let conflict = self.types.iter().find(|existing| {
+            let conflict = self.source_declarations().find(|existing| {
                 self.type_declaration_identity(existing).as_deref() == Some(owner)
                     && existing.source_declaration.as_ref()
                         .is_some_and(|declaration| declaration != incoming)
@@ -7203,12 +7225,12 @@ impl VbcCodegen {
                     }
                     return;
                 }
-                semantic_enrichment = existing.source_declaration.is_none()
-                    && ty.source_declaration.is_some();
-                let source = existing.source_declaration.clone()
-                    .or_else(|| ty.source_declaration.clone());
-                ty.source_declaration = source.clone();
-                self.types[index].source_declaration = source;
+                if existing.source_declaration.is_none()
+                    && let Some(source) = &ty.source_declaration
+                {
+                    self.attach_source_declaration(index, source.clone());
+                    semantic_enrichment = true;
+                }
             }
         }
         // A runtime record owns its layout and policy. Its scalar ABI carrier
@@ -9462,6 +9484,7 @@ impl VbcCodegen {
         self.functions.clear();
         self.types.clear();
         self.type_index.clear();
+        self.source_declaration_slots.clear();
         self.archive_data_sources.clear();
         self.ineligible_record_carriers.clear();
         self.next_func_id = 0;
@@ -10601,7 +10624,7 @@ impl VbcCodegen {
                             format!("type declaration `{qualified}` has ambiguous VBC descriptor ownership"),
                         )));
                     }
-                    self.types[index].source_declaration = Some(source_declaration);
+                    self.attach_source_declaration(index, source_declaration);
                 }
                 // Descriptor constructors default to public. The source
                 // declaration owns export policy, including glob imports.
@@ -22193,6 +22216,9 @@ impl VbcCodegen {
         {
             return;
         }
+        if ty.source_declaration.is_some() {
+            self.source_declaration_slots.insert(self.types.len());
+        }
         self.type_index.insert(ty.id.0, self.types.len());
         // The ONLY `self.types.push` in the crate — everything else goes
         // through this function, which is what keeps the index warm.
@@ -26344,10 +26370,7 @@ impl VbcCodegen {
         if self.ensure_source_declaration(&declaration_owner, ty.source_declaration.as_ref()).is_err() {
             return;
         }
-        if ty.source_declaration.is_none() && self.types.iter().any(|existing| {
-            existing.source_declaration.is_some()
-                && self.type_declaration_identity(existing).as_deref() == Some(declaration_owner.as_str())
-        }) {
+        if ty.source_declaration.is_none() && self.has_source_declaration(&declaration_owner) {
             // Source-local TypeRefs and names do not establish correspondence
             // with the accepted semantic declaration; do not hide a version conflict.
             let _ = self.reject_source_declaration_conflict(&declaration_owner);
@@ -26414,11 +26437,6 @@ impl VbcCodegen {
                             && self.type_declaration_identity(existing).as_deref() == Some(q)))
             })
         {
-            if let Some(index) = self.type_index_of(qid)
-                && self.types[index].source_declaration.is_none()
-            {
-                self.types[index].source_declaration = ty.source_declaration.clone();
-            }
             if let Some(bundle_key) = bundle_key {
                 self.type_name_to_id.entry(bundle_key).or_insert(qid);
             }
@@ -26946,8 +26964,7 @@ impl VbcCodegen {
         for descriptor in &module.types {
             let Some(declaration) = descriptor.source_declaration.as_ref() else {
                 if let Some(owner) = bootstrap_types::identity(module, descriptor)
-                    && self.types.iter().any(|existing| existing.source_declaration.is_some()
-                        && self.type_declaration_identity(existing).as_deref() == Some(owner.as_str()))
+                    && self.has_source_declaration(&owner)
                 {
                     let _ = self.reject_source_declaration_conflict(&owner);
                     return;
