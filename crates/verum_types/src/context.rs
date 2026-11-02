@@ -1383,22 +1383,22 @@ impl TypeEnv {
         }
         // Only pin the holder after confirming that the original storage still
         // exists at this identity. A rejected projection creates no evidence.
-        let mut scope = &mut *self;
-        loop {
-            if let Some(place) = scope
-                .record_places
-                .values_mut()
-                .find(|p| p.id == Some(source.binding))
-            {
-                place.projection.get_or_insert(origin);
-                break;
-            }
-            scope = scope.parent.as_deref_mut()?;
-        }
+        self.pin_record_source(&source, origin)?;
         self.local_record_place(name)?
             .projection
             .get_or_insert(origin);
         Some(source)
+    }
+
+    pub(crate) fn pin_record_source(&mut self, source: &crate::ty::RecordReceiver, origin: Span) -> Option<()> {
+        let mut scope = self;
+        loop {
+            if let Some(place) = scope.record_places.values_mut().find(|p| p.id == Some(source.binding)) {
+                place.projection.get_or_insert(origin);
+                return Some(());
+            }
+            scope = scope.parent.as_deref_mut()?;
+        }
     }
 
     /// Look up a variable, searching parent scopes if needed

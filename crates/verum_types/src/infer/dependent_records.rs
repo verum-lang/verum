@@ -152,7 +152,7 @@ impl TypeChecker {
 
     /// A projection can escape into the type of another value. Consequently its
     /// root must remain stable even after ordinary evaluation has finished.
-    fn record_receiver(&mut self, expr: &Expr, origin: Span) -> Result<RecordReceiver> {
+    fn record_receiver(&mut self, expr: &Expr, ty: &Type, origin: Span) -> Result<RecordReceiver> {
         let unstable = || {
             refusal(
                 "dependent projection requires an immutable local receiver or shared reference",
@@ -160,7 +160,7 @@ impl TypeChecker {
             )
         };
         match &expr.kind {
-            ExprKind::Paren(inner) => self.record_receiver(inner, origin),
+            ExprKind::Paren(inner) => self.record_receiver(inner, ty, origin),
             ExprKind::Path(path) if path.segments.len() == 1 => {
                 let name = path.last_segment_name();
                 let scheme = self.ctx.env.lookup(name).ok_or_else(unstable)?;
@@ -200,9 +200,17 @@ impl TypeChecker {
                 if !self.stable_receiver_type(field_ty, expr.span)? {
                     return Err(unstable());
                 }
-                let mut receiver = self.record_receiver(parent, origin)?;
+                let mut receiver = self.record_receiver(parent, &parent_ty, origin)?;
                 receiver.fields.push(field.name.clone());
                 Ok(receiver)
+            }
+            ExprKind::Call { .. } | ExprKind::Unary { op: verum_ast::UnOp::Ref, .. }
+                if self.is_shared_reference_head(ty, expr.span)? && self.stable_receiver_type(ty, expr.span)? =>
+            {
+                let unknown = || TypeError::UnknownRecordOrigin { span: expr.span };
+                let source = self.reference_result_origin(expr).ok_or_else(unknown)?;
+                self.ctx.env.pin_record_source(&source, origin).ok_or_else(unknown)?;
+                Ok(source)
             }
             _ => Err(unstable()),
         }
@@ -245,7 +253,7 @@ impl TypeChecker {
         {
             return Ok(Some(field_ty.clone()));
         }
-        let place = self.record_receiver(receiver, span)?;
+        let place = self.record_receiver(receiver, ty, span)?;
         layout.projection(field, field_ty, place, span).map(Some)
     }
 
@@ -305,7 +313,7 @@ impl TypeChecker {
                         owner: layout.owner,
                         ordinal,
                     }),
-                    receiver: Some(Box::new(self.record_receiver(receiver, value.span)?)),
+                    receiver: Some(Box::new(self.record_receiver(receiver, &receiver_ty, value.span)?)),
                     level: level.clone(),
                 });
             }

@@ -228,6 +228,7 @@ fn reference_results_preserve_the_origin_of_a_dependent_projection() {
     for body in [
         "fn same(x: Pack) -> Pack { let r = borrow(&x); Pack { carrier: x.carrier, witness: r.witness } }",
         "fn chain(x: &Pack) -> Pack { let a = borrow(x); let b = borrow(a); Pack { carrier: b.carrier, witness: x.witness } }",
+        "fn inline(x: &Pack) -> Pack { Pack { carrier: borrow(x).carrier, witness: relay(x).witness } }",
         "fn nested(p: Pair) -> Pack { let a = borrow(&p.left); Pack { carrier: p.left.carrier, witness: a.witness } }",
         "fn forwarded(x: &Pack) -> Pack { let a = relay(x); Pack { carrier: x.carrier, witness: a.witness } }",
         "fn positional(x: &Pack, y: &Pack) -> Pack { let a = second(x, y); Pack { carrier: y.carrier, witness: a.witness } }",
@@ -244,6 +245,9 @@ fn reference_results_preserve_the_origin_of_a_dependent_projection() {
         "fn indirect(c: Bool, mut x: Pack, y: Pack) { fn consume(a: &Pack, b: &mut Pack) {} let r = choose(c, &x, &y); let s = r; consume(s, &mut x); }",
         "fn opaque(c: Bool, x: &Pack, y: &Pack) -> Pack { let a = choose(c, x, y); Pack { carrier: x.carrier, witness: a.witness } }",
         "fn shadow(x: &Pack, y: &Pack) -> Pack { let a = borrow(x); let x = y; Pack { carrier: x.carrier, witness: a.witness } }",
+        "fn inline_stale(mut x: Pack, y: Pack) { let old = borrow(&x).witness; x = y; }",
+        "fn inline_wrong(x: &Pack, y: &Pack) -> Pack { Pack { carrier: borrow(x).carrier, witness: relay(y).witness } }",
+        "fn inline_choose(c: Bool, x: &Pack, y: &Pack) -> Pack { Pack { carrier: x.carrier, witness: choose(c, x, y).witness } }",
         "fn nested_slot(mut x: &Pack, y: &Pack) { let a = borrow(&x); x = y; let _ = a; }",
         "fn changed_before_projection(mut x: Pack, y: Pack) -> Pack { let a = borrow(&x); x = y; Pack { carrier: a.carrier, witness: a.witness } }",
     ] {

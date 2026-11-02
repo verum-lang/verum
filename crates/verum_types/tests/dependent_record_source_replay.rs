@@ -12,7 +12,7 @@ use verum_types::{Type, TypeChecker};
 mod replay;
 
 #[derive(Default)]
-struct Uses(Vec<(Text, Span)>);
+struct Uses(Vec<Span>);
 
 impl Visitor for Uses {
     fn visit_expr(&mut self, expr: &Expr) {
@@ -21,9 +21,8 @@ impl Visitor for Uses {
             field,
         } = &expr.kind
             && matches!(field.name.as_str(), "witness" | "truncation")
-            && let ExprKind::Path(path) = &receiver.kind
         {
-            self.0.push((path.last_segment_name().into(), expr.span));
+            self.0.push(receiver.span);
         }
         walk_expr(self, expr);
     }
@@ -47,7 +46,7 @@ fn project_source(checker: &mut TypeChecker, expression: &str) -> Vec<(Text, Typ
     assert_eq!(uses.0.len(), components.len());
     uses.0
         .into_iter()
-        .map(|(name, _)| name)
+        .map(|span| Text::from(&expression[span.start as usize..span.end as usize]))
         .zip(components)
         .collect()
 }
@@ -232,7 +231,7 @@ fn native() -> Observation {
     }
     let projected = project_source(
         &mut checker,
-        "|x: &Pack, y: &Pack| { let a = forward(x); let b = a; (x.witness, y.witness, x.witness, b.witness) }",
+        "|x: &Pack, y: &Pack| { let a = forward(x); let b = a; (x.witness, y.witness, x.witness, b.witness, forward(y).witness) }",
     );
     assert!(checker.take_deferred_errors().is_empty());
     assert!(!checker.diagnostics().iter().any(|d| d.is_error()));
@@ -300,10 +299,11 @@ fn source_projection_types_retain_binding_and_slot_identity() {
             .iter()
             .map(|(name, _, _)| name.as_str())
             .collect::<Vec<_>>(),
-        ["x", "y", "x", "b"]
+        ["x", "y", "x", "b", "forward(y)"]
     );
     assert_eq!(observation.uses[0], observation.uses[2]);
     assert_eq!(observation.uses[0].1, observation.uses[3].1);
+    assert_eq!(observation.uses[1].1, observation.uses[4].1);
     assert_ne!(observation.uses[0].1, observation.uses[1].1);
 }
 
@@ -382,7 +382,7 @@ fn lean_checks_source_record_projection_ownership() {
     for (i, (name, observed_receiver, observed_slot)) in observation.uses.iter().enumerate() {
         let receiver = match name.as_str() {
             "x" | "b" => x,
-            "y" => y,
+            "y" | "forward(y)" => y,
             _ => panic!("unexpected source root"),
         };
         writeln!(claims, "example : projection rows {field} {receiver} = some [({slot}, ({observed_receiver}, {observed_slot}))] := by decide").unwrap();
@@ -408,7 +408,7 @@ fn lean_checks_source_record_projection_ownership() {
     let changed = format!("(.pair (.root 7) (.project {x} {})) := by decide", slot + 1);
     replay::check(
         &claims,
-        &["differentReceivers", "graph0", "graph1", "graph2", "graph3"],
+        &["differentReceivers", "graph0", "graph1", "graph2", "graph3", "graph4"],
         &[(&expected, &foreign), (&original, &changed)],
     );
 }
