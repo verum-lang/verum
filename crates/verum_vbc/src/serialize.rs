@@ -978,6 +978,7 @@ impl Serializer {
             || !module.function_variants.is_empty()
             || !module.theorems.is_empty()
             || !module.discharge_receipts.is_empty();
+        let has_declaration_bindings = !module.declaration_type_bindings.is_empty();
 
         if !has_shapes
             && !has_device_hints
@@ -990,6 +991,7 @@ impl Serializer {
             && !has_mount_aliases
             && !has_module_tables
             && !has_module_tables2
+            && !has_declaration_bindings
         {
             // No extensions, return zeros
             return Ok((0, 0, VbcFlags::empty()));
@@ -1123,7 +1125,7 @@ impl Serializer {
         // ends right after `external_function_names`).
         //
         // Wire form: `u32 byte_len + bincode(Vec<(StringId, FunctionId)>)`.
-        if !module.mount_aliases.is_empty() || has_module_tables {
+        if !module.mount_aliases.is_empty() || has_module_tables || has_module_tables2 || has_declaration_bindings {
             // The slot is written even when EMPTY once a further record
             // follows it: these trailing records are positional, so a reader
             // would otherwise take the next record's length prefix for this
@@ -1141,7 +1143,7 @@ impl Serializer {
         // field_id_to_name, type_field_layouts, user_function_start))`.
         // Present iff at least one of them is non-default; readers that
         // predate it simply stop at the end of the previous record.
-        if has_module_tables {
+        if has_module_tables || has_module_tables2 || has_declaration_bindings {
             // Empty stand-ins when the program tables are off (archive member).
             let empty_field_names: Vec<String> = Vec::new();
             let empty_layouts: std::collections::HashMap<String, Vec<String>> =
@@ -1170,7 +1172,7 @@ impl Serializer {
         // sets, theorems, discharge receipts. Written whenever EITHER this
         // record or the previous one has content, so the pair stays
         // positionally unambiguous.
-        if has_module_tables || has_module_tables2 {
+        if has_module_tables || has_module_tables2 || has_declaration_bindings {
             let payload = (
                 &module.cfg_keys,
                 &module.function_variants,
@@ -1180,6 +1182,14 @@ impl Serializer {
             let data = bincode::serialize(&payload).map_err(|e| {
                 crate::error::VbcError::Serialization(format!("module_tables2: {}", e))
             })?;
+            encode_u32(data.len() as u32, &mut self.output);
+            self.output.extend_from_slice(&data);
+        }
+
+        // 2.32: declaration lexical environments occupy the fourth trailing
+        // record. Earlier positional records above must exist even when empty.
+        if has_declaration_bindings {
+            let data = crate::declaration_bindings_codec::encode(&module.declaration_type_bindings)?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
         }

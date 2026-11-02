@@ -12,7 +12,7 @@ use verum_common::{List, Maybe, OrderedMap, Text};
 mod source_signature_wire;
 
 /// Current sidecar schema; bincode archives must be rebuilt when this changes.
-pub const CORE_METADATA_VERSION: u32 = 3;
+pub const CORE_METADATA_VERSION: u32 = 4;
 
 /// Framed sidecars reject stale schemas before decoding their AST payloads.
 pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";
@@ -70,14 +70,7 @@ pub fn decode_metadata(bytes: &[u8]) -> Result<CoreMetadata, verum_common::Text>
 }
 
 fn validate_source_signatures(metadata: &CoreMetadata) -> Result<(), Text> {
-    for descriptor in metadata.types.values() {
-        if let Some(declaration) = &descriptor.source_declaration {
-            verum_ast::source_signature::validate_source_type_declaration(declaration)?;
-            if declaration.name.name.as_str() != descriptor.name.as_str().rsplit('.').next().unwrap_or("") {
-                return Err("source declaration does not belong to its metadata type descriptor".into());
-            }
-        }
-    }
+    NominalSourceOwners::default().admit(metadata)?;
     for descriptor in metadata.functions.values() {
         if let Some(signature) = &descriptor.source_signature {
             verum_ast::source_signature::validate_source_signature(signature, descriptor.parent_type.is_some())?;
@@ -89,6 +82,76 @@ fn validate_source_signatures(metadata: &CoreMetadata) -> Result<(), Text> {
         }
     }
     Ok(())
+}
+
+/// Canonical declaration identity shared by wire validation and type loading.
+pub(crate) fn nominal_declaring_key(descriptor: &TypeDescriptor) -> Text {
+    let owner = descriptor.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
+        .unwrap_or(&descriptor.module_path);
+    if owner.is_empty() || owner.as_str() == "cog" {
+        descriptor.name.clone()
+    } else {
+        verum_common::qualified_name::qualify_module_name(owner, descriptor.name.as_str())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct NominalSourceReceipt {
+    declaration: verum_ast::TypeDecl,
+    bindings: Option<OrderedMap<Text, Option<Text>>>,
+}
+
+/// Accepted declaration authority survives metadata snapshot replacement.
+/// A cached type cannot turn a later contradictory declaration into a replay.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct NominalSourceOwners {
+    owners: OrderedMap<Text, Option<NominalSourceReceipt>>,
+}
+
+impl NominalSourceOwners {
+    /// Validate the whole incoming snapshot before recording any of it.
+    /// ABI-only duplicates retain their existing path; a semantic declaration
+    /// requires an identical AST and lexical binding environment on every copy.
+    pub(crate) fn admit(&mut self, metadata: &CoreMetadata) -> Result<(), Text> {
+        let mut incoming: OrderedMap<Text, Option<NominalSourceReceipt>> = OrderedMap::new();
+        for descriptor in metadata.types.values() {
+            let key = nominal_declaring_key(descriptor);
+            let receipt = if let Some(declaration) = &descriptor.source_declaration {
+                // Bound programmatically constructed ASTs before equality too.
+                verum_ast::source_signature::validate_source_type_declaration(declaration)?;
+                if declaration.name.name.as_str() != descriptor.name.as_str().rsplit('.').next().unwrap_or("") {
+                    return Err("source declaration does not belong to its metadata type descriptor".into());
+                }
+                // Replay enters the parent of the canonical key, including
+                // descriptors whose name already contains a nested owner.
+                let (owner, _) = key.rsplit_once('.').ok_or_else(|| Text::from(
+                    "metadata source type declaration requires its declaring module"))?;
+                Some(NominalSourceReceipt {
+                    declaration: declaration.clone(),
+                    bindings: metadata.declaration_type_bindings.get(&Text::from(owner)).cloned(),
+                })
+            } else {
+                None
+            };
+            if let Some(previous) = incoming.get(&key).or_else(|| self.owners.get(&key)) {
+                match (previous, &receipt) {
+                    (Some(previous), Some(current)) if previous.declaration != current.declaration => {
+                        return Err(format!("conflicting semantic type declarations for {key}").into());
+                    }
+                    (Some(previous), Some(current)) if previous.bindings != current.bindings => {
+                        return Err(format!("conflicting semantic type binding scopes for {key}").into());
+                    }
+                    (Some(_), None) | (None, Some(_)) => {
+                        return Err(format!("semantic and ABI-only declarations disagree for {key}").into());
+                    }
+                    _ => {}
+                }
+            }
+            incoming.entry(key).or_insert(receipt);
+        }
+        for (key, receipt) in incoming { self.owners.insert(key, receipt); }
+        Ok(())
+    }
 }
 
 /// Serde default for `is_public`: a descriptor deserialised from an
@@ -271,6 +334,11 @@ pub struct CoreMetadata {
     /// deserialise this field.
     #[serde(default)]
     pub module_reexports: OrderedMap<Text, List<(Text, Text, Text)>>,
+
+    /// Lexical type bindings of declaration owners, including private mounts.
+    /// A blocked binding is retained as `None`; absence is not permission to
+    /// substitute an unrelated global type with the same leaf name.
+    pub declaration_type_bindings: OrderedMap<Text, OrderedMap<Text, Option<Text>>>,
 
     /// Blanket protocol implementations declared in `core/`
     /// (`implement<T: Base> Derived for T`), as

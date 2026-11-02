@@ -39,6 +39,7 @@ struct FfiBundle {
 /// Parsed extensions data from the extensions section.
 #[derive(Default)]
 struct ExtensionsData {
+ declaration_type_bindings: crate::declaration_bindings_codec::Bindings,
  shape_metadata: ShapeMetadata,
  device_hints: DeviceHints,
  distribution: DistributionMetadata,
@@ -453,6 +454,7 @@ impl<'a> Deserializer<'a> {
  ffi_layouts: extensions.ffi_layouts,
  // Source directory is set during compilation, not deserialization.
  source_dir: None,
+ declaration_type_bindings: extensions.declaration_type_bindings,
  // Tensor metadata from extensions section
  shape_metadata: extensions.shape_metadata,
  device_hints: extensions.device_hints,
@@ -2151,6 +2153,22 @@ impl<'a> Deserializer<'a> {
                  })?,
          );
          self.offset += len;
+     }
+ }
+ if self.header.as_ref().is_some_and(|header| header.version_minor >= 32) && self.offset < extensions_end {
+     if extensions_end - self.offset < 4 {
+         return Err(VbcError::eof(self.offset, 4));
+     }
+     let len = decode_u32(self.data, &mut self.offset)? as usize;
+     if len > crate::declaration_bindings_codec::MAX_BYTES || len > extensions_end - self.offset {
+         return Err(VbcError::Deserialization("declaration type bindings exceed extension bounds".into()));
+     }
+     result.declaration_type_bindings = crate::declaration_bindings_codec::decode(
+         &self.data[self.offset..self.offset + len],
+     )?;
+     self.offset += len;
+     if self.offset != extensions_end {
+         return Err(VbcError::Deserialization("trailing declaration type binding data".into()));
      }
  }
  Ok(result)

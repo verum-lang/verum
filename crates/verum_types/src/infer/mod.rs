@@ -14,6 +14,7 @@
 
 // Submodules containing impl TypeChecker method groups
 mod source_declarations;
+mod source_type_registration;
 mod universe_parameters;
 mod call_obligations;
 mod preparation;
@@ -630,6 +631,8 @@ pub struct TypeChecker {
     /// success so a Berardi-shaped declaration tucked inside an
     /// imported module still aborts the build.
     pub(crate) deferred_soundness_errors: Vec<TypeError>,
+    pub(crate) metadata_source_owners: crate::core_metadata::NominalSourceOwners,
+    pub(crate) source_type_registration: source_type_registration::SourceTypeRegistration,
     /// Names a refinement predicate mentioned that were not resolvable
     /// AT THE TIME THE TYPE WAS CONVERTED. Re-checked when the module
     /// is finished, because a `const` the predicate names is registered

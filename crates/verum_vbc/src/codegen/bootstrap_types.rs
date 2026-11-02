@@ -573,6 +573,11 @@ impl VbcCodegen {
         for key in &selected {
             let (mi, ti) = catalog[key];
             let module = available[mi];
+            if module.types[ti].source_declaration.is_some() {
+                let owner = module.types[ti].origin_module.and_then(|id| module.strings.get(id))
+                    .unwrap_or(&module.name);
+                self.retain_declaration_type_scope(module, owner)?;
+            }
             let mut ty = module.types[ti].clone();
             // Retain this fact from the original descriptor: unresolved glue
             // becomes None below, but that loss cannot authorize absorption.
@@ -651,6 +656,11 @@ impl VbcCodegen {
         for (mi, fi) in function_sites {
             let module = available[mi];
             let function = &module.functions[fi];
+            if function.source_signature.is_some() {
+                let owner = function.origin_module.and_then(|id| module.strings.get(id))
+                    .unwrap_or(&module.name);
+                self.retain_declaration_type_scope(module, owner)?;
+            }
             if let Some(info) = self.bootstrap_function(module, function.id.0) {
                 let id = info.id.0;
                 // Forward registrations may have no source signature yet.

@@ -36,6 +36,74 @@ fn nominal_universe_declarations_survive_archive_and_sidecar() {
     }
 }
 
+#[test]
+fn nominal_private_type_mounts_keep_their_owner_across_archive_and_sidecar() {
+    for declaration_only in [false, true] {
+        let mut dependencies = List::new();
+        for (owner, level) in [("core.alpha", 1), ("core.beta", 2)] {
+            let ast = Parser::new(&format!("module {owner}; public type Token is {{ public value: Type({level}) }};"))
+                .parse_module().unwrap();
+            dependencies.push(VbcCodegen::with_config(CodegenConfig::new(owner)).compile_module(&ast).unwrap());
+        }
+        let ast = Parser::new("module core.api; mount core.alpha.{Token as Renamed}; public type Carrier<A> is { public level: Type, public payload: Renamed, public extra: A };")
+            .parse_module().unwrap();
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.api"));
+        producer.import_bootstrap_nominal_dependencies(&[&ast], &dependencies.iter().collect::<List<_>>()).unwrap();
+        let module = if declaration_only { producer.collect_declaration_interface(&[&ast]).unwrap() }
+            else {
+                producer.collect_unit_declarations(&[&ast]).unwrap();
+                producer.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap();
+                producer.finalize_module_from_state().unwrap()
+            };
+        let mut builder = ArchiveBuilder::new();
+        for module in dependencies.iter().chain(std::iter::once(&module)) {
+            builder.add_module(&module.name, module, &[]).unwrap();
+        }
+        let mut bytes = List::new();
+        verum_vbc::archive::write_archive(&builder.finish(), &mut bytes).unwrap();
+        let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes.as_slice())).unwrap();
+        let metadata = archive_to_core_metadata(&archive).unwrap();
+        let bytes = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
+        let metadata = verum_types::core_metadata::decode_metadata(&bytes).unwrap();
+        assert_eq!(metadata.declaration_type_bindings.get(&Text::from("core.api")).unwrap()
+            .get(&Text::from("Renamed")), Some(&Some("core.alpha.Token".into())));
+        for eager in [false, true] {
+            let result = errors(&metadata, "fn read(x: core.api.Carrier<Int>) -> core.alpha.Token { x.payload }", eager);
+            assert!(result.is_empty(), "interface={declaration_only}, eager={eager}: {result:?}");
+            let result = errors(&metadata, "fn wrong(x: core.api.Carrier<Int>) -> core.beta.Token { x.payload }", eager);
+            assert!(!result.is_empty(), "private mount changed nominal owner");
+        }
+    }
+}
+
+#[test]
+fn actual_ntype_unresolved_dependent_field_is_not_fabricated() {
+    let mut ast = Parser::new(include_str!("../../../core/math/hott.vr")).parse_module().unwrap();
+    ast.items.retain(|item| matches!(&item.kind, verum_ast::ItemKind::Module(_))
+        || matches!(&item.kind, verum_ast::ItemKind::Type(decl) if ["IsTrunc", "NType"].contains(&decl.name.name.as_str())));
+    let module = VbcCodegen::with_config(CodegenConfig::new("core.math"))
+        .collect_declaration_interface(&[&ast]).unwrap();
+    let mut builder = ArchiveBuilder::new();
+    builder.add_module("core.math", &module, &[]).unwrap();
+    let metadata = archive_to_core_metadata(&builder.finish()).unwrap();
+    for eager in [false, true] {
+        let mut checker = if eager { TypeChecker::new_with_core_eager(std::sync::Arc::new(metadata.clone())) }
+            else { TypeChecker::new_with_core(std::sync::Arc::new(metadata.clone())) };
+        checker.register_primitives();
+        checker.set_current_module_path("core.math.hott");
+        let usage = Parser::new("fn carrier(x: &core.math.hott.NType<0>) -> Type { x.carrier }").parse_module().unwrap();
+        let mut failures = checker.prepare_module_declarations(&usage);
+        for item in &usage.items { if let Err(error) = checker.check_item(item) { failures.push(error); } }
+        failures.extend(checker.take_deferred_errors());
+        // Dependent record elaboration is not implemented (T2116). Until it
+        // owns the earlier field binder, rejecting this declaration is the
+        // sound result; a bare Named(carrier) or fresh inference variable is not.
+        assert!(failures.iter().any(|error| matches!(error,
+            verum_types::TypeError::TypeNotFound { name, .. } if name.as_str() == "carrier"
+        )), "eager={eager}: {failures:?}");
+    }
+}
+
 fn metadata(declaration_only: bool, reverse: bool) -> CoreMetadata {
     let mut owners = List::new();
     for owner in ["core.alpha", "core.beta"] {
@@ -251,6 +319,12 @@ fn actual_stdlib_nominal_universes_reach_the_compiler_pipeline() {
     let metadata = archive_to_core_metadata(archive).unwrap();
     let descriptor = metadata.types.get(&Text::from("core.math.hott.NType")).expect("declared NType");
     assert!(descriptor.source_declaration.is_some(), "fresh nominal declaration carrier");
+    let source = Parser::new(include_str!("../../../core/math/hott.vr")).parse_module().unwrap();
+    let original = source.items.iter().find_map(|item| match &item.kind {
+        verum_ast::ItemKind::Type(decl) if decl.name.name.as_str() == "NType" => Some(decl),
+        _ => None,
+    }).unwrap();
+    assert_eq!(descriptor.source_declaration.as_ref(), Some(original), "retain the entire source declaration, including dependent fields");
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("nominal.vr");
     std::fs::write(&input, "mount core.math.hott.{NType}; fn inspect(x: &NType<0>) {} fn main() {} ").unwrap();

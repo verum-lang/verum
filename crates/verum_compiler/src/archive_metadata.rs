@@ -122,6 +122,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
         // typechecker's re-export resolver degrades to a no-op when
         // the entry is absent, falling back to AST walks).
         module_reexports: OrderedMap::new(),
+        declaration_type_bindings: OrderedMap::new(),
         // Module-level statics are captured at archive precompile time
         // (T1088), from a source walk in `precompile.rs`. This
         // archive→metadata convert path has no source to walk, so it
@@ -157,11 +158,43 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
     // A repeated owner is a replay only if its complete semantic declaration
     // agrees. Check before descriptor selection can enrich or replace its ABI.
     let mut semantic_declarations = std::collections::BTreeMap::new();
+    let mut semantic_scopes = std::collections::BTreeMap::<String, Option<OrderedMap<Text, Option<Text>>>>::new();
     for entry in sorted_index {
         let module = archive.load_module(&entry.name)
             .map_err(|error| Text::from(format!("cannot publish module {}: {error}", entry.name)))?;
-        if module.header.version_minor < 31 {
+        if module.header.version_minor < 32 {
             return Err(format!("module {} predates semantic universe signatures; rebuild the archive", entry.name).into());
+        }
+        // Absence is evidence too: a copy without a declaration environment
+        // cannot borrow one from another archive entry during map merging.
+        let mut owners = Vec::new();
+        for ty in module.types.iter().filter(|ty| ty.source_declaration.is_some()) {
+            let owner = ty.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&module.name);
+            let name = module.strings.get(ty.name).ok_or_else(|| Text::from("semantic type has no name"))?;
+            let key = verum_vbc::module::qualify_module_name(owner, name);
+            let (owner, _) = key.rsplit_once('.').ok_or_else(|| Text::from("semantic type has no declaring module"))?;
+            owners.push(owner.to_owned());
+        }
+        owners.extend(module.functions.iter().filter(|function| function.source_signature.is_some())
+            .map(|function| function.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&module.name).to_owned()));
+        for owner in owners {
+            let scope = module.declaration_type_bindings.get(&Text::from(owner.as_str()));
+            if let Some(previous) = semantic_scopes.get(&owner) {
+                if previous.as_ref() != scope {
+                    return Err(format!("conflicting declaration type bindings for {owner}").into());
+                }
+            } else {
+                semantic_scopes.insert(owner, scope.cloned());
+            }
+        }
+        for (owner, bindings) in &module.declaration_type_bindings {
+            if let Some(previous) = meta.declaration_type_bindings.get(owner) {
+                if previous != bindings {
+                    return Err(format!("conflicting declaration type bindings for {owner}").into());
+                }
+            } else {
+                meta.declaration_type_bindings.insert(owner.clone(), bindings.clone());
+            }
         }
         for function in &module.functions {
             if let Some(signature) = &function.source_signature {

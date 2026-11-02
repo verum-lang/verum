@@ -319,10 +319,10 @@ impl TypeChecker {
         &mut self,
         type_name: &str,
         generics: &[verum_ast::ty::GenericParam],
-    ) {
+    ) -> Result<()> {
         use verum_ast::ty::GenericParamKind;
         if generics.is_empty() {
-            return;
+            return Ok(());
         }
         let mut defaults: List<Type> = List::new();
         let mut any = false;
@@ -336,18 +336,23 @@ impl TypeChecker {
                     // registered yet must not fail the declaration it
                     // decorates — declarations are registered in file
                     // order and a default may point forward.
-                    defaults.push(self.ast_to_type_lenient(ast_ty));
+                    defaults.push(if self.resolving_source_signature {
+                        self.ast_to_type(ast_ty)?
+                    } else {
+                        self.ast_to_type_lenient(ast_ty)
+                    });
                     any = true;
                 }
                 _ => defaults.push(Type::Unknown),
             }
         }
         if !any {
-            return;
+            return Ok(());
         }
         self.define_declared_type_metadata(
             "__type_param_defaults_", type_name, Type::Tuple(defaults),
         );
+        Ok(())
     }
 
     fn register_type_declaration_inner(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
@@ -371,16 +376,6 @@ impl TypeChecker {
         let generics_count = type_decl.generics.len();
         self.type_generics_count
             .insert(type_name.clone(), generics_count);
-
-        // A parameter's DEFAULT, recorded once, at the declaration.
-        //
-        // There are five places that write some part of a type's
-        // parameter story (`__type_params_`, `__type_var_order_`,
-        // `__type_params_count_`, the archive path, the alias path), and
-        // adding a sixth fact to all five is how a fact ends up stated in
-        // four of them. The declaration is the authority for what its own
-        // defaults are, so this is the one site.
-        self.record_type_param_defaults(type_name.as_str(), &type_decl.generics);
 
         // CRITICAL: Prevent infinite recursion when registering mutually recursive types.
         // If we're already in the process of registering this type, return early.
@@ -569,6 +564,9 @@ impl TypeChecker {
         // the immediately-invoked closure captures every `?`, making the
         // parameter cleanup below unconditional.
         let body_result: Result<()> = (|| {
+        // Defaults share the declaration's lexical parameter frame and owner.
+        // Imported signatures cannot postpone a missing name to the consumer.
+        self.record_type_param_defaults(type_name.as_str(), &type_decl.generics)?;
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 // Register the type alias in the type context
@@ -1202,6 +1200,7 @@ impl TypeChecker {
                                 let field_name: Text = field.name.name.as_str().into();
                                 let field_type = match self.ast_to_type(&field.ty) {
                                     Ok(ty) => ty,
+                                    Err(error) if self.resolving_source_signature => return Err(error),
                                     Err(_) => self.ast_to_type_lenient(&field.ty),
                                 };
                                 record_map.insert(field_name, field_type);
@@ -1252,6 +1251,7 @@ impl TypeChecker {
                 // `descent`. The Type::Variant lowering above remains
                 // the primary representation for ordinary type checking.
                 if !hit_constructors.is_empty() {
+                    self.journal_variant_paths(&type_name);
                     self.hit_path_constructors
                         .insert(type_name.clone(), hit_constructors);
                 }
@@ -1425,6 +1425,7 @@ impl TypeChecker {
                 // parent type (Result vs CheckedResult) based on expected type context.
                 for variant in variants.iter() {
                     let variant_name: Text = variant.name.name.as_str().into();
+                    self.journal_variant_parent(&variant_name);
                     let parents = self
                         .variant_constructor_parents
                         .entry(variant_name)
@@ -1679,7 +1680,7 @@ impl TypeChecker {
                         // field-position defects (E408 dependent-arity,
                         // T0266) vanish while the same annotation errored
                         // in every other position.
-                        Err(e) if !Self::field_error_must_surface(&e) => {
+                        Err(e) if !self.resolving_source_signature && !Self::field_error_must_surface(&e) => {
                             // Lenient resolution: unresolved types become fresh type variables
                             // or Named types that will be resolved later
                             self.ast_to_type_lenient(&field.ty)
@@ -1980,6 +1981,8 @@ impl TypeChecker {
                 let old_self_type = self.current_self_type.clone();
                 self.set_current_self_type(Maybe::Some(self_type.clone()));
 
+                let registration = (|| -> Result<()> {
+
                 // CRITICAL FIX: Register protocol's type parameters (like T in Into<T>) BEFORE
                 // processing method signatures. This allows the return type `T` to be resolved
                 // as Type::Var instead of Type::Named, enabling proper type inference with
@@ -2117,9 +2120,17 @@ impl TypeChecker {
                             })
                             .collect();
 
+                        let param_types = match param_types {
+                            Err(error) if self.resolving_source_signature => return Err(error),
+                            other => other,
+                        };
                         if let Ok(params) = param_types {
                             let return_type = if let Some(ref ret_ty) = method.return_type {
-                                self.ast_to_type(ret_ty).unwrap_or(Type::unit())
+                                match self.ast_to_type(ret_ty) {
+                                    Ok(ty) => ty,
+                                    Err(error) if self.resolving_source_signature => return Err(error),
+                                    Err(_) => Type::unit(),
+                                }
                             } else {
                                 Type::unit()
                             };
@@ -2284,7 +2295,21 @@ impl TypeChecker {
                         protocol.methods.keys().cloned().collect(),
                     ),
                 );
-                let _ = self.protocol_checker.write().register_protocol(protocol);
+                // Capture the predecessor and installed identity atomically with
+                // this write. A failed recursive load must not undo another
+                // checker's later publication of the same protocol name.
+                let mut registry = self.protocol_checker.write();
+                if let Some(binding) = self.source_type_registration.protocols.get_mut(&protocol.name) {
+                    let publication = registry.register_protocol_with_receipt(protocol)
+                        .map_err(|error| TypeError::UniverseBinding {
+                            message: error.to_string().into(),
+                            span: type_decl.span,
+                        })?;
+                    binding.publications.push(publication);
+                } else {
+                    let _ = registry.register_protocol(protocol);
+                }
+                drop(registry);
 
                 // IMPORTANT: Register protocols correctly based on their context status.
                 //
@@ -2308,9 +2333,11 @@ impl TypeChecker {
                         .register_constraint_protocol(type_name);
                 }
 
-                // Restore the previous current_self_type
+                Ok(())
+                })();
+                // Restore the receiver scope even when a method signature fails.
                 self.set_current_self_type(old_self_type);
-        Ok(())
+        registration
     }
 
     // ==================== Two-Pass Type Resolution ====================
@@ -3225,6 +3252,7 @@ impl TypeChecker {
                 // This map is read by check_expr Record handler for variant constructors.
                 for (vname, vty) in &variant_map {
                     if let Type::Record(fields) = vty {
+                        self.journal_variant_record(vname);
                         self.variant_record_fields
                             .insert(vname.clone(), fields.clone());
                     }
@@ -3304,6 +3332,7 @@ impl TypeChecker {
                 // Register variant constructor parent mappings for scope-aware resolution.
                 for variant in variants.iter() {
                     let vn: Text = variant.name.name.as_str().into();
+                    self.journal_variant_parent(&vn);
                     let parents = self.variant_constructor_parents.entry(vn).or_default();
                     if !parents.iter().any(|p| p.as_str() == type_name.as_str()) {
                         parents.push(type_name.clone());

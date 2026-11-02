@@ -71,3 +71,33 @@ fn abi_only_claim_cannot_erase_a_semantic_declaration_in_either_order() {
         );
     }
 }
+
+#[test]
+fn archive_copies_cannot_supply_missing_or_different_lexical_scopes() {
+    let first = declaration(1);
+    assert!(first.declaration_type_bindings.get(&"core.carrier".into()).is_some());
+    let mut missing = first.clone();
+    missing.declaration_type_bindings.clear();
+    let mut changed = first.clone();
+    changed.declaration_type_bindings.get_mut(&"core.carrier".into()).unwrap()
+        .insert("Alias".into(), Some("foreign.Token".into()));
+    for second in [missing, changed] {
+        for (left, right) in [(&first, &second), (&second, &first)] {
+            let error = archive_metadata(left, right).unwrap_err();
+            assert!(error.contains("conflicting declaration type bindings for core.carrier"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn nested_nominal_names_use_the_scope_entered_by_the_consumer() {
+    let mut first = declaration(1);
+    first.types.iter_mut().find(|ty| ty.source_declaration.is_some()).unwrap().name =
+        first.strings.intern("nested.Carrier");
+    let bindings = first.declaration_type_bindings.remove(&"core.carrier".into()).unwrap();
+    first.declaration_type_bindings.insert("core.carrier.nested".into(), bindings);
+    let mut second = first.clone();
+    second.declaration_type_bindings.clear();
+    let error = archive_metadata(&first, &second).unwrap_err();
+    assert!(error.contains("conflicting declaration type bindings for core.carrier.nested"), "{error}");
+}

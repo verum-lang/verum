@@ -94,6 +94,12 @@ impl TypeChecker {
         // first-registered-wins for inductive constructor lookup, no hardcoded
         // priority list, no compiler-side knowledge of stdlib type names.
         for (type_name, type_desc) in Self::stdlib_iteration_order(metadata) {
+            // Declaration-bearing variants register constructors through the
+            // source loader. Rebuilding them from erased payload strings can
+            // republish fields even after that declaration failed to load.
+            if type_desc.source_declaration.is_some() {
+                continue;
+            }
             if let TypeDescriptorKind::Variant { cases } = &type_desc.kind {
                 let mut constructors = verum_common::List::new();
 
@@ -958,6 +964,8 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            metadata_source_owners: Default::default(),
+            source_type_registration: Default::default(),
             deferred_refinement_names: Vec::new(),
             in_type_declaration: false,
             pending_ambiguity: Vec::new(),
@@ -1116,6 +1124,8 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            metadata_source_owners: Default::default(),
+            source_type_registration: Default::default(),
             deferred_refinement_names: Vec::new(),
             in_type_declaration: false,
             pending_ambiguity: Vec::new(),
@@ -1275,6 +1285,8 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            metadata_source_owners: Default::default(),
+            source_type_registration: Default::default(),
             deferred_refinement_names: Vec::new(),
             in_type_declaration: false,
             pending_ambiguity: Vec::new(),
@@ -9102,6 +9114,7 @@ impl TypeChecker {
         // regardless.
         let cur_mod = self.current_module_path.clone();
         if let Some(parents) = self.variant_constructor_parents.get(&name).cloned() {
+            self.journal_variant_parent(&name);
             let kept: Vec<Text> = parents
                 .iter()
                 .filter(|p| self.module_publishes_type(cur_mod.as_str(), p.as_str()))

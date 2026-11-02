@@ -905,6 +905,8 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            metadata_source_owners: Default::default(),
+            source_type_registration: Default::default(),
             deferred_refinement_names: Vec::new(),
             in_type_declaration: false,
             pending_ambiguity: Vec::new(),
@@ -1100,7 +1102,9 @@ impl TypeChecker {
             eprintln!("[loadcost]     nwc_minimal_context     {:>8.1} ms", t.elapsed().as_secs_f64() * 1e3);
         }
         let t = std::time::Instant::now();
-        checker.register_coercion_markers_from_metadata(&metadata);
+        if checker.install_core_metadata(metadata.clone()) {
+            checker.register_coercion_markers_from_metadata(&metadata);
+        }
         if trace {
             eprintln!("[loadcost]     nwc_coercion_markers    {:>8.1} ms ({} impls)", t.elapsed().as_secs_f64() * 1e3, metadata.implementations.len());
         }
@@ -1108,7 +1112,6 @@ impl TypeChecker {
         // lookup sites via `lookup_static_or_load_from_metadata` —
         // the eager 30k-scheme scan this constructor used to run
         // cost ~150 ms release / ~420 ms debug per cold start.
-        checker.install_core_metadata(metadata);
         checker
     }
 
@@ -1116,6 +1119,9 @@ impl TypeChecker {
     /// Protocol registrations and admission receipts remain checker-local.
     pub fn new_with_core_snapshot(snapshot: std::sync::Arc<crate::CoreMetadataSnapshot>) -> Self {
         let mut checker = Self::new_with_core(snapshot.metadata().clone());
+        if checker.core_metadata.is_none() {
+            return checker;
+        }
         checker.metadata_impls_by_owner = Some(snapshot.implementations.clone());
         checker.metadata_names = std::cell::OnceCell::from(snapshot.names.clone());
         checker
@@ -1169,7 +1175,14 @@ impl TypeChecker {
     fn install_core_metadata(
         &mut self,
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
-    ) {
+    ) -> bool {
+        if let Err(message) = self.metadata_source_owners.admit(&metadata) {
+            self.deferred_soundness_errors.push(TypeError::UniverseBinding {
+                message,
+                span: Span::default(),
+            });
+            return false;
+        }
         self.install_metadata_nominal_identity(&metadata);
         self.core_metadata = Maybe::Some(metadata);
         self.metadata_names = std::cell::OnceCell::new();
@@ -1178,6 +1191,7 @@ impl TypeChecker {
         self.metadata_impls_by_owner = Maybe::None;
         self.metadata_impl_receipts.clear();
         self.stdlib_tail_registered.clear();
+        true
     }
 
     pub(super) fn metadata_name_index(
@@ -1240,8 +1254,9 @@ impl TypeChecker {
         &mut self,
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) {
-        self.register_coercion_markers_from_metadata(&metadata);
-        self.install_core_metadata(metadata);
+        if self.install_core_metadata(metadata.clone()) {
+            self.register_coercion_markers_from_metadata(&metadata);
+        }
     }
 
     /// Eager construction — registers every type/protocol/function
@@ -1254,8 +1269,9 @@ impl TypeChecker {
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) -> Self {
         let mut checker = Self::with_minimal_context();
-        checker.load_stdlib_from_metadata(&metadata);
-        checker.install_core_metadata(metadata);
+        if checker.install_core_metadata(metadata.clone()) {
+            checker.load_stdlib_from_metadata(&metadata);
+        }
         checker
     }
 
@@ -1445,13 +1461,7 @@ impl TypeChecker {
     }
 
     pub(crate) fn metadata_declaring_key(descriptor: &crate::core_metadata::TypeDescriptor) -> Text {
-        let owner = descriptor.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
-            .unwrap_or(&descriptor.module_path);
-        if owner.is_empty() || owner.as_str() == "cog" {
-            descriptor.name.clone()
-        } else {
-            verum_common::qualified_name::qualify_module_name(owner, descriptor.name.as_str())
-        }
+        crate::core_metadata::nominal_declaring_key(descriptor)
     }
 
     /// Replay a carried declaration through the source checker in its owner's
@@ -4096,6 +4106,8 @@ impl TypeChecker {
             diagnostics: List::new(),
             diagnostic_sources: List::new(),
             deferred_soundness_errors: Vec::new(),
+            metadata_source_owners: Default::default(),
+            source_type_registration: Default::default(),
             deferred_refinement_names: Vec::new(),
             in_type_declaration: false,
             pending_ambiguity: Vec::new(),
@@ -4240,7 +4252,14 @@ impl TypeChecker {
         use crate::ty::Type;
         use verum_common::span::Span;
 
-        self.install_metadata_nominal_identity(metadata);
+        // The public eager loader also accepts a borrowed, in-memory snapshot.
+        // Install its authority before loading anything; existing registrations
+        // may outlive earlier snapshots, so receipts are retained separately.
+        let installed = self.core_metadata.as_ref()
+            .is_some_and(|current| std::ptr::eq(current.as_ref(), metadata));
+        if !installed && !self.install_core_metadata(std::sync::Arc::new(metadata.clone())) {
+            return;
+        }
 
         // Register types from metadata in source declaration order.
         //

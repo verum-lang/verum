@@ -83,6 +83,7 @@ pub mod encoding;
 pub mod reachability;
 pub mod serialize;
 mod source_signature_codec;
+mod declaration_bindings_codec;
 pub mod source_declaration_integrity;
 pub mod validate;
 

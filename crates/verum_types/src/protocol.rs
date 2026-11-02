@@ -19,6 +19,7 @@
 //! - **VTable**: Virtual dispatch table for protocol methods
 
 use std::cell::RefCell;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use crate::ty::{Type, TypeVar};
 use verum_ast::{
@@ -1613,12 +1614,23 @@ impl ImplOverlapIndex {
     }
 }
 
+/// One publication in the shared registry. Its predecessor and identity are
+/// captured under the same write guard as the installation.
+#[derive(Debug)]
+pub(crate) struct ProtocolBindingReceipt {
+    name: Text,
+    previous: Option<Protocol>,
+    previous_revision: Option<Arc<AtomicBool>>,
+    installed_revision: Arc<AtomicBool>,
+}
+
 /// Protocol checking and resolution engine
 #[derive(Clone)]
 
 pub struct ProtocolChecker {
     /// Registered protocols
     protocols: Map<Text, Protocol>,
+    protocol_revisions: Map<Text, Arc<AtomicBool>>,
     /// Protocol implementations
     impls: List<ProtocolImpl>,
     /// Implementation index for fast lookup
@@ -1818,6 +1830,7 @@ impl ProtocolChecker {
     pub fn new() -> Self {
         let mut checker = Self {
             protocols: Map::new(),
+            protocol_revisions: Map::new(),
             impls: List::new(),
             impl_index: Map::new(),
             impls_by_protocol: Map::new(),
@@ -1857,6 +1870,7 @@ impl ProtocolChecker {
     pub fn new_empty() -> Self {
         Self {
             protocols: Map::new(),
+            protocol_revisions: Map::new(),
             impls: List::new(),
             impl_index: Map::new(),
             impls_by_protocol: Map::new(),
@@ -5206,6 +5220,13 @@ impl ProtocolChecker {
     /// Returns `Err(ProtocolError::CyclicInheritance)` if the new protocol
     /// introduces a cycle in the superprotocol hierarchy.
     pub fn register_protocol(&mut self, protocol: Protocol) -> Result<(), ProtocolError> {
+        self.register_protocol_with_receipt(protocol).map(|_| ())
+    }
+
+    pub(crate) fn register_protocol_with_receipt(
+        &mut self,
+        protocol: Protocol,
+    ) -> Result<ProtocolBindingReceipt, ProtocolError> {
         let name = protocol.name.clone();
         let mut protocol = protocol;
         // PROTOCOL-REREGISTRATION-KEEPS-THE-RECEIVER-1 (T1378).
@@ -5260,7 +5281,13 @@ impl ProtocolChecker {
                 }
             }
         }
-        self.protocols.insert(name.clone(), protocol);
+        let installed_revision = Arc::new(AtomicBool::new(true));
+        let receipt = ProtocolBindingReceipt {
+            name: name.clone(),
+            previous: self.protocols.insert(name.clone(), protocol),
+            previous_revision: self.protocol_revisions.insert(name.clone(), installed_revision.clone()),
+            installed_revision,
+        };
         // Invalidate caches when new protocol is registered
         self.methods_cache.clear();
         self.superprotocol_cache.clear();
@@ -5269,15 +5296,42 @@ impl ProtocolChecker {
         // Check for cycles introduced by this registration
         if let Err(e) = self.check_hierarchy_cycles(&name) {
             // Roll back the registration so the registry stays consistent
-            self.protocols.remove(&name);
+            self.restore_protocol_binding(receipt);
             return Err(e);
         }
-        Ok(())
+        Ok(receipt)
     }
 
     /// Check if a protocol is registered by name
     pub fn has_protocol(&self, name: &Text) -> bool {
         self.protocols.contains_key(name)
+    }
+
+    /// Undo only this publication, leaving any later writer untouched. Invalidate
+    /// even a superseded publication so another rollback cannot resurrect it.
+    pub(crate) fn restore_protocol_binding(&mut self, receipt: ProtocolBindingReceipt) -> bool {
+        receipt.installed_revision.store(false, Ordering::Release);
+        if !self.protocol_revisions.get(&receipt.name)
+            .is_some_and(|current| Arc::ptr_eq(current, &receipt.installed_revision))
+        {
+            return false;
+        }
+        let predecessor_valid = receipt.previous_revision.as_ref()
+            .is_none_or(|revision| revision.load(Ordering::Acquire));
+        self.protocols.remove(&receipt.name);
+        self.protocol_revisions.remove(&receipt.name);
+        if predecessor_valid {
+            if let Some(protocol) = receipt.previous {
+                self.protocols.insert(receipt.name.clone(), protocol);
+                if let Some(revision) = receipt.previous_revision {
+                    self.protocol_revisions.insert(receipt.name, revision);
+                }
+            }
+        }
+        self.methods_cache.clear();
+        self.superprotocol_cache.clear();
+        self.method_resolution_cache.clear();
+        true
     }
 
     /// Look up a protocol by path
@@ -15179,6 +15233,61 @@ impl UnifiedProtocolError {
 mod tests {
     use super::*;
     use crate::advanced_protocols::*;
+
+    fn rollback_protocol(name: &str, kind: ProtocolKind) -> Protocol {
+        Protocol {
+            name: name.into(),
+            kind,
+            type_params: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            super_protocols: List::new(),
+            specialization_info: Maybe::None,
+            defining_crate: Maybe::None,
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    fn protocol_rollback_restores_exact_predecessor_and_preserves_other_names() {
+        let mut registry = ProtocolChecker::new_empty();
+        registry.register_protocol(rollback_protocol("Owner", ProtocolKind::Injectable)).unwrap();
+        let receipt = registry.register_protocol_with_receipt(
+            rollback_protocol("Owner", ProtocolKind::Constraint),
+        ).unwrap();
+        registry.register_protocol(rollback_protocol("Other", ProtocolKind::Constraint)).unwrap();
+        assert!(registry.restore_protocol_binding(receipt));
+        assert_eq!(registry.get_protocol(&"Owner".into()).unwrap().kind, ProtocolKind::Injectable);
+        assert!(registry.has_protocol(&"Other".into()));
+    }
+
+    #[test]
+    fn protocol_rollback_does_not_remove_a_later_identical_publication() {
+        let mut registry = ProtocolChecker::new_empty();
+        let protocol = rollback_protocol("Owner", ProtocolKind::Constraint);
+        let receipt = registry.register_protocol_with_receipt(protocol.clone()).unwrap();
+        // Same contents still belong to another writer; structural equality is
+        // not evidence that the failing group owns the current publication.
+        registry.register_protocol(protocol).unwrap();
+        assert!(!registry.restore_protocol_binding(receipt));
+        assert!(registry.has_protocol(&"Owner".into()));
+    }
+
+    #[test]
+    fn protocol_rollback_does_not_resurrect_a_failed_superseded_publication() {
+        let mut registry = ProtocolChecker::new_empty();
+        let first = registry.register_protocol_with_receipt(
+            rollback_protocol("Owner", ProtocolKind::Constraint),
+        ).unwrap();
+        let second = registry.register_protocol_with_receipt(
+            rollback_protocol("Owner", ProtocolKind::Injectable),
+        ).unwrap();
+        assert!(!registry.restore_protocol_binding(first));
+        assert_eq!(registry.get_protocol(&"Owner".into()).unwrap().kind, ProtocolKind::Injectable);
+        assert!(registry.restore_protocol_binding(second));
+        assert!(!registry.has_protocol(&"Owner".into()));
+    }
 
     /// Build a bare nominal type for the instantiation tests below.
     fn named(name: &str) -> Type {

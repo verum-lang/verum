@@ -123,7 +123,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.29 adds declaration-owned typed destruction, including sum payloads.
 /// Version 2.30 retains declaration-owned function universe signatures.
 /// Version 2.31 retains typed nominal declarations independently of ABI types.
-pub const VERSION_MINOR: u16 = 31;
+// 2.32 carries declaration-owned lexical type bindings in the extensions.
+pub const VERSION_MINOR: u16 = 32;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

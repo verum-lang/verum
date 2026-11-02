@@ -1991,6 +1991,19 @@ impl TypeChecker {
         }
     }
 
+    fn record_variant_parent(&self, path: &verum_ast::ty::Path) -> Option<(Text, Text)> {
+        if path.segments.len() < 2 || !path.segments.iter().all(|segment|
+            matches!(segment, verum_ast::ty::PathSegment::Name(_)))
+        {
+            return None;
+        }
+        let mut parent_path = path.clone();
+        let verum_ast::ty::PathSegment::Name(variant) = parent_path.segments.pop()? else {
+            return None;
+        };
+        Some((self.path_to_string(&parent_path).into(), variant.name))
+    }
+
     fn check_record_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Record { path, fields, base } = &expr.kind
@@ -2074,16 +2087,12 @@ impl TypeChecker {
                 // Aliases do not publish a second constructor function. Use
                 // their resolved parent declaration before the record guard;
                 // the existing variant checker validates the selected payload.
-                let is_aliased_variant_constructor = if lookup_path.segments.len() == 2
-                    && let (
-                        verum_ast::ty::PathSegment::Name(parent),
-                        verum_ast::ty::PathSegment::Name(variant),
-                    ) = (&lookup_path.segments[0], &lookup_path.segments[1])
-                    && let Ok(parent_ty) = self.resolve_type_name(parent.name.as_str(), expr.span)
+                let is_aliased_variant_constructor = if let Some((parent, variant)) = self.record_variant_parent(lookup_path)
+                    && let Ok(parent_ty) = self.resolve_type_name(parent.as_str(), expr.span)
                     && self.resolve_to_record_type(&parent_ty).is_none()
                     && let Type::Variant(variants) = self.expand_generic_to_variant(&parent_ty)
                 {
-                    variants.contains_key(variant.name.as_str())
+                    variants.contains_key(variant.as_str())
                 } else {
                     false
                 };
@@ -11220,14 +11229,12 @@ impl TypeChecker {
         // eprintln!("[DEBUG] infer_expr_inner: Record at {:?}, path={:?}", current_expr.span, path);
 
         // First check if this is a variant constructor (Type.Variant { ... })
-        if path.segments.len() == 2
-            && let (
-                verum_ast::ty::PathSegment::Name(type_ident),
-                verum_ast::ty::PathSegment::Name(variant_ident),
-            ) = (&path.segments[0], &path.segments[1])
+        if let Some((parent_name, variant_name)) = self.record_variant_parent(path)
         {
-            let type_name = type_ident.name.as_str();
-            let variant_name = variant_ident.name.as_str();
+            // Resolve the complete parent path. A module-qualified constructor
+            // has the same payload contract as a locally mounted constructor.
+            let type_name = parent_name.as_str();
+            let variant_name = variant_name.as_str();
 
             // Look up the type to see if it's a variant type.
             //

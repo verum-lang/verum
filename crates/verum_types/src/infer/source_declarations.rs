@@ -113,11 +113,8 @@ impl TypeChecker {
         {
             return Ok((ty.clone(), None));
         }
-        // The existing ambient archive interface remains available, but use
-        // its descriptor authority rather than a consumer's source binding.
-        // A lexical declaration in the signature's own file takes precedence
-        // over the archive's flat-name convenience index. The latter may name
-        // an unrelated sibling with the same leaf spelling.
+        // A lexical declaration in the signature's own file takes precedence.
+        // A flat archive index is not the declaration's import environment.
         let local_owner = self.core_metadata.as_ref().and_then(|metadata| {
             let key: Text = format!("{}.{name}", self.current_module_path).into();
             Self::metadata_type_with_declaring_key(metadata, &key)
@@ -128,19 +125,23 @@ impl TypeChecker {
         {
             return Ok((ty, Some(key)));
         }
-        let metadata_owner = self.core_metadata.as_ref().and_then(|metadata| {
-            metadata.types.get(&Text::from(name)).map(|descriptor| {
-                descriptor
-                    .origin_module_path
-                    .as_ref()
-                    .filter(|owner| !owner.is_empty())
-                    .unwrap_or(&descriptor.module_path)
-                    .clone()
-            })
-        });
-        if let Some(owner) = metadata_owner
-            && let Some((ty, key)) =
-                self.ensure_mounted_type_loaded_with_parameter_key(name, owner.as_str())
+        let (head, tail) = name.split_once('.').unwrap_or((name, ""));
+        let binding = self.core_metadata.as_ref().and_then(|metadata|
+            metadata.declaration_type_bindings.get(&self.current_module_path)
+                .and_then(|bindings| bindings.get(&Text::from(head))).cloned());
+        if let Some(binding) = binding {
+            // Retain an ambiguous or unresolved lexical binding as a refusal.
+            // It must not fall through to a different declaration of `name`.
+            if let Some(path) = binding {
+                let path = if tail.is_empty() { path } else { format!("{path}.{tail}").into() };
+                if let Some((owner, declared_name)) = path.rsplit_once('.')
+                    && let Some((ty, key)) = self.ensure_mounted_type_loaded_with_parameter_key(declared_name, owner)
+                {
+                    return Ok((ty, Some(key)));
+                }
+            }
+        } else if let Some((owner, declared_name)) = name.rsplit_once('.')
+            && let Some((ty, key)) = self.ensure_mounted_type_loaded_with_parameter_key(declared_name, owner)
         {
             return Ok((ty, Some(key)));
         }
@@ -271,9 +272,44 @@ impl TypeChecker {
         span: Span,
     ) -> Result<(Type, Text)> {
         let key: Text = format!("{owner}.{}", declaration.name.name).into();
-        if let Some(ty) = self.ctx.lookup_type(key.as_str()) {
-            return Ok((ty.clone(), key));
+        // A nominal entry may only be a placeholder left by failed source
+        // elaboration. Completed loads, and recursive loads in this active
+        // transaction, are the only authority for a cache hit.
+        if let Some(accepted) = self.source_type_registration.completed.get(&key)
+            .or_else(|| self.source_type_registration.pending.get(&key))
+        {
+            if accepted != declaration {
+                let message: Text = format!("conflicting source declarations while loading {key}").into();
+                if self.source_type_registration.depth != 0 {
+                    self.source_type_registration.failure = Some(message.clone());
+                }
+                return Err(TypeError::UniverseBinding { message, span });
+            }
+            let result = self.ctx.lookup_type(key.as_str()).cloned()
+                .map(|ty| (ty, key.clone()))
+                .ok_or_else(|| TypeError::TypeNotFound { name: key, span });
+            if self.source_type_registration.depth != 0 && let Err(error) = &result {
+                self.source_type_registration.failure = Some(error.to_string().into());
+            }
+            return result;
         }
+        let outermost = self.source_type_registration.depth == 0;
+        if outermost {
+            self.ctx.begin_type_definition_journal();
+            self.unifier.begin_variant_registration_journal();
+        }
+        self.source_type_registration.pending.insert(key.clone(), declaration.clone());
+        self.source_type_registration.aliases.insert(key.clone(), self.unifier.alias_binding(key.as_str()));
+        if matches!(declaration.body, verum_ast::TypeDeclBody::Protocol(_) | verum_ast::TypeDeclBody::Coinductive(_)) {
+            self.source_type_registration.protocols.insert(key.clone(), super::source_type_registration::SourceProtocolRegistration {
+                publications: Vec::new(),
+                unifier_name: self.unifier.protocol_name_is_registered(&key),
+                defaults: self.protocols_with_known_defaults.get(&key).cloned(),
+            });
+        }
+        self.source_type_registration.depth += 1;
+        self.source_type_registration.variants.arities.entry(declaration.name.name.clone())
+            .or_insert_with(|| self.type_generics_count.get(&declaration.name.name).copied());
         // Loading a return type is not a mount of its lexical name or
         // constructors. Keep qualified declaration metadata, while restoring
         // this one pre-existing consumer binding on success and failure.
@@ -303,12 +339,57 @@ impl TypeChecker {
         }
         self.unifier
             .restore_alias_binding(local_name, previous_unifier_alias);
-        registration?;
-        self.ctx
-            .lookup_type(key.as_str())
-            .cloned()
-            .map(|ty| (ty, key.clone()))
-            .ok_or_else(|| TypeError::TypeNotFound { name: key, span })
+        let result = registration.and_then(|()| {
+            self.ctx.lookup_type(key.as_str()).cloned()
+                .map(|ty| (ty, key.clone()))
+                .ok_or_else(|| TypeError::TypeNotFound { name: key.clone(), span })
+        });
+        self.source_type_registration.depth -= 1;
+        if let Err(error) = &result {
+            self.source_type_registration.failure = Some(error.to_string().into());
+        }
+        if outermost {
+            let pending = std::mem::take(&mut self.source_type_registration.pending);
+            let aliases = std::mem::take(&mut self.source_type_registration.aliases);
+            let protocols = std::mem::take(&mut self.source_type_registration.protocols);
+            if let Some(failure) = self.source_type_registration.failure.take() {
+                // A nested declaration may have completed using this load's
+                // provisional type. None of this group's nominal bindings may
+                // remain usable after any member fails; retries must elaborate
+                // them again. Lexical environment entries were already scoped.
+                self.ctx.finish_type_definition_journal(false);
+                self.finish_source_variant_registrations(false);
+                for (name, binding) in aliases {
+                    self.unifier.restore_alias_binding(name, binding);
+                }
+                for (name, binding) in protocols {
+                    for publication in binding.publications.into_iter().rev() {
+                        self.protocol_checker.write().restore_protocol_binding(publication);
+                    }
+                    self.unifier.restore_protocol_name(name.clone(), binding.unifier_name);
+                    match binding.defaults {
+                        Some(defaults) => { self.protocols_with_known_defaults.insert(name, defaults); }
+                        None => { self.protocols_with_known_defaults.remove(&name); }
+                    }
+                }
+                for name in pending.keys() {
+                    self.ctx.type_defs.remove(name);
+                    self.ctx.type_aliases.remove(name);
+                    self.unifier.restore_alias_binding(name.clone(), (None, None));
+                }
+                return match result {
+                    Err(error) => Err(error),
+                    Ok(_) => Err(TypeError::UniverseBinding {
+                        message: format!("source declaration load for {key} failed: {failure}").into(),
+                        span,
+                    }),
+                };
+            }
+            self.ctx.finish_type_definition_journal(true);
+            self.finish_source_variant_registrations(true);
+            self.source_type_registration.completed.extend(pending);
+        }
+        result
     }
 
     /// Resolve only a nominal key whose exact source module declares the type.

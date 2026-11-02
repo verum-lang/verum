@@ -124,6 +124,14 @@ pub struct VbcModule {
     /// Module name.
     pub name: String,
 
+    /// Lexical type and namespace imports for declaration-owned AST carriers.
+    /// Keys are declaring modules, then local names. A `None` target records
+    /// an ambiguous binding and must never authorize a global-name fallback.
+    #[serde(default)]
+    pub declaration_type_bindings: verum_common::OrderedMap<
+        Text, verum_common::OrderedMap<Text, Option<Text>>,
+    >,
+
     /// String table (deduplicated strings).
     pub strings: StringTable,
 
@@ -557,6 +565,7 @@ impl VbcModule {
         Self {
             header: VbcHeader::new(),
             name,
+            declaration_type_bindings: Default::default(),
             strings,
             types: Vec::new(),
             functions: Vec::new(),

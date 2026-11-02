@@ -15271,6 +15271,11 @@ impl TypeChecker {
     /// `variant_collision_log` so `take_variant_collisions()` can
     /// surface them as compile-time diagnostics.
     pub(super) fn register_variant_type_name_first_wins(&mut self, sig: Text, type_name: Text) {
+        let provisional = self.source_type_registration.depth != 0;
+        if provisional {
+            self.source_type_registration.variants.names.entry(sig.clone())
+                .or_insert_with(|| self.variant_type_names.get(&sig).cloned());
+        }
         if let Some(existing) = self.variant_type_names.get(&sig) {
             if existing != &type_name {
                 // The soundness hole the doc above names is REAL and
@@ -15298,16 +15303,24 @@ impl TypeChecker {
                         type_name.as_str()
                     );
                 }
-                self.variant_collision_log
-                    .push((sig.clone(), existing.clone(), type_name.clone()));
+                let collision = (sig.clone(), existing.clone(), type_name.clone());
+                if provisional {
+                    self.source_type_registration.variants.collisions.push(collision);
+                } else {
+                    self.variant_collision_log.push(collision);
+                }
             }
         }
         self.variant_type_names
             .entry(sig.clone())
             .or_insert_with(|| type_name.clone());
-        self.protocol_checker
-            .write()
-            .register_variant_type_name(sig.clone(), type_name.clone());
+        if provisional {
+            self.source_type_registration.variants.shared_names.push((sig.clone(), type_name.clone()));
+        } else {
+            self.protocol_checker
+                .write()
+                .register_variant_type_name(sig.clone(), type_name.clone());
+        }
         self.unifier.register_variant_type_name(sig, type_name);
     }
 

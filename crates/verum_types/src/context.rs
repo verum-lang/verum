@@ -1565,6 +1565,15 @@ impl Default for TypeEnv {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct TypeDefinitionJournal {
+    types: Map<Text, Option<Type>>,
+    aliases: Map<Text, Option<Type>>,
+    module_types: Map<(ModuleId, Text), Option<Type>>,
+    module_aliases: Map<(ModuleId, Text), Option<Type>>,
+    constructors: Map<Text, Option<List<crate::ty::InductiveConstructor>>>,
+}
+
 /// Type context for the entire type checker.
 ///
 /// This maintains global state including:
@@ -1585,6 +1594,9 @@ pub struct TypeContext {
     /// Used for resolving `type Int is i64;` style aliases
     /// When looking up a type, we follow alias chains until we reach a non-alias type
     pub type_aliases: Map<Text, Type>,
+    /// Exact writes made while a source declaration and its dependencies load.
+    /// This journals type namespaces only, not the complete type checker.
+    type_definition_journal: Option<TypeDefinitionJournal>,
     /// Module-qualified type definitions
     /// Maps (module_id, type_name) -> Type
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Qualified type lookup
@@ -1687,6 +1699,7 @@ impl TypeContext {
             env: TypeEnv::new(),
             type_defs: Map::new(),
             type_aliases: Map::new(),
+            type_definition_journal: None,
             module_type_defs: Map::new(),
             module_type_aliases: Map::new(),
             protocol_impls: Map::new(),
@@ -1705,8 +1718,13 @@ impl TypeContext {
         type_name: impl Into<Text>,
         constructors: List<crate::ty::InductiveConstructor>,
     ) {
+        let type_name = type_name.into();
+        if let Some(journal) = &mut self.type_definition_journal {
+            journal.constructors.entry(type_name.clone())
+                .or_insert_with(|| self.inductive_constructors.get(&type_name).cloned());
+        }
         self.inductive_constructors
-            .insert(type_name.into(), constructors);
+            .insert(type_name, constructors);
     }
 
     /// Get constructors for an inductive type (for exhaustiveness checking)
@@ -1937,6 +1955,9 @@ impl TypeContext {
     #[track_caller]
     pub fn define_type(&mut self, name: impl Into<Text>, ty: Type) {
         let name = name.into();
+        if let Some(journal) = &mut self.type_definition_journal {
+            journal.types.entry(name.clone()).or_insert_with(|| self.type_defs.get(&name).cloned());
+        }
         if let Ok(filter) = std::env::var("VERUM_TRACE_DEFTYPE")
             && (filter == "1" || filter == name.as_str())
         {
@@ -1964,6 +1985,46 @@ impl TypeContext {
         self.type_defs.insert(name, ty);
     }
 
+    pub(crate) fn begin_type_definition_journal(&mut self) {
+        debug_assert!(self.type_definition_journal.is_none());
+        self.type_definition_journal = Some(TypeDefinitionJournal::default());
+    }
+
+    pub(crate) fn finish_type_definition_journal(&mut self, commit: bool) {
+        let Some(journal) = self.type_definition_journal.take() else { return; };
+        if commit { return; }
+        for (name, previous) in journal.types {
+            match previous {
+                Some(ty) => { self.type_defs.insert(name, ty); }
+                None => { self.type_defs.remove(&name); }
+            }
+        }
+        for (name, previous) in journal.aliases {
+            match previous {
+                Some(ty) => { self.type_aliases.insert(name, ty); }
+                None => { self.type_aliases.remove(&name); }
+            }
+        }
+        for (name, previous) in journal.module_types {
+            match previous {
+                Some(ty) => { self.module_type_defs.insert(name, ty); }
+                None => { self.module_type_defs.remove(&name); }
+            }
+        }
+        for (name, previous) in journal.module_aliases {
+            match previous {
+                Some(ty) => { self.module_type_aliases.insert(name, ty); }
+                None => { self.module_type_aliases.remove(&name); }
+            }
+        }
+        for (name, previous) in journal.constructors {
+            match previous {
+                Some(constructors) => { self.inductive_constructors.insert(name, constructors); }
+                None => { self.inductive_constructors.remove(&name); }
+            }
+        }
+    }
+
     /// Remove a type definition (for cleanup of temporary type parameters)
     ///
     /// Same `VERUM_TRACE_DEFTYPE` filter as [`Self::define_type`] —
@@ -1971,6 +2032,9 @@ impl TypeContext {
     /// parameter name leaks (T0683).
     #[track_caller]
     pub fn remove_type(&mut self, name: &Text) {
+        if let Some(journal) = &mut self.type_definition_journal {
+            journal.types.entry(name.clone()).or_insert_with(|| self.type_defs.get(name).cloned());
+        }
         if let Ok(filter) = std::env::var("VERUM_TRACE_DEFTYPE")
             && (filter == "1" || filter == name.as_str())
         {
@@ -2000,6 +2064,10 @@ impl TypeContext {
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Module-qualified type definitions
     pub fn define_module_type(&mut self, module_id: ModuleId, name: impl Into<Text>, ty: Type) {
         let name = name.into();
+        if let Some(journal) = &mut self.type_definition_journal {
+            let key = (module_id, name.clone());
+            journal.module_types.entry(key.clone()).or_insert_with(|| self.module_type_defs.get(&key).cloned());
+        }
         // Store in both qualified and unqualified maps for compatibility
         self.module_type_defs
             .insert((module_id, name.clone()), ty.clone());
@@ -2007,7 +2075,7 @@ impl TypeContext {
         if let Maybe::Some(current) = self.current_module()
             && current == module_id
         {
-            self.type_defs.insert(name, ty);
+            self.define_type(name, ty);
         }
     }
 
@@ -2151,12 +2219,18 @@ impl TypeContext {
     /// Register a type alias: `type Alias is Target;`
     pub fn define_alias(&mut self, alias_name: impl Into<Text>, target_type: Type) {
         let alias_name = alias_name.into();
+        if let Some(journal) = &mut self.type_definition_journal {
+            journal.aliases.entry(alias_name.clone()).or_insert_with(|| self.type_aliases.get(&alias_name).cloned());
+        }
         self.type_aliases.insert(alias_name, target_type);
     }
 
     /// Remove a type alias (used when user types override stdlib aliases)
     pub fn remove_alias(&mut self, alias_name: &str) {
         let key: Text = alias_name.into();
+        if let Some(journal) = &mut self.type_definition_journal {
+            journal.aliases.entry(key.clone()).or_insert_with(|| self.type_aliases.get(&key).cloned());
+        }
         self.type_aliases.remove(&key);
     }
 
@@ -2168,6 +2242,10 @@ impl TypeContext {
         target_type: Type,
     ) {
         let alias_name = alias_name.into();
+        if let Some(journal) = &mut self.type_definition_journal {
+            let key = (module_id, alias_name.clone());
+            journal.module_aliases.entry(key.clone()).or_insert_with(|| self.module_type_aliases.get(&key).cloned());
+        }
         self.module_type_aliases
             .insert((module_id, alias_name.clone()), target_type.clone());
 
@@ -2175,7 +2253,7 @@ impl TypeContext {
         if let Maybe::Some(current) = self.current_module()
             && current == module_id
         {
-            self.type_aliases.insert(alias_name, target_type);
+            self.define_alias(alias_name, target_type);
         }
     }
 

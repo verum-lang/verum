@@ -1079,6 +1079,10 @@ pub struct VbcCodegen {
     // None is an ambiguous glob binding, not permission to use a bare alias.
     source_type_mounts: Map<Text, Map<Text, Option<Text>>>,
 
+    /// Imported declaration scopes are immutable receipts, separate from a
+    /// source unit's incrementally collected mounts until finalization.
+    imported_declaration_type_bindings: Map<Text, Option<verum_common::OrderedMap<Text, Option<Text>>>>,
+
     /// SIBLING-IMPL-MATERIALIZATION-1 (#51): per-qualified-name count
     /// of impl-block method registrations.  The FIRST `implement`
     /// block's `<Type>.<method>` keeps the plain key (single-impl
@@ -2320,6 +2324,7 @@ impl VbcCodegen {
             current_impl_ast_generics: None,
             current_impl_semantic_target: None,
             source_type_mounts: Map::new(),
+            imported_declaration_type_bindings: Map::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
@@ -7145,6 +7150,89 @@ impl VbcCodegen {
             None => self.config.module_name.as_str(),
         };
         Some(crate::module::qualify_module_name(owner, name).into())
+    }
+
+    /// Retain the lexical environment that gives an imported AST its meaning.
+    /// Missing scope is distinct from a known empty scope. A later import may
+    /// not silently reinterpret either one.
+    fn retain_declaration_type_scope(
+        &mut self, module: &crate::module::VbcModule, owner: &str,
+    ) -> CodegenResult<()> {
+        let incoming = module.declaration_type_bindings.get(&Text::from(owner));
+        if let Some(existing) = self.imported_declaration_type_bindings.get(&Text::from(owner)) {
+            if existing.as_ref() != incoming {
+                return self.reject_source_declaration(format!(
+                    "conflicting lexical type bindings for declaration owner {owner}",
+                ).into());
+            }
+        } else {
+            self.imported_declaration_type_bindings.insert(owner.into(), incoming.cloned());
+        }
+        Ok(())
+    }
+
+    fn retain_module_declaration_type_scopes(
+        &mut self, module: &crate::module::VbcModule,
+    ) -> CodegenResult<()> {
+        let mut owners = std::collections::BTreeSet::new();
+        for descriptor in &module.types {
+            if descriptor.source_declaration.is_some() {
+                owners.insert(descriptor.origin_module.and_then(|id| module.strings.get(id))
+                    .unwrap_or(&module.name));
+            }
+        }
+        for descriptor in &module.functions {
+            if descriptor.source_signature.is_some() {
+                owners.insert(descriptor.origin_module.and_then(|id| module.strings.get(id))
+                    .unwrap_or(&module.name));
+            }
+        }
+        for owner in owners { self.retain_declaration_type_scope(module, owner)?; }
+        Ok(())
+    }
+
+    fn collect_declaration_type_bindings(&self) -> CodegenResult<crate::declaration_bindings_codec::Bindings> {
+        let mut owners = std::collections::BTreeSet::new();
+        for descriptor in &self.types {
+            if descriptor.source_declaration.is_some() {
+                owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
+                    .map(String::as_str).unwrap_or(&self.config.module_name));
+            }
+        }
+        for descriptor in &self.functions {
+            let descriptor = &descriptor.descriptor;
+            if descriptor.source_signature.is_some() {
+                owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
+                    .map(String::as_str).unwrap_or(&self.config.module_name));
+            }
+        }
+        let mut bindings = crate::declaration_bindings_codec::Bindings::new();
+        for owner in owners {
+            let owner = Text::from(owner);
+            let source: Option<verum_common::OrderedMap<_, _>> = self.source_type_mounts.get(&owner)
+                .map(|names| names.iter().map(|(name, target)| {
+                    // A qualified re-export may have a different declaring
+                    // owner. Only the exact registered path and its nominal
+                    // ID can establish that identity; never consult a leaf.
+                    let target = target.as_ref().map(|target| {
+                        target.contains(".").then(|| self.type_name_to_id.get(target.as_str()))
+                            .flatten().and_then(|id| self.type_by_id(*id))
+                            .and_then(|descriptor| self.type_declaration_identity(descriptor))
+                            .unwrap_or_else(|| target.clone())
+                    });
+                    (name.clone(), target)
+                }).collect());
+            let imported = self.imported_declaration_type_bindings.get(&owner);
+            if source.is_some() && imported.is_some_and(|scope| scope != &source) {
+                return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
+                    "source completion changed lexical type bindings for declaration owner {owner}",
+                ))));
+            }
+            if let Some(scope) = source.or_else(|| imported.cloned().flatten()) {
+                bindings.insert(owner, scope);
+            }
+        }
+        Ok(bindings)
     }
 
     fn check_source_declaration_error(&self) -> CodegenResult<()> {
@@ -12507,6 +12595,14 @@ impl VbcCodegen {
                         None => func_name.clone(),
                     },
                 };
+
+                // A lexical path remains authoritative even when it is a
+                // private rename or a lowercase namespace prefix. Capture it
+                // before namespace/function lowering takes an early return.
+                let source_owner = self.ctx.current_source_module.as_deref()
+                    .unwrap_or(&self.config.module_name);
+                self.source_type_mounts.entry(source_owner.into()).or_default()
+                    .insert(alias_name.as_str().into(), Some(full_path.join(".").into()));
 
                 // An exact declared module is a namespace even when it has
                 // only types or a single path segment. Publish this intent
@@ -25343,6 +25439,7 @@ impl VbcCodegen {
         self.emit_canonical_report_if_traced();
 
         let mut module = VbcModule::new(self.config.module_name.clone());
+        module.declaration_type_bindings = self.collect_declaration_type_bindings()?;
 
         // IMPORTANT: Intern strings FIRST and build mapping from codegen index to module StringId.
         // Codegen uses simple indices (0, 1, 2...) while VbcModule uses byte offsets.
@@ -27497,6 +27594,9 @@ impl VbcCodegen {
         if self.check_source_declaration_error().is_err() {
             return;
         }
+        if self.retain_module_declaration_type_scopes(module).is_err() {
+            return;
+        }
         let mut incoming_declarations: Map<Text, &verum_ast::TypeDecl> = Map::new();
         for descriptor in &module.types {
             let Some(declaration) = descriptor.source_declaration.as_ref() else {
@@ -27979,6 +28079,10 @@ impl VbcCodegen {
         func_id_remap: &std::collections::HashMap<u32, crate::module::FunctionId>,
     ) -> usize {
         use std::collections::HashMap;
+
+        if self.retain_module_declaration_type_scopes(archive_module).is_err() {
+            return 0;
+        }
 
         // **Archive-wide name index population** (task #12 fix).
         //

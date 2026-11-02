@@ -20,6 +20,13 @@ use verum_common::Text;
 use verum_common::ToText;
 use verum_common::{List, Map, Maybe};
 
+#[derive(Default)]
+struct VariantRegistrationJournal {
+    names: Map<Text, Option<Text>>,
+    originals: Map<Text, Option<Type>>,
+    orders: Map<Text, Option<List<TypeVar>>>,
+}
+
 /// Unifier performs type unification.
 ///
 /// CRITICAL: The Unifier now maintains an accumulated substitution that
@@ -68,6 +75,7 @@ pub struct Unifier {
     /// Key is the type name, value is the list of TypeVars in declaration order.
     /// For `type Validated<E, A>`, this stores [E_typevar, A_typevar].
     type_var_orders: Map<Text, List<TypeVar>>,
+    variant_registration_journal: Option<VariantRegistrationJournal>,
     /// Type alias registry: maps alias names to their target types.
     /// E.g., "Byte" -> Named("UInt8"), enabling transparent unification
     /// through aliases like `type Byte is UInt8;`.
@@ -289,6 +297,7 @@ impl Unifier {
             original_variant_types: Map::new(),
             protocol_names: std::collections::HashSet::new(),
             type_var_orders: Map::new(),
+            variant_registration_journal: None,
             type_aliases: Map::new(),
             type_alias_params: Map::new(),
             array_coercible_types,
@@ -479,6 +488,15 @@ impl Unifier {
     /// concrete→protocol unify arm can subsume (see the field doc).
     pub fn register_protocol_name(&mut self, name: &str) {
         self.protocol_names.insert(Text::from(name));
+    }
+
+    pub(crate) fn protocol_name_is_registered(&self, name: &Text) -> bool {
+        self.protocol_names.contains(name)
+    }
+
+    pub(crate) fn restore_protocol_name(&mut self, name: Text, was_registered: bool) {
+        if was_registered { self.protocol_names.insert(name); }
+        else { self.protocol_names.remove(&name); }
     }
 
     pub fn resolve_aliased_head_text(&self, name: &str) -> Option<String> {
@@ -722,11 +740,21 @@ impl Unifier {
     /// Set the variant type names registry for stdlib-agnostic unification.
     /// This should be called when initializing the unifier with type context data.
     pub fn set_variant_type_names(&mut self, registry: Map<Text, Text>) {
+        if let Some(journal) = &mut self.variant_registration_journal {
+            for signature in self.variant_type_names.keys().chain(registry.keys()) {
+                journal.names.entry(signature.clone())
+                    .or_insert_with(|| self.variant_type_names.get(signature).cloned());
+            }
+        }
         self.variant_type_names = registry;
     }
 
     /// Register a variant type name mapping.
     pub fn register_variant_type_name(&mut self, signature: Text, type_name: Text) {
+        if let Some(journal) = &mut self.variant_registration_journal {
+            journal.names.entry(signature.clone())
+                .or_insert_with(|| self.variant_type_names.get(&signature).cloned());
+        }
         // Use entry().or_insert to keep FIRST registration (stdlib types registered first
         // should take precedence). This ensures deterministic variant resolution
         // regardless of module registration order.
@@ -738,13 +766,49 @@ impl Unifier {
     /// Register the original (unsubstituted) variant type definition.
     /// This is needed for Generic<->Variant unification to properly map type arguments.
     pub fn register_original_variant_type(&mut self, type_name: Text, original_type: Type) {
+        if let Some(journal) = &mut self.variant_registration_journal {
+            journal.originals.entry(type_name.clone())
+                .or_insert_with(|| self.original_variant_types.get(&type_name).cloned());
+        }
         self.original_variant_types.insert(type_name, original_type);
     }
 
     /// Register the type variable order for a variant type.
     /// This maps type name to the list of TypeVars in declaration order.
     pub fn register_type_var_order(&mut self, type_name: Text, order: List<TypeVar>) {
+        if let Some(journal) = &mut self.variant_registration_journal {
+            journal.orders.entry(type_name.clone())
+                .or_insert_with(|| self.type_var_orders.get(&type_name).cloned());
+        }
         self.type_var_orders.insert(type_name, order);
+    }
+
+    pub(crate) fn begin_variant_registration_journal(&mut self) {
+        debug_assert!(self.variant_registration_journal.is_none());
+        self.variant_registration_journal = Some(VariantRegistrationJournal::default());
+    }
+
+    pub(crate) fn finish_variant_registration_journal(&mut self, commit: bool) {
+        let Some(journal) = self.variant_registration_journal.take() else { return; };
+        if commit { return; }
+        for (name, previous) in journal.names {
+            match previous {
+                Some(value) => { self.variant_type_names.insert(name, value); }
+                None => { self.variant_type_names.remove(&name); }
+            }
+        }
+        for (name, previous) in journal.originals {
+            match previous {
+                Some(value) => { self.original_variant_types.insert(name, value); }
+                None => { self.original_variant_types.remove(&name); }
+            }
+        }
+        for (name, previous) in journal.orders {
+            match previous {
+                Some(value) => { self.type_var_orders.insert(name, value); }
+                None => { self.type_var_orders.remove(&name); }
+            }
+        }
     }
 
     /// Register a type alias mapping (e.g., "Byte" -> UInt8 Named type).
@@ -6435,6 +6499,39 @@ mod var_var_age_discipline {
         // a cycle would either loop or resolve to the younger var.
         assert_eq!(u.apply(&Type::Var(b)), Type::Var(a));
         assert_eq!(u.apply(&Type::Var(a)), Type::Var(a));
+    }
+}
+
+#[cfg(test)]
+mod variant_registration_rollback {
+    use super::*;
+
+    #[test]
+    fn restores_existing_variant_bindings_and_removes_provisional_bindings() {
+        let mut unifier = Unifier::new();
+        let original = TypeVar::fresh();
+        let provisional = TypeVar::fresh();
+        unifier.register_variant_type_name("signature".into(), "Stable".into());
+        unifier.register_original_variant_type("Stable".into(), Type::Var(original));
+        unifier.register_type_var_order("Stable".into(), List::from_single(original));
+        unifier.begin_variant_registration_journal();
+        unifier.set_variant_type_names(Map::new());
+        for name in ["Stable", "Child"] {
+            unifier.register_variant_type_name(name.into(), name.into());
+            unifier.register_original_variant_type(name.into(), Type::Var(provisional));
+            unifier.register_type_var_order(name.into(), List::from_single(provisional));
+        }
+        unifier.finish_variant_registration_journal(false);
+        assert_eq!(unifier.variant_type_names.get(&Text::from("signature")), Some(&Text::from("Stable")));
+        assert_eq!(unifier.original_variant_types.get(&Text::from("Stable")), Some(&Type::Var(original)));
+        assert_eq!(unifier.type_var_orders.get(&Text::from("Stable")), Some(&List::from_single(original)));
+        assert!(!unifier.variant_type_names.contains_key(&Text::from("Child")));
+        assert!(!unifier.original_variant_types.contains_key(&Text::from("Child")));
+        assert!(!unifier.type_var_orders.contains_key(&Text::from("Child")));
+        unifier.begin_variant_registration_journal();
+        unifier.register_original_variant_type("Child".into(), Type::Var(provisional));
+        unifier.finish_variant_registration_journal(true);
+        assert_eq!(unifier.original_variant_types.get(&Text::from("Child")), Some(&Type::Var(provisional)));
     }
 }
 

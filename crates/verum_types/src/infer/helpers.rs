@@ -2285,6 +2285,7 @@ pub(crate) fn register_variant_signature_for_lazy(
     // "expected 'UpdateOp', found 'UoInsert'".
     for case in cases.iter() {
         let vn: Text = case.name.clone();
+        checker.journal_variant_parent(&vn);
         let parents = checker.variant_constructor_parents.entry(vn).or_default();
         if !parents.iter().any(|p| p.as_str() == name.as_str()) {
             parents.push(name.clone());
