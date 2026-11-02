@@ -40,6 +40,7 @@ mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.base.env.{var_opt as env_var_opt, shell as host_shell, temp_dir as host_temp_dir};
 mount core.text.format.{Formatter, FormatError};
 mount core.io.fs.{current_dir as fs_current_dir};
+mount core.io.process.{Command};
 mount core.shell.escape.{ShellFlavour, default_flavour};
 mount core.shell.result.{ShellResult, ShellError};
 
@@ -363,6 +364,12 @@ implement ShellContext {
                 Result.Err(_) => Maybe.None,
             },
         }
+    }
+
+    /// Apply the working-directory and environment overrides to a child command.
+    public fn configure_command(&self, command: &mut Command) {
+        if let Maybe.Some(dir) = &self.cwd { command.current_dir(dir.clone()); }
+        for (key, value) in self.env_overrides.iter() { command.env(key.clone(), value.clone()); }
     }
 
     /// Resolve the shell binary for `-c` dispatch.
