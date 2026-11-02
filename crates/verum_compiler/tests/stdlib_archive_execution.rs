@@ -89,9 +89,6 @@ fn cancelled_accept_preserves_the_pending_tcp_connection() {
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn sqlite_snapshot_checks_execute_from_the_published_archive() {
-    let archive =
-        PathBuf::from(std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("candidate .vbca"));
-    let archive = read_archive_from_file(archive).unwrap();
     let source = r#"
         module app;
         mount core.database.sqlite.native.l1_pager.snapshot.{SnapshotError, snapshot_new, ensure_fresh};
@@ -111,6 +108,13 @@ fn sqlite_snapshot_checks_execute_from_the_published_archive() {
             fresh + stale
         }
     "#;
+    assert_eq!(execute_from_archive(source), 13);
+}
+
+fn execute_from_archive(source: &str) -> i64 {
+    let archive =
+        PathBuf::from(std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("candidate .vbca"));
+    let archive = read_archive_from_file(archive).unwrap();
     let app = Parser::new(source).parse_module().unwrap();
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("app"));
     ArchiveCtxCache::new().apply_lazy_with_types(&archive, &mut codegen, &app, &[]);
@@ -123,7 +127,7 @@ fn sqlite_snapshot_checks_execute_from_the_published_archive() {
     let main = module.find_function_by_name("app.main").unwrap();
     let mut vm = Interpreter::new(Arc::new(module));
     vm.run_global_ctors().unwrap();
-    assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(13));
+    vm.execute_function(main).unwrap().try_as_i64().expect("integer result")
 }
 
 #[cfg(target_os = "macos")]
