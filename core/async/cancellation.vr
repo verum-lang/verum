@@ -587,7 +587,7 @@ implement Drop for CancelledFuture {
 // Dropping a Registration deregisters the callback before it fires.
 // If cancel has already happened, the callback already fired and Drop is a no-op.
 
-public type Registration is {
+public type affine Registration is {
     flag: Shared<CancellationFlag>,
     id: RegistrationId,
 };

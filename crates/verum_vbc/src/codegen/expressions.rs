@@ -16243,14 +16243,16 @@ impl VbcCodegen {
                     .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i + 1)?.as_ref()))?
                     .or_internal("method arg has no value")?;
                 let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
-                // Only the declaration selected for direct dispatch can grant
-                // an owned destination. Dynamic/builtin dispatch keeps its
-                // existing argument contract.
-                let arg_val = if let Some(callable) = resolved_method.as_ref()
-                    .filter(|_| devirt_func_id.is_some()) {
-                    self.emit_owned_call_argument(callable, i + 1, arg, arg_val)
-                } else { arg_val };
-                copy_arguments.push(stores_arguments && self.binds_a_copy_of_a_place(arg, arg_val, copy_type.as_ref())?);
+                // Builtin storage uses CallM for its native layout. The selected
+                // declaration still specifies which operands own their values.
+                let receives_value = devirt_func_id.is_some()
+                    || (stores_arguments && type_prefix_intercepted_by_runtime(&effective_method_name));
+                let source = arg_val;
+                let arg_val = if let Some(callable) = resolved_method.as_ref().filter(|_| receives_value) {
+                    self.emit_owned_call_argument(callable, i + 1, arg, source)
+                } else { source };
+                copy_arguments.push(source == arg_val && stores_arguments
+                    && self.binds_a_copy_of_a_place(arg, source, copy_type.as_ref())?);
                 if let Some(saved) = saved_disambig {
                     self.ctx.pop_disambig_context(saved);
                 }

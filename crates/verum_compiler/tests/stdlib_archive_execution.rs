@@ -10,6 +10,31 @@ use verum_vbc::{
 
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn a_list_owns_its_transferred_cancellation_registration() {
+    let source = r#"
+        module app;
+        mount core.async.cancellation.{CancellationToken, Registration};
+        mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+        static OBSERVED: AtomicInt = AtomicInt.new(0);
+        fn retain(regs: &mut List<Registration>, token: &CancellationToken) {
+            let reg = token.register(|| { let _ = OBSERVED.fetch_add(1, MemoryOrdering.AcqRel); });
+            regs.push(reg);
+        }
+        fn main() -> Int {
+            let token = CancellationToken.new();
+            let mut regs: List<Registration> = [];
+            retain(&mut regs, &token);
+            token.cancel();
+            token.cancel();
+            assert_eq(OBSERVED.load(MemoryOrdering.Acquire), 1);
+            73
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 73);
+}
+
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn bounded_channel_preserves_payloads_and_destroys_generic_endpoints() {
     let source = r#"
         module app;
