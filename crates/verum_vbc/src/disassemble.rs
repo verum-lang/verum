@@ -6,7 +6,7 @@
 use std::fmt::Write;
 
 use crate::instruction::{Instruction, Reg};
-use crate::module::{Constant, VbcModule};
+use crate::module::{Constant, FunctionDescriptor, VbcModule};
 use crate::types::{CbgrTier, Mutability, TypeId, TypeRef};
 
 /// Disassemble a VBC module to human-readable text.
@@ -42,46 +42,81 @@ fn write_module(out: &mut String, module: &VbcModule) -> std::fmt::Result {
     // Types
     if !module.types.is_empty() {
         writeln!(out, "; === Types ===")?;
-        for (i, td) in module.types.iter().enumerate() {
-            let tid = i as u32 + TypeId::FIRST_USER;
+        for td in &module.types {
+            let tid = td.id.0;
             let name = module.get_string(td.name).unwrap_or("?");
             writeln!(out, ";   T{}: {} ({:?})", tid, name, td.kind)?;
         }
         writeln!(out)?;
     }
 
-    // Functions
-    for (i, func) in module.functions.iter().enumerate() {
-        let name = module.get_string(func.name).unwrap_or("?");
-        let ret = format_type_ref(module, &func.return_type);
-
-        write!(out, "; fn {}(", name)?;
-        for (j, p) in func.params.iter().enumerate() {
-            if j > 0 {
-                write!(out, ", ")?;
-            }
-            let pname = module.get_string(p.name).unwrap_or("_");
-            let pty = format_type_ref(module, &p.type_ref);
-            write!(out, "{}: {}", pname, pty)?;
+    for func in &module.functions {
+        match write_function(out, module, func) {
+            Ok(()) => writeln!(out)?,
+            Err(error) => writeln!(
+                out,
+                "; fn {} [{}]: {error}",
+                module.get_string(func.name).unwrap_or("?"),
+                func.id.0
+            )?,
         }
-        writeln!(
-            out,
-            ") -> {}  [id={}, regs={}, locals={}]",
-            ret, i, func.register_count, func.locals_count
-        )?;
-
-        if let Some(instructions) = &func.instructions {
-            for (j, instr) in instructions.iter().enumerate() {
-                write!(out, "  {:04}  ", j)?;
-                write_instruction(out, module, instr)?;
-                writeln!(out)?;
-            }
-        } else {
-            writeln!(out, "  ; (no decoded instructions)")?;
-        }
-        writeln!(out)?;
     }
+    Ok(())
+}
 
+/// Decode one descriptor, including bodies loaded from a serialized archive.
+/// Stored offsets are relative to the start of the selected function.
+pub fn disassemble_function(
+    module: &VbcModule,
+    func: &FunctionDescriptor,
+) -> crate::error::VbcResult<String> {
+    let mut out = String::new();
+    write_function(&mut out, module, func)?;
+    Ok(out)
+}
+
+fn write_function(
+    out: &mut String,
+    module: &VbcModule,
+    func: &FunctionDescriptor,
+) -> crate::error::VbcResult<()> {
+    let name = module.get_string(func.name).unwrap_or("?");
+    write!(out, "; fn {name}(").expect("writing to String");
+    for (index, param) in func.params.iter().enumerate() {
+        if index != 0 { out.push_str(", "); }
+        let name = module.get_string(param.name).unwrap_or("_");
+        write!(out, "{name}: {}", format_type_ref(module, &param.type_ref)).expect("writing to String");
+    }
+    writeln!(out, ") -> {}  [id={}, regs={}, locals={}]",
+        format_type_ref(module, &func.return_type), func.id.0, func.register_count, func.locals_count)
+        .expect("writing to String");
+    let mut line = |position: usize, instruction: &Instruction| {
+        write!(out, "  {position:04}  ").expect("writing to String");
+        write_instruction(out, module, instruction).expect("writing to String");
+        out.push('\n');
+    };
+    if let Some(instructions) = &func.instructions {
+        for (index, instruction) in instructions.iter().enumerate() {
+            line(index, instruction);
+        }
+    } else {
+        let invalid_range = || crate::error::VbcError::SectionOverflow {
+            section: "function bytecode",
+            offset: func.bytecode_offset,
+            size: func.bytecode_length,
+        };
+        let start = func.bytecode_offset as usize;
+        let end = start
+            .checked_add(func.bytecode_length as usize)
+            .ok_or_else(invalid_range)?;
+        let code = module.bytecode.get(start..end).ok_or_else(invalid_range)?;
+        let mut pc = 0;
+        while pc < code.len() {
+            let start = pc;
+            let instruction = crate::bytecode::decode_instruction(code, &mut pc)?;
+            line(start, &instruction);
+        }
+    }
     Ok(())
 }
 
@@ -897,5 +932,31 @@ fn write_instruction(
                 write!(out, "{}", dbg)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use crate::module::FunctionId;
+
+    #[test]
+    fn wire_disassembly_uses_the_exact_descriptor_range_and_id() {
+        let mut module = VbcModule::new("archive".into());
+        let mut function = FunctionDescriptor::default();
+        function.id = FunctionId(71);
+        function.name = module.strings.intern("probe");
+        module.bytecode.push(0xff);
+        function.bytecode_offset = 1;
+        crate::bytecode::encode_instruction(&Instruction::LoadI { dst: Reg(1), value: 37 }, &mut module.bytecode);
+        crate::bytecode::encode_instruction(&Instruction::Ret { value: Reg(1) }, &mut module.bytecode);
+        function.bytecode_length = module.bytecode.len() as u32 - 1;
+        module.bytecode.push(0xff);
+        let text = disassemble_function(&module, &function).unwrap();
+        assert!(text.contains("id=71") && text.contains("LOAD_I    r1, 37") && text.contains("RET       r1"), "{text}");
+        function.bytecode_length += 1;
+        assert!(disassemble_function(&module, &function).is_err());
+        function.bytecode_offset = u32::MAX;
+        assert!(disassemble_function(&module, &function).is_err());
     }
 }
