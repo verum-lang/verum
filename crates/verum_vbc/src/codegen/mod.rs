@@ -7143,8 +7143,12 @@ impl VbcCodegen {
 
     fn collect_declaration_type_bindings(&self) -> CodegenResult<crate::declaration_bindings_codec::Bindings> {
         let mut owners = std::collections::BTreeSet::new();
+        // An implementation can reserve a protocol descriptor without declaring
+        // that protocol. Only a source-owned default body needs its lexical scope.
+        owners.extend(self.protocol_registry.values().filter(|protocol| !protocol.default_methods.is_empty())
+            .map(|protocol| protocol.source_module.as_str()));
         for descriptor in &self.types {
-            if descriptor.source_declaration.is_some() || descriptor.kind == crate::types::TypeKind::Protocol {
+            if descriptor.source_declaration.is_some() {
                 owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
                     .map(String::as_str).unwrap_or(&self.config.module_name));
             }

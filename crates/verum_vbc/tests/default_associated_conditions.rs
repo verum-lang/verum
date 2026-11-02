@@ -228,3 +228,44 @@ fn inherited_default_equality_uses_the_protocols_nominal_dependency() {
         }
     }
 }
+
+#[test]
+fn a_referenced_protocol_does_not_own_the_implementors_module_scope() {
+    let facade = Parser::new("module app; public mount .platform.{Timer};")
+        .parse_module()
+        .unwrap();
+    let implementor = Parser::new(
+        "module app.marker; public type Marker is { n: Int };
+        implement Eq for Marker { fn eq(&self, other: &Self) -> Bool { true } }",
+    )
+    .parse_module()
+    .unwrap();
+    let source = Parser::new("module app.platform.clock; public type Timer is { n: Int };")
+        .parse_module()
+        .unwrap();
+    let unit = [&facade, &implementor];
+    let first = VbcCodegen::with_config(CodegenConfig::new("app"))
+        .collect_declaration_interface(&unit)
+        .unwrap();
+    let foreign = VbcCodegen::with_config(CodegenConfig::new("app.platform"))
+        .collect_declaration_interface(&[&source])
+        .unwrap();
+    assert!(
+        first
+            .types
+            .iter()
+            .any(|ty| first.get_string(ty.name) == Some("Eq")
+                && ty.kind == verum_vbc::types::TypeKind::Protocol
+                && ty.origin_module.is_none())
+    );
+    let mut resolved = VbcCodegen::with_config(CodegenConfig::new("app"));
+    resolved
+        .import_bootstrap_nominal_dependencies_with_resolver(&unit, &[&first, &foreign], |name| {
+            (name == "app.platform.Timer").then(|| "app.platform.clock.Timer".into())
+        })
+        .unwrap();
+    let resolved = resolved.collect_declaration_interface(&unit).unwrap();
+    for phase in [&first, &resolved] {
+        assert!(!phase.declaration_type_bindings.contains_key(&"app".into()));
+    }
+}

@@ -502,7 +502,7 @@ impl VbcCodegen {
             if ty.kind == TypeKind::Protocol
                 && let Some((owner, name)) = key.rsplit_once('.')
                 && let Some(protocol) = self.protocol_registry.get(name)
-                && protocol.source_module == owner
+                && protocol.source_module == owner && !protocol.default_methods.is_empty()
             {
                 let mounts = module.declaration_type_bindings.get(&Text::from(owner));
                 let mut paths = SourceNames { names: BTreeSet::new(), codegen: None };
@@ -526,6 +526,7 @@ impl VbcCodegen {
                         pending.push(dependency);
                     }
                 }
+                self.retain_declaration_type_scope(module, owner)?;
             }
             add_dependencies(mi, &key, descriptor_ids(ty), &mut selected, &mut pending)?;
             let methods = methods_by_owner.entry(mi).or_insert_with(|| {
@@ -619,7 +620,7 @@ impl VbcCodegen {
         for key in &selected {
             let (mi, ti) = catalog[key];
             let module = available[mi];
-            if module.types[ti].source_declaration.is_some() || module.types[ti].kind == TypeKind::Protocol {
+            if module.types[ti].source_declaration.is_some() {
                 let owner = module.types[ti].origin_module.and_then(|id| module.strings.get(id))
                     .unwrap_or(&module.name);
                 self.retain_declaration_type_scope(module, owner)?;
