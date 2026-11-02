@@ -137,6 +137,8 @@ impl Serializer {
         let type_table_offset = self.output.len() as u32;
         let type_table_count = module.types.len() as u32;
         for type_desc in &module.types {
+            crate::source_declaration_integrity::validate_type_descriptor(type_desc, &module.strings)
+                .map_err(|message| crate::VbcError::Serialization(message.to_string()))?;
             self.serialize_type_descriptor(type_desc)?;
         }
 
@@ -444,6 +446,12 @@ impl Serializer {
         }
         // v2.18: a missing declaration is distinct from unrestricted usage.
         self.output.push(desc.resource_discipline as u8);
+        self.output.push(u8::from(desc.source_declaration.is_some()));
+        if let Some(declaration) = &desc.source_declaration {
+            let bytes = crate::source_signature_codec::encode_type(declaration)?;
+            encode_varint(bytes.len() as u64, &mut self.output);
+            self.output.extend_from_slice(&bytes);
+        }
 
         Ok(())
     }

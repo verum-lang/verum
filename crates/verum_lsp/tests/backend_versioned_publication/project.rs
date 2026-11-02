@@ -232,6 +232,7 @@ fn library_fixture(target: &str) -> std::sync::Arc<crate::library_metadata::Libr
         metadata.types.insert(
             name.into(),
             TypeDescriptor {
+                source_declaration: None,
                 name: name.into(),
                 module_path: "portable.units".into(),
                 origin_module_path: Maybe::None,
@@ -284,6 +285,22 @@ async fn release_metadata_supplies_import_types_without_inventing_source_locatio
     assert!(snapshot["bindings"][0]["definition"].is_null());
     let private = project.open("private.vr", "mount portable.units.{Hidden}; fn main() {} ");
     assert!(!errors(&project.snapshot(&private).await).is_empty());
+}
+
+#[tokio::test]
+#[ignore = "requires matching VERUM_TEST_LIBRARY_METADATA from a fresh stdlib bake"]
+async fn actual_stdlib_nominal_universes_reach_project_analysis() {
+    let path = std::env::var_os("VERUM_TEST_LIBRARY_METADATA").expect("fresh metadata path");
+    let library = crate::library_metadata::LibraryMetadata::load(std::path::Path::new(&path)).unwrap();
+    let project = Project::with_library(Some(library.clone()));
+    let uri = project.open("main.vr", "mount core.math.hott.{NType}; fn inspect(x: &NType<0>) {} ");
+    let snapshot = project.snapshot(&uri).await;
+    assert!(errors(&snapshot).is_empty(), "{snapshot:#}");
+    assert_eq!(snapshot["analysis_scope"], "project-sources-with-library-metadata");
+    assert_eq!(snapshot["library_metadata"]["sha256"], library.identity.sha256.as_str());
+    assert!(snapshot["bindings"].as_array().unwrap().iter().any(|binding|
+        binding["source_module"] == "core.math.hott" && binding["name"] == "NType"
+    ), "{snapshot:#}");
 }
 
 #[tokio::test]

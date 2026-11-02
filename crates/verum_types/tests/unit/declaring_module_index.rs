@@ -5,6 +5,7 @@ use verum_common::ResourceDiscipline;
 
 fn descriptor(name: &str, module: &str, origin: Maybe<Text>) -> TypeDescriptor {
     TypeDescriptor {
+        source_declaration: None,
         name: name.into(),
         module_path: module.into(),
         origin_module_path: origin,

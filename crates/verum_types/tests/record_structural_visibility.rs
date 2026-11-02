@@ -62,6 +62,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
     }
     for owner in owners {
         let descriptor = TypeDescriptor {
+            source_declaration: None,
             name: "Packet".into(),
             module_path: owner.into(),
             origin_module_path: None,
@@ -105,6 +106,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
 
 fn with_collection_metadata(mut metadata: CoreMetadata) -> CoreMetadata {
     let storage = TypeDescriptor {
+        source_declaration: None,
         name: "Storage".into(),
         module_path: "core.structural_collection".into(),
         origin_module_path: None,

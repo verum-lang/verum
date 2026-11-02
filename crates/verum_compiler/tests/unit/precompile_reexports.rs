@@ -6,6 +6,7 @@ use verum_types::core_metadata::{
 
 fn ty(entry: &str, origin: Option<&str>) -> TypeDescriptor {
     TypeDescriptor {
+        source_declaration: None,
         name: "Contract".into(),
         module_path: entry.into(),
         origin_module_path: origin.map(Text::from),

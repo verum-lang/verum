@@ -1823,6 +1823,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// the cached bake.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 pub(crate) const PRECOMPILE_SCHEMA_VERSION: &str =
+    // v59: VBC2.31 carries complete typed nominal declarations.
     // v58: VBC2.30 and CoreMetadata2 preserve body-free universe signatures.
     // v57: VBC2.29 adds typed destruction; closures retain declaration evidence.
     // v56: VBC2.27 retains source result facts across declaration/archive boundaries.
@@ -1850,7 +1851,7 @@ pub(crate) const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v58-universe-source-signatures";
+    "v59-universe-type-declarations";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

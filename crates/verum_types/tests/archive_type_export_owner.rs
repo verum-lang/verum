@@ -83,6 +83,7 @@ fn observe(error: &TypeError) -> Observation {
 
 fn declaration(owner: &str, generic: bool, policy: Option<Visibility>) -> TypeDescriptor {
     TypeDescriptor {
+        source_declaration: None,
         name: "Packet".into(),
         module_path: "core.bundle".into(),
         origin_module_path: Some(owner.into()),

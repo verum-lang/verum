@@ -3675,6 +3675,17 @@ impl TypeChecker {
         bounds: List<crate::protocol::ProtocolBound>,
     ) {
         if !bounds.is_empty() {
+            // A qualified imported bound owns its declaration just as an
+            // imported parameter type does. Load the typed declaration before
+            // method lookup; an absent definition is not a fresh result type.
+            if let Some(metadata) = self.core_metadata.clone() {
+                for bound in &bounds {
+                    let key = self.path_to_string(&bound.protocol);
+                    if metadata.types.get(&key).is_some_and(|d| d.source_declaration.is_some()) {
+                        self.register_stdlib_protocol_for_name(&key, &metadata);
+                    }
+                }
+            }
             // Validate that all bounds are usable as type constraints (not pure Injectable).
             // A pure Injectable context (declared with `context Name { }`) cannot be used
             // as a type bound — only Constraint and ConstraintAndInjectable protocols can.

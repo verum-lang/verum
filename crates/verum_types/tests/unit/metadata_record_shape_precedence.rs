@@ -8,6 +8,7 @@ use verum_fast_parser::Parser;
 
 fn checker(owner: &str) -> TypeChecker {
     let descriptor = TypeDescriptor {
+        source_declaration: None,
         name: "Packet".into(),
         module_path: owner.into(),
         origin_module_path: None,

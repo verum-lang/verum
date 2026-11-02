@@ -8,6 +8,7 @@ use verum_fast_parser::Parser;
 fn metadata_checker(eager: bool) -> TypeChecker {
     let mut metadata = CoreMetadata::default();
     let descriptor = TypeDescriptor {
+        source_declaration: None,
         name: "Pair".into(),
         module_path: "alpha".into(),
         origin_module_path: None,

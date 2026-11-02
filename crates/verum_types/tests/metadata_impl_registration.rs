@@ -30,6 +30,7 @@ fn descriptor() -> ImplementationDescriptor {
 
 fn metadata(implementations: List<ImplementationDescriptor>) -> CoreMetadata {
     let descriptor = TypeDescriptor {
+        source_declaration: None,
         name: "Container".into(),
         module_path: "owner".into(),
         origin_module_path: Maybe::None,

@@ -1062,6 +1062,8 @@ impl<'a> BytecodeSpecializer<'a> {
             // `TypeDescriptor::is_transparent_wrapper`.
             is_transparent_wrapper: base_desc.map(|d| d.is_transparent_wrapper).unwrap_or(false),
             declared_layout: base_desc.and_then(|d| d.declared_layout),
+            // A specialized runtime carrier is not a new source declaration.
+            source_declaration: None,
         };
 
         // Update layout cache

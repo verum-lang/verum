@@ -154,10 +154,13 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
     // See `resolve_opaque_type_ids_in_alias_targets` for what it fixes.
     let mut archive_type_names: HashMap<u32, Option<String>> = HashMap::new();
     let mut declarations = std::collections::BTreeMap::new();
+    // A repeated owner is a replay only if its complete semantic declaration
+    // agrees. Check before descriptor selection can enrich or replace its ABI.
+    let mut semantic_declarations = std::collections::BTreeMap::new();
     for entry in sorted_index {
         let module = archive.load_module(&entry.name)
             .map_err(|error| Text::from(format!("cannot publish module {}: {error}", entry.name)))?;
-        if module.header.version_minor < 30 {
+        if module.header.version_minor < 31 {
             return Err(format!("module {} predates semantic universe signatures; rebuild the archive", entry.name).into());
         }
         for function in &module.functions {
@@ -173,9 +176,32 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
             }
         }
         for t in module.types.iter() {
+            verum_vbc::source_declaration_integrity::validate_type_descriptor(t, &module.strings)?;
             let Some(n) = module.strings.get(t.name) else {
                 continue;
             };
+            let owner = match t.origin_module {
+                Some(owner) => module.strings.get(owner)
+                    .ok_or_else(|| Text::from("type descriptor has invalid declaring module"))?,
+                None => entry.name.as_str(),
+            };
+            let key = verum_vbc::module::qualify_module_name(owner, n);
+            if let Some(existing) = semantic_declarations.get(&key) {
+                match (existing, &t.source_declaration) {
+                    (Some(previous), Some(current)) if previous != current => {
+                        return Err(format!("conflicting semantic type declarations for {key}").into());
+                    }
+                    (Some(_), None) | (None, Some(_)) => {
+                        // The wire format has no trusted import-stub marker.
+                        // An ABI-only claim cannot establish correspondence
+                        // with a universe-bearing source declaration.
+                        return Err(format!("semantic and ABI-only declarations disagree for {key}; rebuild the archive").into());
+                    }
+                    _ => {}
+                }
+            } else {
+                semantic_declarations.insert(key, t.source_declaration.clone());
+            }
             let (known, conflicting) = match archive_type_names.get(&t.id.0) {
                 None => (false, false),
                 Some(None) => (true, true),
@@ -896,6 +922,7 @@ fn register_module_metadata(
             .collect();
 
         let descriptor = TypeDescriptor {
+            source_declaration: ty.source_declaration.clone(),
             is_public: matches!(
                 ty.visibility,
                 verum_vbc::types::Visibility::Public
@@ -1750,6 +1777,7 @@ fn register_module_metadata(
             continue;
         }
         let descriptor = TypeDescriptor {
+            source_declaration: None,
             is_public: true,
             name: parent_name.clone(),
             module_path: Text::from(""),

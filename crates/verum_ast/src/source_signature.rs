@@ -27,9 +27,7 @@ pub fn signature_uses_universes(function: &FunctionDecl) -> Result<bool> {
 /// Detect universe annotations in an independently declared type, such as a
 /// static or constant annotation, without interpreting rendered names.
 pub fn type_uses_universes(ty: &crate::Type) -> Result<bool> {
-    Budget { nodes: 0, bytes: 0 }
-        .visit(ty, 0)
-        .map_err(|error| error.0)?;
+    Budget::new().visit(ty, 0).map_err(|error| error.0)?;
     let mut scan = SignatureScan::new(false);
     scan.visit_type(ty);
     scan.finish().map(|_| scan.uses_universes)
@@ -39,12 +37,120 @@ pub fn type_uses_universes(ty: &crate::Type) -> Result<bool> {
 /// refuse this declaration when it lacks a structured carrier; guessing from
 /// rendered names or silently treating levels as ordinary type slots is unsound.
 pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<bool> {
-    Budget { nodes: 0, bytes: 0 }
-        .visit(declaration, 0)
-        .map_err(|error| error.0)?;
+    check_type_declaration_size(declaration)?;
     let mut scan = SignatureScan::new(false);
     scan.visit_type_decl(declaration);
     scan.finish().map(|_| scan.uses_universes)
+}
+
+/// Preserve a complete declaration when its annotations need universe semantics,
+/// excluding executable method bodies. Ordinary declarations keep their
+/// established metadata path.
+pub fn source_type_declaration(declaration: &crate::TypeDecl) -> Result<Option<crate::TypeDecl>> {
+    if !type_declaration_uses_universes(declaration)
+        .map_err(|message| type_declaration_error(declaration, message))?
+    {
+        return Ok(None);
+    }
+    validate_type_declaration(declaration, true)
+        .map_err(|message| type_declaration_error(declaration, message))?;
+    Ok(Some(copy_type_declaration(declaration)))
+}
+
+/// Validate a complete decoded declaration before replay. This establishes
+/// bounded syntax and lexical level closure, not its typing or proof obligations.
+/// Executable method bodies and nominal universe parameters are refused;
+/// consumers must not fall back to erased metadata on failure.
+pub fn validate_source_type_declaration(declaration: &crate::TypeDecl) -> Result<()> {
+    validate_type_declaration(declaration, false)
+        .map_err(|message| type_declaration_error(declaration, message))
+}
+
+fn validate_type_declaration(
+    declaration: &crate::TypeDecl,
+    allow_source_bodies: bool,
+) -> Result<()> {
+    use crate::decl::{ProtocolItemKind, TypeDeclBody};
+    check_type_declaration_size(declaration)?;
+    let name = declaration.name.name.as_str();
+    if name.is_empty() || name.contains('.') || name.contains("::") {
+        return Err("nominal carrier name must be a nonempty unqualified source identifier".into());
+    }
+    if declaration
+        .generics
+        .iter()
+        .any(|parameter| matches!(parameter.kind, GenericParamKind::Level { .. }))
+    {
+        return Err("nominal universe parameters require unsupported level instantiation".into());
+    }
+    if !allow_source_bodies {
+        if let TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) = &declaration.body {
+            for item in &body.items {
+                if let ProtocolItemKind::Function { decl, default_impl } = &item.kind {
+                    if decl.body.is_some() || default_impl.is_some() {
+                        return Err(format!(
+                            "method `{}` must not contain an executable body in metadata",
+                            decl.name.name
+                        )
+                        .into());
+                    }
+                }
+            }
+        }
+    }
+    let mut scan = SignatureScan::new(true);
+    scan.visit_type_decl(declaration);
+    scan.finish()?;
+    supported(&scan, false)
+}
+
+fn type_declaration_error(declaration: &crate::TypeDecl, message: Text) -> Text {
+    format!("type declaration `{}`: {message}", declaration.name.name).into()
+}
+
+fn copy_type_declaration(declaration: &crate::TypeDecl) -> crate::TypeDecl {
+    use crate::decl::{ProtocolBody, ProtocolItem, ProtocolItemKind, TypeDeclBody};
+    let body = match &declaration.body {
+        TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) => {
+            let copied = ProtocolBody {
+                is_context: body.is_context,
+                extends: body.extends.clone(),
+                generic_where_clause: body.generic_where_clause.clone(),
+                items: body
+                    .items
+                    .iter()
+                    .map(|item| match &item.kind {
+                        ProtocolItemKind::Function { decl, .. } => ProtocolItem {
+                            kind: ProtocolItemKind::Function {
+                                decl: copy_function_signature(decl),
+                                default_impl: None,
+                            },
+                            span: item.span,
+                        },
+                        _ => item.clone(),
+                    })
+                    .collect(),
+            };
+            if matches!(declaration.body, TypeDeclBody::Protocol(_)) {
+                TypeDeclBody::Protocol(copied)
+            } else {
+                TypeDeclBody::Coinductive(copied)
+            }
+        }
+        body => body.clone(),
+    };
+    crate::TypeDecl {
+        visibility: declaration.visibility.clone(),
+        name: declaration.name.clone(),
+        generics: declaration.generics.clone(),
+        attributes: declaration.attributes.clone(),
+        body,
+        value_params: declaration.value_params.clone(),
+        resource_modifier: declaration.resource_modifier,
+        generic_where_clause: declaration.generic_where_clause.clone(),
+        meta_where_clause: declaration.meta_where_clause.clone(),
+        span: declaration.span,
+    }
 }
 
 /// Capture the entire declaration signature, with only its executable body
@@ -59,7 +165,11 @@ pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Opti
     supported(&scan, is_method || function.is_method())?;
     // Do not clone the body just to discard it: it is outside the carrier's
     // size budget and can contain arbitrarily larger executable syntax.
-    Ok(Some(FunctionDecl {
+    Ok(Some(copy_function_signature(function)))
+}
+
+fn copy_function_signature(function: &FunctionDecl) -> FunctionDecl {
+    FunctionDecl {
         visibility: function.visibility.clone(),
         is_async: function.is_async,
         is_meta: function.is_meta,
@@ -86,7 +196,7 @@ pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Opti
         attributes: function.attributes.clone(),
         body: None,
         span: function.span,
-    }))
+    }
 }
 
 /// Validate a decoded universe signature before using any of its annotations.
@@ -120,6 +230,8 @@ struct SignatureScan {
     universe_in_rank_two: bool,
     rank_two_depth: usize,
     type_bound_depth: usize,
+    nominal_depth: usize,
+    direct_nominal_method: bool,
     scopes: List<Map<Text, bool>>,
     error: Option<Text>,
 }
@@ -132,6 +244,8 @@ impl SignatureScan {
             universe_in_rank_two: false,
             rank_two_depth: 0,
             type_bound_depth: 0,
+            nominal_depth: 0,
+            direct_nominal_method: false,
             scopes: List::new(),
             error: None,
         }
@@ -175,6 +289,9 @@ impl SignatureScan {
             let is_level = matches!(parameter.kind, GenericParamKind::Level { .. });
             if is_level {
                 self.universe();
+                if self.validate && self.nominal_depth != 0 {
+                    self.fail("universe binders inside nominal declarations require unsupported level instantiation");
+                }
             }
             if names.insert(name.clone(), is_level).is_some() && self.validate {
                 self.fail(format!(
@@ -252,6 +369,48 @@ impl SignatureScan {
             }
         }
     }
+    fn record_fields(&mut self, fields: &List<crate::decl::RecordField>) {
+        for field in fields {
+            self.visit_type(&field.ty);
+            self.attributes(&field.attributes);
+            if let Some(default) = &field.default_value {
+                self.visit_expr(default);
+            }
+        }
+    }
+    fn variants(&mut self, variants: &List<crate::decl::Variant>) {
+        for variant in variants {
+            if self.validate
+                && variant
+                    .generic_params
+                    .iter()
+                    .any(|parameter| matches!(parameter.kind, GenericParamKind::Level { .. }))
+            {
+                self.fail(
+                    "constructor universe parameters require unsupported level instantiation",
+                );
+            }
+            self.push_generics(&variant.generic_params);
+            self.attributes(&variant.attributes);
+            if let Some(clause) = &variant.where_clause {
+                self.visit_where_clause(clause);
+            }
+            match &variant.data {
+                Some(crate::decl::VariantData::Tuple(types)) => {
+                    for ty in types {
+                        self.visit_type(ty);
+                    }
+                }
+                Some(crate::decl::VariantData::Record(fields)) => self.record_fields(fields),
+                None => {}
+            }
+            if let Some((from, to)) = &variant.path_endpoints {
+                self.visit_expr(from);
+                self.visit_expr(to);
+            }
+            self.scopes.pop();
+        }
+    }
     fn level(&mut self, level: &UniverseLevelExpr) {
         match level {
             UniverseLevelExpr::Variable(name)
@@ -273,6 +432,25 @@ impl SignatureScan {
 }
 
 impl Visitor for SignatureScan {
+    fn visit_axiom(&mut self, axiom: &crate::decl::AxiomDecl) {
+        self.push_generics(&axiom.generics);
+        self.attributes(&axiom.attributes);
+        for parameter in &axiom.params {
+            self.attributes(&parameter.attributes);
+            self.visit_function_param(parameter);
+        }
+        if let Some(ty) = &axiom.return_type {
+            self.visit_type(ty);
+        }
+        self.visit_expr(&axiom.proposition);
+        for clause in [&axiom.generic_where_clause, &axiom.meta_where_clause]
+            .into_iter()
+            .flatten()
+        {
+            self.visit_where_clause(clause);
+        }
+        self.scopes.pop();
+    }
     fn visit_where_predicate(&mut self, predicate: &crate::ty::WherePredicate) {
         match &predicate.kind {
             WherePredicateKind::Type { ty, bounds } => {
@@ -288,21 +466,30 @@ impl Visitor for SignatureScan {
     }
     fn visit_type_decl(&mut self, declaration: &crate::TypeDecl) {
         use crate::decl::{ProtocolItemKind, TypeDeclBody};
+        if self.validate && self.nominal_depth != 0 {
+            self.fail(
+                "nested type declarations in nominal signature expressions are not supported",
+            );
+        }
+        self.nominal_depth += 1;
         self.push_generics(&declaration.generics);
         self.attributes(&declaration.attributes);
         for parameter in &declaration.value_params {
+            self.attributes(&parameter.attributes);
             self.visit_function_param(parameter);
+        }
+        for clause in [
+            &declaration.generic_where_clause,
+            &declaration.meta_where_clause,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            self.visit_where_clause(clause);
         }
         match &declaration.body {
             TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) => {
-                for clause in [
-                    &declaration.generic_where_clause,
-                    &declaration.meta_where_clause,
-                    &body.generic_where_clause,
-                ]
-                .into_iter()
-                .flatten()
-                {
+                if let Some(clause) = &body.generic_where_clause {
                     self.visit_where_clause(clause);
                 }
                 for ty in &body.extends {
@@ -310,7 +497,10 @@ impl Visitor for SignatureScan {
                 }
                 for item in &body.items {
                     match &item.kind {
-                        ProtocolItemKind::Function { decl, .. } => self.visit_function(decl),
+                        ProtocolItemKind::Function { decl, .. } => {
+                            self.direct_nominal_method = true;
+                            self.visit_function(decl);
+                        }
                         ProtocolItemKind::Type {
                             type_params,
                             where_clause,
@@ -327,19 +517,38 @@ impl Visitor for SignatureScan {
                             self.scopes.pop();
                         }
                         ProtocolItemKind::Const { ty, .. } => self.visit_type(ty),
-                        ProtocolItemKind::Axiom(axiom) => {
-                            self.push_generics(&axiom.generics);
-                            self.visit_axiom(axiom);
-                            self.scopes.pop();
-                        }
+                        ProtocolItemKind::Axiom(axiom) => self.visit_axiom(axiom),
                     }
                 }
             }
-            _ => crate::visitor::walk_type_decl(self, declaration),
+            TypeDeclBody::Alias(ty) | TypeDeclBody::Newtype(ty) => self.visit_type(ty),
+            TypeDeclBody::Record(fields) => self.record_fields(fields),
+            TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants) => {
+                self.variants(variants)
+            }
+            TypeDeclBody::Tuple(types) | TypeDeclBody::SigmaTuple(types) => {
+                for ty in types {
+                    self.visit_type(ty);
+                }
+            }
+            TypeDeclBody::Quotient { base, relation } => {
+                self.visit_type(base);
+                self.visit_expr(relation);
+            }
+            TypeDeclBody::Unit => {}
         }
         self.scopes.pop();
+        self.nominal_depth -= 1;
     }
     fn visit_function(&mut self, function: &FunctionDecl) {
+        let direct_nominal_method = std::mem::take(&mut self.direct_nominal_method);
+        if self.validate
+            && self.nominal_depth != 0
+            && !direct_nominal_method
+            && function.body.is_some()
+        {
+            self.fail("nested function bodies in nominal signature expressions are not supported");
+        }
         self.push_generics(&function.generics);
         for parameter in &function.params {
             self.attributes(&parameter.attributes);
@@ -468,8 +677,16 @@ impl serde::ser::Error for BudgetError {
 struct Budget {
     nodes: usize,
     bytes: usize,
+    skip_root_type_body: bool,
 }
 impl Budget {
+    fn new() -> Self {
+        Self {
+            nodes: 0,
+            bytes: 0,
+            skip_root_type_body: false,
+        }
+    }
     fn visit<T: ?Sized + Serialize>(
         &mut self,
         value: &T,
@@ -500,9 +717,45 @@ impl Budget {
     }
 }
 fn check_size(function: &FunctionDecl) -> Result<()> {
-    Budget { nodes: 0, bytes: 0 }
-        .visit(function, 0)
-        .map_err(|error| error.0)
+    Budget::new().visit(function, 0).map_err(|error| error.0)
+}
+
+fn check_type_declaration_size(declaration: &crate::TypeDecl) -> Result<()> {
+    use crate::decl::{ProtocolBody, ProtocolItemKind, TypeDeclBody};
+    let mut budget = Budget::new();
+    let check = |budget: &mut Budget| -> std::result::Result<(), BudgetError> {
+        match &declaration.body {
+            TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) => {
+                // Bound every outer field without traversing the excluded
+                // executable bodies. The direct copier uses the same boundary.
+                budget.skip_root_type_body = true;
+                budget.visit(declaration, 0)?;
+                budget.skip_root_type_body = false;
+                let ProtocolBody {
+                    is_context,
+                    extends,
+                    generic_where_clause,
+                    items,
+                } = body;
+                budget.visit(is_context, 1)?;
+                budget.visit(extends, 1)?;
+                budget.visit(generic_where_clause, 1)?;
+                for item in items {
+                    match &item.kind {
+                        ProtocolItemKind::Function { decl, .. } => {
+                            budget.visit(&item.span, 1)?;
+                            // At this root, the serializer omits only decl.body.
+                            budget.visit(decl, 0)?;
+                        }
+                        _ => budget.visit(item, 1)?,
+                    }
+                }
+            }
+            _ => budget.visit(declaration, 0)?,
+        }
+        Ok(())
+    };
+    check(&mut budget).map_err(|error| error.0)
 }
 struct Frame<'a> {
     budget: &'a mut Budget,
@@ -619,7 +872,8 @@ impl<'a> serde::Serializer for Frame<'a> {
         name: &'static str,
         _: usize,
     ) -> std::result::Result<Compound<'a>, BudgetError> {
-        let skip_body = self.depth == 0 && name == "FunctionDecl";
+        let skip_body = self.depth == 0
+            && (name == "FunctionDecl" || (name == "TypeDecl" && self.budget.skip_root_type_body));
         Ok(Compound {
             frame: self,
             skip_body,

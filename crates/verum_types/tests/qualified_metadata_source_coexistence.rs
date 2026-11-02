@@ -18,6 +18,7 @@ const KEY: &str = "core.mixed.defining.Packet";
 
 fn metadata(declaring_owner: &str, indexed_key: &str) -> CoreMetadata {
     let descriptor = TypeDescriptor {
+        source_declaration: None,
         name: "Packet".into(),
         module_path: "archive.bundle".into(),
         origin_module_path: Some(declaring_owner.into()),

@@ -7,6 +7,7 @@ use verum_types::{TypeChecker, core_metadata::*, infer::parse_descriptor_type_st
 
 fn wrapper(owner: &str) -> TypeDescriptor {
     TypeDescriptor {
+        source_declaration: None,
         name: "Wrapper".into(),
         module_path: "bundle".into(),
         origin_module_path: Maybe::Some(owner.into()),

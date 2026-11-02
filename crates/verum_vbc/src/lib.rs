@@ -83,6 +83,7 @@ pub mod encoding;
 pub mod reachability;
 pub mod serialize;
 mod source_signature_codec;
+pub mod source_declaration_integrity;
 pub mod validate;
 
 /// VBC module disassembler for human-readable bytecode dumps.

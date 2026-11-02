@@ -1351,6 +1351,12 @@ impl TypeChecker {
         // alias needs to be in the registry by the time pattern
         // matching expands the type.
         for (alias_name, td) in metadata.types.iter() {
+            if td.source_declaration.is_some() {
+                if matches!(td.kind, crate::core_metadata::TypeDescriptorKind::Alias { .. }) {
+                    self.register_metadata_source_type(alias_name, td);
+                }
+                continue;
+            }
             if let crate::core_metadata::TypeDescriptorKind::Alias { target } = &td.kind {
                 let target_ty = parse_descriptor_type_string(target.as_str());
                 self.ctx
@@ -1445,6 +1451,57 @@ impl TypeChecker {
             descriptor.name.clone()
         } else {
             verum_common::qualified_name::qualify_module_name(owner, descriptor.name.as_str())
+        }
+    }
+
+    /// Replay a carried declaration through the source checker in its owner's
+    /// scope. Rendered runtime fields cannot substitute for this authority.
+    fn load_metadata_source_type(
+        &mut self,
+        descriptor: &crate::core_metadata::TypeDescriptor,
+    ) -> Result<(Type, Text)> {
+        let declaration = descriptor.source_declaration.as_ref().ok_or_else(|| TypeError::UniverseBinding {
+            message: "missing metadata source type declaration".into(),
+            span: Span::default(),
+        })?;
+        verum_ast::source_signature::validate_source_type_declaration(declaration)
+            .map_err(|message| TypeError::UniverseBinding { message, span: declaration.span })?;
+        let key = Self::metadata_declaring_key(descriptor);
+        let (owner, name) = key.rsplit_once('.').ok_or_else(|| TypeError::UniverseBinding {
+            message: "metadata source type declaration requires its declaring module".into(),
+            span: declaration.span,
+        })?;
+        if name != declaration.name.name.as_str() {
+            return Err(TypeError::UniverseBinding {
+                message: "metadata source type declaration does not match its descriptor".into(),
+                span: declaration.span,
+            });
+        }
+        self.load_source_type_declaration_with_parameter_key(declaration, &owner.into(), declaration.span)
+    }
+
+    fn register_metadata_source_type(
+        &mut self,
+        name: &Text,
+        descriptor: &crate::core_metadata::TypeDescriptor,
+    ) -> Option<(Type, Text)> {
+        match self.load_metadata_source_type(descriptor) {
+            Ok((ty, key)) => {
+                if !self.current_module_declared_types.contains(name.as_str()) {
+                    self.ctx.define_type(name.clone(), ty.clone());
+                    self.ctx.env.insert(name.clone(), TypeScheme::mono(ty.clone()));
+                    if let Some(target) = self.ctx.type_aliases.get(&key).cloned() {
+                        self.ctx.define_alias(name.clone(), target);
+                        let binding = self.unifier.alias_binding(key.as_str());
+                        self.unifier.restore_alias_binding(name.clone(), binding);
+                    }
+                }
+                Some((ty, key))
+            }
+            Err(error) => {
+                self.deferred_soundness_errors.push(error);
+                None
+            }
         }
     }
 
@@ -1729,6 +1786,15 @@ impl TypeChecker {
             }
         };
         self.register_metadata_resource_discipline(type_desc);
+        if type_desc.source_declaration.is_some() {
+            if self.register_metadata_source_type(name, type_desc).is_some()
+                && self.stdlib_tail_registered.insert(name.clone())
+            {
+                pending.extend(self.register_inherent_methods_from_metadata(name, type_desc, &metadata));
+                pending.extend(self.register_stdlib_impls_for_target(name));
+            }
+            return;
+        }
         self.register_metadata_record_shape(type_desc);
         // A registered alias does not prove its target was loaded: eager
         // registration and lazy dependency loading are separate operations.
@@ -2198,6 +2264,9 @@ impl TypeChecker {
         if public_only && !desc.is_public {
             return None;
         }
+        if desc.source_declaration.is_some() {
+            return self.register_metadata_source_type(&direct_key, &desc);
+        }
         self.register_metadata_record_shape(&desc);
 
         // Run the standard SIMPLE-name lazy load first (bounded
@@ -2425,6 +2494,12 @@ impl TypeChecker {
         metadata: &crate::core_metadata::CoreMetadata,
     ) {
         use crate::protocol::{Protocol, ProtocolMethod};
+        if let Some(descriptor) = metadata.types.get(name)
+            && descriptor.source_declaration.is_some()
+        {
+            self.register_metadata_source_type(name, descriptor);
+            return;
+        }
         let protocol_desc = match metadata.protocols.get(name) {
             Some(d) => d,
             None => return,
@@ -4192,6 +4267,10 @@ impl TypeChecker {
         let ordered_types = Self::stdlib_iteration_order(metadata);
         for (name, type_desc) in ordered_types {
             self.register_metadata_resource_discipline(type_desc);
+            if type_desc.source_declaration.is_some() {
+                self.register_metadata_source_type(name, type_desc);
+                continue;
+            }
             self.register_metadata_record_shape(type_desc);
             // Publish defaults before the generic-sum branch can finish this
             // descriptor. Eager and lazy registration share the same contract.
@@ -4393,6 +4472,12 @@ impl TypeChecker {
         let mut sorted_protocols: Vec<_> = metadata.protocols.iter().collect();
         sorted_protocols.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
         for (name, protocol_desc) in sorted_protocols {
+            if let Some(descriptor) = metadata.types.get(name)
+                && descriptor.source_declaration.is_some()
+            {
+                self.register_metadata_source_type(name, descriptor);
+                continue;
+            }
             // Convert core_metadata methods to protocol ProtocolMethods
             let mut methods = verum_common::Map::new();
             for m in protocol_desc.required_methods.iter() {

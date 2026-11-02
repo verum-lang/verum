@@ -38,6 +38,7 @@ fn descriptor(owner: &str, alias: bool) -> TypeDescriptor {
         (false, true) => &["Noise", "Return", "Input"],
     };
     TypeDescriptor {
+        source_declaration: None,
         name: if alias { "Handler" } else { "Choice" }.into(),
         module_path: "core.parameter_bundle".into(),
         origin_module_path: Some(owner.into()),

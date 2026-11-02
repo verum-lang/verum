@@ -78,6 +78,7 @@ fn metadata_errors(declaring_module: &str, public: bool, call: &str, eager: bool
     use verum_types::core_metadata::*;
     let mut metadata = CoreMetadata::default();
     metadata.types.insert("core.factory.Factory".into(), TypeDescriptor {
+        source_declaration: None,
         name: "Factory".into(), module_path: "core.factory".into(), origin_module_path: Maybe::None,
         generic_params: List::new(), kind: TypeDescriptorKind::Record { fields: List::new() },
         size: Maybe::None, alignment: Maybe::None, methods: List::new(), implements: List::new(),

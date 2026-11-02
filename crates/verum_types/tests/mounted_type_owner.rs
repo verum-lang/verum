@@ -20,6 +20,7 @@ const DECLARATION: &str = r#"
 fn foreign_metadata() -> Arc<CoreMetadata> {
     let mut metadata = CoreMetadata::default();
     let descriptor = TypeDescriptor {
+        source_declaration: None,
         name: "Cache".into(),
         module_path: "core.foreign".into(),
         origin_module_path: Maybe::None,

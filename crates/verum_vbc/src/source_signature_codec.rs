@@ -1,35 +1,68 @@
-//! Bounded declaration-only AST carrier for VBC 2.30.
+//! Bounded declaration-only AST carriers for VBC 2.30 and 2.31.
 
 use crate::error::{VbcError, VbcResult};
-use verum_ast::FunctionDecl;
+use serde::{Serialize, de::DeserializeOwned};
+use verum_ast::{FunctionDecl, TypeDecl};
+use verum_common::Text;
 
 pub(crate) const MAX_SOURCE_SIGNATURE_BYTES: usize = 1024 * 1024;
 
-pub(crate) fn encode(signature: &FunctionDecl, is_method: bool) -> VbcResult<Vec<u8>> {
-    verum_ast::source_signature::validate_source_signature(signature, is_method)
-        .map_err(|message| VbcError::Serialization(message.to_string()))?;
-    let bytes = serde_json::to_vec(signature)
+fn encode_payload<T: Serialize + DeserializeOwned>(
+    declaration: &T,
+    validate: impl Fn(&T) -> Result<(), Text> + Copy,
+) -> VbcResult<Vec<u8>> {
+    validate(declaration).map_err(|message| VbcError::Serialization(message.to_string()))?;
+    let bytes = serde_json::to_vec(declaration)
         .map_err(|error| VbcError::Serialization(error.to_string()))?;
     if bytes.len() > MAX_SOURCE_SIGNATURE_BYTES {
         return Err(VbcError::Serialization(
-            "source signature exceeds byte budget".into(),
+            "source declaration exceeds byte budget".into(),
         ));
     }
-    decode(&bytes, is_method).map_err(|error| VbcError::Serialization(error.to_string()))?;
+    // Writers must produce a payload the bounded reader can accept.
+    decode_payload::<T>(&bytes, validate)
+        .map_err(|error| VbcError::Serialization(error.to_string()))?;
     Ok(bytes)
 }
 
-pub(crate) fn decode(bytes: &[u8], is_method: bool) -> VbcResult<FunctionDecl> {
+fn decode_payload<T: DeserializeOwned>(
+    bytes: &[u8],
+    validate: impl Fn(&T) -> Result<(), Text>,
+) -> VbcResult<T> {
     if bytes.len() > MAX_SOURCE_SIGNATURE_BYTES {
         return Err(VbcError::Deserialization(
-            "source signature exceeds byte budget".into(),
+            "source declaration exceeds byte budget".into(),
         ));
     }
-    // Keep serde_json's recursion limit enabled: validation after a recursive
-    // unbounded binary decode would be too late to protect the reader's stack.
-    let signature: FunctionDecl = serde_json::from_slice(bytes)
+    // Keep the JSON recursion limit enabled before constructing the typed AST.
+    let declaration = serde_json::from_slice(bytes)
         .map_err(|error| VbcError::Deserialization(error.to_string()))?;
-    verum_ast::source_signature::validate_source_signature(&signature, is_method)
-        .map_err(|message| VbcError::Deserialization(message.to_string()))?;
-    Ok(signature)
+    validate(&declaration).map_err(|message| VbcError::Deserialization(message.to_string()))?;
+    Ok(declaration)
+}
+
+pub(crate) fn encode(signature: &FunctionDecl, is_method: bool) -> VbcResult<Vec<u8>> {
+    encode_payload(signature, |signature| {
+        verum_ast::source_signature::validate_source_signature(signature, is_method)
+    })
+}
+
+pub(crate) fn decode(bytes: &[u8], is_method: bool) -> VbcResult<FunctionDecl> {
+    decode_payload(bytes, |signature| {
+        verum_ast::source_signature::validate_source_signature(signature, is_method)
+    })
+}
+
+pub(crate) fn encode_type(declaration: &TypeDecl) -> VbcResult<Vec<u8>> {
+    encode_payload(
+        declaration,
+        verum_ast::source_signature::validate_source_type_declaration,
+    )
+}
+
+pub(crate) fn decode_type(bytes: &[u8]) -> VbcResult<TypeDecl> {
+    decode_payload(
+        bytes,
+        verum_ast::source_signature::validate_source_type_declaration,
+    )
 }

@@ -19,6 +19,7 @@ const BETA: &str = "core.beta.Builder";
 
 fn declaration(owner: &str, public: bool) -> TypeDescriptor {
     TypeDescriptor {
+        source_declaration: None,
         name: "Builder".into(),
         module_path: "core.bundle".into(),
         origin_module_path: Maybe::Some(owner.into()),

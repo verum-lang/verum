@@ -14,6 +14,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
     }
     for owner in owners {
         let descriptor = TypeDescriptor {
+            source_declaration: None,
             name: "Parcel".into(),
             module_path: owner.into(),
             origin_module_path: None,

@@ -794,6 +794,7 @@ mod make_variant_typed_validation_tests {
             alias_target_name: None,
             is_transparent_wrapper: false,
         declared_layout: None,
+        source_declaration: None,
         };
         module.add_type(td);
         // Runtime objects carry the descriptor's `id` field in their

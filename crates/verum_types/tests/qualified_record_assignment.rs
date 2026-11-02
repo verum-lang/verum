@@ -44,6 +44,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
     }
     for (owner, body, own_field) in declarations {
         let descriptor = TypeDescriptor {
+            source_declaration: None,
             name: "Packet".into(),
             module_path: owner.into(),
             origin_module_path: None,

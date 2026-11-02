@@ -12,7 +12,7 @@ use verum_common::{List, Maybe, OrderedMap, Text};
 mod source_signature_wire;
 
 /// Current sidecar schema; bincode archives must be rebuilt when this changes.
-pub const CORE_METADATA_VERSION: u32 = 2;
+pub const CORE_METADATA_VERSION: u32 = 3;
 
 /// Framed sidecars reject stale schemas before decoding their AST payloads.
 pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";
@@ -70,6 +70,14 @@ pub fn decode_metadata(bytes: &[u8]) -> Result<CoreMetadata, verum_common::Text>
 }
 
 fn validate_source_signatures(metadata: &CoreMetadata) -> Result<(), Text> {
+    for descriptor in metadata.types.values() {
+        if let Some(declaration) = &descriptor.source_declaration {
+            verum_ast::source_signature::validate_source_type_declaration(declaration)?;
+            if declaration.name.name.as_str() != descriptor.name.as_str().rsplit('.').next().unwrap_or("") {
+                return Err("source declaration does not belong to its metadata type descriptor".into());
+            }
+        }
+    }
     for descriptor in metadata.functions.values() {
         if let Some(signature) = &descriptor.source_signature {
             verum_ast::source_signature::validate_source_signature(signature, descriptor.parent_type.is_some())?;
@@ -296,6 +304,10 @@ pub struct CoreMetadata {
 /// Descriptor for a type definition in stdlib
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeDescriptor {
+    /// Complete declaration semantics, independent of the erased runtime layout.
+    /// Binder names are elaborated in the recorded declaring module.
+    #[serde(default, with = "source_signature_wire")]
+    pub source_declaration: Maybe<verum_ast::TypeDecl>,
     /// Type name (e.g., "List", "Map", "Maybe")
     pub name: Text,
 

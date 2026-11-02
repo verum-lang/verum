@@ -954,7 +954,7 @@ pub struct DeclaredTypeLayout {
 ///
 /// Contains all metadata about a type including generic parameters,
 /// fields, variants, and protocol implementations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TypeDescriptor {
     /// Unique type ID.
     pub id: TypeId,
@@ -1051,6 +1051,10 @@ pub struct TypeDescriptor {
     /// This does not change object allocation or the width of stored Values.
     #[serde(default)]
     pub declared_layout: Option<DeclaredTypeLayout>,
+    /// Complete declaration-owned semantic type, separate from runtime layout.
+    /// Executable protocol method bodies are absent. VBC 2.31.
+    #[serde(default)]
+    pub source_declaration: Option<verum_ast::TypeDecl>,
 }
 
 impl TypeDescriptor {
@@ -1117,6 +1121,7 @@ impl Default for TypeDescriptor {
             // element `Tuple` lowering paths flip this true.
             is_transparent_wrapper: false,
             declared_layout: None,
+            source_declaration: None,
         }
     }
 }

@@ -4,6 +4,7 @@ use verum_types::{core_metadata::*, module_projection::project_modules};
 
 fn ty(name: &str, entry: &str, origin: Option<&str>, public: bool) -> TypeDescriptor {
     TypeDescriptor {
+        source_declaration: None,
         name: name.into(),
         module_path: entry.into(),
         origin_module_path: origin.map(Text::from),

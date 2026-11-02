@@ -2256,7 +2256,9 @@ impl TypeChecker {
                 };
 
                 let protocol = crate::protocol::Protocol {
-                    name: type_name.clone(),
+                    name: if self.resolving_source_signature {
+                        self.declared_type_key(type_name.as_str())
+                    } else { type_name.clone() },
                     kind,
                     type_params: self.convert_generic_params_to_type_params(&type_decl.generics),
                     methods: protocol_methods.clone(),

@@ -1,10 +1,11 @@
 use verum_ast::decl::{
-    FunctionBody, FunctionDecl, FunctionParam, FunctionParamKind, TypeDecl, TypeDeclBody,
-    Visibility,
+    FunctionBody, FunctionDecl, FunctionParam, FunctionParamKind, ProtocolBody, ProtocolItem,
+    ProtocolItemKind, RecordField, TypeDecl, TypeDeclBody, Variant, VariantData, Visibility,
 };
 use verum_ast::source_signature::{
-    signature_uses_universes, source_signature, type_declaration_uses_universes,
-    type_uses_universes, validate_source_signature,
+    signature_uses_universes, source_signature, source_type_declaration,
+    type_declaration_uses_universes, type_uses_universes, validate_source_signature,
+    validate_source_type_declaration,
 };
 use verum_ast::ty::{
     GenericParam, GenericParamKind, Ident, Path, Type, TypeBound, TypeBoundKind, TypeKind,
@@ -342,4 +343,381 @@ fn cache_type_detection_uses_ast_kinds_not_rendered_names() {
     declaration.body = TypeDeclBody::Alias(Type::new(TypeKind::Int, Span::dummy()));
     declaration.generics.push(level("u"));
     assert!(type_declaration_uses_universes(&declaration).unwrap());
+}
+
+fn type_declaration(body: TypeDeclBody) -> TypeDecl {
+    TypeDecl {
+        visibility: Visibility::Public,
+        name: ident("Carrier"),
+        generics: List::new(),
+        attributes: List::new(),
+        body,
+        value_params: List::new(),
+        resource_modifier: None,
+        generic_where_clause: None,
+        meta_where_clause: None,
+        span: Span::dummy(),
+    }
+}
+
+fn carrier_field() -> RecordField {
+    RecordField::new(
+        Visibility::Public,
+        ident("carrier"),
+        Type::new(TypeKind::Universe { level: None }, Span::dummy()),
+        Span::dummy(),
+    )
+}
+
+fn callable_universe() -> Type {
+    Type::new(
+        TypeKind::Function {
+            params: List::from_iter([Type::new(TypeKind::Int, Span::dummy())]),
+            return_type: Heap::new(universe(UniverseLevelExpr::Concrete(1))),
+            calling_convention: None,
+            contexts: Default::default(),
+        },
+        Span::dummy(),
+    )
+}
+
+#[test]
+fn data_carrier_roundtrips_complete_record_constraints_and_defaults() {
+    let mut field = carrier_field();
+    field.default_value = Some(Expr::new(
+        ExprKind::TypeExpr(Type::new(TypeKind::Int, Span::dummy())),
+        Span::dummy(),
+    ));
+    let mut declaration = type_declaration(TypeDeclBody::Record(List::from_iter([field])));
+    declaration.name = ident("NType");
+    declaration.resource_modifier = Some(verum_ast::decl::ResourceModifier::Affine);
+    declaration.generics.push(GenericParam {
+        kind: GenericParamKind::Meta {
+            name: ident("N"),
+            ty: Type::new(TypeKind::Int, Span::dummy()),
+            refinement: Some(Heap::new(Expr::literal(Literal::bool(true, Span::dummy())))),
+        },
+        is_implicit: false,
+        span: Span::dummy(),
+    });
+    declaration.meta_where_clause = Some(WhereClause::new(
+        List::from_iter([WherePredicate {
+            kind: WherePredicateKind::Meta {
+                constraint: Expr::literal(Literal::bool(true, Span::dummy())),
+            },
+            span: Span::dummy(),
+        }]),
+        Span::dummy(),
+    ));
+    let carrier = source_type_declaration(&declaration).unwrap().unwrap();
+    assert_eq!(carrier, declaration);
+    let decoded: TypeDecl = serde_json::from_slice(&serde_json::to_vec(&carrier).unwrap()).unwrap();
+    validate_source_type_declaration(&decoded).unwrap();
+    assert_eq!(decoded, declaration);
+}
+
+#[test]
+fn data_shapes_and_callable_bounds_preserve_full_declarations() {
+    let ty = universe(UniverseLevelExpr::Concrete(0));
+    let variant = Variant::new(
+        ident("Pack"),
+        Some(VariantData::Tuple(List::from_iter([ty.clone()]))),
+        Span::dummy(),
+    );
+    for body in [
+        TypeDeclBody::Alias(ty.clone()),
+        TypeDeclBody::Newtype(ty.clone()),
+        TypeDeclBody::Tuple(List::from_iter([ty.clone()])),
+        TypeDeclBody::SigmaTuple(List::from_iter([ty])),
+        TypeDeclBody::Variant(List::from_iter([variant.clone()])),
+        TypeDeclBody::Inductive(List::from_iter([variant])),
+    ] {
+        let declaration = type_declaration(body);
+        assert_eq!(
+            source_type_declaration(&declaration).unwrap().unwrap(),
+            declaration
+        );
+    }
+    let mut declaration = type_declaration(TypeDeclBody::Unit);
+    declaration.generics.push(GenericParam {
+        kind: GenericParamKind::Type {
+            name: ident("F"),
+            bounds: List::from_iter([TypeBound {
+                kind: TypeBoundKind::Equality(callable_universe()),
+                span: Span::dummy(),
+            }]),
+            default: Some(callable_universe()),
+        },
+        is_implicit: false,
+        span: Span::dummy(),
+    });
+    declaration
+        .value_params
+        .push(parameter(callable_universe()));
+    assert_eq!(
+        source_type_declaration(&declaration).unwrap().unwrap(),
+        declaration
+    );
+    let ordinary = type_declaration(TypeDeclBody::Alias(Type::new(TypeKind::Int, Span::dummy())));
+    assert!(source_type_declaration(&ordinary).unwrap().is_none());
+}
+
+fn method_item() -> ProtocolItem {
+    let mut method = function();
+    method.name = ident("sections");
+    method.params.push(FunctionParam::new(
+        FunctionParamKind::SelfRef,
+        Span::dummy(),
+    ));
+    method.return_type = Some(universe(UniverseLevelExpr::Concrete(0)));
+    ProtocolItem {
+        kind: ProtocolItemKind::Function {
+            decl: method,
+            default_impl: None,
+        },
+        span: Span::dummy(),
+    }
+}
+
+#[test]
+fn protocol_carriers_strip_source_bodies_and_reject_bodies_on_decode() {
+    let mut item = method_item();
+    let ProtocolItemKind::Function { decl, default_impl } = &mut item.kind else {
+        panic!("method")
+    };
+    let mut expression = Expr::new(
+        ExprKind::TypeExpr(universe(variable("body_only_free_level"))),
+        Span::dummy(),
+    );
+    for _ in 0..300 {
+        expression = Expr::new(ExprKind::Paren(Heap::new(expression)), Span::dummy());
+    }
+    decl.body = Some(FunctionBody::Expr(expression.clone()));
+    *default_impl = Some(FunctionBody::Expr(expression));
+    assert!(source_signature(decl, true).is_err());
+    let associated = ProtocolItem {
+        kind: ProtocolItemKind::Type {
+            name: ident("Item"),
+            type_params: List::from_iter([ordinary("A")]),
+            bounds: List::new(),
+            where_clause: None,
+            default_type: Some(universe(UniverseLevelExpr::Concrete(1))),
+        },
+        span: Span::dummy(),
+    };
+    let mut axiom = verum_ast::decl::AxiomDecl::new(
+        ident("law"),
+        Expr::literal(Literal::bool(true, Span::dummy())),
+        Span::dummy(),
+    );
+    axiom.return_type = Some(universe(UniverseLevelExpr::Concrete(1)));
+    let axiom = ProtocolItem {
+        kind: ProtocolItemKind::Axiom(axiom),
+        span: Span::dummy(),
+    };
+    let body = ProtocolBody::new(List::from_iter([item, associated, axiom]));
+    for body in [
+        TypeDeclBody::Protocol(body.clone()),
+        TypeDeclBody::Coinductive(body),
+    ] {
+        let declaration = type_declaration(body);
+        let original_error = validate_source_type_declaration(&declaration).unwrap_err();
+        assert!(original_error.contains("Carrier") && original_error.contains("sections"));
+        let carrier = source_type_declaration(&declaration).unwrap().unwrap();
+        let (TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body)) = &carrier.body else {
+            panic!("protocol")
+        };
+        let ProtocolItemKind::Function { decl, default_impl } = &body.items[0].kind else {
+            panic!("method")
+        };
+        assert!(decl.body.is_none() && default_impl.is_none());
+        validate_source_type_declaration(&carrier).unwrap();
+        let decoded: TypeDecl =
+            serde_json::from_slice(&serde_json::to_vec(&carrier).unwrap()).unwrap();
+        assert_eq!(decoded, carrier);
+        validate_source_type_declaration(&decoded).unwrap();
+        let (TypeDeclBody::Protocol(original) | TypeDeclBody::Coinductive(original)) =
+            &declaration.body
+        else {
+            panic!("protocol")
+        };
+        assert_eq!(&body.items.as_slice()[1..], &original.items.as_slice()[1..]);
+        for into_default in [false, true] {
+            let mut malicious = carrier.clone();
+            let (TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body)) =
+                &mut malicious.body
+            else {
+                panic!("protocol")
+            };
+            let ProtocolItemKind::Function { decl, default_impl } = &mut body.items[0].kind else {
+                panic!("method")
+            };
+            let body = Some(FunctionBody::Expr(Expr::literal(Literal::bool(
+                true,
+                Span::dummy(),
+            ))));
+            if into_default {
+                *default_impl = body;
+            } else {
+                decl.body = body;
+            }
+            assert!(
+                validate_source_type_declaration(&malicious)
+                    .unwrap_err()
+                    .contains("Carrier")
+            );
+        }
+    }
+}
+
+#[test]
+fn nominal_level_binders_in_all_declaration_scopes_refuse() {
+    let mut top = type_declaration(TypeDeclBody::Alias(universe(variable("u"))));
+    top.generics.push(level("u"));
+    let mut variant = Variant::new(ident("Pack"), None, Span::dummy());
+    variant.generic_params.push(level("u"));
+    let constructor = type_declaration(TypeDeclBody::Inductive(List::from_iter([variant])));
+    let mut method = method_item();
+    let ProtocolItemKind::Function { decl, .. } = &mut method.kind else {
+        panic!("method")
+    };
+    decl.generics.push(level("u"));
+    let method = type_declaration(TypeDeclBody::Protocol(ProtocolBody::new(List::from_iter(
+        [method],
+    ))));
+    let associated = type_declaration(TypeDeclBody::Protocol(ProtocolBody::new(List::from_iter(
+        [ProtocolItem {
+            kind: ProtocolItemKind::Type {
+                name: ident("Item"),
+                type_params: List::from_iter([level("u")]),
+                bounds: List::new(),
+                where_clause: None,
+                default_type: None,
+            },
+            span: Span::dummy(),
+        }],
+    ))));
+    let mut axiom = verum_ast::decl::AxiomDecl::new(
+        ident("law"),
+        Expr::literal(Literal::bool(true, Span::dummy())),
+        Span::dummy(),
+    );
+    axiom.generics.push(level("u"));
+    let axiom = type_declaration(TypeDeclBody::Protocol(ProtocolBody::new(List::from_iter(
+        [ProtocolItem {
+            kind: ProtocolItemKind::Axiom(axiom),
+            span: Span::dummy(),
+        }],
+    ))));
+    for declaration in [top, constructor, method, associated, axiom] {
+        assert!(type_declaration_uses_universes(&declaration).unwrap());
+        let error = source_type_declaration(&declaration).unwrap_err();
+        assert!(
+            error.contains("Carrier") && error.contains("level instantiation"),
+            "{error}"
+        );
+        assert!(validate_source_type_declaration(&declaration).is_err());
+    }
+}
+
+#[test]
+fn nominal_carriers_reject_free_wrong_kind_duplicate_rank_two_and_oversize_annotations() {
+    let free = type_declaration(TypeDeclBody::Alias(universe(variable("u"))));
+    let mut wrong = free.clone();
+    wrong.generics.push(ordinary("u"));
+    let mut duplicate = type_declaration(TypeDeclBody::Alias(universe(
+        UniverseLevelExpr::Concrete(0),
+    )));
+    duplicate.generics.extend([ordinary("A"), ordinary("A")]);
+    let rank_two = type_declaration(TypeDeclBody::Alias(Type::new(
+        TypeKind::Rank2Function {
+            type_params: List::from_iter([ordinary("A")]),
+            params: List::new(),
+            return_type: Heap::new(universe(UniverseLevelExpr::Concrete(0))),
+            contexts: Default::default(),
+            calling_convention: None,
+            where_clause: None,
+        },
+        Span::dummy(),
+    )));
+    let mut expression = UniverseLevelExpr::Concrete(0);
+    for _ in 0..200 {
+        expression = UniverseLevelExpr::Succ(Heap::new(expression));
+    }
+    let deep = type_declaration(TypeDeclBody::Alias(universe(expression)));
+    for declaration in [free, wrong, duplicate, rank_two, deep] {
+        assert!(
+            source_type_declaration(&declaration)
+                .unwrap_err()
+                .contains("Carrier")
+        );
+        assert!(
+            validate_source_type_declaration(&declaration)
+                .unwrap_err()
+                .contains("Carrier")
+        );
+    }
+    for name in ["", "other.Carrier", "other::Carrier"] {
+        let mut declaration = type_declaration(TypeDeclBody::Alias(universe(
+            UniverseLevelExpr::Concrete(0),
+        )));
+        declaration.name = ident(name);
+        let error = source_type_declaration(&declaration).unwrap_err();
+        assert!(error.contains(format!("`{name}`").as_str()) && error.contains("unqualified"));
+        assert!(validate_source_type_declaration(&declaration).is_err());
+    }
+}
+
+#[test]
+fn nominal_detection_and_validation_include_record_defaults_and_variant_constraints() {
+    let mut field = RecordField::new(
+        Visibility::Public,
+        ident("value"),
+        Type::new(TypeKind::Int, Span::dummy()),
+        Span::dummy(),
+    );
+    field.default_value = Some(Expr::new(
+        ExprKind::TypeExpr(universe(variable("free"))),
+        Span::dummy(),
+    ));
+    let default = type_declaration(TypeDeclBody::Record(List::from_iter([field])));
+    let mut variant = Variant::new(ident("Pack"), None, Span::dummy());
+    let mut bound = ordinary("F");
+    let GenericParamKind::Type { bounds, .. } = &mut bound.kind else {
+        panic!("type")
+    };
+    bounds.push(TypeBound {
+        kind: TypeBoundKind::Equality(Type::new(
+            TypeKind::Function {
+                params: List::new(),
+                return_type: Heap::new(universe(variable("free"))),
+                contexts: Default::default(),
+                calling_convention: None,
+            },
+            Span::dummy(),
+        )),
+        span: Span::dummy(),
+    });
+    variant.generic_params.push(bound);
+    let variant = type_declaration(TypeDeclBody::Variant(List::from_iter([variant])));
+    let mut axiom = verum_ast::decl::AxiomDecl::new(
+        ident("law"),
+        Expr::literal(Literal::bool(true, Span::dummy())),
+        Span::dummy(),
+    );
+    axiom.return_type = Some(universe(variable("free")));
+    let axiom = type_declaration(TypeDeclBody::Protocol(ProtocolBody::new(List::from_iter(
+        [ProtocolItem {
+            kind: ProtocolItemKind::Axiom(axiom),
+            span: Span::dummy(),
+        }],
+    ))));
+    for declaration in [default, variant, axiom] {
+        assert!(type_declaration_uses_universes(&declaration).unwrap());
+        let error = source_type_declaration(&declaration).unwrap_err();
+        assert!(
+            error.contains("Carrier") && error.contains("free"),
+            "{error}"
+        );
+    }
 }

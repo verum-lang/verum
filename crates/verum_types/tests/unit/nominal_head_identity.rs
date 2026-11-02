@@ -10,6 +10,7 @@ use verum_fast_parser::Parser;
 
 fn descriptor(name: &str, owner: &str, params: &[&str]) -> TypeDescriptor {
     TypeDescriptor {
+        source_declaration: None,
         name: name.into(),
         module_path: "bundle".into(),
         origin_module_path: Some(owner.into()),

@@ -36,6 +36,7 @@ fn check(
         };
         let methods = List::from_iter([method]);
         let descriptor = TypeDescriptor {
+            source_declaration: None,
             name: "Inspect".into(),
             module_path: "core.bundle".into(),
             origin_module_path: Some(owner.into()),

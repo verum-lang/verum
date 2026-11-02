@@ -115,6 +115,19 @@ impl TypeChecker {
         }
         // The existing ambient archive interface remains available, but use
         // its descriptor authority rather than a consumer's source binding.
+        // A lexical declaration in the signature's own file takes precedence
+        // over the archive's flat-name convenience index. The latter may name
+        // an unrelated sibling with the same leaf spelling.
+        let local_owner = self.core_metadata.as_ref().and_then(|metadata| {
+            let key: Text = format!("{}.{name}", self.current_module_path).into();
+            Self::metadata_type_with_declaring_key(metadata, &key)
+                .map(|_| self.current_module_path.clone())
+        });
+        if let Some(owner) = local_owner
+            && let Some((ty, key)) = self.ensure_mounted_type_loaded_with_parameter_key(name, owner.as_str())
+        {
+            return Ok((ty, Some(key)));
+        }
         let metadata_owner = self.core_metadata.as_ref().and_then(|metadata| {
             metadata.types.get(&Text::from(name)).map(|descriptor| {
                 descriptor

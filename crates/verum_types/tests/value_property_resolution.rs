@@ -219,6 +219,7 @@ fn property_metadata() -> verum_types::core_metadata::CoreMetadata {
         metadata.types.insert(
             format!("{owner}.Cell").into(),
             TypeDescriptor {
+                source_declaration: None,
                 name: "Cell".into(),
                 module_path: owner.into(),
                 origin_module_path: Maybe::None,

@@ -33,6 +33,7 @@ fn make_type_with_variants(name_idx: u32, variants: Vec<VariantDescriptor>) -> T
         alias_target_name: None,
         is_transparent_wrapper: false,
         declared_layout: None,
+        source_declaration: None,
         origin_module: None,
     }
 }

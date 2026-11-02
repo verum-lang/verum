@@ -8,6 +8,34 @@ use verum_vbc::{
     codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen},
 };
 
+#[test]
+fn nominal_universe_declarations_survive_archive_and_sidecar() {
+    for declaration_only in [false, true] {
+        let mut archive = ArchiveBuilder::new();
+        for (owner, level) in [("core.alpha", 1), ("core.beta", 2)] {
+            let ast = Parser::new(&format!("module {owner}; public type Token<A> is {{ public value: Type({level}), public extra: A }};"))
+                .parse_module().unwrap();
+            let mut producer = VbcCodegen::with_config(CodegenConfig::new(owner));
+            let module = if declaration_only {
+                producer.collect_declaration_interface(&[&ast]).unwrap()
+            } else { producer.compile_module(&ast).unwrap() };
+            archive.add_module(owner, &module, &[]).unwrap();
+        }
+        let mut bytes = List::new();
+        verum_vbc::archive::write_archive(&archive.finish(), &mut bytes).unwrap();
+        let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes.as_slice())).unwrap();
+        let metadata = archive_to_core_metadata(&archive).unwrap();
+        let bytes = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
+        let metadata = verum_types::core_metadata::decode_metadata(&bytes).unwrap();
+        for eager in [false, true] {
+            let result = errors(&metadata, "mount core.alpha.{Token as A}; mount core.beta.{Token as B}; fn a(x: A<Int>) -> Type(1) { x.value } fn b(x: B<Bool>) -> Type(2) { x.value } fn extra(x: A<Int>) -> Int { x.extra }", eager);
+            assert!(result.is_empty(), "interface={declaration_only}, eager={eager}: {result:?}");
+            let result = errors(&metadata, "mount core.beta.{Token}; fn bad(x: Token<Int>) -> Type(1) { x.value }", eager);
+            assert!(!result.is_empty(), "archive permitted a downward universe cast");
+        }
+    }
+}
+
 fn metadata(declaration_only: bool, reverse: bool) -> CoreMetadata {
     let mut owners = List::new();
     for owner in ["core.alpha", "core.beta"] {
@@ -213,4 +241,23 @@ fn actual_stdlib_datetime_signature_retains_the_imported_declaration() {
         "&core.database.sqlite.native.datetime.instant.DatetimeInstant"
     );
     assert_eq!(function.return_type.as_str(), "Text");
+}
+
+#[test]
+#[ignore = "requires the matching freshly baked stdlib embedded in this test binary"]
+fn actual_stdlib_nominal_universes_reach_the_compiler_pipeline() {
+    use verum_compiler::{CompilationPipeline, CompilerOptions, OutputFormat, Session, VerifyMode};
+    let archive = verum_compiler::embedded_stdlib_vbc::get_runtime_archive().expect("fresh stdlib");
+    let metadata = archive_to_core_metadata(archive).unwrap();
+    let descriptor = metadata.types.get(&Text::from("core.math.hott.NType")).expect("declared NType");
+    assert!(descriptor.source_declaration.is_some(), "fresh nominal declaration carrier");
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("nominal.vr");
+    std::fs::write(&input, "mount core.math.hott.{NType}; fn inspect(x: &NType<0>) {} fn main() {} ").unwrap();
+    let mut session = Session::new(CompilerOptions {
+        input, verify_mode: VerifyMode::Runtime, output_format: OutputFormat::Human,
+        check_only: true, ..Default::default()
+    });
+    let result = CompilationPipeline::new(&mut session).run_check_only();
+    assert!(result.is_ok(), "{result:?}\n{}", session.format_diagnostics());
 }

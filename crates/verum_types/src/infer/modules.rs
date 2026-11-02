@@ -21456,9 +21456,10 @@ impl TypeChecker {
 
                     // Try to find the method in any of the bounding protocols
                     for bound in &bounds {
-                        if let Some(ident) = bound.protocol.as_ident() {
+                        {
                             // Check if this protocol has the method we're looking for
-                            let protocol_name = ident.name.as_str();
+                            let protocol_key = self.path_to_string(&bound.protocol);
+                            let protocol_name = protocol_key.as_str();
                             let method_name_text: Text = method.name.as_str().into();
 
                             // For HKT-side-table-routed dispatch (receiver
@@ -23171,8 +23172,8 @@ impl TypeChecker {
                 for bound in &receiver_bounds {
                     if bound.is_negative { continue; }
                     // Get the protocol name from the bound
-                    if let Some(protocol_ident) = bound.protocol.as_ident() {
-                        let protocol_name: Text = protocol_ident.name.clone();
+                    {
+                        let protocol_name = self.path_to_string(&bound.protocol);
 
                         // Look up the protocol definition
                         let protocol_opt = self
@@ -23307,8 +23308,8 @@ impl TypeChecker {
                 if let Some(bounds) = effective_bounds {
                     // Check each protocol bound for the method
                     for bound in bounds.iter() {
-                        if let Some(protocol_ident) = bound.protocol.as_ident() {
-                            let protocol_name: Text = protocol_ident.name.clone();
+                        {
+                            let protocol_name = self.path_to_string(&bound.protocol);
 
                             // Look up the protocol definition
                             let protocol_exists = self
@@ -23989,7 +23990,8 @@ impl TypeChecker {
             }
         };
         if let Type::Named { path, .. } = &protocol_lookup_ty {
-            if let Some(protocol_name) = path.as_ident().map(|id| id.name.clone()) {
+            {
+                let protocol_name = self.path_to_string(path);
                 // Check if this is a registered protocol
                 let protocol_opt = self
                     .protocol_checker
@@ -24049,7 +24051,7 @@ impl TypeChecker {
             if wrapper_args.len() == 1 {
                 let inner = &wrapper_args[0];
                 let protocol_name_opt: Option<verum_common::Text> = match inner {
-                    Type::Named { path, .. } => path.as_ident().map(|id| id.name.clone()),
+                    Type::Named { path, .. } => Some(self.path_to_string(path)),
                     Type::Generic { name, .. } => Some(name.clone()),
                     _ => None,
                 };

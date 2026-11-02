@@ -386,7 +386,10 @@ impl<'a> Deserializer<'a> {
  self.offset = header.type_table_offset as usize;
  let mut types = Vec::with_capacity(header.type_table_count as usize);
  for _ in 0..header.type_table_count {
- types.push(self.parse_type_descriptor()?);
+ let descriptor = self.parse_type_descriptor()?;
+ crate::source_declaration_integrity::validate_type_descriptor(&descriptor, &strings)
+     .map_err(|message| VbcError::Deserialization(message.to_string()))?;
+ types.push(descriptor);
  }
 
  // 4. Parse function table
@@ -1068,7 +1071,26 @@ impl<'a> Deserializer<'a> {
  } else {
      verum_common::ResourceDiscipline::Unknown
  };
+ let source_declaration = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 31 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => {
+             let length = decode_varint(self.data, &mut self.offset)?;
+             if length > crate::source_signature_codec::MAX_SOURCE_SIGNATURE_BYTES as u64 {
+                 return Err(VbcError::Deserialization("source type declaration exceeds byte budget".into()));
+             }
+             let end = self.offset.checked_add(length as usize)
+                 .filter(|end| *end <= self.data.len())
+                 .ok_or_else(|| VbcError::Deserialization("truncated source type declaration".into()))?;
+             let declaration = crate::source_signature_codec::decode_type(&self.data[self.offset..end])?;
+             self.offset = end;
+             Some(declaration)
+         }
+         _ => return Err(VbcError::Deserialization("invalid source type declaration presence tag".into())),
+     }
+ } else { None };
  Ok(TypeDescriptor {
+ source_declaration,
  declared_layout,
  resource_discipline,
  id,

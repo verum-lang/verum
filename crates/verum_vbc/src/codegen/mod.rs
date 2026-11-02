@@ -739,6 +739,10 @@ pub struct VbcCodegen {
     /// Type descriptors.
     types: Vec<TypeDescriptor>,
 
+    /// Void archive-import APIs defer this fatal error to publication. Once a
+    /// declaration conflict is observed, later imports cannot clear it.
+    source_declaration_error: Maybe<Text>,
+
     /// `TypeId` → index into [`Self::types`].
     ///
     /// Twenty sites answer "which descriptor has this id?" with
@@ -2245,6 +2249,7 @@ impl VbcCodegen {
             config,
             functions: Vec::new(),
             types: Vec::new(),
+            source_declaration_error: None,
             type_index: std::collections::HashMap::new(),
             ineligible_record_carriers: Set::new(),
             next_func_id: 0,
@@ -6028,6 +6033,7 @@ impl VbcCodegen {
             let mut shape = ty.clone();
             shape.name = StringId::EMPTY;
             shape.origin_module = None;
+            shape.source_declaration = None;
             shape.protocols.clear();
             shape
         }
@@ -6038,6 +6044,11 @@ impl VbcCodegen {
         self.type_index.clear();
         let mut scalar_slots = Map::<TypeId, usize>::new();
         for (original_slot, ty) in original.into_iter().enumerate() {
+            if let Some(owner) = self.type_declaration_identity(&ty)
+                && self.ensure_source_declaration(owner.as_str(), ty.source_declaration.as_ref()).is_err()
+            {
+                return;
+            }
             let carrier_ineligible = ineligible.contains(&original_slot);
             let scalar = self
                 .ctx
@@ -6046,7 +6057,16 @@ impl VbcCodegen {
                 .and_then(|name| ty.canonical_scalar_type_id(name));
             if let Some(id) = scalar {
                 if let Some(&slot) = scalar_slots.get(&id) {
-                    if runtime_shape(&self.types[slot]) == runtime_shape(&ty) {
+                    let same_owner = self.type_declaration_identity(&self.types[slot])
+                        == self.type_declaration_identity(&ty);
+                    let has_source = self.types[slot].source_declaration.is_some()
+                        || ty.source_declaration.is_some();
+                    if (!has_source || same_owner)
+                        && runtime_shape(&self.types[slot]) == runtime_shape(&ty)
+                    {
+                        if self.types[slot].source_declaration.is_none() {
+                            self.types[slot].source_declaration = ty.source_declaration.clone();
+                        }
                         if carrier_ineligible {
                             self.ineligible_record_carriers.insert(slot);
                         }
@@ -6072,6 +6092,7 @@ impl VbcCodegen {
     /// drains pending constants / TLS inits / default-method monomorphisations
     /// and ensures every call target has a descriptor.
     pub fn finalize_module(&mut self) -> CodegenResult<VbcModule> {
+        self.check_source_declaration_error()?;
         mount_cost::report_aliases("finalize_module");
         bare_method::report("finalize_module");
         self.dump_vbc_if_requested();
@@ -6096,6 +6117,7 @@ impl VbcCodegen {
         // hasn't been pushed to `self.functions`.
         self.emit_missing_stub_descriptors();
         self.coalesce_runtime_scalar_carriers();
+        self.check_source_declaration_error()?;
         // Verify type-descriptor self-consistency before emitting bytecode.
         // Catches the class of bugs where codegen produces a TypeDescriptor
         // whose variants disagree with their declared `kind`/`arity`/
@@ -6543,6 +6565,22 @@ impl VbcCodegen {
         module_prefix: Option<&str>,
         archive_strings: Option<&crate::module::StringTable>,
     ) {
+        if self.check_source_declaration_error().is_err() {
+            return;
+        }
+        if ty.source_declaration.is_some() {
+            if let Some(strings) = archive_strings {
+                self.import_archive_type_with_protocol_remap_qualified(
+                    &ty, strings, &std::collections::HashMap::new(), module_prefix,
+                );
+                return;
+            }
+            if ty.origin_module.is_none() {
+                ty.origin_module = module_prefix.map(|owner| {
+                    StringId(self.ctx.intern_string_raw(owner))
+                });
+            }
+        }
         // TYPE-ID-COLLISION-1 (#27) FUNDAMENTAL FIX. Archive type ids are
         // MODULE-LOCAL: every `.vr` module numbers its own types starting from
         // `FIRST_USER`, so two DISTINCT types from different modules carry the
@@ -7056,7 +7094,116 @@ impl VbcCodegen {
         self.push_type_with_carrier_eligibility(ty, eligible);
     }
 
+    /// Canonical declaration identity in this codegen's string pool. Semantic
+    /// carriers may follow structural enrichment only within this exact owner.
+    fn type_declaration_identity(&self, ty: &TypeDescriptor) -> Maybe<Text> {
+        let name = self.ctx.strings.get(ty.name.0 as usize)?;
+        let owner = match ty.origin_module {
+            Some(id) => self.ctx.strings.get(id.0 as usize)?.as_str(),
+            None => self.config.module_name.as_str(),
+        };
+        Some(crate::module::qualify_module_name(owner, name).into())
+    }
+
+    fn check_source_declaration_error(&self) -> CodegenResult<()> {
+        match &self.source_declaration_error {
+            Some(message) => Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                message.to_string(),
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    fn reject_source_declaration(&mut self, message: Text) -> CodegenResult<()> {
+        if self.source_declaration_error.is_none() {
+            self.source_declaration_error = Some(message);
+        }
+        self.check_source_declaration_error()
+    }
+
+    fn reject_source_declaration_conflict(&mut self, owner: &str) -> CodegenResult<()> {
+        self.reject_source_declaration(format!(
+            "type declaration `{owner}` has conflicting semantic source declarations",
+        ).into())
+    }
+
+    /// Require the same typed declaration before changing an accepted owner's
+    /// ABI. Equality is deliberately conservative, including source spans.
+    fn ensure_source_declaration(
+        &mut self,
+        owner: &str,
+        incoming: Maybe<&verum_ast::TypeDecl>,
+    ) -> CodegenResult<()> {
+        self.check_source_declaration_error()?;
+        if let Some(incoming) = incoming {
+            if let Err(message) = verum_ast::source_signature::validate_source_type_declaration(incoming) {
+                return self.reject_source_declaration(format!(
+                    "type declaration `{owner}`: {message}",
+                ).into());
+            }
+            let conflict = self.types.iter().any(|existing| {
+                self.type_declaration_identity(existing).as_deref() == Some(owner)
+                    && existing.source_declaration.as_ref()
+                        .is_some_and(|declaration| declaration != incoming)
+            });
+            if conflict {
+                return self.reject_source_declaration_conflict(owner);
+            }
+        }
+        Ok(())
+    }
+
     fn push_type_with_carrier_eligibility(&mut self, mut ty: TypeDescriptor, eligible: bool) {
+        if self.check_source_declaration_error().is_err() {
+            return;
+        }
+        if let Some(owner) = self.type_declaration_identity(&ty)
+            && self.ensure_source_declaration(owner.as_str(), ty.source_declaration.as_ref()).is_err()
+        {
+            return;
+        }
+        let mut semantic_enrichment = false;
+        if let Some(index) = self.type_index_of(ty.id) {
+            let existing = &self.types[index];
+            if existing.source_declaration.is_some() || ty.source_declaration.is_some() {
+                let incoming_owner = self.type_declaration_identity(&ty);
+                if incoming_owner.is_none()
+                    || incoming_owner != self.type_declaration_identity(existing)
+                {
+                    // Keep both claims for the unconditional semantic-owner
+                    // validation at publication; never pick an owner by richness.
+                    self.push_type_descriptor(ty);
+                    return;
+                }
+                if existing.source_declaration.is_some() && ty.source_declaration.is_none() {
+                    // Same-pool ABI equality is required; ownership alone cannot
+                    // establish that a runtime-only copy is the same declaration.
+                    let mut declared_shape = existing.clone();
+                    declared_shape.source_declaration = None;
+                    declared_shape.protocols.clear();
+                    let mut incoming_shape = ty.clone();
+                    incoming_shape.protocols.clear();
+                    if declared_shape != incoming_shape {
+                        if let Some(owner) = incoming_owner.as_ref() {
+                            let _ = self.reject_source_declaration_conflict(owner.as_str());
+                        }
+                        return;
+                    }
+                    for implementation in ty.protocols {
+                        if !self.types[index].protocols.contains(&implementation) {
+                            self.types[index].protocols.push(implementation);
+                        }
+                    }
+                    return;
+                }
+                semantic_enrichment = existing.source_declaration.is_none()
+                    && ty.source_declaration.is_some();
+                let source = existing.source_declaration.clone()
+                    .or_else(|| ty.source_declaration.clone());
+                ty.source_declaration = source.clone();
+                self.types[index].source_declaration = source;
+            }
+        }
         // A runtime record owns its layout and policy. Its scalar ABI carrier
         // may add complete implementation records, but cannot replace that
         // declaration or independently claim fields/glue. Check at insertion,
@@ -7167,7 +7314,7 @@ impl VbcCodegen {
                     incoming.protocols = std::mem::take(&mut slot.protocols);
                 }
             };
-            if existing_empty && new_richer {
+            if (existing_empty && new_richer) || semantic_enrichment {
                 let mut ty = ty;
                 preserve_protocols(&mut self.types[idx], &mut ty);
                 self.types[idx] = ty;
@@ -9703,15 +9850,20 @@ impl VbcCodegen {
 
     fn collect_declarations(&mut self, item: &Item) -> CodegenResult<()> {
         let unsupported_universe = match &item.kind {
-            ItemKind::Type(declaration) => verum_ast::source_signature::type_declaration_uses_universes(declaration),
-            ItemKind::Const(declaration) => verum_ast::source_signature::type_uses_universes(&declaration.ty),
-            ItemKind::Static(declaration) => verum_ast::source_signature::type_uses_universes(&declaration.ty),
-            _ => Ok(false),
-        }.map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
-        if unsupported_universe {
-            return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
-                "universe-bearing type, const, and static declarations require a metadata carrier; only free-function signatures are supported".into(),
-            )));
+            ItemKind::Const(declaration) => Some((&declaration.name, &declaration.ty)),
+            ItemKind::Static(declaration) => Some((&declaration.name, &declaration.ty)),
+            _ => None,
+        };
+        if let Some((name, ty)) = unsupported_universe {
+            let uses_universes = verum_ast::source_signature::type_uses_universes(ty)
+                .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                    format!("declaration `{}`: {message}", name.name),
+                )))?;
+            if uses_universes {
+                return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                    format!("declaration `{}`: universe-bearing const and static declarations require an unsupported metadata carrier", name.name),
+                )));
+            }
         }
         match &item.kind {
             ItemKind::Function(func) => {
@@ -10393,7 +10545,38 @@ impl VbcCodegen {
             // Type declarations - register variant constructors for sum types
             // and record field layouts for proper field indexing
             ItemKind::Type(type_decl) => {
+                let source_declaration = verum_ast::source_signature::source_type_declaration(type_decl)
+                    .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                        format!("type declaration `{}`: {message}", type_decl.name.name),
+                    )))?;
+                let owner = self.ctx.current_source_module.as_deref()
+                    .unwrap_or(&self.config.module_name);
+                let qualified = crate::module::qualify_module_name(owner, type_decl.name.name.as_str());
+                self.ensure_source_declaration(&qualified, source_declaration.as_ref())?;
                 self.register_type_constructors(type_decl)?;
+                self.check_source_declaration_error()?;
+                if let Some(source_declaration) = source_declaration {
+                    let owner = self.ctx.current_source_module.as_deref()
+                        .unwrap_or(&self.config.module_name);
+                    let qualified: Text = crate::module::qualify_module_name(
+                        owner, type_decl.name.name.as_str(),
+                    ).into();
+                    let mut matches = self.types.iter().enumerate().filter_map(|(index, ty)| {
+                        (self.type_declaration_identity(ty).as_ref() == Some(&qualified))
+                            .then_some(index)
+                    });
+                    let index = matches.next().ok_or_else(|| CodegenError::new(
+                        CodegenErrorKind::InvalidSourceSignature(format!(
+                            "type declaration `{qualified}` has no declaring VBC descriptor for its semantic signature",
+                        )),
+                    ))?;
+                    if matches.next().is_some() {
+                        return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                            format!("type declaration `{qualified}` has ambiguous VBC descriptor ownership"),
+                        )));
+                    }
+                    self.types[index].source_declaration = Some(source_declaration);
+                }
                 // Descriptor constructors default to public. The source
                 // declaration owns export policy, including glob imports.
                 let (visibility, _) = self.lower_field_visibility(&type_decl.visibility)?;
@@ -16740,6 +16923,7 @@ impl VbcCodegen {
                     // descriptor, not by the alias itself.
                     is_transparent_wrapper: false,
                     declared_layout: None,
+                    source_declaration: None,
                 };
                 self.push_type_dedupe(type_desc);
             }
@@ -22381,6 +22565,14 @@ impl VbcCodegen {
     /// which costs a linear scan, not correctness, because
     /// [`Self::type_by_id`] verifies before it trusts.
     fn push_type_descriptor(&mut self, ty: TypeDescriptor) {
+        if self.check_source_declaration_error().is_err() {
+            return;
+        }
+        if let Some(owner) = self.type_declaration_identity(&ty)
+            && self.ensure_source_declaration(owner.as_str(), ty.source_declaration.as_ref()).is_err()
+        {
+            return;
+        }
         self.type_index.insert(ty.id.0, self.types.len());
         // The ONLY `self.types.push` in the crate — everything else goes
         // through this function, which is what keeps the index warm.
@@ -25046,6 +25238,37 @@ impl VbcCodegen {
 
     /// Builds the final VBC module.
     fn build_module(&mut self) -> CodegenResult<VbcModule> {
+        self.check_source_declaration_error()?;
+        let mut declaration_owners: Map<TypeId, (Maybe<Text>, bool, bool)> = Map::new();
+        for ty in &self.types {
+            let identity = self.type_declaration_identity(ty);
+            let has_source = ty.source_declaration.is_some();
+            if let Some((previous, previous_has_source, conflicting)) = declaration_owners.get_mut(&ty.id) {
+                *conflicting |= *previous != identity;
+                *previous_has_source |= has_source;
+                if *previous_has_source && *conflicting {
+                    return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                        format!("type declaration {:?} shares VBC TypeId {} with another semantic owner", identity, ty.id.0),
+                    )));
+                }
+            } else {
+                declaration_owners.insert(ty.id, (identity.clone(), has_source, false));
+            }
+            if let Some(source) = &ty.source_declaration {
+                verum_ast::source_signature::validate_source_type_declaration(source)
+                    .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                        format!("type declaration `{}`: {message}", source.name.name),
+                    )))?;
+                let name = self.ctx.strings.get(ty.name.0 as usize);
+                if identity.is_none() || !name.is_some_and(|name| {
+                    name.rsplit('.').next() == Some(source.name.name.as_str())
+                }) {
+                    return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                        format!("type declaration `{}` does not belong to its VBC descriptor", source.name.name),
+                    )));
+                }
+            }
+        }
         // ARCH-P2 stage 1: canonical-vs-bare consistency sweep at THE
         // module-finalize seam (env-gated diagnostics; no behavior
         // change — every registration has run by this point).
@@ -26436,6 +26659,12 @@ impl VbcCodegen {
             );
         }
 
+        for descriptor in &module.types {
+            crate::source_declaration_integrity::validate_type_descriptor(descriptor, &module.strings)
+                .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                    message.to_string(),
+                )))?;
+        }
         Ok(module)
     }
 
@@ -26571,6 +26800,13 @@ impl VbcCodegen {
         module_prefix: Maybe<&str>,
         original_carrier_eligible: Maybe<bool>,
     ) {
+        if self.check_source_declaration_error().is_err() {
+            return;
+        }
+        if let Err(message) = crate::source_declaration_integrity::validate_type_descriptor(ty, archive_strings) {
+            let _ = self.reject_source_declaration(message);
+            return;
+        }
         let intern = |this: &mut Self, sid: crate::types::StringId| -> crate::types::StringId {
             let name = match archive_strings.get(sid) {
                 Some(s) => s.to_string(),
@@ -26602,6 +26838,21 @@ impl VbcCodegen {
         let name_str = owner.zip(qualified_key.as_ref())
             .and_then(|(owner, name)| name.strip_prefix(&format!("{owner}.")))
             .unwrap_or(&name_str).to_owned();
+        let declaration_owner = qualified_key.clone().unwrap_or_else(|| {
+            crate::module::qualify_module_name(&self.config.module_name, &name_str)
+        });
+        if self.ensure_source_declaration(&declaration_owner, ty.source_declaration.as_ref()).is_err() {
+            return;
+        }
+        if ty.source_declaration.is_none() && self.types.iter().any(|existing| {
+            existing.source_declaration.is_some()
+                && self.type_declaration_identity(existing).as_deref() == Some(declaration_owner.as_str())
+        }) {
+            // Source-local TypeRefs and names do not establish correspondence
+            // with the accepted semantic declaration; do not hide a version conflict.
+            let _ = self.reject_source_declaration_conflict(&declaration_owner);
+            return;
+        }
         let scalar_id = ty.canonical_scalar_type_id(&name_str);
         // Record eligibility before clearing source-local glue IDs below.
         let carrier_eligible = original_carrier_eligible.unwrap_or_else(|| {
@@ -26657,9 +26908,17 @@ impl VbcCodegen {
             && let Some(q) = qualified_key.as_deref()
             && let Some(&qid) = self.type_name_to_id.get(q)
             && self.type_by_id(qid).is_some_and(|existing| {
-                canonical_id.is_none() || self.canonical_runtime_record_id(existing) == canonical_id
+                (canonical_id.is_none() || self.canonical_runtime_record_id(existing) == canonical_id)
+                    && (ty.source_declaration.is_none()
+                        || (existing.source_declaration.is_some()
+                            && self.type_declaration_identity(existing).as_deref() == Some(q)))
             })
         {
+            if let Some(index) = self.type_index_of(qid)
+                && self.types[index].source_declaration.is_none()
+            {
+                self.types[index].source_declaration = ty.source_declaration.clone();
+            }
             if let Some(bundle_key) = bundle_key {
                 self.type_name_to_id.entry(bundle_key).or_insert(qid);
             }
@@ -26865,7 +27124,10 @@ impl VbcCodegen {
             // (same discipline as every other StringId in this copy).
             origin_module: ty
                 .origin_module
-                .map(|sid| intern(self, sid)),
+                .map(|sid| intern(self, sid))
+                .or_else(|| ty.source_declaration.as_ref().and(owner).map(|owner| {
+                    StringId(self.ctx.intern_string_raw(owner))
+                })),
             type_params: new_type_params,
             fields: new_fields,
             variants: new_variants,
@@ -26891,6 +27153,7 @@ impl VbcCodegen {
             }),
             is_transparent_wrapper: ty.is_transparent_wrapper,
             declared_layout: ty.declared_layout,
+            source_declaration: ty.source_declaration.clone(),
         };
 
         // Restore the codegen-local newtype fast-cache from the
@@ -27163,6 +27426,38 @@ impl VbcCodegen {
     /// it down to `import_archive_type` for in-place remap of each
     /// type's `protocols` list.
     pub fn import_archive_module_types(&mut self, module: &crate::module::VbcModule) {
+        if self.check_source_declaration_error().is_err() {
+            return;
+        }
+        let mut incoming_declarations: Map<Text, &verum_ast::TypeDecl> = Map::new();
+        for descriptor in &module.types {
+            let Some(declaration) = descriptor.source_declaration.as_ref() else {
+                if let Some(owner) = bootstrap_types::identity(module, descriptor)
+                    && self.types.iter().any(|existing| existing.source_declaration.is_some()
+                        && self.type_declaration_identity(existing).as_deref() == Some(owner.as_str()))
+                {
+                    let _ = self.reject_source_declaration_conflict(&owner);
+                    return;
+                }
+                continue;
+            };
+            if let Err(message) = crate::source_declaration_integrity::validate_type_descriptor(descriptor, &module.strings) {
+                let _ = self.reject_source_declaration(message);
+                return;
+            }
+            let Some(owner) = bootstrap_types::identity(module, descriptor) else {
+                continue;
+            };
+            if self.ensure_source_declaration(&owner, Some(declaration)).is_err() {
+                return;
+            }
+            if let Some(previous) = incoming_declarations.insert(owner.clone().into(), declaration)
+                && previous != declaration
+            {
+                let _ = self.reject_source_declaration_conflict(&owner);
+                return;
+            }
+        }
         // FIRST PASS — protocol stub registration. For each Protocol
         // type in the archive, allocate (or reuse) a codegen-local
         // TypeId AND push a name-only stub `TypeDescriptor` into
@@ -27211,7 +27506,7 @@ impl VbcCodegen {
                     if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
                         eprintln!("[typebind] site=proto_import name={} id={}", qualified, id.0);
                     }
-                    self.type_name_to_id.insert(qualified, id);
+                    self.type_name_to_id.insert(qualified.clone(), id);
                     id
                 }
             };
@@ -27226,6 +27521,12 @@ impl VbcCodegen {
                     .or_insert(codegen_id);
             }
             protocol_id_remap.insert(ty.id, codegen_id);
+            // Semantic protocols need the complete parameter and method roster.
+            // Reserve their identity here; the common importer remaps the full
+            // descriptor in the second pass once every protocol ID is known.
+            if ty.source_declaration.is_some() {
+                continue;
+            }
             // Push the stub IF no descriptor for this id has been
             // pushed yet (first-wins, mirrors `import_archive_type`'s
             // existing discipline).
@@ -27257,12 +27558,14 @@ impl VbcCodegen {
                     alias_target_name: None,
                     is_transparent_wrapper: false,
                     declared_layout: ty.declared_layout,
+                    source_declaration: None,
                 });
             }
         }
-        // SECOND PASS — non-Protocol imports with protocol-id remap.
+        // SECOND PASS — data and semantic protocol descriptors, with the
+        // complete protocol-ID map and one shared string-pool remapper.
         for ty in module.types.iter() {
-            if matches!(ty.kind, crate::types::TypeKind::Protocol) {
+            if ty.kind == crate::types::TypeKind::Protocol && ty.source_declaration.is_none() {
                 continue;
             }
             self.import_archive_type_with_protocol_remap_qualified(
@@ -27277,13 +27580,18 @@ impl VbcCodegen {
         // may already contain local IDs after an earlier import (T1536).
         let type_id_remap = self.archive_type_id_remap(module);
         for source in &module.types {
-            if source.kind == crate::types::TypeKind::Protocol {
+            if source.kind == crate::types::TypeKind::Protocol && source.source_declaration.is_none() {
                 continue;
             }
             let Some(&local) = type_id_remap.get(&source.id.0) else {
                 continue;
             };
             if let Some(index) = self.type_index_of(crate::types::TypeId(local)) {
+                if self.types[index].source_declaration.is_some() && source.source_declaration.is_none() {
+                    let owner = bootstrap_types::identity(module, source).unwrap_or_default();
+                    let _ = self.reject_source_declaration_conflict(&owner);
+                    return;
+                }
                 let priority = bootstrap_types::declaration_priority(module, source);
                 let local = crate::types::TypeId(local);
                 if self
@@ -29270,6 +29578,9 @@ fn copy_remapped_data_type_carriers(
     target: &mut crate::types::TypeDescriptor,
     ids: &std::collections::HashMap<u32, u32>,
 ) {
+    // source_declaration contains lexical AST names, never module-local IDs.
+    // Its exact-owner import/clone is retained; a runtime ID remap cannot move
+    // semantic authority between descriptors.
     let tr = |ty: &crate::types::TypeRef| remap_type_ref_archive(ty, ids);
     for (to, from) in target.fields.iter_mut().zip(&source.fields) {
         to.type_ref = tr(&from.type_ref);

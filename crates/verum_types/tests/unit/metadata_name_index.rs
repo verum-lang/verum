@@ -34,6 +34,7 @@ fn metadata(keys: &[&str]) -> CoreMetadata {
         data.types.insert(
             (*key).into(),
             TypeDescriptor {
+                source_declaration: None,
                 name: (*key).into(),
                 module_path: "bundle".into(),
                 origin_module_path: None,

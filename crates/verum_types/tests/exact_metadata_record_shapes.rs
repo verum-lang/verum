@@ -56,6 +56,7 @@ fn metadata(reverse: bool, generic: bool, bundled: bool) -> CoreMetadata {
     }
     for (owner, value_type, unique) in entries {
         let descriptor = TypeDescriptor {
+            source_declaration: None,
             name: "Packet".into(),
             module_path: if bundled {
                 "core.bundle".into()

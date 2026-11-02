@@ -8,6 +8,7 @@ use verum_types::{TypeChecker, core_metadata::*};
 fn metadata() -> CoreMetadata {
     let mut metadata = CoreMetadata::default();
     let descriptor = TypeDescriptor {
+        source_declaration: None,
         name: "Shadow".into(),
         module_path: "library".into(),
         origin_module_path: None,

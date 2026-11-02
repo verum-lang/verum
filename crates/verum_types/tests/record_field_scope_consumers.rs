@@ -86,6 +86,7 @@ fn decoded_metadata(modifier: &str, evidence: PolicyEvidence) -> CoreMetadata {
         PolicyEvidence::LegacyNull | PolicyEvidence::LegacyOmitted => None,
     };
     let descriptor = TypeDescriptor {
+        source_declaration: None,
         name: "Packet".into(),
         // Bundle location deliberately differs from the declaration owner.
         module_path: BUNDLE.into(),
