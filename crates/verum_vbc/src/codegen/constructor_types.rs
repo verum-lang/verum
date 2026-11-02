@@ -304,23 +304,60 @@ impl VbcCodegen {
         Some(ty)
     }
 
+    /// A call's expected result can bind its own parameters. Only arguments
+    /// fixed by that substitution can supply context to a nested expression.
+    pub(super) fn contextual_call_parameters(
+        &self, info: &FunctionInfo, explicit: &[verum_ast::ty::GenericArg], operands: &[Expr],
+    ) -> Option<Vec<Option<TypeRef>>> {
+        if !operands.iter().any(|arg| matches!(Self::normalized_place(arg).kind,
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. })) {
+            return None;
+        }
+        let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else {
+            return None;
+        };
+        let mut bindings = TypeSubstitution::empty();
+        self.bind_source_type_arguments(&info.explicit_type_param_ids, explicit, &mut bindings)?;
+        if let Some(expected) = self.ctx.expected_value_type.as_ref()
+            && !self.bind_source_declaration(return_type, expected, &mut bindings)
+        {
+            return None;
+        }
+        Some(params.iter().map(|formal| fully_bound(formal, &bindings)
+            .then(|| bindings.apply(formal))).collect())
+    }
+
     /// A projected field belongs to its instantiated record, so its free
     /// arguments are caller witnesses even when none of them is concrete yet.
     pub(super) fn declared_argument_witnesses<'a>(
         &self, id: u32, count: usize, args: impl Iterator<Item = &'a Expr>,
     ) -> Option<Vec<TypeRef>> {
         let info = self.ctx.lookup_function_by_id(crate::module::FunctionId(id))?;
-        if info.type_param_ids.is_empty() || count == 0 {
+        if info.type_param_ids.is_empty() {
             return None;
         }
-        let TypeRef::Function { params, .. } = info.callable_signature.as_ref()? else {
+        let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else {
             return None;
         };
         if params.len() != count { return None; }
         let mut bindings = TypeSubstitution::empty();
+        if let Some(expected) = self.ctx.expected_value_type.as_ref() {
+            // A surrounding call can have a different result than this operand.
+            // A failed structural match contributes no partial substitutions.
+            let mut result_bindings = TypeSubstitution::empty();
+            if self.bind_source_declaration(return_type, expected, &mut result_bindings) {
+                bindings = result_bindings;
+            }
+        }
         for (index, (formal, arg)) in params.iter().zip(args).enumerate() {
             if !formal.is_generic() { continue; }
-            let actual = self.declared_expression_result(arg, None, 0, 0)?;
+            let actual = if fully_bound(formal, &bindings) && matches!(
+                Self::normalized_place(arg).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }
+            ) {
+                self.source_expression_declaration(arg, Some(&bindings.apply(formal)), 0)?
+            } else {
+                self.declared_expression_result(arg, None, 0, 0)?
+            };
             let (mut formal, mut actual) = (formal, &actual);
             if index == 0 && info.param_names.first().is_some_and(|name| name == "self") {
                 // A method's receiver can borrow implicitly. Its nested

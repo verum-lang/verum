@@ -8039,6 +8039,7 @@ impl VbcCodegen {
             // For array element references, compile specially using ArrayToC marshalling
             // For function callbacks, compile using CreateCallback
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
+            let contexts = self.contextual_call_parameters(&func_info, type_args, args);
             for (i, arg) in args.iter().enumerate() {
                 // Check if this argument is an array element reference
                 let is_array_ref = array_ref_infos.iter().any(|info| info.arg_idx == i as u8);
@@ -8134,7 +8135,7 @@ impl VbcCodegen {
                         .and_then(|t| Self::function_type_arity(t));
 
                     let arg_val = self
-                        .compile_expr(arg)?
+                        .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i)?.as_ref()))?
                         .or_internal("call arg has no value")?;
                     self.ctx.expected_fn_value_arity = saved_arity;
                     if let Some(saved) = saved {
@@ -8582,6 +8583,21 @@ impl VbcCodegen {
     }
 
     /// Derive descriptor-ordered witnesses for the interpreter and AOT.
+    fn compile_call_operand(
+        &mut self, argument: &Expr, expected: Option<&crate::types::TypeRef>,
+    ) -> CodegenResult<Option<Reg>> {
+        let value = Self::normalized_place(argument);
+        if !matches!(value.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }) {
+            return self.compile_expr(argument);
+        }
+        let prior_type = std::mem::replace(&mut self.ctx.expected_value_type, expected.cloned());
+        let prior_span = std::mem::replace(&mut self.ctx.expected_value_span, expected.map(|_| value.span));
+        let result = self.compile_expr(argument);
+        self.ctx.expected_value_type = prior_type;
+        self.ctx.expected_value_span = prior_span;
+        result
+    }
+
     /// Borrow receiver and operands directly from their source expressions.
     fn record_generic_instantiation(
         &mut self,
@@ -16425,6 +16441,8 @@ impl VbcCodegen {
         let mut copy_arguments = verum_common::List::new();
         let args_start = if !args.is_empty() {
             let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+            let contexts = resolved_method.as_ref()
+                .and_then(|method| self.contextual_call_parameters(method, type_args, args));
             for (i, arg) in args.iter().enumerate() {
                 // Skip self (param index 0): callsite `args` already
                 // excludes the receiver — so closure arg at callsite
@@ -16441,7 +16459,7 @@ impl VbcCodegen {
                 };
                 let copy_start = self.ctx.instructions.len();
                 let arg_val = self
-                    .compile_expr(arg)?
+                    .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i + 1)?.as_ref()))?
                     .or_internal("method arg has no value")?;
                 let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
                 // Only the declaration selected for direct dispatch can grant
@@ -18102,6 +18120,7 @@ impl VbcCodegen {
         // Compile arguments
         let args_start = if !args.is_empty() {
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
+            let contexts = self.contextual_call_parameters(func_info, type_args, args);
             for (i, arg) in args.iter().enumerate() {
                 // **Closure expected-return-type plumbing (#26 residual).**
                 //
@@ -18131,7 +18150,7 @@ impl VbcCodegen {
                     None
                 };
                 let arg_val = self
-                    .compile_expr(arg)?
+                    .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i)?.as_ref()))?
                     .or_internal("static method arg has no value")?;
                 if let Some(saved) = saved_disambig {
                     self.ctx.pop_disambig_context(saved);

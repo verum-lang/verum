@@ -208,7 +208,7 @@ fn cyclic_dependency_completes_owned_variant_and_record_fields() {
         ),
         (
             "values/mod.vr",
-            "module core.values; public type Maybe<T> is None | Some(T);",
+            "module core.values; public type Maybe<T> is None | Some(T); public type Slots<T> is { len: Int }; implement<T> Slots<T> { public fn empty() -> Slots<T> { Slots { len: 0 } } }",
         ),
         (
             "coordination/mod.vr",
@@ -237,11 +237,11 @@ fn cyclic_dependency_completes_owned_variant_and_record_fields() {
             module core.workers.cancellation;
             mount core.clock.Instant;
             mount core.coordination.Mutex;
-            mount core.values.Maybe;
+            mount core.values.{Maybe, Slots};
             public type CancelReason is Cancelled | Timeout { deadline: Instant };
-            public type Flag is { reason: Mutex<Maybe<CancelReason>> };
+            public type Flag is { reason: Mutex<Maybe<CancelReason>>, observed: Mutex<Slots<Instant>> };
             public fn probe() -> Int {
-                let flag = Flag { reason: Mutex.new(Maybe.None) };
+                let flag = Flag { reason: Mutex.new(Maybe.None), observed: Mutex.new(Slots.empty()) };
                 match flag.reason.data { Maybe.None => 79, Maybe.Some(_) => 0 }
             }
         "#,
@@ -286,6 +286,42 @@ fn cyclic_dependency_completes_owned_variant_and_record_fields() {
     assert_eq!(
         module.get_string(module.get_type(mutex).unwrap().origin_module.unwrap()),
         Some("core.coordination")
+    );
+    let probe = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|name| name.rsplit('.').next() == Some("probe"))
+        })
+        .unwrap();
+    let bytecode = &module.bytecode
+        [probe.bytecode_offset as usize..(probe.bytecode_offset + probe.bytecode_length) as usize];
+    let witnesses = decode_instructions(bytecode)
+        .unwrap()
+        .into_iter()
+        .filter_map(|op| match op {
+            Instruction::CallG { type_args, .. } => Some(type_args),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let instant = verum_vbc::types::TypeRef::Concrete(clock);
+    let slots = flag.fields[1].declaration_type.as_ref().unwrap();
+    let verum_vbc::types::TypeRef::Instantiated { args, .. } = slots else {
+        panic!("expected Mutex<Slots<Instant>>")
+    };
+    assert!(
+        witnesses
+            .iter()
+            .any(|args| args.as_slice() == [instant.clone()]),
+        "{witnesses:?}"
+    );
+    assert!(
+        witnesses
+            .iter()
+            .any(|actual| actual.as_slice() == args.as_slice()),
+        "{witnesses:?}"
     );
     assert_eq!(
         execute(
