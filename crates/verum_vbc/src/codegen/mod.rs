@@ -2746,7 +2746,11 @@ impl VbcCodegen {
             // declarations table — see infer.rs:2417 — so empty
             // methods at the impl level is fine; the protocol body
             // remains the canonical source.
-            if !self.type_name_to_id.contains_key(name) {
+            // Reserve the defining module's key before importing declaration
+            // layouts. The later descriptor and the local impl row must resolve
+            // to the same consumer-pool ID, even across a bare-name collision.
+            let owner_key = crate::module::qualify_module_name(&info.source_module, name);
+            if !self.type_name_to_id.contains_key(&owner_key) {
                 let type_id = self.alloc_user_type_id();
                 // TYPEBIND (T1108): `type_name_to_id` is written from nine
                 // places and the LOCAL-TYPE-SHADOW rule reads provenance
@@ -2757,12 +2761,14 @@ impl VbcCodegen {
                 if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
                     eprintln!("[typebind] site=protocol_stub name={name} id={}", type_id.0);
                 }
-                self.type_name_to_id.insert(name.clone(), type_id);
+                self.type_name_to_id.insert(owner_key, type_id);
+                self.type_name_to_id.entry(name.clone()).or_insert(type_id);
                 let name_sid = StringId(self.ctx.intern_string_raw(name));
                 let stub = crate::types::TypeDescriptor {
                     id: type_id,
                     name: name_sid,
                     kind: crate::types::TypeKind::Protocol,
+                    origin_module: Some(StringId(self.ctx.intern_string_raw(&info.source_module))),
                     ..Default::default()
                 };
                 self.push_type_descriptor(stub);

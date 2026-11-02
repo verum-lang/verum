@@ -74,3 +74,60 @@ fn only_contradicted_associated_equalities_exclude_a_default() {
         .unwrap();
     assert_eq!(value.try_as_i64(), Some(73));
 }
+
+#[test]
+fn imported_protocol_defaults_keep_their_declaration_identity() {
+    let provider = Parser::new(
+        r#"
+        module library.protocols;
+        public type Source is protocol {
+            type Item;
+            fn restricted<T, E>(&self) -> Bool where Self.Item = Result<T, E> { true }
+            fn general(&self) -> Bool { true }
+        };
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let receiver = Parser::new(
+        r#"
+        module app;
+        mount library.protocols.{Source};
+        type Cursor is { position: Int };
+        implement Source for Cursor { type Item = Int; }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("library.protocols"));
+    producer.collect_unit_declarations(&[&provider]).unwrap();
+    let protocols = producer.export_protocols();
+    let provider = producer.finalize_module_from_state().unwrap();
+    for load_descriptor in [false, true] {
+        let mut cg = VbcCodegen::with_config(CodegenConfig::new("app"));
+        cg.import_protocols(&protocols);
+        if load_descriptor {
+            cg.import_bootstrap_nominal_dependencies(&[&receiver], &[&provider])
+                .unwrap();
+        }
+        cg.collect_unit_declarations(&[&receiver]).unwrap();
+        cg.resolve_pending_imports();
+        cg.compile_default_methods_with_policy(ItemFailurePolicy::Strict)
+            .unwrap();
+        let functions = cg.export_functions();
+        assert!(functions.contains_key("Cursor.general"));
+        assert!(!functions.contains_key("Cursor.restricted"));
+        let module = cg.finalize_module_from_state().unwrap();
+        let cursor = module
+            .types
+            .iter()
+            .find(|ty| module.get_string(ty.name) == Some("Cursor"))
+            .unwrap();
+        let id = cursor.protocols[0].protocol;
+        let owner = module.types.iter().find(|ty| ty.id.0 == id.0).unwrap();
+        assert_eq!(
+            owner.origin_module.and_then(|name| module.get_string(name)),
+            Some("library.protocols")
+        );
+    }
+}
