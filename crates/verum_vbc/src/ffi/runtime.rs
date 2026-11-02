@@ -843,7 +843,7 @@ impl FfiRuntime {
                     let mut struct_buffer = Box::new([0u8; 256]);
 
                     // The Verum value should be a pointer to a heap object
-                    let obj_ptr = arg.as_ptr::<u8>();
+                    let obj_ptr = record_argument(*arg, false)?;
                     if !obj_ptr.is_null() {
                         // Use helper function to marshal Verum struct to C buffer
                         unsafe {
@@ -867,11 +867,12 @@ impl FfiRuntime {
                 // Handle struct-pointer arguments: convert Verum heap object to C struct buffer
                 // and pass a pointer to that buffer
                 if let Some(layout) = module.ffi_layouts.get(*layout_idx as usize) {
-                    // Allocate a buffer for the C struct
+                    let obj_ptr = record_argument(*arg, true)?;
+                    if obj_ptr.is_null() {
+                        raw_args.push(0);
+                        continue;
+                    }
                     let mut struct_buffer = Box::new([0u8; 256]);
-
-                    // The Verum value should be a pointer to a heap object
-                    let obj_ptr = arg.as_ptr::<u8>();
                     if !obj_ptr.is_null() {
                         // Use helper function to marshal Verum struct to C buffer
                         unsafe {
@@ -1242,6 +1243,18 @@ impl Default for FfiRuntime {
     }
 }
 
+/// FFI record arguments have an object representation. A null reference
+/// passes a literal C null and has no backing record to marshal or write back.
+fn record_argument(value: Value, nullable: bool) -> Result<*mut u8, MarshalError> {
+    if value.is_regular_ptr() {
+        return Ok(value.as_ptr());
+    }
+    if nullable && (value.is_nil() || (value.is_inline_int() && value.as_i64() == 0)) {
+        return Ok(std::ptr::null_mut());
+    }
+    Err(MarshalError::InvalidPointer)
+}
+
 /// Marshals a single field value from Verum to C format.
 ///
 /// # Safety
@@ -1290,7 +1303,12 @@ unsafe fn marshal_field_to_c(
             | crate::module::CType::StructPtr
             | crate::module::CType::ArrayPtr
             | crate::module::CType::FnPtr => {
-                *(c_field_ptr as *mut *mut u8) = field_value.as_ptr::<u8>();
+                let address = if field_value.is_inline_int() {
+                    field_value.as_i64() as usize as *mut u8
+                } else {
+                    field_value.as_ptr::<u8>()
+                };
+                *(c_field_ptr as *mut *mut u8) = address;
             }
             crate::module::CType::Void | crate::module::CType::StructValue => {}
         }
@@ -1712,6 +1730,18 @@ fn ctype_to_ffi_type(ctype: CTypeRuntime) -> *mut ffi_type {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn null_record_arguments_preserve_the_native_null_pointer() {
+        for value in [Value::nil(), Value::from_i64(0)] {
+            assert!(record_argument(value, true).unwrap().is_null());
+            assert!(record_argument(value, false).is_err());
+        }
+        assert!(record_argument(Value::from_i64(1), true).is_err());
+        let mut byte = 0u8;
+        let ptr = std::ptr::from_mut(&mut byte);
+        assert_eq!(record_argument(Value::from_ptr(ptr), false).unwrap(), ptr);
+    }
 
     #[test]
     fn test_ffi_runtime_creation() {
