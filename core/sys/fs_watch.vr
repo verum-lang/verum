@@ -158,59 +158,33 @@ type FsWatcherImpl is
 
 @cfg(target_os = "macos")
 mount core.sys.darwin.libsystem.{
-    kqueue, kevent, EVFILT_VNODE,
-    EV_ADD, EV_DELETE, EV_CLEAR, EV_ENABLE,
+    safe_kqueue, safe_open, safe_close, watch_vnode, wait_vnode,
     NOTE_DELETE, NOTE_WRITE, NOTE_EXTEND, NOTE_ATTRIB, NOTE_RENAME,
-    open, close as sys_close,
 };
 
 @cfg(target_os = "macos")
-@repr(C)
-type KEvent is {
-    ident:  UInt64,   // fd
-    filter: Int16,
-    flags:  UInt16,
-    fflags: UInt32,
-    data:   Int64,
-    udata:  &unsafe Byte,
-}
-
-@cfg(target_os = "macos")
 public type KqueueBackend is {
-    kq_fd:    Int32,
+    kq_fd:    FileDesc,
     /// Tracked fds with their paths, indexed by fd.
-    watches:  List<(Int32, Text)>,
+    watches:  List<(FileDesc, Text)>,
 }
 
 @cfg(target_os = "macos")
 implement KqueueBackend {
     public fn new() -> Result<KqueueBackend, Text> {
-        let fd = kqueue();
-        if fd < 0 { Result.Err("kqueue() failed".into()) }
-        else      { Result.Ok(KqueueBackend { kq_fd: fd, watches: [] }) }
+        let fd = safe_kqueue().map_err(|error| error.to_string())?;
+        Result.Ok(KqueueBackend { kq_fd: fd, watches: [] })
     }
 
     public fn add(&mut self, path: &Text) -> Result<(), Text> {
         // Open the path so we can register its fd with kqueue.
         // O_RDONLY = 0, O_EVTONLY = 0x8000 — kernel-level "open just to watch".
-        let path_c = nul_terminate(path);
-        const O_EVTONLY: Int32 = 0x8000;
-        let fd = open(&path_c[0] as &Byte, O_EVTONLY, 0 as UInt32);
-        if fd < 0 { return Result.Err(f"open({path}) failed"); }
-        // Register an EVFILT_VNODE filter with all the interesting fflags.
-        let fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_ATTRIB | NOTE_RENAME;
-        let mut ev = KEvent {
-            ident:  fd as UInt64,
-            filter: EVFILT_VNODE,
-            flags:  EV_ADD | EV_CLEAR,
-            fflags,
-            data:   0,
-            udata:  0 as &unsafe Byte,
-        };
-        let r = kevent(self.kq_fd, &ev as &KEvent, 1 as Int32, 0 as &mut KEvent, 0 as Int32, 0 as &Byte);
-        if r < 0 {
-            sys_close(fd);
-            return Result.Err("kevent register failed".into());
+        const O_EVTONLY: Int = 0x8000;
+        let fd = safe_open(path.as_bytes(), O_EVTONLY, 0).map_err(|error| error.to_string())?;
+        let mask = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_ATTRIB | NOTE_RENAME;
+        if let Result.Err(error) = watch_vnode(self.kq_fd, fd, mask) {
+            let _ = safe_close(fd);
+            return Result.Err(error.to_string());
         }
         self.watches.push((fd, path.clone()));
         Result.Ok(())
@@ -223,47 +197,23 @@ implement KqueueBackend {
         }
         if idx < 0 { return Result.Ok(()); }
         let (fd, _) = self.watches.remove(idx as usize);
-        sys_close(fd);
-        Result.Ok(())
+        safe_close(fd).map_err(|error| error.to_string())
     }
 
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
-        // Up to 16 events at a time
-        let mut buf: List<KEvent> = List.with_capacity(16);
-        let mut i = 0;
-        while i < 16 {
-            buf.push(KEvent {
-                ident: 0, filter: 0, flags: 0, fflags: 0, data: 0,
-                udata: 0 as &unsafe Byte,
-            });
-            i = i + 1;
-        }
-        // kevent's timespec: { tv_sec, tv_nsec }
-        let timeout_ns = if timeout_ms < 0 { 0 } else { timeout_ms * 1_000_000 };
-        let r = kevent(
-            self.kq_fd,
-            0 as &KEvent,
-            0 as Int32,
-            buf.as_mut_ptr() as &mut KEvent,
-            16 as Int32,
-            if timeout_ms < 0 { 0 as &Byte } else { &timeout_ns as &Byte },
-        );
-        if r < 0 { return Result.Err("kevent wait failed".into()); }
         let mut events: List<FsEvent> = [];
-        let mut k = 0;
-        while k < r as Int {
-            let ev = &buf[k as usize];
-            // Find path for fd
-            let mut path: Text = "".into();
-            for (fd, p) in self.watches.iter() {
-                if (*fd as UInt64) == ev.ident { path = p.clone(); break; }
+        let ready = wait_vnode(self.kq_fd, timeout_ms).map_err(|error| error.to_string())?;
+        if let Maybe.Some((ident, flags)) = ready {
+            for (fd, path) in self.watches.iter() {
+                if fd.as_raw() == ident {
+                    let kind = if (flags & NOTE_DELETE) != 0 { FsEventKind.Deleted }
+                               else if (flags & NOTE_RENAME) != 0 { FsEventKind.Renamed }
+                               else if (flags & (NOTE_WRITE | NOTE_EXTEND)) != 0 { FsEventKind.Modified }
+                               else { FsEventKind.AttribChanged };
+                    events.push(FsEvent { path: path.clone(), kind });
+                    break;
+                }
             }
-            let kind = if (ev.fflags & NOTE_DELETE) != 0 { FsEventKind.Deleted }
-                       else if (ev.fflags & NOTE_RENAME) != 0 { FsEventKind.Renamed }
-                       else if (ev.fflags & NOTE_ATTRIB) != 0 { FsEventKind.AttribChanged }
-                       else { FsEventKind.Modified };
-            events.push(FsEvent { path, kind });
-            k = k + 1;
         }
         Result.Ok(events)
     }
@@ -272,8 +222,8 @@ implement KqueueBackend {
 @cfg(target_os = "macos")
 implement Drop for KqueueBackend {
     fn drop(&mut self) {
-        for (fd, _) in self.watches.iter() { sys_close(*fd); }
-        sys_close(self.kq_fd);
+        for (fd, _) in self.watches.iter() { let _ = safe_close(*fd); }
+        let _ = safe_close(self.kq_fd);
     }
 }
 
@@ -320,7 +270,7 @@ public const SYS_INOTIFY_RM_WATCH: Int = 28;
 @cfg(target_os = "linux")
 public type InotifyBackend is {
     fd:       Int32,
-    watches:  List<(Int32, Text)>,  // (wd, path)
+    watches:  List<(FileDesc, Text)>,  // (wd, path)
 }
 
 @cfg(target_os = "linux")
@@ -445,7 +395,7 @@ fn read_u32_le(buf: &List<Byte>, off: Int) -> Int {
 // Common helpers
 // =============================================================================
 
-@cfg(any(target_os = "linux", target_os = "macos"))
+@cfg(target_os = "linux")
 fn nul_terminate(t: &Text) -> List<Byte> {
     let mut out = List.with_capacity(t.len() + 1);
     for b in t.clone().into_bytes().iter() { out.push(*b); }

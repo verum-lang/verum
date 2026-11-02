@@ -207,3 +207,35 @@ fn darwin_path_slices_refuse_truncation_before_opening_a_file() {
     "#;
     assert_eq!(execute_from_archive(source), 1);
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn watcher_reports_the_registered_file_and_removes_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("observed file");
+    std::fs::write(&file, []).unwrap();
+    let source = r#"
+        module app;
+        mount core.sys.fs_watch.{FsWatcher, FsEventKind};
+        mount core.sys.darwin.libsystem.{safe_open, safe_close, safe_ftruncate, O_RDWR};
+        fn main() -> Int {
+            let path: Text = FILE_NAME;
+            let mut watcher = FsWatcher.new().unwrap();
+            watcher.add(&path).unwrap();
+            assert_eq(watcher.wait(0).unwrap().len(), 0);
+            let writer = safe_open(path.as_bytes(), O_RDWR, 0).unwrap();
+            safe_ftruncate(writer, 7).unwrap();
+            let events = watcher.wait(1000).unwrap();
+            assert_eq(events.len(), 1);
+            assert_eq(events[0].path, path);
+            match events[0].kind { FsEventKind.Modified => {}, _ => panic("expected modification") }
+            watcher.remove(&path).unwrap();
+            safe_ftruncate(writer, 15).unwrap();
+            safe_close(writer).unwrap();
+            watcher.wait(0).unwrap().len()
+        }
+    "#.replace("FILE_NAME", &format!("{:?}", file.to_str().unwrap()));
+    assert_eq!(execute_from_archive(&source), 0);
+    assert_eq!(std::fs::metadata(file).unwrap().len(), 15);
+}
