@@ -9,6 +9,34 @@ use verum_vbc::{
 };
 
 #[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn cancellation_observers_see_publication_and_linked_children() {
+    let source = r#"
+        module app;
+        mount core.async.cancellation.{CancellationToken, CancelReason};
+        fn main() -> Int {
+            let parent = CancellationToken.new();
+            let before = parent.child_source();
+            let observed_parent = parent.clone();
+            let mark = CancellationToken.new();
+            let callback_mark = mark.clone();
+            let registration = parent.register(move || {
+                if observed_parent.is_cancelled() { callback_mark.cancel(); }
+            });
+            parent.cancel();
+            if !mark.is_cancelled() || !before.is_cancelled() { return 1; }
+            let after = parent.child_source();
+            if !after.is_cancelled() { return 2; }
+            match before.token().reason() {
+                Maybe.Some(CancelReason.ParentCancelled) => 81,
+                _ => 3,
+            }
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 81);
+}
+
+#[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and loopback TCP"]
 fn cancelled_accept_preserves_the_pending_tcp_connection() {
     let source = r#"

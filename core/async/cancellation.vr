@@ -237,8 +237,8 @@ type CancellationCallback is {
 //
 
 // State layout:
-//  state: 0 = active, 1 = cancelling (mid-propagation), 2 = cancelled (stable).
-//  reason: written once on first cancel via compare-exchange on state.
+//  state: active until the first cancellation reason has been published.
+//  reason: its mutex serializes the single successful transition.
 //  next_id: monotonic counter for registration IDs.
 
 public type CancellationFlag is {
@@ -252,7 +252,6 @@ public type CancellationFlag is {
 
 // State constants for the `state` field.
 const STATE_ACTIVE: Int = 0;
-const STATE_CANCELLING: Int = 1;
 const STATE_CANCELLED: Int = 2;
 
 implement CancellationFlag {
@@ -284,34 +283,17 @@ implement CancellationFlag {
     // Returns true if this call performed the transition (first caller),
     // false if already cancelled (idempotent).
     public fn cancel_with(&self, r: CancelReason) -> Bool {
-        // Compare-exchange: active → cancelling. Losers bail out.
-        let transition = self.state.compare_exchange(
-            STATE_ACTIVE, STATE_CANCELLING,
-            MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
-        );
-        // compare_exchange returns Result<old, actual>, not the old Int.
-        // Only the winner may publish the reason and notify observers.
-        if transition.is_err() {
-            return false;
-        }
-
-        // Record reason.
+        if self.is_cancelled() { return false; }
         {
-            let mut rg = self.reason.lock().unwrap_or_else(|p| p.into_inner());
-            *rg = Maybe.Some(r);
+            let mut reason = self.reason.lock().unwrap_or_else(|p| p.into_inner());
+            if self.is_cancelled() { return false; }
+            *reason = Maybe.Some(r);
+            // Registration rechecks under its queue lock. Publish before
+            // draining so a concurrent or reentrant observer cannot miss us.
+            self.state.store(STATE_CANCELLED, MemoryOrdering.Release);
         }
 
-        // Drain wakers — take ownership of the list and release lock
-        // before invoking wakers (avoid re-entrancy under lock).
-        //
-
-        // Uses `replace(&mut <guard>, List.new())` rather than the
-        // generic `take<T: Default>` helper from `base.memory` —
-        // bounded generics on top-level functions are not yet
-        // registered into the VBC function table by stdlib loading
-        // (task #159), so callers that imported `take`/`mem_take`
-        // hit `[lenient] SKIP … undefined function`. The
-        // `replace<T>` form has no bound and registers cleanly.
+        // Transfer each queue before invoking user code outside its lock.
         let waiters_drained = {
             let mut wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
             let list = replace(&mut *wg, List.new());
@@ -332,11 +314,11 @@ implement CancellationFlag {
         }
 
         // Propagate to children (weak → strong upgrade; skip dead).
-        let children_snapshot: List<Weak<CancellationFlag>> = {
-            let cg = self.children.lock().unwrap_or_else(|p| p.into_inner());
-            cg.iter().map(|w| w.clone()).collect<List<_>>()
+        let children = {
+            let mut cg = self.children.lock().unwrap_or_else(|p| p.into_inner());
+            replace(&mut *cg, List.new())
         };
-        for weak in children_snapshot {
+        for weak in children {
             if let Maybe.Some(child) = weak.upgrade() {
                 // Propagated reason — children see ParentCancelled,
                 // not the parent's own reason (structured traceability).
@@ -344,8 +326,6 @@ implement CancellationFlag {
             }
         }
 
-        // Publish final state.
-        self.state.store(STATE_CANCELLED, MemoryOrdering.Release);
         true
     }
 
@@ -504,7 +484,7 @@ implement CancellationToken {
     /// (and can independently be cancelled without affecting this parent).
     public fn child_source(&self) -> CancellationTokenSource {
         let src = CancellationTokenSource.new();
-        self.inner.attach_child(src.token.inner.weak());
+        self.inner.attach_child(src.token.inner.downgrade());
         src
     }
 
@@ -514,7 +494,7 @@ implement CancellationToken {
     public fn combine(tokens: &[CancellationToken]) -> CancellationToken {
         let combined = CancellationTokenSource.new();
         for t in tokens {
-            t.inner.attach_child(combined.token.inner.weak());
+            t.inner.attach_child(combined.token.inner.downgrade());
         }
         // Return the observer token; combined source is dropped here,
         // but parent→child linkage keeps the flag alive through the
@@ -649,7 +629,7 @@ implement CancellationTokenSource {
     /// This source can still be cancelled independently.
     public fn linked_to(parent: &CancellationToken) -> CancellationTokenSource {
         let src = CancellationTokenSource.new();
-        parent.inner.attach_child(src.token.inner.weak());
+        parent.inner.attach_child(src.token.inner.downgrade());
         src
     }
 
