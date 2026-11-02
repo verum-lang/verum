@@ -83,6 +83,9 @@ mod tests_e2e;
 #[cfg(test)]
 mod test_params;
 
+use associated_types::ConcreteImplType;
+use std::collections::HashMap;
+
 pub use context::{CodegenContext, CodegenStats, ExprId, FunctionInfo, LoopContext, TierContext};
 
 /// Where `resolve_mounts` spends its time, per compiled file.
@@ -297,10 +300,20 @@ mod mount_cost {
 pub struct ProtocolInfo {
     /// Protocol name (e.g., "Eq", "Ord", "Clone").
     pub name: String,
+    /// Lexical scope of this protocol's signatures and default bodies.
+    pub source_module: String,
     /// Default method implementations: maps method name to its FunctionDecl.
     pub default_methods: std::collections::HashMap<String, verum_ast::FunctionDecl>,
     /// Superprotocol names this protocol extends.
     pub super_protocols: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct DefaultConstraintScope {
+    receiver: crate::types::TypeId,
+    instance: Option<ConcreteImplType>,
+    protocol: crate::types::ProtocolId,
+    source_module: String,
 }
 
 /// A blanket protocol implementation waiting to be monomorphized onto
@@ -1226,7 +1239,14 @@ pub struct VbcCodegen {
     /// under `#impl10`.  Deferral makes slot assignment
     /// declaration-order-independent: every explicit body registers
     /// first, and a default only fills a still-empty slot.
-    pending_default_registrations: Vec<(verum_ast::FunctionDecl, String)>,
+    pending_default_registrations: Vec<(
+        verum_ast::FunctionDecl,
+        String,
+        Option<DefaultConstraintScope>,
+    )>,
+    /// Local associated equalities indexed by the full specialized impl receiver.
+    concrete_impl_bindings:
+        HashMap<(ConcreteImplType, crate::types::ProtocolId), HashMap<String, ConcreteImplType>>,
 
     /// Blanket protocol implementations: `implement<T: BaseProto> DerivedProto for T {}`.
     ///
@@ -2501,6 +2521,7 @@ impl VbcCodegen {
             // Pending default protocol methods for deferred compilation
             pending_default_methods: Vec::new(),
             pending_default_registrations: Vec::new(),
+            concrete_impl_bindings: HashMap::new(),
             blanket_impls: Vec::new(),
             // Static variable initializer functions (become global constructors)
             static_init_functions: Vec::new(),
@@ -2839,6 +2860,8 @@ impl VbcCodegen {
                         protocol_name.clone(),
                         ProtocolInfo {
                             name: protocol_name,
+                            source_module: Self::resolve_full_module_path(module, &self.config.module_name)
+                                .unwrap_or_else(|| self.config.module_name.clone()),
                             default_methods,
                             super_protocols,
                         },
@@ -3350,6 +3373,7 @@ impl VbcCodegen {
         &mut self,
         protocol_name: &str,
         type_name: &str,
+        instance: Option<&ConcreteImplType>,
         implemented_methods: &std::collections::HashSet<String>,
     ) -> CodegenResult<()> {
         // Collect all protocols to check (this protocol + all superprotocols
@@ -3419,7 +3443,7 @@ impl VbcCodegen {
                     // materialisation below — explicit bodies from
                     // LATER blocks must win the unsuffixed slot.
                     self.pending_default_registrations
-                        .push((body_func.clone(), type_name.to_string()));
+                        .push((body_func.clone(), type_name.to_string(), None));
                 }
                 per_proto_overrides
                     .entry(derived.clone())
@@ -3469,8 +3493,22 @@ impl VbcCodegen {
                     // claims the unsuffixed dispatch slot; the default
                     // only fills slots still empty after the whole
                     // collect phase.
+                    let constraints = default_func.generic_where_clause.as_ref().and_then(|_| {
+                        let receiver = self.nominal_type_id(type_name)?;
+                        let owner = crate::module::qualify_module_name(
+                            &protocol_info.source_module,
+                            &proto_name,
+                        );
+                        let protocol = self.nominal_type_id(&owner)?;
+                        Some(DefaultConstraintScope {
+                            receiver,
+                            instance: instance.cloned(),
+                            protocol: crate::types::ProtocolId(protocol.0),
+                            source_module: protocol_info.source_module.clone(),
+                        })
+                    });
                     self.pending_default_registrations
-                        .push((default_func.clone(), type_name.to_string()));
+                        .push((default_func.clone(), type_name.to_string(), constraints));
                 }
             }
         }
@@ -3552,7 +3590,7 @@ impl VbcCodegen {
         // every explicit impl body already owns its unsuffixed slot
         // and a default only fills slots that are still empty.
         let deferred = std::mem::take(&mut self.pending_default_registrations);
-        for (default_func, type_name) in deferred {
+        for (default_func, type_name, constraints) in deferred {
             let full_method_name =
                 format!("{}.{}", type_name, default_func.name.name);
             // INSTRUMENT (VERUM_TRACE_DEFREG=<substring>): whether a
@@ -3577,6 +3615,20 @@ impl VbcCodegen {
             }
             if self.ctx.lookup_function(&full_method_name).is_some() {
                 continue;
+            }
+            if let Some(constraints) = constraints {
+                let previous_module = self.ctx.current_source_module.replace(constraints.source_module);
+                let contradicts = self.default_binding_contradicts(
+                    &default_func,
+                    &type_name,
+                    constraints.receiver,
+                    constraints.protocol,
+                    constraints.instance.as_ref(),
+                );
+                self.ctx.current_source_module = previous_module;
+                if contradicts {
+                    continue;
+                }
             }
             self.register_impl_function(&default_func, &type_name, &[])?;
             self.pending_default_methods
@@ -9513,6 +9565,7 @@ impl VbcCodegen {
         self.mount_installed_qualified_keys.clear();
         self.decl_installed_qualified_keys.clear();
         self.local_concrete_types.clear();
+        self.concrete_impl_bindings.clear();
         // Constructor collisions belong to the same registration lifetime as ctx.
         self.variant_collisions.clear();
         // Clear field name indices
@@ -10181,7 +10234,10 @@ impl VbcCodegen {
                             .collect();
 
                         // Generate default methods from protocol
-                        self.generate_default_protocol_methods(&pn, ty_name, &implemented_methods)?;
+                        let instance = self.record_concrete_impl_bindings(impl_decl);
+                        self.generate_default_protocol_methods(
+                            &pn, ty_name, instance.as_ref(), &implemented_methods,
+                        )?;
 
                         // Populate TypeDescriptor.protocols for vtable-based dispatch.
                         // Look up protocol's TypeDescriptor to get canonical method order,
