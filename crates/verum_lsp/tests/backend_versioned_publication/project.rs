@@ -322,6 +322,59 @@ async fn library_artifact_identity_invalidates_project_generation() {
     assert!(!errors(&after).is_empty(), "{after:#}");
 }
 
+fn nominal_library_fixture(target: &str) -> std::sync::Arc<crate::library_metadata::LibraryMetadata> {
+    use verum_types::core_metadata::*;
+    let mut metadata = CoreMetadata { version: CORE_METADATA_VERSION, ..Default::default() };
+    for (owner, source) in [
+        ("portable.levels", "public type Level is { public value: Type(1) };"),
+        ("foreign.levels", "public type Level is { public value: Type(2) };"),
+        ("portable.api", "public type Carrier is { public value: Type(1), public nested: PrivateLevel };"),
+    ] {
+        let ast = verum_parser::Parser::new(source).parse_module().unwrap();
+        let verum_ast::ItemKind::Type(decl) = &ast.items[0].kind else { panic!("type") };
+        let verum_ast::TypeDeclBody::Record(fields) = &decl.body else { panic!("record") };
+        let key: verum_common::Text = format!("{owner}.{}", decl.name.name).into();
+        metadata.type_declaration_order.push(key.clone());
+        metadata.types.insert(key, TypeDescriptor {
+            source_declaration: verum_ast::source_signature::source_type_declaration(decl).unwrap(),
+            name: decl.name.name.clone(), module_path: owner.into(), origin_module_path: None,
+            generic_params: Default::default(),
+            kind: TypeDescriptorKind::Record { fields: fields.iter().map(|field| FieldDescriptor {
+                name: field.name.name.clone(), ty: "__opaque_src".into(), is_public: true,
+                declared_visibility: Some(verum_ast::Visibility::Public),
+            }).collect() },
+            size: None, alignment: None, methods: Default::default(), implements: Default::default(),
+            decl_span: None, is_public: true, is_transparent_wrapper: false,
+            resource_discipline: Default::default(),
+        });
+    }
+    let mut bindings = verum_common::OrderedMap::new();
+    bindings.insert("PrivateLevel".into(), Some(target.into()));
+    metadata.declaration_type_bindings.insert("portable.api".into(), bindings);
+    crate::library_metadata::LibraryMetadata::decode(&encode_metadata(&metadata).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn nominal_library_levels_and_private_scopes_reach_project_analysis() {
+    let library = nominal_library_fixture("portable.levels.Level");
+    let project = Project::with_library(Some(library.clone()));
+    let uri = project.open("main.vr", "mount portable.api.{Carrier}; fn read(x: &Carrier) -> Type(1) { x.value } fn nested(x: &Carrier) -> portable.levels.Level { x.nested }");
+    let before = project.snapshot(&uri).await;
+    assert!(errors(&before).is_empty(), "{before:#}");
+    assert_eq!(before["library_metadata"]["sha256"], library.identity.sha256.as_str());
+    let negative = Project::with_library(Some(library));
+    let bad = negative.open("bad.vr", "mount portable.api.{Carrier}; fn bad(x: &Carrier) -> Type(0) { x.value }");
+    assert!(!errors(&negative.snapshot(&bad).await).is_empty(), "LSP erased a universe level");
+
+    let changed = nominal_library_fixture("foreign.levels.Level");
+    let mut context = crate::project_context::ProjectContext::with_library(Some(changed));
+    context.configure(project.root.path().to_path_buf(), None);
+    *project.service.inner().project.lock() = context;
+    let after = project.snapshot(&uri).await;
+    assert_ne!(before["project_revision"], after["project_revision"]);
+    assert!(!errors(&after).is_empty(), "changed private binding reused stale successful analysis: {after:#}");
+}
+
 #[tokio::test]
 async fn tab_lifecycle_reuses_semantics_without_reusing_publication_incarnations() {
     let project = Project::new();
