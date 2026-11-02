@@ -120,3 +120,47 @@ fn archived_socket_classifier_uses_its_target_errno_table() {
         assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), expected);
     }
 }
+
+const SYSCALL_CONSTANTS: &[(&str, i64)] = &[
+    ("TCGETS", 0x5401), ("TCSETS", 0x5402), ("TCSETSW", 0x5403), ("TCSETSF", 0x5404),
+    ("TIOCGWINSZ", 0x5413), ("TIOCSWINSZ", 0x5414),
+    ("F_GETFL", 3), ("F_SETFL", 4), ("O_NONBLOCK", 0o4000),
+];
+
+#[test]
+fn syscall_constants_remain_distinct_when_compiled_from_their_declarations() {
+    let mut ast = Parser::new(include_str!("../../../core/sys/linux/syscall.vr")).parse_module().unwrap();
+    ast.items.retain(|item| match &item.kind {
+        verum_ast::ItemKind::Module(_) => true,
+        verum_ast::ItemKind::Const(decl) => SYSCALL_CONSTANTS.iter().any(|&(name, _)| name == decl.name.name.as_str()),
+        _ => false,
+    });
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    check_syscall_constants(verum_vbc::deserialize::deserialize_module(&bytes).unwrap());
+}
+
+#[test]
+#[ignore = "requires the freshly built VERUM_TEST_FROZEN_STDLIB archive"]
+fn published_syscall_constants_execute_from_distinct_declared_accessors() {
+    let path = std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("fresh stdlib archive path");
+    let archive = verum_vbc::archive::read_archive_from_file(path).unwrap();
+    check_syscall_constants(archive.load_module("core.sys.linux").unwrap());
+}
+
+fn check_syscall_constants(module: verum_vbc::module::VbcModule) {
+    let module = Arc::new(module);
+    let mut interpreter = Interpreter::new(module.clone());
+    let mut ids = std::collections::HashSet::new();
+    for &(name, expected) in SYSCALL_CONSTANTS {
+        let qualified = format!("core.sys.linux.syscall.{name}");
+        let mut matches = module.functions.iter().filter(|f| module.get_string(f.name) == Some(&qualified));
+        let accessor = matches.next().unwrap_or_else(|| panic!("missing {qualified}"));
+        assert!(matches.next().is_none(), "multiple {qualified} accessors");
+        assert!(accessor.is_const && ids.insert(accessor.id), "invalid {qualified} slot");
+        let entry = module.find_function_by_name(&qualified).unwrap();
+        let value = interpreter.execute_function(entry).unwrap();
+        assert!(value.is_int(), "{qualified}: {value:?} at {entry:?} (descriptor {:?})", accessor.id);
+        assert_eq!(value.as_i64(), expected, "{qualified}");
+    }
+}
