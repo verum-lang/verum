@@ -209,11 +209,20 @@ fn actual_ntype_references_the_completed_local_istrunc_identity() {
                 if ["IsTrunc", "NType", "HProp", "HSet"].contains(&declaration.name.name.as_str()))
     });
     let completed = second_bootstrap_interface("core.math", &ast);
-    let declarations: Vec<_> = completed
+    let mut declarations: Vec<_> = completed
         .types
         .iter()
-        .filter_map(|descriptor| descriptor.source_declaration.as_ref())
+        .filter_map(|ty| Some((ty.source_declaration.as_ref()?.name.name.as_str(), ty)))
         .collect();
-    assert_eq!(declarations.len(), 1);
-    assert_eq!(declarations[0].name.name.as_str(), "NType");
+    declarations.sort_by_key(|(name, _)| *name);
+    let [("IsTrunc", protocol), ("NType", record)] = declarations.as_slice() else {
+        panic!("expected one source declaration each for IsTrunc and NType");
+    };
+    let witness = record.fields.iter()
+        .find(|field| completed.get_string(field.name) == Some("truncation"))
+        .expect("NType declares a truncation witness");
+    let TypeRef::Instantiated { base, .. } = &witness.type_ref else {
+        panic!("the witness must retain its nominal protocol application");
+    };
+    assert_eq!(*base, protocol.id);
 }
