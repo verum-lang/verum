@@ -84,7 +84,7 @@ fn load(checker: &mut TypeChecker, name: &str) {
 
 fn item(checker: &TypeChecker, owner: &str) -> Option<Type> {
     checker.protocol_checker.read().try_find_associated_type(
-        &parse_descriptor_type_string(&format!("{owner}<Int>")),
+        &parse_descriptor_type_string(&format!("{owner}<Int>")).unwrap(),
         &"Item".into(),
     )
 }
@@ -127,7 +127,7 @@ fn admitted_descriptor_reuses_successful_aliases_without_rechecking_overlap() {
 fn rejected_alias_is_retried_without_readmitting_successful_aliases() {
     let mut checker =
         TypeChecker::new_with_core(Arc::new(metadata(List::from_iter([descriptor()]))));
-    let Type::Named { path: protocol, .. } = parse_descriptor_type_string("Inspect") else {
+    let Type::Named { path: protocol, .. } = parse_descriptor_type_string("Inspect").unwrap() else {
         panic!("nominal protocol path");
     };
     // This concrete implementation conflicts with the archived generic owner.
@@ -138,7 +138,7 @@ fn rejected_alias_is_retried_without_readmitting_successful_aliases() {
         .register_impl(verum_types::protocol::ProtocolImpl {
             protocol,
             protocol_args: List::new(),
-            for_type: parse_descriptor_type_string("owner.Container<Int>"),
+            for_type: parse_descriptor_type_string("owner.Container<Int>").unwrap(),
             where_clauses: List::new(),
             methods: Default::default(),
             associated_types: [("Item".into(), Type::Bool)].into_iter().collect(),
@@ -272,7 +272,7 @@ fn installing_new_metadata_invalidates_position_receipts() {
     load(&mut checker, "Container");
     assert_eq!(
         checker.protocol_checker.read().try_find_associated_type(
-            &parse_descriptor_type_string("owner.Container<Int>"),
+            &parse_descriptor_type_string("owner.Container<Int>").unwrap(),
             &"Measured".into(),
         ),
         Some(Type::Text)

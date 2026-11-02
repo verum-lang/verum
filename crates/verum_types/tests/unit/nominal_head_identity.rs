@@ -84,7 +84,7 @@ fn metadata_generic_and_bare_named_have_one_declared_owner() {
             for swap in [false, true] {
                 let mut checker = checker(metadata("alpha", reverse), eager);
                 let left = generic("alpha.Table", Type::Int);
-                let right = parse_type("Table<Text, Int>");
+                let right = parse_type("Table<Text, Int>").unwrap();
                 let (left, right) = if swap { (right, left) } else { (left, right) };
                 assert!(
                     compatible(&mut checker, left, right),
@@ -101,7 +101,7 @@ fn fully_qualified_generic_and_named_heads_are_identical() {
     assert!(compatible(
         &mut checker,
         generic("alpha.Table", Type::Int),
-        parse_type("alpha.Table<Text, Int>")
+        parse_type("alpha.Table<Text, Int>").unwrap()
     ));
 }
 
@@ -112,7 +112,7 @@ fn registered_export_alias_uses_its_declared_owner() {
         assert!(compatible(
             &mut checker,
             generic("alpha.Table", Type::Int),
-            parse_type("exports.Renamed<Text, Int>")
+            parse_type("exports.Renamed<Text, Int>").unwrap()
         ));
     }
 }
@@ -125,12 +125,12 @@ fn qualified_foreign_owner_never_borrows_the_bare_binding() {
             assert!(!compatible(
                 &mut checker,
                 generic("Table", Type::Int),
-                parse_type("foreign.Table<Text, Int>")
+                parse_type("foreign.Table<Text, Int>").unwrap()
             ));
             assert!(!compatible(
                 &mut checker,
                 generic("alpha.Table", Type::Int),
-                parse_type("foreign.Table<Text, Int>")
+                parse_type("foreign.Table<Text, Int>").unwrap()
             ));
         }
     }
@@ -142,12 +142,12 @@ fn unknown_qualified_owner_never_borrows_the_bare_binding() {
     assert!(!compatible(
         &mut checker,
         generic("Table", Type::Int),
-        parse_type("missing.Table<Text, Int>")
+        parse_type("missing.Table<Text, Int>").unwrap()
     ));
     assert!(!compatible(
         &mut checker,
         generic("missing.Table", Type::Int),
-        parse_type("Table<Text, Int>")
+        parse_type("Table<Text, Int>").unwrap()
     ));
 }
 
@@ -157,7 +157,7 @@ fn matching_leaf_without_declaration_is_not_identity() {
     assert!(!compatible(
         &mut checker,
         generic("Table", Type::Int),
-        parse_type("missing.Table<Text, Int>")
+        parse_type("missing.Table<Text, Int>").unwrap()
     ));
 }
 
@@ -167,7 +167,7 @@ fn value_arguments_still_constrain_declared_heads() {
     assert!(!compatible(
         &mut checker,
         generic("alpha.Table", Type::Int),
-        parse_type("Table<Text, Bool>")
+        parse_type("Table<Text, Bool>").unwrap()
     ));
 }
 
@@ -177,12 +177,12 @@ fn key_arguments_and_arity_still_constrain_declared_heads() {
     assert!(!compatible(
         &mut checker,
         generic("alpha.Table", Type::Int),
-        parse_type("Table<Bool, Int>")
+        parse_type("Table<Bool, Int>").unwrap()
     ));
     assert!(!compatible(
         &mut checker,
         generic("alpha.Table", Type::Int),
-        parse_type("Table<Text>")
+        parse_type("Table<Text>").unwrap()
     ));
 }
 
@@ -193,12 +193,12 @@ fn replacing_metadata_replaces_the_head_authority() {
     assert!(compatible(
         &mut checker,
         generic("beta.Table", Type::Int),
-        parse_type("Table<Text, Int>")
+        parse_type("Table<Text, Int>").unwrap()
     ));
     assert!(!compatible(
         &mut checker,
         generic("alpha.Table", Type::Int),
-        parse_type("Table<Text, Int>")
+        parse_type("Table<Text, Int>").unwrap()
     ));
 }
 

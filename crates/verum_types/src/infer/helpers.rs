@@ -1838,24 +1838,15 @@ fn parse_descriptor_type(raw: &str, resolve_bound: &impl Fn(&str) -> Text) -> Ty
             .collect();
         return Type::Tuple(elems);
     }
-    // SLICE-METHOD-TYPECHECK-E400 (#51): slice spelling "[T]" — the
-    // carried source-verbatim return names ("&[T]" via RETNAME-CARRY)
-    // reach this parser now that the metadata writer prefers them over
-    // the lossy TypeRef render (VBC TypeRefs have NO slice form, so
-    // `slice() -> &[T]` used to serialise as bare "List" and the
-    // chained receiver misinfered as List<_>).
-    if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
-        let inner = &trimmed[1..trimmed.len() - 1];
-        // "[T; N]" (array) — element is everything before the
-        // top-level ';'. Metadata keeps no length; Slice is the
-        // honest structural reading for method-signature purposes.
-        let elem_text = match inner.rfind(';') {
-            Some(semi) if !inner[..semi].contains('[') => inner[..semi].trim_end(),
-            _ => inner,
-        };
-        return Type::Slice {
-            element: Box::new(parse(elem_text.trim())),
-        };
+    if let Some(inner) = trimmed.strip_prefix('[').and_then(|body| body.strip_suffix(']')) {
+        // Admission checks every fixed dimension. Only the outermost fixed
+        // extent can end in decimal digits immediately before this closing ']'.
+        if let Some((element, count)) = inner.rsplit_once(';')
+            && let Ok(size) = crate::core_metadata::parse_archive_array_extent(count)
+        {
+            return Type::array(parse(element.trim()), Some(size));
+        }
+        return Type::Slice { element: Box::new(parse(inner.trim())) };
     }
     // **Function-type spelling** (`fn(arg1, arg2, ...) -> ret`) — must
     // be parsed BEFORE the generic-instantiation `<>` check below, since

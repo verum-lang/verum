@@ -7519,7 +7519,8 @@ impl TypeChecker {
     /// `name` is the bare const name (e.g. `"SSO_CAPACITY"`).
     /// `type_text` is the descriptor text (e.g. `"Int"` or `"Maybe<Int>"`).
     pub fn register_const_from_metadata(&mut self, name: &str, type_text: &str) -> Result<()> {
-        let const_type = crate::infer::helpers::parse_descriptor_type_string(type_text);
+        let const_type =
+            crate::infer::parse_descriptor_type_string(type_text).map_err(TypeError::Other)?;
         self.ctx.env.insert_value(name, TypeScheme::mono(const_type));
         tracing::debug!("Registered const from metadata: {}", name);
         Ok(())

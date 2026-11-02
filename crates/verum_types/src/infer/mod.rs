@@ -1654,13 +1654,12 @@ pub(crate) use gat::{GATConstraint, GATInferenceError, GATInferenceStats, Optimi
 // expr_kind_description, HKT methods, QTT helpers, type-size, meta_value_to_literal, …)
 // → see infer/helpers.rs in this module
 pub(crate) mod helpers;
-/// The archive-descriptor type decoder, exposed for the conformance gate.
-///
-/// It is the ONLY place a baked spelling becomes a `Type` again, so its
-/// rank-2 arm (`fn<R>(…)` → `Type::Forall`) has no other observable: the
-/// end-to-end symptom needs a rebaked stdlib, which no unit test can
-/// stand up (T0997).
-pub use helpers::parse_descriptor_type_string;
+/// Reconstruct a type from an external archive spelling, checking array extents
+/// before they enter the type system.
+pub fn parse_descriptor_type_string(raw: &str) -> std::result::Result<Type, Text> {
+    crate::core_metadata::validate_archive_array_spelling(raw)?;
+    Ok(helpers::parse_descriptor_type_string(raw))
+}
 // Re-export helpers so sibling submodules can access them via `super::`
 pub(crate) use helpers::{
     mount_tree_exports_name, resolve_builtin_meta_type, levenshtein_distance,

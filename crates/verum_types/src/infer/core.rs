@@ -30,6 +30,7 @@ use crate::ty::{Type, TypeVar};
 use crate::unify::Unifier;
 #[allow(unused_imports)]
 use crate::{Result, TypeError, TypeCheckMetrics};
+use super::helpers::parse_descriptor_type_string;
 #[allow(unused_imports)]
 use super::{
     TypeChecker, FunctionContract, DeferredConstraint, DeferredVerificationGoal,
@@ -41,7 +42,7 @@ use super::{
     MAX_INFERENCE_DEPTH,
     read_param_classification,
     collect_inline_mount_reexports_recursive, has_declassify_attr_on_function,
-    collect_named_types_from_module, parse_descriptor_type_string,
+    collect_named_types_from_module,
     register_variant_signature_for_lazy,
 };
 #[allow(unused_imports)]

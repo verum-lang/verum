@@ -53,7 +53,7 @@ fn alias_arguments_archive_template_keeps_distinct_slots_and_uses() {
         let checker = metadata_checker(eager);
         for spelling in ["Pair", "alpha.Pair"] {
             for (first, second) in [(Type::Text, Type::Bool), (Type::Bool, Type::Int)] {
-                let mut application = parse_type(spelling);
+                let mut application = parse_type(spelling).unwrap();
                 let Type::Named { args, .. } = &mut application else {
                     panic!("named type")
                 };
@@ -84,7 +84,7 @@ fn alias_arguments_source_declaration_preserves_reordered_and_unused_slots() {
         checker.check_item(item).expect("source declaration");
     }
     for spelling in ["Select", "alpha.Select"] {
-        let application = parse_type(&format!("{spelling}<Int, Bool, Text>"));
+        let application = parse_type(&format!("{spelling}<Int, Bool, Text>")).unwrap();
         let expected = Type::function(List::from_iter([Type::Text, Type::Bool]), Type::Text);
         assert_eq!(
             checker.expand_type_alias(&application),
@@ -99,7 +99,7 @@ fn alias_arguments_missing_qualified_owner_does_not_borrow_bare_template() {
     for eager in [false, true] {
         let checker = metadata_checker(eager);
         assert_eq!(
-            checker.expand_type_alias(&parse_type("beta.Pair<Text, Bool>")),
+            checker.expand_type_alias(&parse_type("beta.Pair<Text, Bool>").unwrap()),
             None
         );
     }
@@ -126,7 +126,7 @@ fn alias_arguments_order_registry_preserves_phantom_and_foreign_variables() {
     );
     let expected = Type::Tuple(List::from_iter([Type::Text, Type::Bool, foreign]));
     for application in [
-        parse_type("alpha.Select<Int, Bool, Text>"),
+        parse_type("alpha.Select<Int, Bool, Text>").unwrap(),
         Type::Generic {
             name: "alpha.Select".into(),
             args: List::from_iter([Type::Int, Type::Bool, Type::Text]),
@@ -151,7 +151,7 @@ fn alias_arguments_absent_registry_never_guesses_variable_positions() {
         Type::Tuple(List::from_iter([variable])),
     );
     assert_eq!(
-        checker.expand_type_alias(&parse_type("alpha.Select<Int>")),
+        checker.expand_type_alias(&parse_type("alpha.Select<Int>").unwrap()),
         Some(target)
     );
 }

@@ -86,7 +86,7 @@ fn checker(metadata: CoreMetadata, eager: bool) -> TypeChecker {
 }
 fn target(checker: &TypeChecker, owner: &str) -> Option<verum_types::Type> {
     checker.protocol_checker.read().try_find_associated_type(
-        &parse_descriptor_type_string(&format!("{owner}<Int>")),
+        &parse_descriptor_type_string(&format!("{owner}<Int>")).unwrap(),
         &Text::from("Target"),
     )
 }
@@ -343,7 +343,7 @@ fn replacing_metadata_reloads_completed_tails_and_rebuilds_positions() {
     checker.ensure_stdlib_type_loaded(&"alpha.Wrapper".into(), &mut Default::default());
     assert_eq!(
         checker.protocol_checker.read().try_find_associated_type(
-            &parse_descriptor_type_string("alpha.Wrapper<Int>"),
+            &parse_descriptor_type_string("alpha.Wrapper<Int>").unwrap(),
             &"Printed".into(),
         ),
         Some(verum_types::Type::Text),
@@ -410,7 +410,7 @@ fn owner_bucket_keeps_protocol_instantiations_in_declaration_order() {
                 .len(),
             1
         );
-        let receiver = parse_descriptor_type_string("alpha.Wrapper");
+        let receiver = parse_descriptor_type_string("alpha.Wrapper").unwrap();
         let implementations = protocols.get_implementations(&receiver);
         let args: List<List<verum_types::Type>> = implementations
             .iter()
@@ -438,12 +438,12 @@ fn owner_bucket_keeps_protocol_instantiations_in_declaration_order() {
         );
         assert!(
             protocols
-                .get_implementations(&parse_descriptor_type_string("beta.Wrapper"))
+                .get_implementations(&parse_descriptor_type_string("beta.Wrapper").unwrap())
                 .is_empty()
         );
         assert!(
             protocols
-                .get_implementations(&parse_descriptor_type_string("missing.Wrapper"))
+                .get_implementations(&parse_descriptor_type_string("missing.Wrapper").unwrap())
                 .is_empty()
         );
     }

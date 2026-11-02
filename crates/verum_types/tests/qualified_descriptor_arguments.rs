@@ -8,8 +8,8 @@ use verum_types::unify::Unifier;
 fn compatible(declared: &str, actual: &str) -> bool {
     Unifier::new()
         .unify(
-            &parse_descriptor_type_string(declared),
-            &parse_descriptor_type_string(actual),
+            &parse_descriptor_type_string(declared).unwrap(),
+            &parse_descriptor_type_string(actual).unwrap(),
             Span::dummy(),
         )
         .is_ok()
@@ -55,7 +55,7 @@ fn named(parts: &[&str], arguments: &[verum_types::Type]) -> verum_types::Type {
 fn archived_and_source_nominals_agree_on_the_entire_path_and_arguments() {
     use verum_types::{Type, subtype::Subtyping};
 
-    let archived = parse_descriptor_type_string("domain.atomic.Flag<Int>");
+    let archived = parse_descriptor_type_string("domain.atomic.Flag<Int>").unwrap();
     let source = named(&["domain", "atomic", "Flag"], &[Type::Int]);
     let partly_qualified = named(&["domain.atomic", "Flag"], &[Type::Int]);
     let foreign = named(&["other", "atomic", "Flag"], &[Type::Int]);
@@ -86,5 +86,27 @@ fn a_packed_nested_owner_does_not_become_a_bare_leaf_inside_a_qualified_path() {
     for (a, b) in [(&left, &right), (&right, &left)] {
         assert!(Unifier::new().unify(a, b, Span::dummy()).is_err());
         assert!(!verum_types::subtype::Subtyping::new().is_subtype(a, b));
+    }
+}
+
+#[test]
+fn archive_array_extents_are_preserved_at_their_own_nesting_depth() {
+    use verum_types::Type;
+    let array = |element, size| Type::array(element, Some(size));
+    let slice = |element| Type::Slice { element: Box::new(element) };
+    for (text, expected) in [
+        ("[Int; 0]", array(Type::Int, 0)),
+        ("[[Int; 2]; 3]", array(array(Type::Int, 2), 3)),
+        ("[[Int; 2]]", slice(array(Type::Int, 2))),
+        ("[[Int]; 4]", array(slice(Type::Int), 4)),
+    ] {
+        assert_eq!(parse_descriptor_type_string(text).unwrap(), expected, "{text}");
+    }
+}
+
+#[test]
+fn invalid_descriptor_extents_do_not_produce_types() {
+    for invalid in ["[Int; -1]", "[Int; ]", "&[[Int; 9223372036854775808]; 2]", "[Int; N]"] {
+        assert!(parse_descriptor_type_string(invalid).is_err(), "{invalid}");
     }
 }
