@@ -5229,7 +5229,8 @@ fn harvest_names_in_stmt(
     use verum_common::Maybe;
     use verum_ast::stmt::StmtKind;
     match &stmt.kind {
-        StmtKind::Let { ty, value, .. } => {
+        StmtKind::Let { pattern, ty, value, .. } => {
+            harvest_names_in_pattern(pattern, out);
             if let Maybe::Some(t) = ty {
                 harvest_names_in_type(t, out);
             }
@@ -5237,12 +5238,8 @@ fn harvest_names_in_stmt(
                 harvest_names_in_expr(v, out);
             }
         }
-        StmtKind::LetElse {
-            ty,
-            value,
-            else_block,
-            ..
-        } => {
+        StmtKind::LetElse { pattern, ty, value, else_block } => {
+            harvest_names_in_pattern(pattern, out);
             if let Maybe::Some(t) = ty {
                 harvest_names_in_type(t, out);
             }
@@ -5430,11 +5427,16 @@ fn harvest_names_in_expr(
         }
         ExprKind::Try(e) | ExprKind::TryBlock(e) => harvest_names_in_expr(e, out),
         ExprKind::Block(block) => harvest_names_in_block(block, out),
-        ExprKind::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
+        ExprKind::If { condition, then_branch, else_branch } => {
+            for condition in &condition.conditions {
+                match condition {
+                    verum_ast::ConditionKind::Let { pattern, value } => {
+                        harvest_names_in_pattern(pattern, out);
+                        harvest_names_in_expr(value, out);
+                    }
+                    verum_ast::ConditionKind::Expr(expr) => harvest_names_in_expr(expr, out),
+                }
+            }
             harvest_names_in_block(then_branch, out);
             if let Maybe::Some(eb) = else_branch {
                 harvest_names_in_expr(eb, out);
@@ -5457,7 +5459,12 @@ fn harvest_names_in_expr(
             harvest_names_in_expr(condition, out);
             harvest_names_in_block(body, out);
         }
-        ExprKind::For { iter, body, .. } => {
+        ExprKind::Is { expr, pattern, .. } => {
+            harvest_names_in_pattern(pattern, out);
+            harvest_names_in_expr(expr, out);
+        }
+        ExprKind::For { pattern, iter, body, .. } => {
+            harvest_names_in_pattern(pattern, out);
             harvest_names_in_expr(iter, out);
             harvest_names_in_block(body, out);
         }
@@ -8192,6 +8199,24 @@ mod formatted_call_harvest_tests {
         verum_fast_parser::VerumParser::new()
             .parse_module_str(src, verum_common::FileId::new(0))
             .expect("probe must parse")
+    }
+
+    #[test]
+    fn refutable_bindings_load_their_scrutinee_calls_and_nominal_patterns() {
+        let module = module_of(r#"
+            fn probe() {
+                if let First.Hit(a) = poll_first() && accept(a) {}
+                while let Second.Hit(b) = poll_second() { break; }
+                let Third.Hit(c) = poll_third() else { return; };
+                if poll_fourth() is Fourth.Hit(d) {}
+            }
+        "#);
+        let mut harvest = super::Harvest::default();
+        for item in &module.items { super::collect_referenced_function_names(item, &mut harvest); }
+        for name in ["First.Hit", "Second.Hit", "Third.Hit", "Fourth.Hit", "poll_first",
+                     "accept", "poll_second", "poll_third", "poll_fourth"] {
+            assert!(harvest.names.contains(name), "missing {name}");
+        }
     }
 
     #[test]
