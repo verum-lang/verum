@@ -1122,8 +1122,7 @@ pub struct TypeChecker {
     /// recursion. The termination check only claims the inherent case,
     /// where `self.name(…)` unambiguously means this method.
     in_inherent_impl: bool,
-    /// Set of type names currently being registered.
-    /// Prevents infinite recursion when registering mutually recursive types.
+    /// Declaration-owned type keys currently being registered.
     types_being_registered: std::collections::HashSet<Text>,
     /// Set of (module_path, item_name) pairs currently being imported.
     /// Prevents infinite recursion when importing types with circular dependencies.

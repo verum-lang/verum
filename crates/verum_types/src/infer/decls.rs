@@ -387,9 +387,6 @@ impl TypeChecker {
         use verum_common::Text;
 
         let type_name: Text = type_decl.name.name.as_str().into();
-        // Save a copy for cleanup at end of function
-        let type_name_for_cleanup = type_name.clone();
-
         // Track number of generic parameters for this type.
         // This enables proper type inference when the type is used without explicit type args.
         //
@@ -401,28 +398,14 @@ impl TypeChecker {
         self.type_generics_count
             .insert(type_name.clone(), generics_count);
 
-        // CRITICAL: Prevent infinite recursion when registering mutually recursive types.
-        // If we're already in the process of registering this type, return early.
-        // The placeholder was already added, so lookups will find a Type::Var.
-        if self.types_being_registered.contains(&type_name) {
-            // Return early - a placeholder has already been registered
+        // Only a recursive visit to the same declaration can reuse its placeholder.
+        // A nested private mount may resolve this spelling in a different module.
+        let key = self.declared_type_key(type_name.as_str());
+        if !self.types_being_registered.insert(key.clone()) {
             return Ok(());
         }
-        // Mark this type as being registered
-        self.types_being_registered.insert(type_name.clone());
-
-        // CRITICAL FIX: Execute the registration body and ensure cleanup happens on BOTH
-        // success AND failure paths. Previously, errors via `?` would return early without
-        // removing the type from `types_being_registered`, causing subsequent retry attempts
-        // to short-circuit at the recursion guard above and return Ok(()) without actually
-        // registering the type (including __type_var_order_ storage).
-        //
-
-        // We use a closure + match pattern to ensure cleanup happens regardless of result.
-        let result = self.register_type_declaration_body(type_decl, type_name.clone());
-
-        // Always cleanup on both success and failure (but NOT on recursion guard early return above)
-        self.types_being_registered.remove(&type_name_for_cleanup);
+        let result = self.register_type_declaration_body(type_decl, type_name);
+        self.types_being_registered.remove(&key);
 
         result
     }
