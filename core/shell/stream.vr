@@ -22,7 +22,10 @@
 )
 module core.shell.stream;
 
-mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.collections.list.List;
+mount core.text.text.Text;
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.async.channel.{
     Sender, Receiver, bounded,
