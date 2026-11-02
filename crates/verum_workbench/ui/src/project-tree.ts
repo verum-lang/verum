@@ -48,3 +48,38 @@ export function retainedTreeFocus(previous: TreeRow[], next: TreeRow[], focused:
   if (index >= 0 && next.length) return next[Math.min(index, next.length - 1)].path;
   return paths.has(current) ? current : next[0]?.path ?? '';
 }
+
+/** Translate a compiler file URI into the same workspace key used by the explorer. */
+export function workspaceFilePath(uri: string, root: string): string | null {
+  if (!root) return null;
+  try {
+    const url = new URL(uri);
+    const windows = /^[a-z]:[\\/]/i.test(root) || root.startsWith('\\\\');
+    if (url.protocol !== 'file:' || /%2f/i.test(url.pathname) || (windows && /%5c/i.test(url.pathname))) return null;
+    let path = decodeURIComponent(url.pathname);
+    if (url.host) {
+      if (!windows || !root.startsWith('\\\\')) return null;
+      path = '//' + url.host + path;
+    } else if (windows && /^\/[a-z]:\//i.test(path)) {
+      path = path.slice(1);
+    }
+    const base = (windows ? root.replaceAll('\\', '/') : root).replace(/\/$/, '') + '/';
+    return path.startsWith(base) && path.length > base.length ? path.slice(base.length) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** An indexed file has no analysis digest until the language service supplies one. */
+export function projectSourceIndex(root: string, sources: readonly { uri: string }[], documents: readonly { uri: string; source_hash: string }[]) {
+  const index = new Map<string, string | null>();
+  for (const source of sources) {
+    const path = workspaceFilePath(source.uri, root);
+    if (path !== null) index.set(path, null);
+  }
+  for (const document of documents) {
+    const path = workspaceFilePath(document.uri, root);
+    if (path !== null) index.set(path, document.source_hash);
+  }
+  return index;
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectedTree, visibleTree, changedDirectories, retainedTreeFocus, type ProjectEntry } from '../src/project-tree.ts';
+import { projectSourceIndex, workspaceFilePath, projectedTree, visibleTree, changedDirectories, retainedTreeFocus, type ProjectEntry } from '../src/project-tree.ts';
 
 test('filtered and deleted paths retain ancestors, folders first and exact sibling positions', () => {
   const files: ProjectEntry[] = ['README.md', 'src/api/request.vr', 'src/main.vr', 'tests/api.vr'].map(path => ({ path, kind: 'file', size: 0 }));
@@ -25,4 +25,18 @@ test('refresh keeps keyboard position, or selects a surviving parent or neighbor
   assert.equal(retainedTreeFocus(before, before.filter(row => row.path !== 'README.md'), 'README.md', 'src/main.vr'), 'tests/a.vr');
   assert.equal(retainedTreeFocus([], before, '', 'README.md'), 'README.md');
   assert.equal(retainedTreeFocus(before, [], 'src', 'README.md'), '');
+});
+
+test('analysis snapshots and definition links use the same workspace-relative paths', () => {
+  const root = '/srv/registry';
+  const uri = 'file:///srv/registry/src/publish%20cog.vr';
+  assert.equal(workspaceFilePath(uri, root), 'src/publish cog.vr');
+  assert.equal(workspaceFilePath('file:///srv/registry-copy/src/main.vr', root), null);
+  assert.equal(workspaceFilePath('file://other/srv/registry/src/main.vr', root), null);
+  assert.equal(workspaceFilePath('file:///C:/registry/src/main.vr', 'C:\\registry'), 'src/main.vr');
+  assert.equal(workspaceFilePath('file://build/share/registry/src/main.vr', '\\\\build\\share\\registry'), 'src/main.vr');
+  const index = projectSourceIndex(root, [{ uri }, { uri: 'file:///srv/registry/src/server.vr' }], [{ uri, source_hash: 'verified' }]);
+  assert.equal(index.get('src/publish cog.vr'), 'verified');
+  assert.equal(index.get('src/server.vr'), null);
+  assert.equal(index.has('src/unseen.vr'), false);
 });

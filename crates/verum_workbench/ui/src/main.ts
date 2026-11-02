@@ -1,3 +1,4 @@
+import { projectSourceIndex, workspaceFilePath } from './project-tree';
 import './style.css';
 import { runtimeSourceRange } from './runtime';
 import { proofSourceRange } from './proof';
@@ -268,10 +269,8 @@ function sourceView() {
 }
 function showRange(range: Range) { sourceView(); setPane('editor'); editor.select(range); }
 async function navigateDefinition(location: { uri: string; range: Range }) {
-  const url = new URL(location.uri), root = $('workspace-root').dataset.root || '';
-  const path = decodeURIComponent(url.pathname);
-  if (url.protocol !== 'file:' || !path.startsWith(root + '/')) throw new Error(t(m('Definition is outside this workspace.')));
-  const relative = path.slice(root.length + 1);
+  const relative = workspaceFilePath(location.uri, $('workspace-root').dataset.root || '');
+  if (relative === null) throw new Error(t(m('Definition is outside this workspace.')));
   if (relative !== currentPath) await openFile(relative);
   if (relative === currentPath) showRange(location.range);
 }
@@ -283,16 +282,27 @@ bind('architecture-toggle', async () => {
   setAttribute($('architecture-toggle'), 'data-tooltip', m('Return to source'));
   await inspectProject();
 });
+let projectRequest = 0;
 async function inspectProject() {
-  const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: { sources?: Array<{ uri: string; source_hash: string }>; issues?: string[]; documents: Array<Analysis & { uri: string }> } }>('project.inspect');
-  const list = $('project-content'); list.replaceChildren();
-  for (const issue of project.analysis.issues ?? []) list.append(node('p', 'muted', issue));
-  for (const file of project.workspace.files) {
-    const snapshot = project.analysis.documents.find(document => decodeURIComponent(new URL(document.uri).pathname) === `${project.workspace.root}/${file.path}`);
-    const indexed = project.analysis.sources?.find(source => decodeURIComponent(new URL(source.uri).pathname) === `${project.workspace.root}/${file.path}`);
-    const entry = button('', () => openFile(file.path), 'project-file');
-    entry.append(node('span', '', file.path), node('span', 'muted', snapshot ? snapshot.source_hash.slice(0, 10) : indexed ? m('Indexed source') : m('Not analyzed')));
-    list.append(entry);
+  const request = ++projectRequest;
+  const list = $('project-content');
+  list.setAttribute('aria-busy', 'true');
+  try {
+    const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: { sources?: Array<{ uri: string }>; issues?: string[]; documents: Array<Analysis & { uri: string }> } }>('project.inspect');
+    if (request !== projectRequest) return;
+    const index = projectSourceIndex(project.workspace.root, project.analysis.sources ?? [], project.analysis.documents);
+    const rows = document.createDocumentFragment();
+    for (const issue of project.analysis.issues ?? []) rows.append(node('p', 'muted', issue));
+    for (const file of project.workspace.files) {
+      const digest = index.get(file.path);
+      const status = digest === undefined ? m('Not analyzed') : digest === null ? m('Indexed source') : digest.slice(0, 10);
+      const entry = button('', () => openFile(file.path), 'project-file');
+      entry.append(node('span', '', file.path), node('span', 'muted', status));
+      rows.append(entry);
+    }
+    list.replaceChildren(rows);
+  } finally {
+    if (request === projectRequest) list.removeAttribute('aria-busy');
   }
 }
 bind('project-refresh', async () => { scheduleAnalysis(); await inspectProject(); });
