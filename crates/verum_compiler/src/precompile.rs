@@ -2431,6 +2431,34 @@ fn bind_source_declarations(
                 .all(|declaration| declaration == first)
                 .then(|| (Text::from(first.0), first.1))
         };
+    // import_protocols allocates an empty protocol slot in every later unit.
+    // Such a binding can select a semantic protocol already validated at its
+    // exact declaring key; an independently claimed ABI cannot be repaired.
+    use verum_types::core_metadata::{TypeDescriptor, TypeDescriptorKind};
+    fn is_unowned_protocol_slot(ty: &TypeDescriptor) -> bool {
+        ty.origin_module_path.is_none()
+            && ty.source_declaration.is_none()
+            && !ty.name.as_str().contains('.')
+            && ty.generic_params.is_empty()
+            && ty.methods.is_empty()
+            && ty.implements.is_empty()
+            && ty.size.is_none()
+            && ty.alignment == Some(1)
+            && !ty.is_transparent_wrapper
+            && ty.resource_discipline == verum_common::ResourceDiscipline::Unknown
+            && matches!(&ty.kind, TypeDescriptorKind::Protocol {
+                super_protocols, associated_types, required_methods, default_methods,
+            } if super_protocols.is_empty() && associated_types.is_empty()
+                && required_methods.is_empty() && default_methods.is_empty())
+    }
+    let semantic_protocols: HashMap<_, _> = metadata.types.iter().filter_map(|(key, ty)| {
+        if !matches!(ty.source_declaration.as_ref()?.body, verum_ast::TypeDeclBody::Protocol(_)) {
+            return None;
+        }
+        let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
+        let canonical = verum_common::qualified_name::qualify_module_name(owner, &ty.name);
+        (key == &canonical).then(|| (canonical, ty.clone()))
+    }).collect();
     for descriptor in metadata.types.values_mut() {
         let declared = descriptor
             .origin_module_path
@@ -2442,6 +2470,14 @@ fn bind_source_declarations(
             &descriptor.module_path,
             DeclarationKind::Nominal,
         ) {
+            if owner != descriptor.module_path && is_unowned_protocol_slot(descriptor) {
+                let key = verum_common::qualified_name::qualify_module_name(&owner, &descriptor.name);
+                if let Some(canonical) = semantic_protocols.get(&key) {
+                    descriptor.clone_from(canonical);
+                    descriptor.is_public = public;
+                    continue;
+                }
+            }
             descriptor.origin_module_path = (owner != descriptor.module_path).then_some(owner);
             descriptor.is_public = public;
         }

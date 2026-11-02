@@ -245,6 +245,90 @@ fn archive_publication_rejects_foreign_prefix_even_when_signature_leaf_matches()
     assert!(archive_to_core_metadata(&builder.finish()).is_err());
 }
 
+fn mixed_protocol_with_import_shell(visibility: &str) -> (tempfile::TempDir, CoreMetadata) {
+    let source = format!("module core.indexed; public type Parent is protocol {{}}; {visibility} type Contract<N: meta Int> is protocol extends Parent {{ fn dimension(&self) -> Int; }};");
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("indexed.vr"), &source).unwrap();
+    let ast = Parser::new(&source).parse_module().unwrap();
+    let mut owner = VbcCodegen::with_config(CodegenConfig::new("core.indexed"));
+    let declared = owner.compile_module(&ast).unwrap();
+    let mut importer = VbcCodegen::with_config(CodegenConfig::new("core.importer"));
+    let exported = owner.export_protocols();
+    assert!(exported.contains_key("Contract"), "declaring module must export a protocol slot");
+    importer.import_protocols(&exported);
+    let imported = importer.finalize_module().unwrap();
+    let mut archive = ArchiveBuilder::new();
+    archive.add_module("core.indexed", &declared, &[]).unwrap();
+    archive.add_module("core.importer", &imported, &[]).unwrap();
+    let metadata = archive_to_core_metadata(&archive.finish()).unwrap();
+    (root, metadata)
+}
+
+#[test]
+fn source_binding_uses_the_declaring_protocol_for_an_imported_abi_shell() {
+    let (root, mut metadata) = mixed_protocol_with_import_shell("public");
+    let imported = verum_common::Text::from("core.importer.Contract");
+    let declared = verum_common::Text::from("core.indexed.Contract");
+    let original = metadata.types.get(&declared).unwrap().clone();
+    assert!(original.source_declaration.is_some());
+    assert!(metadata.types.get(&imported).unwrap().source_declaration.is_none());
+    super::bind_source_declarations(&mut metadata, root.path(), &[], false);
+    let decoded = verum_types::core_metadata::decode_metadata(
+        &verum_types::core_metadata::encode_metadata(&metadata).unwrap(),
+    ).unwrap();
+    let bound = decoded.types.get(&imported).unwrap();
+    assert_eq!(bound.source_declaration, original.source_declaration);
+    assert_eq!(bound.module_path, original.module_path);
+    assert_eq!(bound.origin_module_path, original.origin_module_path);
+    assert_eq!(bound.methods, original.methods);
+    // Compatibility lookup keys are internal. Only declaring modules and
+    // explicit source re-exports contribute to the public module surface.
+    let registry = verum_modules::ModuleRegistry::new();
+    let modules = verum_types::module_projection::project_modules(&decoded, None, |_| registry.allocate_id()).unwrap();
+    let owners: Vec<_> = modules.iter().filter(|m| m.exports.contains("Contract"))
+        .map(|m| m.path.to_string()).collect();
+    assert_eq!(owners, ["core.indexed"]);
+}
+
+#[test]
+fn imported_protocol_slots_preserve_source_visibility() {
+    let (root, mut metadata) = mixed_protocol_with_import_shell("");
+    super::bind_source_declarations(&mut metadata, root.path(), &[], false);
+    for key in ["core.indexed.Contract", "core.importer.Contract"] {
+        let entry = metadata.types.get(&key.into()).unwrap();
+        assert!(entry.source_declaration.is_some());
+        assert!(!entry.is_public, "private declaration became public at {key}");
+    }
+}
+
+#[test]
+fn source_binding_cannot_repair_an_abi_claim_that_already_names_the_semantic_owner() {
+    let (root, mut metadata) = mixed_protocol_with_import_shell("public");
+    metadata.types.get_mut(&"core.importer.Contract".into()).unwrap().origin_module_path = Some("core.indexed".into());
+    super::bind_source_declarations(&mut metadata, root.path(), &[], false);
+    let error = verum_types::core_metadata::encode_metadata(&metadata).unwrap_err();
+    assert!(error.contains("semantic and ABI-only declarations disagree for core.indexed.Contract"), "{error}");
+}
+
+#[test]
+fn an_ambiguous_import_shell_cannot_acquire_a_semantic_homonym() {
+    let (root, mut metadata) = mixed_protocol_with_import_shell("public");
+    std::fs::write(root.path().join("other.vr"), "public type Contract is protocol {};").unwrap();
+    super::bind_source_declarations(&mut metadata, root.path(), &[], false);
+    let bound = metadata.types.get(&"core.importer.Contract".into()).unwrap();
+    assert!(bound.origin_module_path.is_none());
+    assert!(bound.source_declaration.is_none());
+}
+
+#[test]
+fn source_binding_does_not_overwrite_a_foreign_protocol_abi() {
+    let (root, mut metadata) = mixed_protocol_with_import_shell("public");
+    metadata.types.get_mut(&"core.importer.Contract".into()).unwrap().methods.push("other".into());
+    super::bind_source_declarations(&mut metadata, root.path(), &[], false);
+    assert!(verum_types::core_metadata::encode_metadata(&metadata).unwrap_err()
+        .contains("semantic and ABI-only declarations disagree for core.indexed.Contract"));
+}
+
 /// Reuse the publication path on an explicitly supplied, freshly baked archive.
 /// This gate never substitutes a cached artifact or silently skips absent input.
 #[test]
