@@ -33,6 +33,7 @@ impl VbcCodegen {
     pub(super) fn capture_declaration_interface(
         &mut self,
         source: &FunctionDecl,
+        source_signature: Option<FunctionDecl>,
         info: &FunctionInfo,
         name: &str,
         parent: Option<&str>,
@@ -46,6 +47,7 @@ impl VbcCodegen {
         scope.extend(shadow.clone());
         let name_id = StringId(self.intern_string(name));
         let mut descriptor = self.new_fn_descriptor(name_id);
+        descriptor.source_signature = source_signature;
         descriptor.id = info.id;
         descriptor.has_source_body = info.has_source_body;
         descriptor.parent_type = parent.and_then(|name| {

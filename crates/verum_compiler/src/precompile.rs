@@ -3109,7 +3109,7 @@ fn inject_declared_module_free_fn_keys(
             let rel_str = rel_path.to_string_lossy().replace('\\', "/");
             let source_module = crate::stdlib_index::file_path_to_module_path(&rel_str);
 
-            for item in &module.items {
+            for (item_index, item) in module.items.iter().enumerate() {
                 // A module-level `public static` is recorded in its own
                 // channel (T1088).  It has no proxy among the descriptors
                 // below: a `const` reaches `metadata.functions` because
@@ -3162,15 +3162,40 @@ fn inject_declared_module_free_fn_keys(
                         verum_ast::source_signature::validate_source_signature(signature, existing.parent_type.is_some())
                             .map_err(|error| anyhow::anyhow!("{qualified}: {error}"))?;
                         let owner = existing.origin_module_path.as_ref().unwrap_or(&existing.module_path);
-                        if owner.as_str() != source_module || existing.name.as_str() != simple
+                        if owner.as_str() != source_module
+                            || existing.parent_type.is_some()
+                            || !crate::archive_metadata::free_function_name_matches_declaration(
+                                existing.name.as_str(), owner.as_str(), simple)
                             || signature.name.name.as_str() != simple
                             || signature.params.len() != existing.params.len()
                         {
-                            anyhow::bail!("semantic universe signature provenance mismatch for {qualified}");
+                            anyhow::bail!(
+                                "semantic universe signature provenance mismatch for {qualified}: \
+                                 owner={owner}, descriptor={}, signature={}, arity={}/{}",
+                                existing.name, signature.name.name, signature.params.len(), existing.params.len()
+                            );
                         }
-                        // The archive owns this exact declaration. Parsing source
-                        // again can assign different FileIds; AST equality is not
-                        // semantic equality and cannot replace its provenance.
+                        // Replay at the producer's FileId, not by deleting source
+                        // fields from the serialized AST. This compares the entire
+                        // body-free declaration (including levels and contracts),
+                        // and refuses stale source with the same name and arity.
+                        let replayed;
+                        let declared = if fd.span.file_id == signature.span.file_id {
+                            source_signature.as_ref()
+                        } else {
+                            let parsed = verum_fast_parser::FastParser::new()
+                                .parse_module_str(&content, signature.span.file_id)
+                                .map_err(|error| anyhow::anyhow!("cannot replay signature source {}: {error:?}", path.display()))?;
+                            let Some(verum_ast::Item { kind: ItemKind::Function(function), .. }) = parsed.items.get(item_index) else {
+                                anyhow::bail!("missing source declaration for {qualified}");
+                            };
+                            replayed = verum_ast::source_signature::source_signature(function, false)
+                                .map_err(|error| anyhow::anyhow!("{qualified}: {error}"))?;
+                            replayed.as_ref()
+                        };
+                        if declared != Some(signature) {
+                            anyhow::bail!("semantic universe signature differs from declaring source for {qualified}");
+                        }
                     } else if existing.source_signature.is_some() {
                         anyhow::bail!("conflicting semantic universe signature presence for {qualified}");
                     }

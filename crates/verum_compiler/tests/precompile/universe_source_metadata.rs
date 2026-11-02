@@ -204,3 +204,55 @@ fn archive_publication_rejects_a_carrier_attached_to_another_declaration() {
     builder.add_module(&module.name, &module, &[]).unwrap();
     assert!(archive_to_core_metadata(&builder.finish()).is_err());
 }
+
+#[test]
+fn source_publication_accepts_exact_interface_and_body_names_with_producer_file_ids() {
+    let source = format!("module core.universe_fixture; {POLYMORPHIC}");
+    for interface in [false, true] {
+        let ast = verum_fast_parser::FastParser::new()
+            .parse_module_str(&source, verum_ast::FileId::new(57)).unwrap();
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.universe_fixture"));
+        let module = if interface { producer.collect_declaration_interface(&[&ast]).unwrap() }
+            else { producer.compile_module(&ast).unwrap() };
+        let mut builder = ArchiveBuilder::new();
+        builder.add_module(&module.name, &module, &[]).unwrap();
+        let mut metadata = archive_to_core_metadata(&builder.finish()).unwrap();
+        scan(&source, &mut metadata).unwrap();
+        let key = verum_common::Text::from("core.universe_fixture.retain");
+        let valid = metadata.clone();
+        for bad_name in ["other.retain", "core.universe_fixture.other.retain", "core.universe_fixturex.retain"] {
+            let mut forged = valid.clone();
+            forged.functions.get_mut(&key).unwrap().name = bad_name.into();
+            assert!(scan(&source, &mut forged).is_err(), "{bad_name}");
+        }
+        let mut forged = valid.clone();
+        forged.functions.get_mut(&key).unwrap().origin_module_path = verum_common::Maybe::Some("other".into());
+        assert!(scan(&source, &mut forged).is_err());
+        // Same owner/name/arity but different level expression must not pass.
+        let stale = source.replace("-> Type(u)", "-> Type(1)");
+        assert!(scan(&stale, &mut metadata).is_err());
+    }
+}
+
+#[test]
+fn archive_publication_rejects_foreign_prefix_even_when_signature_leaf_matches() {
+    let mut module = compiled_module();
+    let foreign = module.strings.intern("other.retain");
+    module.functions.iter_mut().find(|function| function.source_signature.is_some())
+        .unwrap().name = foreign;
+    let mut builder = ArchiveBuilder::new();
+    builder.add_module(&module.name, &module, &[]).unwrap();
+    assert!(archive_to_core_metadata(&builder.finish()).is_err());
+}
+
+/// Reuse the publication path on an explicitly supplied, freshly baked archive.
+/// This gate never substitutes a cached artifact or silently skips absent input.
+#[test]
+#[ignore = "requires VERUM_TEST_FROZEN_STDLIB and its unchanged declaring source tree"]
+fn frozen_stdlib_sidecars_pass_source_validation() {
+    let archive = std::path::PathBuf::from(std::env::var_os("VERUM_TEST_FROZEN_STDLIB")
+        .expect("explicit freshly baked stdlib archive required"));
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
+    super::write_core_metadata_alongside_archive(&archive, Some(&root), true).unwrap();
+    super::write_symbol_graph_alongside_archive(&archive, true).unwrap();
+}

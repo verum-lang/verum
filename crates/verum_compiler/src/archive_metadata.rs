@@ -201,7 +201,17 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
                 verum_ast::source_signature::validate_source_signature(signature, function.parent_type.is_some())?;
                 let name = module.strings.get(function.name)
                     .ok_or_else(|| Text::from("universe signature descriptor has no name"))?;
-                if name.rsplit('.').next() != Some(signature.name.name.as_str())
+                let owner = match function.origin_module {
+                    Some(id) => module.strings.get(id).ok_or_else(||
+                        Text::from("universe signature descriptor has invalid declaring module"))?,
+                    None => module.name.as_str(),
+                };
+                let owns_name = if function.parent_type.is_none() {
+                    free_function_name_matches_declaration(name, owner, signature.name.name.as_str())
+                } else {
+                    name.rsplit('.').next() == Some(signature.name.name.as_str())
+                };
+                if !owns_name
                     || signature.params.len() != function.params.len()
                 {
                     return Err(format!("semantic universe signature does not belong to descriptor {name}").into());
@@ -439,6 +449,14 @@ fn join_module_path(module_path: &str, item_name: &str) -> String {
     let mut out: Vec<&str> = m;
     out.extend_from_slice(&n[overlap..]);
     out.join(".")
+}
+
+/// Free-function interfaces store a leaf; compiled bodies may store its full
+/// declaring path. Both spellings denote the same declaration only under the
+/// exact owner. A matching suffix under a different prefix is not evidence.
+pub(crate) fn free_function_name_matches_declaration(name: &str, owner: &str, leaf: &str) -> bool {
+    !leaf.is_empty() && !leaf.contains('.') && (name == leaf
+        || name.strip_prefix(owner).and_then(|tail| tail.strip_prefix('.')) == Some(leaf))
 }
 
 fn register_module_metadata(

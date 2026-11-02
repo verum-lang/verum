@@ -11320,7 +11320,7 @@ impl VbcCodegen {
     }
 
     fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
-        verum_ast::source_signature::source_signature(func, false)
+        let source_signature = verum_ast::source_signature::source_signature(func, false)
             .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let base_name = func.name.name.to_string();
 
@@ -11593,7 +11593,7 @@ impl VbcCodegen {
         if !self.ctx.prefer_existing_functions && !name.contains('.') && !name.contains("::") {
             self.ctx.unit_declared_fns.insert(name.clone());
         }
-        self.capture_declaration_interface(func, &info, &name, None, &dense, &shadow);
+        self.capture_declaration_interface(func, source_signature, &info, &name, None, &dense, &shadow);
         self.ctx.register_function(name.clone(), info.clone());
         if self.nested_function_scope.is_empty() {
             self.ctx.register_source_function(&name, &info);
@@ -14025,7 +14025,7 @@ impl VbcCodegen {
         type_name: &str,
         impl_generics: &[String],
     ) -> CodegenResult<()> {
-        verum_ast::source_signature::source_signature(func, true)
+        let source_signature = verum_ast::source_signature::source_signature(func, true)
             .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let self_type_name = self.declared_impl_type_name(type_name);
         let func_name = func.name.name.to_string();
@@ -14211,7 +14211,7 @@ impl VbcCodegen {
         } else {
             format!("{}#impl{}", qualified_name, ordinal)
         };
-        self.capture_declaration_interface(func, &info, &registration_key, Some(type_name), &dense, &shadow);
+        self.capture_declaration_interface(func, source_signature, &info, &registration_key, Some(type_name), &dense, &shadow);
         self.ctx.register_function(registration_key, info);
 
         Ok(())
