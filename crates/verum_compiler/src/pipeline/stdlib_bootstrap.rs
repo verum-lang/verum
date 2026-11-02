@@ -1534,12 +1534,16 @@ one module and therefore never seeded",
     /// types through those identities. This metadata pass supports cycles;
     /// executable bodies are still compiled exactly once.
     fn collect_core_declaration_interfaces(
-        &self,
+        &mut self,
         all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
         config: &CoreConfig,
         target: &verum_ast::cfg::TargetConfig,
     ) -> Result<Vec<verum_vbc::VbcModule>> {
-        let collect = |available: &[&verum_vbc::VbcModule]| -> Result<Vec<verum_vbc::VbcModule>> {
+        let mut next_method = self.global_function_registry.values()
+            .map(|info| info.id.0)
+            .filter(|id| verum_vbc::stub_ranges::in_stage1(*id))
+            .min().map_or(verum_vbc::stub_ranges::STAGE1_BASE, |id| id - 1);
+        let mut collect = |available: &[&verum_vbc::VbcModule]| -> Result<Vec<verum_vbc::VbcModule>> {
             let mut resolved = Vec::with_capacity(all_modules.len());
             for (name, files) in all_modules {
                 let mut declarations = VbcCodegen::with_config(
@@ -1552,8 +1556,34 @@ one module and therefore never seeded",
                     self.import_core_nominal_dependencies(&mut declarations, &sources, available)
                         .map_err(|error| anyhow::anyhow!("interface for {name}: {error}"))?;
                 }
-                resolved.push(declarations.collect_declaration_interface(&sources)
-                    .map_err(|error| anyhow::anyhow!("collecting interface for {name}: {error}"))?);
+                let interface = declarations.collect_declaration_interface(&sources)
+                    .map_err(|error| anyhow::anyhow!("collecting interface for {name}: {error}"))?;
+                if !available.is_empty() {
+                    // The declaring compiler selects the method (including protocol
+                    // implementations). Publish that identity before any body is
+                    // compiled. Consumer-pool signatures come from the interface
+                    // importer, never the declaring compiler's numeric type IDs.
+                    let exports = declarations.export_function_view();
+                    for method in &interface.functions {
+                        if method.parent_type.is_none() || !method.has_source_body { continue; }
+                        let Some(owner) = method.origin_module.and_then(|id| interface.strings.get(id)) else { continue };
+                        let Some(leaf) = interface.strings.get(method.name) else { continue };
+                        let key = verum_vbc::module::qualify_module_name(owner, leaf);
+                        let Some(&source) = exports.get(&Text::from(key.as_str())) else { continue };
+                        // Finalizing the interface renumbers its functions. The
+                        // canonical export selects the source declaration across pools.
+                        if !source.has_source_body || self.global_function_registry.contains_key(&key) { continue; }
+                        anyhow::ensure!(verum_vbc::stub_ranges::in_stage1(next_method), "forward method ID range exhausted");
+                        let mut forward = source.clone();
+                        forward.id = verum_vbc::module::FunctionId(next_method);
+                        forward.callable_signature = None;
+                        forward.return_type = None;
+                        forward.yield_type = None;
+                        self.global_function_registry.insert(key, forward);
+                        next_method -= 1;
+                    }
+                }
+                resolved.push(interface);
             }
             Ok(resolved)
         };

@@ -51,6 +51,12 @@ public type Future is protocol {
     type Output;
     fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output>;
 };
+public type Complete<T> is { value: T };
+implement<T> Future for Complete<T> {
+    type Output = T;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<T> { Poll.Ready(self.value) }
+}
+public fn complete<T>(value: T) -> Complete<T> { Complete { value: value } }
 "#,
     )
     .unwrap();
@@ -81,6 +87,7 @@ implement<'a> Future for AcceptFuture<'a> {
         Poll.Ready(Result.Ok((*self.value, 9)))
     }
 }
+public async fn forward() -> Int { core.scheduler.future.complete(37).await }
 public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFuture { value: value }.await }
 "#).unwrap();
     if glob {
@@ -102,7 +109,11 @@ public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFutur
             .unwrap();
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let archive = read_archive_from_file(&output).unwrap();
-    for (module, name) in [("core.scheduler", "choose"), ("core.network", "accept")] {
+    for (module, name) in [
+        ("core.scheduler", "choose"),
+        ("core.network", "accept"),
+        ("core.network", "forward"),
+    ] {
         let module = archive.load_module(module).unwrap();
         let function = module
             .functions

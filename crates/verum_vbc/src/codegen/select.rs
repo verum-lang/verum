@@ -73,32 +73,62 @@ impl VbcCodegen {
         let owner_id = future_type
             .base_type_id()
             .ok_or_else(|| CodegenError::internal("Future has no nominal owner"))?;
-        let spelling = self.resolve_type_alias(Self::strip_generic_args(&name));
-        let owner = if self.type_name_to_id.get(spelling.as_str()) == Some(&owner_id) {
-            spelling
-        } else {
-            self.type_by_id(owner_id)
-                .and_then(|ty| self.ctx.strings.get(ty.name.0 as usize))
-                .cloned()
-                .ok_or_else(|| CodegenError::internal("Future has no declared owner name"))?
-        };
-        let method = self
+        let descriptor = self
+            .type_by_id(owner_id)
+            .ok_or_else(|| CodegenError::internal("Future has no nominal declaration"))?;
+        let leaf = self
             .ctx
-            .lookup_function_in_scope(&format!("{owner}.poll"))
-            .filter(|method| method.param_count == 2)
-            .cloned()
+            .strings
+            .get(descriptor.name.0 as usize)
+            .ok_or_else(|| CodegenError::internal("Future has no declared owner name"))?;
+        let qualified = descriptor
+            .origin_module
+            .and_then(|id| self.ctx.strings.get(id.0 as usize))
+            .map(|owner| crate::module::qualify_module_name(owner, leaf));
+        // The global canonical forward slot may coexist with a newly
+        // emitted local body. A bare alias can also name another module's
+        // identically spelled type. Only a remapped matching receiver
+        // and poll result establish an applicable declaration.
+        let canonical = qualified
+            .as_ref()
+            .and_then(|owner| self.ctx.lookup_function_in_scope(&format!("{owner}.poll")));
+        let local = self.ctx.lookup_function_in_scope(&format!("{leaf}.poll"));
+        let (method, nominal, bindings) = [canonical, local]
+            .into_iter()
+            .flatten()
+            .filter_map(|method| {
+                if method.param_count != 2 {
+                    return None;
+                }
+                let nominal = method.return_type.as_ref()?.base_type_id()?;
+                let receiver = self
+                    .ctx
+                    .semantic_fn_params
+                    .get(&method.id)
+                    .and_then(|params| params.first())
+                    .and_then(Option::as_ref)
+                    .or_else(|| {
+                        self.functions
+                            .iter()
+                            .find(|f| f.descriptor.id == method.id)
+                            .and_then(|f| f.descriptor.semantic_parameter_types())
+                            .and_then(|params| params.first())
+                            .and_then(Option::as_ref)
+                    })?;
+                let crate::types::TypeRef::Reference { inner, .. } = receiver else {
+                    return None;
+                };
+                let mut bindings = crate::mono::TypeSubstitution::empty();
+                self.bind_source_declaration(inner, &future_type, &mut bindings)
+                    .then(|| (method, nominal, bindings))
+            })
+            .min_by_key(|(method, _, _)| crate::stub_ranges::is_stub_id(method.id.0))
+            .map(|(method, nominal, bindings)| (method.clone(), nominal, bindings))
             .ok_or_else(|| {
-                CodegenError::internal(format!("Future `{name}` has no callable poll declaration"))
+                CodegenError::internal(format!(
+                    "Future `{name}` has no callable poll declaration for its instantiated receiver"
+                ))
             })?;
-        let nominal = match method.return_type {
-            Some(crate::types::TypeRef::Concrete(id))
-            | Some(crate::types::TypeRef::Instantiated { base: id, .. }) => id,
-            _ => {
-                return Err(CodegenError::internal(
-                    "Future poll has no nominal result declaration",
-                ));
-            }
-        };
         let ready_tag = self.lookup_stdlib_variant_tag(
             "Ready",
             "Poll.Ready",
@@ -112,37 +142,6 @@ impl VbcCodegen {
         if expected.is_some_and(|expected| expected != &output_type) {
             return Err(CodegenError::internal(
                 "Future.Output conflicts with its contextual declaration",
-            ));
-        }
-        let receiver = self
-            .ctx
-            .semantic_fn_params
-            .get(&method.id)
-            .and_then(|params| params.first())
-            .and_then(|ty| ty.as_ref())
-            .or_else(|| {
-                self.functions
-                    .iter()
-                    .find(|function| function.descriptor.id == method.id)
-                    .and_then(|function| function.descriptor.semantic_parameter_types())
-                    .and_then(|params| params.first())
-                    .and_then(|ty| ty.as_ref())
-            })
-            .ok_or_else(|| {
-                CodegenError::internal("Future.poll receiver lacks a semantic declaration")
-            })?;
-        let crate::types::TypeRef::Reference {
-            inner: receiver, ..
-        } = receiver
-        else {
-            return Err(CodegenError::internal(
-                "Future.poll receiver is not a borrowed owner",
-            ));
-        };
-        let mut bindings = crate::mono::TypeSubstitution::empty();
-        if !self.bind_source_declaration(receiver, &future_type, &mut bindings) {
-            return Err(CodegenError::internal(
-                "Future.poll receiver conflicts with the selected owner",
             ));
         }
         let type_args = method

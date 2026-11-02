@@ -157,3 +157,49 @@ fn forward_result_case(serialized: bool, relative: bool) {
             .insert(name.clone(), compiled);
     }
 }
+
+
+#[test]
+fn protocol_method_forward_ids_belong_to_the_selected_declarations() {
+    let mut parsed = Vec::new();
+    for owner in ["core.first", "core.second"] {
+        let source = format!(
+            "module {owner}; type Reader is protocol {{ fn read(&self) -> Int; }}; type Handle is {{ number: Int }}; implement Reader for Handle {{ fn read(&self) -> Int {{ self.number }} }}"
+        );
+        let ast = Parser::new(&source).parse_module().unwrap();
+        parsed.push((
+            owner.to_owned(),
+            vec![(PathBuf::from(format!("{owner}.vr")), ast)],
+        ));
+    }
+    let mut session = Session::new(Default::default());
+    let config = CoreConfig::new(".");
+    let mut pipeline = CompilationPipeline::new_core(&mut session, config.clone());
+    pipeline
+        .pre_register_canonical_static_methods(&parsed)
+        .unwrap();
+    let interfaces = pipeline
+        .collect_core_declaration_interfaces(
+            &parsed,
+            &config,
+            &verum_ast::cfg::TargetConfig::host(),
+        )
+        .unwrap();
+    let mut ids = std::collections::HashSet::new();
+    for module in interfaces {
+        let key = format!("{}.Handle.read", module.name);
+        let forward = &pipeline.global_function_registry[&key];
+        assert!(verum_vbc::stub_ranges::in_stage1(forward.id.0));
+        assert!(ids.insert(forward.id));
+        assert!(forward.has_source_body);
+        assert!(
+            forward.callable_signature.is_none(),
+            "the consumer imports pool-local types"
+        );
+    }
+    assert!(
+        !pipeline
+            .global_function_registry
+            .contains_key("Handle.read")
+    );
+}
