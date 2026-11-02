@@ -388,6 +388,20 @@ impl VbcCodegen {
             }
         }
         let mut selected = BTreeSet::new();
+        // import_protocols reserves protocol IDs in the emitted type table. A
+        // reserved ID refers to its declaration even if no source item names it.
+        // Complete semantic protocols through the normal descriptor+bindings path.
+        for protocol in self.protocol_registry.values() {
+            let key = crate::module::qualify_module_name(&protocol.source_module, &protocol.name);
+            if self.type_name_to_id.contains_key(&key)
+                && catalog.get(&key).is_some_and(|&(mi, ti)| {
+                    available[mi].types[ti].source_declaration.is_some()
+                })
+            {
+                selected.insert(key);
+            }
+        }
+
         let mut resolved_exports = Map::<Text, Text>::new();
         let mut function_sites = BTreeSet::new();
         for name in names {

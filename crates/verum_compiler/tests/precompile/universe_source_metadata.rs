@@ -252,16 +252,61 @@ fn mixed_protocol_with_import_shell(visibility: &str) -> (tempfile::TempDir, Cor
     let ast = Parser::new(&source).parse_module().unwrap();
     let mut owner = VbcCodegen::with_config(CodegenConfig::new("core.indexed"));
     let declared = owner.compile_module(&ast).unwrap();
-    let mut importer = VbcCodegen::with_config(CodegenConfig::new("core.importer"));
-    let exported = owner.export_protocols();
-    assert!(exported.contains_key("Contract"), "declaring module must export a protocol slot");
-    importer.import_protocols(&exported);
-    let imported = importer.finalize_module().unwrap();
+    // A legacy archive had an unowned ABI-only slot. Current import_protocols
+    // reserves a known owner and is tested through the production completion
+    // path below. Construct the historical wire representation directly.
+    let mut imported = verum_vbc::VbcModule::new("core.importer".into());
+    let name = imported.strings.intern("Contract");
+    imported.types.push(verum_vbc::types::TypeDescriptor {
+        id: verum_vbc::types::TypeId(verum_vbc::types::TypeId::FIRST_USER),
+        name,
+        kind: verum_vbc::types::TypeKind::Protocol,
+        ..Default::default()
+    });
     let mut archive = ArchiveBuilder::new();
     archive.add_module("core.indexed", &declared, &[]).unwrap();
     archive.add_module("core.importer", &imported, &[]).unwrap();
     let metadata = archive_to_core_metadata(&archive.finish()).unwrap();
     (root, metadata)
+}
+
+#[test]
+fn reserved_semantic_protocols_publish_the_defining_interface() {
+    let ast = Parser::new(
+        "module core.indexed; public type Parent is protocol {}; public type Contract<N: meta Int> is protocol extends Parent { fn dimension(&self) -> Int; };",
+    ).parse_module().unwrap();
+    let mut owner = VbcCodegen::with_config(CodegenConfig::new("core.indexed"));
+    let declared = owner.compile_module(&ast).unwrap();
+    let protocols = owner.export_protocols();
+    let publish = |imported: &verum_vbc::VbcModule| {
+        let mut archive = ArchiveBuilder::new();
+        archive.add_module("core.indexed", &declared, &[]).unwrap();
+        archive.add_module("core.importer", imported, &[]).unwrap();
+        archive_to_core_metadata(&archive.finish())
+    };
+    let mut incomplete = VbcCodegen::with_config(CodegenConfig::new("core.importer"));
+    incomplete.import_protocols(&protocols);
+    let error = publish(&incomplete.finalize_module().unwrap()).unwrap_err();
+    assert!(error.contains("semantic and ABI-only declarations disagree for core.indexed.Contract"));
+
+    for source in [
+        "module core.importer; fn unrelated() {}",
+        "module core.importer; mount core.indexed.{Contract}; fn touch(v: &dyn Contract<1>) {}",
+    ] {
+        let ast = Parser::new(source).parse_module().unwrap();
+        let mut importer = VbcCodegen::with_config(CodegenConfig::new("core.importer"));
+        importer.import_protocols(&protocols);
+        importer.import_bootstrap_nominal_dependencies(&[&ast], &[&declared]).unwrap();
+        let imported = importer.finalize_module().unwrap();
+        let metadata = publish(&imported).unwrap();
+        let contract = metadata.types.get(&"core.indexed.Contract".into()).unwrap();
+        let carried = imported.types.iter().filter_map(|ty| ty.source_declaration.as_ref())
+            .find(|decl| decl.name.name == "Contract").expect("imported semantic declaration");
+        assert_eq!(contract.source_declaration.as_ref(), Some(carried), "{source}");
+        let key = verum_common::Text::from("core.indexed");
+        let bindings = declared.declaration_type_bindings.get(&key).expect("declaring scope");
+        assert_eq!(imported.declaration_type_bindings.get(&key), Some(bindings), "{source}");
+    }
 }
 
 #[test]
