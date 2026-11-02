@@ -188,6 +188,26 @@ fn execute_from_archive(source: &str) -> i64 {
     vm.execute_function(main).unwrap().try_as_i64().expect("integer result")
 }
 
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn archived_function_ids_are_unique_within_each_module() {
+    let path = std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("candidate .vbca");
+    let archive = read_archive_from_file(path).unwrap();
+    assert!(!archive.index.is_empty());
+    for (index, entry) in archive.index.iter().enumerate() {
+        let module = archive.load_module_by_index(index).unwrap();
+        let mut owners = std::collections::HashMap::with_capacity(module.functions.len());
+        for function in &module.functions {
+            let name = module.get_string(function.name).expect("function name");
+            if let Some(previous) = owners.insert(function.id, name) {
+                panic!("{} assigns {:?} to both {previous} and {name}", entry.name, function.id);
+            }
+            let end = u64::from(function.bytecode_offset) + u64::from(function.bytecode_length);
+            assert!(end <= module.bytecode.len() as u64, "{} has an invalid body range for {name}", entry.name);
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
