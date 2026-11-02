@@ -53,9 +53,11 @@ vbench micro
 ### Compare Against Baselines
 
 ```bash
-# Compare with C, Rust, and Go implementations
-vbench run --compare c,rust,go
+vbench baseline --language c --candidate ./verum-native --reference ./c-native \
+  --input workload.bin --expected-stdout expected.bin --format json
 ```
+
+Build both programs with the optimizations you want to compare. Each receives the same stdin bytes and must produce the expected stdout and exit code on every run. Use `--expected-exit` for workloads with a nonzero exit code. The report records executable and workload digests and the median wall time including process startup.
 
 ### Generate Reports
 

@@ -60,8 +60,11 @@ walkdir = { workspace = true }
 # CSV output for comparison data
 csv = { workspace = true }
 
-[dev-dependencies]
+blake3 = { workspace = true }
+wait-timeout = { workspace = true }
 tempfile = { workspace = true }
+
+[dev-dependencies]
 proptest = { workspace = true }
 
 [lints]

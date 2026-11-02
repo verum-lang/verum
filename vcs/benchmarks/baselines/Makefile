@@ -98,10 +98,8 @@ clean:
 report: run
 	@echo ""
 	@echo "=== Comparison Report ==="
-	@echo "To generate full comparison with Verum, run:"
-	@echo "  vbench baseline --language c"
-	@echo "  vbench baseline --language rust"
-	@echo "  vbench baseline --language go"
+	@echo "Compare prebuilt executables that read the same input and produce the same expected bytes:"
+	@echo "  vbench baseline --language c --candidate VERUM_BINARY --reference C_BINARY --input INPUT --expected-stdout EXPECTED"
 
 help:
 	@echo "VCS Baselines - Language Comparison Benchmarks"

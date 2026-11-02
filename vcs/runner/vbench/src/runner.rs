@@ -630,32 +630,22 @@ impl PerformanceExpectation {
                 min_ratio,
                 max_ratio,
                 ..
-            } => {
-                if let Some(baseline) = baseline_ns {
-                    if baseline > 0.0 {
-                        let ratio = baseline / measured_ns;
-                        ratio >= *min_ratio && ratio <= *max_ratio
-                    } else {
-                        false
-                    }
-                } else {
-                    true // No baseline to compare, pass by default
-                }
-            }
+            } => baseline_ns.is_some_and(|baseline| {
+                baseline.is_finite()
+                    && baseline > 0.0
+                    && measured_ns.is_finite()
+                    && measured_ns > 0.0
+                    && (*min_ratio..=*max_ratio).contains(&(baseline / measured_ns))
+            }),
             PerformanceExpectation::Percentage {
                 tolerance_percent, ..
-            } => {
-                if let Some(baseline) = baseline_ns {
-                    if baseline > 0.0 {
-                        let diff_percent = ((measured_ns - baseline) / baseline).abs() * 100.0;
-                        diff_percent <= *tolerance_percent
-                    } else {
-                        false
-                    }
-                } else {
-                    true
-                }
-            }
+            } => baseline_ns.is_some_and(|baseline| {
+                baseline.is_finite()
+                    && baseline > 0.0
+                    && measured_ns.is_finite()
+                    && measured_ns > 0.0
+                    && ((measured_ns - baseline) / baseline).abs() * 100.0 <= *tolerance_percent
+            }),
         }
     }
 
@@ -1170,6 +1160,13 @@ fn run_single_benchmark(
     }
 
     if let Some(ref expectation) = spec.parsed_expectation {
+        result.passed &= expectation.check(result.statistics.mean_ns, None);
+        if matches!(
+            expectation,
+            PerformanceExpectation::Ratio { .. } | PerformanceExpectation::Percentage { .. }
+        ) {
+            result = result.with_metadata("comparison", "missing reference measurement");
+        }
         result = result.with_metadata("expectation", format!("{:?}", expectation));
     }
 
@@ -1771,6 +1768,17 @@ mod tests {
         assert!(ratio.check(110.0, Some(100.0)));
         // If we measured 200ns, ratio = 100/200 = 0.5 which is below 0.85
         assert!(!ratio.check(200.0, Some(100.0)));
+        let tolerance = PerformanceExpectation::Percentage {
+            tolerance_percent: 10.0,
+            baseline: Some(BaselineLanguage::C),
+        };
+        assert!(tolerance.check(105.0, Some(100.0)));
+        for relative in [ratio, tolerance] {
+            for absent in [None, Some(0.0), Some(f64::INFINITY), Some(f64::NAN)] {
+                assert!(!relative.check(100.0, absent));
+            }
+            assert!(!relative.check(0.0, Some(100.0)));
+        }
     }
 
     #[test]

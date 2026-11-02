@@ -18,7 +18,7 @@
 //! vbench full       # Full benchmark suite
 //!
 //! # Run with baseline comparison
-//! vbench run --compare rust,c
+//! vbench baseline --language c --candidate ./verum-native --reference ./c-native --input input --expected-stdout expected
 //!
 //! # Generate HTML report
 //! vbench report --format html --output report.html
@@ -47,6 +47,8 @@
 #![allow(unused_assignments)]
 #![allow(unreachable_code)]
 #![allow(unreachable_patterns)]
+
+mod native_baseline;
 
 use std::path::PathBuf;
 
@@ -132,8 +134,8 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
 
-        /// Compare against baselines
-        #[arg(long, value_delimiter = ',')]
+        /// Legacy option. Native comparisons require the baseline subcommand.
+        #[arg(long, hide = true, value_delimiter = ',')]
         compare: Option<Vec<String>>,
 
         /// Fail if any benchmark exceeds threshold
@@ -372,9 +374,8 @@ enum Commands {
         #[arg(short, long)]
         language: BaselineArg,
 
-        /// VCS root directory
-        #[arg(long, default_value = "vcs")]
-        vcs_root: PathBuf,
+        #[command(flatten)]
+        programs: native_baseline::Programs,
 
         /// Output format
         #[arg(long, default_value = "console")]
@@ -523,9 +524,10 @@ impl From<BenchTypeArg> for BenchmarkType {
     }
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, Debug, ValueEnum)]
 enum BaselineArg {
     C,
+    Cpp,
     Rust,
     Go,
     Java,
@@ -639,10 +641,18 @@ fn main() -> Result<()> {
         ),
         Commands::Baseline {
             language,
-            vcs_root,
+            programs,
             format,
             output,
-        } => cmd_baseline(language, vcs_root, format, output),
+        } => {
+            let report = programs.measure(language)?;
+            if let Some(path) = output {
+                write_report(&report, format.into(), &path)?;
+            } else {
+                println!("{}", generate_report(&report, format.into())?);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -660,11 +670,15 @@ fn cmd_run(
     parallel: usize,
     format: FormatArg,
     output: Option<PathBuf>,
-    _compare: Option<Vec<String>>,
+    compare: Option<Vec<String>>,
     strict: bool,
     history_path: Option<PathBuf>,
     version: Option<String>,
 ) -> Result<()> {
+    anyhow::ensure!(
+        compare.is_none(),
+        "use vbench baseline with --candidate and --reference for native comparisons"
+    );
     info!("Running benchmarks from {}", dir.display());
 
     // Parse tiers
@@ -1351,106 +1365,6 @@ fn cmd_specs(
         write_report(&report, format.into(), &path)?;
         println!("Report written to: {}", path.display());
     } else {
-        println!("{}", report_content);
-    }
-
-    Ok(())
-}
-
-fn cmd_baseline(
-    language: BaselineArg,
-    vcs_root: PathBuf,
-    format: FormatArg,
-    output: Option<PathBuf>,
-) -> Result<()> {
-    let lang_str = match language {
-        BaselineArg::C => "C",
-        BaselineArg::Rust => "Rust",
-        BaselineArg::Go => "Go",
-        BaselineArg::Java => "Java",
-        BaselineArg::Python => "Python",
-    };
-
-    println!(
-        "{}",
-        format!("Running baseline comparison against {}...", lang_str).cyan()
-    );
-
-    // Discover all benchmarks and filter by baseline type
-    let all_specs = discover_all_benchmarks(&vcs_root)?;
-    let baseline_specs = filter_by_type(all_specs, BenchmarkType::Baseline);
-
-    if baseline_specs.is_empty() {
-        println!("{}", "No baseline comparison benchmarks found".yellow());
-        println!(
-            "  Looking in: {}/specs/L4-performance/comparison/",
-            vcs_root.display()
-        );
-        return Ok(());
-    }
-
-    println!(
-        "  Found {} baseline comparison benchmarks\n",
-        baseline_specs.len()
-    );
-
-    // Build config and run
-    let config = RunnerConfig {
-        benchmark_dir: vcs_root.join("specs").join("L4-performance"),
-        verbose: true,
-        ..Default::default()
-    };
-
-    let results = run_benchmarks(&config)?;
-
-    // Filter to baseline results
-    let baseline_results: Vec<_> = results
-        .into_iter()
-        .filter(|r| {
-            r.metadata
-                .get("benchmark_type")
-                .map(|t| t == "Baseline")
-                .unwrap_or(false)
-        })
-        .collect();
-
-    if baseline_results.is_empty() {
-        println!("{}", "No baseline comparison results".yellow());
-        return Ok(());
-    }
-
-    // Generate comparison report
-    println!("{}", format!("Comparison Results vs {}:", lang_str).bold());
-    println!();
-
-    for result in &baseline_results {
-        let status = if result.passed {
-            "PASS".green()
-        } else {
-            "FAIL".red()
-        };
-        println!(
-            "  {} {:40} {:.2}ns",
-            status, result.name, result.statistics.mean_ns
-        );
-    }
-
-    // Generate report
-    let metadata = ReportMetadata::new(
-        &format!("Baseline Comparison: Verum vs {}", lang_str),
-        "1.0.0",
-    );
-    let report = BenchmarkReport::new(metadata, baseline_results, vec![], vec![]);
-
-    let report_content = generate_report(&report, format.into())?;
-
-    if let Some(path) = output {
-        write_report(&report, format.into(), &path)?;
-        println!("\nReport written to: {}", path.display());
-    } else if matches!(
-        format,
-        FormatArg::Json | FormatArg::Html | FormatArg::Csv | FormatArg::Markdown
-    ) {
         println!("{}", report_content);
     }
 
