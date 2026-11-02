@@ -46,7 +46,7 @@ module core.shell.exec;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};
-mount core.io.process.{Command, Child, ExitStatus, Output, Stdio};
+mount core.io.process.{Command, ExitStatus, Stdio};
 mount core.time.duration.{Duration};
 mount core.time.instant.{Instant};
 mount core.async.cancellation.{CancellationToken};
@@ -101,7 +101,7 @@ public async fn run(program: &Text, args: List<Text>)
     let start = Instant.now();
     let mut cmd = Command.new(program.clone());
     cmd.args(&args);
-    apply_context(&mut cmd, &ctx);
+    ctx.configure_command(&mut cmd);
     cmd.stdout(Stdio.Piped);
     cmd.stderr(Stdio.Piped);
 
@@ -176,7 +176,7 @@ public async fn sh_check(cmd_text: &Text)
     let mut cmd = Command.new(shell_prog);
     cmd.arg(flag);
     cmd.arg(cmd_text.clone());
-    apply_context(&mut cmd, &ctx);
+    ctx.configure_command(&mut cmd);
     cmd.stdout(Stdio.Piped);
     cmd.stderr(Stdio.Piped);
 
@@ -231,14 +231,18 @@ public async fn run_with_cancel(
         }
     }
 
+    if let Maybe.Some(reason) = token.reason() {
+        return Result.Err(ShellError.Cancelled { command: display_cmd, reason: reason.message() });
+    }
+
     let start = Instant.now();
     let mut cmd = Command.new(program.clone());
     cmd.args(&args);
-    apply_context(&mut cmd, &ctx);
+    ctx.configure_command(&mut cmd);
     cmd.stdout(Stdio.Piped);
     cmd.stderr(Stdio.Piped);
 
-    let child = match cmd.spawn() {
+    let mut child = match cmd.spawn() {
         Result.Ok(c) => c,
         Result.Err(reason) => return Result.Err(ShellError.SpawnFailed {
             command: display_cmd,
@@ -246,31 +250,69 @@ public async fn run_with_cancel(
         }),
     };
 
-    // Race: child completion vs cancellation
     let effective_grace = if grace.as_millis() == 0 { Duration.from_millis(5000) } else { grace };
+    let mut stdout: List<Byte> = [];
+    let mut stderr: List<Byte> = [];
+    let mut status: Maybe<ExitStatus> = Maybe.None;
+    let mut cancellation: Maybe<Text> = Maybe.None;
+    let mut terminate_at: Maybe<Instant> = Maybe.None;
+    loop {
+        // Only this task reaps the child. Once reaped, its numeric PID may
+        // belong to another process and must never be signalled again.
+        if status.is_none() {
+            match child.try_wait() {
+                Result.Ok(state) => { status = state; },
+                Result.Err(reason) => {
+                    child.close_output();
+                    return Result.Err(ShellError.SpawnFailed { command: display_cmd, reason });
+                },
+            }
+        }
+        if cancellation.is_none() && token.is_cancelled() {
+            if let Maybe.Some(reason) = token.reason() {
+                cancellation = Maybe.Some(reason.message());
+                if status.is_none() {
+                    let _ = child.terminate();
+                    terminate_at = Maybe.Some(Instant.now());
+                }
+            }
+        }
+        if let Maybe.Some(sent) = &terminate_at {
+            if status.is_none() && sent.elapsed().as_millis() >= effective_grace.as_millis() {
+                let _ = child.kill();
+                terminate_at = Maybe.None;
+            }
+        }
+        if status.is_some() && cancellation.is_some() {
+            child.close_output();
+            return Result.Err(ShellError.Cancelled { command: display_cmd, reason: cancellation.unwrap() });
+        }
 
-    select {
-        out = wait_with_output_async(&child).await => match out {
-            Result.Ok(o) => Result.Ok(ShellResult.new(
-                o.status, o.stdout_bytes, o.stderr_bytes,
-                display_cmd, start.elapsed(),
-            )),
-            Result.Err(reason) => Result.Err(ShellError.SpawnFailed { command: display_cmd, reason }),
-        },
-        reason = token.cancelled().await => {
-            // Graceful shutdown — SIGTERM first
-            let _ = child.terminate();
-            // Wait up to `grace` for clean exit, then SIGKILL
-            let kill_ct = CancellationToken.with_timeout(effective_grace);
-            select {
-                _ = wait_with_output_async(&child).await => {},
-                _ = kill_ct.cancelled().await => { let _ = child.kill(); },
-            };
-            Result.Err(ShellError.Cancelled {
-                command: display_cmd,
-                reason:  reason.message(),
-            })
-        },
+        // Service both pipes fairly, even during the TERM grace period. A
+        // child filling stderr while its stdout stays open must make progress.
+        let mut progress = false;
+        let mut failure: Maybe<Text> = Maybe.None;
+        match child.read_stdout_ready(65536) {
+            Result.Ok(Maybe.Some(bytes)) => { for b in bytes { stdout.push(b); } progress = true; },
+            Result.Err(reason) => { failure = Maybe.Some(reason); },
+            _ => {},
+        }
+        match child.read_stderr_ready(65536) {
+            Result.Ok(Maybe.Some(bytes)) => { for b in bytes { stderr.push(b); } progress = true; },
+            Result.Err(reason) => { failure = Maybe.Some(reason); },
+            _ => {},
+        }
+        if let Maybe.Some(reason) = failure {
+            child.close_output();
+            if status.is_none() { let _ = child.kill(); let _ = child.wait(); }
+            return Result.Err(ShellError.SpawnFailed { command: display_cmd, reason });
+        }
+        if child.output_is_closed() {
+            if let Maybe.Some(exit) = status {
+                return Result.Ok(ShellResult.new(exit, stdout, stderr, display_cmd, start.elapsed()));
+            }
+        }
+        if progress { core.async.task.yield_now().await; } else { core.async.timer.sleep_ms(1).await; }
     }
 }
 
@@ -291,15 +333,6 @@ public async fn sh_with_cancel(
 // =============================================================================
 // Internals
 // =============================================================================
-
-fn apply_context(cmd: &mut Command, ctx: &ShellContext) {
-    if let Maybe.Some(dir) = &ctx.cwd {
-        cmd.current_dir(dir.clone());
-    }
-    for (k, v) in ctx.env_overrides.iter() {
-        cmd.env(k.clone(), v.clone());
-    }
-}
 
 /// Reconstruct a human-readable command line from program + argv.
 /// Used purely for diagnostics — never re-parsed.
@@ -362,13 +395,4 @@ fn synthesise_dry_run(command: Text) -> ShellResult {
 fn log_dispatched(cmd: &Text) {
     // Diagnostics output goes to stderr to leave stdout clean for piping.
     eprint(f"$ {cmd}\n");
-}
-
-/// Async-friendly wrapper around Child.wait_with_output. Yields to the
-/// executor between status checks so other tasks can progress.
-async fn wait_with_output_async(child: &Child) -> Result<Output, Text> {
-    // Synchronous wait_with_output is acceptable on the runtime's worker
-    // thread pool — verum_runtime spawns a dedicated thread for blocking
-    // syscalls so the async executor stays responsive.
-    child.wait_with_output()
 }
