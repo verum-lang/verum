@@ -1,0 +1,16 @@
+mount core.database.postgres.replication.Lsn;
+
+@test
+fn wal_positions_are_ordered_across_the_signed_boundary() {
+    let zero = Lsn.zero();
+    let low_half_end = Lsn.from_int(9223372036854775807);
+    let high_half_start = Lsn.from_int(-9223372036854775807 - 1);
+    let last = Lsn.from_int(-1);
+    assert(low_half_end.follows(&zero));
+    assert(high_half_start.follows(&low_half_end));
+    assert(last.follows(&high_half_start));
+    assert(!zero.follows(&last));
+    assert(!last.follows(&last));
+}
+
+fn main() {}

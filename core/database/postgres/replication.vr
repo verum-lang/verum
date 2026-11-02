@@ -173,6 +173,11 @@ implement Lsn {
 
     public fn raw(&self) -> Int { self.value }
 
+    /// WAL byte positions are ordered as unsigned 64-bit offsets.
+    public fn follows(&self, other: &Lsn) -> Bool {
+        (self.value as UInt64) > (other.value as UInt64)
+    }
+
     public fn is_zero(&self) -> Bool { self.value == 0 }
 
     /// Postgres canonical form: `"%X/%X"` with upper / lower halves.
@@ -243,14 +248,14 @@ public type PrimaryKeepalive is {
 
 public type IdentifySystemRow is {
     /// Cluster system identifier (uint64 as Text from the wire).
-    systemid: Text,
+    public systemid: Text,
     /// Current timeline ID.
-    timeline: Int,
+    public timeline: Int,
     /// Server's current end-of-WAL position at IDENTIFY time.
-    xlogpos: Lsn,
+    public xlogpos: Lsn,
     /// Database name when connected with `replication=database`,
     /// otherwise empty.
-    dbname: Text,
+    public dbname: Text,
 };
 
 /// Result of `TIMELINE_HISTORY <tli>`. `filename` is the canonical
