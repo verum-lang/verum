@@ -72,6 +72,7 @@ impl Default for PrettyConfig {
 #[derive(Debug)]
 pub struct PrettyPrinter {
     config: PrettyConfig,
+    archive_projections: bool,
     /// Current output buffer
     output: String,
     /// Current indentation level
@@ -85,6 +86,7 @@ impl PrettyPrinter {
     pub fn new(config: PrettyConfig) -> Self {
         Self {
             config,
+            archive_projections: false,
             output: String::new(),
             indent_level: 0,
             column: 0,
@@ -656,6 +658,23 @@ impl PrettyPrinter {
     // ==================== TYPES ====================
 
     fn format_type(&mut self, ty: &Type) {
+        if self.archive_projections {
+            let projection = match &ty.kind {
+                TypeKind::AssociatedType { base, assoc } => Some((base.as_ref(), assoc)),
+                TypeKind::Qualified { self_ty, trait_ref, assoc_name } if trait_ref.segments.is_empty() => {
+                    Some((self_ty.as_ref(), assoc_name))
+                }
+                _ => None,
+            };
+            if let Some((base, assoc)) = projection {
+                self.write("::");
+                self.write(assoc.as_str());
+                self.write("<");
+                self.format_type(base);
+                self.write(">");
+                return;
+            }
+        }
         match &ty.kind {
             TypeKind::Unit => self.write("()"),
             TypeKind::Never => self.write("!"),
@@ -3431,6 +3450,15 @@ impl PrettyPrinter {
 /// Format a type to a string.
 pub fn format_type(ty: &Type) -> Text {
     let mut printer = PrettyPrinter::default_printer();
+    printer.format_type(ty);
+    Text::from(printer.output)
+}
+
+/// Format a descriptor type, preserving source signature semantics and spelling
+/// unqualified associated type projections as `::Assoc<Base>`.
+pub fn format_descriptor_type(ty: &Type) -> Text {
+    let mut printer = PrettyPrinter::default_printer();
+    printer.archive_projections = true;
     printer.format_type(ty);
     Text::from(printer.output)
 }

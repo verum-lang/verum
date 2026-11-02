@@ -466,6 +466,30 @@ impl FastParser {
         Ok(ty)
     }
 
+    /// Check a VBC implementation's mandatory binder and function type. The
+    /// archive dialect renders associated types as `::Assoc<Base>`, including
+    /// when nested in ordinary source types.
+    pub fn is_descriptor_function_bound(parameter: &str, bound: &str) -> bool {
+        let file = FileId::new(0);
+        let Ok(tokens) = Self::lex_all(parameter, file) else {
+            return false;
+        };
+        let mut binder = RecursiveParser::new(&tokens, file);
+        if !binder.consume_ident().is_ok_and(|name| name.as_str() == parameter)
+            || Self::require_input_consumed(&binder).is_err()
+        {
+            return false;
+        }
+        let Ok(tokens) = Self::lex_all(bound, file) else {
+            return false;
+        };
+        let mut parser = RecursiveParser::new(&tokens, file);
+        parser.descriptor_projections = true;
+        parser.parse_type().is_ok_and(|ty| matches!(ty.kind, verum_ast::TypeKind::Function { .. }))
+            && parser.errors.is_empty()
+            && Self::require_input_consumed(&parser).is_ok()
+    }
+
     /// [`Self::require_input_consumed`] adapted to the token entry points'
     /// error channel.
     ///

@@ -155,3 +155,152 @@ fn assoc_bindings_roundtrip_through_wire_format() {
         TypeRef::Generic(verum_vbc::types::TypeParamId(0))
     ));
 }
+
+fn compile_function_bound_impl() -> verum_vbc::module::VbcModule {
+    let source = r#"
+module probe.bounds;
+
+public type Select<I, F> is { source: I, predicate: F };
+public type Predicate is protocol {};
+implement<I, F: fn(&I.Item) -> Bool> Predicate for Select<I, F> {}
+"#;
+    let ast = Parser::new(source).parse_module().expect("parse");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("bounds.vr").with_validation());
+    codegen
+        .compile_module_with_mounts(&ast, "bounds.vr", ".")
+        .expect("compile");
+    codegen.finalize_module().expect("finalize")
+}
+
+fn assert_function_bound(module: &verum_vbc::module::VbcModule) {
+    let ty = module
+        .types
+        .iter()
+        .find(|ty| module.get_string(ty.name) == Some("Select"))
+        .unwrap();
+    let bounds = &ty.protocols[0].type_param_fn_bounds;
+    assert_eq!(bounds.len(), 1);
+    assert_eq!(module.get_string(bounds[0].0), Some("F"));
+    assert_eq!(
+        module.get_string(bounds[0].1),
+        Some("fn(&::Item<I>) -> Bool")
+    );
+}
+
+#[test]
+fn implementation_function_bound_survives_finalize_wire_and_link() {
+    use verum_vbc::{
+        deserialize::deserialize_module, linker::VbcLinker, module::VbcModule,
+        serialize::serialize_module,
+    };
+
+    assert!(Parser::new("fn(&::Item<I>) -> Bool").parse_type().is_err());
+    let module = compile_function_bound_impl();
+    assert_function_bound(&module);
+    let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    assert_function_bound(&module);
+    // Put a different name at the parameter's exact byte offset in the
+    // preceding archive entry. Both operands must resolve in their owner.
+    let param = module
+        .types
+        .iter()
+        .flat_map(|ty| &ty.protocols)
+        .flat_map(|implementation| &implementation.type_param_fn_bounds)
+        .next()
+        .unwrap()
+        .0;
+    let mut prefix = VbcModule::new("x".repeat(param.0 as usize - 4));
+    assert_eq!(prefix.intern_string("wrong_parameter"), param);
+    let mut archive = verum_vbc::archive::ArchiveBuilder::new();
+    archive.add_module("a.decoy", &prefix, &[]).unwrap();
+    archive.add_module("b.owner", &module, &[]).unwrap();
+    let mut linker = VbcLinker::new("aarch64-apple-darwin");
+    linker.add_archive(&archive.finish()).unwrap();
+    assert_function_bound(&linker.finalize());
+}
+
+#[test]
+fn wire_and_linker_reject_a_dangling_implementation_bound_operand() {
+    use verum_vbc::{
+        linker::{LinkError, VbcLinker},
+        types::StringId,
+    };
+
+    let template = compile_function_bound_impl();
+    for damage_name in [true, false] {
+        let mut module = template.clone();
+        let ty = module
+            .types
+            .iter_mut()
+            .find(|ty| !ty.protocols.is_empty())
+            .unwrap();
+        let pair = &mut ty.protocols[0].type_param_fn_bounds[0];
+        if damage_name {
+            pair.0 = StringId(u32::MAX);
+        } else {
+            pair.1 = StringId(u32::MAX);
+        }
+        let error = verum_vbc::serialize::serialize_module(&module).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unresolved implementation function-bound string")
+        );
+        let mut linker = VbcLinker::new("aarch64-apple-darwin");
+        assert!(matches!(
+            linker.add_user_module(module),
+            Err(LinkError::DanglingReference {
+                kind: "string",
+                source_id: u32::MAX
+            })
+        ));
+    }
+}
+
+#[test]
+fn in_range_function_bound_operands_must_have_the_declared_grammar() {
+    use verum_vbc::linker::{LinkError, VbcLinker};
+    let template = compile_function_bound_impl();
+    for (parameter, bound) in [
+        ("core.term.raw", "fn(Int) -> Bool"),
+        ("F", "SomeOrdinaryType"),
+        ("F", "fn(&::Item<I, J>) -> Bool"),
+        ("F", "fn(Int) -> Bool trailing"),
+        ("F", "\x1b[?1003h"),
+    ] {
+        let mut module = template.clone();
+        let pair = (module.intern_string(parameter), module.intern_string(bound));
+        let ty = module
+            .types
+            .iter_mut()
+            .find(|ty| !ty.protocols.is_empty())
+            .unwrap();
+        ty.protocols[0].type_param_fn_bounds[0] = pair;
+        assert!(
+            verum_vbc::serialize::serialize_module(&module)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid implementation function-bound declaration"),
+            "{parameter:?} {bound:?}"
+        );
+        assert!(matches!(
+            VbcLinker::new("aarch64-apple-darwin").add_user_module(module),
+            Err(LinkError::InvalidImplementationBound)
+        ));
+    }
+}
+
+#[test]
+fn reader_rejects_a_callable_spelling_replaced_in_the_wire_string_pool() {
+    let module = compile_function_bound_impl();
+    let mut bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let bound = b"fn(&::Item<I>) -> Bool";
+    let at = bytes.windows(bound.len()).position(|s| s == bound).unwrap();
+    bytes[at..at + bound.len()].fill(b'X');
+    let error = verum_vbc::deserialize::deserialize_module(&bytes).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("invalid implementation function-bound declaration")
+    );
+}

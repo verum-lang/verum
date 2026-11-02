@@ -1392,6 +1392,26 @@ pub struct ProtocolImpl {
     pub type_param_fn_bounds: Vec<(StringId, StringId)>,
 }
 
+impl ProtocolImpl {
+    /// Move implementation evidence into the destination string table.
+    pub(crate) fn remap_strings<E>(
+        &mut self,
+        mut remap: impl FnMut(StringId) -> Result<StringId, E>,
+    ) -> Result<(), E> {
+        for (name, _) in &mut self.associated_types {
+            *name = remap(*name)?;
+        }
+        for argument in &mut self.protocol_args_text {
+            *argument = remap(*argument)?;
+        }
+        for (parameter, bound) in &mut self.type_param_fn_bounds {
+            *parameter = remap(*parameter)?;
+            *bound = remap(*bound)?;
+        }
+        Ok(())
+    }
+}
+
 // ============================================================================
 // Computational Properties
 // ============================================================================

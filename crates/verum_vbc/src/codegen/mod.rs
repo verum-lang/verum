@@ -10592,7 +10592,7 @@ impl VbcCodegen {
                                             })?;
                                             Some((
                                                 name.name.to_string(),
-                                                Self::extract_type_name_from_ast(fb),
+                                                verum_ast::pretty::format_descriptor_type(fb).to_string(),
                                             ))
                                         }
                                         _ => None,
@@ -25267,31 +25267,12 @@ impl VbcCodegen {
                     tp.name = *mapped;
                 }
             }
-            // Remap the impl-carried associated-type binding NAMES
-            // (Pillar-3 increment 1 / ARRAY-ITER-CONCRETIZE-1) —
-            // same codegen-index → module-StringId remap as every
-            // other StringId field in this walker.  Without it the
-            // names written by `collect_declarations`' impl attach
-            // stay as codegen-time indices against the CANONICAL
-            // (sorted) string table, `module.strings.get(name)`
-            // resolves to None/garbage, and the archive-side
-            // metadata renderer silently drops the binding.
-            for pi in remapped_ty.protocols.iter_mut() {
-                for (name, _) in pi.associated_types.iter_mut() {
-                    if let Some(mapped) = string_id_map.get(name.0 as usize) {
-                        *name = *mapped;
-                    }
-                }
-                // Twin remap for the v2.7 protocol-arg text carry —
-                // same codegen-index → module-StringId discipline;
-                // an unmapped id here reads as "?" from the written
-                // module and the metadata renderer drops the args
-                // (#47 FromResidual tail).
-                for sid in pi.protocol_args_text.iter_mut() {
-                    if let Some(mapped) = string_id_map.get(sid.0 as usize) {
-                        *sid = *mapped;
-                    }
-                }
+            for implementation in &mut remapped_ty.protocols {
+                implementation.remap_strings(|id| {
+                    string_id_map.get(id.0 as usize).copied().ok_or_else(|| {
+                        CodegenError::internal(format!("unknown implementation string slot {}", id.0))
+                    })
+                })?;
             }
             // Remap drop_fn from sparse ID to contiguous 0-based ID.
             //

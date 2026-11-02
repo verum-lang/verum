@@ -280,6 +280,8 @@ pub struct RecursiveParser<'a> {
     pub stream: TokenStream<'a>,
     /// File ID for span creation
     pub file_id: FileId,
+    /// Accept the archive spelling `::Assoc<Base>` inside descriptor types.
+    pub(crate) descriptor_projections: bool,
     /// Accumulated errors for error recovery (capped at MAX_PARSE_ERRORS)
     pub errors: Vec<ParseError>,
     /// Whether error limit has been reached (to log warning once)
@@ -359,6 +361,7 @@ impl<'a> RecursiveParser<'a> {
     pub fn new(tokens: &'a [Token], file_id: FileId) -> Self {
         Self {
             stream: TokenStream::new(tokens),
+            descriptor_projections: false,
             file_id,
             errors: Vec::with_capacity(64), // Pre-allocate reasonable capacity
             errors_capped: false,

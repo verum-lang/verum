@@ -679,6 +679,18 @@ impl<'a> RecursiveParser<'a> {
     fn parse_base_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
+        if self.descriptor_projections && self.stream.consume(&TokenKind::ColonColon).is_some() {
+            let assoc_span = self.stream.current_span();
+            let assoc = Ident::new(self.consume_ident()?, assoc_span);
+            self.stream.expect(TokenKind::Lt)?;
+            let base = Heap::new(self.parse_type()?);
+            self.expect_gt()?;
+            return Ok(Type::new(
+                TypeKind::AssociatedType { base, assoc },
+                self.stream.make_span(start_pos),
+            ));
+        }
+
         // Type lambda: |x| TypeExpr or |x, y| TypeExpr
         // Used in dependent type positions: Sigma<A, |a| B(a)>
         // Try to parse as type lambda first; if it fails, report the original error.

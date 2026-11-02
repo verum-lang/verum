@@ -2213,6 +2213,7 @@ mod tests {
  for count in [0, 1, 255, 256, 257, 285, 4096] {
  let mut module = VbcModule::new("protocol_count".into());
  let name = module.intern_string("ManyImplementations");
+ let bound = module.intern_string("fn(Int) -> Bool");
  let mut desc = TypeDescriptor { id: TypeId(1000), name, ..TypeDescriptor::default() };
  for i in 0..count {
  desc.protocols.push(ProtocolImpl {
@@ -2220,7 +2221,7 @@ mod tests {
  methods: vec![i, i + 1],
  associated_types: vec![(name, TypeRef::Concrete(TypeId::INT))],
  protocol_args_text: vec![name],
- type_param_fn_bounds: vec![(name, name)],
+ type_param_fn_bounds: vec![(name, bound)],
  });
  }
  module.types.push(desc);

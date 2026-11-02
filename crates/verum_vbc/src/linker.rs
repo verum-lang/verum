@@ -91,6 +91,8 @@ pub enum LinkError {
         /// The out-of-range id as it appeared in the source module.
         source_id: u32,
     },
+    /// The implementation bound references strings of the wrong grammatical kind.
+    InvalidImplementationBound,
     /// The bytecode instruction stream couldn't be decoded — a length
     /// prefix said `N` bytes but only `M < N` were available.
     TruncatedBytecode {
@@ -104,6 +106,7 @@ pub enum LinkError {
 impl std::fmt::Display for LinkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidImplementationBound => write!(f, "invalid implementation function-bound declaration"),
             Self::UnhandledInstruction { opcode, offset } => write!(
                 f,
                 "linker: unhandled instruction opcode 0x{:02x} at bytecode offset {}",
@@ -279,10 +282,6 @@ pub struct VbcLinker {
     /// Linker output state — populated incrementally by `add_*`,
     /// finalised by `finalize`.
     out: VbcModule,
-
-    /// Content-addressed string-pool dedup. Two modules interning
-    /// `"hello"` collapse to one linker StringId.
-    string_dedup: HashMap<String, StringId>,
 }
 
 impl VbcLinker {
@@ -291,32 +290,11 @@ impl VbcLinker {
     /// addition.
     pub fn new(target_triple: &str) -> Self {
         let mut out = VbcModule::new("__linker_output".to_string());
-        // Rebuild the dedup map's StringId(0) entry for the module
-        // name so subsequent string lookups stay consistent.
-        let mut string_dedup: HashMap<String, StringId> = HashMap::new();
-        string_dedup.insert("__linker_output".to_string(), StringId(0));
-
-        let cfg = {
-            // Use a temporary closure to satisfy `for_triple`'s
-            // intern signature; ID assignment for unknown OS / arch
-            // / feature tokens routes through the linker's string
-            // table so the resulting CfgKey is comparable to keys
-            // stored in archives.
-            let mut intern = |s: &str| {
-                if let Some(id) = string_dedup.get(s) {
-                    return *id;
-                }
-                let id = out.intern_string(s);
-                string_dedup.insert(s.to_string(), id);
-                id
-            };
-            CfgKey::for_triple(target_triple, &mut intern)
-        };
+        let cfg = CfgKey::for_triple(target_triple, &mut |text| out.intern_string(text));
 
         Self {
             cfg,
             out,
-            string_dedup,
         }
     }
 
@@ -345,7 +323,7 @@ impl VbcLinker {
     pub fn add_archive(&mut self, archive: &VbcArchive) -> Result<usize, LinkError> {
         // Two-pass:
         //   Pass 1: load every archive module, populate one shared
-        //           RemapTable with every (string|type|function|
+        //           RemapTable with every (type|function|
         //           constant|context|protocol) ID across all modules.
         //   Pass 2: walk modules in archive order, apply the shared
         //           remap to descriptors / bodies, append to the
@@ -400,21 +378,8 @@ impl VbcLinker {
         modules: &[VbcModule],
         shared: &mut RemapTable,
     ) -> Result<(), LinkError> {
-        // Strings, types, protocols: archive-wide.
+        // Types and protocols can be referenced across archive entries.
         for src in modules {
-            for (text, src_id) in src.strings.iter() {
-                if shared.string.contains_key(&src_id.0) {
-                    continue;
-                }
-                let linker_id = if let Some(existing) = self.string_dedup.get(text) {
-                    *existing
-                } else {
-                    let new_id = self.out.intern_string(text);
-                    self.string_dedup.insert(text.to_string(), new_id);
-                    new_id
-                };
-                shared.string.insert(src_id.0, linker_id);
-            }
             for src_desc in &src.types {
                 if shared.type_.contains_key(&src_desc.id.0) {
                     continue;
@@ -501,11 +466,13 @@ impl VbcLinker {
         src: VbcModule,
         shared: &RemapTable,
     ) -> Result<(), LinkError> {
-        // Archive-wide remap: strings, types, protocols, functions,
-        // constants are all pre-populated. Per-module remap is just
-        // a clone — no per-module ID allocation needed.
+        // String IDs are byte offsets in this entry's own table. Two entries
+        // can use the same offset for entirely different declarations.
         let mut remap = RemapTable {
-            string: shared.string.clone(),
+            string: src.strings.iter().map(|(text, id)| {
+                let output = self.out.intern_string(text);
+                (id.0, output)
+            }).collect(),
             type_: shared.type_.clone(),
             protocol: shared.protocol.clone(),
             function: shared.function.clone(),
@@ -800,6 +767,14 @@ impl VbcLinker {
             }
         }
         for proto_impl in out.protocols.iter_mut() {
+            proto_impl.remap_strings(|id| {
+                remap.string.get(&id.0).copied().ok_or(LinkError::DanglingReference {
+                    kind: "string",
+                    source_id: id.0,
+                })
+            })?;
+            crate::source_declaration_integrity::validate_impl_function_bounds(proto_impl, &self.out.strings)
+                .map_err(|_| LinkError::InvalidImplementationBound)?;
             proto_impl.protocol = remap.map_protocol(proto_impl.protocol)?;
             // methods: stored as Vec<u32> of FunctionId.0 values.
             for mid in proto_impl.methods.iter_mut() {

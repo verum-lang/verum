@@ -14,12 +14,31 @@ use verum_ast::{
 };
 use verum_common::{Set, Text};
 
+/// Require both string operands to denote one binder and a complete function type.
+pub(crate) fn validate_impl_function_bounds(
+    implementation: &crate::types::ProtocolImpl,
+    strings: &StringTable,
+) -> Result<(), Text> {
+    for (parameter, bound) in &implementation.type_param_fn_bounds {
+        let (Some(parameter), Some(bound)) = (strings.get(*parameter), strings.get(*bound)) else {
+            return Err("unresolved implementation function-bound string".into());
+        };
+        if !verum_fast_parser::FastParser::is_descriptor_function_bound(parameter, bound) {
+            return Err("invalid implementation function-bound declaration".into());
+        }
+    }
+    Ok(())
+}
+
 /// Validate a declaration-bearing descriptor before publishing or importing it.
 /// Ordinary ABI-only descriptors retain their existing validation path.
 pub fn validate_type_descriptor(
     descriptor: &TypeDescriptor,
     strings: &StringTable,
 ) -> Result<(), Text> {
+    for implementation in &descriptor.protocols {
+        validate_impl_function_bounds(implementation, strings)?;
+    }
     if descriptor.kind != TypeKind::Protocol && descriptor.variants.iter().any(|v| v.method_dispatch.is_some()) {
         return Err("data variant cannot declare a protocol method receiver".into());
     }
