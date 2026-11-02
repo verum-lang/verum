@@ -1304,6 +1304,33 @@ fn build_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> Interprete
 mod tests {
     use super::*;
 
+    #[test]
+    fn borrowed_pipe_poll_payload_reports_the_byte_count() {
+        use crate::instruction::{Instruction, Reg};
+        use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
+        use crate::types::StringId;
+        let mut module = VbcModule::new("process".into());
+        let code = [
+            Instruction::AsVar { dst: Reg(1), value: Reg(0), tag: 0 },
+            Instruction::Ref { dst: Reg(2), src: Reg(1) },
+            Instruction::GetVariantDataRef { dst: Reg(3), variant: Reg(2), field: 0 },
+            Instruction::Len { dst: Reg(4), arr: Reg(3), type_hint: 0 },
+            Instruction::Ret { value: Reg(4) },
+        ];
+        crate::bytecode::encode_instructions(&code, &mut module.bytecode);
+        let mut entry = FunctionDescriptor::new(StringId::EMPTY);
+        entry.register_count = 5;
+        entry.bytecode_length = module.bytecode.len() as u32;
+        module.functions.push(entry);
+        let mut vm = crate::interpreter::Interpreter::new(std::sync::Arc::new(module));
+        for bytes in [&[65u8][..], &[]] {
+            let list = alloc_byte_list(&mut vm.state, bytes).unwrap();
+            let result = wrap_poll_result(&mut vm.state, Ok(Some(list))).unwrap().unwrap();
+            let len = vm.execute_function_with_args(FunctionId(0), &[result]).unwrap();
+            assert_eq!(len.try_as_i64(), Some(bytes.len() as i64));
+        }
+    }
+
     /// Spawn `/bin/echo hello`, capture pid via Rust-side helpers,
     /// wait, observe exit status 0.  This is the round-trip
     /// proof for the spawn_child + wait_for_child intercept pair.
