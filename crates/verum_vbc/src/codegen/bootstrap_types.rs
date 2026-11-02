@@ -289,27 +289,19 @@ impl VbcCodegen {
                 }
             }
         }
-        // A declaration interface can reference a reserved source type before
-        // its owning module is compiled, without containing that descriptor.
-        // Resolve those references through the canonical declaration catalogue
-        // so dependency closure and signature remapping use the same identity.
-        // A source descriptor always wins; a same-leaf type in another module
-        // cannot supply the missing declaration.
-        for (mi, module) in available.iter().enumerate() {
-            let ids = module.types.iter().flat_map(descriptor_ids)
-                .chain(module.functions.iter().flat_map(function_ids));
-            for id in ids.filter(|id| !id.is_builtin()) {
-                if source_keys.contains_key(&(mi, id)) { continue; }
-                let Some(name) = id.well_known_name() else { continue };
-                let Some(owner) = verum_common::well_known_types::WellKnownType::from_name(name)
-                    .and_then(|kind| kind.canonical_archive_modules().first().copied())
-                else { continue };
-                let key = format!("{owner}.{name}");
-                if catalog.contains_key(&key) {
-                    source_keys.entry((mi, id)).or_insert(key);
-                }
+        // A forward interface may reference a reserved carrier before its owner
+        // is compiled. Resolve it when the dependency closure reaches that ID.
+        // An explicit descriptor in the source pool always takes precedence.
+        let source_key = |module: usize, id: TypeId| -> Option<&String> {
+            if let Some(key) = source_keys.get(&(module, id)) {
+                return Some(key);
             }
-        }
+            if id.is_builtin() { return None; }
+            let name = id.well_known_name()?;
+            let owner = verum_common::well_known_types::WellKnownType::from_name(name)?
+                .canonical_archive_modules().first()?;
+            catalog.get_key_value(&format!("{owner}.{name}")).map(|(key, _)| key)
+        };
         let mut bare = HashMap::<String, Option<String>>::new();
         for key in catalog.keys() {
             let leaf = key.rsplit('.').next().unwrap().to_owned();
@@ -440,14 +432,16 @@ impl VbcCodegen {
             }
         }
         let mut pending: Vec<_> = selected.iter().cloned().collect();
-        let add_dependencies = |mi: usize,
+        let mut referenced = HashMap::new();
+        let mut add_dependencies = |mi: usize,
                                 key: &str,
                                 ids: Vec<TypeId>,
                                 selected: &mut BTreeSet<String>,
                                 pending: &mut Vec<String>|
          -> CodegenResult<()> {
             for id in ids {
-                if let Some(dependency) = source_keys.get(&(mi, id)) {
+                if let Some(dependency) = source_key(mi, id) {
+                    if !source_keys.contains_key(&(mi, id)) { referenced.insert((mi, id), dependency); }
                     if selected.insert(dependency.clone()) {
                         pending.push(dependency.clone());
                     }
@@ -489,7 +483,7 @@ impl VbcCodegen {
                 let mut methods = HashMap::<&str, Vec<usize>>::new();
                 for (fi, function) in module.functions.iter().enumerate() {
                     if let Some(owner) = function.parent_type
-                        .and_then(|id| source_keys.get(&(mi, id)))
+                        .and_then(|id| source_key(mi, id))
                     {
                         methods.entry(owner.as_str()).or_default().push(fi);
                     }
@@ -569,6 +563,9 @@ impl VbcCodegen {
             if let Some(target) = target_ids.get(key) {
                 maps[owner].insert(source.0, target.0);
             }
+        }
+        for ((owner, source), key) in referenced {
+            maps[owner].insert(source.0, target_ids[key].0);
         }
         for key in &selected {
             let (mi, ti) = catalog[key];
@@ -683,7 +680,7 @@ impl VbcCodegen {
                 // Keep their actual FunctionInfo identity and generic roster;
                 // synthesizing an external stub here would erase CallG witnesses.
                 if let Some(parent) = function.parent_type
-                    .and_then(|parent| source_keys.get(&(mi, parent)))
+                    .and_then(|parent| source_key(mi, parent))
                     && let Some(exports) = method_exports.get(parent)
                     && let Some(canonical) = function_identity(module, function)
                     && let Some(member) = canonical.strip_prefix(&format!("{parent}."))
