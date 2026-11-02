@@ -18,23 +18,9 @@ fn make_type_with_variants(name_idx: u32, variants: Vec<VariantDescriptor>) -> T
         id: TypeId(1000),
         name: StringId(name_idx),
         kind: TypeKind::Sum,
-        type_params: smallvec![],
-        fields: smallvec![],
         variants: variants.into(),
-        size: 0,
-        alignment: 1,
-        drop_fn: None,
-        clone_fn: None,
-        protocols: smallvec![],
         visibility: Visibility::Public,
-        // `Sum` types are not transparent wrappers — variant tags
-        // and payloads must persist at runtime.
-        alias_target: None,
-        alias_target_name: None,
-        is_transparent_wrapper: false,
-        declared_layout: None,
-        source_declaration: None,
-        origin_module: None,
+        ..TypeDescriptor::default()
     }
 }
 
