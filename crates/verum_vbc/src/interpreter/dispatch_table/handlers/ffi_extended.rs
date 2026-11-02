@@ -18,6 +18,94 @@ use crate::types::StringId;
 use crate::types::TypeId;
 use crate::value::Value;
 
+/// Convert a returned C record in declaration order. The native buffer is
+/// reclaimed before allocating on the VM heap so a failed allocation releases it.
+#[cfg(feature = "ffi")]
+fn unpack_native_return(
+    state: &mut InterpreterState,
+    module: &crate::module::VbcModule,
+    symbol: FfiSymbolId,
+    value: Value,
+) -> InterpreterResult<Value> {
+    let Some(symbol) = module.get_ffi_symbol(symbol) else { return Ok(value) };
+    if symbol.signature.return_type != crate::module::CType::StructValue || value.is_nil() {
+        return Ok(value);
+    }
+    let layout = symbol.signature.return_layout_idx
+        .and_then(|idx| module.ffi_layouts.get(idx as usize))
+        .ok_or_else(|| InterpreterError::FfiRuntimeError("missing native return layout".into()))?;
+    let ptr = std::ptr::NonNull::new(value.as_ptr::<u8>())
+        .ok_or_else(|| InterpreterError::FfiRuntimeError("missing native return buffer".into()))?;
+    // SAFETY: the FFI call transferred a NativeRecord allocated for this exact return layout.
+    let buffer = unsafe { crate::ffi::runtime::NativeRecord::take(ptr, layout.size, layout.align) }
+        .map_err(|e| InterpreterError::FfiRuntimeError(e.to_string()))?;
+    unpack_native_fields(state, &module.ffi_layouts, layout, &buffer[..layout.size as usize], 0)
+}
+
+#[cfg(feature = "ffi")]
+fn unpack_native_fields(
+    state: &mut InterpreterState,
+    layouts: &[crate::module::FfiStructLayout],
+    layout: &crate::module::FfiStructLayout,
+    bytes: &[u8],
+    depth: u32,
+) -> InterpreterResult<Value> {
+    use crate::module::CType;
+    if depth >= crate::ffi::runtime::MAX_FFI_STRUCT_NESTING {
+        return Err(InterpreterError::FfiRuntimeError("recursive native return layout".into()));
+    }
+    let ty = layout.verum_type.unwrap_or(TypeId::UNIT);
+    let obj = state.heap.alloc(ty, layout.fields.len() * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    for (slot, field) in layout.fields.iter().enumerate() {
+        let start = field.offset as usize;
+        let raw = bytes.get(start..).and_then(|tail| tail.get(..field.size as usize))
+            .ok_or_else(|| InterpreterError::FfiRuntimeError("native field exceeds return layout".into()))?;
+        let value = if field.c_type == CType::StructValue {
+            let nested = field.nested_layout.and_then(|idx| layouts.get(idx as usize))
+                .filter(|nested| nested.size as usize == raw.len())
+                .ok_or_else(|| InterpreterError::FfiRuntimeError("invalid nested native return layout".into()))?;
+            unpack_native_fields(state, layouts, nested, raw, depth + 1)?
+        } else {
+            crate::ffi::runtime::read_native_scalar(field.c_type, raw)
+                .ok_or_else(|| InterpreterError::FfiRuntimeError("invalid native return field width".into()))?
+        };
+        // SAFETY: the allocation has one Value slot per declared field; slot is its index.
+        unsafe {
+            let slots = (obj.as_ptr() as *mut u8).add(crate::interpreter::OBJECT_HEADER_SIZE).cast::<Value>();
+            slots.add(slot).write(value);
+        }
+    }
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
+#[cfg(all(test, feature = "ffi"))]
+#[test]
+fn native_return_fields_use_declaration_slots_and_nested_offsets() {
+    use crate::module::{CType, FfiStructField, FfiStructLayout, VbcModule};
+    let field = |name, c_type, offset, size, nested_layout| FfiStructField {
+        name: StringId(name), c_type, offset, size, align: 1, nested_layout,
+    };
+    let mut inner = FfiStructLayout::new(StringId(3), 3, 1);
+    inner.fields = vec![field(27, CType::Bool, 0, 1, None), field(91, CType::I16, 1, 2, None)];
+    let mut outer = FfiStructLayout::new(StringId(7), 4, 1);
+    outer.fields = vec![field(86, CType::U8, 0, 1, None), field(61, CType::StructValue, 1, 3, Some(0))];
+    let mut state = InterpreterState::new(std::sync::Arc::new(VbcModule::default()));
+    let [lo, hi] = (-83i16).to_ne_bytes();
+    let layouts = [inner, outer];
+    let record = unpack_native_fields(&mut state, &layouts, &layouts[1], &[9, 1, lo, hi], 0).unwrap();
+    fn slots(value: Value) -> [Value; 2] {
+        // SAFETY: each record created above has two initialized VM field slots.
+        unsafe { value.as_ptr::<u8>().add(crate::interpreter::OBJECT_HEADER_SIZE).cast::<[Value; 2]>().read() }
+    }
+    let [count, nested] = slots(record);
+    assert_eq!(count.try_as_i64(), Some(9));
+    let [valid, offset] = slots(nested);
+    assert_eq!(valid, Value::from_bool(true));
+    assert_eq!(offset.try_as_i64(), Some(-83));
+    assert!(unpack_native_fields(&mut state, &layouts, &layouts[1], &[0; 3], 0).is_err());
+}
+
 /// FFI symbol → permission scope mapping for the script-mode
 /// permission router. The interpreter's `RequiresPermission` flag
 /// only tags raw `syscall0..6`; on macOS / Windows scripts use FFI
@@ -1144,79 +1232,7 @@ fn ffi_extended_body(
                 }
                 .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
-                // If return type is a struct, convert raw C buffer to Verum heap object
-                if let Some(sym) = module.get_ffi_symbol(symbol_id)
-                    && matches!(sym.signature.return_type, crate::module::CType::StructValue)
-                    && let Some(layout_idx) = sym.signature.return_layout_idx
-                {
-                    let layout = &module.ffi_layouts[layout_idx as usize];
-                    let c_buf_ptr = ret_value.as_ptr::<u8>();
-                    if !c_buf_ptr.is_null() {
-                        // Determine number of Value slots needed
-                        let max_field_idx = layout
-                            .fields
-                            .iter()
-                            .map(|f| f.name.0 as usize)
-                            .max()
-                            .unwrap_or(0);
-                        let slot_count = max_field_idx + 1;
-                        let type_id = layout.verum_type.unwrap_or(crate::types::TypeId::UNIT);
-                        let obj = state
-                            .heap
-                            .alloc(type_id, slot_count * std::mem::size_of::<Value>())?;
-                        state.record_allocation();
-
-                        // SAFETY: `obj` was just returned from
-                        // `state.heap.alloc()` with exactly
-                        // `slot_count * sizeof(Value)` data bytes, so
-                        // the Value slice runs from `data_ptr` to
-                        // `data_ptr.add(slot_count)`.
-                        let data_ptr = unsafe {
-                            (obj.as_ptr() as *mut u8)
-                                .add(super::super::super::heap::OBJECT_HEADER_SIZE)
-                                as *mut Value
-                        };
-                        // Marshal each field from C buffer into heap object
-                        for field in &layout.fields {
-                            // SAFETY: `field.offset` is provided by the
-                            // compiler-emitted layout table; the C
-                            // buffer is exactly the 256-byte box below
-                            // and was just written to by the FFI call.
-                            // The field offsets are bounded by that
-                            // box size per the layout contract.
-                            let c_field_ptr = unsafe { c_buf_ptr.add(field.offset as usize) };
-                            // SAFETY: `marshal_field_from_c` reads a
-                            // typed field from `c_field_ptr` whose
-                            // layout matches `field.c_type`. The
-                            // layout table is generated alongside the
-                            // FFI signature so the pairing is
-                            // guaranteed.
-                            if let Some(val) = unsafe {
-                                crate::ffi::runtime::marshal_field_from_c(field.c_type, c_field_ptr)
-                            } {
-                                let slot_idx = field.name.0 as usize;
-                                // SAFETY: `slot_idx` is bounded by
-                                // `max_field_idx`, and `data_ptr` has
-                                // `slot_count = max_field_idx + 1`
-                                // Value slots of writable storage.
-                                unsafe {
-                                    *data_ptr.add(slot_idx) = val;
-                                }
-                            }
-                        }
-                        // Free the C buffer (was Box::into_raw'd [0u8; 256])
-                        // SAFETY: The FFI runtime produced `c_buf_ptr`
-                        // via `Box::into_raw` of a boxed `[0u8; 256]`.
-                        // Reconstructing the same-sized slice and
-                        // dropping it here reverses that allocation
-                        // exactly once per non-null return.
-                        unsafe {
-                            let _ =
-                                Box::from_raw(std::ptr::slice_from_raw_parts_mut(c_buf_ptr, 256));
-                        }
-                        ret_value = Value::from_ptr(obj.as_ptr() as *mut u8);
-                    }
-                }
+                ret_value = unpack_native_return(state, &module, symbol_id, ret_value)?;
 
                 // Error protocol checking: inspect return value + errno
                 // Mirrors LLVM lowering logic for differential correctness.
@@ -1548,63 +1564,7 @@ fn ffi_extended_body(
                 }
                 .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
-                // If return type is a struct, convert raw C buffer to Verum heap object
-                if let Some(sym) = module.get_ffi_symbol(symbol_id)
-                    && matches!(sym.signature.return_type, crate::module::CType::StructValue)
-                    && let Some(layout_idx) = sym.signature.return_layout_idx
-                {
-                    let layout = &module.ffi_layouts[layout_idx as usize];
-                    let c_buf_ptr = ret_value.as_ptr::<u8>();
-                    if !c_buf_ptr.is_null() {
-                        let max_field_idx = layout
-                            .fields
-                            .iter()
-                            .map(|f| f.name.0 as usize)
-                            .max()
-                            .unwrap_or(0);
-                        let slot_count = max_field_idx + 1;
-                        let type_id = layout.verum_type.unwrap_or(crate::types::TypeId::UNIT);
-                        let obj = state
-                            .heap
-                            .alloc(type_id, slot_count * std::mem::size_of::<Value>())?;
-                        state.record_allocation();
-
-                        // SAFETY: See CallFfiC struct-return branch
-                        // for the full justification — same layout
-                        // and alloc invariants apply here.
-                        let data_ptr = unsafe {
-                            (obj.as_ptr() as *mut u8)
-                                .add(super::super::super::heap::OBJECT_HEADER_SIZE)
-                                as *mut Value
-                        };
-                        for field in &layout.fields {
-                            // SAFETY: Offsets come from the compiler
-                            // layout table; see CallFfiC branch.
-                            let c_field_ptr = unsafe { c_buf_ptr.add(field.offset as usize) };
-                            // SAFETY: `field.c_type` matches the
-                            // bytes at `c_field_ptr`; see CallFfiC.
-                            if let Some(val) = unsafe {
-                                crate::ffi::runtime::marshal_field_from_c(field.c_type, c_field_ptr)
-                            } {
-                                let slot_idx = field.name.0 as usize;
-                                // SAFETY: `slot_idx <= max_field_idx`
-                                // and `data_ptr` has `slot_count`
-                                // Value slots; in bounds.
-                                unsafe {
-                                    *data_ptr.add(slot_idx) = val;
-                                }
-                            }
-                        }
-                        // SAFETY: Undoes the `Box::into_raw` of a
-                        // [0u8; 256] performed by the FFI runtime;
-                        // see CallFfiC for details.
-                        unsafe {
-                            let _ =
-                                Box::from_raw(std::ptr::slice_from_raw_parts_mut(c_buf_ptr, 256));
-                        }
-                        ret_value = Value::from_ptr(obj.as_ptr() as *mut u8);
-                    }
-                }
+                ret_value = unpack_native_return(state, &module, symbol_id, ret_value)?;
 
                 state.set_reg(ret_reg, ret_value);
 

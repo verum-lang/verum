@@ -150,6 +150,75 @@ impl fmt::Debug for ResolvedSymbol {
     }
 }
 
+/// Owned C storage with the size and alignment specified by the native ABI.
+pub(crate) struct NativeRecord {
+    ptr: std::ptr::NonNull<u8>,
+    layout: std::alloc::Layout,
+}
+
+impl NativeRecord {
+    fn layout(size: u32, alignment: u16) -> Result<std::alloc::Layout, FfiError> {
+        // libffi requires at least an argument word of storage for small returns.
+        if !alignment.is_power_of_two() {
+            return Err(FfiError::CallFailed(
+                "invalid native record alignment".into(),
+            ));
+        }
+        std::alloc::Layout::from_size_align(
+            (size as usize).max(std::mem::size_of::<usize>()),
+            (alignment as usize).max(std::mem::align_of::<usize>()),
+        )
+        .map_err(|_| FfiError::CallFailed("invalid native record layout".into()))
+    }
+
+    fn new(size: u32, alignment: u16) -> Result<Self, FfiError> {
+        let layout = Self::layout(size, alignment)?;
+        // SAFETY: layout is nonempty, and Drop uses the same allocator and layout.
+        let ptr = std::ptr::NonNull::new(unsafe { std::alloc::alloc_zeroed(layout) })
+            .ok_or_else(|| FfiError::CallFailed("native record allocation failed".into()))?;
+        Ok(Self { ptr, layout })
+    }
+
+    fn into_raw(self) -> *mut u8 {
+        std::mem::ManuallyDrop::new(self).ptr.as_ptr()
+    }
+
+    /// # Safety
+    /// The pointer must come from into_raw for the same layout, exactly once.
+    pub(crate) unsafe fn take(
+        ptr: std::ptr::NonNull<u8>,
+        size: u32,
+        align: u16,
+    ) -> Result<Self, FfiError> {
+        Ok(Self {
+            ptr,
+            layout: Self::layout(size, align)?,
+        })
+    }
+}
+
+impl std::ops::Deref for NativeRecord {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        // SAFETY: the allocation is initialized and live while self is borrowed.
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.layout.size()) }
+    }
+}
+
+impl std::ops::DerefMut for NativeRecord {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        // SAFETY: the allocation is uniquely borrowed for the slice lifetime.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.layout.size()) }
+    }
+}
+
+impl Drop for NativeRecord {
+    fn drop(&mut self) {
+        // SAFETY: ptr and layout are paired by new or the take contract.
+        unsafe { std::alloc::dealloc(self.ptr.as_ptr(), self.layout) };
+    }
+}
+
 /// Holds a dynamically created libffi struct type.
 ///
 /// This struct keeps the ffi_type and its element array alive for the lifetime
@@ -249,6 +318,15 @@ impl FfiRuntime {
         module: &VbcModule,
         layout_idx: u16,
     ) -> Result<*mut ffi_type, FfiError> {
+        self.struct_ffi_type(module, layout_idx, &mut Vec::new())
+    }
+
+    fn struct_ffi_type(
+        &mut self,
+        module: &VbcModule,
+        layout_idx: u16,
+        active: &mut Vec<u16>,
+    ) -> Result<*mut ffi_type, FfiError> {
         // Check cache first
         if let Some(struct_type) = self.struct_types.get_mut(&layout_idx) {
             return Ok(struct_type.as_ffi_type_ptr());
@@ -259,16 +337,64 @@ impl FfiRuntime {
             FfiError::CallFailed(format!("FFI struct layout {} not found", layout_idx))
         })?;
 
-        // Build the field type array
-        let mut field_types: Vec<*mut ffi_type> = Vec::with_capacity(layout.fields.len());
-        for field in &layout.fields {
-            // Convert field CType to runtime type - StructValue in fields not currently supported
-            let ctype_runtime: CTypeRuntime = field.c_type.into();
-            field_types.push(ctype_to_ffi_type(ctype_runtime));
+        if active.len() >= MAX_FFI_STRUCT_NESTING as usize || active.contains(&layout_idx) {
+            return Err(FfiError::CallFailed(
+                "recursive or too deeply nested native record".into(),
+            ));
         }
+        if layout.fields.is_empty() {
+            return Err(FfiError::CallFailed("empty native by-value record".into()));
+        }
+        active.push(layout_idx);
+        let mut field_types = Vec::with_capacity(layout.fields.len());
+        for field in &layout.fields {
+            let ffi_type = match field.c_type {
+                crate::module::CType::StructValue => {
+                    let nested = field.nested_layout.ok_or_else(|| {
+                        FfiError::CallFailed("native record field has no layout".into())
+                    })?;
+                    self.struct_ffi_type(module, nested, active)?
+                }
+                crate::module::CType::StructPtr => ctype_to_ffi_type(CTypeRuntime::Ptr),
+                crate::module::CType::Void => {
+                    return Err(FfiError::CallFailed("void native record field".into()));
+                }
+                scalar => ctype_to_ffi_type(scalar.into()),
+            };
+            // SAFETY: this is a live scalar descriptor or a validated nested record.
+            if unsafe { (*ffi_type).size } != usize::from(field.size) {
+                return Err(FfiError::CallFailed(
+                    "native record field width disagrees with ABI".into(),
+                ));
+            }
+            field_types.push(ffi_type);
+        }
+        active.pop();
 
         // Create and cache the struct type
-        let struct_type = FfiStructType::new(field_types, layout.size, layout.align);
+        let mut struct_type = FfiStructType::new(field_types, layout.size, layout.align);
+        let mut offsets = vec![0usize; layout.fields.len()];
+        // SAFETY: the element array is null-terminated, its descriptors are live,
+        // and offsets has one entry per field. libffi independently computes the host ABI.
+        let status = unsafe {
+            libffi::raw::ffi_get_struct_offsets(
+                ffi_abi_FFI_DEFAULT_ABI,
+                struct_type.as_ffi_type_ptr(),
+                offsets.as_mut_ptr(),
+            )
+        };
+        if status != libffi::raw::ffi_status_FFI_OK
+            || struct_type.ffi_type.size != layout.size as usize
+            || struct_type.ffi_type.alignment != layout.align
+            || offsets
+                .iter()
+                .zip(&layout.fields)
+                .any(|(&offset, field)| offset != field.offset as usize)
+        {
+            return Err(FfiError::CallFailed(
+                "native by-value record disagrees with host ABI".into(),
+            ));
+        }
         self.struct_types.insert(layout_idx, Box::new(struct_type));
 
         // Return the pointer
@@ -353,6 +479,16 @@ impl FfiRuntime {
         // Resolve the symbol
         let ptr = self.platform.resolve_symbol(handle, name)?;
 
+        self.prepare_struct_symbol(module, ptr, return_type, arg_types)
+    }
+
+    fn prepare_struct_symbol(
+        &mut self,
+        module: &VbcModule,
+        ptr: *const (),
+        return_type: CTypeRuntime,
+        arg_types: Vec<CTypeRuntime>,
+    ) -> Result<ResolvedSymbol, FfiError> {
         // Prepare the CIF
         let mut cif = Box::new(ffi_cif::default());
 
@@ -602,16 +738,14 @@ impl FfiRuntime {
         // Handle struct-by-value returns specially
         if let CTypeRuntime::StructValue(layout_idx) = symbol.return_type {
             // Get struct size from the cached type
-            let struct_size = self
-                .struct_types
-                .get(&layout_idx)
-                .map(|st| st.size as usize)
-                .unwrap_or(0);
+            let record = self.struct_types.get(&layout_idx).ok_or_else(|| {
+                FfiError::CallFailed(format!("missing native return layout {layout_idx}"))
+            })?;
 
-            if struct_size > 0 {
+            if record.size > 0 {
                 // Allocate a buffer for the struct return value
-                let ret_buffer = Box::new([0u8; 256]); // Max struct size we support
-                let ret_ptr = Box::into_raw(ret_buffer) as *mut u8;
+                let ret_buffer = NativeRecord::new(record.size, record.alignment)?;
+                let ret_ptr = ret_buffer.into_raw();
 
                 // For struct returns, libffi writes to the address we provide
                 // We pass the buffer address as the return storage
@@ -816,7 +950,7 @@ impl FfiRuntime {
         let mut raw_args: Vec<u64> = Vec::with_capacity(args.len());
         let mut arg_ptrs: Vec<*mut std::ffi::c_void> = Vec::with_capacity(args.len());
         // Storage for struct-by-value arguments (kept alive until after the call)
-        let mut struct_arg_buffers: Vec<Box<[u8; 256]>> = Vec::new();
+        let mut struct_arg_buffers: Vec<NativeRecord> = Vec::new();
         // **B1d FFI byte-buffer marshalling (VERUM_FFI_PACK).** A Verum
         // `List<Byte>` backing is NaN-boxed 8-byte-strided `Value`s and a
         // `BYTE_SLICE` is a header+{ptr,len} view — neither is contiguous
@@ -840,28 +974,28 @@ impl FfiRuntime {
                 // Get the struct layout
                 if let Some(layout) = module.ffi_layouts.get(*layout_idx as usize) {
                     // Allocate a buffer for the C struct
-                    let mut struct_buffer = Box::new([0u8; 256]);
+                    let mut struct_buffer = NativeRecord::new(layout.size, layout.align)?;
 
                     // The Verum value should be a pointer to a heap object
                     let obj_ptr = record_argument(*arg, false)?;
-                    if !obj_ptr.is_null() {
-                        // Use helper function to marshal Verum struct to C buffer
-                        unsafe {
-                            marshal_verum_struct_to_c(
-                                layout,
-                                &module.ffi_layouts,
-                                obj_ptr,
-                                &mut struct_buffer,
-                            )
-                        };
-                    }
+                    // SAFETY: the argument refers to a record and the buffer covers its layout.
+                    unsafe {
+                        marshal_verum_struct_to_c(
+                            layout,
+                            &module.ffi_layouts,
+                            obj_ptr,
+                            &mut struct_buffer,
+                        )
+                    };
 
                     // Track this as a struct argument (we'll set arg_ptrs[i] to point directly to the buffer later)
                     struct_arg_indices.push((raw_args.len(), struct_arg_buffers.len()));
                     struct_arg_buffers.push(struct_buffer);
                     raw_args.push(0); // placeholder - will use buffer pointer directly
                 } else {
-                    raw_args.push(0);
+                    return Err(FfiError::CallFailed(format!(
+                        "missing native argument layout {layout_idx}"
+                    )));
                 }
             } else if let CTypeRuntime::StructPtr(layout_idx) = ctype {
                 // Handle struct-pointer arguments: convert Verum heap object to C struct buffer
@@ -872,18 +1006,16 @@ impl FfiRuntime {
                         raw_args.push(0);
                         continue;
                     }
-                    let mut struct_buffer = Box::new([0u8; 256]);
-                    if !obj_ptr.is_null() {
-                        // Use helper function to marshal Verum struct to C buffer
-                        unsafe {
-                            marshal_verum_struct_to_c(
-                                layout,
-                                &module.ffi_layouts,
-                                obj_ptr,
-                                &mut struct_buffer,
-                            )
-                        };
-                    }
+                    let mut struct_buffer = NativeRecord::new(layout.size, layout.align)?;
+                    // SAFETY: the argument refers to a record and the buffer covers its layout.
+                    unsafe {
+                        marshal_verum_struct_to_c(
+                            layout,
+                            &module.ffi_layouts,
+                            obj_ptr,
+                            &mut struct_buffer,
+                        )
+                    };
 
                     // Track for write-back: (layout_idx, obj_ptr, buffer_idx)
                     // We write back for ALL struct pointer args since we don't know mutability at runtime
@@ -896,7 +1028,9 @@ impl FfiRuntime {
                     struct_arg_buffers.push(struct_buffer);
                     raw_args.push(buffer_ptr);
                 } else {
-                    raw_args.push(0);
+                    return Err(FfiError::CallFailed(format!(
+                        "missing native argument layout {layout_idx}"
+                    )));
                 }
             } else {
                 // For pointer types that are mutable, use the SOURCE register for write-back
@@ -971,16 +1105,14 @@ impl FfiRuntime {
         // Handle struct-by-value returns specially
         if let CTypeRuntime::StructValue(layout_idx) = return_type {
             // Get struct size from the cached type
-            let struct_size = self
-                .struct_types
-                .get(&layout_idx)
-                .map(|st| st.size as usize)
-                .unwrap_or(0);
+            let record = self.struct_types.get(&layout_idx).ok_or_else(|| {
+                FfiError::CallFailed(format!("missing native return layout {layout_idx}"))
+            })?;
 
-            if struct_size > 0 {
+            if record.size > 0 {
                 // Allocate a buffer for the struct return value
-                let ret_buffer = Box::new([0u8; 256]); // Max struct size we support
-                let ret_ptr = Box::into_raw(ret_buffer) as *mut u8;
+                let ret_buffer = NativeRecord::new(record.size, record.alignment)?;
+                let ret_ptr = ret_buffer.into_raw();
 
                 // For struct returns, libffi writes to the address we provide
                 unsafe {
@@ -1018,12 +1150,7 @@ impl FfiRuntime {
                 let struct_buffer = &struct_arg_buffers[*buffer_idx];
                 // Use helper function to marshal C buffer back to Verum struct
                 unsafe {
-                    marshal_c_to_verum_struct(
-                        layout,
-                        &module.ffi_layouts,
-                        struct_buffer,
-                        *obj_ptr,
-                    )
+                    marshal_c_to_verum_struct(layout, &module.ffi_layouts, struct_buffer, *obj_ptr)
                 };
             }
         }
@@ -1048,12 +1175,8 @@ impl FfiRuntime {
                     crate::ffi::marshal::RefArgKind::Float => {
                         Value::from_f64(f64::from_bits(raw_value))
                     }
-                    crate::ffi::marshal::RefArgKind::Bool => {
-                        Value::from_bool(raw_value != 0)
-                    }
-                    crate::ffi::marshal::RefArgKind::Int => {
-                        Value::from_i64(raw_value as i64)
-                    }
+                    crate::ffi::marshal::RefArgKind::Bool => Value::from_bool(raw_value != 0),
+                    crate::ffi::marshal::RefArgKind::Int => Value::from_i64(raw_value as i64),
                 };
                 writebacks.push((reg, value));
             }
@@ -1255,104 +1378,56 @@ fn record_argument(value: Value, nullable: bool) -> Result<*mut u8, MarshalError
     Err(MarshalError::InvalidPointer)
 }
 
-/// Marshals a single field value from Verum to C format.
-///
-/// # Safety
-///
-/// The c_field_ptr must point to valid writable memory of the appropriate type.
-unsafe fn marshal_field_to_c(
-    field_value: Value,
-    c_type: crate::module::CType,
-    c_field_ptr: *mut u8,
-) {
-    // SAFETY: Caller guarantees c_field_ptr points to valid writable memory of the appropriate type.
-    unsafe {
-        match c_type {
-            crate::module::CType::I8 => {
-                *(c_field_ptr as *mut i8) = field_value.as_i64() as i8;
-            }
-            crate::module::CType::U8 | crate::module::CType::Bool => {
-                *c_field_ptr = field_value.as_i64() as u8;
-            }
-            crate::module::CType::I16 => {
-                *(c_field_ptr as *mut i16) = field_value.as_i64() as i16;
-            }
-            crate::module::CType::U16 => {
-                *(c_field_ptr as *mut u16) = field_value.as_i64() as u16;
-            }
-            crate::module::CType::I32 => {
-                *(c_field_ptr as *mut i32) = field_value.as_i64() as i32;
-            }
-            crate::module::CType::U32 => {
-                *(c_field_ptr as *mut u32) = field_value.as_i64() as u32;
-            }
-            crate::module::CType::I64 | crate::module::CType::Ssize => {
-                *(c_field_ptr as *mut i64) = field_value.as_i64();
-            }
-            crate::module::CType::U64 | crate::module::CType::Size => {
-                *(c_field_ptr as *mut u64) = field_value.as_i64() as u64;
-            }
-            crate::module::CType::F32 => {
-                *(c_field_ptr as *mut f32) = field_value.as_f64() as f32;
-            }
-            crate::module::CType::F64 => {
-                *(c_field_ptr as *mut f64) = field_value.as_f64();
-            }
-            crate::module::CType::Ptr
-            | crate::module::CType::CStr
-            | crate::module::CType::StructPtr
-            | crate::module::CType::ArrayPtr
-            | crate::module::CType::FnPtr => {
-                let address = if field_value.is_inline_int() {
-                    field_value.as_i64() as usize as *mut u8
-                } else {
-                    field_value.as_ptr::<u8>()
-                };
-                *(c_field_ptr as *mut *mut u8) = address;
-            }
-            crate::module::CType::Void | crate::module::CType::StructValue => {}
+fn write_native_scalar(ty: crate::module::CType, value: Value, bytes: &mut [u8]) {
+    use crate::module::CType::*;
+    // Target widths come from the declared C type. A malformed field size
+    // must never authorize a wider write, including inside a packed record.
+    fn store<const N: usize>(bytes: &mut [u8], value: [u8; N]) {
+        if bytes.len() == N {
+            bytes.copy_from_slice(&value);
         }
+    }
+    match ty {
+        Bool => store(bytes, [value.as_integer_compatible() as u8]),
+        I8 | U8 => store(bytes, [value.as_i64() as u8]),
+        I16 | U16 => store(bytes, (value.as_i64() as u16).to_ne_bytes()),
+        I32 | U32 => store(bytes, (value.as_i64() as u32).to_ne_bytes()),
+        I64 | U64 => store(bytes, value.as_i64().to_ne_bytes()),
+        Size | Ssize => store(bytes, (value.as_i64() as usize).to_ne_bytes()),
+        F32 => store(bytes, (value.as_f64() as f32).to_ne_bytes()),
+        F64 => store(bytes, value.as_f64().to_ne_bytes()),
+        Ptr | CStr | StructPtr | ArrayPtr | FnPtr => {
+            let address = if value.is_inline_int() {
+                value.as_i64() as usize
+            } else {
+                value.as_ptr::<u8>() as usize
+            };
+            store(bytes, address.to_ne_bytes());
+        }
+        Void | StructValue => {}
     }
 }
 
-/// Marshals a single field value from C to Verum format.
-///
-/// # Safety
-///
-/// The c_field_ptr must point to valid readable memory of the appropriate type.
-pub(crate) unsafe fn marshal_field_from_c(
-    c_type: crate::module::CType,
-    c_field_ptr: *const u8,
-) -> Option<Value> {
-    // SAFETY: Caller guarantees c_field_ptr points to valid readable memory of the appropriate type.
-    unsafe {
-        match c_type {
-            crate::module::CType::I8 => Some(Value::from_i64(*(c_field_ptr as *const i8) as i64)),
-            crate::module::CType::U8 | crate::module::CType::Bool => {
-                Some(Value::from_i64(*c_field_ptr as i64))
-            }
-            crate::module::CType::I16 => Some(Value::from_i64(*(c_field_ptr as *const i16) as i64)),
-            crate::module::CType::U16 => Some(Value::from_i64(*(c_field_ptr as *const u16) as i64)),
-            crate::module::CType::I32 => Some(Value::from_i64(*(c_field_ptr as *const i32) as i64)),
-            crate::module::CType::U32 => Some(Value::from_i64(*(c_field_ptr as *const u32) as i64)),
-            crate::module::CType::I64 | crate::module::CType::Ssize => {
-                Some(Value::from_i64(*(c_field_ptr as *const i64)))
-            }
-            crate::module::CType::U64 | crate::module::CType::Size => {
-                Some(Value::from_i64(*(c_field_ptr as *const u64) as i64))
-            }
-            crate::module::CType::F32 => Some(Value::from_f64(*(c_field_ptr as *const f32) as f64)),
-            crate::module::CType::F64 => Some(Value::from_f64(*(c_field_ptr as *const f64))),
-            crate::module::CType::Ptr
-            | crate::module::CType::CStr
-            | crate::module::CType::StructPtr
-            | crate::module::CType::ArrayPtr
-            | crate::module::CType::FnPtr => {
-                Some(Value::from_ptr(*(c_field_ptr as *const *mut u8)))
-            }
-            crate::module::CType::Void | crate::module::CType::StructValue => None,
+/// Decode a scalar without assuming that a foreign field is naturally aligned.
+pub(crate) fn read_native_scalar(ty: crate::module::CType, bytes: &[u8]) -> Option<Value> {
+    use crate::module::CType::*;
+    Some(match ty {
+        I8 => Value::from_i64(i8::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        U8 => Value::from_i64(u8::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        Bool => Value::from_bool(u8::from_ne_bytes(bytes.try_into().ok()?) != 0),
+        I16 => Value::from_i64(i16::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        U16 => Value::from_i64(u16::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        I32 => Value::from_i64(i32::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        U32 => Value::from_i64(u32::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        I64 | U64 => Value::from_i64(i64::from_ne_bytes(bytes.try_into().ok()?)),
+        Size | Ssize => Value::from_i64(isize::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        F32 => Value::from_f64(f32::from_ne_bytes(bytes.try_into().ok()?) as f64),
+        F64 => Value::from_f64(f64::from_ne_bytes(bytes.try_into().ok()?)),
+        Ptr | CStr | StructPtr | ArrayPtr | FnPtr => {
+            Value::from_ptr(usize::from_ne_bytes(bytes.try_into().ok()?) as *mut u8)
         }
-    }
+        Void | StructValue => return None,
+    })
 }
 
 /// Marshals a Verum struct (heap object) to a C struct buffer.
@@ -1365,7 +1440,7 @@ unsafe fn marshal_verum_struct_to_c(
     layout: &crate::module::FfiStructLayout,
     layouts: &[crate::module::FfiStructLayout],
     obj_ptr: *const u8,
-    struct_buffer: &mut [u8; 256],
+    struct_buffer: &mut [u8],
 ) {
     // SAFETY: Caller guarantees obj_ptr points to a valid Verum heap object
     // and struct_buffer is large enough to hold the marshalled struct.
@@ -1384,7 +1459,7 @@ unsafe fn marshal_verum_struct_to_c(
 /// `tests/red_team_bytecode_trust_boundary.rs`). A hand-written archive can
 /// point a layout at itself, and the depth cap is what keeps that a wrong
 /// answer instead of a stack overflow.
-const MAX_FFI_STRUCT_NESTING: u32 = 8;
+pub(crate) const MAX_FFI_STRUCT_NESTING: u32 = 8;
 
 /// Whether to narrate the nested-struct walk, cached so the env is read
 /// once and not per field.
@@ -1471,10 +1546,7 @@ pub unsafe fn marshal_verum_struct_to_c_at(
             let Some(off) = base_off.checked_add(field.offset as usize) else {
                 continue;
             };
-            // The buffer is a fixed 256 bytes and `field.offset` is a u32
-            // read from the module, so this bound is the only thing
-            // standing between a malformed layout and a write past the
-            // box. It was absent until T1359.
+            // Field offsets originate in the serialized ABI layout.
             if off.saturating_add(field.size as usize) > buf_len {
                 continue;
             }
@@ -1537,7 +1609,8 @@ pub unsafe fn marshal_verum_struct_to_c_at(
                 continue;
             }
 
-            marshal_field_to_c(field_value, field.c_type, buf.add(off));
+            let bytes = std::slice::from_raw_parts_mut(buf.add(off), field.size as usize);
+            write_native_scalar(field.c_type, field_value, bytes);
         }
     }
 }
@@ -1551,7 +1624,7 @@ pub unsafe fn marshal_verum_struct_to_c_at(
 unsafe fn marshal_c_to_verum_struct(
     layout: &crate::module::FfiStructLayout,
     layouts: &[crate::module::FfiStructLayout],
-    struct_buffer: &[u8; 256],
+    struct_buffer: &[u8],
     obj_ptr: *mut u8,
 ) {
     // SAFETY: Caller guarantees obj_ptr points to a valid writable Verum heap object
@@ -1621,8 +1694,7 @@ pub unsafe fn marshal_c_to_verum_struct_at(
 
             let value_ptr = obj_ptr
                 .add(crate::interpreter::OBJECT_HEADER_SIZE)
-                .add(slot * std::mem::size_of::<Value>())
-                as *mut Value;
+                .add(slot * std::mem::size_of::<Value>()) as *mut Value;
 
             // The nested record already exists as a heap object — the
             // caller built it before the call — so write THROUGH the slot's
@@ -1664,7 +1736,8 @@ pub unsafe fn marshal_c_to_verum_struct_at(
                 continue;
             }
 
-            if let Some(field_value) = marshal_field_from_c(field.c_type, buf.add(off)) {
+            let bytes = std::slice::from_raw_parts(buf.add(off), field.size as usize);
+            if let Some(field_value) = read_native_scalar(field.c_type, bytes) {
                 *value_ptr = field_value;
             }
         }
@@ -1730,6 +1803,124 @@ fn ctype_to_ffi_type(ctype: CTypeRuntime) -> *mut ffi_type {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_large_nested_return_uses_the_declared_layout_and_literal_null() {
+        use crate::module::{CType, FfiSignature, FfiStructField, FfiStructLayout, FfiSymbol};
+        use crate::types::StringId;
+        #[repr(C)]
+        struct Pair(u64, u64);
+        #[repr(C)]
+        struct Report {
+            header: Pair,
+            words: [u64; 40],
+        }
+        extern "C" fn report(probe: *const Pair) -> Report {
+            let mut words = [0; 40];
+            words[39] = 73;
+            Report {
+                header: Pair(17, probe.is_null() as u64),
+                words,
+            }
+        }
+        fn field(
+            slot: u32,
+            ty: CType,
+            offset: u32,
+            size: u16,
+            nested_layout: Option<u16>,
+        ) -> FfiStructField {
+            FfiStructField {
+                name: StringId(slot + 93),
+                c_type: ty,
+                offset,
+                size,
+                align: 8,
+                nested_layout,
+            }
+        }
+        let mut module = VbcModule::new("foreign".into());
+        let mut pair = FfiStructLayout::new(StringId(0), 16, 8);
+        pair.fields = vec![
+            field(0, CType::U64, 0, 8, None),
+            field(1, CType::U64, 8, 8, None),
+        ];
+        let size = std::mem::size_of::<Report>() as u32;
+        let mut result = FfiStructLayout::new(StringId(0), size, 8);
+        result
+            .fields
+            .push(field(0, CType::StructValue, 0, 16, Some(0)));
+        result
+            .fields
+            .extend((0..40).map(|i| field(i + 1, CType::U64, 16 + i * 8, 8, None)));
+        module.ffi_layouts = vec![pair, result];
+        let mut signature =
+            FfiSignature::new(CType::StructValue, smallvec::smallvec![CType::StructPtr]);
+        signature.return_layout_idx = Some(1);
+        signature.param_layout_indices = smallvec::smallvec![Some(0)];
+        module
+            .ffi_symbols
+            .push(FfiSymbol::new(StringId(0), signature));
+        let mut runtime = FfiRuntime::new().unwrap();
+        let resolved = runtime
+            .prepare_struct_symbol(
+                &module,
+                report as *const (),
+                CTypeRuntime::StructValue(1),
+                vec![CTypeRuntime::StructPtr(0)],
+            )
+            .unwrap();
+        runtime.symbols.insert(0, resolved);
+        let mut invalid = module.clone();
+        invalid.ffi_layouts[1].fields[1].offset += 1;
+        assert!(
+            FfiRuntime::new()
+                .unwrap()
+                .get_or_create_struct_type(&invalid, 1)
+                .is_err()
+        );
+        for null in [Value::nil(), Value::from_i64(0)] {
+            let mut value = Value::nil();
+            // SAFETY: the declared native function and both repr(C) layouts match.
+            unsafe {
+                runtime.call_module_ffi_c_with_writeback_v2(
+                    &module,
+                    FfiSymbolId(0),
+                    &[null],
+                    &HashMap::new(),
+                    &mut value,
+                )
+            }
+            .unwrap();
+            // SAFETY: the successful call transfers precisely this return allocation.
+            let returned = unsafe {
+                NativeRecord::take(std::ptr::NonNull::new(value.as_ptr()).unwrap(), size, 8)
+                    .unwrap()
+            };
+            assert_eq!(u64::from_ne_bytes(returned[0..8].try_into().unwrap()), 17);
+            assert_eq!(u64::from_ne_bytes(returned[8..16].try_into().unwrap()), 1);
+            assert_eq!(
+                u64::from_ne_bytes(
+                    returned[size as usize - 8..size as usize]
+                        .try_into()
+                        .unwrap()
+                ),
+                73
+            );
+        }
+    }
+
+    #[test]
+    fn native_record_storage_obeys_size_and_alignment_across_transfer() {
+        let mut record = NativeRecord::new(1024, 64).unwrap();
+        assert_eq!(record.as_ptr().align_offset(64), 0);
+        record[1023] = 37;
+        let ptr = std::ptr::NonNull::new(record.into_raw()).unwrap();
+        // SAFETY: reclaim the freshly transferred record with its exact layout.
+        let reclaimed = unsafe { NativeRecord::take(ptr, 1024, 64).unwrap() };
+        assert_eq!(reclaimed[1023], 37);
+        assert!(NativeRecord::new(64, 24).is_err());
+    }
 
     #[test]
     fn null_record_arguments_preserve_the_native_null_pointer() {
