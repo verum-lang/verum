@@ -331,3 +331,32 @@ async fn architecture_uses_checked_record_dependencies_for_the_current_buffer() 
         assert_eq!(diagnostics.iter().any(|d| d["severity"] == 1), dependencies.is_null());
     }
 }
+
+#[tokio::test]
+async fn receiver_diagnostic_links_to_the_projection_in_the_current_buffer() {
+    let root = tempfile::tempdir().unwrap();
+    let studio = studio(root.path());
+    let declarations = "public type Witness<A> is { public value: A };\n\
+        public type Pack is { public carrier: Type, public witness: Witness<carrier> };\n";
+    for padding in ["/* α */ ", "/* 🧮 long */ "] {
+        let projection_line = format!("    {padding}let w = x.witness;");
+        let source = format!("{declarations}fn stale(x: Pack, y: Pack) -> Pack {{\n{projection_line}\n    x = y;\n    Pack {{ carrier: x.carrier, witness: w }}\n}}");
+        let response = studio.call("language.request", json!({"path":"records.vr", "source":source})).await.unwrap();
+        let result = &response["result"];
+        let diagnostic = result["diagnostics"].as_array().unwrap().iter()
+            .find(|d| d["message"].as_str().is_some_and(|m| m.contains("cannot mutate a receiver")))
+            .unwrap_or_else(|| panic!("missing mutation diagnostic: {result}"));
+        assert_eq!(diagnostic["range"]["start"], json!({"line":4, "character":4}));
+        let related = diagnostic["relatedInformation"].as_array().unwrap();
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0]["location"]["uri"], result["uri"]);
+        let start = projection_line.split_once("x.witness").unwrap().0.encode_utf16().count();
+        assert_eq!(related[0]["location"]["range"], json!({
+            "start":{"line":3, "character":start},
+            "end":{"line":3, "character":start + "x.witness".len()},
+        }));
+    }
+    let valid = format!("{declarations}fn keep(x: &Pack) -> Pack {{ Pack {{ carrier: x.carrier, witness: x.witness }} }}");
+    let fixed = studio.call("language.request", json!({"path":"records.vr", "source":valid})).await.unwrap();
+    assert!(fixed["result"]["diagnostics"].as_array().unwrap().iter().all(|d| d["severity"] != 1), "{fixed}");
+}

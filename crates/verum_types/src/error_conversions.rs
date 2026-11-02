@@ -268,6 +268,9 @@ impl From<TypeError> for VerumError {
             TypeError::Other(msg) => VerumError::Other {
                 message: msg.clone(),
             },
+            error @ TypeError::DependentReceiverMutation { .. } => VerumError::Other {
+                message: error.to_string().into(),
+            },
             TypeError::UniverseBinding { message, span } => VerumError::Other {
                 // The unified error currently has no structured span carrier.
                 message: format!("invalid universe annotation at {span}: {message}").into(),

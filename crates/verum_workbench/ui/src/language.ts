@@ -1,7 +1,8 @@
 export type Position = { line: number; character: number };
 export type Range = { start: Position; end: Position };
 export type FormattingOptions = { tabSize: number; insertSpaces: boolean };
-export type Diagnostic = { range: Range; severity?: number; message: string; source?: string; code?: string | number };
+export type SourceLocation = { uri: string; range: Range };
+export type Diagnostic = { relatedInformation?: Array<{ location: SourceLocation; message: string }>; range: Range; severity?: number; message: string; source?: string; code?: string | number };
 export type RecordMember = { name: string; selection_range: Range; annotation: { source: string; range: Range }; depends_on: number[] | null };
 export type Declaration = { id: string; name: string; kind: string; type_display?: string | null; record_fields?: RecordMember[]; range: Range; selection_range: Range; requirements: Array<{ source: string; range: Range }>; preconditions?: Array<{ source: string; range: Range }>; postconditions?: Array<{ source: string; range: Range }> };
 export type Binding = { name: string; type_display: string; source_module?: string; definition: { uri: string; range: Range } | null };

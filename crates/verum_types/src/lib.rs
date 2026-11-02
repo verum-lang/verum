@@ -1941,6 +1941,14 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
+    /// The checker retains the first projection that made this place a type index.
+    #[error("cannot mutate a receiver used as a dependent type index (`{receiver}`)")]
+    DependentReceiverMutation {
+        receiver: Text,
+        projection: verum_ast::Span,
+        mutation: verum_ast::Span,
+    },
+
     /// E370: Strict-positivity violation (K-Pos kernel rule).
     ///
     /// The named inductive type's constructor mentions itself in a
@@ -2165,6 +2173,7 @@ impl TypeError {
             AnalysisCancelled | RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
             OtherWithCodeSpanned { span, .. } => *span,
             UniverseBinding { span, .. } => *span,
+            DependentReceiverMutation { mutation, .. } => *mutation,
             PositivityViolation { span, .. } => *span,
             UnknownVariantConstructor { span, .. } => *span,
             UnknownField { span, .. } => *span,
@@ -2177,7 +2186,8 @@ impl TypeError {
     /// item-registration phase to ensure soundness errors abort
     /// the build rather than getting masked by `tracing::debug!`.
     pub fn is_soundness_critical(&self) -> bool {
-        matches!(self, TypeError::PositivityViolation { .. } | TypeError::UniverseBinding { .. })
+        matches!(self, TypeError::PositivityViolation { .. } | TypeError::UniverseBinding { .. }
+            | TypeError::DependentReceiverMutation { .. })
     }
 
     /// Convert to diagnostic for error reporting with span information
@@ -3416,6 +3426,17 @@ impl TypeError {
                 .message("Analysis cancelled or deadline exceeded; no verdict is available")
                 .build(),
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
+
+            DependentReceiverMutation { receiver, projection, mutation } => {
+                let mut builder = DiagnosticBuilder::error().message(self.to_string());
+                if let Some(span) = convert_span(*mutation) {
+                    builder = builder.span(span);
+                }
+                if let Some(span) = convert_span(*projection) {
+                    builder = builder.secondary_span(span, format!("this field projection uses `{receiver}` as a type index"));
+                }
+                builder.build()
+            }
 
             UniverseBinding { message, span } => {
                 let mut builder = DiagnosticBuilder::error()

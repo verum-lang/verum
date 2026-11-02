@@ -1032,7 +1032,7 @@ impl Default for UniverseContext {
 #[derive(Clone, Copy, Debug)]
 enum RecordPlace {
     Mutable,
-    Projected(u64),
+    Projected { id: u64, origin: Span },
 }
 
 /// Type environment maps variables to type schemes.
@@ -1249,25 +1249,25 @@ impl TypeEnv {
 
     /// A value used as a type index must remain stable for the lifetime of
     /// any witnesses that have already escaped into the enclosing scope.
-    pub(crate) fn note_record_place_write(&mut self, name: &str) -> bool {
+    pub(crate) fn note_record_place_write(&mut self, name: &str) -> Result<(), Span> {
         let key = Text::from(name);
         let mut scope = self;
         while scope.parent.is_some() {
             if scope.bindings.contains_key(&key) {
-                if matches!(scope.record_places.get(&key), Some(RecordPlace::Projected(_))) {
-                    return false;
+                if let Some(RecordPlace::Projected { origin, .. }) = scope.record_places.get(&key) {
+                    return Err(*origin);
                 }
                 scope.record_places.insert(key, RecordPlace::Mutable);
                 break;
             }
             scope = scope.parent.as_deref_mut().expect("parent scope");
         }
-        true
+        Ok(())
     }
 
     /// Identify the nearest lexical value binding. Shadowing and rebinding
     /// receive distinct identities, even in different clones of the same scope.
-    pub(crate) fn receiver_id(&mut self, name: &str) -> Option<u64> {
+    pub(crate) fn receiver_id(&mut self, name: &str, origin: Span) -> Option<u64> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let key = Text::from(name);
@@ -1279,11 +1279,11 @@ impl TypeEnv {
                 }
                 match scope.record_places.get(&key) {
                     Some(RecordPlace::Mutable) => return None,
-                    Some(RecordPlace::Projected(id)) => return Some(*id),
+                    Some(RecordPlace::Projected { id, .. }) => return Some(*id),
                     None => {}
                 }
                 let id = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)).ok()?;
-                scope.record_places.insert(key, RecordPlace::Projected(id));
+                scope.record_places.insert(key, RecordPlace::Projected { id, origin });
                 return Some(id);
             }
             scope = scope.parent.as_deref_mut()?;

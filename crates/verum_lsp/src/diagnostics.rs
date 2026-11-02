@@ -61,24 +61,20 @@ pub fn to_lsp_diagnostic(diagnostic: &VerumDiagnostic, text: &str, uri: &Url) ->
     };
 
     // Add related information from secondary labels
-    let secondary_labels = diagnostic.secondary_labels();
-    if !secondary_labels.is_empty() {
-        let related: Vec<DiagnosticRelatedInformation> = secondary_labels
-            .iter()
-            .filter_map(|label| {
-                Some(DiagnosticRelatedInformation {
-                    location: Location {
-                        uri: uri.clone(),
-                        range: verum_span_to_range(&label.span, text),
-                    },
-                    message: label.message.to_string(),
-                })
-            })
-            .collect();
-
-        if !related.is_empty() {
-            lsp_diagnostic.related_information = Some(related);
-        }
+    // This conversion has one document's text. A different file would need
+    // its own revision to translate columns to UTF-16.
+    let related: Vec<_> = diagnostic.secondary_labels().iter()
+        .filter(|label| primary_span.is_some_and(|primary| primary.file == label.span.file))
+        .map(|label| DiagnosticRelatedInformation {
+            location: Location {
+                uri: uri.clone(),
+                range: verum_span_to_range(&label.span, text),
+            },
+            message: label.message.to_string(),
+        })
+        .collect();
+    if !related.is_empty() {
+        lsp_diagnostic.related_information = Some(related);
     }
 
     // Add code description link if we have an error code
@@ -365,7 +361,7 @@ pub struct DiagnosticUpdate {
 
 /// Check if two diagnostics are equal (for delta computation).
 fn diagnostics_equal(a: &LspDiagnostic, b: &LspDiagnostic) -> bool {
-    a.range == b.range && a.message == b.message && a.code == b.code
+    a == b
 }
 
 /// Check if two ranges overlap.

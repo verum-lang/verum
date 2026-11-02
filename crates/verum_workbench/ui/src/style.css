@@ -800,6 +800,7 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 #analysis-scope { margin-bottom: 10px; }
 .diagnostic-item { display: flex; align-items: baseline; gap: 10px; text-align: left; width: 100%; padding: 10px 0; border-top: 1px solid var(--subtle-border); }
 .diagnostic-item:hover { background: var(--hover); }
+.diagnostic-related { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 0 6px 18px; color: var(--accent-text); text-align: start; overflow-wrap: anywhere; }
 .diagnostic-message { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
 .diagnostic-marker { color: var(--warning); }
 .severity-1 { color: var(--danger); }

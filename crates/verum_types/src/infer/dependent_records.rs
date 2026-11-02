@@ -137,7 +137,7 @@ impl TypeChecker {
 
     /// A projection can escape into the type of another value. Consequently its
     /// root must remain stable even after ordinary evaluation has finished.
-    fn record_receiver(&mut self, expr: &Expr) -> Result<RecordReceiver> {
+    fn record_receiver(&mut self, expr: &Expr, origin: Span) -> Result<RecordReceiver> {
         let unstable = || {
             refusal(
                 "dependent projection requires an immutable local receiver or shared reference",
@@ -145,7 +145,7 @@ impl TypeChecker {
             )
         };
         match &expr.kind {
-            ExprKind::Paren(inner) => self.record_receiver(inner),
+            ExprKind::Paren(inner) => self.record_receiver(inner, origin),
             ExprKind::Path(path) if path.segments.len() == 1 => {
                 let name = path.last_segment_name();
                 let scheme = self.ctx.env.lookup(name).ok_or_else(unstable)?;
@@ -163,7 +163,7 @@ impl TypeChecker {
                 ) {
                     return Err(unstable());
                 }
-                let binding = self.ctx.env.receiver_id(name).ok_or_else(unstable)?;
+                let binding = self.ctx.env.receiver_id(name, origin).ok_or_else(unstable)?;
                 Ok(RecordReceiver {
                     binding,
                     fields: Default::default(),
@@ -191,7 +191,7 @@ impl TypeChecker {
                 ) {
                     return Err(unstable());
                 }
-                let mut receiver = self.record_receiver(parent)?;
+                let mut receiver = self.record_receiver(parent, origin)?;
                 receiver.fields.push(field.name.clone());
                 Ok(receiver)
             }
@@ -236,7 +236,7 @@ impl TypeChecker {
         {
             return Ok(Some(field_ty.clone()));
         }
-        let place = self.record_receiver(receiver)?;
+        let place = self.record_receiver(receiver, span)?;
         layout.projection(field, field_ty, place, span).map(Some)
     }
 
@@ -266,12 +266,13 @@ impl TypeChecker {
                 } => root = expr,
                 ExprKind::Path(path) => {
                     if let Some(verum_ast::ty::PathSegment::Name(name)) = path.segments.first()
-                        && !self.ctx.env.note_record_place_write(&name.name)
+                        && let Err(projection) = self.ctx.env.note_record_place_write(&name.name)
                     {
-                        return Err(refusal(
-                            "cannot mutate a receiver used by a dependent witness",
-                            place.span,
-                        ));
+                        return Err(TypeError::DependentReceiverMutation {
+                            receiver: name.name.clone(),
+                            projection,
+                            mutation: place.span,
+                        });
                     }
                     break;
                 }
@@ -337,7 +338,7 @@ impl TypeChecker {
                         owner: layout.owner,
                         ordinal,
                     }),
-                    receiver: Some(Box::new(self.record_receiver(receiver)?)),
+                    receiver: Some(Box::new(self.record_receiver(receiver, value.span)?)),
                     level: level.clone(),
                 });
             }

@@ -359,6 +359,12 @@ function renderAnalysis(snapshot: Analysis) {
     const entry = button('', () => showRange(diagnostic.range), 'diagnostic-item');
     entry.append(node('span', `diagnostic-marker severity-${diagnostic.severity}`, diagnostic.severity === 1 ? '●' : '◇'), node('span', 'diagnostic-message', diagnostic.message), node('span', 'muted', `${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}`));
     diagnostics.append(entry);
+    for (const related of diagnostic.relatedInformation ?? []) {
+      const link = button(related.message, () => navigateDefinition(related.location), 'diagnostic-related');
+      const position = related.location.range.start;
+      link.append(node('span', 'muted', `${position.line + 1}:${position.character + 1}`));
+      diagnostics.append(link);
+    }
   }
   if (!count) diagnostics.append(node('p', 'muted', m('No module diagnostics')));
   const structure = $('architecture-content'); structure.replaceChildren();
