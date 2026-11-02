@@ -534,3 +534,52 @@ fn probe(factory: Factory) -> Int {
     }
     assert_eq!(witnesses, vec![vec![expected]]);
 }
+
+fn bundled_sum_patterns(
+    pattern: &str,
+    local_first: bool,
+) -> verum_vbc::codegen::CodegenResult<VbcModule> {
+    let provider = producer("crypto", "module crypto; public type Algorithm is Alpha | Extra | Shared;");
+    let local = source(r#"
+        module bundle.internal_alg;
+        type Algorithm is Shared | Alpha | SiblingOnly;
+        fn local_tag(a: Algorithm) -> Int { match a { Algorithm.Shared => 7, _ => 0 } }
+    "#);
+    let consumer = source(&format!(
+        "module bundle.keys;
+         mount crypto.{{Algorithm}};
+         fn imported_tag(a: &Algorithm) -> Int {{ match a {{ Algorithm.{pattern} => 9, _ => 0 }} }}"
+    ));
+    let files = if local_first { [&local, &consumer] } else { [&consumer, &local] };
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("bundle"));
+    codegen.import_bootstrap_nominal_dependencies(&files, &[&provider])?;
+    codegen.collect_unit_declarations(&files)?;
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&files, verum_vbc::codegen::ItemFailurePolicy::Strict)?;
+    codegen.finalize_module_from_state()
+}
+
+#[test]
+fn sibling_sum_does_not_shadow_a_files_explicit_mount() {
+    use verum_vbc::{Instruction, bytecode::decode_instructions};
+    for local_first in [false, true] {
+        for (variant, expected) in [("Shared", 2), ("Extra", 1)] {
+            let module = bundled_sum_patterns(variant, local_first).unwrap();
+            let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+            let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+            for (name, tag) in [
+                ("bundle.keys.imported_tag", expected),
+                ("bundle.internal_alg.local_tag", 0),
+            ] {
+                let id = module.find_function_by_name(name).unwrap();
+                let function = module.get_function(id).unwrap();
+                let start = function.bytecode_offset as usize;
+                let end = start + function.bytecode_length as usize;
+                let ops = decode_instructions(&module.bytecode[start..end]).unwrap();
+                assert!(ops.iter().any(|op| matches!(op, Instruction::IsVar { tag: actual, .. } if *actual == tag)),
+                    "{name}: expected tag {tag}, got {ops:?}");
+            }
+        }
+    }
+    assert!(bundled_sum_patterns("SiblingOnly", true).is_err());
+}

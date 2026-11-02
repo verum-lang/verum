@@ -762,15 +762,19 @@ impl VbcCodegen {
             })
         };
         let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+        // A declaration in this file shadows its imports. A same-named type in
+        // a different file of the bootstrap unit owns only its qualified name.
+        if !name.contains('.')
+            && let Some(local) = self.type_name_to_id.get(&format!("{owner}.{name}"))
+        {
+            return Some(*local);
+        }
         if self.source_type_mounts.get(&Text::from(owner))
             .and_then(|bindings| bindings.get(&Text::from(name))) == Some(&None)
-            && !self.type_name_to_id.contains_key(&format!("{owner}.{name}"))
         {
             return None;
         }
-        if !self.local_concrete_types.contains(name)
-            && let Some(mounted) = self.mounted_type_path(name)
-        {
+        if let Some(mounted) = self.mounted_type_path(name) {
             return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")));
         }
         lookup(name)
