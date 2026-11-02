@@ -296,3 +296,51 @@ fn test_visitor_mixed_where_clause() {
     assert_eq!(visitor.postconditions, 1);
     assert_eq!(visitor.expr_count, 3); // Three expression-based predicates
 }
+
+#[test]
+fn type_predicate_visits_every_constraint_dependency_in_source_order() {
+    use verum_ast::{Type, TypeKind};
+
+    #[derive(Default)]
+    struct Names(Vec<String>);
+    impl Visitor for Names {
+        fn visit_path(&mut self, path: &Path) {
+            self.0.push(path.to_string());
+        }
+        fn visit_ident(&mut self, ident: &Ident) {
+            self.0.push(ident.name.to_string());
+        }
+    }
+
+    let span = Span::dummy();
+    let path = |name| Path::single(Ident::new(name, span));
+    let ty = |name| Type::new(TypeKind::Path(path(name)), span);
+    let bound = |kind| TypeBound { kind, span };
+    let predicate = WherePredicate {
+        span,
+        kind: WherePredicateKind::Type {
+            ty: ty("Carrier"),
+            bounds: vec![
+                bound(TypeBoundKind::Equality(ty("Required"))),
+                bound(TypeBoundKind::Protocol(path("Readable"))),
+                bound(TypeBoundKind::NegativeProtocol(path("Excluded"))),
+                bound(TypeBoundKind::GenericProtocol(ty("Container"))),
+                bound(TypeBoundKind::AssociatedTypeBound {
+                    type_path: path("Outer"),
+                    assoc_name: Ident::new("Item", span),
+                    bounds: vec![bound(TypeBoundKind::AssociatedTypeEquality {
+                        type_path: path("Inner"),
+                        assoc_name: Ident::new("Target", span),
+                        eq_type: ty("Payload"),
+                    })].into(),
+                }),
+            ].into(),
+        },
+    };
+    let mut names = Names::default();
+    names.visit_where_predicate(&predicate);
+    assert_eq!(names.0, [
+        "Carrier", "Required", "Readable", "Excluded", "Container",
+        "Outer", "Item", "Inner", "Target", "Payload",
+    ]);
+}

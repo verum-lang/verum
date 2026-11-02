@@ -63,7 +63,7 @@ use crate::ffi::FFIBoundary;
 use crate::literal::Literal;
 use crate::pattern::{Pattern, PatternKind, VariantPatternData};
 use crate::stmt::{Stmt, StmtKind};
-use crate::ty::{GenericArg, Ident, Path, Type, TypeKind, WhereClause, WherePredicate};
+use crate::ty::{GenericArg, Ident, Path, Type, TypeBound, TypeBoundKind, TypeKind, WhereClause, WherePredicate};
 use verum_common::Maybe;
 
 // ============================================================================
@@ -2113,9 +2113,9 @@ pub fn walk_where_predicate<V: Visitor>(visitor: &mut V, predicate: &WherePredic
 
     match &predicate.kind {
         // 1. Generic type constraint: where type T: Protocol
-        WherePredicateKind::Type { ty, bounds: _ } => {
+        WherePredicateKind::Type { ty, bounds } => {
             visit_child!(visitor, ty, Type);
-            // TypeBounds contain paths which are already visited as leaf nodes
+            walk_type_bounds(visitor, bounds);
         }
 
         // 2. Meta-parameter refinement: where meta N > 0
@@ -2131,6 +2131,32 @@ pub fn walk_where_predicate<V: Visitor>(visitor: &mut V, predicate: &WherePredic
         // 4. Postcondition: where ensures result >= 0
         WherePredicateKind::Ensures { postcondition } => {
             visit_child!(visitor, postcondition, Expr);
+        }
+    }
+}
+
+/// Associated bounds can contain further bounds. Keep their traversal off
+/// the call stack while sending each type through the visitor's normal hook.
+fn walk_type_bounds<V: Visitor>(visitor: &mut V, bounds: &[TypeBound]) {
+    let mut pending: smallvec::SmallVec<[_; 4]> = bounds.iter().rev().collect();
+    while let Some(bound) = pending.pop() {
+        match &bound.kind {
+            TypeBoundKind::Protocol(path) | TypeBoundKind::NegativeProtocol(path) => {
+                visitor.visit_path(path);
+            }
+            TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
+                visit_child!(visitor, ty, Type);
+            }
+            TypeBoundKind::AssociatedTypeBound { type_path, assoc_name, bounds } => {
+                visitor.visit_path(type_path);
+                visitor.visit_ident(assoc_name);
+                pending.extend(bounds.iter().rev());
+            }
+            TypeBoundKind::AssociatedTypeEquality { type_path, assoc_name, eq_type } => {
+                visitor.visit_path(type_path);
+                visitor.visit_ident(assoc_name);
+                visit_child!(visitor, eq_type, Type);
+            }
         }
     }
 }
