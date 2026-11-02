@@ -3196,7 +3196,47 @@ impl VbcCodegen {
     ///
     /// Idempotent per module: declaration passes run more than once over a
     /// module; only that module's first claim allocates/evicts.
-    fn claim_user_type_name(&mut self, module_name: &str, type_name: &str) {
+    fn claim_user_type_name(&mut self, module_name: &str, declaration: &verum_ast::TypeDecl) {
+        let type_name = declaration.name.name.as_str();
+        let qualified = crate::module::qualify_module_name(module_name, type_name);
+        let source = match verum_ast::source_signature::source_type_declaration(declaration) {
+            Ok(source) => source,
+            Err(message) => {
+                let _ = self.reject_source_declaration(message);
+                return;
+            }
+        };
+        if self.ensure_source_declaration(&qualified, source.as_ref()).is_err() {
+            return;
+        }
+        // A declaration interface may already contain this source unit's own
+        // type. Complete that exact identity only with the same validated AST;
+        // a bare name or an ABI-only import cannot establish correspondence.
+        let mut exact_count = 0usize;
+        let mut exact_id = None;
+        let mut existing_semantic = false;
+        let mut all_equal = true;
+        for existing in &self.types {
+            if self.type_declaration_identity(existing).as_deref() != Some(qualified.as_str()) {
+                continue;
+            }
+            exact_count += 1;
+            exact_id = Some(existing.id);
+            existing_semantic |= existing.source_declaration.is_some();
+            all_equal &= matches!((&existing.source_declaration, &source),
+                (Some(existing), Some(incoming)) if existing == incoming);
+        }
+        let semantic_completion = source.is_some() || existing_semantic;
+        if semantic_completion && exact_count != 0 && (exact_count != 1 || !all_equal) {
+            let _ = self.reject_source_declaration_conflict(&qualified);
+            return;
+        }
+        let complete_id = (semantic_completion && exact_count == 1).then_some(exact_id).flatten();
+        let canonical_sum_id = Self::canonical_sum_type_id(module_name, type_name);
+        if complete_id.zip(canonical_sum_id).is_some_and(|(existing, canonical)| existing != canonical) {
+            let _ = self.reject_source_declaration_conflict(&qualified);
+            return;
+        }
         if !self
             .user_claimed_type_names
             .insert((module_name.to_string(), type_name.to_string()))
@@ -3216,7 +3256,6 @@ impl VbcCodegen {
         // Intrinsic signatures and variant opcodes share these reserved IDs.
         // The first archive owner is the source-declared owner, whereas later
         // entries are bundle lookup alternatives, not declaration authority.
-        let canonical_sum_id = Self::canonical_sum_type_id(module_name, type_name);
         if let Some(id) = canonical_sum_id {
             // Source mounts may skip re-registering variant constructors that
             // are already built in. Install their qualified key in the same
@@ -3248,7 +3287,7 @@ impl VbcCodegen {
         // the archive came back field-scrambled (the vcs #143 register
         // entry). Lexical scoping: the declaring module owns its simple
         // key; the foreign layout stays reachable via its qualified key.
-        let type_id = canonical_sum_id.unwrap_or_else(|| self.alloc_user_type_id());
+        let type_id = complete_id.or(canonical_sum_id).unwrap_or_else(|| self.alloc_user_type_id());
         // The qualified entry belongs to this declaration, independently of
         // whichever sibling currently occupies the convenience bare key.
         self.type_name_to_id.insert(format!("{module_name}.{type_name}"), type_id);
@@ -8355,7 +8394,7 @@ impl VbcCodegen {
         for item in items {
             if !self.should_compile_item(item) { continue; }
             match &item.kind {
-                ItemKind::Type(declaration) => self.claim_user_type_name(owner, declaration.name.name.as_str()),
+                ItemKind::Type(declaration) => self.claim_user_type_name(owner, declaration),
                 ItemKind::Module(module) => {
                     if let Some(items) = &module.items {
                         // Match scope_to_inline_module: a file-owned child
