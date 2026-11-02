@@ -3199,8 +3199,12 @@ impl VbcCodegen {
             return;
         }
         let complete_id = (semantic_completion && exact_count == 1).then_some(exact_id).flatten();
-        let canonical_sum_id = Self::canonical_sum_type_id(module_name, type_name);
-        if complete_id.zip(canonical_sum_id).is_some_and(|(existing, canonical)| existing != canonical) {
+        let canonical_id = match &declaration.body {
+            verum_ast::decl::TypeDeclBody::Record(_) =>
+                TypeId::for_declared_record(type_name, Some(module_name)),
+            _ => Self::canonical_sum_type_id(module_name, type_name),
+        };
+        if complete_id.zip(canonical_id).is_some_and(|(existing, canonical)| existing != canonical) {
             let _ = self.reject_source_declaration_conflict(&qualified);
             return;
         }
@@ -3217,17 +3221,6 @@ impl VbcCodegen {
                 );
             }
             return;
-        }
-        // T1536: the canonical source declaration completes the built-in
-        // sum identity; it must not allocate a second ID for the same type.
-        // Intrinsic signatures and variant opcodes share these reserved IDs.
-        // The first archive owner is the source-declared owner, whereas later
-        // entries are bundle lookup alternatives, not declaration authority.
-        if let Some(id) = canonical_sum_id {
-            // Source mounts may skip re-registering variant constructors that
-            // are already built in. Install their qualified key in the same
-            // prepass that claims the simple key, before that skip.
-            self.type_name_to_id.insert(format!("{module_name}.{type_name}"), id);
         }
         // First claim by THIS module: bind the simple key to its declared id.
         // If the key was already bound (archive import or an earlier
@@ -3254,7 +3247,7 @@ impl VbcCodegen {
         // the archive came back field-scrambled (the vcs #143 register
         // entry). Lexical scoping: the declaring module owns its simple
         // key; the foreign layout stays reachable via its qualified key.
-        let type_id = complete_id.or(canonical_sum_id).unwrap_or_else(|| self.alloc_user_type_id());
+        let type_id = complete_id.or(canonical_id).unwrap_or_else(|| self.alloc_user_type_id());
         // The qualified entry belongs to this declaration, independently of
         // whichever sibling currently occupies the convenience bare key.
         self.type_name_to_id.insert(format!("{module_name}.{type_name}"), type_id);

@@ -32,6 +32,13 @@ impl StringId {
 pub struct TypeId(pub u32);
 
 impl TypeId {
+    /// Reserved runtime identity of a record declared at its canonical source path.
+    pub(crate) fn for_declared_record(name: &str, owner: Option<&str>) -> Option<Self> {
+        let carrier = verum_common::well_known_types::WellKnownType::Text;
+        (name == carrier.as_str() && owner == carrier.canonical_archive_modules().first().copied())
+            .then_some(Self::TEXT)
+    }
+
     /// Unit type `()`.
     pub const UNIT: TypeId = TypeId(0);
     /// Boolean type.
@@ -1088,12 +1095,11 @@ impl TypeDescriptor {
         declared_name: &str,
         declaring_owner: verum_common::Maybe<&str>,
     ) -> verum_common::Maybe<TypeId> {
-        use verum_common::well_known_types::WellKnownType;
-        let carrier = WellKnownType::Text;
-        (self.kind == TypeKind::Record
-            && declared_name == carrier.as_str()
-            && declaring_owner == carrier.canonical_archive_modules().first().copied())
-            .then_some(TypeId::TEXT)
+        if self.kind == TypeKind::Record {
+            TypeId::for_declared_record(declared_name, declaring_owner)
+        } else {
+            None
+        }
     }
 }
 

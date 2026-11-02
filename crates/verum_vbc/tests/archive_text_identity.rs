@@ -11,6 +11,20 @@ use verum_vbc::types::{TypeDescriptor, TypeId, TypeKind};
 const TEXT_SOURCE: &str = include_str!("../../../core/text/text.vr");
 const OWNER: &str = "core.text.text";
 
+#[test]
+fn source_claim_and_method_parent_share_the_runtime_record_identity() {
+    for owner in [OWNER, "foreign.text"] {
+        let ast = declaration_ast(owner, "");
+        let mut gen_ = VbcCodegen::with_config(CodegenConfig::new(owner));
+        gen_.collect_unit_declarations(&[&ast]).unwrap();
+        gen_.compile_unit_items(&[&ast], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+        let module = wire(&gen_.finalize_module_from_state().unwrap());
+        let record = text(&module, Some(owner));
+        assert_eq!(record.id == TypeId::TEXT, owner == OWNER);
+        method(&module, record.id, "Text.archive_marker");
+    }
+}
+
 fn wire(module: &VbcModule) -> VbcModule {
     verum_vbc::deserialize::deserialize_module(
         &verum_vbc::serialize::serialize_module(module).expect("serialize archive module"),
