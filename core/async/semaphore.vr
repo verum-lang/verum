@@ -65,7 +65,8 @@ module core.async.semaphore;
 
 mount core.collections.list.{List};
 mount core.collections.deque.{Deque};
-mount core.sync.{Shared, Mutex};
+mount core.base.memory.Shared;
+mount core.sync.mutex.Mutex;
 mount core.async.waker.{Waker};
 mount core.async.poll.{Poll};
 
@@ -95,14 +96,13 @@ implement AsyncSemaphore {
     /// valid — all acquirers wait until someone grants permits via
     /// `add_permits`.
     public fn new(permits: Int) -> AsyncSemaphore {
-        let p = if permits < 0 { 0 } else { permits };
-        AsyncSemaphore {
-            inner: Shared.new(Mutex.new(SemaphoreInner {
-                permits: p,
-                waiters: Deque.new(),
-                closed:  false,
-            })),
-        }
+        let state = SemaphoreInner {
+            permits: if permits < 0 { 0 } else { permits },
+            waiters: Deque.new(),
+            closed: false,
+        };
+        let lock: Mutex<SemaphoreInner> = Mutex.new(state);
+        AsyncSemaphore { inner: Shared.new(lock) }
     }
 
     /// Await until a permit is available; return a guard that
@@ -121,9 +121,12 @@ implement AsyncSemaphore {
     public fn try_acquire(&self) -> Maybe<SemaphorePermit> {
         let shared = self.inner.clone();
         let mut inner = (*shared).lock().unwrap_or_else(|p| p.into_inner());
-        if inner.closed || inner.permits <= 0 { return Maybe.None; }
-        inner.permits = inner.permits - 1;
-        Maybe.Some(SemaphorePermit { sem: shared.clone() })
+        if inner.closed || inner.permits <= 0 {
+            Maybe.None
+        } else {
+            inner.permits = inner.permits - 1;
+            Maybe.Some(SemaphorePermit { sem: shared.clone() })
+        }
     }
 
     /// Grant additional permits at runtime — useful for dynamic
@@ -173,14 +176,14 @@ implement AsyncSemaphore {
 // Permit guard — releases on drop
 // =============================================================================
 
-public type SemaphorePermit is {
+public type affine SemaphorePermit is {
     sem: Shared<Mutex<SemaphoreInner>>,
 };
 
 implement SemaphorePermit {
     /// Release the permit eagerly (before drop). Rarely useful —
     /// prefer letting the guard drop naturally at scope end.
-    public fn release(self) { /* drop runs below */ }
+    public fn release(self) { drop(self); }
 }
 
 // Drop hook — returns the permit to the pool and wakes one waiter.
@@ -250,16 +253,16 @@ implement Future for SemaphoreFuture {
     fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
         let mut inner = (*self.sem).lock().unwrap_or_else(|p| p.into_inner());
         if inner.closed {
-            return Poll.Ready(Result.Err(SemaphoreError.Closed));
-        }
-        if inner.permits > 0 {
+            Poll.Ready(Result.Err(SemaphoreError.Closed))
+        } else if inner.permits > 0 {
             inner.permits = inner.permits - 1;
-            return Poll.Ready(Result.Ok(SemaphorePermit { sem: self.sem.clone() }));
+            Poll.Ready(Result.Ok(SemaphorePermit { sem: self.sem.clone() }))
+        } else {
+            if !self.waker_registered {
+                inner.waiters.push_back(cx.waker().clone());
+                self.waker_registered = true;
+            }
+            Poll.Pending
         }
-        if !self.waker_registered {
-            inner.waiters.push_back(cx.waker().clone());
-            self.waker_registered = true;
-        }
-        Poll.Pending
     }
 }

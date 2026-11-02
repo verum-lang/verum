@@ -2,19 +2,9 @@
 // core-tests/async/semaphore/unit_test.vr
 // =============================================================================
 //
-// Unit tests for `core.async.semaphore` — the async-task counting
-// semaphore.  Today the constructor `AsyncSemaphore.new` panics
-// inside Mutex/AtomicBool initialisation (tracked as task #12);
-// the variant-algebra surface still tests cleanly:
-//
-//   §1 SemaphoreError variant algebra (Closed)
-//
-// All AsyncSemaphore lifecycle tests (new / try_acquire / add_permits /
-// close / available_permits) are pinned in regression_test.vr §A
-// pending task #12.
-// =============================================================================
+// Semaphore errors, permit ownership and closure.
 
-mount core.async.semaphore.{SemaphoreError};
+mount core.async.semaphore.{AsyncSemaphore, SemaphoreError};
 
 // =============================================================================
 // Section 1: SemaphoreError variant algebra
@@ -50,6 +40,26 @@ fn test_semaphore_error_closed_match_arm() {
         }
     }
     assert_eq(classify(SemaphoreError.Closed), "closed");
+}
+
+@test
+async fn acquired_permits_return_once_and_closed_acquisition_fails() {
+    let sem = AsyncSemaphore.new(1);
+    let first = sem.try_acquire().unwrap();
+    assert_eq(sem.available_permits(), 0);
+    first.release();
+    assert_eq(sem.available_permits(), 1);
+    {
+        let guard = sem.try_acquire().unwrap();
+        assert_eq(sem.available_permits(), 0);
+    }
+    assert_eq(sem.available_permits(), 1);
+    let next = sem.acquire().await.unwrap();
+    assert_eq(sem.available_permits(), 0);
+    next.release();
+    assert_eq(sem.available_permits(), 1);
+    sem.close();
+    assert(sem.acquire().await.is_err());
 }
 
 fn main() {}
