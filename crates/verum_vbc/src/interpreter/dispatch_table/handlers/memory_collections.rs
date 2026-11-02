@@ -1895,13 +1895,20 @@ pub(in super::super) fn handle_array_len(
         return Ok(DispatchResult::Continue);
     }
 
-    // Handle integer-encoded string IDs: look up in string table
-    if val.is_int() {
-        let str_id = val.as_i64() as u32;
-        if let Some(s) = state.module.get_string(crate::types::StringId(str_id)) {
-            state.set_reg(dst, Value::from_i64(s.len() as i64));
-            return Ok(DispatchResult::Continue);
-        }
+    // Legacy StringIds are unsigned 32-bit indices. An unrelated scalar
+    // must not wrap into the string table or be interpreted as an address.
+    if let Some(id) = val.try_as_i64().and_then(|i| u32::try_from(i).ok())
+        && let Some(s) = state.module.get_string(crate::types::StringId(id))
+    {
+        state.set_reg(dst, Value::from_i64(s.len() as i64));
+        return Ok(DispatchResult::Continue);
+    }
+    if !val.is_regular_ptr() {
+        return Err(InterpreterError::TypeMismatch {
+            expected: "collection or text",
+            got: "non-collection value",
+            operation: "Len",
+        });
     }
 
     let ptr = val.as_ptr::<u8>();

@@ -309,6 +309,19 @@ fn alloc_string_eq_constant_pool_text() {
 // =============================================================================
 
 #[test]
+fn len_refuses_invalid_scalars_instead_of_reading_them_as_addresses() {
+    let (module, _) = create_module(encode(&[
+        Instruction::Len { dst: Reg(1), arr: Reg(0), type_hint: 0 },
+        Instruction::Ret { value: Reg(1) },
+    ]), &[HEAP_STR]);
+    let mut interpreter = Interpreter::new(module);
+    for scalar in [Value::from_i64(-1), Value::from_i64(1_i64 << 32), Value::from_bool(true)] {
+        let error = interpreter.execute_function_with_args(FunctionId(0), &[scalar]).unwrap_err();
+        assert!(matches!(error, verum_vbc::interpreter::InterpreterError::TypeMismatch { operation: "Len", .. }));
+    }
+}
+
+#[test]
 fn len_opcode_reads_record_field() {
     let (result, _interp) = run_with_strings(
         &[
