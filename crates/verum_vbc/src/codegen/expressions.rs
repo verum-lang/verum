@@ -2060,7 +2060,7 @@ impl VbcCodegen {
                             .map(|pp| format!("{}${}", pp, name))
                             .find_map(|mangled| self.ctx.lookup_function(&mangled).cloned())
                     });
-                let func_info_opt = lexical_fnref.or(expected_prefixed_info).or_else(|| {
+                let func_info_opt = self.lexical_constant(name.as_str()).cloned().or(lexical_fnref).or(expected_prefixed_info).or_else(|| {
                     // The usual resolution answers first. Only when its
                     // answer CANNOT be the value being asked for — the
                     // parameter is declared `fn(A) -> R` and the bare
@@ -45233,7 +45233,7 @@ impl VbcCodegen {
                 }
                 let info = if name.contains('.') {
                     self.constant_integer_binding(&name, scope)
-                } else { bindings.and_then(|bindings| bindings.get(&verum_common::Text::from(name.as_str()))).cloned()
+                } else { inspect_runtime_bindings.then(|| self.lexical_constant(&name).cloned()).flatten().or_else(|| bindings.and_then(|bindings| bindings.get(&verum_common::Text::from(name.as_str()))).cloned())
                     .or_else(|| {
                         (!inspect_runtime_bindings).then(|| {
                             self.module_constant_bindings.get(&(

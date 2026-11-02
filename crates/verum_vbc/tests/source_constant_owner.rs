@@ -93,3 +93,30 @@ fn repeated_source_declaration_keeps_constant_body_identity() {
 fn repeated_method_declaration_keeps_constant_body_identity() {
     check_registered(false, "second.method", 19, true);
 }
+
+#[test]
+fn archived_socket_classifier_uses_its_target_errno_table() {
+    use verum_ast::{ItemKind, cfg::TargetConfig};
+    let source = include_str!("../../../core/io/protocols.vr");
+    let mut ast = Parser::new(source).parse_module().unwrap();
+    ast.items.retain(|item| match &item.kind {
+        ItemKind::Type(decl) => decl.name.name == "IoErrorKind",
+        ItemKind::Function(decl) => decl.name.name == "io_error_kind_from_os_code",
+        _ => false,
+    });
+    for (target, expected) in [
+        (TargetConfig::linux_x86_64(), 1), (TargetConfig::macos_aarch64(), 10),
+        (TargetConfig::windows_x86_64(), 100),
+    ] {
+        let mut unit = ast.clone();
+        let probe = Parser::new("fn classify(n:Int)->Int { match io_error_kind_from_os_code(n) { IoErrorKind.WouldBlock => 1, _ => 0 } }
+            fn probe()->Int { classify(11) + 10*classify(35) + 100*classify(10035) }").parse_module().unwrap();
+        unit.items.extend(probe.items);
+        let mut codegen = VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("core.io.protocols").with_target(target));
+        let module = codegen.compile_module(&unit).unwrap();
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        let entry = module.functions.iter().find(|f| module.get_string(f.name).is_some_and(|n| n == "probe" || n.ends_with(".probe"))).unwrap().id;
+        assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), expected);
+    }
+}

@@ -206,3 +206,47 @@ fn strict_initializer_error_cannot_be_cleared_by_retrying_finalization() {
         .expect("retry must retain failed initializer");
     assert_eq!(first.to_string(), retry.to_string());
 }
+
+#[test]
+fn lexical_constant_bodies_execute_with_their_original_scope_after_serialization() {
+    let source = "module lexical;
+        type LeftOwner is {value:Int}; type RightOwner is {value:Int};
+        const N:Int=2;
+        implement LeftOwner { fn get(&self)->Int { const N:Int=3; const VALUE:Int=N+4; VALUE } }
+        implement RightOwner { fn get(&self)->Int { const N:Int=11; const VALUE:Int=N+6; VALUE } }
+        fn nested()->Int {
+            const N:Int=19; const RECORD:LeftOwner=LeftOwner {value:N};
+            let first = { const N:Int=23; const RECORD:LeftOwner=LeftOwner {value:N}; RECORD.value };
+            first + RECORD.value
+        }
+        fn probe()->Int { LeftOwner {value:0}.get()*1000 + RightOwner {value:0}.get()*100 + nested() + N }";
+    let ast = Parser::new(source).parse_module().expect("grammar");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("lexical"));
+    codegen.collect_unit_declarations(&[&ast]).unwrap();
+    codegen.collect_unit_declarations(&[&ast]).unwrap();
+    codegen.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&codegen.finalize_module().unwrap()).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    let entry = module.functions.iter().find(|f| module.get_string(f.name) == Some("lexical.probe")).unwrap().id;
+    assert_eq!(Interpreter::new(Shared::new(module).into_arc()).execute_function(entry).unwrap().as_i64(), 8744);
+}
+
+#[test]
+fn distinct_constant_declarations_cannot_claim_the_same_slot() {
+    for source in [
+        "const N:Int=4; const N:Int=4;",
+        "fn f()->Int { const N:Int=4; const N:Int=4; N }",
+    ] {
+        let ast = Parser::new(source).parse_module().unwrap();
+        let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
+        assert!(error.to_string().contains("duplicate constant declaration"), "{error}");
+    }
+}
+
+#[test]
+fn a_constant_from_a_sibling_body_is_unbound() {
+    let ast = Parser::new("fn defined()->Int { const PRIVATE_N:Int=19; PRIVATE_N } fn unrelated()->Int { PRIVATE_N }")
+        .parse_module().unwrap();
+    let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
+    assert!(error.to_string().contains("PRIVATE_N"), "{error}");
+}

@@ -195,6 +195,7 @@ mount sys.common.{FileDesc, OSError};
 // Import I/O engine for async operations
 mount sys.io_engine.{IOInterest};
 mount core.io.{IoError, IoErrorKind};
+mount core.io.protocols.{io_error_kind_from_os_code};
 
 // Unified TCP-listen intrinsic family (#25 cascade). These dispatch
 // through the same opcode in interpreter and AOT mode — the
@@ -540,21 +541,15 @@ implement TcpStream {
         @cfg(any(target_os = "linux", target_os = "windows"))
         const EINPROGRESS: Int = 115;
 
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        const EAGAIN: Int = 11;
-
         @cfg(target_os = "macos")
         const EINPROGRESS: Int = 36;
-
-        @cfg(target_os = "macos")
-        const EAGAIN: Int = 35;
 
         match connect_result {
             Result.Ok(()) => {
                 // Connection completed immediately (rare but possible on localhost)
                 return Result.Ok(TcpStream { fd: fd, peer_addr: *addr });
             }
-            Result.Err(e) if e.code == EINPROGRESS || e.code == EAGAIN => {
+            Result.Err(e) if e.code == EINPROGRESS || io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
                 // Expected for non-blocking connect - need to wait for completion
             }
             Result.Err(e) => {
@@ -1309,13 +1304,6 @@ implement TcpListener {
         // Ensure non-blocking mode for async accept
         self.set_nonblocking(true)?;
 
-        // Platform-specific EAGAIN/EWOULDBLOCK codes
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        const EAGAIN: Int = 11;
-
-        @cfg(target_os = "macos")
-        const EAGAIN: Int = 35;
-
         loop {
             // Packed `[Byte; 128]`, not a NaN-boxed List — see `accept`
             // and `local_addr`. This is the buffer Weft's accept loop
@@ -1341,7 +1329,7 @@ implement TcpListener {
                         peer_addr
                     ));
                 }
-                Result.Err(e) if e.code == EAGAIN => {
+                Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
                     // No connection ready - wait for read readiness
                     AsyncIoReady.readable(self.fd).await;
                     // Loop and try again
@@ -1470,7 +1458,7 @@ implement<'a> Stream for AsyncIncoming<'a> {
                     Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(e))),
                 }
             }
-            Result.Err(e) if e.code == EAGAIN => {
+            Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
                 cx.waker().wake_by_ref();
                 Poll.Pending
             }

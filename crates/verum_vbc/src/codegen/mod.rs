@@ -704,6 +704,17 @@ impl ResultDemand {
     }
 }
 
+type ConstantScope = std::sync::Arc<std::collections::HashMap<String, FunctionInfo>>;
+
+struct PendingConstant {
+    name: String,
+    expr: verum_ast::Expr,
+    source_module: Option<String>,
+    info: FunctionInfo,
+    result_type: crate::types::TypeRef,
+    lexical_scopes: Vec<ConstantScope>,
+}
+
 /// AST-to-VBC code generator: owns the module under construction (string /
 /// constant / type pools, function descriptors, bytecode) plus the resolution
 /// tables — mounts, protocol registry, blanket impls — consulted while
@@ -905,20 +916,7 @@ pub struct VbcCodegen {
     /// Each unique pair logs one `warn` so stdlib-precompile CI
     /// surfaces layout drift without per-site spam.
     field_intern_fallbacks: std::collections::HashSet<(String, String)>,
-    /// **CONST-ARRAY-RETTYPE-1** — declared `TypeRef` for every
-    /// body-compiled (non-inlinable) const, keyed by
-    /// `(queued_source_module_or_empty, name)`.  `FunctionDescriptor::new`
-    /// defaults `return_type` to Unit and the primitive-only
-    /// `VarTypeKind` map cannot express composites, so a
-    /// `const SIZE_CLASSES: [Int; 73]` archived with `return_type=Unit`
-    /// left the AOT call-site register UNMARKED — `GetE` then indexed
-    /// the list OBJECT BASE (the zeroed header) instead of the backing
-    /// array, and every const-table read returned 0 under `--aot`
-    /// while `--interp` was correct (cross-tier divergence, 38
-    /// size_class failures).  Populated by
-    /// `register_constant_with_value`, consumed by
-    /// `compile_pending_constants`.
-    constant_type_refs: std::collections::HashMap<(String, String), crate::types::TypeRef>,
+
 
     /// Variant names that have collisions (multiple types define the same variant name).
     /// When a collision is detected, the simple name is removed from the registry and
@@ -1024,22 +1022,10 @@ pub struct VbcCodegen {
     /// Pending constants that need bytecode compilation.
     /// These are constants whose values couldn't be inlined (e.g., struct literals).
     /// Stored as (function_name, expression_clone) for compilation in compile_function_bodies.
-    /// Pending constants queued for body-compilation.  Each tuple is
-    /// `(name, expr, source_module_at_push_time)` — the third element
-    /// captures `current_source_module` AT THE TIME the const is
-    /// queued, so when `compile_pending_constants` eventually flushes
-    /// the queue (potentially during a later file's compile pass
-    /// inside the shared stdlib-bootstrap codegen instance), the
-    /// archive descriptor.name promotion can use the const's *own*
-    /// source-module-declared path rather than whichever file's
-    /// `compile_items_into_state` happens to be on the stack.
-    /// Without this capture, a `public const X: USize = X.bits;` from
-    /// `core/sys/bitfield.vr` (`module sys.bitfield;`) would inherit
-    /// the directory-derived umbrella module name `core.sys` from the
-    /// FIRST file's `compile_pending_constants` call that drains it,
-    /// landing as `core.sys.X` in the archive instead of the file's
-    /// own `sys.bitfield.X` — task #121 archive-side regression.
-    pending_constants: Vec<(String, verum_ast::Expr, Option<String>)>,
+    /// Deferred accessors carry the declaration selected at collection time.
+    /// Loading another file or leaving a block cannot redirect their bodies.
+    pending_constants: Vec<PendingConstant>,
+    lexical_constant_scopes: Vec<ConstantScope>,
 
     /// Constant initializers remain available after pending bodies are drained.
     /// Function identity and declaration module keep dependency evaluation
@@ -2282,7 +2268,6 @@ impl VbcCodegen {
             mount_installed_qualified_keys: std::collections::HashSet::new(),
             decl_installed_qualified_keys: std::collections::HashSet::new(),
             field_intern_fallbacks: std::collections::HashSet::new(),
-            constant_type_refs: std::collections::HashMap::new(),
             // Track variant name collisions
             variant_collisions: std::collections::HashSet::new(),
             // Bitfield type layouts for @bitfield types
@@ -2300,6 +2285,7 @@ impl VbcCodegen {
             static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
+            lexical_constant_scopes: Vec::new(),
             constant_initializers: verum_common::Map::new(),
             module_constant_bindings: verum_common::Map::new(),
             count_module_owners: Default::default(),
@@ -9642,6 +9628,7 @@ impl VbcCodegen {
         self.type_field_refinements.clear();
         // Clear pending constants
         self.pending_constants.clear();
+        self.lexical_constant_scopes.clear();
         self.constant_initializers.clear();
         self.module_constant_bindings.clear();
         self.count_module_owners = Default::default();
@@ -10211,8 +10198,8 @@ impl VbcCodegen {
                                 let qualified = format!("{}.{}", ty_name, name.name);
                                 self.register_constant_with_value(
                                     &qualified,
-                                    Some(value),
-                                    Some(ty),
+                                    value,
+                                    ty,
                                 )?;
                             }
                         }
@@ -10876,8 +10863,8 @@ impl VbcCodegen {
             ItemKind::Const(const_decl) => {
                 self.register_constant_with_value(
                     &const_decl.name.name,
-                    Some(&const_decl.value),
-                    Some(&const_decl.ty),
+                    &const_decl.value,
+                    &const_decl.ty,
                 )?;
             }
             ItemKind::Static(static_decl) => {
@@ -11062,8 +11049,8 @@ impl VbcCodegen {
                 } else {
                     self.register_constant_with_value(
                         &static_decl.name.name,
-                        Some(&static_decl.value),
-                        Some(&static_decl.ty),
+                        &static_decl.value,
+                        &static_decl.ty,
                     )?;
                     // AN IMMUTABLE STATIC HAS A DECLARED TYPE TOO (T1275).
                     //
@@ -14233,19 +14220,12 @@ impl VbcCodegen {
         // Push the parent function name onto the scope stack for name mangling
         self.nested_function_scope.push(parent_name.to_string());
 
-        match body {
-            FunctionBody::Block(block) => {
-                self.collect_nested_declarations_from_block(block)?;
-            }
-            FunctionBody::Expr(_) => {
-                // Expression bodies can't contain item declarations
-            }
-        }
-
-        // Pop the parent function name from the scope stack
+        let result = match body {
+            FunctionBody::Block(block) => self.collect_nested_declarations_from_block(block),
+            FunctionBody::Expr(_) => Ok(()),
+        };
         self.nested_function_scope.pop();
-
-        Ok(())
+        result
     }
 
     /// Collects nested declarations from a block.
@@ -14260,7 +14240,7 @@ impl VbcCodegen {
         for stmt in block.stmts.iter() {
             if let StmtKind::Item(item) = &stmt.kind {
                 // Filter items based on @cfg attributes
-                if self.should_compile_item(item) {
+                if !matches!(item.kind, ItemKind::Const(_)) && self.should_compile_item(item) {
                     // Register the nested item (this recursively collects any nested declarations)
                     self.collect_declarations(item)?;
                 }
@@ -17570,91 +17550,52 @@ impl VbcCodegen {
     fn register_constant_with_value(
         &mut self,
         name: &str,
-        value_expr: Option<&verum_ast::Expr>,
-        const_type: Option<&verum_ast::ty::Type>,
+        expr: &verum_ast::Expr,
+        ty: &verum_ast::ty::Type,
     ) -> CodegenResult<()> {
-        // Mounts can collect a source declaration before its module is compiled.
-        // Keep one identity for that declaration: a fresh ID would leave calls
-        // using a stub while the qualified initializer retained the original ID.
-        let declared_id = if self.ctx.current_function.is_none() {
-            self.module_constant_bindings
-                .get(&(
-                    verum_common::Text::from(
-                        self.ctx.current_source_module.as_deref().unwrap_or_default(),
-                    ),
-                    verum_common::Text::from(name),
-                ))
-                .map(|info| info.id)
-        } else {
-            None
-        };
-        let id = declared_id.unwrap_or_else(|| {
-            let id = FunctionId(self.next_func_id);
-            self.next_func_id = self.next_func_id.saturating_add(1);
-            id
-        });
-
-        if let Some(expr) = value_expr {
-            let mut bindings = verum_common::Map::new();
-            for dependency in Self::constant_integer_dependencies(expr) {
-                let info = if dependency.contains(".") || self.ctx.current_function.is_none() {
-                    self.constant_integer_binding(dependency.as_str(), self.current_count_module_scope())
-                } else if let Some(scope) = &self.ctx.current_source_module {
-                    self.ctx.scoped_functions.get(&(scope.clone(), dependency.to_string())).cloned()
-                } else {
-                    self.module_constant_bindings.get(&(verum_common::Text::from(""), dependency.clone())).cloned()
-                };
-                if let Some(info) = info.filter(|info| info.is_const) {
-                    bindings.insert(dependency, info);
+        let info = self.declare_constant(name, expr, ty, None)?;
+        self.ctx.register_function(name.to_string(), info.clone());
+        let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+        if !owner.is_empty() && owner != "main" && !name.contains('.') && !name.contains("::") {
+            let qualified = format!("{owner}.{name}");
+            let alternate = qualified.replace('.', "::");
+            for key in [qualified, alternate] {
+                if self.ctx.lookup_function(&key).is_none() {
+                    self.ctx.register_function(key, info.clone());
                 }
             }
-            self.constant_initializers.insert(id, (
-                expr.clone(),
-                self.current_count_module_scope().map_or(
-                    verum_common::Maybe::None,
-                    |scope| verum_common::Maybe::Some(verum_common::Text::from(scope)),
-                ),
-                bindings,
-            ));
         }
+        let key = (self.current_count_module_scope().unwrap_or_default().into(), name.into());
+        self.scoped_count_imports.remove(&key);
+        self.declared_count_bindings.insert(key, info);
+        let var_type = self.type_kind_to_var_type(&ty.kind);
+        self.ctx.register_constant_type(name, var_type);
+        Ok(())
+    }
 
-        // Try to extract a literal integer value from the expression.
-        // If successful, register as an inlineable constant (no function call needed).
-        let intrinsic_name = value_expr
-            .and_then(Self::extract_const_literal_value)
-            .map(|v| format!("__const_val_{}", v));
-
-        // If the constant couldn't be inlined, queue it for compilation as a function.
-        // This handles struct literals like `MemProt { read: false, write: false, exec: false }`.
-        let needs_compilation = intrinsic_name.is_none() && value_expr.is_some();
-        if needs_compilation && let Some(expr) = value_expr {
-            // Capture the CURRENT source-module at queue time so the
-            // descriptor.name promotion in `compile_pending_constants`
-            // uses the const's own declared module (`sys.bitfield` for
-            // `core/sys/bitfield.vr::USIZE_BITS`) instead of whichever
-            // file's `compile_items_into_state` is on the stack when
-            // the queue is eventually drained (task #121).
-            let source_module = self.ctx.current_source_module.clone();
-            // CONST-ARRAY-RETTYPE-1: stash the declared TypeRef so the
-            // drained body's descriptor carries the composite return
-            // type ([Int; N] / List<T> / …) — see the field doc.
-            if let Some(ty) = const_type {
-                let tref = self.ast_type_to_type_ref(ty);
-                self.constant_type_refs.insert(
-                    (
-                        source_module.clone().unwrap_or_default(),
-                        name.to_string(),
-                    ),
-                    tref,
-                );
+    fn declare_constant(
+        &mut self, name: &str, expr: &verum_ast::Expr, ty: &verum_ast::ty::Type, local: Option<&str>,
+    ) -> CodegenResult<FunctionInfo> {
+        let symbol = local.unwrap_or(name);
+        let key = (self.ctx.current_source_module.as_deref().unwrap_or_default().into(), symbol.into());
+        if let Some(existing) = self.module_constant_bindings.get(&key) {
+            if self.constant_initializers.get(&existing.id).is_some_and(|(previous, _, _)| previous == expr) {
+                return Ok(existing.clone());
             }
-            self.pending_constants
-                .push((name.to_string(), expr.clone(), source_module));
+            return Err(CodegenError::with_span(error::CodegenErrorKind::InvalidLiteral(
+                format!("duplicate constant declaration `{symbol}`")), expr.span));
         }
-
-        // Extract return type name from constant type if present
-        let return_type_name = const_type.and_then(|ty| self.extract_type_name(ty));
-
+        let id = FunctionId(self.next_func_id);
+        self.next_func_id = self.next_func_id.checked_add(1)
+            .ok_or_else(|| CodegenError::internal("constant function ID space exhausted"))?;
+        let bindings = Self::constant_integer_dependencies(expr).into_iter().filter_map(|dependency| {
+            self.constant_integer_binding(&dependency, self.current_count_module_scope())
+                .filter(|info| info.is_const).map(|info| (dependency, info))
+        }).collect();
+        self.constant_initializers.insert(id, (expr.clone(),
+            self.current_count_module_scope().map(Into::into), bindings));
+        let intrinsic_name = Self::extract_const_literal_value(expr).map(|v| format!("__const_val_{v}"));
+        let return_type_name = self.extract_type_name(ty);
         let info = FunctionInfo {
             has_source_body: false,
             callable_signature: None,
@@ -17677,156 +17618,84 @@ impl VbcCodegen {
             takes_self_mut_ref: false,
             return_type_name,
             return_type_inner: None,
-            // #97 — const storage strategy.  Both inlinable and
-            // non-inlinable consts (those queued in
-            // `pending_constants` for body compilation) carry this
-            // marker so the typechecker treats them as values.
             is_const: true,
             is_transparent_wrapper: false,
             param_closure_return_type_names: Vec::new(),
         };
 
-        // Register with simple name for local access
-        self.ctx.register_function(name.to_string(), info.clone());
-
-        // Also register with qualified names for cross-module imports.
-        // Mirror `register_function`'s qualified-name strategy: register
-        // under both the dot-form (`sys.bitfield.USIZE_BITS`) and the
-        // colon-form (`sys::bitfield::USIZE_BITS`), and prefer the
-        // *source module* (from the file's `module X.Y.Z;` declaration)
-        // over `config.module_name`. The latter is fixed per-codegen-
-        // session (`"main"` for a single-file user run) but a session
-        // processes many imported stdlib modules, each with its own path
-        // — without using `current_source_module`, every imported file's
-        // consts collapse onto the session's outer module name, so
-        // `mount core.sys.bitfield.{USIZE_BITS}` cannot find
-        // `core.sys.bitfield.USIZE_BITS` at the import-resolution site
-        // (it lands under `core.USIZE_BITS` instead). The matching
-        // change in `register_function` is at line ~5996 — keep these
-        // two paths in step.
-        // Bind to an owned String so the immutable borrow of
-        // `self.ctx.current_source_module` (via `.as_deref()`) drops
-        // before the subsequent `self.ctx.register_function(...)` /
-        // `self.ctx.register_constant_type(...)` mutable-borrow calls
-        // and the later `if info.intrinsic_name.is_some()` block that
-        // reads `effective_module` again for the descriptor-name
-        // promotion.  Without the clone the borrow stays alive across
-        // the function body and rejects the mutable-borrow calls.
-        let effective_module: String = self
-            .ctx
-            .current_source_module
-            .as_deref()
-            .unwrap_or(&self.config.module_name)
-            .to_string();
-        if !effective_module.is_empty()
-            && effective_module != "main"
-            && !name.contains('.')
-            && !name.contains("::")
-        {
-            let dot_qualified = format!("{}.{}", effective_module, name);
-            let colon_qualified = effective_module.replace('.', "::") + "::" + name;
-            if self.ctx.lookup_function(&dot_qualified).is_none() {
-                self.ctx.register_function(dot_qualified, info.clone());
-            }
-            if self.ctx.lookup_function(&colon_qualified).is_none() {
-                self.ctx.register_function(colon_qualified, info.clone());
-            }
-        }
-
-        if self.ctx.current_function.is_none() {
-            // Preserve the existing registry's later-declaration selection;
-            // changing import/declaration precedence globally is separate.
-            self.scoped_count_imports.remove(&(
-                verum_common::Text::from(self.current_count_module_scope().unwrap_or_default()),
-                verum_common::Text::from(name),
-            ));
-            self.declared_count_bindings.insert((
-                verum_common::Text::from(self.current_count_module_scope().unwrap_or_default()),
-                verum_common::Text::from(name),
-            ), info.clone());
-            self.module_constant_bindings.insert((
-                verum_common::Text::from(self.ctx.current_source_module.as_deref().unwrap_or_default()),
-                verum_common::Text::from(name),
-            ), info.clone());
-        }
-
-        // Register the constant's type for correct instruction selection.
-        // This is critical for generating float vs integer operations on constants.
-        // e.g., `const PI: Float = 3.14;` then `-PI` should use NegF, not NegI.
-        // Uses register_constant_type which persists across function compilations.
-        if let Some(ty) = const_type {
-            let var_type = self.type_kind_to_var_type(&ty.kind);
-            self.ctx.register_constant_type(name, var_type);
-        }
-
-        // #97 — Push an unconditional stub VbcFunction for inlinable
-        // consts (those with `intrinsic_name = Some("__const_val_<N>")`)
-        // so the precompile path emits them into the archive even
-        // when no internal stdlib bytecode references the const.
-        // Without this, `public const SSO_CAPACITY: Int = 23;` is
-        // registered in `ctx.functions` but never lands in
-        // `module.functions`; downstream user-side codegen then can't
-        // find SSO_CAPACITY in the archive and the typechecker
-        // surfaces `unbound variable: SSO_CAPACITY`.
-        //
-        // Non-inlinable consts go through `compile_pending_constants`
-        // which already pushes a real body to `self.functions`, so
-        // the stub is gated on `intrinsic_name.is_some()`.
-        if info.intrinsic_name.is_some() {
-            // Mirror the source-module-qualified descriptor.name
-            // promotion in `compile_function` (task #121): when the
-            // current source module is known, emit the descriptor's
-            // stored name in fully qualified form so the archive-side
-            // load path sees `sys.bitfield.USIZE_BITS` rather than
-            // a bare `USIZE_BITS` that collides with same-named consts
-            // in sibling files of the same archive entry directory.
-            let const_qualified_name = if !effective_module.is_empty()
-                && effective_module != "main"
-                && !name.contains('.')
-                && !name.contains("::")
-            {
-                format!("{}.{}", effective_module, name)
-            } else {
-                name.to_string()
-            };
-            let name_id = StringId(self.intern_string(&const_qualified_name));
+        self.module_constant_bindings.insert(key, info.clone());
+        let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+        let name = if !owner.is_empty() && owner != "main" && !symbol.contains('.') && !symbol.contains("::") {
+            format!("{owner}.{symbol}")
+        } else { symbol.to_owned() };
+        let result_type = self.ast_type_to_type_ref(ty);
+        if let Some(value) = Self::extract_const_literal_value(expr) {
+            let name_id = StringId(self.intern_string(&name));
             let mut descriptor = self.new_fn_descriptor(name_id);
-            descriptor.id = info.id;
-            // RETNAME-CARRY-1 — carry the source-level return-type name.
-            descriptor.return_type_name = info
-                .return_type_name
-                .as_ref()
-                .map(|n| StringId(self.intern_string(n)));
+            descriptor.id = id;
             descriptor.is_const = true;
-            if let Some(ref iname) = info.intrinsic_name {
-                descriptor.intrinsic_name = Some(StringId(self.intern_string(iname)));
-            }
-            // Set the const's actual return type (Int / Text / Char /
-            // …) — derived from the AST `const_type` when present.
-            // The codegen-side `type_kind_to_type_ref` mirror of the
-            // typechecker's known-type mapping is the right helper
-            // here; use a conservative `Int` fallback when the type
-            // can't be inferred.
-            if let Some(ty) = const_type {
-                descriptor.return_type =
-                    self.ast_type_to_type_ref(ty);
-            }
+            descriptor.return_type = result_type;
+            descriptor.return_type_name = info.return_type_name.as_ref().map(|n| StringId(self.intern_string(n)));
+            descriptor.intrinsic_name = info.intrinsic_name.as_ref().map(|n| StringId(self.intern_string(n)));
             descriptor.register_count = 1;
-            descriptor.locals_count = 0;
-            let vbc_func = crate::module::VbcFunction::new(
-                descriptor,
-                vec![Instruction::RetV],
-            );
-            self.functions.push(vbc_func);
+            let dst = Reg(0);
+            let load = match &expr.kind {
+                verum_ast::ExprKind::Literal(lit) => match &lit.kind {
+                    verum_ast::literal::LiteralKind::Bool(true) => Instruction::LoadTrue { dst },
+                    verum_ast::literal::LiteralKind::Bool(false) => Instruction::LoadFalse { dst },
+                    _ => Instruction::LoadI { dst, value },
+                },
+                _ => Instruction::LoadI { dst, value },
+            };
+            self.functions.push(VbcFunction::new(descriptor, vec![load, Instruction::Ret { value: dst }]));
+        } else {
+            self.pending_constants.push(PendingConstant {
+                name, expr: expr.clone(), source_module: self.ctx.current_source_module.clone(),
+                info: info.clone(), result_type, lexical_scopes: Vec::new(),
+            });
         }
-
-        Ok(())
+        Ok(info)
     }
 
-    /// Compiles pending constants that couldn't be inlined.
-    ///
-    /// These are constants with complex values (like struct literals) that
-    /// are compiled as zero-argument functions returning the constant value.
+    /// All declarations in a block share its scope, including forward references.
+    /// A deferred initializer keeps that exact scope after body compilation ends.
+    fn in_constant_scope<T>(&mut self, block: &Block, compile: impl FnOnce(&mut Self) -> CodegenResult<T>) -> CodegenResult<T> {
+        let mut names = std::collections::HashMap::new();
+        let pending_start = self.pending_constants.len();
+        for stmt in &block.stmts {
+            let StmtKind::Item(item) = &stmt.kind else { continue };
+            let ItemKind::Const(decl) = &item.kind else { continue };
+            if !self.should_compile_stmt(stmt) || !self.should_compile_item(item) { continue; }
+            let name = decl.name.name.as_str();
+            let parent = self.ctx.current_function.as_deref().unwrap_or("");
+            let symbol = format!("{parent}$const${}${name}", decl.name.span.start);
+            let info = self.declare_constant(name, &decl.value, &decl.ty, Some(&symbol))?;
+            if names.insert(name.to_string(), info).is_some() {
+                return Err(CodegenError::with_span(error::CodegenErrorKind::InvalidLiteral(
+                    format!("duplicate constant declaration `{name}`")), decl.name.span));
+            }
+        }
+        if names.is_empty() { return compile(self); }
+        self.lexical_constant_scopes.push(std::sync::Arc::new(names));
+        for pending in &mut self.pending_constants[pending_start..] {
+            pending.lexical_scopes.clone_from(&self.lexical_constant_scopes);
+            if let Some((expr, _, bindings)) = self.constant_initializers.get_mut(&pending.info.id) {
+                for name in Self::constant_integer_dependencies(expr) {
+                    if let Some(info) = self.lexical_constant_scopes.iter().rev().find_map(|s| s.get(name.as_str())) {
+                        bindings.insert(name, info.clone());
+                    }
+                }
+            }
+        }
+        let result = compile(self);
+        self.lexical_constant_scopes.pop();
+        result
+    }
+
+    fn lexical_constant(&self, name: &str) -> Option<&FunctionInfo> {
+        self.lexical_constant_scopes.iter().rev().find_map(|scope| scope.get(name))
+    }
+
     fn compile_pending_constants(&mut self) -> CodegenResult<()> {
         self.compile_pending_constants_with_policy(ItemFailurePolicy::Strict)
     }
@@ -17838,40 +17707,10 @@ impl VbcCodegen {
         let mut constants = std::mem::take(&mut self.pending_constants).into_iter();
         let mut first_error = None;
 
-        while let Some((name, expr, queued_source_module)) = constants.next() {
-            // Get the pre-registered function info.
-            //
-            // **Cross-module same-simple-name const disambiguation.**
-            // When two modules declare a const with the same simple name
-            // — e.g. `core.mem.allocator.SIZE_CLASSES: [Int; 11]` vs
-            // `core.mem.size_class.SIZE_CLASSES: [Int; 73]` —
-            // `register_constant_with_value` assigns each its OWN
-            // `FunctionId` and registers it under BOTH the bare simple
-            // name (first-wins) and its module-qualified name.  A bare
-            // `lookup_function(&name)` here returns the SAME first-wins
-            // entry for BOTH pending bodies, so both compiled bodies land
-            // on one `FunctionId`; `push_function_dedup` then keeps only
-            // one, and the loser's qualified archive descriptor (e.g.
-            // `core.mem.allocator.SIZE_CLASSES`) never makes it into the
-            // archive at all — so a downstream
-            // `mount core.mem.allocator.{SIZE_CLASSES}` can't resolve it
-            // and silently reads the other module's table.  Prefer the
-            // source-module-qualified entry so each module's const keeps
-            // its own id + body + qualified name.
-            let qualified_name: Option<String> = queued_source_module
-                .as_deref()
-                .filter(|m| !m.is_empty() && *m != "main")
-                .filter(|_| !name.contains('.') && !name.contains("::"))
-                .map(|m| format!("{}.{}", m, name));
-            let func_info = match qualified_name
-                .as_deref()
-                .and_then(|q| self.ctx.lookup_function(q))
-                .or_else(|| self.ctx.lookup_function(&name))
-            {
-                Some(info) => info.clone(),
-                None => continue, // Skip if not found (shouldn't happen)
-            };
-
+        while let Some(pending) = constants.next() {
+            let PendingConstant { name, expr, info: func_info, result_type, source_module: queued_source_module, lexical_scopes } = pending;
+            let previous_scope = std::mem::replace(&mut self.lexical_constant_scopes, lexical_scopes);
+            let previous_module = std::mem::replace(&mut self.ctx.current_source_module, queued_source_module.clone());
             self.ctx.begin_function(&name, &[], None);
             let compiled: CodegenResult<Option<i64>> = (|| {
                 // Preserve scalar folding for imported array counts without
@@ -17901,6 +17740,8 @@ impl VbcCodegen {
                 }
                 Ok(folded_integer)
             })();
+            let lexical_scopes = std::mem::replace(&mut self.lexical_constant_scopes, previous_scope);
+            self.ctx.current_source_module = previous_module;
             let folded_integer = match compiled {
                 Ok(value) => value,
                 Err(error) => {
@@ -17911,7 +17752,7 @@ impl VbcCodegen {
                             // failure. Keep newly queued entries after the
                             // original failed initializer and unvisited tail.
                             let added = std::mem::take(&mut self.pending_constants);
-                            self.pending_constants.push((name, expr, queued_source_module));
+                            self.pending_constants.push(PendingConstant { name, expr, source_module: queued_source_module, info: func_info, result_type, lexical_scopes });
                             self.pending_constants.extend(constants);
                             self.pending_constants.extend(added);
                             return Err(error);
@@ -17924,7 +17765,7 @@ impl VbcCodegen {
                             self.ctx.begin_function(&name, &[], None);
                             let message_id = self.intern_string(&format!(
                                 "[lenient] {} compiled to panic-stub: {}",
-                                qualified_name.as_deref().unwrap_or(&name), error,
+                                name, error,
                             ));
                             self.ctx.emit(Instruction::Panic { message_id });
                             self.ctx.emit(Instruction::RetV);
@@ -17940,45 +17781,9 @@ impl VbcCodegen {
             // End the function and collect instructions
             let (instructions, register_count) = self.ctx.end_function();
 
-            // Mirror the source-module-qualified descriptor.name
-            // promotion in `compile_function` and the inlinable-const
-            // stub above (task #121): the body-compiled-const branch
-            // also serializes a `FunctionDescriptor` into the archive,
-            // and that descriptor's `name` is what the archive-load
-            // path uses as the qualified registry key.  Without this
-            // promotion, `public const USIZE_BITS: USize = USize.bits;`
-            // (whose value is a method call so `extract_const_literal_value`
-            // returns None and the const flows through the
-            // `pending_constants` path here, not the inlinable stub
-            // above) lands in the archive as the bare name `USIZE_BITS`
-            // instead of `sys.bitfield.USIZE_BITS`.  Cross-module
-            // bare-mount qualified access (`mount core.sys.bitfield;
-            // ... bitfield.USIZE_BITS`) then can't find it in the
-            // user-side function registry.
-            //
-            // Prefer the `queued_source_module` captured at queue
-            // time — `current_source_module` reflects whichever
-            // `compile_items_into_state` call happens to be on the
-            // stack when the queue drains (the shared stdlib-bootstrap
-            // codegen instance processes multiple files in sequence;
-            // a const queued by an earlier file gets drained by a
-            // later file's flush call).
-            let const_effective_module = queued_source_module
-                .as_deref()
-                .or_else(|| self.ctx.current_source_module.as_deref())
-                .unwrap_or(&self.config.module_name);
-            let const_descriptor_name = if !const_effective_module.is_empty()
-                && const_effective_module != "main"
-                && !name.contains('.')
-                && !name.contains("::")
-            {
-                format!("{}.{}", const_effective_module, name)
-            } else {
-                name.to_string()
-            };
-            let name_id = StringId(self.intern_string(&const_descriptor_name));
+            let name_id = StringId(self.intern_string(&name));
             let mut descriptor = self.new_fn_descriptor(name_id);
-            self.trace_id_adoption(func_info.id.0, &const_descriptor_name);
+            self.trace_id_adoption(func_info.id.0, &name);
             descriptor.id = func_info.id;
             // RETNAME-CARRY-1 — carry the source-level return-type name.
             descriptor.return_type_name = func_info
@@ -17987,19 +17792,6 @@ impl VbcCodegen {
                 .map(|n| StringId(self.intern_string(n)));
             descriptor.register_count = register_count;
             descriptor.locals_count = 0;
-            // #97 — propagate the const-storage marker into the
-            // archive descriptor.  Without this, body-compiled
-            // (non-inlinable) consts — Float-valued constants like
-            // `public const NAN: Float = 0.0 / 0.0;`, struct-literal
-            // initialisers, anything that fails `extract_const_literal_value`
-            // — get archived with `is_const = false`, even though their
-            // `FunctionInfo` correctly carries `is_const = true`.
-            // The asymmetry made `register_stdlib_consts_from_metadata`
-            // skip every Float-valued const (NAN / INFINITY / NEG_INFINITY /
-            // PI / MAX / MIN / MIN_POSITIVE / EPSILON, all of
-            // `core/base/primitives.vr::implement Float`) AND every
-            // struct-literal const (MemProt's read/write/exec triples,
-            // anything carrying composite initialisers).
             descriptor.is_const = true;
             if let Some(value) = folded_integer {
                 descriptor.intrinsic_name = Some(StringId(self.intern_string(&format!(
@@ -18007,64 +17799,10 @@ impl VbcCodegen {
                 ))));
             }
 
-            // Propagate the const's TYPE into the archive descriptor.
-            // `FunctionDescriptor::new` defaults `return_type` to
-            // `TypeRef::Concrete(TypeId::UNIT)`, which the archive
-            // metadata builder serialises as the literal text "Unit".
-            // Downstream `register_stdlib_consts_from_metadata` then
-            // builds a `Type::Unit` TypeScheme — user code's
-            // `let n: Float = Float.NAN` fails unification with
-            // `expected 'Float', found 'Unit'`.  Recover the
-            // canonical type from the codegen-local
-            // `constant_types: HashMap<String, VarTypeKind>` map
-            // populated by `register_constant_type` (mod.rs:9654).
-            // Mapping VarTypeKind → TypeId is exhaustive for the
-            // primitive-typed const surface (Int / Float / Bool /
-            // Byte / Char / Text / Int32 / UInt64); composite-typed
-            // consts (Maybe<T>, struct literals, …) keep the Unit
-            // fallback because their type wasn't a simple primitive
-            // — those load through the codegen-side
-            // `func_info.return_type_name` path on the user-archive
-            // consumer side anyway.
-            use crate::codegen::context::VarTypeKind;
-            use crate::types::TypeId as VbcTypeId;
-            use crate::types::TypeRef as VbcTypeRef;
-            let var_ty_kind = self.ctx.get_constant_type(&name);
-            let tid = match var_ty_kind {
-                VarTypeKind::Int => Some(VbcTypeId::INT),
-                VarTypeKind::Float => Some(VbcTypeId::FLOAT),
-                VarTypeKind::Bool => Some(VbcTypeId::BOOL),
-                VarTypeKind::Byte => Some(VbcTypeId::U8),
-                VarTypeKind::Char => Some(VbcTypeId::CHAR),
-                VarTypeKind::Text => Some(VbcTypeId::TEXT),
-                VarTypeKind::Int32 => Some(VbcTypeId::I32),
-                VarTypeKind::UInt64 => Some(VbcTypeId::U64),
-                _ => None,
-            };
-            if let Some(tid) = tid {
-                descriptor.return_type = VbcTypeRef::Concrete(tid);
-            } else if let Some(tref) = self.constant_type_refs.get(&(
-                queued_source_module.clone().unwrap_or_default(),
-                name.to_string(),
-            )) {
-                // CONST-ARRAY-RETTYPE-1: composite-typed consts
-                // ([Int; N] / List<T> / records / …) carry their
-                // declared TypeRef instead of the Unit fallback, so
-                // the AOT call-site register classification
-                // (`mark_register_from_return_type`'s LIST / Array /
-                // MAP arms) sees the real shape and `GetE` indexes the
-                // BACKING array rather than the zeroed object header.
-                descriptor.return_type = tref.clone();
-            }
-            // Closes task #18: Float.NAN / INFINITY / PI / MAX / MIN /
-            // EPSILON etc. now land in the archive with `is_const=true`
-            // AND `return_type=Float`, so the typechecker's lazy-load
-            // path reads the correct TypeScheme.
+            descriptor.return_type = result_type;
 
-            // Create VbcFunction and add it (dedupe via push_function_dedup
-            // so blanket-impl replays don't produce same-id duplicates).
             let vbc_func = VbcFunction::new(descriptor, instructions);
-            self.push_function_dedup(vbc_func);
+            self.functions.push(vbc_func);
         }
 
         match first_error {
@@ -21884,6 +21622,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         // Function-body locals remain available to the playground's final
         // type report. Nested lexical blocks restore their outer bindings.
+        self.in_constant_scope(block, |cg| cg.compile_block_contents(block, demand))
+    }
+
+    fn compile_block_contents(&mut self, block: &Block, demand: ResultDemand) -> CodegenResult<Option<Reg>> {
         let outer_type_names = (self.ctx.registers.scope_level() > 0)
             .then(|| self.ctx.variable_type_names.clone());
         self.ctx.enter_scope();
@@ -25531,126 +25273,16 @@ impl VbcCodegen {
             self.functions.sort_by(|a, b| key_of(a).cmp(&key_of(b)));
         }
 
-        // **Duplicate-id collapse, the load-bearing dispatch fix.**
-        //
-
-        // `func_id_remap` was a HashMap<old_id → new_idx> that silently
-        // collapsed duplicate `descriptor.id` entries — the second
-        // function compiled with a given codegen-time id won the
-        // HashMap key, and `Call(old_id)` instructions emitted from
-        // ANY caller resolved to the winner. Live failure mode:
-        // pager.vr's body emits `Call(14706)` for its local
-        // `is_valid_page_size`; another module also pushes a function
-        // with `descriptor.id = 14706` (because of asymmetric
-        // `next_func_id` consumption between `register_*` and
-        // `self.functions.push`); the second function (`StreamFilter.flatten`
-        // in the live repro) wins the remap, and pager's call lands
-        // on the wrong body — surfacing as `pager_open_memory failed`
-        // for a perfectly-valid 4 KiB page once `mount base.{...}`
-        // pulls in enough modules to trigger the collision.
-        //
-
-        // The dedup keeps the LAST function for each codegen-time id,
-        // matching `register_function`'s last-wins semantics in user-
-        // mode compilation (`prefer_existing_functions = false`).
-        // Under stdlib loading (`prefer_existing = true`) registration
-        // is first-wins, but compile-time pushes still respect that
-        // because the registry only retains the first-registered info.
-        // The duplicates we collapse here are the SECOND BODY pushes
-        // — typically blanket-impl replays, generic monomorphisations,
-        // or stdlib re-loads that re-emit the same function under
-        // the same codegen-id.
-        {
-            use std::collections::HashMap;
-            let before_len = self.functions.len();
-            // Diagnostic counting is unconditional so we can ALWAYS
-            // record the dup-group count under tracing::debug; the
-            // verbose per-function listing is gated on the
-            // `VERUM_TRACE_DEDUP` env so it doesn't pollute stderr
-            // on every `verum run` invocation. The pre-fix path
-            // unconditionally `eprintln!`'d both lines, which made
-            // every script invocation emit ~30 lines of dispatch
-            // diagnostics that drown real script output.
-            let mut id_count: HashMap<u32, usize> = HashMap::new();
-            for f in &self.functions {
-                *id_count.entry(f.descriptor.id.0).or_insert(0) += 1;
-            }
-            let dups: Vec<(u32, usize)> = id_count
-                .iter()
-                .filter(|&(_, &c)| c > 1)
-                .map(|(&k, &v)| (k, v))
-                .collect();
-            if !dups.is_empty() {
-                // FN-ID-COLLISION diagnostic (defect-class analogue of the
-                // module-local TypeId collision).  Two DISTINCT functions were
-                // pushed under the same codegen-time id; the dedup below keeps
-                // only one, so every `Call(id)` from any caller silently
-                // resolves to the survivor — a wrong-dispatch (and, for a
-                // dropped GENERIC function, the reason AOT monomorphization
-                // can't find it: it was collapsed away).  Surface it at WARN by
-                // default (previously only `tracing::debug`, invisible in
-                // normal runs), list the colliding names, and fail hard under
-                // `VERUM_STRICT_FN_ID=1` so the systemic id-space issue can be
-                // driven to zero.
-                let total_dropped: usize = dups.iter().map(|&(_, c)| c - 1).sum();
-                let names_for = |id: u32| -> Vec<String> {
-                    self.functions
-                        .iter()
-                        .filter(|f| f.descriptor.id.0 == id)
-                        .filter_map(|f| {
-                            self.ctx.strings.get(f.descriptor.name.0 as usize).cloned()
-                        })
-                        .collect()
-                };
-                tracing::warn!(
-                    target: "verum_vbc::codegen::fn_id_collision",
-                    "FN-ID-COLLISION: {} codegen-id group(s) collide; {} function \
-                     body(ies) will be DROPPED by dedup — callers silently resolve \
-                     to the surviving body (wrong-dispatch; a dropped generic fn is \
-                     invisible to AOT monomorphization). Set VERUM_STRICT_FN_ID=1 to \
-                     fail the build.",
-                    dups.len(),
-                    total_dropped,
-                );
-                let show = if std::env::var("VERUM_TRACE_DEDUP").is_ok() {
-                    dups.len()
-                } else {
-                    dups.len().min(8)
-                };
-                for &(id, _) in dups.iter().take(show) {
-                    tracing::warn!(
-                        target: "verum_vbc::codegen::fn_id_collision",
-                        "  codegen-id {} collides across {:?}",
-                        id,
-                        names_for(id),
-                    );
-                }
-                if std::env::var("VERUM_STRICT_FN_ID").is_ok() {
-                    return Err(CodegenError::internal(format!(
-                        "FN-ID-COLLISION (strict): {} colliding codegen-id group(s), \
-                         {} body(ies) dropped; first: id={} across {:?}",
-                        dups.len(),
-                        total_dropped,
-                        dups[0].0,
-                        names_for(dups[0].0),
-                    )));
-                }
-            }
-            use std::collections::HashSet;
-            let mut seen: HashSet<u32> = HashSet::new();
-            // Walk in reverse so `retain`'s natural keep-first becomes
-            // keep-last after a final reverse.
-            self.functions.reverse();
-            self.functions.retain(|f| seen.insert(f.descriptor.id.0));
-            self.functions.reverse();
-            if self.functions.len() != before_len {
-                tracing::debug!(
-                    target: "verum_vbc::codegen::dedup",
-                    "collapsed {} functions ({} → {})",
-                    before_len - self.functions.len(),
-                    before_len,
-                    self.functions.len(),
-                );
+        // Calls encode only the codegen ID. Once two bodies claim it, no
+        // serialization order can preserve which body each caller selected.
+        let mut owners = std::collections::HashMap::with_capacity(self.functions.len());
+        for function in &self.functions {
+            if let Some(previous) = owners.insert(function.descriptor.id, function.descriptor.name) {
+                let name = |id: StringId| self.ctx.strings.get(id.0 as usize).map(String::as_str).unwrap_or("?");
+                return Err(CodegenError::internal(format!(
+                    "FN-ID-COLLISION: ID {} belongs to both `{}` and `{}`",
+                    function.descriptor.id.0, name(previous), name(function.descriptor.name),
+                )));
             }
         }
 

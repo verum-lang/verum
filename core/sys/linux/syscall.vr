@@ -181,14 +181,6 @@ public mount sys.linux.arch.{
     SYS_ARCH_PRCTL,
 };
 
-// Terminal ioctl constants — arch-invariant.
-public const TCGETS: Int = 0x5401;
-public const TCSETS: Int = 0x5402;
-public const TCSETSW: Int = 0x5403;
-public const TCSETSF: Int = 0x5404;
-public const TIOCGWINSZ: Int = 0x5413;
-public const TIOCSWINSZ: Int = 0x5414;
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -1313,11 +1305,6 @@ public const MSG_NOSIGNAL: Int = 0x4000;
 public const SHUT_RD: Int = 0;
 public const SHUT_WR: Int = 1;
 public const SHUT_RDWR: Int = 2;
-
-/// File control flags.
-public const F_GETFL: Int = 3;
-public const F_SETFL: Int = 4;
-public const O_NONBLOCK: Int = 0o4000;
 
 /// sockaddr_in structure for IPv4.
 @repr(C)

@@ -211,6 +211,7 @@ mount sys.common.{FileDesc};
 // Import I/O engine for async operations
 mount sys.io_engine.{IOEngine, IOInterest};
 mount core.io.{IoError, IoErrorKind};
+mount core.io.protocols.{io_error_kind_from_os_code};
 
 // =============================================================================
 // UdpSocket
@@ -887,12 +888,6 @@ implement UdpSocket {
         // Ensure non-blocking mode
         self.set_nonblocking(true)?;
 
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        const EAGAIN: Int = 11;
-
-        @cfg(target_os = "macos")
-        const EAGAIN: Int = 35;
-
         loop {
             let mut addr_buf: [Byte; 128] = [0; 128];
             let mut addr_len: UInt32 = 128;
@@ -908,7 +903,7 @@ implement UdpSocket {
                     let src_addr = deserialize_socket_addr(&addr_buf[..(addr_len as Int)])?;
                     return Result.Ok((n, src_addr));
                 }
-                Result.Err(e) if e.code == EAGAIN => {
+                Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
                     UdpIoReady.readable(self.fd).await;
                     continue;
                 }
@@ -925,12 +920,6 @@ implement UdpSocket {
     /// Yields to the executor if the send buffer is full.
     public async fn send_to_async(&self, buf: &[Byte], addr: SocketAddr) -> Result<Int, IoError> {
         self.set_nonblocking(true)?;
-
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        const EAGAIN: Int = 11;
-
-        @cfg(target_os = "macos")
-        const EAGAIN: Int = 35;
 
         // FFI-BYTE-BUFFER-STRIDE-1: pack the sockaddr in-scope (see bind).
         let addr_bytes = serialize_socket_addr(&addr);
@@ -952,7 +941,7 @@ implement UdpSocket {
 
             match result {
                 Result.Ok(n) => return Result.Ok(n),
-                Result.Err(e) if e.code == EAGAIN => {
+                Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
                     UdpIoReady.writable(self.fd).await;
                     continue;
                 }
