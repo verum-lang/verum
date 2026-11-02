@@ -489,13 +489,13 @@ impl VbcArchive {
         let data = self.get_module_data(entry_idx).ok_or_else(|| {
             VbcError::ArchiveError(format!("Module data not found: idx={}", entry_idx))
         })?;
-        let decompressed = if self.header.flags.contains(ArchiveFlags::COMPRESSED) {
-            decompress_data(data)
-                .map_err(|e| VbcError::ArchiveError(format!("Decompression error: {}", e)))?
+        if self.is_compressed() {
+            let decompressed = decompress_data(data)
+                .map_err(|e| VbcError::ArchiveError(format!("Decompression error: {}", e)))?;
+            deserialize_module(&decompressed)
         } else {
-            data.to_vec()
-        };
-        deserialize_module(&decompressed)
+            deserialize_module(data)
+        }
     }
 
     // `load_module_validated` REMOVED (T1073): superseded by
