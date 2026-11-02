@@ -907,6 +907,8 @@ const commandRegistry = new CommandRegistry([
   command('focus.editor', m('Focus editor'), 'Alt+1', () => { setPane('editor'); sourceView(); editor.view.focus(); }),
   command('focus.agent', m('Focus collaborator'), 'Alt+2', () => { setPane('agent'); $(input('agent-input').disabled ? 'agent-connect' : 'agent-input').focus(); }),
   command('focus.results', m('Focus results'), 'Alt+3', () => { setPane('results'); $( $('diagnostics-panel').hidden ? 'operations-tab' : 'diagnostics-tab').focus(); }),
+  command('editor.nextDiagnostic', m('Next diagnostic'), 'F8', editorAction(editor.actions.nextDiagnostic), ['editor'], editor.hasDiagnostics),
+  command('editor.previousDiagnostic', m('Previous diagnostic'), 'Shift+F8', editorAction(editor.actions.previousDiagnostic), ['editor'], editor.hasDiagnostics),
   command('editor.definition', m('Go to definition'), 'F12', editorAction(editor.definition), ['editor'], () => currentPath.endsWith('.vr')),
   command('editor.format', m('Format document'), 'Alt+Shift+F', editorAction(editor.format), ['editor'], () => currentPath.endsWith('.vr')),
   command('editor.find', m('Find in source'), 'Mod+F', editorAction(editor.actions.find), ['editor']),

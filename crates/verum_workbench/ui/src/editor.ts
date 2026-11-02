@@ -1,6 +1,6 @@
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, hoverTooltip } from '@codemirror/view';
-import { lintGutter, setDiagnostics } from '@codemirror/lint';
+import { diagnosticCount, lintGutter, nextDiagnostic, previousDiagnostic, setDiagnostics } from '@codemirror/lint';
 import { defaultKeymap, history, historyKeymap, undo, redo, toggleComment, isolateHistory } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches, searchPanelOpen, closeSearchPanel, openSearchPanel, gotoLine, SearchQuery, getSearchQuery, setSearchQuery } from '@codemirror/search';
 import { autocompletion, completionKeymap, snippet, startCompletion } from '@codemirror/autocomplete';
@@ -87,7 +87,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
   let verumEnabled = true;
   const syntax = new Compartment();
   // These bindings belong to Studio's editable registry, including their removal.
-  const actions = { undo, redo, find: openSearchPanel, gotoLine, comment: toggleComment, complete: startCompletion };
+  const actions = { undo, redo, find: openSearchPanel, gotoLine, comment: toggleComment, complete: startCompletion, nextDiagnostic, previousDiagnostic };
   const managed = new Set(Object.values(actions));
   const editingKeys = [...completionKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap].filter(binding => !binding.run || !managed.has(binding.run));
   async function definition() {
@@ -169,6 +169,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
     definition,
     format,
     actions: Object.fromEntries(Object.entries(actions).map(([id, action]) => [id, () => { view.focus(); return action(view); }])) as Record<keyof typeof actions, () => boolean>,
+    hasDiagnostics: () => diagnosticCount(view.state) > 0,
     diagnostics(source: string, diagnostics: Diagnostic[]) {
       if (view.state.doc.toString() !== source) return;
       view.dispatch(setDiagnostics(view.state, diagnostics.flatMap(diagnostic => {

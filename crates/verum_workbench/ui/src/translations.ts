@@ -456,6 +456,8 @@ export const translations = {
   'replace': 'заменить',
   'replace all': 'заменить все',
   'close': 'закрыть',
+  'Next diagnostic': 'Следующая диагностика',
+  'Previous diagnostic': 'Предыдущая диагностика',
   'Go to line': 'Перейти к строке',
   'go': 'перейти',
   'Go': 'Перейти',
