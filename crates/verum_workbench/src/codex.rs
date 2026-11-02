@@ -17,30 +17,179 @@ use tokio::{
 };
 use verum_common::{List, Map, Text};
 
-type Pending = Arc<Mutex<Map<u64, oneshot::Sender<Value>>>>;
-#[derive(Default)]
+use crate::agent_tools::Role;
+
+struct PendingRequest {
+    reply: oneshot::Sender<Result<Value>>,
+    starting: Option<Role>,
+}
+type Pending = Arc<Mutex<Map<u64, PendingRequest>>>;
 pub struct Events {
-    pub next: u64,
-    pub messages: List<Value>,
-    pub requests: Map<Text, Value>,
+    connection: uuid::Uuid,
+    // Keep retired IDs until disconnect so they cannot acquire a different role.
+    roles: std::collections::HashMap<String, Option<Role>>,
+    next: u64,
+    messages: std::collections::VecDeque<Value>,
+    // Live provider wire IDs are unique within this transport. Their values are
+    // host-issued envelopes identifying the exact occurrence shown for review.
+    requests: Map<Text, Value>,
+}
+impl Default for Events {
+    fn default() -> Self {
+        Self {
+            connection: uuid::Uuid::new_v4(),
+            roles: Default::default(),
+            next: 0,
+            messages: Default::default(),
+            requests: Map::new(),
+        }
+    }
 }
 impl Events {
-    fn push(&mut self, message: Value) {
-        self.next += 1;
-        if self.messages.len() == 512 {
-            self.messages.remove(0);
-        }
-        self.messages
-            .push(json!({"seq":self.next,"message":message}));
+    pub fn connection(&self) -> uuid::Uuid {
+        self.connection
     }
-    pub fn read(&self, after: u64) -> Value {
-        let events: List<Value> = self
+
+    pub(crate) fn can_start_thread(&self) -> Result<()> {
+        ensure!(
+            self.roles.len() < 256,
+            "Conversation limit reached; restart Studio to start a new provider session"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn register_thread(&mut self, thread: &str, role: Role) -> Result<()> {
+        ensure!(
+            !thread.is_empty() && thread.len() <= 1024,
+            "Invalid provider conversation ID"
+        );
+        // An occurrence received before registration never inherits a later grant.
+        self.requests
+            .retain(|_, entry| entry["message"]["params"]["threadId"] != thread);
+        if let Some(previous) = self.roles.get_mut(thread) {
+            *previous = None;
+            bail!("Provider reused a conversation ID; its authorizations have been revoked");
+        }
+        self.can_start_thread()?;
+        self.roles.insert(thread.to_owned(), Some(role));
+        Ok(())
+    }
+
+    pub(crate) fn role(&self, thread: &str) -> Option<Role> {
+        self.roles.get(thread).copied().flatten()
+    }
+
+    fn push(&mut self, message: Value) -> Result<()> {
+        let params = &message["params"];
+        if message["method"] == "serverRequest/resolved" {
+            let key: Text = params["requestId"].to_string().into();
+            if let Some(pending) = self.requests.get(&key)
+                && (params.get("threadId").is_none()
+                    || pending["message"]["params"]["threadId"] == params["threadId"])
+            {
+                self.requests.remove(&key);
+            }
+        } else if message["method"] == "turn/completed"
+            && let (Some(thread), Some(turn)) =
+                (params["threadId"].as_str(), params["turn"]["id"].as_str())
+        {
+            self.requests.retain(|_, entry| {
+                let owner = &entry["message"]["params"];
+                owner["threadId"] != thread || owner["turnId"] != turn
+            });
+        }
+        let seq = self.next + 1;
+        let mut entry = json!({"seq":seq,"message":message});
+        if let Some(id) = message.get("id") {
+            ensure!(
+                id.is_string() || id.is_i64() || id.is_u64(),
+                "Invalid provider request ID"
+            );
+            ensure!(
+                params["threadId"]
+                    .as_str()
+                    .is_some_and(|thread| !thread.is_empty()),
+                "Unscoped provider request"
+            );
+            let key: Text = id.to_string().into();
+            ensure!(
+                self.requests.len() < 64 && !self.requests.contains_key(&key),
+                "Invalid pending provider request"
+            );
+            entry["reviewId"] = json!(uuid::Uuid::new_v4().to_string());
+            if message["method"] == "item/tool/call"
+                && let Some(role) = params["threadId"]
+                    .as_str()
+                    .and_then(|thread| self.role(thread))
+                && let Some(kind) = params["tool"]
+                    .as_str()
+                    .and_then(|tool| role.review_kind(tool))
+            {
+                entry["reviewKind"] = json!(kind);
+            }
+            self.requests.insert(key, entry.clone());
+        }
+        self.next = seq;
+        if self.messages.len() == 512 {
+            self.messages.pop_front();
+        }
+        self.messages.push_back(entry);
+        Ok(())
+    }
+
+    pub fn read(&self, after: u64, thread: Option<&str>) -> Value {
+        let gap = self
+            .messages
+            .front()
+            .and_then(|e| e["seq"].as_u64())
+            .is_some_and(|s| after.saturating_add(1) < s);
+        let visible = |e: &Value| {
+            let message = &e["message"];
+            let params = &message["params"];
+            if let Some(owner) = params["threadId"]
+                .as_str()
+                .or_else(|| params["thread"]["id"].as_str())
+            {
+                Some(owner) == thread
+            } else {
+                matches!(
+                    message["method"].as_str(),
+                    Some("account/updated" | "account/login/completed" | "studio/disconnected")
+                )
+            }
+        };
+        let events: List<_> = self
             .messages
             .iter()
-            .filter(|e| e["seq"].as_u64().unwrap_or(0) > after)
-            .cloned()
+            .filter(|e| e["seq"].as_u64().is_some_and(|seq| seq > after) && visible(e))
             .collect();
-        json!({"cursor":self.next,"events":events,"gap":self.messages.first().and_then(|e|e["seq"].as_u64()).is_some_and(|s|after+1<s)})
+        let pending: List<_> = self.requests.values().filter(|e| visible(e)).collect();
+        // A live review may outlast its position in the bounded journal.
+        let first = self
+            .messages
+            .front()
+            .and_then(|e| e["seq"].as_u64())
+            .unwrap_or(0);
+        let recovered: List<_> = pending
+            .iter()
+            .filter(|e| gap && e["seq"].as_u64().is_some_and(|seq| seq < first))
+            .collect();
+        let reviews: List<_> = pending.iter().map(|e| &e["reviewId"]).collect();
+        json!({"connectionId":self.connection.to_string(),"cursor":self.next,"events":events,"gap":gap,"pendingReviews":reviews,"recoveredReviews":recovered})
+    }
+
+    pub(crate) fn take_review(&mut self, review: &str, thread: Option<&str>) -> Result<Value> {
+        let key = self
+            .requests
+            .iter()
+            .find_map(|(key, entry)| {
+                (entry["reviewId"] == review
+                    && entry["message"]["params"]["threadId"].as_str() == thread)
+                    .then(|| key.clone())
+            })
+            .context("This review has expired or belongs to another conversation")?;
+        let mut entry = self.requests.remove(&key).context("Review has expired")?;
+        Ok(entry["message"].take())
     }
 }
 pub struct Codex {
@@ -137,38 +286,47 @@ impl Codex {
                 };
                 if message.get("method").is_none() {
                     if let Some(id) = message["id"].as_u64()
-                        && let Some(sender) = responses.lock().await.remove(&id)
+                        && let Some(request) = responses.lock().await.remove(&id)
                     {
-                        let _ = sender.send(message);
+                        // Install the role in wire order, before a following tool call
+                        // can enter the approval journal. A cancelled start grants nothing.
+                        let result = if let Some(role) = request.starting
+                            && message.get("error").is_none()
+                        {
+                            let thread = message["result"]["thread"]["id"]
+                                .as_str()
+                                .or_else(|| message["result"]["id"].as_str());
+                            match thread {
+                                Some(id) => {
+                                    let mut events = notifications.lock().await;
+                                    let registration = events.register_thread(id, role);
+                                    if request.reply.is_closed() {
+                                        if let Some(grant) = events.roles.get_mut(id) {
+                                            *grant = None;
+                                        }
+                                    }
+                                    registration.map(|_| message)
+                                }
+                                None => Err(anyhow::anyhow!(
+                                    "Provider did not return a conversation ID"
+                                )),
+                            }
+                        } else {
+                            Ok(message)
+                        };
+                        let _ = request.reply.send(result);
                     }
                 } else {
                     let mut events = notifications.lock().await;
-                    if message["method"] == "serverRequest/resolved" {
-                        events
-                            .requests
-                            .remove(&Text::from(message["params"]["requestId"].to_string()));
+                    if events.push(message).is_err() {
+                        break;
                     }
-                    if message["method"] == "turn/completed" {
-                        let turn = &message["params"]["turn"]["id"];
-                        events
-                            .requests
-                            .retain(|_, r| &r["params"]["turnId"] != turn);
-                    }
-                    if let Some(id) = message.get("id") {
-                        if events.requests.len() >= 64 {
-                            break;
-                        }
-                        events
-                            .requests
-                            .insert(id.to_string().into(), message.clone());
-                    }
-                    events.push(message);
                 }
             }
             responses.lock().await.clear();
             let mut events = notifications.lock().await;
             events.requests.clear();
-            events.push(json!({"method":"studio/disconnected","params":{"message":"Codex disconnected. Check CLI version and reconnect."}}));
+            let _ = events.push(json!({"method":"studio/disconnected","params":{"message":"Codex disconnected. Check CLI version and reconnect."}}));
         });
         let stderr_task = tokio::spawn(async move {
             // Drain without persisting provider diagnostics, which may contain account data.
@@ -197,21 +355,41 @@ impl Codex {
         writer.flush().await?;
         Ok(())
     }
+    pub(crate) async fn start_thread(&self, role: Role, params: Value) -> Result<Value> {
+        self.events.lock().await.can_start_thread()?;
+        self.request_inner("thread/start", params, Some(role)).await
+    }
+
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        self.request_inner(method, params, None).await
+    }
+
+    async fn request_inner(
+        &self,
+        method: &str,
+        params: Value,
+        starting: Option<Role>,
+    ) -> Result<Value> {
         ensure!(
             !self.reader.is_finished(),
             "Codex is disconnected; reconnect first"
         );
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (send, receive) = oneshot::channel();
-        self.pending.lock().await.insert(id, send);
+        self.pending.lock().await.insert(
+            id,
+            PendingRequest {
+                reply: send,
+                starting,
+            },
+        );
         let result = async {
             self.send(json!({"id":id,"method":method,"params":params}))
                 .await?;
             let message = tokio::time::timeout(Duration::from_secs(30), receive)
                 .await
                 .context("Codex request timed out")?
-                .context("Codex disconnected; update the CLI if app-server v2 is unavailable")?;
+                .context("Codex disconnected; update the CLI if app-server v2 is unavailable")??;
             if let Some(error) = message.get("error") {
                 bail!(
                     "Codex: {}",
@@ -238,82 +416,116 @@ fn ensure_io(valid: bool) -> std::io::Result<()> {
         Err(std::io::Error::other("Codex frame exceeds limit"))
     }
 }
-pub fn tools() -> Value {
-    let source = json!({"type":"string","description":"Complete Verum source for this revision"});
-    let permissions = json!({"type":"string","enum":["source","deny-all","allow-all"],"description":"Script permission mode: source follows CLI/frontmatter defaults; deny-all clears grants; allow-all grants all kinds. Not an OS sandbox."});
-    let timeout = json!({"type":"integer","minimum":1,"maximum":300000,"description":"Wall time budget in milliseconds; default 60000"});
-    let runtime_diagnostics = json!({"type":"boolean","description":"Capture bounded CBGR dispatch errors for this execution. Not allocation tracing or a proof of memory safety. Default false."});
-    let proof_profile = json!({"type":"string","enum":verum_source_proof::SourceProfile::ALL,"description":"Source proof scope: logical theorem (default), or closed finite function contracts with proved helper-call obligations. Neither proves native compiler correspondence."});
-    let mut tools = List::new();
-    for (name, description, properties, required) in [
-        (
-            "verum_files",
-            "Browse a project directory lazily (path defaults to the root), or search project file paths with query. Includes source and supporting files; hidden, generated and symlink paths are excluded. Search reports truncation explicitly.",
-            json!({"path":{"type":"string"},"query":{"type":"string"}}),
-            json!([]),
-        ),
-        (
-            "verum_changes",
-            "Inspect read-only Git status with separate index and working-tree states. To review a patch, supply path and side (index or worktree). Does not stage, commit, reset or change files.",
-            json!({"path":{"type":"string"},"side":{"type":"string","enum":["index","worktree"]}}),
-            json!([]),
-        ),
-        (
-            "verum_project",
-            "Inspect workspace source inventory and revision-bound analyzed documents shared with Studio. Coverage is analyzed documents only, not a whole-project build or proof.",
-            json!({}),
-            json!([]),
-        ),
-        (
-            "verum_analyze",
-            "Inspect exact source through Studio's shared LSP: versioned diagnostics, declarations and context requirements. Read analysis_scope and library_metadata for coverage; this is not a whole-project or runtime proof. Omit source to read the saved file.",
-            json!({"path":{"type":"string"},"source":source}),
-            json!(["path"]),
-        ),
-        (
-            "verum_format",
-            "Return revision-bound formatting edits from Studio's shared Verum LSP. Does not write files. Omit source to format the saved file; propose the resulting source separately for review.",
-            json!({"path":{"type":"string"},"source":source,"options":{"type":"object","properties":{"tabSize":{"type":"integer","minimum":1,"maximum":16},"insertSpaces":{"type":"boolean"}},"required":["tabSize","insertSpaces"],"additionalProperties":false}}),
-            json!(["path"]),
-        ),
-        (
-            "verum_read",
-            "Read a .vr source in the open workspace",
-            json!({"path":{"type":"string"}}),
-            json!(["path"]),
-        ),
-        (
-            "verum_propose",
-            "Propose a source replacement for human review; compare-and-swap against expected_hash",
-            json!({"path":{"type":"string"},"source":source,"expected_hash":{"type":["string","null"]}}),
-            json!(["path", "source", "expected_hash"]),
-        ),
-        (
-            "verum_plan",
-            "Inspect the exact execution contract without launching a process or writing run evidence. Run permission overrides apply only to scripts.",
-            json!({"kind":{"type":"string","enum":["run","check","proof"]},"path":{"type":"string"},"source":source,"permissions":permissions,"runtime_diagnostics":runtime_diagnostics,"timeout_ms":timeout,"declaration":{"type":"string"},"proof_profile":proof_profile}),
-            json!(["kind", "path", "source"]),
-        ),
-        (
-            "verum_run",
-            "Run exact source with Verum interpreter after user approval",
-            json!({"path":{"type":"string"},"source":source,"permissions":permissions,"runtime_diagnostics":runtime_diagnostics,"timeout_ms":timeout}),
-            json!(["path", "source"]),
-        ),
-        (
-            "verum_check",
-            "Type-check exact Verum source after user approval",
-            json!({"path":{"type":"string"},"source":source,"timeout_ms":timeout}),
-            json!(["path", "source"]),
-        ),
-        (
-            "verum_proof",
-            "Check a logical theorem or finite source function contract using the selected proof_profile; not native implementation correspondence",
-            json!({"path":{"type":"string"},"source":source,"declaration":{"type":"string"},"timeout_ms":timeout,"proof_profile":proof_profile}),
-            json!(["path", "source", "declaration"]),
-        ),
-    ] {
-        tools.push(json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}));
+/// Tool definitions sent through Codex's dynamic tool transport.
+pub use crate::agent_tools::catalog as tools;
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+
+    fn call(thread: &str, path: &str) -> Value {
+        json!({"id":7,"method":"item/tool/call","params":{
+            "threadId":thread,"turnId":"turn","tool":"verum_propose","arguments":{"path":path}
+        }})
     }
-    json!(tools)
+    fn ticket(events: &Events, thread: &str) -> String {
+        events.read(0, Some(thread))["pendingReviews"][0]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn review_authorizes_one_exact_occurrence_in_one_conversation() {
+        let mut events = Events::default();
+        events
+            .register_thread("author", crate::agent_tools::Role::Author)
+            .unwrap();
+        events.push(call("author", "first.vr")).unwrap();
+        let first = ticket(&events, "author");
+        assert!(events.take_review(&first, Some("critic")).is_err());
+        assert!(
+            events.read(0, Some("critic"))["events"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            events.read(0, None)["pendingReviews"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            events.read(0, Some("author"))["events"][0]["reviewKind"],
+            "source"
+        );
+        assert_eq!(
+            events.take_review(&first, Some("author")).unwrap()["params"]["arguments"]["path"],
+            "first.vr"
+        );
+        events.push(call("author", "second.vr")).unwrap();
+        let second = ticket(&events, "author");
+        assert_ne!(first, second);
+        assert!(events.take_review(&first, Some("author")).is_err());
+        assert!(events.push(call("critic", "replacement.vr")).is_err());
+        let mut reconnected = Events::default();
+        reconnected.push(call("author", "new-process.vr")).unwrap();
+        assert_ne!(events.connection(), reconnected.connection());
+        assert!(reconnected.take_review(&second, Some("author")).is_err());
+        assert!(events.take_review(&second, Some("author")).is_ok());
+    }
+
+    #[test]
+    fn later_registration_cannot_authorize_an_earlier_tool_call() {
+        let mut events = Events::default();
+        events.push(call("unregistered", "early.vr")).unwrap();
+        let id = ticket(&events, "unregistered");
+        events
+            .register_thread("unregistered", crate::agent_tools::Role::Author)
+            .unwrap();
+        assert!(events.take_review(&id, Some("unregistered")).is_err());
+        events.push(call("unregistered", "current.vr")).unwrap();
+        let fresh = ticket(&events, "unregistered");
+        assert_eq!(
+            events.take_review(&fresh, Some("unregistered")).unwrap()["params"]["arguments"]["path"],
+            "current.vr"
+        );
+    }
+
+    #[test]
+    fn journal_eviction_preserves_live_reviews_and_terminal_events_retire_only_the_owner() {
+        let mut events = Events::default();
+        events.push(call("author", "lib.vr")).unwrap();
+        let id = ticket(&events, "author");
+        events.push(json!({"method":"turn/completed","params":{"threadId":"critic","turn":{"id":"turn"}}})).unwrap();
+        events.push(json!({"method":"thread/started","params":{"thread":{"id":"author","preview":"private"}}})).unwrap();
+        assert_eq!(
+            events.read(0, Some("critic"))["events"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        for _ in 0..512 {
+            events
+                .push(json!({"method":"account/updated","params":{}}))
+                .unwrap();
+        }
+        let page = events.read(0, Some("author"));
+        assert_eq!(page["gap"], true);
+        assert_eq!(page["recoveredReviews"][0]["reviewId"], id);
+        assert_eq!(
+            events.read(0, Some("critic"))["recoveredReviews"],
+            json!([])
+        );
+        assert_eq!(events.read(u64::MAX, None)["events"], json!([]));
+        events.push(json!({"method":"turn/completed","params":{"threadId":"author","turn":{"id":"turn"}}})).unwrap();
+        assert!(events.take_review(&id, Some("author")).is_err());
+        assert!(
+            events
+                .push(json!({"id":9,"method":"item/tool/call","params":{"tool":"verum_read"}}))
+                .is_err()
+        );
+    }
 }

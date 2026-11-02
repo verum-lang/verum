@@ -1,4 +1,5 @@
 //! Verum Studio: one local operation service, with browser and provider adapters.
+pub mod agent_tools;
 pub mod codex;
 pub mod execution;
 pub mod jobs;
@@ -72,6 +73,126 @@ impl Studio {
     }
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         match method {
+            "agent.tools" => Ok(agent_tools::catalog()),
+            "agent.connect" => {
+                // A new connection never borrows another application's auth files.
+                let mut provider = self.agent.lock().await;
+                if provider.as_ref().is_none_or(|p| !p.connected()) {
+                    *provider = Some(Arc::new(
+                        codex::Codex::connect(&self.config.codex, &self.config.workspace).await?,
+                    ));
+                }
+                let provider = provider.as_ref().context("Codex")?;
+                let mut account = provider.request("account/read", json!({"refreshToken":false})).await?;
+                account["connectionId"] = json!(provider.events.lock().await.connection().to_string());
+                Ok(account)
+            }
+            "agent.login" => {
+                self.provider()
+                    .await?
+                    .request("account/login/start", json!({"type":"chatgpt"}))
+                    .await
+            }
+            "agent.events" => Ok(self
+                .provider()
+                .await?
+                .events
+                .lock()
+                .await
+                .read(params["after"].as_u64().unwrap_or(0), params["threadId"].as_str())),
+            "agent.request" => {
+                let method = field(&params, "method")?;
+                let mut args = params["params"].clone();
+                ensure!(args.is_object(), "Agent params must be an object");
+                ensure!(
+                    matches!(
+                        method,
+                        "thread/start"
+                            | "turn/start"
+                            | "turn/interrupt"
+                            | "model/list"
+                            | "account/read"
+                    ),
+                    "Unsupported agent operation"
+                );
+                let provider = self.provider().await?;
+                if method == "thread/start" {
+                    let role: agent_tools::Role = params.get("role").map(|value| serde_json::from_value(value.clone()))
+                        .transpose().context("Expected author or reviewer role")?.unwrap_or_default();
+                    let instructions = match role {
+                        agent_tools::Role::Author => "You are the Verum Studio research assistant. Work only in Verum. Use verum_analyze for revision-bound diagnostics, declarations and context requirements from the same language service as the editor. Read the reported analysis_scope and library_metadata identity: captured dependency declarations and available release metadata inform open-document checks; unopened dependency bodies are not whole-program verification. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
+                        agent_tools::Role::Reviewer => "Independently review Verum source and explicitly identified Studio receipts using only the available read tools. Check the source hash, analysis scope and proof outcome. Distinguish a verified theorem from implementation correspondence and a passing execution. Report reproducible findings and missing evidence. Request the relevant paths and receipt IDs from the user when needed.",
+                    };
+                    let model = args.get("model").cloned();
+                    args = json!({"cwd":self.config.workspace,"sandbox":"read-only","approvalPolicy":"untrusted",
+                        "baseInstructions":instructions,
+                        "dynamicTools":role.catalog()});
+                    if let Some(model) = model {
+                        args["model"] = model;
+                    }
+                    return provider.start_thread(role, args).await;
+                }
+                ensure!(params.get("role").is_none(), "Conversation role is fixed at creation");
+                if matches!(method, "turn/start" | "turn/interrupt") {
+                    ensure!(provider.events.lock().await.role(field(&args, "threadId")?).is_some(), "Unknown or retired conversation");
+                }
+                if method == "turn/start" {
+                    // Client controls conversation input, not sandbox or execution policy.
+                    args = json!({"threadId":args["threadId"],"input":args["input"]});
+                }
+                provider.request(method, args).await
+            }
+            "agent.respond" => self.respond(params).await,
+            _ => self.workspace_operation(method, params).await,
+        }
+    }
+    async fn respond(&self, params: Value) -> Result<Value> {
+        let provider = self.provider().await?;
+        let thread = params["threadId"].as_str();
+        let (request, role) = {
+            let mut events = provider.events.lock().await;
+            let request = events.take_review(field(&params, "reviewId")?, thread)?;
+            (request, thread.and_then(|id| events.role(id)))
+        };
+        let id = &request["id"];
+        if request["method"] != "item/tool/call" {
+            // No generic shell/permission escalation in a Verum-only research workspace.
+            provider.send(json!({"id":id,"error":{"code":-32601,"message":"Studio exposes only reviewed Verum tools"}})).await?;
+            return Ok(json!({"declined":true}));
+        }
+        let result = if params["result"]["approved"].as_bool() != Some(true) {
+            Err(anyhow::anyhow!("User declined this operation"))
+        } else if role.and_then(|role| role.review_kind(request["params"]["tool"].as_str()?)).is_none() {
+            Err(anyhow::anyhow!("This conversation is not authorized to invoke the requested tool"))
+        } else {
+            self.tool(&request["params"]).await
+        };
+        let (success, tool_result) = match result {
+            Ok(value) => (true, value),
+            Err(error) => (false, json!({"error":error.to_string()})),
+        };
+        let content = tool_result.to_string();
+        provider.send(json!({"id":id,"result":{"success":success,"contentItems":[{"type":"inputText","text":content}]}})).await?;
+        Ok(json!({"delivered":true,"success":success,"tool_result":tool_result}))
+    }
+    async fn tool(&self, params: &Value) -> Result<Value> {
+        let (method, args) = agent_tools::operation(params)?;
+        let result = self.workspace_operation(method, args).await?;
+        if method != "operation.start" {
+            return Ok(result);
+        }
+        loop {
+            let receipt = self.jobs.lock().await.read(&result["id"]).await
+                .context("Operation receipt is unavailable")?;
+            if receipt.status != "running" {
+                return Ok(serde_json::to_value(receipt)?);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn workspace_operation(&self, method: &str, params: Value) -> Result<Value> {
+        match method {
             "workspace.browse" | "workspace.search" | "workspace.changes" | "workspace.diff" => {
                 self.project_files(method, params).await
             }
@@ -118,171 +239,20 @@ impl Studio {
                 );
                 jobs.start(&params, path)
             }
+            "operation.read" => {
+                let id = &params["id"];
+                ensure!(id.is_string(), "Expected operation ID");
+                let receipt = self.jobs.lock().await.read(id).await.context("Unknown operation")?;
+                if let Some(expected) = params.get("expected_source_hash") {
+                    let expected = expected.as_str().context("Expected a SHA-256 source hash")?;
+                    ensure!(expected.len() == 64 && expected.bytes().all(|b| b.is_ascii_hexdigit()), "Invalid SHA-256 source hash");
+                    ensure!(receipt.plan.source_hash.eq_ignore_ascii_case(expected), "Receipt source hash does not match the expected source");
+                }
+                Ok(serde_json::to_value(receipt)?)
+            }
             "operation.list" => Ok(self.jobs.lock().await.changes(&params["known"]).await),
             "operation.cancel" => self.jobs.lock().await.cancel(field(&params, "id")?).await,
-            "agent.connect" => {
-                // A new connection never borrows another application's auth files.
-                let mut provider = self.agent.lock().await;
-                if provider.as_ref().is_none_or(|p| !p.connected()) {
-                    *provider = Some(Arc::new(
-                        codex::Codex::connect(&self.config.codex, &self.config.workspace).await?,
-                    ));
-                }
-                provider
-                    .as_ref()
-                    .context("Codex")?
-                    .request("account/read", json!({"refreshToken":false}))
-                    .await
-            }
-            "agent.login" => {
-                self.provider()
-                    .await?
-                    .request("account/login/start", json!({"type":"chatgpt"}))
-                    .await
-            }
-            "agent.events" => Ok(self
-                .provider()
-                .await?
-                .events
-                .lock()
-                .await
-                .read(params["after"].as_u64().unwrap_or(0))),
-            "agent.request" => {
-                let method = field(&params, "method")?;
-                let mut args = params["params"].clone();
-                ensure!(args.is_object(), "Agent params must be an object");
-                ensure!(
-                    matches!(
-                        method,
-                        "thread/start"
-                            | "turn/start"
-                            | "turn/interrupt"
-                            | "model/list"
-                            | "account/read"
-                    ),
-                    "Unsupported agent operation"
-                );
-                if method == "thread/start" {
-                    let model = args.get("model").cloned();
-                    args = json!({"cwd":self.config.workspace,"sandbox":"read-only","approvalPolicy":"untrusted",
-                        "baseInstructions":"You are the Verum Studio research assistant. Work only in Verum. Use verum_analyze for revision-bound diagnostics, declarations and context requirements from the same language service as the editor. Read the reported analysis_scope and library_metadata identity: captured dependency declarations and available release metadata inform open-document checks; unopened dependency bodies are not whole-program verification. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
-                        "dynamicTools":codex::tools()});
-                    if let Some(model) = model {
-                        args["model"] = model;
-                    }
-                } else if method == "turn/start" {
-                    // Client controls conversation input, not sandbox or execution policy.
-                    args = json!({"threadId":args["threadId"],"input":args["input"]});
-                }
-                self.provider().await?.request(method, args).await
-            }
-            "agent.respond" => self.respond(params).await,
             _ => bail!("Unknown Studio method"),
-        }
-    }
-    async fn respond(&self, params: Value) -> Result<Value> {
-        let provider = self.provider().await?;
-        let id = params.get("id").context("Missing request id")?;
-        let request = provider
-            .events
-            .lock()
-            .await
-            .requests
-            .remove(&Text::from(id.to_string()))
-            .context("This approval has expired or was already answered")?;
-        if request["method"] != "item/tool/call" {
-            // No generic shell/permission escalation in a Verum-only research workspace.
-            provider.send(json!({"id":id,"error":{"code":-32601,"message":"Studio exposes only reviewed Verum tools"}})).await?;
-            return Ok(json!({"declined":true}));
-        }
-        let result = if params["result"]["approved"].as_bool() != Some(true) {
-            Err(anyhow::anyhow!("User declined this operation"))
-        } else {
-            self.tool(&request["params"]).await
-        };
-        let (success, tool_result) = match result {
-            Ok(value) => (true, value),
-            Err(error) => (false, json!({"error":error.to_string()})),
-        };
-        let content = tool_result.to_string();
-        provider.send(json!({"id":id,"result":{"success":success,"contentItems":[{"type":"inputText","text":content}]}})).await?;
-        Ok(json!({"delivered":true,"success":success,"tool_result":tool_result}))
-    }
-    async fn tool(&self, params: &Value) -> Result<Value> {
-        let tool = field(params, "tool")?;
-        let mut args = params["arguments"].clone();
-        match tool {
-            "verum_files" => {
-                self.project_files(
-                    if args.get("query").is_some() {
-                        "workspace.search"
-                    } else {
-                        "workspace.browse"
-                    },
-                    args,
-                )
-                .await
-            }
-            "verum_changes" => {
-                self.project_files(
-                    if args.get("path").is_some() {
-                        "workspace.diff"
-                    } else {
-                        "workspace.changes"
-                    },
-                    args,
-                )
-                .await
-            }
-            "verum_plan" => {
-                self.workspace.lock().await.path(field(&args, "path")?)?;
-                Ok(serde_json::to_value(self.jobs.lock().await.plan(&args)?)?)
-            }
-            "verum_project" => self.project().await,
-            "verum_analyze" => self.language_request(&args).await,
-            "verum_format" => {
-                args["method"] = json!("textDocument/formatting");
-                if args.get("options").is_none() {
-                    args["options"] = json!({"tabSize":4,"insertSpaces":true});
-                }
-                self.language_request(&args).await
-            }
-            "verum_read" => self.workspace.lock().await.read(field(&args, "path")?),
-            "verum_propose" => {
-                self.workspace.lock().await.write(
-                    field(&args, "path")?,
-                    field(&args, "source")?,
-                    expected_hash(&args)?,
-                )
-            }
-            "verum_run" | "verum_check" | "verum_proof" => {
-                args["kind"] = json!(tool.strip_prefix("verum_").context("Tool prefix")?);
-                let path = self.workspace.lock().await.path(field(&args, "path")?)?;
-                let id = {
-                    let mut jobs = self.jobs.lock().await;
-                    ensure!(
-                        jobs.list()
-                            .await
-                            .as_array()
-                            .context("jobs")?
-                            .iter()
-                            .filter(|r| r["status"] == "running")
-                            .count()
-                            < 2,
-                        "Two runs already active"
-                    );
-                    jobs.start(&args, path)?["id"].clone()
-                };
-                loop {
-                    if let Some(receipt) = self.jobs.lock().await.read(&id).await
-                        && receipt.status != "running"
-                    {
-                        return Ok(serde_json::to_value(receipt)?);
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-            _ => bail!("Unknown Verum tool"),
         }
     }
     async fn language_request(&self, params: &Value) -> Result<Value> {

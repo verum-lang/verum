@@ -14,6 +14,13 @@ use tower_lsp::{
 use verum_common::{Map, Text};
 use verum_lsp::Backend;
 
+pub(super) const DOCUMENT_QUERIES: &[&str] = &[
+    "analyze",
+    "textDocument/hover",
+    "textDocument/definition",
+    "textDocument/completion",
+];
+
 struct Command {
     control: verum_lsp::AnalysisControl,
     path: PathBuf,
@@ -95,15 +102,7 @@ impl Language {
             "Source exceeds editor limit"
         );
         ensure!(
-            matches!(
-                method,
-                "project"
-                    | "analyze"
-                    | "textDocument/hover"
-                    | "textDocument/completion"
-                    | "textDocument/definition"
-                    | "textDocument/formatting"
-            ),
+            DOCUMENT_QUERIES.contains(&method) || matches!(method, "project" | "textDocument/formatting"),
             "Unsupported language operation"
         );
         let control = verum_lsp::AnalysisControl::with_deadline(

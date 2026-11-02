@@ -71,14 +71,9 @@ export function relativeVerumPath(value: string): string | null {
   return path;
 }
 
-export function approvalKind(method: string, params: Record<string, unknown>): 'source' | 'execution' | 'read' | 'unsupported' {
-  if (method === 'item/tool/call') {
-    if (params.tool === 'verum_propose' || params.tool === 'propose_source') return 'source';
-    if (['verum_read', 'verum_analyze', 'verum_project', 'verum_plan', 'verum_files', 'verum_changes'].includes(String(params.tool))) return 'read';
-    if (['verum_run', 'verum_check', 'verum_proof'].includes(String(params.tool))) return 'execution';
-    return 'unsupported';
-  }
-  // This workbench permits Verum tools, never built-in shell or filesystem bypasses.
+export type ReviewKind = 'source' | 'execution' | 'read' | 'unsupported';
+export function approvalKind(method: string, hostKind: unknown): ReviewKind {
+  if (method === 'item/tool/call' && (hostKind === 'source' || hostKind === 'read' || hostKind === 'execution')) return hostKind;
   return 'unsupported';
 }
 

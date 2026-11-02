@@ -12,8 +12,8 @@ while IFS= read -r line; do
  case "$line" in
   *'"method":"initialize"'*) printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}' ;;
   *'"method":"account/read"'*)
-   printf '%s\n' '{"id":"review","method":"item/tool/call","params":{"tool":"verum_propose","arguments":{}}}'
-   printf '%s\n' '{"method":"serverRequest/resolved","params":{"requestId":"review"}}'
+   printf '%s\n' '{"id":"review","method":"item/tool/call","params":{"threadId":"fixture","tool":"verum_propose","arguments":{}}}'
+   printf '%s\n' '{"method":"serverRequest/resolved","params":{"threadId":"fixture","requestId":"review"}}'
    printf '%s\n' '{"id":2,"result":{"account":null}}' ;;
  esac
 done
@@ -27,9 +27,9 @@ done
         json!({"account":null})
     );
     let events = provider.events.lock().await;
-    assert_eq!(events.read(0)["events"].as_array().unwrap().len(), 2);
+    assert_eq!(events.read(0, Some("fixture"))["events"].as_array().unwrap().len(), 2);
     assert!(
-        events.requests.is_empty(),
+        events.read(0, Some("fixture"))["pendingReviews"] == json!([]),
         "Resolved approval must not authorize a later source write"
     );
 }

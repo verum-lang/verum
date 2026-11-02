@@ -674,10 +674,10 @@ let threadId: string | null = null;
 let turnId: string | null = null;
 let sending = false;
 let cursor = 0;
+let agentConnection: string | null = null;
 let eventBusy = false;
 const messageBodies = new Map<string, HTMLElement>();
-const approvalIds = new Set<string>();
-let pendingApprovals = 0;
+const activeReviews = new Map<string, () => void>();
 const eventLog: string[] = [];
 let eventLogLength = 0;
 let eventLogDropped = false;
@@ -694,11 +694,14 @@ function addMessage(role: 'user' | 'agent' | 'system', text: Content, id?: strin
 }
 function agentState() {
   const busy = sending || turnId !== null;
+  const pendingApprovals = activeReviews.size;
   $<HTMLButtonElement>('agent-send').disabled = !connected || !authenticated || busy;
   $<HTMLTextAreaElement>('agent-input').disabled = !connected || !authenticated;
   $<HTMLButtonElement>('new-thread').disabled = !connected || !authenticated || busy || pendingApprovals > 0;
-  $<HTMLSelectElement>('agent-model').disabled = threadId !== null;
+  $<HTMLSelectElement>('agent-role').disabled = threadId !== null || busy;
+  $<HTMLSelectElement>('agent-model').disabled = threadId !== null || busy;
   setAttribute($('agent-model'), 'title', threadId ? m('Model is fixed for this conversation. Start a new conversation to choose another model.') : m('Choose the model for a new conversation'));
+  setAttribute($('agent-context-info'), 'title', $<HTMLSelectElement>('agent-role').value === 'reviewer' ? m('Only the selected path and saved revision accompany the review task.') : m('The current editor source is included with each message'));
   $('agent-stop').hidden = !busy;
   setText($('agent-progress'), pendingApprovals ? m('Awaiting review: {count}', { count: pendingApprovals }) : busy ? m('Codex is working…') : connected ? authenticated ? m('Connected · edits and tools require review') : m('Local provider ready · sign in to start a conversation') : '');
   setText($('approval-count'), pendingApprovals ? String(pendingApprovals) : '');
@@ -716,8 +719,12 @@ function accountLabel(value: unknown): Content {
 async function connectAgent() {
   const control = $<HTMLButtonElement>('agent-connect'); control.disabled = true; setText(control, m('Connecting…'));
   try {
-    const account = await api('agent.connect'); connected = true;
-    const data = parseArguments(account); authenticated = data.account != null || data.requiresOpenaiAuth === false;
+    const account = await api('agent.connect');
+    const data = parseArguments(account);
+    if (typeof data.connectionId !== 'string') throw new Error(t(m('Missing provider connection identity.')));
+    if (agentConnection !== data.connectionId) resetAgentConversation();
+    agentConnection = data.connectionId; connected = true;
+    authenticated = data.account != null || data.requiresOpenaiAuth === false;
     setText($('agent-account'), accountLabel(account)); $('agent-controls').hidden = false;
     setText(control, m('Refresh')); agentState();
     await loadModels();
@@ -741,13 +748,12 @@ async function loginAgent() {
   await dialog(m('Connect your account'), content, [{ value: 'close', label: m('Done') }]);
 }
 async function newThread(internal = false) {
-  if (turnId || (sending && !internal) || pendingApprovals) throw new Error(t(m('Finish or stop the current turn and resolve requests before starting another conversation.')));
+  if (turnId || (sending && !internal) || activeReviews.size) throw new Error(t(m('Finish or stop the current turn and resolve requests before starting another conversation.')));
   const model = $<HTMLSelectElement>('agent-model').value;
-  const result = await api<{ thread?: { id: string }; id?: string }>('agent.request', { method: 'thread/start', params: model ? { model } : {} });
+  const result = await api<{ thread?: { id: string }; id?: string }>('agent.request', { method: 'thread/start', role: $<HTMLSelectElement>('agent-role').value, params: model ? { model } : {} });
   const id = result.thread?.id || result.id; if (!id) throw new Error(t(m('Codex did not return a conversation ID.')));
-  threadId = id; messageBodies.clear();
-  $('agent-messages').querySelectorAll('.message,.approval').forEach(element => element.remove());
-  $('agent-welcome').hidden = false; agentState(); announce(m('New conversation started'));
+  resetAgentConversation(); threadId = id;
+  agentState(); announce(m('New conversation started'));
 }
 async function sendMessage() {
   const field = $<HTMLTextAreaElement>('agent-input'), text = field.value.trim();
@@ -758,21 +764,22 @@ async function sendMessage() {
   try {
     if (!connected) await connectAgent();
     if (!threadId) await newThread(true);
-    const hash = await sha256(source);
+    const reviewer = $<HTMLSelectElement>('agent-role').value === 'reviewer';
     addMessage('user', text);
     const model = $<HTMLSelectElement>('agent-model').value;
-    const context = `${text}\n\nCurrent Verum editor source (may contain unsaved edits):\nPath: ${path}\nSource SHA-256: ${hash}\nSaved file SHA-256: ${snapshotSavedHash ?? '(new file; not saved)'}\n<verum_source>\n${source}\n</verum_source>`;
+    const context = reviewer
+      ? `${text}\n\nSelected workspace path: ${path}\nSaved file SHA-256: ${snapshotSavedHash ?? '(unsaved file)'}`
+      : `${text}\n\nCurrent Verum editor source (may contain unsaved edits):\nPath: ${path}\nSource SHA-256: ${await sha256(source)}\nSaved file SHA-256: ${snapshotSavedHash ?? '(new file; not saved)'}\n<verum_source>\n${source}\n</verum_source>`;
     const result = await api<{ turn?: { id: string; status?: string } }>('agent.request', { method: 'turn/start', params: { threadId, input: [{ type: 'text', text: context }], ...(model ? { model } : {}) } });
     if (result.turn?.id && !completedTurns.has(result.turn.id) && result.turn.status !== 'completed' && result.turn.status !== 'failed' && result.turn.status !== 'interrupted') turnId = result.turn.id;
   } catch (error) { addMessage('system', m('Message could not be sent: {error}', { error: errorText(error) })); if (!field.value) field.value = text; }
   finally { sending = false; agentState(); }
 }
+$('agent-role').addEventListener('change', agentState);
 bind('agent-connect', connectAgent); bind('agent-login', loginAgent);
 bind('new-thread', () => {
-  if (turnId || sending || pendingApprovals) throw new Error(t(m('Finish the current turn and resolve requests before starting another conversation.')));
-  threadId = null; messageBodies.clear();
-  $('agent-messages').querySelectorAll('.message,.approval').forEach(element => element.remove());
-  $('agent-welcome').hidden = false; agentState(); $('agent-input').focus();
+  if (turnId || sending || activeReviews.size) throw new Error(t(m('Finish the current turn and resolve requests before starting another conversation.')));
+  resetAgentConversation(); agentState(); $('agent-input').focus();
 });
 bind('agent-suggestion', () => { $<HTMLTextAreaElement>('agent-input').value = t(m('Explain this Verum source and suggest one useful experiment. Use Verum tools to check your claims.')); if (connected) $('agent-input').focus(); else notice(m('Connect Codex to start this conversation.')); });
 $('agent-form').addEventListener('submit', event => { event.preventDefault(); sendMessage().catch(fail); });
@@ -783,26 +790,47 @@ bind('agent-stop', async () => {
 });
 
 type RpcMessage = { id?: string | number; method?: string; params?: Record<string, unknown>; error?: unknown; result?: unknown };
+type AgentEvent = { seq: number; reviewId?: string; reviewKind?: unknown; message: RpcMessage };
+function resetAgentConversation() {
+  for (const expire of activeReviews.values()) expire();
+  activeReviews.clear(); threadId = null; turnId = null; cursor = 0;
+  completedTurns.clear(); messageBodies.clear(); eventLog.length = 0; eventLogLength = 0; eventLogDropped = false;
+  $('agent-messages').querySelectorAll('.message,.approval').forEach(element => element.remove());
+  setText($('event-count'), '0'); setText($('event-content'), '');
+  $('agent-welcome').hidden = false;
+}
 async function pollEvents() {
   if (!connected || eventBusy) return; eventBusy = true;
+  const owner = threadId, connection = agentConnection;
   try {
-    const result = await api<{ cursor: number; events: Array<{ seq: number; message: RpcMessage }>; gap: boolean }>('agent.events', { after: cursor });
+    const result = await api<{ connectionId: string; cursor: number; events: AgentEvent[]; gap: boolean; pendingReviews: string[]; recoveredReviews: AgentEvent[] }>('agent.events', { after: cursor, threadId: owner });
+    if (agentConnection !== connection || owner !== threadId) return;
+    if (result.connectionId !== connection) {
+      connected = false; authenticated = false; agentConnection = null;
+      resetAgentConversation(); agentState(); return;
+    }
+    const live = new Set(result.pendingReviews);
+    for (const [id, expire] of activeReviews) if (!live.has(id)) expire();
     if (result.gap) addMessage('system', m('Some session events are no longer available. This conversation history is incomplete; inspect source and results before continuing.'));
-    for (const event of result.events) { if (event.seq > cursor) await receiveEvent(event.message); }
+    for (const event of [...result.recoveredReviews, ...result.events]) {
+      if (agentConnection !== connection || owner !== threadId) return;
+      if (event.reviewId && !live.has(event.reviewId)) continue;
+      await receiveEvent(event.message, event.reviewId, event.reviewKind);
+    }
+    if (agentConnection !== connection || owner !== threadId) return;
     cursor = result.cursor;
     setText($('event-count'), String(eventLog.length));
     setText($('event-content'), `${eventLogDropped ? 'Recent event excerpts (older or large payloads omitted). Full pending requests appear in their review cards.\n\n' : ''}${eventLog.join('\n\n')}`);
   } finally { eventBusy = false; }
 }
-async function receiveEvent(message: RpcMessage) {
+async function receiveEvent(message: RpcMessage, reviewId?: string, hostKind?: unknown) {
   const serialized = pretty(message);
   const excerpt = serialized.length > 4096 ? `${serialized.slice(0, 4096)}\n[Event payload excerpt]` : serialized;
   if (serialized.length > 4096) eventLogDropped = true;
   eventLog.push(excerpt); eventLogLength += excerpt.length;
   while (eventLog.length > 150 || eventLogLength > 65536) { eventLogLength -= eventLog.shift()!.length; eventLogDropped = true; }
   const method = message.method, params = message.params || {};
-  if (message.id !== undefined && method) { await showApproval(message.id, method, params); return; }
-  if (params.threadId && threadId && params.threadId !== threadId) return;
+  if (message.id !== undefined && method) { if (reviewId) await showApproval(reviewId, method, params, hostKind); return; }
   if (method === 'item/agentMessage/delta') {
     const id = String(params.itemId || 'stream');
     const body = messageBodies.get(id) || addMessage('agent', '', id);
@@ -822,6 +850,9 @@ async function receiveEvent(message: RpcMessage) {
     if (!turnId || !turn.id || turnId === turn.id) turnId = null;
     if (turn.status === 'failed' || turn.error) addMessage('system', m('Turn failed: {error}', { error: pretty(turn.error || turn.status) }));
     else if (turn.status === 'interrupted') addMessage('system', m('Turn interrupted. Completed evidence remains in Results.'));
+  } else if (method === 'studio/disconnected') {
+    connected = false; authenticated = false; turnId = null;
+    addMessage('system', m('Provider disconnected. Reconnect to start a new conversation.'));
   } else if (method === 'account/updated' || method === 'account/login/completed') {
     const account = await api('agent.request', { method: 'account/read', params: {} });
     const data = parseArguments(account); authenticated = data.account != null || data.requiresOpenaiAuth === false;
@@ -829,13 +860,16 @@ async function receiveEvent(message: RpcMessage) {
   } else if (method === 'error') addMessage('system', pretty(params));
   agentState();
 }
-async function showApproval(id: string | number, method: string, params: Record<string, unknown>) {
-  const key = `${typeof id}:${id}`; if (approvalIds.has(key)) return; approvalIds.add(key);
-  const kind = approvalKind(method, params), args = parseArguments(params.arguments);
+async function showApproval(reviewId: string, method: string, params: Record<string, unknown>, hostKind: unknown) {
+  if (activeReviews.has(reviewId)) return;
+  const owner = typeof params.threadId === 'string' ? params.threadId : null;
+  if (owner !== null && owner !== threadId) return;
+  const connection = agentConnection;
+  const kind = approvalKind(method, hostKind), args = parseArguments(params.arguments);
   const card = node('section', 'approval'); card.setAttribute('aria-label', 'Agent request awaiting review');
   card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Review language analysis') : m('Review a workspace read') : m('Unsupported agent request')));
   const content = node('div', 'approval-content');
-  let reviewAvailable = true;
+  let reviewAvailable = owner !== null;
   content.append(node('p', '', kind === 'unsupported' ? m('This request is outside the Verum tool boundary. Decline it to let the agent continue.') : `${String(params.tool || method)}${typeof args.path === 'string' ? ` · ${args.path}` : ''}`));
   if (kind === 'source') {
     let before: Content = m('(A new file is proposed; the server will check that it does not already exist.)');
@@ -851,21 +885,28 @@ async function showApproval(id: string | number, method: string, params: Record<
   const actions = node('div', 'approval-actions');
   const status = node('div', 'approval-status', m('Awaiting your decision. No requested action has been approved.'));
   let responding = false;
+  function expire() {
+    activeReviews.delete(reviewId);
+    actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+    if (!responding) setText(status, m('This review is no longer pending.'));
+    agentState();
+  }
   async function respond(approved: boolean) {
     if (responding) return; responding = true;
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
     setText(status, approved ? m('Approved · waiting for the tool result…') : m('Declining request…'));
     let result: unknown;
-    try { result = await api('agent.respond', { id, result: approvalReply(method, approved) }); }
+    try { result = await api('agent.respond', { reviewId, threadId: owner, result: approvalReply(method, approved) }); }
     catch (error) {
       responding = false; setText(status, m('Request response failed: {error}', { error: errorText(error) }));
-      actions.querySelectorAll('button').forEach(button => { button.disabled = false; }); return;
+      if (activeReviews.has(reviewId)) actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      return;
     }
     try {
       const response = parseArguments(result);
       setText(status, !approved ? m('Request declined.') : response.success === true ? m('Tool completed. Its result is available below.') : response.success === false ? m('The tool reported a failure. Inspect the response below.') : m('Approval delivered. Inspect the tool result and evidence before treating the request as successful.'));
       if (result !== undefined && result !== null) appendDetails(content, m('Tool response'), result, 'response');
-      pendingApprovals--; agentState();
+      activeReviews.delete(reviewId); agentState();
       if (approved && kind === 'source' && typeof args.path === 'string') {
         await refreshFiles();
         if (!switching && args.path === currentPath && !dirty()) {
@@ -877,7 +918,9 @@ async function showApproval(id: string | number, method: string, params: Record<
   }
   actions.append(button(m('Decline'), () => respond(false)));
   if (kind !== 'unsupported' && reviewAvailable) actions.append(button(kind === 'source' ? m('Accept edit') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read') : m('Approve operation'), () => respond(true), 'button primary'));
-  card.append(content, actions, status); $('agent-welcome').hidden = true; $('agent-messages').append(card); pendingApprovals++; agentState();
+  if (connection !== agentConnection || (owner !== null && owner !== threadId)) return;
+  activeReviews.set(reviewId, expire);
+  card.append(content, actions, status); $('agent-welcome').hidden = true; $('agent-messages').append(card); agentState();
   announce(m('Agent request awaiting your review'));
 }
 
@@ -982,7 +1025,7 @@ onSessionChange(state => {
       receipts = []; selectedReceipt = null; renderResults();
       analysisGeneration++; analysisPending = false;
       connected = false; authenticated = false; threadId = null; turnId = null;
-      cursor = 0; pendingApprovals = 0; approvalIds.clear(); completedTurns.clear(); messageBodies.clear();
+      agentConnection = null; resetAgentConversation();
       document.querySelectorAll<HTMLButtonElement>('#agent-messages button').forEach(button => { button.disabled = true; });
       agentState(); connectionStatus(false);
     }

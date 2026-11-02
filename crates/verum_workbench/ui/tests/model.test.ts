@@ -75,14 +75,12 @@ test('history cap retains the newest 128 runs by their actual start times', () =
   assert.equal(merged[127].id, '129');
 });
 
-test('only declared Verum tools offer approval; shell/file bypasses refuse', () => {
-  assert.equal(approvalKind('item/tool/call', { tool: 'verum_propose' }), 'source');
-  assert.equal(approvalKind('item/tool/call', { tool: 'verum_run' }), 'execution');
-  assert.equal(approvalKind('item/tool/call', { tool: 'verum_read' }), 'read');
-  assert.equal(approvalKind('item/tool/call', { tool: 'verum_plan' }), 'read');
-  assert.equal(approvalKind('item/tool/call', { tool: 'run_shell' }), 'unsupported');
-  assert.equal(approvalKind('item/commandExecution/requestApproval', {}), 'unsupported');
-  assert.equal(approvalKind('item/fileChange/requestApproval', {}), 'unsupported');
+test('the review UI uses only the host classification of a dynamic tool call', () => {
+  for (const kind of ['source', 'execution', 'read']) assert.equal(approvalKind('item/tool/call', kind), kind);
+  assert.equal(approvalKind('item/tool/call', undefined), 'unsupported');
+  assert.equal(approvalKind('item/tool/call', { tool: 'verum_read', reviewKind: 'read' }), 'unsupported');
+  assert.equal(approvalKind('item/commandExecution/requestApproval', 'execution'), 'unsupported');
+  assert.equal(approvalKind('item/fileChange/requestApproval', 'source'), 'unsupported');
   assert.deepEqual(approvalReply('item/tool/call', true), { approved: true });
   assert.deepEqual(approvalReply('item/tool/call', false), { approved: false });
   assert.deepEqual(approvalReply('item/commandExecution/requestApproval', false), { decision: 'decline' });
