@@ -30,6 +30,8 @@ pub use verum_modules::ModuleId;
 pub struct TypeScheme {
     /// Universally quantified type variables
     pub vars: List<TypeVar>,
+    /// Rigid declaration levels quantified by this scheme.
+    pub(crate) universe_params: List<u32>,
     /// The body type
     pub ty: Type,
     /// Type variables that are implicit (inferred from context).
@@ -73,6 +75,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             explicit_method_vars: None,
+            universe_params: List::new(),
         }
     }
 
@@ -87,6 +90,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             explicit_method_vars: None,
+            universe_params: List::new(),
         }
     }
 
@@ -102,6 +106,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             explicit_method_vars: None,
+            universe_params: List::new(),
         }
     }
 
@@ -122,6 +127,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             explicit_method_vars: None,
+            universe_params: List::new(),
         }
     }
 
@@ -170,6 +176,31 @@ impl TypeScheme {
         self
     }
 
+    pub fn with_universe_parameters(mut self, parameters: List<u32>) -> Result<Self, Text> {
+        let mut seen = Set::new();
+        if parameters.len() > crate::universe_level::MAX_LEVEL_NODES
+            || parameters.iter().any(|id| !seen.insert(*id)) {
+            return Err("invalid quantified universe parameter roster".into());
+        }
+        // Pure binder renaming does not enlarge level expressions. Validate
+        // the shape before publishing a scheme used by infallible consumers.
+        self.ty.try_apply_subst(&Substitution::new())?;
+        for bounds in self.var_type_bounds.values() {
+            for bound in bounds { bound.try_apply_subst(&Substitution::new())?; }
+        }
+        self.universe_params = parameters;
+        Ok(self)
+    }
+
+    pub fn universe_parameters(&self) -> &[u32] { &self.universe_params }
+
+    fn instantiation_substitution(&self) -> Substitution {
+        let mut substitution = Substitution::new();
+        substitution.universes = crate::universe_inference::UniverseInference::instantiate(&self.universe_params)
+            .expect("TypeScheme constructors validate the universe binder roster");
+        substitution
+    }
+
     /// Check if a type variable is implicit (inferred from context)
     pub fn is_implicit(&self, var: &TypeVar) -> bool {
         self.implicit_vars.contains(var)
@@ -205,11 +236,11 @@ impl TypeScheme {
                 );
             }
         }
-        if self.vars.is_empty() {
+        if self.vars.is_empty() && self.universe_params.is_empty() {
             return self.ty.clone();
         }
 
-        let mut subst = Substitution::new();
+        let mut subst = self.instantiation_substitution();
         for var in &self.vars {
             subst.insert(*var, Type::Var(TypeVar::fresh()));
         }
@@ -223,11 +254,11 @@ impl TypeScheme {
     /// The returned Vec<TypeVar> preserves the order of vars in the scheme, which should match
     /// the order of type params in the original implement block + method declaration.
     pub fn instantiate_with_fresh_vars(&self) -> (Type, List<TypeVar>) {
-        if self.vars.is_empty() {
+        if self.vars.is_empty() && self.universe_params.is_empty() {
             return (self.ty.clone(), List::new());
         }
 
-        let mut subst = Substitution::new();
+        let mut subst = self.instantiation_substitution();
         let mut fresh_vars = List::new();
         for var in &self.vars {
             let fresh = TypeVar::fresh();
@@ -244,11 +275,11 @@ impl TypeScheme {
     /// fresh type variables should be inferred vs. explicitly provided.
     /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
     pub fn instantiate_with_implicit_info(&self) -> (Type, List<TypeVar>, Set<TypeVar>) {
-        if self.vars.is_empty() {
+        if self.vars.is_empty() && self.universe_params.is_empty() {
             return (self.ty.clone(), List::new(), Set::new());
         }
 
-        let mut subst = Substitution::new();
+        let mut subst = self.instantiation_substitution();
         let mut fresh_vars = List::new();
         let mut fresh_implicit = Set::new();
 
@@ -269,7 +300,7 @@ impl TypeScheme {
     /// Rebase the declared receiver with the same substitution as the method.
     pub(crate) fn fresh_impl_self_type(&self, fresh_vars: &[TypeVar]) -> Option<Type> {
         self.impl_self_type.as_ref().map(|receiver| {
-            let mut subst = Substitution::new();
+            let mut subst = self.instantiation_substitution();
             for (original, fresh) in self.vars.iter().zip(fresh_vars.iter()) {
                 subst.insert(*original, Type::Var(*fresh));
             }
@@ -321,11 +352,11 @@ impl TypeScheme {
                 );
             }
         }
-        if self.vars.is_empty() {
+        if self.vars.is_empty() && self.universe_params.is_empty() {
             return (self.ty.clone(), List::new(), Map::new());
         }
 
-        let mut subst = Substitution::new();
+        let mut subst = self.instantiation_substitution();
         let mut fresh_vars = List::new();
         let mut old_to_fresh: Map<TypeVar, TypeVar> = Map::new();
 
@@ -357,11 +388,11 @@ impl TypeScheme {
     pub fn instantiate_with_protocol_bounds(
         &self,
     ) -> (Type, List<TypeVar>, Map<TypeVar, List<ProtocolBound>>) {
-        if self.vars.is_empty() {
+        if self.vars.is_empty() && self.universe_params.is_empty() {
             return (self.ty.clone(), List::new(), Map::new());
         }
 
-        let mut subst = Substitution::new();
+        let mut subst = self.instantiation_substitution();
         let mut fresh_vars = List::new();
         let mut old_to_fresh: Map<TypeVar, TypeVar> = Map::new();
 
@@ -632,6 +663,7 @@ impl UniverseSubstitution {
                         UniverseLevel::Concrete(value) => {
                             values.push(UniverseLevel::Concrete(*value))
                         }
+                        UniverseLevel::Meta(id) => values.push(UniverseLevel::Meta(*id)),
                         UniverseLevel::Variable(var) => {
                             if let Some(bound) = self.bindings.get(var) {
                                 if !active.insert(*var) {

@@ -162,7 +162,7 @@ impl ImplicitResolver {
                     .unify(&metavar_applied, &constraint_applied, constraint.span)?;
 
             // Compose substitutions
-            subst = subst.compose(&new_subst);
+            subst = subst.compose(&new_subst).map_err(|message| TypeError::UniverseBinding { message, span: constraint.span })?;
         }
 
         // Check that all implicit arguments were solved
@@ -204,7 +204,7 @@ impl ImplicitResolver {
                 .unify(&metavar_applied, &constraint_applied, constraint.span)
             {
                 Ok(new_subst) => {
-                    subst = subst.compose(&new_subst);
+                    subst = subst.compose(&new_subst).map_err(|message| TypeError::UniverseBinding { message, span: constraint.span })?;
                 }
                 Err(e) => {
                     return Err(e);

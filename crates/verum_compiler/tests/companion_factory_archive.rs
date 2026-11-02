@@ -31,7 +31,7 @@ public module Factory {
     .unwrap();
     let mut builder = ArchiveBuilder::stdlib();
     builder.add_module("core", &module, &[]).unwrap();
-    let metadata = Arc::new(archive_to_core_metadata(&builder.finish()));
+    let metadata = Arc::new(archive_to_core_metadata(&builder.finish()).expect("valid archive metadata"));
     let factory = metadata
         .functions
         .get(&"core.factory.Factory.make".into())

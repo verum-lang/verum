@@ -34,7 +34,7 @@ fn parameter_metadata(type_ref: TypeRef, declared: Option<&str>) -> ParamDescrip
     archive
         .add_module("fixture.producer", &module, &[])
         .expect("archive fixture");
-    let metadata = archive_to_core_metadata(&archive.finish());
+    let metadata = archive_to_core_metadata(&archive.finish()).expect("valid archive metadata");
     metadata
         .functions
         .get(&Text::from("fixture.producer.accept"))

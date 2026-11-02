@@ -98,8 +98,6 @@ fn check_source(source: &str) {
 fn documented_examples_parse_and_check_with_both_level_spellings() {
     check_source("fn identity<A>(value: A) -> A { value }");
     check_source("fn retain_type(value: Type(1)) -> Type(1) { value }");
-    check_source("fn identity_at<universe u, A: Type(u)>(value: A) -> A { value }");
-    check_source("fn identity_at<u: Level, A: Type(u)>(value: A) -> A { value }");
     check_source("fn retain_at<universe u>(value: Type(u)) -> Type(u) { value }");
     check_source("fn retain_at<u: Level>(value: Type(u)) -> Type(u) { value }");
 }
@@ -138,6 +136,50 @@ fn source_imports_resolve_declared_levels_and_preserve_binding_errors() {
             "import recovery must preserve the binding error: {errors:?}"
         );
     }
+}
+
+#[test]
+fn imported_source_schemes_instantiate_levels_at_each_call() {
+    let (mut checker, errors) = import_source(
+        "public fn retain<universe u>(value: Type(u)) -> Type(u) { value }",
+        "retain",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(
+        checker
+            .ctx_env_lookup("retain")
+            .unwrap()
+            .universe_parameters()
+            .len(),
+        1
+    );
+    let consumer = parse(
+        "fn one(x: Type(1)) -> Type(1) { retain(x) } fn two(x: Type(2)) -> Type(2) { retain(x) }",
+    );
+    assert!(checker.prepare_module_declarations(&consumer).is_empty());
+    for item in &consumer.items {
+        checker.check_item(item).expect("imported call");
+    }
+    assert!(checker.take_deferred_errors().is_empty());
+    assert!(
+        !checker
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.is_error())
+    );
+    let bad = parse("fn bad(x: Type(2)) -> Type(1) { retain(x) }");
+    assert!(checker.prepare_module_declarations(&bad).is_empty());
+    let refused = bad
+        .items
+        .iter()
+        .any(|item| checker.check_item(item).is_err());
+    assert!(
+        refused
+            || checker
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.is_error())
+    );
 }
 
 #[test]
@@ -190,23 +232,15 @@ fn module_ownership_disambiguates_equal_source_offsets() {
 }
 
 #[test]
-fn lexical_rank_two_binders_shadow_and_unmentioned_binders_inherit() {
+fn rank_two_universe_quantification_requires_a_complete_binder_carrier() {
     let ast = parse(
         "fn outer<universe u>(value: Type(u), shadow: fn<universe u>(Type(u)) -> Type(u), inherit: fn<A>(Type(u)) -> Type(u)) -> Type(u) { value }",
     );
     let mut checker = checker();
-    checker
+    let error = checker
         .register_function_signature(function(&ast, 0))
-        .unwrap();
-    let ty = signature(&checker, "outer");
-    let parameters = params(&ty);
-    let outer = level(&parameters[0]);
-    let inner = level(&params(&parameters[1])[0]);
-    assert_ne!(outer, inner);
-    let Type::Forall { body, .. } = &parameters[2] else {
-        panic!("quantified type parameter")
-    };
-    assert_eq!(outer, level(&params(body)[0]));
+        .expect_err("no erased rank-two universe binder");
+    assert!(error.is_soundness_critical());
 }
 
 #[test]
@@ -218,6 +252,8 @@ fn unbound_names_and_wrong_kinds_are_refused_even_in_bounds() {
         "fn bad<u>(value: Type(u)) { }",
         "fn bad<universe u>(value: u) { }",
         "fn bad<universe u>(value: fn<u>(Type(u)) -> Type(u)) { }",
+        "fn bad<universe u, A: Type(u)>(value: A) -> A { value }",
+        "fn bad<A: Type(0)>(value: A) -> A { value }",
     ] {
         let ast = parse(source);
         assert!(

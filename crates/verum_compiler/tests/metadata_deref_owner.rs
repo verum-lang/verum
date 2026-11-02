@@ -7,7 +7,7 @@ use verum_types::{TypeChecker, core_metadata::CoreMetadata};
 
 #[test]
 fn shared_atomic_methods_resolve_from_the_embedded_metadata() {
-    let metadata: CoreMetadata = bincode::deserialize(include_bytes!(concat!(
+    let metadata: CoreMetadata = verum_compiler::embedded_stdlib_metadata::decode_metadata(include_bytes!(concat!(
         env!("OUT_DIR"),
         "/stdlib_runtime.core_metadata"
     )))

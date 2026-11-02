@@ -65,7 +65,7 @@ fn metadata(declaration_only: bool, reverse: bool) -> CoreMetadata {
     let mut bytes = List::new();
     verum_vbc::archive::write_archive(&archive.finish(), &mut bytes).unwrap();
     let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes.as_slice())).unwrap();
-    let metadata = archive_to_core_metadata(&archive);
+    let metadata = archive_to_core_metadata(&archive).expect("valid archive metadata");
     bincode::deserialize(&bincode::serialize(&metadata).unwrap()).unwrap()
 }
 
@@ -201,7 +201,7 @@ fn release_consumers_accept_only_the_declared_owner_and_callable_bound() {
 fn actual_stdlib_datetime_signature_retains_the_imported_declaration() {
     let archive = verum_compiler::embedded_stdlib_vbc::get_runtime_archive()
         .expect("release stdlib archive required");
-    let metadata = archive_to_core_metadata(archive);
+    let metadata = archive_to_core_metadata(archive).expect("valid archive metadata");
     let function = metadata
         .functions
         .get(&Text::from(

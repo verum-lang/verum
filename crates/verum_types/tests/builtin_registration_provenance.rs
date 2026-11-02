@@ -40,6 +40,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
         metadata.type_declaration_order.push(exact);
         metadata.types.insert("Parcel".into(), descriptor);
         let function = FunctionDescriptor {
+            source_signature: None,
             name: "published_fn".into(),
             module_path: owner.into(),
             origin_module_path: None,

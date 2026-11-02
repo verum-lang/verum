@@ -34,9 +34,10 @@ pub fn runtime_metadata_bytes() -> &'static [u8] {
     EMBEDDED_RUNTIME_METADATA
 }
 
-/// Return the embedded stdlib `CoreMetadata`, or `None` when the
-/// compiler binary was built without one.  Decoded once per
-/// process via `OnceLock`; subsequent calls are O(1) `Arc::clone`.
+pub use verum_types::core_metadata::{decode_metadata, encode_metadata};
+
+/// Return the embedded metadata, or None when no sidecar is embedded.
+/// The current-schema artifact is decoded once per process.
 pub fn get_runtime_metadata() -> Option<Arc<CoreMetadata>> {
     RUNTIME_METADATA
         .get_or_init(|| {
@@ -47,7 +48,7 @@ pub fn get_runtime_metadata() -> Option<Arc<CoreMetadata>> {
                 );
                 return None;
             }
-            match bincode::deserialize::<CoreMetadata>(EMBEDDED_RUNTIME_METADATA) {
+            match decode_metadata(EMBEDDED_RUNTIME_METADATA) {
                 Ok(meta) => {
                     tracing::info!(
                         target: "embedded_stdlib_metadata",

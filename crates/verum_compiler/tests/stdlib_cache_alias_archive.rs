@@ -38,7 +38,7 @@ fn generic_parameter_aliases_survive_the_actual_bootstrap_archive() {
 
     let archive = read_archive_from_file(&output).expect("decode the produced archive from disk");
     let module = archive.load_module("core").expect("actual core module");
-    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&archive);
+    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&archive).expect("valid archive metadata");
     let metadata: verum_types::core_metadata::CoreMetadata =
         bincode::deserialize(&bincode::serialize(&metadata).unwrap()).unwrap();
     for (name, parameter, slot) in [("Identity", "T", 0), ("Pick", "R", 1)] {

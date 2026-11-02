@@ -6,6 +6,7 @@ use verum_types::{TypeChecker, core_metadata::*};
 
 fn descriptor(owner: &str, id: u16, slots: Option<List<Option<u16>>>) -> FunctionDescriptor {
     FunctionDescriptor {
+        source_signature: None,
         name: "choose".into(),
         module_path: owner.into(),
         origin_module_path: None,

@@ -250,8 +250,9 @@ fn library_fixture(target: &str) -> std::sync::Arc<crate::library_metadata::Libr
             },
         );
     }
+    metadata.version = verum_types::core_metadata::CORE_METADATA_VERSION;
     let library = crate::library_metadata::LibraryMetadata::decode(
-        &bincode::serialize(&metadata).unwrap(),
+        &verum_types::core_metadata::encode_metadata(&metadata).unwrap(),
     )
     .unwrap();
     let units = library.registry.get_by_path("portable.units").unwrap();

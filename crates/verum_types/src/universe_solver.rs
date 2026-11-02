@@ -147,6 +147,7 @@ fn validate_assignment_with_limits(
                 local_nodes += 1;
                 match level {
                     UniverseLevel::Concrete(_) => {}
+                    UniverseLevel::Meta(_) => return Err("call-local universe metas require inference substitution".into()),
                     UniverseLevel::Variable(id) => {
                         variables.insert(*id);
                         if variables.len() > limits.max_variables {
@@ -229,6 +230,7 @@ impl Translation {
                         UniverseLevel::Concrete(value) => {
                             values.push(Int::from_u64(u64::from(*value)))
                         }
+                        UniverseLevel::Meta(_) => return Err("call-local universe metas require inference substitution".into()),
                         UniverseLevel::Variable(id) => {
                             if !self.variables.contains_key(id) {
                                 if self.variables.len() >= self.max_variables {

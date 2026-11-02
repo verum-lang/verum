@@ -125,6 +125,7 @@ fn declaration(owner: &str, generic: bool, policy: Option<Visibility>) -> TypeDe
 
 fn producer(owner: &str, generic: bool) -> FunctionDescriptor {
     FunctionDescriptor {
+        source_signature: None,
         name: "produce".into(),
         module_path: "core.bundle".into(),
         origin_module_path: Some(owner.into()),

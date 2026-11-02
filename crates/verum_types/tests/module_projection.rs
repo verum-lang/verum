@@ -23,6 +23,7 @@ fn ty(name: &str, entry: &str, origin: Option<&str>, public: bool) -> TypeDescri
 }
 fn function(name: &str, entry: &str, origin: Option<&str>, public: bool) -> FunctionDescriptor {
     FunctionDescriptor {
+        source_signature: None,
         name: name.into(),
         module_path: entry.into(),
         origin_module_path: origin.map(Text::from),

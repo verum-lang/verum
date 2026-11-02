@@ -2,7 +2,7 @@ use verum_types::core_metadata::CoreMetadata;
 
 fn load_metadata() -> CoreMetadata {
     let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/stdlib_runtime.core_metadata"));
-    bincode::deserialize::<CoreMetadata>(bytes).expect("deserialise embedded metadata")
+    verum_compiler::embedded_stdlib_metadata::decode_metadata(bytes).expect("deserialise embedded metadata")
 }
 
 #[test]

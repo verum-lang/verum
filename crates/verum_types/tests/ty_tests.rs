@@ -583,7 +583,7 @@ fn test_substitution_compose() {
     let mut s2 = Substitution::new();
     s2.insert(v2, Type::int());
 
-    let composed = s1.compose(&s2);
+    let composed = s1.compose(&s2).unwrap();
     assert_eq!(composed.get(&v1), Some(&Type::int()));
 }
 

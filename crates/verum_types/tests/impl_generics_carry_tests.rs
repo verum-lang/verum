@@ -23,6 +23,7 @@ use verum_types::core_metadata::FunctionDescriptor;
 
 fn carried_descriptor() -> FunctionDescriptor {
     FunctionDescriptor {
+        source_signature: None,
         is_public: true,
         name: Text::from("Slice.iter"),
         module_path: Text::from("core.collections.slice"),

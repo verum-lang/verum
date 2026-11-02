@@ -5,8 +5,16 @@ use verum_types::core_metadata::CoreMetadata;
 fn metadata_decode_rejects_invalid_and_trailing_data() {
     assert!(LibraryMetadata::decode(&[]).is_err());
     assert!(LibraryMetadata::decode(b"invalid").is_err());
-    let mut bytes = bincode::serialize(&CoreMetadata::default()).unwrap();
+    let metadata = CoreMetadata {
+        version: verum_types::core_metadata::CORE_METADATA_VERSION,
+        ..Default::default()
+    };
+    let mut bytes = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
     assert!(LibraryMetadata::decode(&bytes).is_ok());
+    assert!(LibraryMetadata::decode(&bincode::serialize(&metadata).unwrap()).is_err());
+    let mut old_schema = bytes.clone();
+    old_schema[8..12].copy_from_slice(&1u32.to_le_bytes());
+    assert!(LibraryMetadata::decode(&old_schema).is_err());
     bytes.push(0);
     assert!(LibraryMetadata::decode(&bytes).is_err());
 }

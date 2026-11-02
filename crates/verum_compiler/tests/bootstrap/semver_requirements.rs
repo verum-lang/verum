@@ -394,7 +394,7 @@ fn current_semver_sources_publish_real_bodies_signatures_and_private_fields() {
     let decoded = archive.load_module("core.base").unwrap();
     assert_signatures(&decoded);
     assert_bodies(&decoded, expected.as_slice(), "decoded archive");
-    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
+    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive).expect("valid archive metadata");
     let metadata: CoreMetadata =
         bincode::deserialize(&bincode::serialize(&metadata).unwrap()).unwrap();
     assert_metadata(&metadata);

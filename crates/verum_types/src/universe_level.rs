@@ -4,14 +4,34 @@
 //! neither an identifier nor an unresolved constraint denotes a concrete level.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use verum_common::{List, Map};
 
 pub const MAX_LEVEL_NODES: usize = 4096;
+
+/// An inference identity is distinct from a rigid declaration parameter.
+/// It is process-local and must never be serialized into declaration metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UniverseMeta(u64);
+
+impl UniverseMeta {
+    pub fn id(self) -> u64 { self.0 }
+    pub fn fresh() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .expect("universe inference identity supply exhausted"))
+    }
+}
+
+impl fmt::Display for UniverseMeta {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "?u{}", self.0) }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UniverseLevel {
     Concrete(u32),
     Variable(u32),
+    Meta(UniverseMeta),
     Max(Box<UniverseLevel>, Box<UniverseLevel>),
     Succ(Box<UniverseLevel>),
 }
@@ -121,6 +141,8 @@ impl UniverseLevel {
                     let value = offsets.entry(*id).or_insert(0);
                     *value = (*value).max(offset);
                 }
+                // A call-local unknown cannot establish a universal relation.
+                Self::Meta(_) => return None,
                 Self::Succ(inner) => work.push((inner, offset.checked_add(1)?)),
                 Self::Max(a, b) => {
                     work.push((a, offset));
@@ -165,6 +187,7 @@ impl UniverseLevel {
             match level {
                 Self::Concrete(_) => {}
                 Self::Variable(id) => variables.push(*id),
+                Self::Meta(_) => {},
                 Self::Succ(inner) => work.push(inner),
                 Self::Max(a, b) => {
                     work.push(a);
@@ -214,6 +237,7 @@ impl fmt::Display for UniverseLevel {
                 Ok(())
             }
             Self::Variable(id) => write!(f, "u{id}"),
+            Self::Meta(id) => write!(f, "{id}"),
             Self::Succ(inner) => write!(f, "succ({inner})"),
             Self::Max(a, b) => write!(f, "max({a}, {b})"),
         }

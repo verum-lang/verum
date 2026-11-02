@@ -236,6 +236,7 @@ fn qualified_function_shells_bind_only_to_top_level_declarations_of_the_same_kin
     let mut metadata = CoreMetadata::default();
     metadata.types.insert("Contract".into(), ty("core", None));
     let function = FunctionDescriptor {
+        source_signature: None,
         name: "core.Contract".into(),
         module_path: "core".into(),
         origin_module_path: None,
@@ -323,7 +324,7 @@ fn refresh_release_reexports_with_production_scanner() {
     let input = std::env::var_os("VERUM_TEST_LIBRARY_METADATA").expect("input release metadata");
     let output = std::env::var_os("VERUM_TEST_METADATA_OUTPUT").expect("isolated output metadata");
     assert_ne!(input, output);
-    let mut metadata: CoreMetadata = bincode::deserialize(&std::fs::read(input).unwrap()).unwrap();
+    let mut metadata: CoreMetadata = crate::embedded_stdlib_metadata::decode_metadata(&std::fs::read(input).unwrap()).unwrap();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
     scan_module_reexports(&mut metadata, &root, false).unwrap();
     assert!(
@@ -358,5 +359,6 @@ fn refresh_release_reexports_with_production_scanner() {
         verum_modules::ModuleId::new(id)
     })
     .expect("the complete emitted library must have consistent public exports");
-    std::fs::write(output, bincode::serialize(&metadata).unwrap()).unwrap();
+    metadata.version = verum_types::core_metadata::CORE_METADATA_VERSION;
+    std::fs::write(output, crate::embedded_stdlib_metadata::encode_metadata(&metadata).unwrap()).unwrap();
 }

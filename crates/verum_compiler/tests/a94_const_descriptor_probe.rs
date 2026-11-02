@@ -16,7 +16,7 @@ use verum_vbc::archive::read_archive_from_file;
 fn dump_private_const_descriptors() {
     let path = std::env::var("VBCA").expect("set VBCA=/path/to/runtime.vbca");
     let archive = read_archive_from_file(&path).expect("archive readable");
-    let meta = archive_to_core_metadata(&archive);
+    let meta = archive_to_core_metadata(&archive).expect("valid archive metadata");
 
     let witnesses = ["K", "H_INIT", "LF", "RCODE_REFUSED", "CLOCK_TAI"];
     for (key, fd) in meta.functions.iter() {

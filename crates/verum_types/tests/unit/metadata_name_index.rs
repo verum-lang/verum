@@ -7,6 +7,7 @@ use std::sync::Arc;
 fn function(key: &str) -> FunctionDescriptor {
     let (owner, name) = key.rsplit_once('.').unwrap_or(("", key));
     FunctionDescriptor {
+        source_signature: None,
         name: name.into(),
         module_path: owner.into(),
         origin_module_path: None,

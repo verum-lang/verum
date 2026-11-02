@@ -102,9 +102,9 @@ fn render_param_default(
 /// Convert a precompiled stdlib `VbcArchive` into a
 /// [`CoreMetadata`] suitable for `TypeChecker::new_with_core`.
 ///
-/// Best-effort: per-module decode failures are skipped with a
-/// `tracing::warn!`.  An empty archive returns an empty metadata.
-pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
+/// Publication requires every module and semantic signature to validate.
+/// A failed decode cannot silently publish an incomplete declaration set.
+pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Text> {
     let mut meta = CoreMetadata {
         types: OrderedMap::new(),
         type_declaration_order: List::new(),
@@ -112,7 +112,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
         functions: OrderedMap::new(),
         implementations: List::new(),
         monomorphizations: OrderedMap::new(),
-        version: 1,
+        version: verum_types::core_metadata::CORE_METADATA_VERSION,
         content_hash: [0u8; 32],
         context_declarations: List::new(),
         context_decl_nodes: OrderedMap::new(),
@@ -155,17 +155,23 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
     let mut archive_type_names: HashMap<u32, Option<String>> = HashMap::new();
     let mut declarations = std::collections::BTreeMap::new();
     for entry in sorted_index {
-        let module = match archive.load_module(&entry.name) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!(
-                    target: "archive_metadata",
-                    "skip module {}: decode failed ({:?})",
-                    entry.name, e
-                );
-                continue;
+        let module = archive.load_module(&entry.name)
+            .map_err(|error| Text::from(format!("cannot publish module {}: {error}", entry.name)))?;
+        if module.header.version_minor < 30 {
+            return Err(format!("module {} predates semantic universe signatures; rebuild the archive", entry.name).into());
+        }
+        for function in &module.functions {
+            if let Some(signature) = &function.source_signature {
+                verum_ast::source_signature::validate_source_signature(signature, function.parent_type.is_some())?;
+                let name = module.strings.get(function.name)
+                    .ok_or_else(|| Text::from("universe signature descriptor has no name"))?;
+                if name.rsplit('.').next() != Some(signature.name.name.as_str())
+                    || signature.params.len() != function.params.len()
+                {
+                    return Err(format!("semantic universe signature does not belong to descriptor {name}").into());
+                }
             }
-        };
+        }
         for t in module.types.iter() {
             let Some(n) = module.strings.get(t.name) else {
                 continue;
@@ -187,7 +193,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
     resolve_opaque_type_ids_in_alias_targets(&mut meta, &archive_type_names);
     attach_declared_methods(&mut meta);
 
-    meta
+    Ok(meta)
 }
 
 /// Imported carriers can precede their source declaration, including inside
@@ -1493,6 +1499,7 @@ fn register_module_metadata(
             .unwrap_or_else(|| module_path.clone());
 
         let descriptor = FunctionDescriptor {
+            source_signature: fn_desc.source_signature.clone(),
             is_public: matches!(
                 fn_desc.visibility,
                 verum_vbc::types::Visibility::Public
@@ -2265,7 +2272,7 @@ mod tests {
             Some(a) => a,
             None => return,
         };
-        let meta = archive_to_core_metadata(archive);
+        let meta = archive_to_core_metadata(archive).expect("valid archive metadata");
         // Three records whose declared field types are all non-Unit, spread
         // across unrelated subsystems so a single module's regression cannot
         // hide behind another's.
@@ -2301,7 +2308,7 @@ mod tests {
             Some(a) => a,
             None => return,
         };
-        let meta = archive_to_core_metadata(archive);
+        let meta = archive_to_core_metadata(archive).expect("valid archive metadata");
         assert!(
             meta.types.len() > 100,
             "expected >100 types, got {}",
@@ -2324,7 +2331,7 @@ mod tests {
             Some(a) => a,
             None => return,
         };
-        let meta = archive_to_core_metadata(archive);
+        let meta = archive_to_core_metadata(archive).expect("valid archive metadata");
         let bytes = bincode::serialize(&meta).expect("encode");
         let decoded: CoreMetadata = bincode::deserialize(&bytes).expect("decode");
         assert_eq!(meta.types.len(), decoded.types.len());
@@ -2360,7 +2367,7 @@ mod tests {
             Some(a) => a,
             None => return,
         };
-        let meta = archive_to_core_metadata(archive);
+        let meta = archive_to_core_metadata(archive).expect("valid archive metadata");
 
         let mut checked = 0usize;
         let mut has_structural: std::collections::HashSet<String> =

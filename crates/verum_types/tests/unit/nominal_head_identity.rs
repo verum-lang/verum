@@ -240,6 +240,7 @@ fn json_metadata() -> CoreMetadata {
         metadata.types.insert(owner, desc);
     }
     let accessor = FunctionDescriptor {
+        source_signature: None,
         name: "as_object".into(),
         module_path: "core.encoding.json".into(),
         origin_module_path: None,

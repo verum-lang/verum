@@ -8,6 +8,81 @@
 use serde::{Deserialize, Serialize};
 use verum_common::{List, Maybe, OrderedMap, Text};
 
+#[path = "core_metadata_source_signature.rs"]
+mod source_signature_wire;
+
+/// Current sidecar schema; bincode archives must be rebuilt when this changes.
+pub const CORE_METADATA_VERSION: u32 = 2;
+
+/// Framed sidecars reject stale schemas before decoding their AST payloads.
+pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";
+/// Upper bound for the sidecar payload, shared by compiler and Studio readers.
+pub const MAX_CORE_METADATA_BYTES: usize = 512 * 1024 * 1024;
+
+/// Validate the sidecar envelope and return its current-schema binary payload.
+pub fn metadata_payload(bytes: &[u8]) -> Result<&[u8], Text> {
+    if bytes.len() < 12 || &bytes[..8] != CORE_METADATA_MAGIC {
+        return Err("unversioned metadata archive; rebuild the stdlib metadata archive".into());
+    }
+    let version = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    if version != CORE_METADATA_VERSION {
+        return Err(format!("unsupported metadata schema {version}; expected {CORE_METADATA_VERSION}; rebuild the stdlib metadata archive").into());
+    }
+    if bytes.len() - 12 > MAX_CORE_METADATA_BYTES {
+        return Err("metadata archive exceeds its byte budget".into());
+    }
+    Ok(&bytes[12..])
+}
+
+/// Encode the current sidecar schema with a header checked before AST decoding.
+pub fn encode_metadata(metadata: &CoreMetadata) -> Result<Vec<u8>, verum_common::Text> {
+    if metadata.version != CORE_METADATA_VERSION {
+        return Err("metadata schema mismatch; rebuild the stdlib metadata archive".into());
+    }
+    validate_source_signatures(metadata)?;
+    let payload = bincode::serialize(metadata).map_err(|error| verum_common::Text::from(error.to_string()))?;
+    if payload.len() > MAX_CORE_METADATA_BYTES {
+        return Err("metadata archive exceeds its byte budget".into());
+    }
+    let mut bytes = Vec::with_capacity(12 + payload.len());
+    bytes.extend_from_slice(CORE_METADATA_MAGIC);
+    bytes.extend_from_slice(&metadata.version.to_le_bytes());
+    bytes.extend(payload);
+    Ok(bytes)
+}
+
+/// Decode only a framed current-schema sidecar. Legacy/corrupt byte layouts are
+/// never guessed or reinterpreted as erased nominal/existential signatures.
+pub fn decode_metadata(bytes: &[u8]) -> Result<CoreMetadata, verum_common::Text> {
+    use bincode::Options;
+    let payload = metadata_payload(bytes)?;
+    let metadata: CoreMetadata = bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .reject_trailing_bytes()
+        .with_limit(MAX_CORE_METADATA_BYTES as u64)
+        .deserialize(payload)
+        .map_err(|error| verum_common::Text::from(format!("invalid metadata archive; rebuild the stdlib metadata archive: {error}")))?;
+    if metadata.version != CORE_METADATA_VERSION {
+        return Err("metadata header/payload schema mismatch; rebuild the stdlib metadata archive".into());
+    }
+    validate_source_signatures(&metadata)?;
+    Ok(metadata)
+}
+
+fn validate_source_signatures(metadata: &CoreMetadata) -> Result<(), Text> {
+    for descriptor in metadata.functions.values() {
+        if let Some(signature) = &descriptor.source_signature {
+            verum_ast::source_signature::validate_source_signature(signature, descriptor.parent_type.is_some())?;
+            if signature.name.name.as_str() != descriptor.name.as_str().rsplit('.').next().unwrap_or("")
+                || signature.params.len() != descriptor.params.len()
+            {
+                return Err("source signature does not belong to its metadata function descriptor".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Serde default for `is_public`: a descriptor deserialised from an
 /// archive baked before the field existed is treated as PUBLIC.
 ///
@@ -680,6 +755,12 @@ pub struct FunctionDescriptor {
     /// function.  See the field's twin in `TypeDescriptor`.
     #[serde(default)]
     pub origin_module_path: Maybe<Text>,
+
+    /// Complete body-free source signature when universe semantics cannot be
+    /// represented by ABI descriptors. Bound names are lexical AST binders;
+    /// checker-local universe IDs and inferred metas are never serialized.
+    #[serde(default, with = "source_signature_wire")]
+    pub source_signature: Maybe<verum_ast::FunctionDecl>,
 
     /// Generic parameters
     pub generic_params: List<GenericParam>,

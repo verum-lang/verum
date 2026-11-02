@@ -45,6 +45,7 @@ fn declaration(owner: &str, public: bool) -> TypeDescriptor {
 
 fn method(owner: &str, name: &str, public: bool) -> FunctionDescriptor {
     FunctionDescriptor {
+        source_signature: None,
         name: format!("Builder.{name}").into(),
         module_path: "core.bundle".into(),
         origin_module_path: Maybe::Some(owner.into()),

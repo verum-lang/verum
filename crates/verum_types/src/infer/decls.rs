@@ -206,7 +206,7 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested types.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
-        self.with_universe_parameter_scope(&type_decl.generics, false, |checker| {
+        self.with_declared_universe_scope("type", &type_decl.name.name, &type_decl.generics, |checker| {
             checker.register_type_declaration_in_universe_scope(type_decl)
         })
     }
@@ -2665,7 +2665,7 @@ impl TypeChecker {
         // refinement's name check applies here and nowhere else.
         let prev_in_type_decl = self.in_type_declaration;
         self.in_type_declaration = true;
-        let out = self.with_universe_parameter_scope(&type_decl.generics, false, |checker| {
+        let out = self.with_declared_universe_scope("type", &type_decl.name.name, &type_decl.generics, |checker| {
             checker.resolve_type_definition_inner(type_decl, resolution_stack)
         });
         self.in_type_declaration = prev_in_type_decl;
@@ -7026,7 +7026,7 @@ impl TypeChecker {
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
-        self.with_universe_parameter_scope(&func.generics, false, |checker| {
+        self.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
             checker.validate_function_universes(func)?;
             checker.register_function_signature_in_universe_scope(func)
         })
@@ -7348,7 +7348,8 @@ impl TypeChecker {
         } else {
             scheme.with_type_bounds(param_type_bounds)
         };
-        let mut scheme = scheme;
+        let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
+            .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         self.record_explicit_method_vars(&mut scheme, func);
         // Protect builtin generic/meta functions from being DOWNGRADED by stdlib.
         // When a generic builtin (e.g., fn<T>(T) -> T for abs) already exists,

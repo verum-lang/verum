@@ -26,7 +26,7 @@ fn check(first: &str, second: &str) {
     archive
         .add_module("scalar_alias_probe", &module, &[])
         .unwrap();
-    let metadata = archive_to_core_metadata(&archive.finish());
+    let metadata = archive_to_core_metadata(&archive.finish()).expect("valid archive metadata");
     let mut actual: Vec<_> = metadata
         .implementations
         .iter()

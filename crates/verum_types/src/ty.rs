@@ -2672,23 +2672,27 @@ impl Type {
         }
     }
 
-    /// Apply a substitution to this type
-    /// SAFETY: Uses depth limit to prevent exponential type expansion
+    /// Apply an already validated substitution at an internal invariant boundary.
+    /// Source checking must use `try_apply_subst` to return normal diagnostics.
     pub fn apply_subst(&self, subst: &Substitution) -> Type {
-        const MAX_SUBST_DEPTH: usize = 30;
-        self.apply_subst_with_depth(subst, 0, MAX_SUBST_DEPTH)
+        self.try_apply_subst(subst)
+            .expect("internal type substitution must have been validated")
     }
 
-    /// Internal substitution with depth tracking
-    fn apply_subst_with_depth(&self, subst: &Substitution, depth: usize, max_depth: usize) -> Type {
-        // Prevent exponential type growth
+    /// Apply a substitution without losing failed universe constraints or a
+    /// partially visited type when the structural budget is exceeded.
+    pub fn try_apply_subst(&self, subst: &Substitution) -> Result<Type, Text> {
+        const MAX_SUBST_DEPTH: usize = 30;
+        self.try_apply_subst_with_depth(subst, 0, MAX_SUBST_DEPTH)
+    }
+
+    fn try_apply_subst_with_depth(&self, subst: &Substitution, depth: usize, max_depth: usize) -> Result<Type, Text> {
         if depth >= max_depth {
-            tracing::warn!("Maximum type substitution depth ({}) exceeded", max_depth);
-            return self.clone();
+            return Err("type substitution exceeds its structural depth budget".into());
         }
 
         let next_depth = depth + 1;
-        match self {
+        Ok(match self {
             Type::Var(v) => subst.get(v).cloned().unwrap_or_else(|| self.clone()),
             Type::Function {
                 params,
@@ -2699,10 +2703,10 @@ impl Type {
             } => Type::Function {
                 params: params
                     .iter()
-                    .map(|p| p.apply_subst_with_depth(subst, next_depth, max_depth))
-                    .collect(),
+                    .map(|p| p.try_apply_subst_with_depth(subst, next_depth, max_depth))
+                    .collect::<Result<_, Text>>()?,
                 return_type: Box::new(
-                    return_type.apply_subst_with_depth(subst, next_depth, max_depth),
+                    return_type.try_apply_subst_with_depth(subst, next_depth, max_depth)?,
                 ),
                 type_params: type_params.clone(),
                 contexts: contexts.clone(),
@@ -2711,84 +2715,84 @@ impl Type {
             Type::Tuple(types) => Type::Tuple(
                 types
                     .iter()
-                    .map(|t| t.apply_subst_with_depth(subst, next_depth, max_depth))
-                    .collect(),
+                    .map(|t| t.try_apply_subst_with_depth(subst, next_depth, max_depth))
+                    .collect::<Result<_, Text>>()?,
             ),
             Type::Array { element, size } => Type::Array {
-                element: Box::new(element.apply_subst_with_depth(subst, next_depth, max_depth)),
+                element: Box::new(element.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 size: *size,
             },
             Type::Record(fields) => Type::Record(
                 fields
                     .iter()
                     .map(|(k, v)| {
-                        (
+                        Ok((
                             k.clone(),
-                            v.apply_subst_with_depth(subst, next_depth, max_depth),
-                        )
+                            v.try_apply_subst_with_depth(subst, next_depth, max_depth)?,
+                        ))
                     })
-                    .collect(),
+                    .collect::<Result<_, Text>>()?,
             ),
             Type::Variant(variants) => Type::Variant(
                 variants
                     .iter()
                     .map(|(k, v)| {
-                        (
+                        Ok((
                             k.clone(),
-                            v.apply_subst_with_depth(subst, next_depth, max_depth),
-                        )
+                            v.try_apply_subst_with_depth(subst, next_depth, max_depth)?,
+                        ))
                     })
-                    .collect(),
+                    .collect::<Result<_, Text>>()?,
             ),
             Type::Reference { mutable, inner } => Type::Reference {
                 mutable: *mutable,
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::CheckedReference { mutable, inner } => Type::CheckedReference {
                 mutable: *mutable,
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::UnsafeReference { mutable, inner } => Type::UnsafeReference {
                 mutable: *mutable,
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::Ownership { mutable, inner } => Type::Ownership {
                 mutable: *mutable,
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::Pointer { mutable, inner } => Type::Pointer {
                 mutable: *mutable,
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
 
             Type::VolatilePointer { mutable, inner } => Type::VolatilePointer {
                 mutable: *mutable,
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::Refined { base, predicate } => Type::Refined {
-                base: Box::new(base.apply_subst_with_depth(subst, next_depth, max_depth)),
+                base: Box::new(base.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 predicate: predicate.clone(),
             },
             Type::Named { path, args } => Type::Named {
                 path: path.clone(),
                 args: args
                     .iter()
-                    .map(|a| a.apply_subst_with_depth(subst, next_depth, max_depth))
-                    .collect(),
+                    .map(|a| a.try_apply_subst_with_depth(subst, next_depth, max_depth))
+                    .collect::<Result<_, Text>>()?,
             },
             Type::Generic { name, args } => Type::Generic {
                 name: name.clone(),
                 args: args
                     .iter()
-                    .map(|a| a.apply_subst_with_depth(subst, next_depth, max_depth))
-                    .collect(),
+                    .map(|a| a.try_apply_subst_with_depth(subst, next_depth, max_depth))
+                    .collect::<Result<_, Text>>()?,
             },
             Type::Exists { var, body } => {
                 let mut subst = subst.clone();
                 subst.shift_remove(var);
                 Type::Exists {
                     var: *var,
-                    body: Box::new(body.apply_subst_with_depth(&subst, next_depth, max_depth)),
+                    body: Box::new(body.try_apply_subst_with_depth(&subst, next_depth, max_depth)?),
                 }
             }
             Type::Forall { vars, body } => {
@@ -2798,7 +2802,7 @@ impl Type {
                 }
                 Type::Forall {
                     vars: vars.clone(),
-                    body: Box::new(body.apply_subst_with_depth(&subst, next_depth, max_depth)),
+                    body: Box::new(body.try_apply_subst_with_depth(&subst, next_depth, max_depth)?),
                 }
             }
             Type::Meta {
@@ -2808,19 +2812,19 @@ impl Type {
                 value,
             } => Type::Meta {
                 name: name.clone(),
-                ty: Box::new(ty.apply_subst_with_depth(subst, next_depth, max_depth)),
+                ty: Box::new(ty.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 refinement: refinement.clone(),
                 value: value.clone(),
             },
             Type::Future { output } => Type::Future {
-                output: Box::new(output.apply_subst_with_depth(subst, next_depth, max_depth)),
+                output: Box::new(output.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::Generator {
                 yield_ty,
                 return_ty,
             } => Type::Generator {
-                yield_ty: Box::new(yield_ty.apply_subst_with_depth(subst, next_depth, max_depth)),
-                return_ty: Box::new(return_ty.apply_subst_with_depth(subst, next_depth, max_depth)),
+                yield_ty: Box::new(yield_ty.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
+                return_ty: Box::new(return_ty.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::Tensor {
                 element,
@@ -2828,13 +2832,13 @@ impl Type {
                 strides,
                 span,
             } => Type::Tensor {
-                element: Box::new(element.apply_subst_with_depth(subst, next_depth, max_depth)),
+                element: Box::new(element.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 shape: shape.clone(), // Shape is compile-time constant
                 strides: strides.clone(),
                 span: *span,
             },
             Type::GenRef { inner } => Type::GenRef {
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::TypeConstructor { name, arity, kind } => Type::TypeConstructor {
                 name: name.clone(),
@@ -2843,11 +2847,11 @@ impl Type {
             },
             Type::TypeApp { constructor, args } => {
                 let resolved_ctor =
-                    constructor.apply_subst_with_depth(subst, next_depth, max_depth);
+                    constructor.try_apply_subst_with_depth(subst, next_depth, max_depth)?;
                 let resolved_args: List<Type> = args
                     .iter()
-                    .map(|a| a.apply_subst_with_depth(subst, next_depth, max_depth))
-                    .collect();
+                    .map(|a| a.try_apply_subst_with_depth(subst, next_depth, max_depth))
+                    .collect::<Result<_, Text>>()?;
 
                 // Try to reduce TypeApp when constructor is a concrete type with free vars.
                 // This handles GAT resolution: TypeApp { ctor: List<$tv>, args: [Int] } → List<Int>
@@ -2867,7 +2871,7 @@ impl Type {
                         }
                         if !var_subst.is_empty() {
                             return resolved_ctor
-                                .apply_subst_with_depth(&var_subst, next_depth, max_depth);
+                                .try_apply_subst_with_depth(&var_subst, next_depth, max_depth);
                         }
                         // No free vars to substitute — replace args entirely if same arity
                         if ctor_args.len() == resolved_args.len()
@@ -2900,7 +2904,7 @@ impl Type {
                         }
                         if !var_subst.is_empty() {
                             return resolved_ctor
-                                .apply_subst_with_depth(&var_subst, next_depth, max_depth);
+                                .try_apply_subst_with_depth(&var_subst, next_depth, max_depth);
                         }
                         if ctor_args.len() == resolved_args.len()
                             && ctor_args.iter().all(|a| matches!(a, Type::Var(_)))
@@ -2933,10 +2937,10 @@ impl Type {
             } => Type::Pi {
                 param_name: param_name.clone(),
                 param_type: Box::new(
-                    param_type.apply_subst_with_depth(subst, next_depth, max_depth),
+                    param_type.try_apply_subst_with_depth(subst, next_depth, max_depth)?,
                 ),
                 return_type: Box::new(
-                    return_type.apply_subst_with_depth(subst, next_depth, max_depth),
+                    return_type.try_apply_subst_with_depth(subst, next_depth, max_depth)?,
                 ),
             },
             Type::Sigma {
@@ -2945,27 +2949,29 @@ impl Type {
                 snd_type,
             } => Type::Sigma {
                 fst_name: fst_name.clone(),
-                fst_type: Box::new(fst_type.apply_subst_with_depth(subst, next_depth, max_depth)),
-                snd_type: Box::new(snd_type.apply_subst_with_depth(subst, next_depth, max_depth)),
+                fst_type: Box::new(fst_type.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
+                snd_type: Box::new(snd_type.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
             },
             Type::Eq { ty, lhs, rhs } => Type::Eq {
-                ty: Box::new(ty.apply_subst_with_depth(subst, next_depth, max_depth)),
+                ty: Box::new(ty.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 lhs: lhs.clone(), // EqTerms are value-level, not type-level
                 rhs: rhs.clone(),
             },
             Type::PathType { space, left, right } => Type::PathType {
-                space: Box::new(space.apply_subst_with_depth(subst, next_depth, max_depth)),
+                space: Box::new(space.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 left: left.clone(), // CubicalTerms are value-level, not type-level
                 right: right.clone(),
             },
             Type::Partial { element_type, face } => Type::Partial {
                 element_type: Box::new(
-                    element_type.apply_subst_with_depth(subst, next_depth, max_depth),
+                    element_type.try_apply_subst_with_depth(subst, next_depth, max_depth)?,
                 ),
                 face: face.clone(), // CubicalTerms are value-level
             },
             Type::Interval => Type::Interval,
-            Type::Universe { level } => Type::Universe { level: level.clone() },
+            Type::Universe { level } => Type::Universe {
+                level: subst.universes.apply(level)?,
+            },
             Type::Prop => Type::Prop,
             Type::Inductive {
                 name,
@@ -2978,22 +2984,22 @@ impl Type {
                 params: params
                     .iter()
                     .map(|(n, t)| {
-                        (
+                        Ok((
                             n.clone(),
-                            Box::new(t.apply_subst_with_depth(subst, next_depth, max_depth)),
-                        )
+                            Box::new(t.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
+                        ))
                     })
-                    .collect(),
+                    .collect::<Result<_, Text>>()?,
                 indices: indices
                     .iter()
                     .map(|(n, t)| {
-                        (
+                        Ok((
                             n.clone(),
-                            Box::new(t.apply_subst_with_depth(subst, next_depth, max_depth)),
-                        )
+                            Box::new(t.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
+                        ))
                     })
-                    .collect(),
-                universe: universe.clone(),
+                    .collect::<Result<_, Text>>()?,
+                universe: subst.universes.apply(universe)?,
                 constructors: constructors.clone(), // Constructors have their own type context
             },
             Type::Coinductive {
@@ -3005,12 +3011,12 @@ impl Type {
                 params: params
                     .iter()
                     .map(|(n, t)| {
-                        (
+                        Ok((
                             n.clone(),
-                            Box::new(t.apply_subst_with_depth(subst, next_depth, max_depth)),
-                        )
+                            Box::new(t.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
+                        ))
                     })
-                    .collect(),
+                    .collect::<Result<_, Text>>()?,
                 destructors: destructors.clone(),
             },
             Type::HigherInductive {
@@ -3023,17 +3029,17 @@ impl Type {
                 params: params
                     .iter()
                     .map(|(n, t)| {
-                        (
+                        Ok((
                             n.clone(),
-                            Box::new(t.apply_subst_with_depth(subst, next_depth, max_depth)),
-                        )
+                            Box::new(t.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
+                        ))
                     })
-                    .collect(),
+                    .collect::<Result<_, Text>>()?,
                 point_constructors: point_constructors.clone(),
                 path_constructors: path_constructors.clone(),
             },
             Type::Quantified { inner, quantity } => Type::Quantified {
-                inner: Box::new(inner.apply_subst_with_depth(subst, next_depth, max_depth)),
+                inner: Box::new(inner.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 quantity: *quantity,
             },
 
@@ -3046,11 +3052,11 @@ impl Type {
             // unifying it against a method's `&[T]` pinned the enclosing
             // `implement<T> …` block's parameter (T0742).
             Type::Slice { element } => Type::Slice {
-                element: Box::new(element.apply_subst_with_depth(
+                element: Box::new(element.try_apply_subst_with_depth(
                     subst,
                     next_depth,
                     max_depth,
-                )),
+                )?),
             },
 
             // Primitives and other leaf types
@@ -3070,20 +3076,20 @@ impl Type {
                 bindings: bindings
                     .iter()
                     .map(|(k, v)| {
-                        (
+                        Ok((
                             k.clone(),
-                            v.apply_subst_with_depth(subst, next_depth, max_depth),
-                        )
+                            v.try_apply_subst_with_depth(subst, next_depth, max_depth)?,
+                        ))
                     })
-                    .collect(),
+                    .collect::<Result<_, Text>>()?,
             },
 
             // ExtensibleRecord - substitute into fields, keep row variable
             Type::ExtensibleRecord { fields, row_var } => {
                 let new_fields = fields
                     .iter()
-                    .map(|(k, v)| (k.clone(), v.apply_subst(subst)))
-                    .collect();
+                    .map(|(k, v)| Ok((k.clone(), v.try_apply_subst_with_depth(subst, next_depth, max_depth)?)))
+                    .collect::<Result<_, Text>>()?;
                 Type::ExtensibleRecord {
                     fields: new_fields,
                     row_var: *row_var,
@@ -3092,14 +3098,14 @@ impl Type {
 
             // CapabilityRestricted - substitute into base, keep capabilities
             Type::CapabilityRestricted { base, capabilities } => Type::CapabilityRestricted {
-                base: Box::new(base.apply_subst_with_depth(subst, next_depth, max_depth)),
+                base: Box::new(base.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
                 capabilities: capabilities.clone(),
             },
 
             // Unknown type - a top type with no inner structure to substitute
             // Spec: Unknown is a safe top type that doesn't unify with other types
             Type::Unknown => Type::Unknown,
-        }
+        })
     }
 
     /// Check if this type is a monotype (no type variables)
@@ -3641,25 +3647,53 @@ impl ToText for TypeVar {
 }
 
 /// A substitution maps type variables to types.
-pub type Substitution = IndexMap<TypeVar, Type>;
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Substitution {
+    types: IndexMap<TypeVar, Type>,
+    pub(crate) universes: crate::universe_inference::UniverseInference,
+}
+
+impl Substitution {
+    pub fn new() -> Self { Self::default() }
+    pub fn is_empty(&self) -> bool { self.types.is_empty() && self.universes.is_empty() }
+}
+
+impl std::ops::Deref for Substitution {
+    type Target = IndexMap<TypeVar, Type>;
+    fn deref(&self) -> &Self::Target { &self.types }
+}
+impl std::ops::DerefMut for Substitution {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.types }
+}
+impl FromIterator<(TypeVar, Type)> for Substitution {
+    fn from_iter<I: IntoIterator<Item = (TypeVar, Type)>>(items: I) -> Self {
+        Self { types: items.into_iter().collect(), universes: Default::default() }
+    }
+}
+impl<'a> IntoIterator for &'a Substitution {
+    type Item = (&'a TypeVar, &'a Type);
+    type IntoIter = indexmap::map::Iter<'a, TypeVar, Type>;
+    fn into_iter(self) -> Self::IntoIter { self.types.iter() }
+}
 
 /// Extension trait for Substitution
 pub trait SubstitutionExt {
-    /// Compose two substitutions: apply s1 after s2
-    fn compose(&self, other: &Substitution) -> Substitution;
+    /// Compose two substitutions: apply `other` after `self`, checking levels.
+    fn compose(&self, other: &Substitution) -> Result<Substitution, Text>;
 
     /// Get the domain (set of variables being substituted)
     fn domain(&self) -> Set<TypeVar>;
 }
 
 impl SubstitutionExt for Substitution {
-    fn compose(&self, other: &Substitution) -> Substitution {
+    fn compose(&self, other: &Substitution) -> Result<Substitution, Text> {
         let mut result = Substitution::new();
+        result.universes = self.universes.compose(&other.universes)?;
 
         // Apply other to all types in self (s1.compose(s2) means apply s2 after s1)
         // So for each v -> t in s1, we get v -> s2(t)
         for (var, ty) in self {
-            result.insert(*var, ty.apply_subst(other));
+            result.insert(*var, ty.try_apply_subst(other)?);
         }
 
         // Add bindings from other that aren't in self
@@ -3669,7 +3703,7 @@ impl SubstitutionExt for Substitution {
             }
         }
 
-        result
+        Ok(result)
     }
 
     fn domain(&self) -> Set<TypeVar> {

@@ -203,6 +203,7 @@ fn source_mounts_and_reexports_carry_roles_without_classifying_function_types() 
 
 fn function(name: &str, is_const: bool) -> FunctionDescriptor {
     FunctionDescriptor {
+        source_signature: None,
         name: name.into(),
         module_path: "core.roles".into(),
         origin_module_path: Maybe::None,

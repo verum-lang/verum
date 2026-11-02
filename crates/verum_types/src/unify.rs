@@ -1269,8 +1269,8 @@ impl Unifier {
         let mut subst = Substitution::new();
         for (arg, payload) in args.iter().zip(non_unit_payloads.iter()) {
             let s =
-                self.unify_inner(&arg.apply_subst(&subst), &payload.apply_subst(&subst), span)?;
-            subst = subst.compose(&s);
+                self.unify_inner(&arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &payload.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
         }
         Ok(subst)
     }
@@ -1288,13 +1288,20 @@ impl Unifier {
     /// Apply the current accumulated substitution to a type,
     /// also resolving context variable bindings.
     pub fn apply(&self, ty: &Type) -> Type {
-        let resolved = ty.apply_subst(&self.substitution);
+        self.try_apply(ty, Span::default())
+            .expect("internal unifier application must have been validated")
+    }
+
+    /// Apply on a source-checking path, preserving substitution diagnostics.
+    pub fn try_apply(&self, ty: &Type, span: Span) -> Result<Type> {
+
+        let resolved = ty.try_apply_subst(&self.substitution).map_err(|message| TypeError::UniverseBinding { message, span })?;
         // Also resolve context variables in function types
-        if !self.context_bindings.is_empty() {
+        Ok(if !self.context_bindings.is_empty() {
             self.resolve_context_vars(&resolved)
         } else {
             resolved
-        }
+        })
     }
 
     /// Save the current substitution state for tentative unification.
@@ -1668,8 +1675,8 @@ impl Unifier {
         }
 
         // Apply current substitution to both types before unifying
-        let t1_resolved = t1.apply_subst(&self.substitution);
-        let t2_resolved = t2.apply_subst(&self.substitution);
+        let t1_resolved = t1.try_apply_subst(&self.substitution).map_err(|message| TypeError::UniverseBinding { message, span })?;
+        let t2_resolved = t2.try_apply_subst(&self.substitution).map_err(|message| TypeError::UniverseBinding { message, span })?;
 
         // Unify the resolved types, with type alias fallback.
         // If direct unification fails, try expanding type aliases on either
@@ -1695,7 +1702,7 @@ impl Unifier {
         };
 
         // Compose with accumulated substitution
-        self.substitution = self.substitution.compose(&new_subst);
+        self.substitution = self.substitution.compose(&new_subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
 
         Ok(new_subst)
     }
@@ -2082,13 +2089,13 @@ impl Unifier {
                 // Unify parameters
                 for (pt1, pt2) in p1.iter().zip(p2.iter()) {
                     let s =
-                        self.unify_inner(&pt1.apply_subst(&subst), &pt2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&pt1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &pt2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
 
                 // Unify return types
-                let s = self.unify_inner(&r1.apply_subst(&subst), &r2.apply_subst(&subst), span)?;
-                Ok(subst.compose(&s))
+                let s = self.unify_inner(&r1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &r2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                Ok(subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?)
             }
 
             // Tuple types
@@ -2104,8 +2111,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for (ty1, ty2) in t1s.iter().zip(t2s.iter()) {
                     let s =
-                        self.unify_inner(&ty1.apply_subst(&subst), &ty2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
                 Ok(subst)
             }
@@ -2227,11 +2234,11 @@ impl Unifier {
 
                     // Unify the element types
                     let s = self.unify_inner(
-                        &e1.apply_subst(&subst),
-                        &app_args[0].apply_subst(&subst),
+                        &e1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                        &app_args[0].try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                         span,
                     )?;
-                    Ok(subst.compose(&s))
+                    Ok(subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?)
                 } else if let Type::TypeConstructor { name, arity: 1, .. } = constructor.as_ref() {
                     if self.is_array_coercible(name.as_str()) {
                         // Already an array-coercible collection constructor, just unify element types
@@ -2300,11 +2307,11 @@ impl Unifier {
                     match f2.get(name) {
                         Some(ty2) => {
                             let s = self.unify_inner(
-                                &ty1.apply_subst(&subst),
-                                &ty2.apply_subst(&subst),
+                                &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                 span,
                             )?;
-                            subst = subst.compose(&s);
+                            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                         }
                         None => {
                             return Err(TypeError::Mismatch {
@@ -2336,11 +2343,11 @@ impl Unifier {
                 for (name, ty1) in f1 {
                     if let Some(ty2) = f2.get(name) {
                         let s = self.unify_inner(
-                            &ty1.apply_subst(&subst),
-                            &ty2.apply_subst(&subst),
+                            &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                            &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                             span,
                         )?;
-                        subst = subst.compose(&s);
+                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                     } else if r2.is_none() {
                         // f1 has a field that f2 doesn't, and f2 is closed
                         return Err(TypeError::Mismatch {
@@ -2368,7 +2375,7 @@ impl Unifier {
                     (Some(rv1), Some(rv2)) => {
                         // Both are open - unify the row variables
                         let s = self.unify_inner(&Type::Var(*rv1), &Type::Var(*rv2), span)?;
-                        subst = subst.compose(&s);
+                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                     }
                     (Some(rv), None) | (None, Some(rv)) => {
                         // One open, one closed - bind row variable to empty record
@@ -2394,7 +2401,7 @@ impl Unifier {
                             Type::Record(remaining_fields)
                         };
                         let s = self.bind_var(*rv, &remaining_type, span)?;
-                        subst = subst.compose(&s);
+                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                     }
                     (None, None) => {
                         // Both closed - must have exactly same fields (already checked)
@@ -2426,11 +2433,11 @@ impl Unifier {
                     match rec_fields.get(name) {
                         Some(ty2) => {
                             let s = self.unify_inner(
-                                &ty1.apply_subst(&subst),
-                                &ty2.apply_subst(&subst),
+                                &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                 span,
                             )?;
-                            subst = subst.compose(&s);
+                            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                         }
                         None => {
                             return Err(TypeError::Mismatch {
@@ -2452,7 +2459,7 @@ impl Unifier {
 
                     let remaining_type = Type::Record(remaining_fields);
                     let s = self.bind_var(*rv, &remaining_type, span)?;
-                    subst = subst.compose(&s);
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 } else {
                     // Extensible record is closed (no row var) - must have exact same fields
                     if ext_fields.len() != rec_fields.len() {
@@ -2502,12 +2509,12 @@ impl Unifier {
                         match v2.get(tag) {
                             Some(ty2) => {
                                 match self.unify_inner(
-                                    &ty1.apply_subst(&subst),
-                                    &ty2.apply_subst(&subst),
+                                    &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                    &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                     span,
                                 ) {
                                     Ok(s) => {
-                                        subst = subst.compose(&s);
+                                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                                     }
                                     Err(_) => {
                                         all_matched = false;
@@ -2546,10 +2553,10 @@ impl Unifier {
                         let ty_s = &smaller[name];
                         if let Some(ty_l) = larger.get(name) {
                             let (a, b) =
-                                (ty_s.apply_subst(&subst), ty_l.apply_subst(&subst));
+                                (ty_s.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, ty_l.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?);
                             match self.unify_inner(&a, &b, span) {
                                 Ok(s) => {
-                                    subst = subst.compose(&s);
+                                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                                 }
                                 Err(e) => {
                                     if !Self::has_type_vars(&a) && !Self::has_type_vars(&b) {
@@ -2595,11 +2602,11 @@ impl Unifier {
                         for name in &shared {
                             if let (Some(ty1), Some(ty2)) = (v1.get(*name), v2.get(*name)) {
                                 if let Ok(s) = self.unify_inner(
-                                    &ty1.apply_subst(&subst),
-                                    &ty2.apply_subst(&subst),
+                                    &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                    &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                     span,
                                 ) {
-                                    subst = subst.compose(&s);
+                                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                                 }
                             }
                         }
@@ -2662,11 +2669,11 @@ impl Unifier {
                     match bi2.get(name) {
                         Some(ty2) => {
                             let s = self.unify_inner(
-                                &ty1.apply_subst(&subst),
-                                &ty2.apply_subst(&subst),
+                                &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                 span,
                             )?;
-                            subst = subst.compose(&s);
+                            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                         }
                         None => {
                             return Err(TypeError::Mismatch {
@@ -3232,11 +3239,11 @@ impl Unifier {
                         let mut subst = Substitution::new();
                         for (ty1, ty2) in a1.iter().zip(a2.iter()) {
                             let s = self.unify_inner(
-                                &ty1.apply_subst(&subst),
-                                &ty2.apply_subst(&subst),
+                                &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                 span,
                             )?;
-                            subst = subst.compose(&s);
+                            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                         }
                         return Ok(subst);
                     }
@@ -3306,8 +3313,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for (ty1, ty2) in a1.iter().zip(a2.iter()) {
                     let s =
-                        self.unify_inner(&ty1.apply_subst(&subst), &ty2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
                 Ok(subst)
             }
@@ -3353,8 +3360,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for (ty1, ty2) in a1.iter().zip(a2.iter()) {
                     let s =
-                        self.unify_inner(&ty1.apply_subst(&subst), &ty2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
                 Ok(subst)
             }
@@ -3453,8 +3460,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for (ty1, ty2) in a1.iter().zip(a2.iter()) {
                     let s =
-                        self.unify_inner(&ty1.apply_subst(&subst), &ty2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
                 Ok(subst)
             }
@@ -3496,8 +3503,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for (ty1, ty2) in a1.iter().zip(a2.iter()) {
                     let s =
-                        self.unify_inner(&ty1.apply_subst(&subst), &ty2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
                 Ok(subst)
             }
@@ -3623,11 +3630,11 @@ impl Unifier {
                                 args.iter().zip(extracted_args.iter())
                             {
                                 let s = self.unify_inner(
-                                    &generic_arg.apply_subst(&subst),
-                                    &extracted_arg.apply_subst(&freshen).apply_subst(&subst),
+                                    &generic_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                    &extracted_arg.try_apply_subst(&freshen).map_err(|message| TypeError::UniverseBinding { message, span })?.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                     span,
                                 )?;
-                                subst = subst.compose(&s);
+                                subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                             }
                             return Ok(subst);
                         }
@@ -3760,11 +3767,11 @@ impl Unifier {
                             for (named_arg, extracted_arg) in args.iter().zip(extracted_args.iter())
                             {
                                 let s = self.unify_inner(
-                                    &named_arg.apply_subst(&subst),
-                                    &extracted_arg.apply_subst(&freshen).apply_subst(&subst),
+                                    &named_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                    &extracted_arg.try_apply_subst(&freshen).map_err(|message| TypeError::UniverseBinding { message, span })?.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                     span,
                                 )?;
-                                subst = subst.compose(&s);
+                                subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                             }
                             return Ok(subst);
                         }
@@ -3792,7 +3799,7 @@ impl Unifier {
                     if let Some(arg_ty) = args.get(idx) {
                         // Unify the type variable with the argument type
                         let s = self.unify_inner(&Type::Var(*tv), arg_ty, span)?;
-                        subst = subst.compose(&s);
+                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                     }
                 }
 
@@ -3859,11 +3866,11 @@ impl Unifier {
                         for (idx, app_arg) in app_args.iter().enumerate() {
                             if let Some(tv) = variant_type_vars.get(idx) {
                                 let s = self.unify_inner(
-                                    &app_arg.apply_subst(&subst),
-                                    &Type::Var(*tv).apply_subst(&subst),
+                                    &app_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                    &Type::Var(*tv).try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                     span,
                                 )?;
-                                subst = subst.compose(&s);
+                                subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                             }
                         }
 
@@ -3897,11 +3904,11 @@ impl Unifier {
                                 for (idx, app_arg) in app_args.iter().enumerate() {
                                     if let Some(tv) = variant_type_vars.get(idx) {
                                         let s = self.unify_inner(
-                                            &app_arg.apply_subst(&subst),
-                                            &Type::Var(*tv).apply_subst(&subst),
+                                            &app_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                            &Type::Var(*tv).try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                             span,
                                         )?;
-                                        subst = subst.compose(&s);
+                                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                                     }
                                 }
                                 return Ok(subst);
@@ -4040,8 +4047,8 @@ impl Unifier {
 
                 // For dependent return types, we need alpha-equivalence
                 // Substitute the parameter names to a common fresh variable
-                let r1_applied = r1.apply_subst(&subst);
-                let r2_applied = r2.apply_subst(&subst);
+                let r1_applied = r1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
+                let r2_applied = r2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
 
                 // If parameter names differ, rename one to match the other
                 let r2_renamed = if n1 != n2 {
@@ -4051,7 +4058,7 @@ impl Unifier {
                 };
 
                 let s2 = self.unify_inner(&r1_applied, &r2_renamed, span)?;
-                Ok(subst.compose(&s2))
+                Ok(subst.compose(&s2).map_err(|message| TypeError::UniverseBinding { message, span })?)
             }
 
             // Sigma Types (Dependent Pairs)
@@ -4075,8 +4082,8 @@ impl Unifier {
                 let subst = self.unify_inner(f1, f2, span)?;
 
                 // For dependent second component, handle alpha-equivalence
-                let s1_applied = s1.apply_subst(&subst);
-                let s2_applied = s2.apply_subst(&subst);
+                let s1_applied = s1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
+                let s2_applied = s2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
 
                 let s2_renamed = if n1 != n2 {
                     Self::rename_bound_var(&s2_applied, n2, n1)
@@ -4085,7 +4092,7 @@ impl Unifier {
                 };
 
                 let sub2 = self.unify_inner(&s1_applied, &s2_renamed, span)?;
-                Ok(subst.compose(&sub2))
+                Ok(subst.compose(&sub2).map_err(|message| TypeError::UniverseBinding { message, span })?)
             }
 
             // Equality Types
@@ -4247,15 +4254,9 @@ impl Unifier {
             // Type_n unifies with Type_m if n == m
             // Universe polymorphism is handled by level variables
             (Universe { level: l1 }, Universe { level: l2 }) => {
-                if Self::universe_levels_unify(l1, l2) {
-                    Ok(Substitution::new())
-                } else {
-                    Err(TypeError::Mismatch {
-                        expected: format!("Type{}", l2).into(),
-                        actual: format!("Type{}", l1).into(),
-                        span,
-                    })
-                }
+                let mut result = Substitution::new();
+                result.universes.unify(l1, l2).map_err(|message| TypeError::UniverseBinding { message, span })?;
+                Ok(result)
             }
 
             // Prop (Proof-Irrelevant Propositions)
@@ -4324,8 +4325,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for ((_, t1), (_, t2)) in p1.iter().zip(p2.iter()) {
                     let s =
-                        self.unify_inner(&t1.apply_subst(&subst), &t2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&t1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &t2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
 
                 // Unify indices (for indexed families like List<T, n>)
@@ -4339,8 +4340,8 @@ impl Unifier {
 
                 for ((_, t1), (_, t2)) in i1.iter().zip(i2.iter()) {
                     let s =
-                        self.unify_inner(&t1.apply_subst(&subst), &t2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&t1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &t2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
 
                 Ok(subst)
@@ -4390,8 +4391,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for ((_, t1), (_, t2)) in p1.iter().zip(p2.iter()) {
                     let s =
-                        self.unify_inner(&t1.apply_subst(&subst), &t2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&t1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &t2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
 
                 Ok(subst)
@@ -4451,8 +4452,8 @@ impl Unifier {
                 let mut subst = Substitution::new();
                 for ((_, t1), (_, t2)) in p1.iter().zip(p2.iter()) {
                     let s =
-                        self.unify_inner(&t1.apply_subst(&subst), &t2.apply_subst(&subst), span)?;
-                    subst = subst.compose(&s);
+                        self.unify_inner(&t1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &t2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
 
                 Ok(subst)
@@ -4508,7 +4509,7 @@ impl Unifier {
                 // Rename v2 to v1 in b2 for alpha equivalence
                 let mut rename_subst = Substitution::new();
                 rename_subst.insert(*v2, Type::Var(*v1));
-                let b2_renamed = b2.apply_subst(&rename_subst);
+                let b2_renamed = b2.try_apply_subst(&rename_subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
 
                 // Unify the bodies
                 self.unify_inner(b1, &b2_renamed, span)
@@ -4520,7 +4521,7 @@ impl Unifier {
                 // The concrete type becomes the witness for the existential
                 let mut subst = Substitution::new();
                 subst.insert(*var, ty.clone());
-                let body_subst = body.apply_subst(&subst);
+                let body_subst = body.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
 
                 // Unify the instantiated body with the concrete type
                 self.unify_inner(&body_subst, ty, span)
@@ -4555,7 +4556,7 @@ impl Unifier {
                 for (v1, v2) in vs1.iter().zip(vs2.iter()) {
                     rename_subst.insert(*v2, Type::Var(*v1));
                 }
-                let b2_renamed = b2.apply_subst(&rename_subst);
+                let b2_renamed = b2.try_apply_subst(&rename_subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
 
                 // Unify the bodies
                 self.unify_inner(b1, &b2_renamed, span)
@@ -4577,7 +4578,7 @@ impl Unifier {
                 for v in vars.iter() {
                     inst.insert(*v, Type::Var(TypeVar::fresh()));
                 }
-                let body_inst = body.apply_subst(&inst);
+                let body_inst = body.try_apply_subst(&inst).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 self.unify_inner(&body_inst, ty, span)
             }
             // * A ∀ is REQUIRED, actual is a (freshly instantiated) mono
@@ -4600,7 +4601,7 @@ impl Unifier {
                         },
                     );
                 }
-                let body_sk = body.apply_subst(&skolemize);
+                let body_sk = body.try_apply_subst(&skolemize).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 self.unify_inner(ty, &body_sk, span)
             }
 
@@ -4631,11 +4632,11 @@ impl Unifier {
                 // Unify each argument
                 for (arg1, arg2) in a1.iter().zip(a2.iter()) {
                     let s = self.unify_inner(
-                        &arg1.apply_subst(&subst),
-                        &arg2.apply_subst(&subst),
+                        &arg1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                        &arg2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                         span,
                     )?;
-                    subst = subst.compose(&s);
+                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
 
                 Ok(subst)
@@ -4713,11 +4714,11 @@ impl Unifier {
                     // Unify the arguments
                     for (app_arg, gen_arg) in app_args.iter().zip(gen_args.iter()) {
                         let s = self.unify_inner(
-                            &app_arg.apply_subst(&subst),
-                            &gen_arg.apply_subst(&subst),
+                            &app_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                            &gen_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                             span,
                         )?;
-                        subst = subst.compose(&s);
+                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                     }
 
                     Ok(subst)
@@ -4731,11 +4732,11 @@ impl Unifier {
                             let mut subst = Substitution::new();
                             for (app_arg, gen_arg) in app_args.iter().zip(gen_args.iter()) {
                                 let s = self.unify_inner(
-                                    &app_arg.apply_subst(&subst),
-                                    &gen_arg.apply_subst(&subst),
+                                    &app_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                                    &gen_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                                     span,
                                 )?;
-                                subst = subst.compose(&s);
+                                subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                             }
                             return Ok(subst);
                         }
@@ -4803,11 +4804,11 @@ impl Unifier {
                     // Unify the arguments
                     for (app_arg, named_arg) in app_args.iter().zip(named_args.iter()) {
                         let s = self.unify_inner(
-                            &app_arg.apply_subst(&subst),
-                            &named_arg.apply_subst(&subst),
+                            &app_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
+                            &named_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
                             span,
                         )?;
-                        subst = subst.compose(&s);
+                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                     }
 
                     Ok(subst)

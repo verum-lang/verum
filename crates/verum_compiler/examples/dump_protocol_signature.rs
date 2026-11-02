@@ -22,7 +22,7 @@ fn main() {
                     return;
                 }
             };
-            match bincode::deserialize::<verum_types::core_metadata::CoreMetadata>(&bytes) {
+            match verum_compiler::embedded_stdlib_metadata::decode_metadata(&bytes) {
                 Ok(m) => std::sync::Arc::new(m),
                 Err(e) => {
                     eprintln!("cannot decode {path}: {e}");

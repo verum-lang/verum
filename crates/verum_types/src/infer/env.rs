@@ -392,7 +392,7 @@ impl TypeChecker {
                 }
             }
         }
-        let scheme = Self::scheme_from_function_descriptor(fd, &metadata);
+        let scheme = self.scheme_from_function_descriptor(fd, &metadata)?;
         // A qualified lookup owns only its qualified cache entry. Caching it
         // under the global leaf would make the next mounted owner order-dependent.
         self.ctx.env.insert(Text::from(qualified_name), scheme.clone());
@@ -583,6 +583,47 @@ impl TypeChecker {
     }
 
     pub(super) fn scheme_from_function_descriptor(
+        &mut self,
+        fd: &crate::core_metadata::FunctionDescriptor,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) -> Option<crate::context::TypeScheme> {
+        let Some(source) = &fd.source_signature else {
+            return Some(Self::legacy_scheme_from_function_descriptor(fd, metadata));
+        };
+        let failure = |message| crate::TypeError::UniverseBinding { message, span: source.span };
+        let result = (|| {
+            verum_ast::source_signature::validate_source_signature(source, fd.parent_type.is_some())
+                .map_err(failure)?;
+            let owner = fd.origin_module_path.as_ref().filter(|path| !path.is_empty())
+                .unwrap_or(&fd.module_path);
+            let declared = verum_common::qualified_name::qualify_module_name(owner, &source.name.name);
+            if fd.is_const || (fd.name != source.name.name && fd.name != declared) {
+                return Err(failure("typed source signature does not match its function descriptor".into()));
+            }
+            let saved_owner = std::mem::replace(&mut self.current_module_path, owner.clone());
+            let saved_scope = std::mem::replace(&mut self.resolving_source_signature, true);
+            self.push_decl_param_frame(indexmap::IndexMap::new());
+            self.ctx.enter_scope();
+            let result = self.register_function_signature(source).and_then(|()| {
+                self.ctx.env.lookup(source.name.name.as_str()).cloned().ok_or_else(||
+                    failure("typed source signature did not produce a callable scheme".into()))
+            });
+            self.ctx.exit_scope();
+            self.pop_decl_param_frame();
+            self.resolving_source_signature = saved_scope;
+            self.current_module_path = saved_owner;
+            result
+        })();
+        match result {
+            Ok(scheme) => Some(scheme),
+            Err(error) => {
+                self.deferred_soundness_errors.push(error);
+                None
+            }
+        }
+    }
+
+    fn legacy_scheme_from_function_descriptor(
         fd: &crate::core_metadata::FunctionDescriptor,
         metadata: &crate::core_metadata::CoreMetadata,
     ) -> crate::context::TypeScheme {

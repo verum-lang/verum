@@ -3047,7 +3047,10 @@ fn substitute_refinement_binder(
                 };
                 self.validate_explicit_array_lengths(&ty)?;
                 let provided = self.ast_to_type(&ty)?;
-                combined.extend(self.unifier.unify(&Type::Var(*var), &provided, span)?);
+                use crate::ty::SubstitutionExt;
+                let inferred = self.unifier.unify(&Type::Var(*var), &provided, span)?;
+                combined = combined.compose(&inferred)
+                    .map_err(|message| TypeError::UniverseBinding { message, span })?;
             }
         }
         Ok(combined)

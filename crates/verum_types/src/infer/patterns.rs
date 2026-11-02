@@ -3524,6 +3524,7 @@ impl TypeChecker {
                     impl_var_count: 0,
                     impl_self_type: None,
                     explicit_method_vars: None,
+                    universe_params: List::new(),
                 },
             );
         }

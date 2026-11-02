@@ -1576,7 +1576,16 @@ impl<'s> CompilationPipeline<'s> {
                 );
 
                 // Convert cached metadata to TypeChecker-compatible format
-                let stdlib_meta = Self::convert_cached_metadata_to_stdlib(&entry.metadata);
+                let stdlib_meta = match Self::convert_cached_metadata_to_stdlib(&entry.metadata) {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        // The legacy cache may contain only the first line of
+                        // a declaration. Keep it out of the type environment;
+                        // the normal loader must check the complete source.
+                        warn!("Stdlib cache cannot supply checked signatures: {error}. Checking complete source declarations.");
+                        return Ok(());
+                    }
+                };
                 self.stdlib_metadata = StdlibMetadataState::Eager(Some(
                     std::sync::Arc::new(stdlib_meta),
                 ));
@@ -1607,13 +1616,26 @@ impl<'s> CompilationPipeline<'s> {
     /// a whole pipeline.
     pub fn convert_cached_metadata_to_stdlib(
         cached: &crate::core_cache::CachedCoreMetadata,
-    ) -> verum_types::core_metadata::CoreMetadata {
+    ) -> Result<verum_types::core_metadata::CoreMetadata> {
         use verum_types::core_metadata::*;
 
         let mut metadata = CoreMetadata::default();
 
         // Convert types
         for cached_type in &cached.types {
+            let parsed = verum_fast_parser::Parser::new(&cached_type.definition).parse_module()
+                .map_err(|error| anyhow::anyhow!("cached declaration {} cannot be validated: {error:?}; rebuild from source", cached_type.path))?;
+            let [item] = parsed.items.as_slice() else {
+                anyhow::bail!("cached declaration {} is not one complete type declaration; rebuild from source", cached_type.path);
+            };
+            let verum_ast::ItemKind::Type(declaration) = &item.kind else {
+                anyhow::bail!("cached declaration {} is not a type declaration; rebuild from source", cached_type.path);
+            };
+            if verum_ast::source_signature::type_declaration_uses_universes(declaration)
+                .map_err(|error| anyhow::anyhow!("{error}"))?
+            {
+                anyhow::bail!("cached declaration {} lacks a semantic universe signature; rebuild from source", cached_type.path);
+            }
             let declaring_module = cached_type
                 .path
                 .rsplit_once('.')
@@ -1696,7 +1718,21 @@ impl<'s> CompilationPipeline<'s> {
 
         // Convert functions
         for cached_func in &cached.functions {
+            let parsed = verum_fast_parser::Parser::new(&cached_func.signature).parse_module()
+                .map_err(|error| anyhow::anyhow!("cached declaration {} cannot be validated: {error:?}; rebuild from source", cached_func.path))?;
+            let [item] = parsed.items.as_slice() else {
+                anyhow::bail!("cached declaration {} is not one complete function declaration; rebuild from source", cached_func.path);
+            };
+            let verum_ast::ItemKind::Function(declaration) = &item.kind else {
+                anyhow::bail!("cached declaration {} is not a function declaration; rebuild from source", cached_func.path);
+            };
+            if verum_ast::source_signature::signature_uses_universes(declaration)
+                .map_err(|error| anyhow::anyhow!("{error}"))?
+            {
+                anyhow::bail!("cached declaration {} lacks a semantic universe signature; rebuild from source", cached_func.path);
+            }
             let func_desc = FunctionDescriptor {
+                source_signature: None,
                 // The incremental cache (`CachedTypeInfo` /
                 // `CachedFunctionInfo`) records no visibility, so this
                 // path cannot filter and keeps the pre-A94 behaviour.
@@ -1752,7 +1788,7 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         // Set version and content hash
-        metadata.version = 1;
+        metadata.version = CORE_METADATA_VERSION;
         // Content hash is set to zeros - it will be validated by the cache layer
         metadata.content_hash = [0u8; 32];
 
@@ -1763,7 +1799,7 @@ impl<'s> CompilationPipeline<'s> {
             .map(|s| verum_common::Text::from(s.as_str()))
             .collect();
 
-        metadata
+        Ok(metadata)
     }
 
     /// Parse generic type parameters from a cached type definition string.

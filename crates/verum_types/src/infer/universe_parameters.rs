@@ -16,7 +16,8 @@ pub(super) struct UniverseParameterScopes {
     // Exact source identity reuses a binder during preregistration/body passes.
     // Hash collisions in the map cannot equate distinct keys. Module ownership
     // distinguishes independently parsed modules with the same source offsets.
-    identities: Map<(Text, Span, Text), u32>,
+    identities: Map<(Text, (Text, Text), Span, Text), u32>,
+    declaration: (Text, Text),
 }
 
 struct UniverseParameterFrame {
@@ -51,6 +52,30 @@ fn error_at(message: impl Into<Text>, span: Span) -> TypeError {
 }
 
 impl TypeChecker {
+    pub(super) fn with_declared_universe_scope<T>(
+        &mut self,
+        kind: &str,
+        name: &Text,
+        parameters: &List<GenericParam>,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let saved = std::mem::replace(
+            &mut self.universe_parameters.declaration,
+            (kind.into(), name.clone()),
+        );
+        let result = self.with_universe_parameter_scope(parameters, false, operation);
+        self.universe_parameters.declaration = saved;
+        result
+    }
+
+    pub(super) fn current_universe_parameters(&self) -> List<u32> {
+        let mut parameters: List<_> = self.universe_parameters.frames.last()
+            .map(|frame| frame.bindings.values().filter_map(|value| *value).collect())
+            .unwrap_or_default();
+        parameters.sort_unstable();
+        parameters
+    }
+
     pub(super) fn with_universe_parameter_scope<T>(
         &mut self,
         parameters: &List<GenericParam>,
@@ -86,6 +111,7 @@ impl TypeChecker {
                 }
                 let key = (
                     self.current_module_path.clone(),
+                    self.universe_parameters.declaration.clone(),
                     parameter.span,
                     name.clone(),
                 );
@@ -153,7 +179,10 @@ impl TypeChecker {
             for bound in bounds {
                 match &bound.kind {
                     TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
-                        self.validate_universe_annotations(ty)?
+                        self.validate_universe_annotations(ty)?;
+                        if verum_ast::source_signature::type_uses_universes(ty).map_err(error)? {
+                            return Err(error_at("universe-bearing generic bounds require formation checking; this bound is not supported", ty.span));
+                        }
                     }
                     TypeBoundKind::AssociatedTypeEquality { eq_type, .. } => {
                         self.validate_universe_annotations(eq_type)?
@@ -276,7 +305,12 @@ impl TypeChecker {
             result: Ok(()),
         };
         validator.visit_function(function);
-        validator.result
+        validator.result?;
+        // A lexically well-formed level annotation is not a formation proof.
+        // Apply the same representability boundary as archived signatures.
+        verum_ast::source_signature::source_signature(function, false)
+            .map(|_| ())
+            .map_err(|message| error_at(message, function.span))
     }
 }
 

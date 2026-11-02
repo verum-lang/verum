@@ -167,6 +167,7 @@ pub mod instance_search; // Protocol instance search + coherence (used by Depend
 pub mod qtt_usage; // QTT usage counting (used by check_function_qtt)
 pub mod qtt_walker; // QTT AST walker (used by check_function_qtt)
 pub mod universe_level;
+pub mod universe_inference;
 pub mod universe_solver; // Universe constraint solving (used by Phase 2.5)
 
 // =========================================================================

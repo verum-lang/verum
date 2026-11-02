@@ -266,16 +266,18 @@ impl ModuleContext {
     }
 
     /// Apply substitution to all function types
-    pub fn apply_substitution(&mut self, subst: &Substitution) {
-        for info in self.function_types.values_mut() {
-            info.scheme.ty = info.scheme.ty.apply_subst(subst);
+    pub fn apply_substitution(&mut self, subst: &Substitution) -> std::result::Result<(), Text> {
+        let composed = self.substitution.compose(subst)?;
+        let mut function_types = self.function_types.clone();
+        for info in function_types.values_mut() {
+            info.scheme.ty = info.scheme.ty.try_apply_subst(subst)?;
             if let Some(receiver) = &mut info.scheme.impl_self_type {
-                *receiver = receiver.apply_subst(subst);
+                *receiver = receiver.try_apply_subst(subst)?;
             }
         }
-
-        // Compose with existing substitution
-        self.substitution = self.substitution.compose(subst);
+        self.function_types = function_types;
+        self.substitution = composed;
+        Ok(())
     }
 
     /// Generalize a type scheme relative to the module context

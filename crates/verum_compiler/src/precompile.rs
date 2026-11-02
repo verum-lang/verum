@@ -224,7 +224,8 @@ fn write_core_metadata_alongside_archive(
             )
         })?;
 
-    let mut metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
+    let mut metadata = crate::archive_metadata::archive_to_core_metadata(&archive)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
     if let Some(root) = stdlib_source_root {
         let (names, decl_nodes, declaring_modules) = scan_context_declarations(root);
         metadata.context_declarations = names;
@@ -327,7 +328,7 @@ fn write_core_metadata_alongside_archive(
         // walk re-registers every public top-level free fn under its
         // file-declared dotted module key, rebuilding the descriptor
         // from the AST so collision-dropped functions are recovered.
-        inject_declared_module_free_fn_keys(&mut metadata, root, verbose);
+        inject_declared_module_free_fn_keys(&mut metadata, root, verbose)?;
 
         // **Audit-driven fundamental fix (Task #44)** — capture
         // `extends` clause from every protocol declaration so
@@ -345,8 +346,8 @@ fn write_core_metadata_alongside_archive(
         // declaration on PartialEq.
         scan_protocol_supers(&mut metadata, root, verbose);
     }
-    let bytes = bincode::serialize(&metadata)
-        .context("bincode serialise CoreMetadata for sidecar emit")?;
+    let bytes = crate::embedded_stdlib_metadata::encode_metadata(&metadata)
+        .map_err(|error| anyhow::anyhow!("encode CoreMetadata sidecar: {error}"))?;
 
     let sidecar = archive_path.with_extension("core_metadata");
     // Atomic publish — mirrors `verum_vbc::archive::write_archive_to_file`:
@@ -2935,7 +2936,7 @@ fn inject_declared_module_free_fn_keys(
     metadata: &mut verum_types::core_metadata::CoreMetadata,
     root: &Path,
     verbose: bool,
-) {
+) -> Result<()> {
     /// BAKED-DEFAULT-ARG-1: render a default-value expression as
     /// re-parseable source text. Literal shapes only (the stdlib
     /// convention); anything more exotic returns None and the caller
@@ -3061,31 +3062,26 @@ fn inject_declared_module_free_fn_keys(
         dir: &Path,
         metadata: &mut verum_types::core_metadata::CoreMetadata,
         injected: &mut usize,
-    ) {
+    ) -> Result<()> {
         use verum_ast::ItemKind;
         use verum_common::{List, Maybe, Text};
         use verum_types::core_metadata::{FunctionDescriptor, GenericParam, ParamDescriptor};
 
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
+        let entries = std::fs::read_dir(dir).with_context(|| format!("read signature source directory {}", dir.display()))?;
+        for entry in entries {
+            let entry = entry?;
             let path = entry.path();
             if path.file_name().and_then(|n| n.to_str()) == Some("target") {
                 continue;
             }
             if path.is_dir() {
-                visit_dir(root, &path, metadata, injected);
+                visit_dir(root, &path, metadata, injected)?;
                 continue;
             }
             if path.extension().and_then(|s| s.to_str()) != Some("vr") {
                 continue;
             }
-            let content = match std::fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
+            let content = std::fs::read_to_string(&path).with_context(|| format!("read signature source {}", path.display()))?;
             // Quick filter: no public fn and no public static, nothing to do.
             //
             // `public static` was added to the filter, not just to the item
@@ -3105,10 +3101,7 @@ fn inject_declared_module_free_fn_keys(
                 continue;
             }
             let mut parser = verum_fast_parser::Parser::new(&content);
-            let module = match parser.parse_module() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
+            let module = parser.parse_module().map_err(|error| anyhow::anyhow!("cannot parse signature source {}: {error:?}", path.display()))?;
             let rel_path = match path.strip_prefix(root) {
                 Ok(p) => p,
                 Err(_) => continue,
@@ -3133,6 +3126,11 @@ fn inject_declared_module_free_fn_keys(
                 // them imported cleanly.
                 if let ItemKind::Static(sd) = &item.kind {
                     if matches!(sd.visibility, verum_ast::decl::Visibility::Public) {
+                        if verum_ast::source_signature::type_uses_universes(&sd.ty)
+                            .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?
+                        {
+                            anyhow::bail!("static {}.{} requires an unsupported semantic universe signature", source_module, sd.name.name);
+                        }
                         let qualified: Text =
                             format!("{}.{}", source_module, sd.name.name.as_str()).into();
                         metadata.statics.entry(qualified).or_insert_with(|| {
@@ -3152,9 +3150,30 @@ fn inject_declared_module_free_fn_keys(
                 if !matches!(fd.visibility, verum_ast::decl::Visibility::Public) {
                     continue;
                 }
+                let source_signature = verum_ast::source_signature::source_signature(fd, false)
+                    .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
                 let simple = fd.name.name.as_str();
                 let qualified: Text = format!("{}.{}", source_module, simple).into();
-                if metadata.functions.contains_key(&qualified) {
+                if let Some(existing) = metadata.functions.get(&qualified) {
+                    if source_signature.is_some() {
+                        let Some(signature) = &existing.source_signature else {
+                            anyhow::bail!("absent semantic universe signature for {qualified}; rebuild from its declaring source");
+                        };
+                        verum_ast::source_signature::validate_source_signature(signature, existing.parent_type.is_some())
+                            .map_err(|error| anyhow::anyhow!("{qualified}: {error}"))?;
+                        let owner = existing.origin_module_path.as_ref().unwrap_or(&existing.module_path);
+                        if owner.as_str() != source_module || existing.name.as_str() != simple
+                            || signature.name.name.as_str() != simple
+                            || signature.params.len() != existing.params.len()
+                        {
+                            anyhow::bail!("semantic universe signature provenance mismatch for {qualified}");
+                        }
+                        // The archive owns this exact declaration. Parsing source
+                        // again can assign different FileIds; AST equality is not
+                        // semantic equality and cannot replace its provenance.
+                    } else if existing.source_signature.is_some() {
+                        anyhow::bail!("conflicting semantic universe signature presence for {qualified}");
+                    }
                     // Diagnostic (VERUM_TRACE_DESCSKIP): this guard is
                     // FIRST-WINS, so a thinner descriptor written by an
                     // earlier pass permanently shadows the real one. Under
@@ -3235,6 +3254,7 @@ fn inject_declared_module_free_fn_keys(
                     })
                     .collect();
                 let descriptor = FunctionDescriptor {
+                    source_signature,
                     // Unconditional: the `Visibility::Public` guard
                     // above is what lets this loop reach a descriptor
                     // at all.
@@ -3265,17 +3285,23 @@ fn inject_declared_module_free_fn_keys(
                 *injected += 1;
             }
         }
+        Ok(())
     }
 
     let mut injected: usize = 0;
-    visit_dir(root, root, metadata, &mut injected);
+    visit_dir(root, root, metadata, &mut injected)?;
     if verbose {
         eprintln!(
             "verum stdlib precompile: injected {} file-module-qualified free-fn keys",
             injected
         );
     }
+    Ok(())
 }
+
+#[cfg(test)]
+#[path = "../tests/precompile/universe_source_metadata.rs"]
+mod universe_source_metadata_tests;
 
 #[cfg(test)]
 mod tests {

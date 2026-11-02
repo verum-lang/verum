@@ -19,6 +19,7 @@ fn emit_formula(output: &mut Text, level: &UniverseLevel, next: &mut usize) -> u
         let expression = match item {
             Work::Visit(UniverseLevel::Concrete(value)) => format!(".concrete {value}"),
             Work::Visit(UniverseLevel::Variable(id)) => format!(".var {id}"),
+            Work::Visit(UniverseLevel::Meta(_)) => panic!("unresolved inference cannot be exported as a universal proof"),
             Work::Visit(UniverseLevel::Succ(inner)) => {
                 work.push(Work::Successor);
                 work.push(Work::Visit(inner));

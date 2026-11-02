@@ -12,7 +12,7 @@ fn load_metadata() -> CoreMetadata {
         env!("OUT_DIR"),
         "/stdlib_runtime.core_metadata"
     ));
-    bincode::deserialize::<CoreMetadata>(bytes).expect("deserialise embedded metadata")
+    verum_compiler::embedded_stdlib_metadata::decode_metadata(bytes).expect("deserialise embedded metadata")
 }
 
 #[test]

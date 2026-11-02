@@ -1,6 +1,5 @@
 //! Immutable release metadata shared by every language-service transport.
 use anyhow::{Context, Result, ensure};
-use bincode::Options;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path, sync::Arc};
@@ -30,12 +29,8 @@ impl LibraryMetadata {
             bytes.len() as u64 <= ARTIFACT_LIMIT,
             "Library metadata exceeds size limit"
         );
-        let core: CoreMetadata = bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_limit(ARTIFACT_LIMIT)
-            .reject_trailing_bytes()
-            .deserialize(bytes)
-            .context("Invalid or incompatible library metadata")?;
+        let core = verum_types::core_metadata::decode_metadata(bytes)
+            .map_err(|error| anyhow::anyhow!("Invalid or incompatible library metadata: {error}"))?;
         let mut registry = verum_modules::ModuleRegistry::new();
         for module in verum_types::module_projection::project_modules(&core, None, |_| {
             registry.allocate_id()

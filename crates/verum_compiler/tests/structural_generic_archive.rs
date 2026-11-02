@@ -56,7 +56,7 @@ fn import(archive: &VbcArchive) -> VbcCodegen {
 }
 
 fn errors(archive: &VbcArchive, source: &str, eager: bool) -> List<Text> {
-    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(archive);
+    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(archive).expect("valid archive metadata");
     let metadata: CoreMetadata =
         bincode::deserialize(&bincode::serialize(&metadata).unwrap()).unwrap();
     let mut registry = verum_modules::ModuleRegistry::new();
@@ -129,7 +129,7 @@ fn source_archives_keep_type_slots_distinct_from_const_and_meta_values() {
                 ],
                 reverse,
             );
-            let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&archive);
+            let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&archive).expect("valid archive metadata");
             let alpha = metadata
                 .functions
                 .get(&Text::from("core.alpha.choose"))
@@ -189,7 +189,7 @@ fn source_archive_method_shadow_uses_the_method_slot() {
         )],
         false,
     );
-    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&archive);
+    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&archive).expect("valid archive metadata");
     let method = metadata
         .functions
         .get(&Text::from("core.factory.Factory.choose"))

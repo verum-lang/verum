@@ -151,7 +151,7 @@ fn assert_collections(module: &VbcModule) {
 }
 
 fn metadata(archive: &VbcArchive) -> CoreMetadata {
-    let metadata = crate::archive_metadata::archive_to_core_metadata(archive);
+    let metadata = crate::archive_metadata::archive_to_core_metadata(archive).expect("valid archive metadata");
     bincode::deserialize(&bincode::serialize(&metadata).unwrap()).unwrap()
 }
 

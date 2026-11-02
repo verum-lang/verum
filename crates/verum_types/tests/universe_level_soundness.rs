@@ -94,6 +94,7 @@ fn every_small_accepted_order_holds_in_independent_natural_models() {
             Level::Variable(0) => a,
             Level::Variable(1000) => b,
             Level::Variable(_) => panic!("unknown fixture variable"),
+            Level::Meta(_) => panic!("inference metas are not natural-model fixture parameters"),
             Level::Succ(inner) => eval(inner, a, b) + 1,
             Level::Max(left, right) => eval(left, a, b).max(eval(right, a, b)),
         }

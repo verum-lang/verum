@@ -41,7 +41,7 @@ fn check(aliases: &[&str]) {
     let mut builder = ArchiveBuilder::stdlib();
     builder.add_module("core.archive", &imported, &[]).unwrap();
     builder.add_module("core.cog", &module, &[]).unwrap();
-    let metadata = archive_to_core_metadata(&builder.finish());
+    let metadata = archive_to_core_metadata(&builder.finish()).expect("valid archive metadata");
     for (key, expected_case) in [
         ("core.archive.ArchiveError", "Format"),
         ("core.cog.archive.ArchiveError", "InvalidMagic"),

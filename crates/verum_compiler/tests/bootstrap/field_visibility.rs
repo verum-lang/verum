@@ -49,7 +49,7 @@ fn archive() -> VbcArchive {
 }
 
 fn metadata(archive: &VbcArchive) -> CoreMetadata {
-    let metadata = crate::archive_metadata::archive_to_core_metadata(archive);
+    let metadata = crate::archive_metadata::archive_to_core_metadata(archive).expect("valid archive metadata");
     bincode::deserialize(&bincode::serialize(&metadata).expect("metadata encode"))
         .expect("metadata decode")
 }
@@ -57,7 +57,7 @@ fn metadata(archive: &VbcArchive) -> CoreMetadata {
 #[test]
 fn parsed_private_and_restricted_fields_are_not_public_after_archive_metadata() {
     let archive = archive();
-    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
+    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive).expect("valid archive metadata");
     let metadata: CoreMetadata =
         bincode::deserialize(&bincode::serialize(&metadata).expect("metadata encode"))
             .expect("metadata decode");

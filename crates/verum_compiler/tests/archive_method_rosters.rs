@@ -31,7 +31,7 @@ fn primitive_impl_carrier_does_not_own_text_methods() {
     let mut archive = ArchiveBuilder::stdlib();
     archive.add_module("core", &carrier, &[]).unwrap();
     archive.add_module("core.text", &declaration, &[]).unwrap();
-    let metadata = Arc::new(archive_to_core_metadata(&archive.finish()));
+    let metadata = Arc::new(archive_to_core_metadata(&archive.finish()).expect("valid archive metadata"));
     for key in ["Text", "core.text.Text", "core.text.text.Text"] {
         let ty = metadata.types.get(&key.into()).unwrap();
         assert_eq!(
@@ -79,7 +79,7 @@ fn same_spelled_types_keep_independent_method_rosters() {
             .unwrap();
         archive.add_module(owner, &module, &[]).unwrap();
     }
-    let metadata = archive_to_core_metadata(&archive.finish());
+    let metadata = archive_to_core_metadata(&archive.finish()).expect("valid archive metadata");
     for (key, expected) in [
         ("Envelope", "first"),
         ("core.alpha.Envelope", "first"),

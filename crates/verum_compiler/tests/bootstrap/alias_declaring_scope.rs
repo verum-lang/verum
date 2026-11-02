@@ -153,7 +153,7 @@ fn assert_canonical(files: &[(&str, &str)], root_reexport: bool) {
             "declaring-file identity must survive source collection and wire",
         );
     }
-    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
+    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive).expect("valid archive metadata");
     let TypeDescriptorKind::Alias { target } = &metadata
         .types
         .get(&Text::from("fixture.protocols.IoResult"))

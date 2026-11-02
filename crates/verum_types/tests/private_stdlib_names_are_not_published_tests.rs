@@ -21,6 +21,7 @@ use verum_types::core_metadata::{CoreMetadata, FunctionDescriptor};
 
 fn const_descriptor(name: &str, is_public: bool) -> FunctionDescriptor {
     FunctionDescriptor {
+        source_signature: None,
         is_public,
         name: Text::from(name),
         module_path: Text::from("test.module"),

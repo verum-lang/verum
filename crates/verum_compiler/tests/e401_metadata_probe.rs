@@ -31,7 +31,7 @@ fn dump_witness_modules() {
         }
     }
 
-    let meta = archive_to_core_metadata(&archive);
+    let meta = archive_to_core_metadata(&archive).expect("valid archive metadata");
     let hits: Vec<&str> = meta
         .types
         .keys()

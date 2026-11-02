@@ -27,7 +27,7 @@ use crate::stage_checker::{StageChecker, StageConfig};
 #[allow(unused_imports)]
 use crate::subtype::Subtyping;
 #[allow(unused_imports)]
-use crate::ty::{Type, TypeVar};
+use crate::ty::{SubstitutionExt, Type, TypeVar};
 #[allow(unused_imports)]
 use crate::unify::Unifier;
 #[allow(unused_imports)]
@@ -3307,22 +3307,17 @@ impl TypeChecker {
                         // Use TypeScheme::poly() for generic functions, TypeScheme::mono() for non-generic.
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG] About to extract_function_type_from_module for '{}'", item_name);
-                        if let Some((func_type, type_vars)) =
+                        if let Some(scheme) =
                             self.extract_function_type_from_module(&module_info.ast, item_name, &module_info.path.to_string())
                         {
                             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                                 eprintln!("[task20] AST direct: mod='{}' item='{}' type={:?}",
-                                    resolved_module_path.as_str(), item_name, func_type);
+                                    resolved_module_path.as_str(), item_name, scheme.ty);
                             }
-                            let scheme = if type_vars.is_empty() {
-                                TypeScheme::mono(func_type)
-                            } else {
-                                TypeScheme::poly(type_vars, func_type)
-                            };
                             // T0231: guarded — a prelude/mount import
                             // must not downgrade a builtin's poly scheme.
                             self.insert_fn_scheme_guarded(register_name, scheme);
-                        } else if let Some((func_type, type_vars, _source_path)) = self
+                        } else if let Some((scheme, _source_path)) = self
                             .find_function_with_source_module(
                                 &module_info.ast,
                                 item_name,
@@ -3332,13 +3327,8 @@ impl TypeChecker {
                         {
                             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                                 eprintln!("[task20] AST reexport: mod='{}' item='{}' type={:?}",
-                                    resolved_module_path.as_str(), item_name, func_type);
+                                    resolved_module_path.as_str(), item_name, scheme.ty);
                             }
-                            let scheme = if type_vars.is_empty() {
-                                TypeScheme::mono(func_type)
-                            } else {
-                                TypeScheme::poly(type_vars, func_type)
-                            };
                             // T0231: guarded — a prelude/mount import
                             // must not downgrade a builtin's poly scheme.
                             self.insert_fn_scheme_guarded(register_name, scheme);
@@ -3766,14 +3756,9 @@ impl TypeChecker {
                         // grouped into the parent module (core.intrinsics) rather than registered
                         // as separate submodules. Their public functions are in the parent's AST.
                         if !found {
-                            if let Some((func_type, type_vars)) =
+                            if let Some(scheme) =
                                 self.extract_function_type_from_module(&module_info.ast, item_name, &module_info.path.to_string())
                             {
-                                let scheme = if type_vars.is_empty() {
-                                    TypeScheme::mono(func_type)
-                                } else {
-                                    TypeScheme::poly(type_vars, func_type)
-                                };
                                 // T0231: guarded (see insert_fn_scheme_guarded).
                                 self.insert_fn_scheme_guarded(register_name, scheme);
                                 found = true;
@@ -3953,15 +3938,10 @@ impl TypeChecker {
                             ExportKind::Function | ExportKind::Meta => {
                                 // Extract function type and register it
                                 // Use TypeScheme::poly() for generic functions
-                                if let Some((func_type, type_vars)) = self
+                                if let Some(scheme) = self
                                     .extract_function_type_from_module(&module_info.ast, item_name, &module_info.path.to_string())
                                 {
                                     let register_name = local_name.unwrap_or(item_name);
-                                    let scheme = if type_vars.is_empty() {
-                                        TypeScheme::mono(func_type)
-                                    } else {
-                                        TypeScheme::poly(type_vars, func_type)
-                                    };
                                     // T0231: guarded (see insert_fn_scheme_guarded).
                                     self.insert_fn_scheme_guarded(register_name, scheme);
                                 }
@@ -4948,7 +4928,7 @@ impl TypeChecker {
                             // because the env-lookup hits the
                             // self-referential placeholder before the
                             // function lookup gets a chance.
-                            if let Some((func_type, type_vars, _src)) = self
+                            if let Some((scheme, _src)) = self
                                 .find_function_with_source_module(
                                     &module_info.ast,
                                     item_name,
@@ -4969,11 +4949,6 @@ impl TypeChecker {
                                 let extracted_bounds = std::mem::take(
                                     &mut self.pending_extracted_type_bounds,
                                 );
-                                let scheme = if type_vars.is_empty() {
-                                    TypeScheme::mono(func_type)
-                                } else {
-                                    TypeScheme::poly(type_vars, func_type)
-                                };
                                 let scheme = if extracted_bounds.is_empty() {
                                     scheme
                                 } else {
@@ -7960,6 +7935,14 @@ impl TypeChecker {
         if !fd.is_public {
             return None;
         }
+        if fd.source_signature.is_some() {
+            let fd = fd.clone();
+            let metadata = metadata.clone();
+            let scheme = self.scheme_from_function_descriptor(&fd, &metadata)?;
+            self.register_required_params_from_descriptor(item_name, &fd);
+            let key = verum_common::qualified_name::qualify_module_name(&fd.module_path, &fd.name);
+            return Some((scheme, key));
+        }
         if let Ok(want) = std::env::var("VERUM_TRACE_FNSCHEME")
             && fd.name.as_str().contains(want.as_str())
         {
@@ -8327,7 +8310,7 @@ impl TypeChecker {
         func_name: &str,
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
-    ) -> Option<(Type, List<TypeVar>, Text)> {
+    ) -> Option<(TypeScheme, Text)> {
         // Cycle guard: if we're already walking re-exports for this
         // (module, item) pair higher up the call stack, bail out. Returning
         // None is safe — the caller falls through to its next strategy.
@@ -8352,15 +8335,15 @@ impl TypeChecker {
         func_name: &str,
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
-    ) -> Option<(Type, List<TypeVar>, Text)> {
+    ) -> Option<(TypeScheme, Text)> {
         use verum_ast::ItemKind;
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
         use verum_ast::ty::PathSegment;
 
         // First, try to find the function directly in this module (including variant constructors)
-        if let Some((func_type, type_vars)) = self.extract_function_type_from_module(ast, func_name, current_module_path.as_str())
+        if let Some(scheme) = self.extract_function_type_from_module(ast, func_name, current_module_path.as_str())
         {
-            return Some((func_type, type_vars, current_module_path.clone()));
+            return Some((scheme, current_module_path.clone()));
         }
 
         // Helper to check if path starts with relative marker
@@ -8577,10 +8560,10 @@ impl TypeChecker {
                     // Use original_name if this was matched via alias (e.g., `safe_read as read`)
                     let lookup_name = original_name.as_deref().unwrap_or(func_name);
                     if let Some(source_module) = registry.get_by_path(source_path) {
-                        if let Some((func_type, type_vars)) =
+                        if let Some(scheme) =
                             self.extract_function_type_from_module(&source_module.ast, lookup_name, &source_module.path.to_string())
                         {
-                            return Some((func_type, type_vars, Text::from(source_path.clone())));
+                            return Some((scheme, Text::from(source_path.clone())));
                         } else {
                             // Function not found directly - recurse to check if it's re-exported
                             if let Some(result) = self.find_function_with_source_module(
@@ -10589,15 +10572,14 @@ impl TypeChecker {
     /// This creates a function type from the function declaration's signature.
     /// Also handles variant constructors (e.g., `Some` from `type Maybe<T> is None | Some(T)`).
     /// Extract function type from module.
-    /// Returns (Type, List<TypeVar>) where the List<TypeVar> contains the quantified
-    /// type variables for generic functions (empty for non-generic functions).
-    /// Callers should use TypeScheme::poly() when vars is non-empty, TypeScheme::mono() otherwise.
+    /// Retains ordinary and universe quantifiers and their extracted bounds in
+    /// one scheme, including when the signature crosses a re-export chain.
     fn extract_function_type_from_module(
         &mut self,
         ast: &verum_ast::Module,
         func_name: &str,
         source_module: &str,
-    ) -> Option<(Type, List<TypeVar>)> {
+    ) -> Option<TypeScheme> {
         let saved_owner = std::mem::replace(&mut self.current_module_path, source_module.into());
         let saved_scope = std::mem::replace(&mut self.resolving_source_signature, true);
         self.push_decl_param_frame(indexmap::IndexMap::new());
@@ -10608,7 +10590,7 @@ impl TypeChecker {
             verum_ast::ItemKind::Axiom(axiom) if axiom.name.name.as_str() == func_name => Some(&axiom.generics),
             _ => None,
         }).cloned().unwrap_or_default();
-        let result = self.with_universe_parameter_scope(&generics, false, |checker| {
+        let result = self.with_declared_universe_scope("function", &func_name.into(), &generics, |checker| {
             for item in &ast.items {
                 if let verum_ast::ItemKind::Function(function) = &item.kind
                     && function.name.name.as_str() == func_name
@@ -10626,7 +10608,14 @@ impl TypeChecker {
                     if let Some(ty) = &axiom.return_type { checker.validate_universe_annotations(ty)?; }
                 }
             }
-            Ok(checker.extract_function_type_in_source_scope(ast, func_name))
+            let Some((ty, vars)) = checker.extract_function_type_in_source_scope(ast, func_name) else {
+                return Ok(None);
+            };
+            let scheme = TypeScheme::poly(vars, ty)
+                .with_type_bounds(std::mem::take(&mut checker.pending_extracted_type_bounds))
+                .with_universe_parameters(checker.current_universe_parameters())
+                .map_err(|message| TypeError::UniverseBinding { message, span: Span::dummy() })?;
+            Ok(Some(scheme))
         });
         let result = match result {
             Ok(signature) => signature,
@@ -11207,7 +11196,7 @@ impl TypeChecker {
         // and a leaked parameter would arrive at the next function as a var
         // that refuses to bind to anything.
         let saved_rigid = self.unifier.rigid_snapshot();
-        let result = self.with_universe_parameter_scope(&func.generics, false, |checker| {
+        let result = self.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
             checker.validate_function_universes(func)?;
             checker.check_function_inner(func)
         });
@@ -11640,7 +11629,8 @@ impl TypeChecker {
         } else {
             scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
-        let mut scheme = scheme;
+        let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
+            .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         self.record_explicit_method_vars(&mut scheme, func);
         let source_explicit_slots = scheme.explicit_method_vars.clone();
         // Protect builtin polymorphic functions from being overwritten by stdlib functions.
@@ -13631,7 +13621,8 @@ impl TypeChecker {
         } else {
             final_scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
-        let mut final_scheme = final_scheme;
+        let mut final_scheme = final_scheme.with_universe_parameters(self.current_universe_parameters())
+            .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         final_scheme.explicit_method_vars = source_explicit_slots;
         if !self.in_impl_block {
             // T0231 guarded / T1120 declaration channel — see the
@@ -20323,12 +20314,13 @@ impl TypeChecker {
                                 if let Ok(subst) =
                                     self.unifier.unify(&Type::Var(*type_var), type_arg, span)
                                 {
-                                    combined_subst.extend(subst);
+                                    combined_subst = combined_subst.compose(&subst)
+                                .map_err(|message| TypeError::UniverseBinding { message, span })?;
                                 }
                             }
-                            combined_subst.extend(self.bind_explicit_method_arguments(
+                            combined_subst = combined_subst.compose(&self.bind_explicit_method_arguments(
                                 explicit_vars.as_ref(), type_args, method, span,
-                            )?);
+                            )?).map_err(|message| TypeError::UniverseBinding { message, span })?;
                             self.apply_fn_bound_extraction(&type_bounds, span);
 
                             // OVERLOAD GUARD: If a closure argument doesn't match the parameter
@@ -23851,7 +23843,8 @@ impl TypeChecker {
                         if let Ok(subst) =
                             self.unifier.unify(&Type::Var(*type_var), type_arg, span)
                         {
-                            combined_subst.extend(subst);
+                            combined_subst = combined_subst.compose(&subst)
+                                .map_err(|message| TypeError::UniverseBinding { message, span })?;
                         }
                     }
 
@@ -24638,12 +24631,13 @@ impl TypeChecker {
                         if let Ok(subst) =
                             self.unifier.unify(&Type::Var(*type_var), type_arg, span)
                         {
-                            combined_subst.extend(subst);
+                            combined_subst = combined_subst.compose(&subst)
+                                .map_err(|message| TypeError::UniverseBinding { message, span })?;
                         }
                     }
-                    combined_subst.extend(self.bind_explicit_method_arguments(
+                    combined_subst = combined_subst.compose(&self.bind_explicit_method_arguments(
                         explicit_vars.as_ref(), type_args, method, span,
-                    )?);
+                    )?).map_err(|message| TypeError::UniverseBinding { message, span })?;
                     self.apply_fn_bound_extraction(&type_bounds, span);
 
                     // `params` is a slice since T1270; the `.clone()` that
@@ -26547,10 +26541,10 @@ bake to have this verified.",
                     // descriptors (keys like
                     // `core.time.duration_parse.parse`) that are never
                     // eagerly registered in env — resolve them lazily.
-                    self.core_metadata().and_then(|meta| {
+                    self.core_metadata.clone().and_then(|meta| {
                         meta.functions
                             .get(&verum_common::Text::from(cand.as_str()))
-                            .map(|fd| Self::scheme_from_function_descriptor(fd, &meta))
+                            .and_then(|fd| self.scheme_from_function_descriptor(fd, &meta))
                     })
                 })
                 .or_else(|| {
@@ -26575,7 +26569,7 @@ bake to have this verified.",
                     // hop only — a chain of re-exports resolves on the next
                     // call rather than looping here.
                     let (module_part, item_part) = cand.as_str().rsplit_once('.')?;
-                    let meta = self.core_metadata()?;
+                    let meta = self.core_metadata.clone()?;
                     let leaves = meta
                         .module_reexports
                         .get(&verum_common::Text::from(module_part))?;
@@ -26589,7 +26583,7 @@ bake to have this verified.",
                     }
                     meta.functions
                         .get(&key)
-                        .map(|fd| Self::scheme_from_function_descriptor(fd, &meta))
+                        .and_then(|fd| self.scheme_from_function_descriptor(fd, &meta))
                 });
             if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
                 eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());
@@ -28516,7 +28510,7 @@ bake to have this verified.",
             let s =
                 self.unifier
                     .unify(&arg1.apply_subst(&subst), &arg2.apply_subst(&subst), span)?;
-            subst = subst.compose(&s);
+            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
         }
 
         Ok(subst)

@@ -42,7 +42,7 @@ fn imported_sum_copies_cannot_replace_the_owning_declaration() {
         let mut builder = verum_vbc::archive::ArchiveBuilder::new();
         let modules = if reverse { [&owner, &foreign, &consumer] } else { [&consumer, &foreign, &owner] };
         for module in modules { builder.add_module(&module.name, module, &[]).unwrap(); }
-        let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&builder.finish());
+        let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(&builder.finish()).expect("valid archive metadata");
         let payload = |key: &str| {
             let descriptor = metadata.types.get(&Text::from(key)).unwrap();
             let TypeDescriptorKind::Variant { cases } = &descriptor.kind else { panic!("expected sum") };

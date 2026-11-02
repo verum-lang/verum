@@ -38,7 +38,7 @@ fn convert(entries: Vec<CachedTypeEntry>) -> verum_types::core_metadata::CoreMet
         macros: Vec::new(),
         derives: Vec::new(),
     };
-    CompilationPipeline::convert_cached_metadata_to_stdlib(&cached)
+    CompilationPipeline::convert_cached_metadata_to_stdlib(&cached).expect("valid legacy cache")
 }
 
 #[test]

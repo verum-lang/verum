@@ -2918,7 +2918,7 @@ impl TypeChecker {
     /// in archive_metadata gives at most one qualified key per
     /// concrete (module_path, simple_name) pair).
     pub fn resolve_metadata_reexport_function(
-        &self,
+        &mut self,
         metadata: &crate::core_metadata::CoreMetadata,
         ast: &verum_ast::Module,
         func_name: &str,
@@ -3027,6 +3027,9 @@ impl TypeChecker {
             for key in candidates {
                 let key_text: Text = key.into();
                 if let Some(fd) = metadata.functions.get(&key_text) {
+                    if fd.source_signature.is_some() {
+                        return self.scheme_from_function_descriptor(fd, metadata);
+                    }
                     // Parse params AND return under ONE CAPTURED generic-var
                     // scope (T0175).  Previously each
                     // `parse_descriptor_type_string` ran WITHOUT a shared
