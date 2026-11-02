@@ -269,3 +269,32 @@ fn refutable_patterns_test_the_declared_result_of_the_scrutinee() {
     let mut vm = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module));
     assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(28));
 }
+
+#[test]
+fn explicit_variant_test_reads_the_serialized_owner_tag() {
+    let module = |name, source| {
+        VbcCodegen::with_config(CodegenConfig::new(name))
+            .compile_module(&Parser::new(source).parse_module().unwrap()).unwrap()
+    };
+    let sum = module("alpha", "module alpha; type Event is Empty | Ready(Int);");
+    let sum = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&sum).unwrap(),
+    ).unwrap();
+    let ast = Parser::new(r#"
+        module consumer;
+        mount alpha.Event;
+        fn select(value: Event) -> Int {
+            if let Event.Ready(n) = value { return n; }
+            0
+        }
+    "#).parse_module().unwrap();
+    let mut gen_ = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    gen_.import_archive_module_types(&sum);
+    gen_.collect_unit_declarations(&[&ast]).unwrap();
+    gen_.resolve_pending_imports();
+    gen_.compile_unit_items(&[&ast], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+    let module = gen_.finalize_module_from_state().unwrap();
+    let id = module.find_function_by_name("consumer.select").unwrap();
+    let body = module.get_function(id).unwrap().instructions.as_ref().unwrap();
+    assert!(body.iter().any(|op| matches!(op, Instruction::IsVar { tag: 1, .. })), "{body:?}");
+}

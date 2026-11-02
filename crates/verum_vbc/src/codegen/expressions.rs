@@ -635,6 +635,18 @@ impl VbcCodegen {
         agreed
     }
 
+    /// Imported sums can provide their full layout without callable constructor
+    /// entries. The declaration that owns the payload also owns its tag.
+    fn descriptor_variant<'d>(
+        &self,
+        descriptor: &'d crate::types::TypeDescriptor,
+        name: &str,
+    ) -> Option<&'d crate::types::VariantDescriptor> {
+        descriptor.variants.iter().find(|v| {
+            self.ctx.strings.get(v.name.0 as usize).is_some_and(|entry| entry == name)
+        })
+    }
+
     /// The scrutinee's nominal descriptor owns each payload slot. A known
     /// descriptor with an unresolved slot is distinct from absent metadata:
     /// callers must not replace the former with a sibling constructor cache.
@@ -659,10 +671,7 @@ impl VbcCodegen {
         } else {
             path.as_str()
         };
-        let Some(variant) = descriptor.variants.iter().find(|variant| {
-            self.ctx.strings.get(variant.name.0 as usize)
-                .is_some_and(|name| name == variant_name)
-        }) else {
+        let Some(variant) = self.descriptor_variant(descriptor, variant_name) else {
             return Some(None);
         };
         let Some(payload) = variant.fields.get(field)
@@ -19963,7 +19972,16 @@ impl VbcCodegen {
                         } else {
                             None
                         };
-                        let tag = scrutinee_first_tag
+                        let owner_and_variant = dot_name.rsplit_once('.').or_else(|| {
+                            let scrutinee = Self::strip_wrapper_type(self.ctx.match_scrutinee_type.as_deref()?);
+                            Some((Self::strip_generic_args(scrutinee), dot_name.as_str()))
+                        });
+                        let declaration_tag = owner_and_variant
+                            .and_then(|(owner, variant)| {
+                                self.descriptor_variant(self.type_by_id(self.nominal_type_id(owner)?)?, variant)
+                            })
+                            .map(|v| v.tag);
+                        let tag = declaration_tag.or(scrutinee_first_tag)
                             .or_else(|| {
                                 self.ctx
                                     .lookup_function_in_scope(&variant_name)
