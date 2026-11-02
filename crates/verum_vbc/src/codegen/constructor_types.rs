@@ -290,6 +290,27 @@ impl VbcCodegen {
         Some(ty)
     }
 
+    /// Only the callable's explicit slots are named at the call site. An
+    /// impl receiver can contribute additional parameters to its full roster.
+    pub(super) fn bind_source_type_arguments(
+        &self,
+        slots: &[Option<crate::types::TypeParamId>],
+        arguments: &[verum_ast::ty::GenericArg],
+        bindings: &mut TypeSubstitution,
+    ) -> Option<()> {
+        if arguments.len() > slots.len() {
+            return None;
+        }
+        for (slot, argument) in slots.iter().zip(arguments) {
+            let verum_ast::ty::GenericArg::Type(argument) = argument else { return None; };
+            let actual = self.source_type_in_current_scope(argument)?;
+            if !self.bind_source_declaration(&TypeRef::Generic((*slot)?), &actual, bindings) {
+                return None;
+            }
+        }
+        Some(())
+    }
+
     fn source_call_declaration(
         &self,
         expr: &Expr,
@@ -339,20 +360,7 @@ impl VbcCodegen {
             return None;
         }
         let mut bindings = TypeSubstitution::empty();
-        if !type_args.is_empty() {
-            if type_args.len() != function.type_param_ids.len() {
-                return None;
-            }
-            for (id, argument) in function.type_param_ids.iter().zip(type_args) {
-                let verum_ast::ty::GenericArg::Type(argument) = argument else {
-                    return None;
-                };
-                let actual = self.source_type_in_current_scope(argument)?;
-                if !self.bind_source_declaration(&TypeRef::Generic(*id), &actual, &mut bindings) {
-                    return None;
-                }
-            }
-        }
+        self.bind_source_type_arguments(&function.explicit_type_param_ids, type_args, &mut bindings)?;
         if let Some(expected) = expected {
             if !self.bind_source_declaration(return_type, expected, &mut bindings) {
                 return None;
@@ -447,7 +455,7 @@ impl VbcCodegen {
     }
 }
 
-fn fully_bound(ty: &TypeRef, bindings: &TypeSubstitution) -> bool {
+pub(super) fn fully_bound(ty: &TypeRef, bindings: &TypeSubstitution) -> bool {
     match ty {
         TypeRef::Generic(id) => bindings.get(*id).is_some(),
         TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {

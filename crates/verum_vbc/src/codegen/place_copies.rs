@@ -148,15 +148,14 @@ impl VbcCodegen {
             }),
             ExprKind::MethodCall { receiver, method, type_args, .. } => {
                 let selected = emitted.and_then(|(reg, start, end)|
-                    self.copy_selected_call_result(reg, start, end));
-                if selected.as_ref().is_some_and(|ty| !ty.is_generic()) { return selected; }
+                    self.copy_selected_call_result(reg, start, end, type_args));
+                if selected.is_some() { return selected; }
                 let owner = self.extract_expr_type_name(receiver)?;
                 self.declared_method_result_type(&owner, method.name.as_str(), type_args)
-                    .or(selected)
             }
-            ExprKind::Call { .. } => {
+            ExprKind::Call { type_args, .. } => {
                 let (reg, start, end) = emitted?;
-                self.copy_selected_call_result(reg, start, end)
+                self.copy_selected_call_result(reg, start, end, type_args)
             }
             // Raw pointers, dynamic calls and unresolved
             // expressions cannot establish the missing declaration authority.
@@ -208,7 +207,9 @@ impl VbcCodegen {
         }).then(|| fact.declaration_type.clone()).flatten()
     }
 
-    fn copy_selected_call_result(&self, reg: Reg, start: usize, end: usize) -> Maybe<TypeRef> {
+    fn copy_selected_call_result(
+        &self, reg: Reg, start: usize, end: usize, type_args: &[verum_ast::ty::GenericArg],
+    ) -> Maybe<TypeRef> {
         let (index, op) = self.copy_result_producer(reg, start, end)?;
         let (id, args) = match op {
             Instruction::Call { func_id, args, .. } | Instruction::CallG { func_id, args, .. } => (*func_id, args),
@@ -218,6 +219,7 @@ impl VbcCodegen {
         let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else { return None; };
         if params.len() != usize::from(args.count) { return None; }
         let mut substitution = crate::mono::TypeSubstitution::empty();
+        self.bind_source_type_arguments(&info.explicit_type_param_ids, type_args, &mut substitution)?;
         for (offset, formal) in params.iter().enumerate() {
             let argument = Reg(args.start.0.checked_add(u16::try_from(offset).ok()?)?);
             let Some(actual) = self.copy_argument_declaration(argument, start, index) else { continue; };
@@ -232,11 +234,11 @@ impl VbcCodegen {
                 if !matches!(formal, TypeRef::Concrete(_) | TypeRef::Instantiated { .. }) { return None; }
                 (formal, actual)
             } else { (formal, &actual) };
-            if !bind_copy_parameter(formal, actual, &mut substitution, 0) { return None; }
+            if !self.bind_source_declaration(formal, actual, &mut substitution) { return None; }
         }
         // Layout-only archive returns and unbound slots remain unknown. In
         // particular, CallG's ABI witnesses cannot reconstruct reference layers.
-        Some(substitution.apply(return_type))
+        super::constructor_types::fully_bound(return_type, &substitution).then(|| substitution.apply(return_type))
     }
 
     pub(super) fn copy_type_is_value(&self, ty: &TypeRef) -> bool {
@@ -254,31 +256,5 @@ impl VbcCodegen {
             TypeRef::Tuple(_) | TypeRef::Array { .. } => true,
             _ => false,
         }
-    }
-}
-
-/// Match the exact declaration's parameter pattern, retaining reference layers
-/// and repeated-variable agreement. No nominal-roster positional substitution.
-fn bind_copy_parameter(
-    formal: &TypeRef, actual: &TypeRef, substitution: &mut crate::mono::TypeSubstitution, depth: usize,
-) -> bool {
-    if depth >= 64 { return false; }
-    match (formal, actual) {
-        (TypeRef::Generic(id), actual) => match substitution.get(*id) {
-            Some(bound) => bound == actual,
-            None => { substitution.bind(*id, actual.clone()); true },
-        },
-        (TypeRef::Instantiated { base: left, args: a }, TypeRef::Instantiated { base: right, args: b }) =>
-            left == right && a.len() == b.len() && a.iter().zip(b).all(|(a, b)| bind_copy_parameter(a, b, substitution, depth + 1)),
-        (TypeRef::Reference { inner: a, mutability: am, tier: at }, TypeRef::Reference { inner: b, mutability: bm, tier: bt }) =>
-            am == bm && at == bt && bind_copy_parameter(a, b, substitution, depth + 1),
-        (TypeRef::Tuple(a), TypeRef::Tuple(b)) => a.len() == b.len()
-            && a.iter().zip(b).all(|(a, b)| bind_copy_parameter(a, b, substitution, depth + 1)),
-        (TypeRef::Array { element: a, length: al }, TypeRef::Array { element: b, length: bl }) =>
-            al == bl && bind_copy_parameter(a, b, substitution, depth + 1),
-        (TypeRef::Slice(a), TypeRef::Slice(b)) => bind_copy_parameter(a, b, substitution, depth + 1),
-        (TypeRef::Concrete(a), TypeRef::Concrete(b)) => a == b,
-        (TypeRef::ConstValue(a), TypeRef::ConstValue(b)) => a == b,
-        _ => false,
     }
 }

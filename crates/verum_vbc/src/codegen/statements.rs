@@ -1689,6 +1689,11 @@ impl VbcCodegen {
                     if matches!(inferred, crate::types::TypeRef::Reference { .. }) {
                         self.ctx.reference_bindings.insert(name.name.to_string());
                     }
+                    if let crate::types::TypeRef::Instantiated { .. } = &inferred
+                        && let Some(declared) = self.declaration_type_name(&inferred, 0)
+                    {
+                        self.ctx.variable_type_names.insert(name.name.to_string(), declared);
+                    }
                     self.ctx.registers.value_uses.set_type(reg, inferred, discipline);
                 }
             } else if let Some(fact) = source_value_fact {

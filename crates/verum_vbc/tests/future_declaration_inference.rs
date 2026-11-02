@@ -373,3 +373,30 @@ async fn probe() -> Int {
         37,
     );
 }
+
+#[test]
+fn inferred_factory_result_retains_reordered_owner_arguments() {
+    run(
+        r#"
+type Index is protocol { fn index() -> Int; };
+type Left is { marker: Int };
+type Right is { marker: Int };
+implement Index for Left { fn index() -> Int { 3 } }
+implement Index for Right { fn index() -> Int { 7 } }
+type Pair<A, B> is { marker: Int };
+implement<A: Index, B: Index> Pair<A, B> {
+    fn code(&self) -> Int { A.index() * 10 + B.index() }
+}
+fn factory<X, Y, Z>() -> Pair<Y, X> { Pair { marker: 0 } }
+fn forwarded<L: Index, R: Index>() -> Int {
+    let pair = factory<L, R, Bool>();
+    pair.code()
+}
+fn probe() -> Int {
+    let pair = factory<Left, Right, Bool>();
+    pair.code() * 100 + forwarded<Right, Left>()
+}
+"#,
+        7337,
+    );
+}
