@@ -462,9 +462,13 @@ impl<'a> Validator<'a> {
         let mut pending_jumps: Vec<(u32, u32)> = Vec::new();
 
         let mut offset = func_start;
+        let mut bound_call = None;
         while offset < func_end {
             let instr_start = offset;
-            instr_starts.insert(instr_start as u32);
+            // A receiver prefix and the call it annotates share one entry.
+            if bound_call.take() != Some(offset) {
+                instr_starts.insert(instr_start as u32);
+            }
 
             // Decode this instruction. Decoder failures surface as a
             // typed error; we log and stop walking this function (the
@@ -496,6 +500,17 @@ impl<'a> Validator<'a> {
                 return;
             }
 
+            if let Instruction::BindMethodReceiver { type_ref } = &instr {
+                self.validate_type_ref(type_ref, 0);
+                if offset >= func_end || self.module.bytecode.get(offset) != Some(&crate::instruction::Opcode::CallM.to_byte()) {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start,
+                        reason: "receiver declaration must immediately precede a method call".into(),
+                    });
+                } else {
+                    bound_call = Some(offset);
+                }
+            }
             self.validate_instruction(
                 &instr,
                 instr_start,

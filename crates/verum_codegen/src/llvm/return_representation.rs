@@ -749,7 +749,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     state.invalidate_storage();
                 }
                 I::ChkRef { ref_reg } => use_input(*ref_reg, 8, &state),
-                I::Nop | I::SetCallWitness { .. } => {}
+                I::Nop | I::SetCallWitness { .. } | I::BindMethodReceiver { .. } => {}
                 // Unhandled writes/effects are a barrier, never a stale fact.
                 I::CbgrExtended { .. } | I::FfiExtended { .. }
                     if sites.get(&pc).is_some_and(|sites| {

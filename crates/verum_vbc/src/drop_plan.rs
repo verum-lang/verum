@@ -215,18 +215,5 @@ pub fn native_glue(
     function: FunctionId,
     args: &[TypeRef],
 ) -> Option<FunctionId> {
-    if args.is_empty() {
-        return Some(function);
-    }
-    let receipt = module
-        .specializations
-        .iter()
-        .find(|entry| entry.generic_fn == function && entry.type_args == args)?;
-    let mut bodies = module.functions.iter().filter(|body| {
-        body.type_params.is_empty()
-            && body.bytecode_offset == receipt.bytecode_offset
-            && body.bytecode_length == receipt.bytecode_length
-    });
-    let target = bodies.next()?.id;
-    bodies.next().is_none().then_some(target)
+    module.specialized_function_id(function, args)
 }

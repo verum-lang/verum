@@ -604,7 +604,8 @@ impl<'a> BytecodeSpecializer<'a> {
                     _ => {}
                 }
             }
-            I::DropTyped { type_ref, .. }
+            I::BindMethodReceiver { type_ref }
+            | I::DropTyped { type_ref, .. }
             | I::TypeResource { type_ref, .. }
             | I::LoadT { type_ref, .. }
             | I::TypeLayout { type_ref, .. } => {

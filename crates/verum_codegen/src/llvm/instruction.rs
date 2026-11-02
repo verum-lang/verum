@@ -2540,6 +2540,10 @@ fn lower_instruction_impl<'ctx>(
             Ok(())
         }
 
+        Instruction::BindMethodReceiver { type_ref } => {
+            ctx.pending_method_receiver = Some(type_ref.clone());
+            Ok(())
+        }
         Instruction::SetCallWitness { type_args } => {
             // #44-B Tier-0 sidecar: witnesses ride interpreter frames.
             // #48 phase-2 Tier-1 mirror: stage the witness in the
@@ -15607,7 +15611,8 @@ fn lower_call_method<'ctx>(
     // Call (`lower_call`'s take() picked up a stale foreign fact).
     // Taking at entry covers every early-return intercept path, and
     // makes lower_call's "leak-proof by construction" claim true.
-    let call_witness = ctx.take_pending_call_witness();
+    let mut call_witness = ctx.take_pending_call_witness();
+    let receiver_declaration = ctx.pending_method_receiver.take();
     let vbc_mod = ctx.vbc_module().or_internal("CallM requires VBC module for method resolution")?;
 
     // method_id is a StringId (method name), NOT a FunctionId.
@@ -15616,6 +15621,35 @@ fn lower_call_method<'ctx>(
     // 2. Try method_id as direct FunctionId (backward compat)
     // 3. Search functions by name suffix ".{method_name}"
 
+    let mut method_id = method_id;
+    if let Some(declaration) = receiver_declaration {
+        if declaration.is_generic() {
+            emit_runtime_abort(
+                ctx,
+                "missing generic receiver declaration at native call",
+                "method_receiver",
+            )?;
+            ctx.builder().build_unreachable().or_llvm_err()?;
+            let dead = ctx
+                .llvm_context()
+                .append_basic_block(ctx.function(), "method_receiver_dead");
+            ctx.builder().position_at_end(dead);
+            ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+            return Ok(());
+        }
+        if let Some((function, args)) =
+            vbc_mod.bound_instance_method(&declaration, StringId(method_id), args.count)
+        {
+            let target = vbc_mod
+                .specialized_function_id(function, &args)
+                .and_then(|id| vbc_mod.get_function(id))
+                .ok_or_else(|| {
+                    LlvmLoweringError::unsupported("missing exact bound method specialization")
+                })?;
+            method_id = target.name.0;
+            call_witness = Some(args);
+        }
+    }
     let method_name_str = vbc_mod
         .get_string(StringId(method_id))
         .unwrap_or("")
@@ -31676,6 +31710,9 @@ fn lower_extended<'ctx>(
         }
         Some(ExtendedSubOpcode::NewClosureTyped | ExtendedSubOpcode::NewClosureWitnessed) => Err(LlvmLoweringError::unsupported(
             "typed NewClosure must be structurally decoded before lowering",
+        )),
+        Some(ExtendedSubOpcode::BindMethodReceiver) => Err(LlvmLoweringError::unsupported(
+            "BindMethodReceiver requires the canonical decoded instruction",
         )),
         Some(ExtendedSubOpcode::DropTyped) => Err(LlvmLoweringError::unsupported(
             "DropTyped requires the canonical decoded instruction",

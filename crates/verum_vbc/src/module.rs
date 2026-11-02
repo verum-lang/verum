@@ -1268,6 +1268,52 @@ impl VbcModule {
             .and_then(|(_, sid)| self.get_string(*sid))
     }
 
+    /// Resolve a concrete instantiation through its bytecode receipt.
+    pub fn specialized_function_id(
+        &self,
+        function: FunctionId,
+        args: &[TypeRef],
+    ) -> Option<FunctionId> {
+        if args.is_empty() {
+            return Some(function);
+        }
+        let receipt = self
+            .specializations
+            .iter()
+            .find(|entry| entry.generic_fn == function && entry.type_args == args)?;
+        let mut bodies = self.functions.iter().filter(|body| {
+            body.type_params.is_empty()
+                && body.bytecode_offset == receipt.bytecode_offset
+                && body.bytecode_length == receipt.bytecode_length
+        });
+        let target = bodies.next()?.id;
+        bodies.next().is_none().then_some(target)
+    }
+
+    /// Resolve the exact method for a declared receiver without inferring
+    /// type arguments from a runtime object header or a bare function name.
+    pub fn bound_instance_method(
+        &self,
+        receiver: &TypeRef,
+        method: StringId,
+        argc: u8,
+    ) -> Option<(FunctionId, Vec<TypeRef>)> {
+        let name = self.get_string(method)?.rsplit('.').next()?;
+        let id = self.resolve_protocol_method_by_name(receiver.base_type_id()?.0, name)?;
+        let function = self.get_function(id)?;
+        if function.params.len() != usize::from(argc) + 1
+            || self.get_string(function.params.first()?.name) != Some("self")
+        {
+            return None;
+        }
+        let args = if function.type_params.is_empty() {
+            Vec::new()
+        } else {
+            function.receiver_type_arguments(receiver)?
+        };
+        Some((id, args))
+    }
+
     /// **T0106** — consult the carried-fact protocol dispatch. Returns
     /// the concrete FunctionId implementing `bare_method` for the
     /// runtime receiver's concrete `type_id`, when
@@ -2949,6 +2995,25 @@ impl Default for FunctionDescriptor {
 }
 
 impl FunctionDescriptor {
+    /// Instantiate an implementation through its declared self pattern. A heap
+    /// type header cannot establish its arguments. Parameter order comes from
+    /// this function, even if the impl reorders a nominal owner's parameters.
+    pub fn receiver_type_arguments(&self, receiver: &TypeRef) -> Option<Vec<TypeRef>> {
+        let self_type = self.semantic_parameter_types()?.first()?.as_ref()?;
+        let pattern = match self_type {
+            TypeRef::Reference { inner, .. } => inner.as_ref(),
+            value => value,
+        };
+        let mut bindings = crate::mono::TypeSubstitution::empty();
+        if !crate::mono::unify_declared_types(pattern, receiver, &mut bindings) {
+            return None;
+        }
+        self.type_params
+            .iter()
+            .map(|param| bindings.get(param.id).cloned())
+            .collect()
+    }
+
     /// Reconstruct a complete callable only from retained source facts.
     pub fn semantic_callable_signature(&self) -> Option<TypeRef> {
         if self.is_generator || self.properties.contains(PropertySet::ASYNC)

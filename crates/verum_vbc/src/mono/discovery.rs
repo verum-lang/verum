@@ -79,10 +79,11 @@ pub fn discover_call_instantiations(
     function_base: u32,
     graph: &mut InstantiationGraph,
 ) -> Result<(), MonoPhaseError> {
-    for instr in instructions {
+    for (index, instr) in instructions.iter().enumerate() {
         for (callee, args) in concrete_call(module, instr, function_base)
             .into_iter()
             .chain(concrete_drop_calls(module, instr))
+            .chain(bound_method_call(module, instr, instructions.get(index + 1)))
         {
             record_concrete_instantiation(
                 graph,
@@ -93,6 +94,27 @@ pub fn discover_call_instantiations(
         }
     }
     Ok(())
+}
+
+/// A receiver declaration authorizes only its adjacent CallM. This is also
+/// used after substitution, when a generic caller first learns its implementor.
+pub(super) fn bound_method_call(
+    module: &VbcModule,
+    witness: &Instruction,
+    call: Option<&Instruction>,
+) -> Option<(FunctionId, Vec<TypeRef>)> {
+    let Instruction::BindMethodReceiver { type_ref } = witness else {
+        return None;
+    };
+    let Instruction::CallM {
+        method_id, args, ..
+    } = call?
+    else {
+        return None;
+    };
+    let (id, args) =
+        module.bound_instance_method(type_ref, crate::types::StringId(*method_id), args.count)?;
+    (!args.is_empty()).then_some((id, args))
 }
 
 /// Destruction can call generic user glue even though it has no CallG operand.

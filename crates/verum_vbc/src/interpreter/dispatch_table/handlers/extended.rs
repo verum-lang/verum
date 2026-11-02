@@ -163,6 +163,14 @@ pub(in super::super) fn handle_extended(
             state.set_reg(dst, crate::value::Value::from_i64(mode as u8 as i64));
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::BindMethodReceiver) => {
+            let ty = super::bytecode_io::read_type_ref(state)?;
+            let receiver = state.resolve_generic_witness(&ty);
+            if read_u8(state)? != Opcode::CallM.to_byte() {
+                return Err(InterpreterError::Panic { message: "receiver declaration must immediately precede a method call".into() });
+            }
+            super::method_dispatch::handle_bound_method(state, Some(receiver))
+        }
         Some(ExtendedSubOpcode::DropTyped) => super::cbgr::handle_drop_typed(state),
         Some(ExtendedSubOpcode::TypeLayout) => {
             let dst = read_reg(state)?;

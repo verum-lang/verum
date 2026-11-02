@@ -9759,8 +9759,7 @@ const _: () = {
 /// interpreter / LLVM (see #167 Part B for `MakeVariantTyped` 0x01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
-pub enum ExtendedSubOpcode {
-    /// Reserved no-op — forward-compat anchor. Always sub-op `0x00`.
+pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Always sub-op `0x00`.
     /// Encoders must not emit this; decoders must accept and skip its
     /// (length-prefixed) operand block.
     Reserved = 0x00,
@@ -9811,6 +9810,8 @@ pub enum ExtendedSubOpcode {
     NewClosureWitnessed = 0x08,
     /// Declared destruction: `[0x1F][0x09][src:reg][TypeRef]`.
     DropTyped = 0x09,
+    /// Carry a caller-scoped receiver declaration to the immediately following instance call.
+    BindMethodReceiver = 0x0a,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10067,6 +10068,7 @@ impl ExtendedSubOpcode {
             0x07 => Some(Self::NewClosureTyped),
             0x08 => Some(Self::NewClosureWitnessed),
             0x09 => Some(Self::DropTyped),
+            0x0a => Some(Self::BindMethodReceiver),
             0x10 => Some(Self::ProcessExit),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
@@ -10155,6 +10157,7 @@ impl ExtendedSubOpcode {
             Self::NewClosureTyped => "EXT_NEW_CLOSURE_TYPED",
             Self::NewClosureWitnessed => "EXT_NEW_CLOSURE_WITNESSED",
             Self::DropTyped => "EXT_DROP_TYPED",
+            Self::BindMethodReceiver => "EXT_BIND_METHOD_RECEIVER",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10593,8 +10596,7 @@ impl LayoutProperty {
 
 /// Full instruction with opcode and operands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Instruction {
-    // ========================================================================
+pub enum Instruction {    // ========================================================================
     // Data Movement
     // ========================================================================
     /// Move: `dst = src`
@@ -11880,11 +11882,13 @@ pub enum Instruction {
         /// Number of payload fields to allocate space for.
         field_count: u32,
     },
-    /// Create variant with type-id-validated layout (#146 Phase 3).
-    ///
-    /// Encoded under `Opcode::Extended = 0x1F` with sub-op
-    /// Generic-witness sidecar (#44-B): carries static type args to the
-    /// immediately-following `CallM` (see `ExtendedSubOpcode::SetCallWitness`).
+    /// Bind the selected implementation's self pattern to this call site's declaration.
+    /// The immediately following instruction must be an instance call.
+    BindMethodReceiver {
+        /// Exact type of the value receiver in the caller’s generic scope.
+        type_ref: TypeRef,
+    },
+    /// Stage positional generic arguments for the next call.
     SetCallWitness {
         /// Positional type arguments (TypeParamId order of the callee).
         type_args: Vec<crate::types::TypeRef>,

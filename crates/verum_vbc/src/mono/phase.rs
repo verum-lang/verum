@@ -322,7 +322,7 @@ impl MonomorphizationPhase {
                             message: format!("specialized body decode failed: {error:?}"),
                         }
                     })?;
-                for instruction in &instructions {
+                for (index, instruction) in instructions.iter().enumerate() {
                     for (callee, args) in
                         super::discovery::concrete_call(&user_module, instruction, 0)
                             .into_iter()
@@ -330,6 +330,8 @@ impl MonomorphizationPhase {
                                 &user_module,
                                 instruction,
                             ))
+                            .chain(super::discovery::bound_method_call(
+                                &user_module, instruction, instructions.get(index + 1)))
                     {
                         super::discovery::record_concrete_instantiation(
                             &mut graph,

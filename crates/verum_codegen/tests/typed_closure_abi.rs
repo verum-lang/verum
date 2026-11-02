@@ -684,3 +684,30 @@ fn captured_missing_targets_cannot_become_lenient_fallback_bodies() {
         assert!(matches!(error, verum_codegen::llvm::LlvmLoweringError::UnprovenCallableEnvironment(_)), "{error}");
     }
 }
+
+#[test]
+fn bound_methods_select_each_implementation_instantiation_in_native_code() {
+    let mut module = compile(include_str!(
+        "../../verum_vbc/tests/fixtures/bound_receiver.vr"
+    ));
+    module.resolve_protocol_dispatch();
+    let mut module = specialize_closures(module);
+    module.resolve_protocol_dispatch();
+    let method = module.find_function_by_name("Cell.width").unwrap();
+    for ty in [verum_vbc::types::TypeId::U8, verum_vbc::types::TypeId::INT] {
+        assert!(
+            module
+                .specialized_function_id(method, &[verum_vbc::types::TypeRef::Concrete(ty)])
+                .is_some(),
+            "missing implementation specialization for {ty:?}"
+        );
+    }
+    with_native(&module, |engine| {
+        let probe = unsafe {
+            engine
+                .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                .unwrap()
+        };
+        assert_eq!(unsafe { probe.call() }, 108);
+    });
+}

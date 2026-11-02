@@ -553,3 +553,37 @@ fn watcher_reports_the_registered_file_and_removes_it() {
     assert_eq!(execute_from_archive(&source), 0);
     assert_eq!(std::fs::metadata(file).unwrap().len(), 15);
 }
+
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn archived_select_preserves_both_channel_receiver_witnesses() {
+    let source = r#"
+        module app;
+        mount core.async.channel.{Sender, Receiver, RecvFut, bounded};
+        mount core.async.select.{Either, select_either};
+
+        async fn choose(ready_left: Bool) -> Int {
+            let (left_tx, mut left_rx): (Sender<Byte>, Receiver<Byte>) = bounded<Byte>(1);
+            let (right_tx, mut right_rx): (Sender<Int>, Receiver<Int>) = bounded<Int>(1);
+            if ready_left {
+                left_tx.try_send(31 as Byte).unwrap();
+            } else {
+                right_tx.try_send(73).unwrap();
+            }
+            match select_either<Maybe<Byte>, Maybe<Int>, RecvFut<Byte>, RecvFut<Int>>(
+                left_rx.recv_fut(), right_rx.recv_fut()
+            ).await {
+                Either.Left(Maybe.Some(value)) => value as Int,
+                Either.Right(Maybe.Some(value)) => value,
+                _ => -1,
+            }
+        }
+
+        async fn main() -> Int {
+            let first = choose(true).await;
+            let second = choose(false).await;
+            first * 100 + second
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 3173);
+}

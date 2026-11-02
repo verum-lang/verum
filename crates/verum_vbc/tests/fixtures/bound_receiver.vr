@@ -1,0 +1,9 @@
+protocol Measure { fn width(&self) -> Int; }
+type Cell<T> is { value: T };
+implement<T> Measure for Cell<T> { fn width(&self) -> Int { T.size } }
+fn measure<F: Measure>(value: F) -> Int { value.width() }
+fn probe() -> Int {
+    let small: Cell<Byte> = Cell { value: 1 as Byte };
+    let wide: Cell<Int> = Cell { value: 1 };
+    measure<Cell<Byte>>(small) * 100 + measure<Cell<Int>>(wide)
+}

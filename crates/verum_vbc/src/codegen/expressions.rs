@@ -11073,6 +11073,37 @@ impl VbcCodegen {
         }
     }
 
+    /// A value receiver whose implementation depends on a caller binder.
+    /// Pattern aliases carry their declared pointee in the lexical binding
+    /// table. Reading that type does not move or clone the aliased place.
+    fn bound_receiver_declaration(&self, receiver: &Expr) -> Option<crate::types::TypeRef> {
+        use crate::types::TypeRef;
+        if self.ctx.current_generic_param_ids.is_empty()
+            && self.ctx.generic_type_params_ordered.is_empty()
+        {
+            return None;
+        }
+        let mut declaration = self
+            .declared_expression_result(receiver, None, 0, 0)
+            .or_else(|| {
+                let ExprKind::Path(path) = &Self::normalized_place(receiver).kind else {
+                    return None;
+                };
+                let [PathSegment::Name(name)] = path.segments.as_slice() else {
+                    return None;
+                };
+                self.ctx.lookup_var(name.name.as_str())?;
+                let ty = self.ctx.variable_type_names.get(name.name.as_str())?;
+                self.ctx
+                    .current_generic_param_id(Self::method_receiver_type_name(ty))
+                    .map(TypeRef::Generic)
+            })?;
+        while let TypeRef::Reference { inner, .. } = declaration {
+            declaration = *inner;
+        }
+        matches!(declaration, TypeRef::Generic(_)).then_some(declaration)
+    }
+
     /// Emit bytecode for a typechecker-resolved dispatch target.
     ///
     /// This is the PRE-RESOLVED FAST PATH consumer (#91): the
@@ -16691,6 +16722,10 @@ impl VbcCodegen {
             }
             if let Some(type_args) = sidecar_args {
                 self.ctx.emit(Instruction::SetCallWitness { type_args });
+            } else if type_args.is_empty()
+                && let Some(type_ref) = self.bound_receiver_declaration(receiver)
+            {
+                self.ctx.emit(Instruction::BindMethodReceiver { type_ref });
             }
             self.ctx.emit(Instruction::CallM {
                 dst: result,

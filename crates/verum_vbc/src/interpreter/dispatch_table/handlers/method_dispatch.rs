@@ -509,6 +509,13 @@ fn enter_declared_numeric_method(
 pub(in super::super) fn handle_call_method(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    handle_bound_method(state, None)
+}
+
+pub(super) fn handle_bound_method(
+    state: &mut InterpreterState,
+    declared_receiver: Option<crate::types::TypeRef>,
+) -> InterpreterResult<DispatchResult> {
     // Where this INSTRUCTION begins — one byte back, because the
     // dispatch loop has already consumed the opcode byte. The Deref
     // last-resort at the foot of this function rewinds here after
@@ -544,6 +551,30 @@ pub(in super::super) fn handle_call_method(
     // unrelated later calls by construction.
     let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
         state.pending_call_witness.take();
+
+    let mut take_witness = |module: &crate::module::VbcModule, target: FunctionId| {
+        let Some(receiver) = &declared_receiver else {
+            return Ok(call_witness_sidecar.take());
+        };
+        let function = module
+            .get_function(target)
+            .ok_or(InterpreterError::FunctionNotFound(target))?;
+        if function.type_params.is_empty() || !crate::mono::is_concrete_type(receiver) {
+            return Ok(None);
+        }
+        let arguments = function
+            .params
+            .first()
+            .filter(|parameter| module.get_string(parameter.name) == Some("self"))
+            .and_then(|_| function.receiver_type_arguments(receiver))
+            .ok_or_else(|| InterpreterError::Panic {
+                message: format!(
+                    "receiver {receiver:?} does not establish implementation witnesses for {}",
+                    module.get_string(function.name).unwrap_or("?"),
+                ),
+            })?;
+        Ok::<_, InterpreterError>(Some(arguments.into_boxed_slice()))
+    };
 
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmEq) {
         let mname = state.module.strings.get(StringId(method_id)).unwrap_or("?");
@@ -631,11 +662,12 @@ pub(in super::super) fn handle_call_method(
         {
             let return_pc = state.pc();
             let caller_base = state.reg_base();
+            let witnesses = take_witness(&state.module, func_id)?;
             let new_base = state
                 .call_stack
                 .push_frame(func_id, reg_count, return_pc, dst)?;
             state.registers.push_frame(reg_count);
-            if let Some(w) = call_witness_sidecar.take() {
+            if let Some(w) = witnesses {
                 state.call_stack.set_generic_witnesses(w);
             }
             for i in 0..args.count {
@@ -780,7 +812,7 @@ pub(in super::super) fn handle_call_method(
         let receiver_slot = (!target.borrows_self)
             .then_some(state.reg_base() + u32::from(receiver_reg.0));
         return enter_declared_numeric_method(
-            state, target, receiver, receiver_slot, &args, dst, call_witness_sidecar.take(),
+            state, target, receiver, receiver_slot, &args, dst, take_witness(&state.module, target.function)?,
         );
     }
 
@@ -919,7 +951,7 @@ pub(in super::super) fn handle_call_method(
         let argument_receiver = if target.borrows_self { receiver } else { dispatch_receiver };
         return enter_declared_numeric_method(
             state, target, argument_receiver, receiver_slot, &args, dst,
-            call_witness_sidecar.take(),
+            take_witness(&state.module, target.function)?,
         );
     }
 
@@ -1495,10 +1527,11 @@ pub(in super::super) fn handle_call_method(
             if let Some((func_id, reg_count)) = resolved {
                 let return_pc = state.pc();
                 let caller_base = state.reg_base();
+                let witnesses = take_witness(&state.module, func_id)?;
                 let new_base = state
                     .call_stack
                     .push_frame(func_id, reg_count, return_pc, dst)?;
-                if let Some(w) = call_witness_sidecar.take() {
+                if let Some(w) = witnesses {
                     state.call_stack.set_generic_witnesses(w);
                 }
                 state.registers.push_frame(reg_count);
@@ -2771,7 +2804,7 @@ pub(in super::super) fn handle_call_method(
                 .map(|i| state.registers.get(caller_base, Reg(args.start.0 + i as u16)))
                 .collect();
             let result = super::super::call_function_sync_with_witnesses(
-                state, fid, &argv, call_witness_sidecar.take(),
+                state, fid, &argv, take_witness(&state.module, fid)?,
             )?;
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
@@ -4171,12 +4204,13 @@ pub(in super::super) fn handle_call_method(
                 .map(|n| n == "self")
                 .unwrap_or(true);
 
+            let witnesses = take_witness(&state.module, target_func_id)?;
             let new_base =
                 state
                     .call_stack
                     .push_frame(target_func_id, reg_count, return_pc, dst)?;
             state.registers.push_frame(reg_count);
-            if let Some(w) = call_witness_sidecar.take() {
+            if let Some(w) = witnesses {
                 state.call_stack.set_generic_witnesses(w);
             }
 
@@ -4837,6 +4871,7 @@ pub(in super::super) fn handle_call_method(
             let reg_count = func.register_count;
             let return_pc = state.pc();
             let caller_base = state.reg_base();
+            let witnesses = take_witness(&state.module, fid)?;
             let new_base = state
                 .call_stack
                 .push_frame(fid, reg_count, return_pc, dst)?;
@@ -4848,7 +4883,7 @@ pub(in super::super) fn handle_call_method(
             // materialised a garbage type object, and the collected
             // elements came back Some-wrapped (`peek` on the same shape
             // walked a foreign fmt body and SIGSEGV'd).
-            if let Some(w) = call_witness_sidecar.take() {
+            if let Some(w) = witnesses {
                 state.call_stack.set_generic_witnesses(w);
             }
             let arg_offset = if takes_self {
@@ -4932,11 +4967,12 @@ pub(in super::super) fn handle_call_method(
                 let reg_count = func.register_count;
                 let return_pc = state.pc();
                 let caller_base = state.reg_base();
+                let witnesses = take_witness(&state.module, fid)?;
                 let new_base = state
                     .call_stack
                     .push_frame(fid, reg_count, return_pc, dst)?;
                 state.registers.push_frame(reg_count);
-                if let Some(w) = call_witness_sidecar.take() {
+                if let Some(w) = witnesses {
                     state.call_stack.set_generic_witnesses(w);
                 }
                 let arg_offset = if takes_self {
@@ -5176,7 +5212,7 @@ pub(in super::super) fn handle_call_method(
                 eprintln!("[static-call] DISPATCH {} argc={}", qualified, args.count);
             }
             let result = super::super::call_function_sync_with_witnesses(
-                state, fid, &argv, call_witness_sidecar.take(),
+                state, fid, &argv, take_witness(&state.module, fid)?,
             )?;
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
