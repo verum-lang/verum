@@ -25,7 +25,7 @@
 //   2. Prefer matches whose issuer DN has shorter validity window
 //      remaining (cross-signed roots: pick the longest-lived).
 //   3. Prefer chains that hit a trust anchor sooner.
-//   4. Reject cycles aggressively (subject-DN+SPKI fingerprint).
+//   4. Reject repeated certificates by their complete DER encoding.
 //
 // **Bounds.** `MAX_CHAIN_LENGTH = 16` (matches `chain.vr`),
 // `MAX_CANDIDATES_PER_LEVEL = 8` (cap on cross-signed fan-out),
@@ -59,7 +59,7 @@
 )
 module core.security.x509.path_building;
 
-mount core.collections.{List, Set};
+mount core.collections.{List};
 mount core.security.x509.certificate.{X509Certificate};
 mount core.security.x509.name.{DistinguishedName};
 mount core.security.x509.trust_store.{TrustStore};
@@ -157,11 +157,9 @@ public fn build_paths(
     trust: &TrustStore,
 ) -> Result<List<CandidatePath>, PathBuildError> {
     let mut paths: List<CandidatePath> = List.new();
-    let mut visited: Set<List<Byte>> = Set.new();
     let mut current_inters: List<X509Certificate> = List.new();
 
-    visited.insert(cert_fingerprint(ee));
-    dfs_walk(ee, ee, intermediates, trust, &mut current_inters, &mut visited, &mut paths, 0);
+    dfs_walk(ee, ee, intermediates, trust, &mut current_inters, &mut paths, 0);
 
     if paths.is_empty() { return Result.Err(NoPathsFound); }
     sort_by_score_desc(&mut paths);
@@ -213,16 +211,15 @@ fn enumerate_anchor_candidates(
 fn enumerate_intermediate_candidates(
     current: &X509Certificate,
     intermediates: &List<X509Certificate>,
-    visited: &Set<List<Byte>>,
+    ee: &X509Certificate,
+    path: &List<X509Certificate>,
 ) -> List<X509Certificate> {
     let mut out: List<X509Certificate> = List.new();
     let issuer_dn = &current.tbs.issuer;
     let mut i: Int = 0;
     while i < intermediates.len() {
         let cand = &intermediates[i];
-        if cand.tbs.subject.raw_eq(issuer_dn) {
-            let fp = cert_fingerprint(cand);
-            if visited.contains(&fp) { i = i + 1; continue; }
+        if cand.tbs.subject.raw_eq(issuer_dn) && !path_contains_certificate(ee, path, cand) {
             if anchor_aki_ski_match(current, cand) {
                 out.insert(0, cand.clone());
             } else {
@@ -296,41 +293,20 @@ fn is_self_signed(cert: &X509Certificate) -> Bool {
     cert.tbs.subject.raw_eq(&cert.tbs.issuer)
 }
 
-/// Cycle-detection fingerprint = SHA-256-of-DER would be ideal; we
-/// avoid the hash dependency at this layer and instead hash the DN
-/// + SPKI raw bytes via a fast 64-bit FNV-1a fold, returned as a
-/// 16-byte canonical key. Two certs with identical DN+SPKI cannot
-/// be distinguished (which is fine for cycle-detection — they're
-/// the same cert from a chain-builder's view).
-fn cert_fingerprint(cert: &X509Certificate) -> List<Byte> {
-    let mut out: List<Byte> = List.with_capacity(16);
-    let h1 = fnv1a64(cert.tbs.subject.raw_der.as_slice());
-    let h2 = fnv1a64(cert.tbs.spki.raw_der.as_slice());
-    push_u64_be(&mut out, h1);
-    push_u64_be(&mut out, h2);
-    out
-}
-
-fn push_u64_be(out: &mut List<Byte>, v: Int) {
-    let mut shift: Int = 56;
-    while shift >= 0 {
-        out.push(((v >> shift) & 0xFF) as Byte);
-        shift = shift - 8;
-    }
-}
-
-const FNV_OFFSET: Int = 0xcbf29ce484222325;
-const FNV_PRIME:  Int = 0x100000001b3;
-
-fn fnv1a64(bytes: &[Byte]) -> Int {
-    let mut h: Int = FNV_OFFSET;
+/// The current path is bounded by MAX_PATH_LENGTH. Compare its existing DER
+/// encodings directly so cross-signed certificates retain distinct identities.
+fn path_contains_certificate(
+    ee: &X509Certificate,
+    path: &List<X509Certificate>,
+    candidate: &X509Certificate,
+) -> Bool {
+    if bytes_eq(&ee.raw_der, &candidate.raw_der) { return true; }
     let mut i: Int = 0;
-    while i < bytes.len() {
-        h = h ^ (bytes[i] as Int);
-        h = (h * FNV_PRIME) & 0xFFFFFFFFFFFFFFFF;
+    while i < path.len() {
+        if bytes_eq(&path[i].raw_der, &candidate.raw_der) { return true; }
         i = i + 1;
     }
-    h
+    false
 }
 
 // =============================================================================
@@ -347,7 +323,6 @@ fn dfs_walk(
     intermediates: &List<X509Certificate>,
     trust:         &TrustStore,
     current_inters: &mut List<X509Certificate>,
-    visited:       &mut Set<List<Byte>>,
     paths:         &mut List<CandidatePath>,
     depth:         Int,
 ) {
@@ -369,18 +344,14 @@ fn dfs_walk(
     }
 
     // Then try intermediates as continuation candidates.
-    let inter_candidates = enumerate_intermediate_candidates(current_cert, intermediates, visited);
+    let inter_candidates = enumerate_intermediate_candidates(current_cert, intermediates, ee, current_inters);
     let mut i: Int = 0;
     while i < inter_candidates.len() && paths.len() < MAX_TOTAL_PATHS {
         if i >= MAX_CANDIDATES_PER_LEVEL { break; }
         let cand = inter_candidates[i].clone();
-        let fp = cert_fingerprint(&cand);
-        if visited.contains(&fp) { i = i + 1; continue; }
-        visited.insert(fp.clone());
         current_inters.push(cand.clone());
-        dfs_walk(ee, &cand, intermediates, trust, current_inters, visited, paths, depth + 1);
+        dfs_walk(ee, &cand, intermediates, trust, current_inters, paths, depth + 1);
         current_inters.pop();
-        visited.remove(&fp);
         i = i + 1;
     }
 }
