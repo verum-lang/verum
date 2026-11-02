@@ -18832,23 +18832,15 @@ impl VbcCodegen {
             // `for arg in &attr.args`). `handle_iter_new` already
             // derefs CBGR refs (iterators.rs:74), so the native
             // IterNew/IterNext path is correct for every `&Collection`.
-            let deref_name: &str = {
-                let mut n = type_name.as_str();
-                loop {
-                    let stripped = n
-                        .trim_start_matches("&mut ")
-                        .trim_start_matches("&checked ")
-                        .trim_start_matches("&unsafe ")
-                        .trim_start_matches('&')
-                        .trim_start();
-                    if stripped == n {
-                        break n;
-                    }
-                    n = stripped;
-                }
+            let pointee = Self::method_receiver_type_name(&type_name);
+            let base = Self::strip_generic_args(pointee);
+            // Archive payloads carry a qualified declaration. Only the
+            // canonical collection owner can select its VM storage layout.
+            let base = match base.rsplit_once('.') {
+                Some((owner, leaf)) if WKT::from_name(leaf).is_some_and(|kind|
+                    kind.canonical_archive_modules().contains(&owner)) => leaf,
+                _ => base,
             };
-            // Strip generic args: "List<Int>" → "List", "Map<K, V>" → "Map"
-            let base = deref_name.split('<').next().unwrap_or(deref_name);
             // Builtin collection iterator wrappers — the interpreter
             // recognises the underlying collection (Map / Set / etc.) and
             // the `.iter()` method now returns the collection itself,

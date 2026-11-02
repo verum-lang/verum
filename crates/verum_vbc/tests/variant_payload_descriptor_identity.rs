@@ -328,3 +328,43 @@ fn imported_named_variant_field_owns_its_conversion_target() {
     assert_eq!(verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
         .execute_function(id).unwrap().try_as_i64(), Some(42));
 }
+
+#[test]
+fn archived_collection_payload_selects_native_iteration_by_owner() {
+    for (owner, native) in [("core.collections.list", true), ("foreign", false)] {
+        let source = format!("module {owner}; type List<T> is {{ storage: T }};");
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let dependency = VbcCodegen::with_config(CodegenConfig::new(owner))
+            .compile_module(&ast).unwrap();
+        let mut source = format!(r#"
+            module consumer;
+            mount {owner}.List;
+            type Packet<T> is Empty | Data(T);
+            fn sum(packet: Packet<List<Int>>) -> Int {{
+                let mut total = 0;
+                if let Packet.Data(items) = packet {{
+                    for value in items {{ total = total + value; }}
+                }}
+                total
+            }}
+        "#);
+        if native {
+            source.push_str("fn main() -> Int { sum(Packet.Data([17, 25])) }");
+        }
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        codegen.import_archive_module_types(&dependency);
+        codegen.collect_unit_declarations(&[&ast]).unwrap();
+        codegen.resolve_pending_imports();
+        codegen.compile_unit_items(&[&ast], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+        let module = codegen.finalize_module_from_state().unwrap();
+        let id = module.find_function_by_name("consumer.sum").unwrap();
+        let body = module.get_function(id).unwrap().instructions.as_ref().unwrap();
+        assert_eq!(body.iter().any(|op| matches!(op, Instruction::IterNew { .. })), native, "{owner}");
+        if native {
+            let main = module.find_function_by_name("consumer.main").unwrap();
+            let mut vm = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module));
+            assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(42));
+        }
+    }
+}
