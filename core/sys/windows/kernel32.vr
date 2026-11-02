@@ -589,6 +589,15 @@ public type OverlappedEntry is {
     number_of_bytes_transferred: UInt32,
 };
 
+implement OverlappedEntry {
+    public fn empty() -> OverlappedEntry {
+        OverlappedEntry {
+            completion_key: 0, overlapped: 0 as &Overlapped,
+            internal: 0, number_of_bytes_transferred: 0,
+        }
+    }
+}
+
 // =============================================================================
 // Process and WindowsThread
 // =============================================================================

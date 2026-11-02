@@ -353,7 +353,7 @@ implement IocpDriver {
             iocp: iocp,
             open: true,
             pending: 0,
-            entries: [@zero<OverlappedEntry>(); 256],
+            entries: [OverlappedEntry.empty(); 256],
             num_entries: 0,
         })
     }
@@ -447,9 +447,7 @@ implement IocpDriver {
 
     /// Post a user-defined completion event.
     public fn post_user_event(&mut self, token: WindowsIoToken) -> Result<(), WindowsIoDriverError> {
-        // Create a temporary overlapped for the user event
-        let overlapped = Overlapped.new();
-        self.post_completion(0, token.0 as Int, &overlapped)
+        self.post_completion(0, token.0 as Int, 0 as &Overlapped)
     }
 
     // =========================================================================
@@ -737,133 +735,33 @@ public fn async_write(
 // =============================================================================
 
 implement IOEngine for IocpDriver {
-    /// Submit batch of I/O operations.
-    ///
-
-    /// IOCP is inherently completion-based, but the submission model differs
-    /// from io_uring. Each operation must be submitted individually using
-    /// overlapped I/O or PostQueuedCompletionStatus for synthetic completions.
-    ///
-
-    /// For actual I/O, operations are submitted via ReadFile/WriteFile with
-    /// overlapped structure, and completions arrive via IOCP. This method
-    /// handles synthetic operations (Timeout, Nop, Cancel) via
-    /// PostQueuedCompletionStatus.
+    /// Submit a prefix of the batch. A synthetic no-op has no OVERLAPPED
+    /// allocation. File operations require an associated handle and a live
+    /// overlapped request, which this batch interface does not yet retain.
     @must_use
     fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError> {
-        if !self.open {
-            return Result.Err(EngineIoError.Closed);
-        }
+        if !self.open { return Result.Err(EngineIoError.Closed); }
 
-        let mut submitted: Int = 0;
-
+        let mut submitted = 0;
         for (op, user_data) in ops.iter() {
             match op {
-                // Nop operation - post completion immediately
-                Nop => {
-                    let overlapped = Overlapped.new();
-                    let result = PostQueuedCompletionStatus(
-                        self.iocp,
-                        0,
-                        user_data as Int,
-                        &overlapped,
+                CompletionOp.Nop => {
+                    let posted = PostQueuedCompletionStatus(
+                        self.iocp, 0, user_data as Int, 0 as &Overlapped,
                     );
-                    if result {
-                        self.pending += 1;
-                        submitted += 1;
+                    if !posted {
+                        if submitted > 0 { return Result.Ok(submitted); }
+                        return Result.Err(EngineIoError.from_win32(GetLastError()));
                     }
-                }
-
-                // Timeout operation - post completion with WAIT_TIMEOUT marker
-                Timeout { ts } => {
-                    // IOCP doesn't have native timeout ops like io_uring.
-                    // We use timer thread or post synthetic completion.
-                    // For now, post immediate completion with timeout flag.
-                    let overlapped = Overlapped.new();
-                    let result = PostQueuedCompletionStatus(
-                        self.iocp,
-                        0,
-                        user_data as Int,
-                        &overlapped,
-                    );
-                    if result {
-                        self.pending += 1;
-                        submitted += 1;
-                    }
-                }
-
-                // Cancel operation - cancel by user_data
-                // The field is `user_data` (see CompletionOp in
-                // core/sys/io_engine.vr); binding it as `target_user_data`
-                // named a field the variant does not have, so the pattern
-                // resolved through a positional GUESS (T0723). Renamed at
-                // bind time rather than in place: the body's `user_data` is
-                // the LOOP binding — the submitting op's tag — and shadowing
-                // it would post the completion under the wrong one.
-                Cancel { user_data: target_user_data } => {
-                    // IOCP cancellation is handle-based, not user_data-based.
-                    // Post completion with cancelled status.
-                    let overlapped = Overlapped.new();
-                    let result = PostQueuedCompletionStatus(
-                        self.iocp,
-                        0,
-                        user_data as Int,
-                        &overlapped,
-                    );
-                    if result {
-                        self.pending += 1;
-                        submitted += 1;
-                    }
-                }
-
-                // Read/Write/Accept/Connect/etc. require actual overlapped I/O
-                // These are typically submitted via handle association and
-                // ReadFile/WriteFile. We track them but actual submission
-                // must happen through the appropriate I/O function.
-                Read { fd, buf, offset } => {
-                    // Note: For actual read, caller must use async_read()
-                    // after associating the handle. This just tracks intent.
                     self.pending += 1;
                     submitted += 1;
                 }
-
-                Write { fd, buf, offset } => {
-                    // Note: For actual write, caller must use async_write()
-                    self.pending += 1;
-                    submitted += 1;
-                }
-
-                Accept { fd, addr } => {
-                    // AcceptEx requires WSA setup
-                    self.pending += 1;
-                    submitted += 1;
-                }
-
-                Connect { fd, addr } => {
-                    // ConnectEx requires WSA setup
-                    self.pending += 1;
-                    submitted += 1;
-                }
-
-                Close { fd } => {
-                    // Close is synchronous on Windows
-                    self.pending += 1;
-                    submitted += 1;
-                }
-
-                Fsync { fd, datasync } => {
-                    // FlushFileBuffers is synchronous
-                    self.pending += 1;
-                    submitted += 1;
-                }
-
                 _ => {
-                    // Other operations not directly supported
-                    submitted += 1;
+                    if submitted > 0 { return Result.Ok(submitted); }
+                    return Result.Err(EngineIoError.NotSupported);
                 }
             }
         }
-
         Result.Ok(submitted)
     }
 
