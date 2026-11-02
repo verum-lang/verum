@@ -335,3 +335,20 @@ fn actual_stdlib_nominal_universes_reach_the_compiler_pipeline() {
     let result = CompilationPipeline::new(&mut session).run_check_only();
     assert!(result.is_ok(), "{result:?}\n{}", session.format_diagnostics());
 }
+
+#[test]
+#[ignore = "requires the matching freshly baked stdlib embedded in this test binary"]
+fn actual_stdlib_dependent_field_is_refused_without_a_source_binder() {
+    use verum_compiler::{CompilationPipeline, CompilerOptions, OutputFormat, Session, VerifyMode};
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("dependent.vr");
+    std::fs::write(&input, "mount core.math.hott.{NType}; fn read(x: &NType<0>) -> Type { x.carrier } fn main() {} ").unwrap();
+    let mut session = Session::new(CompilerOptions {
+        input, verify_mode: VerifyMode::Runtime, output_format: OutputFormat::Human,
+        check_only: true, ..Default::default()
+    });
+    let result = CompilationPipeline::new(&mut session).run_check_only();
+    assert!(result.is_err(), "an unresolved dependent record was silently accepted");
+    let diagnostics = session.format_diagnostics();
+    assert!(diagnostics.contains("type not found: carrier"), "wrong refusal: {result:?}\n{diagnostics}");
+}
