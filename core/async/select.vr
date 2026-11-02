@@ -30,7 +30,8 @@
 )
 module core.async.select;
 
-mount core.{Maybe, Result, List};
+mount core.base.{Maybe, Result};
+mount core.collections.List;
 mount super.future.{Future, FutureExt};
 mount super.poll.Poll;
 mount super.waker.Context;
@@ -188,13 +189,13 @@ implement Eq for SelectError {
 }
 
 /// Result of select_all operation.
-public type SelectAllResult<T> is {
+public type SelectAllResult<T, F> is {
     /// The completed value
     value: T,
     /// Index of the future that completed
     index: Int,
     /// Remaining uncompleted futures
-    remaining: List<T>,
+    remaining: List<F>,
 };
 
 /// Select from a collection of futures, completing when any one finishes.
@@ -221,7 +222,7 @@ public type SelectAllResult<T> is {
 /// ```
 public async fn select_all<T, F: Future<Output = T>>(
     mut futures: List<F>,
-) -> Result<SelectAllResult<T>, SelectError> {
+) -> Result<SelectAllResult<T, F>, SelectError> {
     SelectAll { futures: futures }.await
 }
 
@@ -230,9 +231,9 @@ type SelectAll<T, F: Future<Output = T>> is {
 };
 
 implement<T, F: Future<Output = T>> Future for SelectAll<T, F> {
-    type Output = Result<SelectAllResult<T>, SelectError>;
+    type Output = Result<SelectAllResult<T, F>, SelectError>;
 
-    fn poll(&mut self, cx: &mut Context) -> Poll<Result<SelectAllResult<T>, SelectError>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<SelectAllResult<T, F>, SelectError>> {
         // Empty input → synchronous error (do this first so the for-loop
         // bound check below is a pure "all-pending" signal).
         if self.futures.is_empty() {
