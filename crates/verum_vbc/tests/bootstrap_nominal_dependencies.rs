@@ -726,3 +726,66 @@ fn database_error_retry_policy_executes_against_the_declared_timeout_phase() {
         .execute_function(entry).unwrap();
     assert_eq!(value.try_as_i64(), Some(42));
 }
+
+#[test]
+fn module_qualified_patterns_use_the_scrutinees_declaring_sum() {
+    use verum_vbc::{Instruction, bytecode::decode_instructions, codegen::ItemFailurePolicy};
+    let columns = producer("wire", "
+        module wire.columns;
+        public type Row is { reserved: Int, value: Int };
+        public type Cell is Null | Textual(Row) | Binary(Row) | Marked { reserved: Int, value: Int };
+    ");
+    let foreign = producer("wire", "
+        module wire.another;
+        public type Row is { value: Int, reserved: Int };
+        public type Cell is Textual(Row) | Marked { value: Int, reserved: Int } | Null;
+    ");
+    let compile = |pattern: &str, named: &str| {
+        let ast = source(&format!("
+            module app.reader;
+            mount wire.columns.{{Cell}};
+            mount wire.another.Cell as OtherCell;
+            fn named(cell: &wire.columns.Cell) -> Int {{
+                match cell {{ {named} {{ value, .. }} => value, _ => 0 }}
+            }}
+            fn read(cell: &wire.columns.Cell) -> Int {{
+                match cell {{
+                    {pattern}(row) | wire.columns.Binary(row) => row.value,
+                    _ => 0,
+                }}
+            }}"
+        ));
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("app"));
+        codegen.import_bootstrap_nominal_dependencies(&[&ast], &[&foreign, &columns])?;
+        codegen.collect_unit_declarations(&[&ast])?;
+        codegen.resolve_pending_imports();
+        codegen.compile_unit_items(&[&ast], ItemFailurePolicy::Strict)?;
+        codegen.finalize_module_from_state()
+    };
+    for pattern in ["wire.columns.Textual", "wire.columns.Cell.Textual"] {
+        let module = compile(pattern, "wire.columns.Marked").unwrap();
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        let named = module.get_function(module.find_function_by_name("app.reader.named").unwrap()).unwrap();
+        let start = named.bytecode_offset as usize;
+        let instructions = decode_instructions(&module.bytecode[start..start + named.bytecode_length as usize]).unwrap();
+        assert!(instructions.iter().any(|op| matches!(op, Instruction::IsVar { tag: 3, .. })), "{instructions:?}");
+        assert!(instructions.iter().any(|op| matches!(op, Instruction::GetVariantDataRef { field: 1, .. })), "{instructions:?}");
+        let id = module.find_function_by_name("app.reader.read").unwrap();
+        let function = module.get_function(id).unwrap();
+        let start = function.bytecode_offset as usize;
+        let ops = decode_instructions(&module.bytecode[start..start + function.bytecode_length as usize]).unwrap();
+        let tags: Vec<_> = ops.iter().filter_map(|op| match op {
+            Instruction::IsVar { tag, .. } => Some(*tag),
+            _ => None,
+        }).collect();
+        assert_eq!(tags, [1, 2], "{pattern}: {ops:?}");
+        assert!(ops.iter().any(|op| matches!(op, Instruction::GetF { field_idx: 1, .. })), "{pattern}: {ops:?}");
+    }
+    for path in ["wire.another.Textual", "wire.another.Cell.Textual", "wire.columns.Absent"] {
+        let err = compile(path, "wire.columns.Marked").unwrap_err().to_string();
+        assert!(err.contains("no declared tag") && err.contains("wire.columns.Cell"), "{path}: {err}");
+    }
+    let err = compile("wire.columns.Textual", "wire.another.Marked").unwrap_err().to_string();
+    assert!(err.contains("no declared tag") && err.contains("Marked"), "{err}");
+}

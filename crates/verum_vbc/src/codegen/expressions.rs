@@ -658,8 +658,41 @@ impl VbcCodegen {
         self.ctx.lookup_function_in_scope(path)
     }
 
+    fn scrutinee_sum_descriptor(&self) -> Option<&crate::types::TypeDescriptor> {
+        let ty = Self::strip_wrapper_type(self.ctx.match_scrutinee_type.as_deref()?);
+        let declaration = self.type_by_id(self.nominal_type_id(Self::strip_generic_args(ty))?)?;
+        (declaration.kind == crate::types::TypeKind::Sum && !declaration.variants.is_empty())
+            .then_some(declaration)
+    }
+
+    /// A constructor may be qualified by its sum or by the module that
+    /// declares that sum. The selected scrutinee owns both its tag and fields.
+    fn scrutinee_variant<'d>(
+        &self, descriptor: &'d crate::types::TypeDescriptor, path: &str,
+    ) -> Option<&'d crate::types::VariantDescriptor> {
+        let Some((qualifier, name)) = path.rsplit_once('.') else {
+            return self.descriptor_variant(descriptor, path);
+        };
+        let variant = self.descriptor_variant(descriptor, name)?;
+        if let Some(owner) = self.nominal_type_id(qualifier) {
+            return (owner == descriptor.id).then_some(variant);
+        }
+        let module = descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize));
+        if module.is_some_and(|module| module == qualifier || self.mounted_type_path(qualifier) == Some(module)) {
+            return Some(variant);
+        }
+        // Preserve re-exported constructors only when their exact qualified
+        // registration attests both the return owner and the declared tag.
+        let export = self.ctx.lookup_qualified_function(path)?;
+        (export.return_type.as_ref().and_then(crate::types::TypeRef::base_type_id) == Some(descriptor.id)
+            && export.variant_tag == Some(variant.tag)).then_some(variant)
+    }
+
     /// Resolve a qualified constructor within its named owner. Bare patterns may use the scrutinee.
     fn pattern_variant_tag(&self, path: &str) -> Option<u32> {
+        if let Some(descriptor) = self.scrutinee_sum_descriptor() {
+            return self.scrutinee_variant(descriptor, path).map(|variant| variant.tag);
+        }
         if let Some((owner, member)) = path.rsplit_once('.') {
             if let Some(descriptor) = self.nominal_type_id(owner).and_then(|id| self.type_by_id(id))
                 && descriptor.kind == crate::types::TypeKind::Sum
@@ -673,12 +706,6 @@ impl VbcCodegen {
 
         let expected = self.ctx.match_scrutinee_type.as_deref()
             .map(Self::strip_wrapper_type).map(Self::strip_generic_args);
-        if let Some(descriptor) = expected.and_then(|owner| self.nominal_type_id(owner))
-            .and_then(|id| self.type_by_id(id))
-            && descriptor.kind == crate::types::TypeKind::Sum && !descriptor.variants.is_empty()
-        {
-            return self.descriptor_variant(descriptor, path).map(|variant| variant.tag);
-        }
         expected.and_then(|owner| self.ctx.find_variant_by_type_and_name(owner, path)
             .or_else(|| self.ctx.find_variant_parent_type(owner)
                 .and_then(|parent| self.ctx.find_variant_by_type_and_name(&parent, path))))
@@ -705,15 +732,7 @@ impl VbcCodegen {
             return None;
         }
         let path = self.resolve_variant_path_alias(&pattern_path.replace("::", "."));
-        let variant_name = if let Some((parent, variant)) = path.rsplit_once('.') {
-            if self.nominal_type_id(parent) != Some(owner) {
-                return Some(None);
-            }
-            variant
-        } else {
-            path.as_str()
-        };
-        let Some(variant) = self.descriptor_variant(descriptor, variant_name) else {
+        let Some(variant) = self.scrutinee_variant(descriptor, &path) else {
             return Some(None);
         };
         let Some(payload) = variant.fields.get(field)
@@ -778,6 +797,13 @@ impl VbcCodegen {
     ///     FIELD-GUESS doors) applies.
     pub(super) fn variant_pattern_field_type_key(&self, pattern_path: &str) -> String {
         let dotted = self.resolve_variant_path_alias(&pattern_path.replace("::", "."));
+        if let Some(owner) = self.scrutinee_sum_descriptor()
+            && let Some(member) = self.scrutinee_variant(owner, &dotted)
+            && let Some(name) = self.ctx.strings.get(member.name.0 as usize)
+            && let Some(identity) = self.type_declaration_identity(owner)
+        {
+            return format!("{identity}.{name}");
+        }
         if dotted.contains('.') {
             return dotted;
         }
@@ -810,17 +836,20 @@ impl VbcCodegen {
             .rsplit(|c| c == '.' || c == ':')
             .next()
             .unwrap_or(parent_path);
+        let selected = self.nominal_type_id(parent_path);
         for type_desc in self.types.iter() {
             let tn_idx = type_desc.name.0 as usize;
             let tn = match self.ctx.strings.get(tn_idx) {
                 Some(s) => s.as_str(),
                 None => continue,
             };
-            // Match on full path or simple name.
-            let tn_simple = tn.rsplit(|c| c == '.' || c == ':').next().unwrap_or(tn);
-            if tn != parent_path && tn_simple != parent_simple {
-                continue;
-            }
+            let matches_owner = match selected {
+                Some(id) => type_desc.id == id,
+                None if parent_simple != parent_path => self.type_declaration_identity(type_desc)
+                    .is_some_and(|identity| identity.as_str() == parent_path),
+                None => tn.rsplit(['.', ':']).next() == Some(parent_simple),
+            };
+            if !matches_owner { continue; }
             for variant in type_desc.variants.iter() {
                 let vn = match self.ctx.strings.get(variant.name.0 as usize) {
                     Some(s) => s.as_str(),
