@@ -325,7 +325,7 @@ implement AsyncPgConnection {
     public async fn simple_query(&self, sql: &Text)
         -> Result<PgSimpleQueryResult, DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<PgSimpleQueryResult, DbError>>();
         match self.tx.send_async(ReqSimpleQuery {
             sql: sql.clone(),
             reply: rs,
@@ -342,7 +342,7 @@ implement AsyncPgConnection {
     /// Run a single statement that produces no rows; returns the
     /// `command_tag` from CommandComplete.
     public async fn execute(&self, sql: &Text) -> Result<Text, DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<Text, DbError>>();
         match self.tx.send_async(ReqExecute {
             sql: sql.clone(),
             reply: rs,
@@ -359,7 +359,7 @@ implement AsyncPgConnection {
     /// Async health-check — issues `simple_query("SELECT 1")` on
     /// the actor and reports the round-trip success.
     public async fn ping(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.tx.send_async(ReqPing { reply: rs }).await {
             Result.Ok(())  => {}
             Result.Err(_)  => { return Result.Err(actor_dropped("ping")); }
@@ -377,7 +377,7 @@ implement AsyncPgConnection {
     public async fn prepare(&self, sql: &Text)
         -> Result<AsyncPgPreparedStatement, DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<PgPreparedStatement, DbError>>();
         match self.tx.send_async(ReqPrepare {
             sql: sql.clone(),
             reply: rs,
@@ -402,7 +402,7 @@ implement AsyncPgConnection {
         stmt: &AsyncPgPreparedStatement,
         params: List<Maybe<List<Byte>>>,
     ) -> Result<PgSimpleQueryResult, DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<PgSimpleQueryResult, DbError>>();
         match self.tx.send_async(ReqExecutePrepared {
             stmt: stmt.inner.clone(),
             params: params,
@@ -425,7 +425,7 @@ implement AsyncPgConnection {
         stmt: &AsyncPgPreparedStatement,
         typed_params: List<Maybe<core.database.postgres.wire.typed.TypedValue>>,
     ) -> Result<core.database.postgres.connection.PgTypedQueryResult, DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<core.database.postgres.connection.PgTypedQueryResult, DbError>>();
         match self.tx.send_async(ReqExecutePreparedTyped {
             stmt: stmt.inner.clone(),
             typed_params: typed_params,
@@ -444,7 +444,7 @@ implement AsyncPgConnection {
     public async fn close_prepared(&self, stmt: AsyncPgPreparedStatement)
         -> Result<(), DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.tx.send_async(ReqClosePrepared {
             stmt: stmt.inner,
             reply: rs,
@@ -463,7 +463,7 @@ implement AsyncPgConnection {
     /// Subsequent calls on any clone fail with
     /// `ACTOR_CLOSED`.
     public async fn close(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.tx.send_async(ReqShutdown { reply: rs }).await {
             Result.Ok(())  => {}
             Result.Err(_)  => { return Result.Err(actor_dropped("close")); }

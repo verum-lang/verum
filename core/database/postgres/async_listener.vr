@@ -123,7 +123,7 @@ implement AsyncPgListener {
     /// re-issuing as a no-op. Returns once the actor confirms the
     /// command went through.
     public async fn listen(&self, channel: &Text) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(LcListen {
             channel: channel.clone(),
             ack: rs,
@@ -138,7 +138,7 @@ implement AsyncPgListener {
     }
 
     public async fn unlisten(&self, channel: &Text) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(LcUnlisten {
             channel: channel.clone(),
             ack: rs,
@@ -179,7 +179,7 @@ implement AsyncPgListener {
     }
 
     public async fn close(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(LcShutdown { ack: rs }).await {
             Result.Ok(()) => {}
             Result.Err(_) => { return Result.Err(actor_dropped("close")); }

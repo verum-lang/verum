@@ -121,7 +121,7 @@ implement AsyncCopyInWriter {
     }
 
     public async fn finish(self) -> Result<Int, DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<Int, DbError>>();
         match self.chunk_tx.send_async(CicDone(rs)).await {
             Result.Ok(())  => {}
             Result.Err(_)  => { return Result.Err(actor_dropped("copy_in.finish send")); }
@@ -134,7 +134,7 @@ implement AsyncCopyInWriter {
 
     public async fn cancel(self, reason: &Text) -> Result<(), DbError> {
         self.metrics.record_cancellation();
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.chunk_tx.send_async(CicCancel { reason: reason.clone(), reply: rs }).await {
             Result.Ok(())  => {}
             Result.Err(_)  => { return Result.Err(actor_dropped("copy_in.cancel send")); }

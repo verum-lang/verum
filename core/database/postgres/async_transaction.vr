@@ -82,7 +82,7 @@ public async fn begin_tx_with_async(
 ) -> Result<AsyncPgTransaction, DbError> {
     let mut sql: Text = "BEGIN".clone();
     sql.push_str(&opts.render_sql());
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(ReqBeginTx {
         begin_sql: sql,
         reply: rs,
@@ -121,7 +121,7 @@ public async fn commit_tx_async(
     tx: AsyncPgTransaction,
 ) -> Result<(), DbError> {
     let _ = tx;
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(ReqCommitTx { reply: rs }).await;
     match rr.await {
         Result.Ok(r)  => r,
@@ -134,7 +134,7 @@ public async fn rollback_tx_async(
     tx: AsyncPgTransaction,
 ) -> Result<(), DbError> {
     let _ = tx;
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(ReqRollbackTx { reply: rs }).await;
     match rr.await {
         Result.Ok(r)  => r,
@@ -150,7 +150,7 @@ public async fn savepoint_async(
     conn: &AsyncPgConnection,
     name: &Text,
 ) -> Result<(), DbError> {
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(ReqSavepoint {
         name: name.clone(),
         reply: rs,
@@ -165,7 +165,7 @@ public async fn release_savepoint_async(
     conn: &AsyncPgConnection,
     name: &Text,
 ) -> Result<(), DbError> {
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(ReqReleaseSavepoint {
         name: name.clone(),
         reply: rs,
@@ -180,7 +180,7 @@ public async fn rollback_to_savepoint_async(
     conn: &AsyncPgConnection,
     name: &Text,
 ) -> Result<(), DbError> {
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(ReqRollbackToSavepoint {
         name: name.clone(),
         reply: rs,
