@@ -211,7 +211,17 @@ impl SignatureScan {
         for bound in bounds {
             match &bound.kind {
                 TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
-                    self.visit_type(ty)
+                    // F: fn(A) -> Type(u) constrains a callable's result;
+                    // A: Type(u) instead asserts a formation judgment.
+                    // Callable equality bounds are checked by the existing
+                    // source checker and retain their levels in the scheme.
+                    if matches!(ty.kind, TypeKind::Function { .. }) {
+                        let saved = std::mem::take(&mut self.type_bound_depth);
+                        self.visit_type(ty);
+                        self.type_bound_depth = saved;
+                    } else {
+                        self.visit_type(ty);
+                    }
                 }
                 TypeBoundKind::AssociatedTypeEquality { eq_type, .. } => self.visit_type(eq_type),
                 TypeBoundKind::AssociatedTypeBound { bounds, .. } => self.bounds(bounds),

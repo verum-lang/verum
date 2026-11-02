@@ -63,7 +63,68 @@ pub struct TypeScheme {
     pub explicit_method_vars: Option<List<Option<TypeVar>>>,
 }
 
+/// One call's fresh body and obligations. All fields use the same simultaneous
+/// substitution, including level parameters nested in bounds and the receiver.
+pub struct InstantiatedScheme {
+    substitution: Substitution,
+    pub ty: Type,
+    pub fresh_vars: List<TypeVar>,
+    pub implicit_vars: Set<TypeVar>,
+    pub type_bounds: Map<TypeVar, List<Type>>,
+    pub protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
+    pub impl_self_type: Option<Type>,
+    pub explicit_method_vars: Option<List<Option<TypeVar>>>,
+}
+
+impl InstantiatedScheme {
+    /// Read-only provenance for independent checking of the native instance.
+    pub fn universe_instantiation(&self) -> &crate::universe_inference::UniverseInference {
+        &self.substitution.universes
+    }
+}
+
 impl TypeScheme {
+    pub fn try_instantiate(&self) -> Result<InstantiatedScheme, Text> {
+        let mut subst = Substitution::new();
+        subst.universes = crate::universe_inference::UniverseInference::instantiate(&self.universe_params)?;
+        let mut fresh_vars = List::new();
+        let mut implicit_vars = Set::new();
+        for original in &self.vars {
+            let fresh = TypeVar::fresh();
+            if subst.insert(*original, Type::Var(fresh)).is_some() {
+                return Err("duplicate quantified type variable".into());
+            }
+            fresh_vars.push(fresh);
+            if self.implicit_vars.contains(original) { implicit_vars.insert(fresh); }
+        }
+        let fresh_key = |original: &TypeVar| -> Result<TypeVar, Text> {
+            match subst.get(original) {
+                Some(Type::Var(fresh)) => Ok(*fresh),
+                _ => Err("bound owner is absent from the quantified parameter roster".into()),
+            }
+        };
+        let mut type_bounds = Map::new();
+        for (original, bounds) in &self.var_type_bounds {
+            type_bounds.insert(fresh_key(original)?, bounds.iter()
+                .map(|bound| bound.try_apply_subst(&subst)).collect::<Result<_, _>>()?);
+        }
+        let mut protocol_bounds = Map::new();
+        for (original, bounds) in &self.var_protocol_bounds {
+            protocol_bounds.insert(fresh_key(original)?, bounds.iter()
+                .map(|bound| bound.try_apply_subst(&subst)).collect::<Result<_, _>>()?);
+        }
+        Ok(InstantiatedScheme {
+            ty: self.ty.try_apply_subst(&subst)?,
+            implicit_vars,
+            type_bounds,
+            protocol_bounds,
+            impl_self_type: self.impl_self_type.as_ref().map(|ty| ty.try_apply_subst(&subst)).transpose()?,
+            explicit_method_vars: self.fresh_explicit_method_vars(&fresh_vars),
+            fresh_vars,
+            substitution: subst,
+        })
+    }
+
     /// Create a monomorphic type scheme (no quantification)
     pub fn mono(ty: Type) -> Self {
         Self {

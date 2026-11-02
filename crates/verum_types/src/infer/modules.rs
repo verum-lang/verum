@@ -121,7 +121,7 @@ impl TypeChecker {
         // holding the whole module call `register_declared_meta_macros`,
         // which covers the other order too.
         self.note_declared_meta_macros(item);
-        let outcome = self.check_item_inner(item);
+        let outcome = self.with_value_obligation_scope(false, |checker| checker.check_item_inner(item));
         self.check_analysis_control()?;
         outcome
     }
@@ -11196,9 +11196,11 @@ impl TypeChecker {
         // and a leaked parameter would arrive at the next function as a var
         // that refuses to bind to anything.
         let saved_rigid = self.unifier.rigid_snapshot();
-        let result = self.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
-            checker.validate_function_universes(func)?;
-            checker.check_function_inner(func)
+        let result = self.with_value_obligation_scope(true, |checker| {
+            checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
+                checker.validate_function_universes(func)?;
+                checker.check_function_inner(func)
+            })
         });
         self.unifier.exit_rigid_scope(saved_rigid);
         result
@@ -11335,6 +11337,7 @@ impl TypeChecker {
         // body-check publishes (see the note at the insertion site).
         let mut func_param_protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>> =
             Map::new();
+        let mut func_param_type_bounds: Map<TypeVar, List<Type>> = Map::new();
         let mut func_implicit_type_vars: Set<TypeVar> = Set::new();
 
         for generic_param in &func.generics {
@@ -11442,6 +11445,10 @@ impl TypeChecker {
             self.register_type_var_bounds(var, protocol_bounds.clone());
             if !protocol_bounds.is_empty() {
                 func_param_protocol_bounds.insert(var, protocol_bounds.clone());
+            }
+            let type_bounds = self.extract_type_bounds_from_ast(bounds);
+            if !type_bounds.is_empty() {
+                func_param_type_bounds.insert(var, type_bounds);
             }
             self.ctx.env.add_type_param(crate::context::TypeParam::new(name.name.clone(), name.span)
                 .with_bounds(protocol_bounds));
@@ -11593,11 +11600,10 @@ impl TypeChecker {
         // the signature pass is overwritten here and never reaches a call
         // site — fixing one place and not the other is inert, which is how
         // the first attempt at this measured.
-        let mut func_where_type_bounds: Map<TypeVar, List<Type>> = Map::new();
         self.collect_where_clause_bounds(
             func,
             &mut func_param_protocol_bounds,
-            &mut func_where_type_bounds,
+            &mut func_param_type_bounds,
         );
 
         // Create initial function type with contexts and add to environment (for recursive calls)
@@ -11629,6 +11635,9 @@ impl TypeChecker {
         } else {
             scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
+        // Recursive calls and the final publication must retain the same
+        // callable/type bounds as the signature-registration pass.
+        let scheme = scheme.with_type_bounds(func_param_type_bounds.clone());
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         self.record_explicit_method_vars(&mut scheme, func);
@@ -13352,6 +13361,9 @@ impl TypeChecker {
             }
         }
 
+        // Resolve value-instance obligations while this declaration's local
+        // type scope and rigid binders are still available.
+        self.discharge_value_obligations()?;
         self.ctx.exit_scope();
 
         // One carrier for the final signature wrap (throws handled at
@@ -13621,6 +13633,7 @@ impl TypeChecker {
         } else {
             final_scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
+        let final_scheme = final_scheme.with_type_bounds(func_param_type_bounds);
         let mut final_scheme = final_scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         final_scheme.explicit_method_vars = source_explicit_slots;
@@ -26596,12 +26609,12 @@ bake to have this verified.",
                 }
             }
             if let Some(scheme) = scheme {
-                let (instantiated, fresh) = scheme.instantiate_with_fresh_vars();
-                let explicit_slots = scheme.fresh_explicit_method_vars(&fresh);
+                let instance = self.instantiate_call_scheme(&scheme, span)?;
+                let explicit_slots = &instance.explicit_method_vars;
                 if !type_args.is_empty() {
                     self.bind_explicit_method_arguments(explicit_slots.as_ref(), type_args, method, span)?;
                 }
-                let func_type = self.unifier.apply(&instantiated);
+                let func_type = self.unifier.try_apply(&instance.ty, span)?;
                 if let Type::Function {
                     params,
                     return_type,
@@ -26613,6 +26626,8 @@ bake to have this verified.",
                             let resolved_param = self.unifier.apply(param_ty);
                             self.check_expr(arg, &resolved_param)?;
                         }
+                        self.enforce_call_type_bounds(&instance.type_bounds, span)?;
+                        self.enforce_call_protocol_bounds(&instance.protocol_bounds, span)?;
                         let resolved_return = self.unifier.apply(return_type);
                         return Ok(Some(InferResult::new(resolved_return)));
                     }

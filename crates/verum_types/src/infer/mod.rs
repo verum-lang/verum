@@ -15,6 +15,7 @@
 // Submodules containing impl TypeChecker method groups
 mod source_declarations;
 mod universe_parameters;
+mod call_obligations;
 mod preparation;
 mod field_visibility;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
@@ -1018,6 +1019,9 @@ pub struct TypeChecker {
     /// - Equality bounds from generics
     /// Generic bounds tracking: type parameters carry protocol constraints (e.g., T: Ord) that are checked at instantiation sites
     type_var_type_bounds: Map<TypeVar, List<Type>>,
+    /// Bounds belonging to value instances in the active inference frame.
+    pending_value_obligations: List<call_obligations::PendingValueObligation>,
+    value_obligation_scope_depth: usize,
     /// Deferred constraint queue for improved constraint solving
     /// Contains constraints that couldn't be solved immediately and need
     /// to be revisited after more type information is available.

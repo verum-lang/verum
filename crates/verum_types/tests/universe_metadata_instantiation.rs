@@ -168,3 +168,40 @@ fn equal_archived_parameter_spans_do_not_merge_sibling_declarations() {
     assert_eq!(b.len(), 1);
     assert_ne!(a, b);
 }
+
+#[test]
+fn metadata_replays_callable_universe_bounds_at_actual_calls() {
+    let module = parse("public fn retain<universe u, F: fn() -> Type(u)>(f: F) -> Type(u) { f() }");
+    let ItemKind::Function(function) = &module.items[0].kind else {
+        panic!("function")
+    };
+    let declaration = verum_ast::source_signature::source_signature(function, false)
+        .unwrap()
+        .unwrap();
+    let bytes = encode_metadata(&metadata(declaration)).unwrap();
+    let errors = check(
+        decode_metadata(&bytes).unwrap(),
+        "fn one(f: fn() -> Type(1)) -> Type(1) { test.provider.retain(f) } fn two(f: fn() -> Type(2)) -> Type(2) { test.provider.retain(f) }",
+        true,
+        false,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let errors = check(
+        decode_metadata(&bytes).unwrap(),
+        "fn bad(f: fn() -> Type(2)) -> Type(1) { test.provider.retain(f) }",
+        true,
+        false,
+    );
+    assert!(!errors.is_empty());
+    for level in [1, 2] {
+        let source = format!(
+            "fn use_it(f: fn() -> Type({level})) -> Type(1) {{ let alias: fn(fn() -> Type({level})) -> Type(1) = test.provider.retain; alias(f) }}"
+        );
+        let errors = check(decode_metadata(&bytes).unwrap(), &source, true, false);
+        if level == 1 {
+            assert!(errors.is_empty(), "{errors:?}");
+        } else {
+            assert!(!errors.is_empty(), "metadata value lost its bound");
+        }
+    }
+}

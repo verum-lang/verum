@@ -103,11 +103,13 @@ impl TypeChecker {
         // Use iterative inference for expressions that might be deeply nested
         // to avoid stack overflow. Falls back to recursive inference for
         // complex expressions that need full context.
-        if Self::should_use_iterative_inference(expr) {
-            self.synth_expr_iterative(expr)
-        } else {
-            self.infer_expr(expr, InferMode::Synth)
-        }
+        self.with_value_obligation_scope(false, |checker| {
+            if Self::should_use_iterative_inference(expr) {
+                checker.synth_expr_iterative(expr)
+            } else {
+                checker.infer_expr(expr, InferMode::Synth)
+            }
+        })
     }
 
     /// Determine if an expression should use iterative inference.
@@ -1553,6 +1555,20 @@ impl TypeChecker {
                             });
                         }
 
+                        // An annotation chooses the body's checking type, but it
+                        // must still satisfy the required callable result. Unit
+                        // permits result discard without changing the annotation.
+                        let ret_ty = if let Some(rt) = return_type {
+                            let annotated = self.ast_to_type(rt)?;
+                            let required = self.normalize_type(&self.unifier.apply(expected_return));
+                            if !matches!(required, Type::Unit) {
+                                self.check_call_type_bound(&annotated, &required, rt.span, 0)?;
+                            }
+                            annotated
+                        } else {
+                            (**expected_return).clone()
+                        };
+
                         // T0653: capture exclusivity is checked on THIS path
                         // too, not only when the closure's type is inferred.
                         let closure_id =
@@ -1568,13 +1584,6 @@ impl TypeChecker {
                             let normalized_param_ty = self.normalize_type(param_ty);
                             self.bind_pattern(&param.pattern, &normalized_param_ty)?;
                         }
-
-                        // Check body against return type
-                        let ret_ty = if let Some(rt) = return_type {
-                            self.ast_to_type(rt)?
-                        } else {
-                            (**expected_return).clone()
-                        };
 
                         // Check body against expected return type with bidirectional inference.
                         // We do NOT synth first: synth would resolve variant constructors
@@ -1646,6 +1655,20 @@ impl TypeChecker {
                             });
                         }
 
+                        // An annotation chooses the body's checking type, but it
+                        // must still satisfy the required callable result. Unit
+                        // permits result discard without changing the annotation.
+                        let ret_ty = if let Some(rt) = return_type {
+                            let annotated = self.ast_to_type(rt)?;
+                            let required = self.normalize_type(&self.unifier.apply(expected_return));
+                            if !matches!(required, Type::Unit) {
+                                self.check_call_type_bound(&annotated, &required, rt.span, 0)?;
+                            }
+                            annotated
+                        } else {
+                            (**expected_return).clone()
+                        };
+
                         // T0653: capture exclusivity is checked on THIS path
                         // too — this is the branch most closures take
                         // (`.map(|x| …)`, typed argument, typed binding).
@@ -1663,13 +1686,6 @@ impl TypeChecker {
                             let normalized_param_ty = self.normalize_type(param_ty);
                             self.bind_pattern(&param.pattern, &normalized_param_ty)?;
                         }
-
-                        // Check body against return type
-                        let ret_ty = if let Some(rt) = return_type {
-                            self.ast_to_type(rt)?
-                        } else {
-                            (**expected_return).clone()
-                        };
 
                         // Check body against expected return type with bidirectional inference.
                         // We do NOT synth first: synth would resolve variant constructors
@@ -1699,14 +1715,20 @@ impl TypeChecker {
 
                         self.ctx.exit_scope();
 
-                        // Register closure type in the type registry for codegen
-                        // Apply unifier substitution to resolve type variables
-                        // This enables closure parameter type inference during LLVM codegen
-                        let resolved_expected = self.unifier.apply(expected);
-                        self.type_registry
-                            .register_expr(expr.span, resolved_expected);
+                        // Preserve the annotated callable result even when the
+                        // bound permits discarding it. A generic F denotes this
+                        // actual closure type, not the contract used to check it.
+                        let mut actual = normalized_expected.clone();
+                        if let Type::Function { return_type, .. } = &mut actual {
+                            *return_type = Box::new(ret_ty);
+                        }
+                        if let Type::Var(var) = self.unifier.apply(expected) {
+                            self.unifier.unify(&Type::Var(var), &actual, expr.span)?;
+                        }
+                        let actual = self.unifier.apply(&actual);
+                        self.type_registry.register_expr(expr.span, actual.clone());
 
-                        Ok(InferResult::new(expected.clone()))
+                        Ok(InferResult::new(actual))
                     } else {
                         // Not a function type (even after normalization), fall back to synthesis + subsumption
                         self.synth_and_check(expr, expected)
@@ -4671,8 +4693,8 @@ impl TypeChecker {
                         // Check if we're in a method context
                         if let Maybe::Some(ref self_ty) = self.current_self_type {
                             // Look up 'self' in the environment
-                            if let Some(scheme) = self.ctx.env.lookup("self") {
-                                let ty = scheme.instantiate();
+                            if let Some(scheme) = self.ctx.env.lookup("self").cloned() {
+                                let ty = self.instantiate_value_scheme(&scheme, span)?;
                                 return Ok(ty);
                             }
                         }
@@ -4728,7 +4750,7 @@ impl TypeChecker {
             // explicitly mounted single-source name outranks the flat
             // bare env slot — before the env chain, not after it.
             if let Some(scheme) = self.mount_authoritative_fn_scheme(name) {
-                let ty = scheme.instantiate();
+                let ty = self.instantiate_value_scheme(&scheme, span)?;
                 return Ok(self.unifier.apply(&ty));
             }
 
@@ -4773,7 +4795,7 @@ impl TypeChecker {
                     }
                 }
 
-                let ty = scheme.instantiate();
+                let ty = self.instantiate_value_scheme(&scheme, span)?;
                 // Apply unifier to resolve type variables
                 let resolved_ty = self.unifier.apply(&ty);
                 // For GAT/HKT types: if the resolved type contains TypeApp projections,
@@ -4795,7 +4817,7 @@ impl TypeChecker {
             } else {
                 // Try module-level function lookup
                 if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
-                    let ty = scheme.instantiate();
+                    let ty = self.instantiate_value_scheme(&scheme, span)?;
                     let resolved_ty = self.unifier.apply(&ty);
                     if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
                         return Ok(ctor_fn);
@@ -7269,8 +7291,8 @@ impl TypeChecker {
                         // Check if we're in a method context (implement block)
                         if let Maybe::Some(ref self_ty) = self.current_self_type {
                             // Look up 'self' in the environment
-                            if let Some(scheme) = self.ctx.env.lookup("self") {
-                                let ty = scheme.instantiate();
+                            if let Some(scheme) = self.ctx.env.lookup("self").cloned() {
+                                let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                                 return Ok(InferResult::new(ty));
                             }
                         }
@@ -7308,7 +7330,7 @@ impl TypeChecker {
             // MOUNT AUTHORITY (iterative-walker twin of the
             // infer_path_expr arm — see mount_authoritative_fn_scheme).
             if let Some(scheme) = self.mount_authoritative_fn_scheme(name) {
-                let ty = scheme.instantiate();
+                let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                 return Ok(InferResult::new(self.unifier.apply(&ty)));
             }
 
@@ -7317,7 +7339,7 @@ impl TypeChecker {
             }
 
             // COMPLETE module-level lookup: Try local env first, then module context
-            match self.ctx.env.lookup(name) {
+            match self.ctx.env.lookup(name).cloned() {
                 Some(scheme) => {
                     // =====================================================================
                     // DEFINITE ASSIGNMENT: Check variable is initialized before use
@@ -7326,7 +7348,7 @@ impl TypeChecker {
                     let var_name = verum_common::Text::from(name);
                     self.check_variable_initialized(&var_name, expr.span)?;
 
-                    let ty = scheme.instantiate();
+                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                     // CRITICAL: Apply unifier to resolve type variables
                     // When we have e.g. `wrapper: Wrapper<τ59>` and τ59 was unified with Text,
                     // we need to return `Wrapper<Text>` so field access works correctly.
@@ -7339,7 +7361,7 @@ impl TypeChecker {
                 None => {
                     // Try module-level function lookup for cross-function inference
                     if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
-                        let ty = scheme.instantiate();
+                        let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                         let resolved_ty = self.unifier.apply(&ty);
                         if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty)
                         {
@@ -7354,7 +7376,7 @@ impl TypeChecker {
                         // covers both the bare `Map.new` and the
                         // module-qualified `core.collections.map.Map.new`
                         // spellings a field-access chain can produce.
-                        let ty = scheme.instantiate();
+                        let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                         Ok(InferResult::new(self.unifier.apply(&ty)))
                     } else {
                         Err(TypeError::UnboundVariable {
@@ -7931,6 +7953,8 @@ impl TypeChecker {
             List<crate::protocol::ProtocolBound>,
         > = Map::new();
 
+        let mut pending_type_bounds: Map<TypeVar, List<Type>> = Map::new();
+
         // CALLEE-SOURCE (T1120): a unit's own `fn min` never runs — the
         // ambient builtin answers instead, in BOTH layers, and
         // `fn min(…) -> Text` used where `Int` is required checks clean.
@@ -7967,10 +7991,10 @@ impl TypeChecker {
             // Look up the redirected function name
             if let Some(scheme) = self.ctx.env.lookup(redirected_name.as_str()).cloned()
             {
-                let (ty, _fresh_vars, proto_bounds) =
-                    scheme.instantiate_with_protocol_bounds();
-                pending_protocol_bounds = proto_bounds;
-                InferResult::new(ty)
+                let instance = self.instantiate_call_scheme(&scheme, expr.span)?;
+                pending_protocol_bounds = instance.protocol_bounds;
+                pending_type_bounds = instance.type_bounds;
+                InferResult::new(instance.ty)
             } else {
                 self.synth_expr(func)?
             }
@@ -7984,23 +8008,12 @@ impl TypeChecker {
             // Implicit parameters (marked with {T}) are inferred from context.
             if let Some(ref name) = callee_name {
                 if let Some(scheme) = self.callee_scheme_with_mount_authority(name.as_str()) {
-                    let (ty, fresh_vars, implicit_vars) =
-                        scheme.instantiate_with_implicit_info();
-                    // Also get protocol bounds mapped to fresh vars
-                    if !scheme.var_protocol_bounds.is_empty() {
-                        let mut old_to_fresh_map: Map<TypeVar, TypeVar> = Map::new();
-                        for (orig, fresh) in scheme.vars.iter().zip(fresh_vars.iter()) {
-                            old_to_fresh_map.insert(*orig, *fresh);
-                        }
-                        let substitution: Substitution = old_to_fresh_map.iter()
-                            .map(|(old, fresh)| (*old, Type::Var(*fresh))).collect();
-                        for (old_var, bounds) in &scheme.var_protocol_bounds {
-                            if let Some(fresh_var) = old_to_fresh_map.get(old_var) {
-                                pending_protocol_bounds.insert(*fresh_var,
-                                    bounds.iter().map(|bound| bound.apply_subst(&substitution)).collect());
-                            }
-                        }
-                    }
+                    let instance = self.instantiate_call_scheme(&scheme, expr.span)?;
+                    let ty = instance.ty;
+                    let fresh_vars = instance.fresh_vars;
+                    let implicit_vars = instance.implicit_vars;
+                    pending_protocol_bounds = instance.protocol_bounds;
+                    pending_type_bounds = instance.type_bounds;
 
                     let explicit_slots = scheme.fresh_explicit_method_vars(&fresh_vars);
                     if let Some(slots) = explicit_slots.as_ref() {
@@ -8102,43 +8115,10 @@ impl TypeChecker {
                     let has_proto_bounds = !scheme.var_protocol_bounds.is_empty();
                     let has_type_bounds = !scheme.var_type_bounds.is_empty();
                     if has_proto_bounds || has_type_bounds {
-                        // Instantiate with both kinds of bounds.  When both are
-                        // present we must use a SINGLE instantiation so the same
-                        // fresh-var mapping applies to both bound kinds.
-                        let mut subst = Substitution::new();
-                        let mut old_to_fresh: Map<TypeVar, TypeVar> = Map::new();
-                        for var in &scheme.vars {
-                            let fresh = TypeVar::fresh();
-                            subst.insert(*var, Type::Var(fresh));
-                            old_to_fresh.insert(*var, fresh);
-                        }
-                        let ty = scheme.ty.apply_subst(&subst);
-                        // Register protocol bounds for later call-site verification
-                        if has_proto_bounds {
-                            for (old_var, bounds) in &scheme.var_protocol_bounds {
-                                if let Some(fresh_var) = old_to_fresh.get(old_var) {
-                                    pending_protocol_bounds.insert(*fresh_var,
-                                        bounds.iter().map(|bound| bound.apply_subst(&subst)).collect());
-                                }
-                            }
-                        }
-                        // Register function-type bounds on the global env so
-                        // `check_closure_expr`'s `get_function_type_bound(fresh)`
-                        // can recover the closure shape.  The bound itself is
-                        // substituted through the same `subst` so any nested
-                        // generic params (e.g. T inside `fn() -> Maybe<T>`)
-                        // share fresh vars with the function's own return type.
-                        if has_type_bounds {
-                            for (old_var, bounds) in &scheme.var_type_bounds {
-                                if let Some(fresh_var) = old_to_fresh.get(old_var) {
-                                    for b in bounds.iter() {
-                                        let mapped = b.apply_subst(&subst);
-                                        self.register_type_var_type_bound(*fresh_var, mapped);
-                                    }
-                                }
-                            }
-                        }
-                        InferResult::new(ty)
+                        let instance = self.instantiate_call_scheme(&scheme, expr.span)?;
+                        pending_protocol_bounds = instance.protocol_bounds;
+                        pending_type_bounds = instance.type_bounds;
+                        InferResult::new(instance.ty)
                     } else {
                         self.synth_expr(func)?
                     }
@@ -8756,178 +8736,14 @@ impl TypeChecker {
                 // Consume affine values passed by value
                 self.consume_affine_call_args(args, &params)?;
 
+                self.enforce_call_type_bounds(&pending_type_bounds, expr.span)?;
+
                 // ============================================================
                 // Protocol Bound Checking at Call Sites
                 // ============================================================
                 // After argument unification, resolve type vars to concrete
                 // types and verify protocol bounds are satisfied.
-                for (type_var, bounds) in &pending_protocol_bounds {
-                    let resolved_ty = self.unifier.apply(&Type::Var(*type_var));
-                    self.enforce_protocol_bound_evidence(&resolved_ty, bounds, expr.span)?;
-                    let substitution = self.unifier.save_substitution();
-                    let resolved_bounds: List<_> = bounds.iter()
-                        .map(|bound| bound.apply_subst(&substitution)).collect();
-                    let bounds = &resolved_bounds;
-                    // Only check bounds when the type var resolved to a concrete type
-                    // (not still a type variable — those are checked at their own call sites)
-                    //
-                    // "Still a type variable" has to look THROUGH reference
-                    // layers. `&_` is `Reference { inner: Var }`, which is not
-                    // `Type::Var(_)`, so a top-level-only test let it past and
-                    // the checker announced that `&_` does not implement `Fn`
-                    // — a verdict about a type it does not know. Five such
-                    // diagnostics appeared in `core/math/calculus.vr` the
-                    // moment `where`-clause bounds started reaching this
-                    // check, all of them on `&_`, none of them a real
-                    // conformance gap. Saying "does not implement" about an
-                    // unknown type is the same error as saying it about a
-                    // module path nobody recognises: absence of evidence.
-                    let mut unresolved_core = &resolved_ty;
-                    loop {
-                        match unresolved_core {
-                            Type::Reference { inner, .. }
-                            | Type::CheckedReference { inner, .. }
-                            | Type::UnsafeReference { inner, .. }
-                            | Type::Pointer { inner, .. }
-                            | Type::VolatilePointer { inner, .. }
-                            | Type::Ownership { inner, .. } => unresolved_core = inner,
-                            _ => break,
-                        }
-                    }
-                    // HKT-BOUND-ASKS-THE-CONSTRUCTOR (T1075).  A bound on
-                    // `F<_>` resolves to a TYPE CONSTRUCTOR (`Bad`, arity 1),
-                    // not to an inhabited type.  `check_bounds` keys impls by
-                    // the WHOLE type, and a constructor's key is `tycon:Bad`,
-                    // which never equals the key of
-                    // `implement<T> Mappable for Good<T>` — so it answered
-                    // "does not implement" for EVERY constructor, the
-                    // satisfying ones included.  Measured: once the bound was
-                    // merely recorded, BOTH the valid and the violating call
-                    // were refused, which is not a bound check.
-                    //
-                    // A `F<_>` bound can only ever be about the constructor's
-                    // NAME, and `type_constructor_implements_protocol` is the
-                    // authority that compares by name across `TypeConstructor`,
-                    // `Named` and `Generic` impl heads.  Load first, then ask:
-                    // a constructor reaching a bound has usually never been a
-                    // method receiver, so its impls are not registered yet
-                    // (the receiver-oriented lazy load, T0701).
-                    if let Type::TypeConstructor { name, .. } = unresolved_core {
-                        self.ensure_stdlib_type_loaded_transitive(name);
-                        for b in bounds.iter() {
-                            let Some(proto_ident) = b.protocol.as_ident() else {
-                                continue;
-                            };
-                            let proto: Text = proto_ident.as_str().into();
-                            self.ensure_stdlib_type_loaded_transitive(&proto);
-                            let holds = self
-                                .protocol_checker
-                                .read()
-                                .type_constructor_implements_protocol(name, &proto);
-                            if holds != b.is_negative {
-                                continue;
-                            }
-                            let msg = if b.is_negative {
-                                format!(
-                                    "type constructor `{}` must NOT implement `{}` here, but it does",
-                                    name, proto
-                                )
-                            } else {
-                                format!(
-                                    "type constructor `{}` does not implement `{}`, required by \
-                                     this call's bound",
-                                    name, proto
-                                )
-                            };
-                            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                                code: Text::from("E405"),
-                                msg: Text::from(msg),
-                                span: expr.span,
-                            });
-                        }
-                        continue;
-                    }
-                    if !matches!(unresolved_core, Type::Var(_)) {
-                        // LAZY-LOAD FIRST, THEN JUDGE. The verdict used to be
-                        // thrown away into `tracing::debug!` with the note
-                        // «some stdlib impls may not yet be loaded depending on
-                        // compilation order. The runtime will catch actual
-                        // violations». Both halves were wrong: for a statically
-                        // typed language the runtime must not be the arbiter of
-                        // a compile-time bound, and the load-order worry has a
-                        // real fix — ensure the receiver's impls are loaded and
-                        // re-ask. Silencing it made EVERY generic bound
-                        // decorative: `fn f<T: Ord>(…)` accepted a type with no
-                        // `Ord` and no `cmp` at all, and `T: Semiring` accepted
-                        // a plain record (measured on 2026-08-07).
-                        let first = self
-                            .protocol_checker
-                            .read()
-                            .check_bounds(&resolved_ty, bounds);
-                        // Retry AFTER ensuring the receiver's and the
-                        // protocols' impls are loaded: the lazy stdlib loader
-                        // is receiver-driven, so a bound can look unsatisfied
-                        // purely because nothing had asked for that type yet.
-                        // (This load-order worry is why the verdict used to be
-                        // discarded entirely — the fix is to remove the
-                        // uncertainty, not the check.)
-                        let satisfied = if first.is_err() {
-                            let leaf: Text =
-                                self.get_type_name(&resolved_ty).unwrap_or_default();
-                            if leaf.as_str().is_empty() {
-                                first
-                            } else {
-                                self.ensure_stdlib_type_loaded_transitive(&leaf);
-                                for b in bounds.iter() {
-                                    let rendered = format!("{}", b.protocol);
-                                    let proto_leaf: Text = rendered
-                                        .rsplit('.')
-                                        .next()
-                                        .unwrap_or(rendered.as_str())
-                                        .into();
-                                    self.ensure_stdlib_type_loaded_transitive(&proto_leaf);
-                                }
-                                self.protocol_checker
-                                    .read()
-                                    .check_bounds(&resolved_ty, bounds)
-                            }
-                        } else {
-                            first
-                        };
-                        if let Err(e) = satisfied {
-                            let (proto, is_negative) = match &e {
-                                crate::protocol::ProtocolError::BoundNotSatisfied {
-                                    protocol,
-                                    ..
-                                } => (Text::from(format!("{}", protocol)), false),
-                                crate::protocol::ProtocolError::NegativeBoundViolated {
-                                    protocol,
-                                    ..
-                                } => (Text::from(format!("{}", protocol)), true),
-                                _ => (Text::from(""), false),
-                            };
-                            if !proto.as_str().is_empty() {
-                                let msg = if is_negative {
-                                    format!(
-                                        "type `{}` must NOT implement `{}` here, but it does",
-                                        resolved_ty, proto
-                                    )
-                                } else {
-                                    format!(
-                                        "type `{}` does not implement `{}`, required by this \
-                                         call's bound",
-                                        resolved_ty, proto
-                                    )
-                                };
-                                self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                                    code: Text::from("E405"),
-                                    msg: Text::from(msg),
-                                    span: expr.span,
-                                });
-                            }
-                        }
-                    }
-                }
+                self.enforce_call_protocol_bounds(&pending_protocol_bounds, expr.span)?;
 
                 // ============================================================
                 // Interprocedural Escape Analysis for &checked References
@@ -9239,19 +9055,38 @@ impl TypeChecker {
         &mut self,
         obj: &Expr,
         field: &verum_ast::ty::Ident,
-    ) -> Option<Type> {
-        let segments = self.extract_module_path_from_field(obj, field)?;
+    ) -> Result<Option<Type>> {
+        let Some(segments) = self.extract_module_path_from_field(obj, field) else { return Ok(None) };
         // `a.NAME` alone is far more likely to be a field access than a
         // module reference; require a real module path.
         if segments.len() < 3 {
-            return None;
+            return Ok(None);
         }
-        let root = *segments.first()?;
+        let root = segments[0];
         if self.ctx.env.lookup(root).is_some() {
-            return None;
+            return Ok(None);
         }
-        let item_name = verum_common::Text::from(*segments.last()?);
+        let item_name = verum_common::Text::from(*segments.last().expect("nonempty qualified path"));
         let span = field.span;
+        // Value access and calls use the same declaration-owned metadata. An
+        // exact descriptor hit must not lose its obligations through a textual
+        // signature or a failed synthetic mount.
+        let qualified: Text = segments.join(".").into();
+        if let Some(metadata) = self.core_metadata.clone()
+            && let Some(descriptor) = metadata.functions.get(&qualified)
+            && descriptor.parent_type.is_none()
+        {
+            if !descriptor.is_public && descriptor.module_path != self.current_module_path {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(), msg: format!("function `{qualified}` is private").into(), span,
+                });
+            }
+            let scheme = self.scheme_from_function_descriptor(descriptor, &metadata)
+                .ok_or_else(|| TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(), msg: format!("invalid signature for `{qualified}`").into(), span,
+                })?;
+            return self.instantiate_value_scheme(&scheme, span).map(Some);
+        }
         let path = verum_ast::ty::Path::new(
             segments
                 .iter()
@@ -9278,12 +9113,12 @@ impl TypeChecker {
             self.ctx
                 .env
                 .lookup(item_name.as_str())
-                .map(|scheme| scheme.instantiate())
+                .cloned()
         } else {
             None
         };
         self.ctx.env.pop_scope();
-        found
+        found.map(|scheme| self.instantiate_value_scheme(&scheme, span)).transpose()
     }
 
     /// Admit a property type path only from an exact declaration or import.
@@ -9531,7 +9366,7 @@ impl TypeChecker {
         // Asked BEFORE the receiver is synthesised, and only when the
         // root segment names no binding in scope, so an ordinary field
         // access on a variable never reaches here.
-        if let Some(resolved) = self.resolve_qualified_path_expr(obj, field) {
+        if let Some(resolved) = self.resolve_qualified_path_expr(obj, field)? {
             return Ok(InferResult::new(resolved));
         }
         // Special case: Module namespace navigation
@@ -9585,11 +9420,11 @@ impl TypeChecker {
                 // archive-side load; otherwise pull the static-method
                 // scheme lazily from the baked metadata.
                 if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified) {
-                    let ty = scheme.instantiate();
+                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                     return Ok(InferResult::new(self.unifier.apply(&ty)));
                 }
                 if let Maybe::Some(scheme) = self.lookup_function_in_module(qualified.as_str()) {
-                    let ty = scheme.instantiate();
+                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                     return Ok(InferResult::new(self.unifier.apply(&ty)));
                 }
                 // **Type.method canonical-form fallback**: when `mount
@@ -9619,14 +9454,14 @@ impl TypeChecker {
                     format!("{}.{}", last_seg, field_name).into()
                 };
                 if type_method_form != qualified {
-                    if let Some(scheme) = self.ctx.env.lookup(&type_method_form) {
-                        let ty = scheme.instantiate();
+                    if let Some(scheme) = self.ctx.env.lookup(&type_method_form).cloned() {
+                        let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                         return Ok(InferResult::new(self.unifier.apply(&ty)));
                     }
                     if let Maybe::Some(scheme) =
                         self.lookup_function_in_module(type_method_form.as_str())
                     {
-                        let ty = scheme.instantiate();
+                        let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                         return Ok(InferResult::new(self.unifier.apply(&ty)));
                     }
                 }
@@ -9661,8 +9496,8 @@ impl TypeChecker {
                 // Field-access fallback: lookup the simple field
                 // name in env as a last-ditch effort.  Same shape
                 // as the inline-module bail-out below.
-                if let Some(scheme) = self.ctx.env.lookup(field_name) {
-                    let ty = scheme.instantiate();
+                if let Some(scheme) = self.ctx.env.lookup(field_name).cloned() {
+                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                     return Ok(InferResult::new(self.unifier.apply(&ty)));
                 }
             }
@@ -9752,7 +9587,7 @@ impl TypeChecker {
             if !contested
                 && let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name)
             {
-                let ty = scheme.instantiate();
+                let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                 return Ok(InferResult::new(ty));
             }
 
@@ -10366,7 +10201,7 @@ impl TypeChecker {
                         let const_name = format!("{}.{}", type_name, field.name);
                         if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned()
                         {
-                            let ty = scheme.instantiate();
+                            let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                             return Ok(InferResult::new(ty));
                         }
                         // Built-in type properties (T0216-c): the single authority
@@ -10493,7 +10328,7 @@ impl TypeChecker {
                 // Look up as "Type.field" in the environment
                 let const_name = format!("{}.{}", normalized_ty, field.name);
                 if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned() {
-                    let ty = scheme.instantiate();
+                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                     return Ok(InferResult::new(ty));
                 }
                 // Try with "Float" instead of variant display
@@ -10504,7 +10339,7 @@ impl TypeChecker {
                 };
                 let const_name = format!("{}.{}", type_name, field.name);
                 if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned() {
-                    let ty = scheme.instantiate();
+                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                     return Ok(InferResult::new(ty));
                 }
                 Err(TypeError::Other(verum_common::Text::from(format!(
@@ -10618,7 +10453,7 @@ impl TypeChecker {
                                 if let Some(scheme) =
                                     self.ctx.env.lookup(&const_name).cloned()
                                 {
-                                    let ty = scheme.instantiate();
+                                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                                     return Ok(InferResult::new(ty));
                                 }
                                 // Static-method dispatch fallback: when the
@@ -10663,7 +10498,7 @@ impl TypeChecker {
                                     drop(methods_guard);
                                     if let Some(scheme) = scheme {
                                         return Ok(InferResult::new(
-                                            scheme.instantiate(),
+                                            self.instantiate_value_scheme(&scheme, expr.span)?,
                                         ));
                                     }
                                 } else {

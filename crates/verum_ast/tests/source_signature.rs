@@ -194,6 +194,33 @@ fn concrete_universes_and_generic_bounds_are_detected() {
 }
 
 #[test]
+fn callable_result_universes_keep_their_lexical_binders() {
+    for result_level in [variable("u"), UniverseLevelExpr::Concrete(1)] {
+        let mut declaration = retained();
+        let mut callable = ordinary("F");
+        let GenericParamKind::Type { bounds, .. } = &mut callable.kind else {
+            panic!("type")
+        };
+        bounds.push(TypeBound {
+            kind: TypeBoundKind::Equality(Type::new(
+                TypeKind::Function {
+                    params: List::new(),
+                    return_type: Heap::new(universe(result_level)),
+                    calling_convention: None,
+                    contexts: Default::default(),
+                },
+                Span::dummy(),
+            )),
+            span: Span::dummy(),
+        });
+        declaration.generics.push(callable);
+        let carrier = source_signature(&declaration, false).unwrap().unwrap();
+        validate_source_signature(&carrier, false).unwrap();
+        assert_eq!(carrier.generics, declaration.generics);
+    }
+}
+
+#[test]
 fn universe_kind_bounds_are_detected_but_refused_until_formation_is_checked() {
     for level_expression in [variable("u"), UniverseLevelExpr::Concrete(1)] {
         for kind in [

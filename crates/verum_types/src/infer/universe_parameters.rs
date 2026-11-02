@@ -180,7 +180,8 @@ impl TypeChecker {
                 match &bound.kind {
                     TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
                         self.validate_universe_annotations(ty)?;
-                        if verum_ast::source_signature::type_uses_universes(ty).map_err(error)? {
+                        if !matches!(ty.kind, TypeKind::Function { .. })
+                            && verum_ast::source_signature::type_uses_universes(ty).map_err(error)? {
                             return Err(error_at("universe-bearing generic bounds require formation checking; this bound is not supported", ty.span));
                         }
                     }

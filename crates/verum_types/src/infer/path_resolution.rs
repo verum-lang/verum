@@ -882,12 +882,12 @@ impl TypeChecker {
         let scheme = self
             .ctx
             .env
-            .lookup(first_name)
+            .lookup(first_name).cloned()
             .ok_or_else(|| TypeError::UnboundVariable {
                 name: first_name.to_text(),
                 span,
             })?;
-        let mut current_ty = scheme.instantiate();
+        let mut current_ty = self.instantiate_value_scheme(&scheme, span)?;
 
         // Process remaining segments as field accesses
         for segment in path.segments.iter().skip(1) {
@@ -1176,13 +1176,13 @@ impl TypeChecker {
                     // exactly Strategy 3's discipline.
                     let qualified = segments.join(".");
                     if let Some(scheme) = self.ctx.env.lookup(qualified.as_str()).cloned() {
-                        let (ty, fresh) = scheme.instantiate_with_fresh_vars();
+                        let instance = self.instantiate_value_instance(&scheme, span)?;
                         if let Some(arguments) = arguments.filter(|arguments| !arguments.is_empty()) {
-                            let slots = scheme.fresh_explicit_method_vars(&fresh);
+                            let slots = &instance.explicit_method_vars;
                             self.bind_explicit_method_arguments(slots.as_ref(), arguments,
                                 &verum_ast::Ident::new(segment_text.clone(), span), span)?;
                         }
-                        return Ok(InferResult::new(ty));
+                        return Ok(InferResult::new(instance.ty));
                     }
                     return Err(TypeError::UnboundVariable {
                         name: verum_common::Text::from(segment_name),
@@ -1530,8 +1530,8 @@ impl TypeChecker {
 
         // Strategy 3: Check local environment with qualified name
         let qualified_name = segments.join(".");
-        if let Some(scheme) = self.ctx.env.lookup(qualified_name.as_str()) {
-            let ty = scheme.instantiate();
+        if let Some(scheme) = self.ctx.env.lookup(qualified_name.as_str()).cloned() {
+            let ty = self.instantiate_value_scheme(&scheme, span)?;
             return Ok(InferResult::new(ty));
         }
 
@@ -1552,8 +1552,8 @@ impl TypeChecker {
                 return Ok(InferResult::new(ty.clone()));
             }
             // Try looking up as a variable
-            if let Some(scheme) = self.ctx.env.lookup(last_name_str) {
-                return Ok(InferResult::new(scheme.instantiate()));
+            if let Some(scheme) = self.ctx.env.lookup(last_name_str).cloned() {
+                return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
             }
             // If the last segment looks like a type name, create a forward reference
             if last_name_str
@@ -1728,8 +1728,8 @@ impl TypeChecker {
             if let Maybe::Some(ty) = self.ctx.lookup_type(last_name) {
                 return Ok(InferResult::new(ty.clone()));
             }
-            if let Some(scheme) = self.ctx.env.lookup(last_name) {
-                return Ok(InferResult::new(scheme.instantiate()));
+            if let Some(scheme) = self.ctx.env.lookup(last_name).cloned() {
+                return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
             }
             if is_wellknown_type_name(last_name) {
                 return Ok(InferResult::new(Type::Named {
@@ -1873,8 +1873,8 @@ impl TypeChecker {
             if let Maybe::Some(ty) = self.ctx.lookup_type(last_name) {
                 return Ok(InferResult::new(ty.clone()));
             }
-            if let Some(scheme) = self.ctx.env.lookup(last_name) {
-                return Ok(InferResult::new(scheme.instantiate()));
+            if let Some(scheme) = self.ctx.env.lookup(last_name).cloned() {
+                return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
             }
             if is_wellknown_type_name(last_name) {
                 return Ok(InferResult::new(Type::Named {
@@ -1899,8 +1899,8 @@ impl TypeChecker {
         if self.current_self_type.is_some() {
             // Look up "self" in the environment (it should have been registered
             // when processing the function's self parameter)
-            if let Some(scheme) = self.ctx.env.lookup("self") {
-                let mut current_ty = scheme.instantiate();
+            if let Some(scheme) = self.ctx.env.lookup("self").cloned() {
+                let mut current_ty = self.instantiate_value_scheme(&scheme, span)?;
 
                 // Process remaining segments (after `self`) as field accesses
                 for segment in path.segments.iter().skip(1) {

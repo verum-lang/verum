@@ -871,20 +871,25 @@ impl ProtocolBound {
 
     /// Freshen every declaration carried by the bound with the same scope map.
     pub fn apply_subst(&self, substitution: &crate::ty::Substitution) -> Self {
-        Self {
+        self.try_apply_subst(substitution)
+            .expect("protocol substitution must satisfy its checked expression budget")
+    }
+
+    pub fn try_apply_subst(&self, substitution: &crate::ty::Substitution) -> Result<Self, Text> {
+        Ok(Self {
             protocol: self.protocol.clone(),
             args: self
                 .args
                 .iter()
-                .map(|ty| ty.apply_subst(substitution))
-                .collect(),
+                .map(|ty| ty.try_apply_subst(substitution))
+                .collect::<Result<_, _>>()?,
             associated_types: self
                 .associated_types
                 .iter()
-                .map(|(name, ty)| (name.clone(), ty.apply_subst(substitution)))
-                .collect(),
+                .map(|(name, ty)| Ok((name.clone(), ty.try_apply_subst(substitution)?)))
+                .collect::<Result<_, Text>>()?,
             is_negative: self.is_negative,
-        }
+        })
     }
 
     /// Check if this is a negative bound

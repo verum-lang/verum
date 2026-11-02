@@ -154,3 +154,80 @@ fn scheme_body_bounds_and_inductive_universe_share_one_instantiation() {
     assert_eq!(bounds[&fresh[0]][0], fields[0]);
     assert!(matches!(level, Level::Meta(_)));
 }
+
+#[test]
+fn callable_result_bounds_are_checked_without_becoming_kind_bounds() {
+    let declaration = "fn apply<universe u, F: fn() -> Type(u)>(f: F) -> Type(u) { f() }";
+    let valid = format!(
+        "{declaration} fn one(f: fn() -> Type(1)) -> Type(1) {{ apply(f) }} fn two(f: fn() -> Type(2)) -> Type(2) {{ apply(f) }}"
+    );
+    let errors = complaints(&valid);
+    assert!(errors.is_empty(), "{errors:?}");
+    let invalid = format!("{declaration} fn bad(f: fn() -> Type(2)) -> Type(1) {{ apply(f) }}");
+    assert!(!complaints(&invalid).is_empty());
+}
+
+#[test]
+fn callable_bounds_survive_forwarding_and_reject_named_wrong_results() {
+    let source = "fn apply<universe u, F: fn() -> Type(u)>(f: F) -> Type(u) { f() }
+        fn forward<universe v, F: fn() -> Type(v)>(f: F) -> Type(v) { apply(f) }";
+    assert!(complaints(source).is_empty(), "{:?}", complaints(source));
+    let source = "fn apply<F: fn() -> Int, G: fn() -> F>(g: G) -> F { g() }
+        fn forward<F: fn() -> Int, G: fn() -> F>(g: G) -> F { apply(g) }";
+    assert!(complaints(source).is_empty(), "{:?}", complaints(source));
+    assert!(
+        !complaints(
+            "fn apply<F: fn() -> Int>(f: F) -> Int { f() }
+        fn text() -> Text { \"wrong\" } fn bad() -> Int { apply(text) }"
+        )
+        .is_empty()
+    );
+    let source = "fn keep<F: fn()>(f: F) -> F { f }
+        fn number() -> Int { 1 } fn run() -> Int { let f = keep(number); f() }";
+    assert!(complaints(source).is_empty(), "{:?}", complaints(source));
+}
+
+#[test]
+fn callable_constraints_cannot_be_erased_by_local_aliases() {
+    let valid = "fn apply<universe u, F: fn() -> Type(u)>(f: F) -> Type(u) { f() }
+        fn good(f: fn() -> Type(1)) -> Type(1) { let alias = apply; alias(f) }";
+    assert!(complaints(valid).is_empty(), "{:?}", complaints(valid));
+    let invalid = "fn apply<universe u, F: fn() -> Type(u)>(f: F) -> Type(u) { f() }
+        fn bad(f: fn() -> Type(2)) -> Type(1) { let alias = apply; alias(f) }";
+    assert!(!complaints(invalid).is_empty());
+}
+
+#[test]
+fn callable_constraints_survive_value_position_coercions() {
+    let declaration = "fn apply<universe u, F: fn() -> Type(u)>(f: F) -> Type(u) { f() }";
+    for level in [1, 2] {
+        for expression in [
+            format!("let alias: fn(fn() -> Type({level})) -> Type(1) = apply; alias(f)"),
+            "(apply)(f)".into(),
+            format!(
+                "fn invoke(g: fn(fn() -> Type({level})) -> Type(1), h: fn() -> Type({level})) -> Type(1) {{ g(h) }} invoke(apply, f)"
+            ),
+        ] {
+            let source = format!(
+                "{declaration} fn use_it(f: fn() -> Type({level})) -> Type(1) {{ {expression} }}"
+            );
+            let errors = complaints(&source);
+            if level == 1 {
+                assert!(errors.is_empty(), "{source}: {errors:?}");
+            } else {
+                assert!(!errors.is_empty(), "bound lost: {source}");
+            }
+        }
+    }
+}
+
+#[test]
+fn callable_bounds_do_not_hide_free_level_names() {
+    let errors = complaints("fn invalid<F: fn() -> Type(missing)>(f: F) { }");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("unbound") || error.contains("undeclared")),
+        "{errors:?}"
+    );
+}

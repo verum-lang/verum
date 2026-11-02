@@ -99,6 +99,26 @@ fn emit_case(
     source: &Level,
     equation: Option<(&Level, &Level)>,
 ) {
+    emit_observed_case(
+        output,
+        name,
+        declared,
+        inference,
+        source,
+        &inference.apply(source).unwrap(),
+        equation,
+    );
+}
+
+fn emit_observed_case(
+    output: &mut Text,
+    name: &str,
+    declared: &[u32],
+    inference: &UniverseInference,
+    source: &Level,
+    observed: &Level,
+    equation: Option<(&Level, &Level)>,
+) {
     writeln!(
         output,
         "\nnamespace Verum.UniverseInstantiationReplay.{name}"
@@ -107,8 +127,7 @@ fn emit_case(
     output.push_str("open Verum.UniverseInstantiation\n");
     let mut next = 0;
     let source_id = emit_formula(output, source, &mut next);
-    let result = inference.apply(source).unwrap();
-    let output_id = emit_formula(output, &result, &mut next);
+    let output_id = emit_formula(output, observed, &mut next);
     writeln!(
         output,
         "def source : Formula := e{source_id}\ndef output : Formula := e{output_id}"
@@ -223,6 +242,49 @@ fn native_replay() -> Text {
          #print axioms Verum.UniverseInstantiation.groundModel_sound\n\
          #print axioms Verum.UniverseInstantiation.checked_equation\n",
     );
+    use verum_types::{
+        context::TypeScheme,
+        ty::{Type, TypeVar},
+    };
+    let owner = TypeVar::fresh();
+    let source_level = Level::Max(
+        Box::new(Level::Variable(7)),
+        Box::new(Level::Variable(9).succ()),
+    );
+    let source_type = Type::universe(source_level.clone());
+    let mut bounds = Map::new();
+    bounds.insert(
+        owner,
+        List::from_single(Type::function(List::new(), source_type.clone())),
+    );
+    let mut scheme = TypeScheme::poly(List::from_single(owner), source_type.clone())
+        .with_type_bounds(bounds)
+        .with_universe_parameters(declared.into_iter().collect())
+        .unwrap();
+    scheme.impl_self_type = Some(source_type);
+    let instance = scheme.try_instantiate().unwrap();
+    let Type::Function { return_type, .. } = &instance.type_bounds[&instance.fresh_vars[0]][0]
+    else {
+        panic!("callable bound")
+    };
+    for (name, ty) in [
+        ("SchemeBody", &instance.ty),
+        ("SchemeBound", return_type.as_ref()),
+        ("SchemeReceiver", instance.impl_self_type.as_ref().unwrap()),
+    ] {
+        let Type::Universe { level } = ty else {
+            panic!("universe field")
+        };
+        emit_observed_case(
+            &mut output,
+            name,
+            &declared,
+            instance.universe_instantiation(),
+            &source_level,
+            level,
+            None,
+        );
+    }
     emit_case(
         &mut output,
         "Unsolved",
@@ -317,6 +379,9 @@ fn independent_lean_checks_native_instantiation_and_resolved_equations() {
     let stderr = std::string::String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stdout}\n{stderr}");
     for theorem in [
+        "SchemeBody.unrestrictedSemantics",
+        "SchemeBound.unrestrictedSemantics",
+        "SchemeReceiver.unrestrictedSemantics",
         "Unsolved.unrestrictedSemantics",
         "Independent.unrestrictedSemantics",
         "NamespaceSeparation.unrestrictedSemantics",

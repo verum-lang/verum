@@ -1140,7 +1140,8 @@ meta_param      = identifier , ':' , 'meta' , type_expr , [ refinement ] ;
 refinement      = '{' , predicate_expr , '}' ;
 
 bounds          = bound , { '+' , bound } ;
-bound           = protocol_bound | associated_type_bound | negative_bound ;
+bound           = protocol_bound | function_type | rank2_function_type
+                | associated_type_bound | negative_bound ;
 protocol_bound  = path_type ;
 
 (* ============================================================================ *)

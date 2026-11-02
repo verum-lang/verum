@@ -527,6 +527,11 @@ impl TypeChecker {
         scope: &indexmap::IndexMap<String, crate::ty::TypeVar>,
         scheme: &mut crate::context::TypeScheme,
     ) {
+        // Scope names may alias one variable even when no explicit-slot
+        // evidence is available. Quantifier identity is independent of whether
+        // bracket arguments can be classified from the source roster.
+        let mut seen = verum_common::Set::new();
+        scheme.vars.retain(|var| seen.insert(*var));
         let Some(source_slots) = fd.explicit_type_param_ids.as_ref() else {
             return;
         };
@@ -553,8 +558,6 @@ impl TypeChecker {
         };
         // Aliases in the parsing scope are multiple names for one variable;
         // quantifying it twice would disconnect the first fresh slot from use.
-        let mut seen = verum_common::Set::new();
-        scheme.vars.retain(|var| seen.insert(*var));
         for var in slots.iter().flatten() {
             if seen.insert(*var) {
                 scheme.vars.push(*var);
@@ -1011,6 +1014,8 @@ impl TypeChecker {
             type_var_bounds: Map::new(),
             hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
+            pending_value_obligations: List::new(),
+            value_obligation_scope_depth: 0,
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
             in_async_context: false,
@@ -1167,6 +1172,8 @@ impl TypeChecker {
             type_var_bounds: Map::new(),
             hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
+            pending_value_obligations: List::new(),
+            value_obligation_scope_depth: 0,
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
             in_async_context: false,
@@ -1324,6 +1331,8 @@ impl TypeChecker {
             type_var_bounds: Map::new(),
             hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
+            pending_value_obligations: List::new(),
+            value_obligation_scope_depth: 0,
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
             in_async_context: false,
@@ -9915,7 +9924,7 @@ impl TypeChecker {
     /// Main entry point: infer type for an expression.
     pub fn infer(&mut self, expr: &Expr, mode: InferMode) -> Result<InferResult> {
         let start = Instant::now();
-        let result = self.infer_expr(expr, mode);
+        let result = self.with_value_obligation_scope(false, |checker| checker.infer_expr(expr, mode));
         self.check_analysis_control()?;
         self.metrics.time_us += start.elapsed().as_micros() as u64;
         result
@@ -9926,7 +9935,7 @@ impl TypeChecker {
         let start = Instant::now();
         self.metrics.check_count += 1;
 
-        let result = self.check_expr(expr, &expected);
+        let result = self.with_value_obligation_scope(false, |checker| checker.check_expr(expr, &expected));
         self.check_analysis_control()?;
 
         self.metrics.time_us += start.elapsed().as_micros() as u64;
@@ -9941,7 +9950,7 @@ impl TypeChecker {
     /// Returns whether the statement diverges (has type Never).
     pub fn check_stmt(&mut self, stmt: &Stmt) -> Result<bool> {
         let _depth_guard = self.inc_inference_depth("check_stmt")?;
-        let outcome = self.check_stmt_inner(stmt);
+        let outcome = self.with_value_obligation_scope(false, |checker| checker.check_stmt_inner(stmt));
         self.check_analysis_control()?;
         outcome
     }
@@ -10189,6 +10198,17 @@ impl TypeChecker {
                         ExprKind::Path(_) | ExprKind::Closure { .. }
                     ) && !resolved_ty.free_vars().is_empty();
 
+                    // An immutable alias of a declared polymorphic value keeps
+                    // its entire scheme. Generalizing only the inferred body
+                    // would discard the declaration's levels and obligations.
+                    let aliased_scheme = if ty.is_none() && !is_mutable_binding {
+                        if let ExprKind::Path(path) = &val.kind {
+                            let name = self.path_to_string(path);
+                            self.callee_scheme_with_mount_authority(name.as_str())
+                                .filter(|scheme| !scheme.vars.is_empty() || !scheme.universe_parameters().is_empty())
+                        } else { None }
+                    } else { None };
+
                     // AMBIGUITY-E404-1 (T0585): an un-annotated binding whose
                     // value type still carries free inference vars HERE is an
                     // ambiguity CANDIDATE — judged at the end of the enclosing
@@ -10198,6 +10218,7 @@ impl TypeChecker {
                     // nothing, and destructuring shapes get their ambiguity
                     // from the scrutinee's own expression errors.
                     if !resolved_ty.free_vars().is_empty()
+                        && aliased_scheme.is_none()
                         && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
                     {
                         self.pending_ambiguity.push((
@@ -10207,7 +10228,9 @@ impl TypeChecker {
                         ));
                     }
 
-                    let scheme = if is_closure_with_unresolved_vars
+                    let scheme = if let Some(scheme) = aliased_scheme {
+                        scheme
+                    } else if is_closure_with_unresolved_vars
                         || is_mutable_with_unresolved_vars
                         || is_nonvalue_with_unresolved_vars
                     {
