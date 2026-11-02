@@ -203,6 +203,11 @@ fn editing_an_indexed_descriptor_table_restores_first_declaration_authority() {
     module.types.remove(0);
     assert_eq!(first_name(&module, 23).as_deref(), Some("last.Name"));
     assert_eq!(module.type_index_by_id(TypeId(23)), Some(1));
+    let mut first = module.types[1].clone();
+    first.id = TypeId(17);
+    module.types.insert(0, first);
+    assert_eq!(first_name(&module, 17).as_deref(), Some("last.Name"));
+    assert_eq!(module.type_index_by_id(TypeId(23)), Some(2));
 }
 
 #[test]

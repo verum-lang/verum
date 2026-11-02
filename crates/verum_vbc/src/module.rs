@@ -140,6 +140,17 @@ impl TypeTable {
         }
         self.entries.push(descriptor);
     }
+
+    /// Insert a descriptor at a builder-selected position. An insertion before
+    /// existing entries can change both their positions and first-ID authority.
+    pub fn insert(&mut self, position: usize, descriptor: TypeDescriptor) {
+        if position == self.entries.len() {
+            self.push(descriptor);
+        } else {
+            self.by_id.take();
+            self.entries.insert(position, descriptor);
+        }
+    }
 }
 
 impl From<Vec<TypeDescriptor>> for TypeTable {
