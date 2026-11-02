@@ -96,6 +96,83 @@ fn probe() -> Int {{
 }
 
 #[test]
+fn scalar_and_unit_returns_release_live_affine_locals_in_reverse_order() {
+    let source = r#"
+fn release(counter: &mut Count, early: Bool) -> Bool {
+    let held: Watch = Watch { counter, digit: 1 };
+    {
+        let held: Watch = Watch { counter, digit: 2 };
+        if early { return true; }
+    }
+    false
+}
+fn release_unit(counter: &mut Count) {
+    let held: Watch = Watch { counter, digit: 3 };
+    return;
+}
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    release(&mut counter, true);
+    release(&mut counter, false);
+    release_unit(&mut counter);
+    counter.value
+}
+"#;
+    for bootstrap in [false, true] {
+        assert_eq!(run(source, bootstrap), 21213, "bootstrap={bootstrap}");
+    }
+}
+
+#[test]
+fn residual_return_releases_owners_on_the_propagating_edge() {
+    let source = r#"
+type Result<T, E> is | Ok(T) | Err(E);
+fn source(fail: Bool) -> Result<Int, Int> {
+    if fail { Result.Err(7) } else { Result.Ok(8) }
+}
+fn guarded(counter: &mut Count, fail: Bool) -> Result<Int, Int> {
+    let held: Watch = Watch { counter, digit: 4 };
+    let value = source(fail)?;
+    if counter.value != 4 { return Result.Err(99); }
+    Result.Ok(value)
+}
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    let first = match guarded(&mut counter, true) { Result.Err(e) => e, _ => 0 };
+    let second = match guarded(&mut counter, false) { Result.Ok(v) => v, _ => 0 };
+    counter.value * 100 + first * 10 + second
+}
+"#;
+    for bootstrap in [false, true] {
+        assert_eq!(run(source, bootstrap), 4478, "bootstrap={bootstrap}");
+    }
+}
+
+#[test]
+fn residual_defers_precede_cleanup_in_each_exited_scope() {
+    let source = r#"
+type Result<T, E> is | Ok(T) | Err(E);
+fn missing() -> Result<Int, Int> { Result.Err(9) }
+fn guarded(counter: &mut Count) -> Result<Int, Int> {
+    let outer: Watch = Watch { counter, digit: 1 };
+    defer { counter.value = counter.value * 10 + 2; }
+    {
+        let inner: Watch = Watch { counter, digit: 3 };
+        errdefer { counter.value = counter.value * 10 + 4; }
+        let value = missing()?;
+    }
+    Result.Ok(0)
+}
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    let result = guarded(&mut counter);
+    counter.value
+}
+"#;
+    assert_eq!(run(source, true), 4321);
+}
+
+#[test]
 fn returned_moved_local_and_explicit_drop_keep_one_obligation() {
     let source = r#"
 fn make(counter: &mut Count) -> Watch {

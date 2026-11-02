@@ -72,6 +72,45 @@ fn returning_a_lock_guard_holds_and_releases_one_acquisition() {
 }
 
 #[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn explicit_and_propagated_returns_release_inferred_lock_guards() {
+    let source = r#"
+        module app;
+        mount core.sync.rwlock.RwLock;
+        mount core.sync.mutex.Mutex;
+        fn early(lock: &RwLock<Int>, active: Bool) -> Bool {
+            let guard = lock.write().unwrap();
+            if !active { return false; }
+            true
+        }
+        fn require_active(active: Bool) -> Result<Int, Int> {
+            if active { Result.Ok(17) } else { Result.Err(7) }
+        }
+        fn guarded(lock: &Mutex<Int>, active: Bool) -> Result<Int, Int> {
+            let guard = lock.lock().unwrap();
+            let value = require_active(active)?;
+            Result.Ok(value)
+        }
+        fn main() -> Int {
+            let write = RwLock.new(17);
+            let mutex = Mutex.new(25);
+            assert(!early(&write, false), "expected early return");
+            {
+                let read = write.try_read().unwrap();
+                assert_eq(*read, 17);
+            }
+            assert(guarded(&mutex, false).is_err(), "expected residual return");
+            {
+                let exclusive = mutex.try_lock().unwrap();
+                assert_eq(*exclusive, 25);
+            }
+            guarded(&mutex, true).unwrap()
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 17);
+}
+
+#[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and loopback TCP"]
 fn weft_overload_sends_the_complete_http_response() {
     let source = r#"

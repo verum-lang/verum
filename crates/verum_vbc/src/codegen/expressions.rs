@@ -18379,10 +18379,10 @@ impl VbcCodegen {
             }
 
             if !self.emit_direct_affine_return(expr, reg, return_uses)? {
-                self.ctx.emit(Instruction::Ret { value: reg });
+                self.emit_lexical_return(Some(reg), Some(reg), false, !return_uses.unhandled);
             }
         } else {
-            self.ctx.emit(Instruction::RetV);
+            self.emit_lexical_return(None, None, false, true);
         }
 
         Ok(None)
@@ -26955,8 +26955,11 @@ impl VbcCodegen {
                 );
             }
 
+            let emit_residual_return = |codegen: &mut Self, value| {
+                codegen.emit_lexical_return(Some(value), Some(inner_reg), true, true);
+            };
             if same_type {
-                self.ctx.emit(Instruction::Ret { value: inner_reg });
+                emit_residual_return(self, inner_reg);
             } else if is_result_type
                 && outer_base.as_deref().is_some_and(|o| WKT::Result.matches(o))
                 && let (Some(inner_err), Some(outer_err)) =
@@ -27035,7 +27038,7 @@ impl VbcCodegen {
                         field: 0,
                         value: converted,
                     });
-                    self.ctx.emit(Instruction::Ret { value: out_variant });
+                    emit_residual_return(self, out_variant);
                     self.ctx.free_temp(err_payload);
                     self.ctx.free_temp(converted);
                     self.ctx.free_temp(out_variant);
@@ -27048,7 +27051,7 @@ impl VbcCodegen {
                         outer_err,
                         inner_err,
                     );
-                    self.ctx.emit(Instruction::Ret { value: inner_reg });
+                    emit_residual_return(self, inner_reg);
                 }
             } else {
                 // Cross-type: call `<OuterType>::from_residual(inner_reg)` then Ret.
@@ -27080,9 +27083,7 @@ impl VbcCodegen {
                         func_id: fid,
                         args: crate::instruction::RegRange::new(inner_reg, 1),
                     });
-                    self.ctx.emit(Instruction::Ret {
-                        value: from_residual_ret,
-                    });
+                    emit_residual_return(self, from_residual_ret);
                 } else {
                     // from_residual not yet registered (stdlib not loaded yet or
                     // user-defined type without an explicit impl).  Fall back to
@@ -27093,7 +27094,7 @@ impl VbcCodegen {
                         base_name.unwrap_or("?"),
                         outer_name,
                     );
-                    self.ctx.emit(Instruction::Ret { value: inner_reg });
+                    emit_residual_return(self, inner_reg);
                 }
                 self.ctx.free_temp(from_residual_ret);
             }

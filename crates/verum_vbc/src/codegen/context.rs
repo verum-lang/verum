@@ -2393,6 +2393,13 @@ impl CodegenContext {
         self.defer_stack.push(Vec::new());
     }
 
+    /// Replay a scope on an abrupt edge while retaining it for sibling paths.
+    pub(super) fn exit_edge_defers(&self, level: usize, residual: bool) -> Vec<Instruction> {
+        self.defer_stack.get(level).into_iter().flatten().rev()
+            .filter(|defer| residual || !defer.is_errdefer)
+            .flat_map(|defer| defer.instructions.iter().cloned()).collect()
+    }
+
     /// Pops a defer scope and returns deferred instructions.
     pub fn pop_defer_scope(&mut self, is_error_path: bool) -> Vec<Vec<Instruction>> {
         let mut result = Vec::new();

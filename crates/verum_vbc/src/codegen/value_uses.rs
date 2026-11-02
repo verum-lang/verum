@@ -419,6 +419,53 @@ impl super::VbcCodegen {
         self.named_binding_fact(name, reg).is_some_and(|fact| matches!(fact.discipline,
             ResourceDiscipline::Affine | ResourceDiscipline::Linear))
     }
+    /// Emit the exit edge without popping compile-time scopes shared with
+    /// the untaken path. A result must survive deferred code that changes a local.
+    pub(super) fn emit_lexical_return(
+        &mut self, value: Option<Reg>, preserved: Option<Reg>, residual: bool, independent: bool,
+    ) {
+        let has_defers = self.ctx.has_pending_defers();
+        let value = if has_defers {
+            value.map(|src| {
+                let dst = self.ctx.registers.alloc_fresh();
+                self.ctx.emit(Instruction::Mov { dst, src });
+                dst
+            })
+        } else { value };
+        let has_owners = independent && self.ctx.registers.value_uses.active.values().any(|fact| {
+            matches!(fact.discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear)
+        });
+        if has_defers || has_owners {
+            let mut bindings = self.ctx.registers.function_exit_bindings().into_iter().peekable();
+            for level in (0..=self.ctx.registers.scope_level()).rev() {
+                if has_defers {
+                    for instruction in self.ctx.exit_edge_defers(level, residual) {
+                        self.ctx.emit(instruction);
+                    }
+                }
+                while let Some((name, binding)) = bindings.next_if(|(_, b)| b.scope_level == level) {
+                    if !has_owners || preserved == Some(binding.reg) || binding.is_cell
+                        || binding.is_pattern_alias || self.ctx.is_raw_pointer(binding.reg)
+                        || self.ctx.current_fn_escaping_vars.contains(name.as_str())
+                    {
+                        continue;
+                    }
+                    if let Some(fact) = self.ctx.registers.value_uses.active.get(&binding.reg)
+                        && fact.id == binding.binding_id
+                        && matches!(fact.discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear)
+                        && let Some(ty) = fact.declaration_type.clone()
+                    {
+                        self.emit_local_drop(binding.reg, Some(&ty));
+                    }
+                }
+            }
+        }
+        self.ctx.emit(match value {
+            Some(value) => Instruction::Ret { value },
+            None => Instruction::RetV,
+        });
+    }
+
     /// Transfer a direct affine local or a fresh aggregate whose owning stores
     /// already consumed their inputs. Unproven selected results and calls remain
     /// refused. Both routes discharge the remaining lexical locals on this edge.
