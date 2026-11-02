@@ -357,6 +357,32 @@ async function analyzeSource() {
     }
   } finally { analysisBusy = false; if (analysisPending) analysisTimer = window.setTimeout(analyzeSource, 100); }
 }
+type EvidencePacket = {
+  schema: string; path: string;
+  analysis: Pick<Analysis, 'source_hash' | 'analysis_scope' | 'project_revision' | 'library_metadata' | 'parsed'>
+    & { document_diagnostics: { total: number; errors: number }; declaration: { name: string; kind: string } | null };
+  operation: { id: string; kind: Receipt['kind']; status: string } | null;
+};
+async function inspectEvidence(revision: DocumentRevision, hash: string, project?: string | null, declaration?: string, operation?: string) {
+  if (!sameRevision(revision, languageRevision())) throw new Error(t(m('Source changed. Select a declaration from the current analysis.')));
+  const packet = await api<EvidencePacket>('evidence.packet', {
+    path: revision.path, source: revision.source, expected_source_hash: hash,
+    expected_project_revision: project, declaration_id: declaration, operation_id: operation,
+  });
+  if (!sameRevision(revision, languageRevision())) throw new Error(t(m('Source changed. Select a declaration from the current analysis.')));
+  const { analysis } = packet, subject = analysis.declaration;
+  const details = node('div', 'evidence-packet');
+  details.append(node('p', '', subject ? `${packet.path} · ${subject.name}` : packet.path),
+    node('p', 'muted', analysisScopeLabel(analysis.analysis_scope)),
+    node('p', '', m('Document diagnostics: {errors} errors, {total} total', analysis.document_diagnostics)),
+    node('p', 'result-meta', m('Source SHA-256: {hash}', { hash: analysis.source_hash })));
+  if (packet.operation) details.append(node('p', '', m('Operation {id} · {status}', { id: packet.operation.id, status: m(packet.operation.status as Receipt['status']) })),
+    node('p', 'muted', m('The operation records its input source. Its project revision was not captured.')));
+  appendDetails(details, m('Machine-readable evidence'), packet, 'packet');
+  if (await dialog(m('Evidence packet'), details, [{ value: 'close', label: m('Done') }, { value: 'copy', label: m('Copy packet'), primary: true }]) === 'copy') {
+    await navigator.clipboard.writeText(pretty(packet)); announce(m('Evidence packet copied'));
+  }
+}
 function renderAnalysis(snapshot: Analysis) {
   const revision = languageRevision();
   proofTargets.accept(revision, snapshot); renderProofTargets();
@@ -388,11 +414,15 @@ function renderAnalysis(snapshot: Analysis) {
   if (!count) diagnostics.append(node('p', 'muted', m('No module diagnostics')));
   const structure = $('architecture-content'); structure.replaceChildren();
   structure.append(node('p', 'result-meta', `${currentPath} · ${snapshot.source_hash.slice(0, 12)}${snapshot.project_revision ? ` · ${snapshot.project_revision.slice(0, 12)}` : ''}`));
+  structure.append(iconButton('source', m('Inspect document evidence'), () =>
+    inspectEvidence(revision, snapshot.source_hash, snapshot.project_revision)));
   if (!snapshot.declarations.length) structure.append(node('p', 'muted', m('No declarations available for this revision.')));
   for (const declaration of snapshot.declarations) {
     const card = node('article', 'declaration-card');
     const heading = button(declaration.name, () => showRange(declaration.selection_range), 'declaration-name');
-    card.append(node('span', 'badge', declaration.kind), heading);
+    card.append(node('span', 'badge', declaration.kind), heading,
+      iconButton('source', m('Inspect evidence for {name}', { name: declaration.name }), () =>
+        inspectEvidence(revision, snapshot.source_hash, snapshot.project_revision, declaration.id)));
     if (declaration.type_display) card.append(node('code', 'muted', declaration.type_display));
     const fields = declaration.record_fields;
     if (fields?.length) {
@@ -599,6 +629,11 @@ function renderResults() {
   if (receipt.status === 'running') {
     const cancel = iconButton('close', m('Cancel'), async () => { await api('operation.cancel', { id: receipt.id }); await refreshOperations(); });
     cancel.dataset.focusKey = 'cancel'; heading.append(cancel);
+  }
+  if (currentPath === receipt.path && currentHash === receipt.source_hash) {
+    const revision = languageRevision();
+    heading.append(iconButton('source', m('Inspect operation evidence'), () =>
+      inspectEvidence(revision, receipt.source_hash, undefined, undefined, receipt.id)));
   }
   const copy = iconButton('copy', m('Copy receipt'), async () => { await navigator.clipboard.writeText(pretty(receipt)); announce(m('Receipt copied')); });
   copy.dataset.focusKey = 'copy'; heading.append(copy);

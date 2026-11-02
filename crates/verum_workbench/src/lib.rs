@@ -1,6 +1,7 @@
 //! Verum Studio: one local operation service, with browser and provider adapters.
 pub mod agent_tools;
 pub mod codex;
+mod evidence;
 pub mod execution;
 pub mod jobs;
 pub mod language;
@@ -211,6 +212,7 @@ impl Studio {
             "workspace.list" => self.workspace.lock().await.list(),
             "language.request" => self.language_request(&params).await,
             "project.inspect" => self.project().await,
+            "evidence.packet" => self.evidence_packet(params).await,
             "workspace.read" => self.workspace.lock().await.read(field(&params, "path")?),
             "workspace.write" => {
                 self.workspace.lock().await.write(
@@ -256,16 +258,8 @@ impl Studio {
         }
     }
     async fn language_request(&self, params: &Value) -> Result<Value> {
-        let (path, source) = {
-            let workspace = self.workspace.lock().await;
-            let relative = field(params, "path")?;
-            let path = workspace.path(relative)?;
-            let source = match params.get("source") {
-                Some(value) => value.as_str().context("Expected source text")?.into(),
-                None => field(&workspace.read(relative)?, "source")?.into(),
-            };
-            (path, source)
-        };
+        let draft = params.get("source").map(|value| value.as_str().map(Text::from).context("Expected source text")).transpose()?;
+        let (path, source) = self.workspace.lock().await.source_input(field(params, "path")?, draft)?;
         self.language
             .request(
                 path,

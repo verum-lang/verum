@@ -86,12 +86,25 @@ impl Workspace {
         }
         Ok(path)
     }
+    pub(super) fn source_input(&self, relative: &str, draft: Option<Text>) -> Result<(PathBuf, Text)> {
+        let path = self.path(relative)?;
+        let source = match draft {
+            Some(source) => source,
+            None => Self::read_text(&path)?,
+        };
+        Ok((path, source))
+    }
     pub fn read(&self, relative: &str) -> Result<Value> {
-        self.path(relative)?;
-        self.read_document(relative)
+        Self::read_at(relative, &self.path(relative)?)
     }
     pub fn read_document(&self, relative: &str) -> Result<Value> {
-        let path = self.document_path(relative)?;
+        Self::read_at(relative, &self.document_path(relative)?)
+    }
+    fn read_at(relative: &str, path: &Path) -> Result<Value> {
+        let source = Self::read_text(path)?;
+        Ok(json!({"path":relative, "hash":digest(source.as_bytes()), "source":source}))
+    }
+    fn read_text(path: &Path) -> Result<Text> {
         ensure!(path.metadata()?.is_file(), "Select a regular text file");
         ensure!(
             path.metadata()?.len() <= SOURCE_LIMIT as u64,
@@ -108,7 +121,7 @@ impl Workspace {
             !source.contains("\0"),
             "Binary files cannot be edited as text"
         );
-        Ok(json!({"path":relative, "hash":digest(source.as_bytes()), "source":source}))
+        Ok(source)
     }
     pub fn write(&self, relative: &str, source: &str, expected: Option<&str>) -> Result<Value> {
         self.path(relative)?;

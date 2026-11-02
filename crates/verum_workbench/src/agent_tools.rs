@@ -10,6 +10,7 @@ enum Route {
     ReadSource,
     Propose,
     Receipt,
+    Evidence,
     Plan,
     Files,
     Changes,
@@ -40,6 +41,7 @@ impl Tool {
             Route::Start(_) => "execution",
             Route::Project
             | Route::ReadSource
+            | Route::Evidence
             | Route::Receipt
             | Route::Plan
             | Route::Files
@@ -113,6 +115,7 @@ pub(super) fn operation(params: &Value) -> Result<(&'static str, Value)> {
         Route::ReadSource => "workspace.read",
         Route::Propose => "workspace.write",
         Route::Receipt => "operation.read",
+        Route::Evidence => "evidence.packet",
         Route::Plan => "operation.plan",
         Route::Files => {
             ensure!(
@@ -215,6 +218,12 @@ fn define_tools() -> Vec<Tool> {
             "Propose a source replacement for human review; compare-and-swap against expected_hash",
             json!({"path":{"type":"string"},"source":source,"expected_hash":{"type":["string","null"]}}),
             json!(["path", "source", "expected_hash"]),
+        ),
+        (
+            "verum_evidence", Route::Evidence,
+            "Inspect compact compiler evidence at a pinned source revision. Take declaration_id and project revision from verum_analyze. Attach an exact operation ID for input-source correspondence, or a checker-bound span for a selected declaration. The operation does not attest to the compiler project revision.",
+            json!({"path":{"type":"string"},"expected_source_hash":{"type":"string","pattern":"^[A-Fa-f0-9]{64}$"},"expected_project_revision":{"type":"string"},"declaration_id":{"type":"string"},"operation_id":{"type":"string"}}),
+            json!(["path", "expected_source_hash"]),
         ),
         (
             "verum_receipt", Route::Receipt,

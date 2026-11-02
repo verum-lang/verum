@@ -269,3 +269,153 @@ done
         json!([])
     );
 }
+
+#[tokio::test]
+async fn packet_binds_one_declaration_and_retained_proof_without_promoting_the_run_scope() {
+    let root = tempfile::tempdir().unwrap();
+    let source =
+        "fn first(x: Bool) -> Bool ensures result == x { x }\nfn second(x: Bool) -> Bool { x }\n";
+    let hash = crate::workspace::digest(source.as_bytes());
+    for path in ["subject.vr", "other.vr"] {
+        std::fs::write(root.path().join(path), source).unwrap();
+    }
+    let request = verum_source_proof::SourceRequest {
+        profile: verum_source_proof::SourceProfile::Finite.as_str().into(),
+        source: source.into(),
+        declaration: "first".into(),
+    };
+    let proof = verum_source_proof::replay(&serde_json::to_vec(&request).unwrap());
+    assert_eq!(
+        proof.validate_for(&request).unwrap(),
+        verum_source_proof::SourceOutcome::Verified
+    );
+    let run = root.path().join(".verum-studio/runs/saved-proof");
+    std::fs::create_dir_all(&run).unwrap();
+    std::fs::write(run.join("source.vr"), source).unwrap();
+    std::fs::write(run.join("receipt.json"), serde_json::to_vec(&json!({
+        "id":"saved-proof","kind":"proof","path":"subject.vr","source_hash":hash,
+        "declaration":"first","proof_profile":request.profile,"status":"succeeded","proof":proof,
+        "executable":"verum-source-replay","timeout_ms":1000,"elapsed_ms":1,"exit_code":0,
+        "stdout":"","stderr":"","evidence_path":run,"started_unix_ms":1,"termination":"exit","version":1
+    })).unwrap()).unwrap();
+    let studio = Studio::open(Config {
+        workspace: root.path().into(),
+        codex: "unused".into(),
+        verum: "unused".into(),
+        proof: "unused".into(),
+        port: 0,
+    })
+    .unwrap();
+    let raw = studio
+        .call("language.request", json!({"path":"subject.vr"}))
+        .await
+        .unwrap();
+    let snapshot = &raw["result"];
+    let first = &snapshot["declarations"][0];
+    let args = json!({"path":"subject.vr","expected_source_hash":hash,"expected_project_revision":snapshot["project_revision"],
+        "declaration_id":first["id"],"operation_id":"saved-proof"});
+    let packet = studio.call("evidence.packet", args.clone()).await.unwrap();
+    assert_eq!(
+        packet,
+        studio
+            .tool(&json!({"tool":"verum_evidence","arguments":args}))
+            .await
+            .unwrap()
+    );
+    assert_eq!(packet["schema"], "verum-evidence-packet/1");
+    assert_eq!(packet["analysis"]["declaration"], *first);
+    assert_eq!(
+        packet["analysis"]["project_revision"],
+        snapshot["project_revision"]
+    );
+    assert_eq!(
+        packet["analysis"]["document_diagnostics"]["total"],
+        snapshot["diagnostics"].as_array().unwrap().len()
+    );
+    assert_eq!(
+        packet["analysis"]["declaration_span"],
+        json!(proof.source.span)
+    );
+    assert_eq!(packet["operation"]["relation"], "checker-source-span");
+    assert_eq!(packet["operation"]["status"], "succeeded");
+    assert_eq!(
+        packet["operation"].get("project_revision"),
+        Some(&Value::Null)
+    );
+    assert!(packet["operation"].get("stdout").is_none());
+
+    for (field, invalid) in [
+        ("expected_source_hash", json!("0".repeat(64))),
+        ("expected_project_revision", json!("unrelated revision")),
+        ("declaration_id", snapshot["declarations"][1]["id"].clone()),
+        ("declaration_id", json!("unknown")),
+        ("operation_id", json!("missing")),
+    ] {
+        let mut wrong = args.clone();
+        wrong[field] = invalid;
+        assert!(
+            studio.call("evidence.packet", wrong).await.is_err(),
+            "{field}"
+        );
+    }
+    // A cold request with a stale selector closes its temporary LSP document too.
+    assert!(
+        studio
+            .call(
+                "evidence.packet",
+                json!({"path":"other.vr","expected_source_hash":hash,"declaration_id":"missing"})
+            )
+            .await
+            .is_err()
+    );
+    let changed = "fn another() -> Int { 1 }";
+    std::fs::write(root.path().join("other.vr"), changed).unwrap();
+    let cold = studio.call("evidence.packet",json!({"path":"other.vr","expected_source_hash":crate::workspace::digest(changed.as_bytes())})).await.unwrap();
+    assert_eq!(
+        cold["analysis"]["source_hash"],
+        crate::workspace::digest(changed.as_bytes()).as_str()
+    );
+    // The subject is byte-for-byte unchanged, but its captured project has changed.
+    assert!(snapshot["project_revision"].is_string());
+    assert_ne!(cold["analysis"]["project_revision"], snapshot["project_revision"]);
+    assert!(studio.call("evidence.packet", args.clone()).await.is_err());
+    std::fs::write(root.path().join("other.vr"), source).unwrap();
+    // Identical bytes in another file cannot acquire this proof by a document join.
+    assert!(
+        studio
+            .call(
+                "evidence.packet",
+                json!({"path":"other.vr","expected_source_hash":hash,"operation_id":"saved-proof"})
+            )
+            .await
+            .is_err()
+    );
+    let document = studio
+        .call(
+            "evidence.packet",
+            json!({"path":"subject.vr","expected_source_hash":hash,"operation_id":"saved-proof"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(document["operation"]["relation"], "input-source");
+    assert_eq!(document["analysis"]["declaration"], Value::Null);
+
+    let draft = "fn first(x: Bool) -> Bool { 99 }";
+    let active = studio
+        .call(
+            "language.request",
+            json!({"path":"subject.vr","source":draft}),
+        )
+        .await
+        .unwrap();
+    assert!(studio.call("evidence.packet", args).await.is_err());
+    let pinned = studio.call("evidence.packet",json!({"path":"subject.vr","source":draft,"expected_source_hash":active["source_hash"]})).await.unwrap();
+    assert_eq!(pinned["analysis"]["version"], active["version"]);
+    assert!(
+        pinned["analysis"]["document_diagnostics"]["errors"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(pinned["operation"], Value::Null);
+}

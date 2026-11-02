@@ -102,7 +102,7 @@ impl Language {
             "Source exceeds editor limit"
         );
         ensure!(
-            DOCUMENT_QUERIES.contains(&method) || matches!(method, "project" | "textDocument/formatting"),
+            DOCUMENT_QUERIES.contains(&method) || matches!(method, "project" | "evidence" | "textDocument/formatting"),
             "Unsupported language operation"
         );
         let control = verum_lsp::AnalysisControl::with_deadline(
@@ -190,6 +190,36 @@ impl Session {
             None => bail!("Language server omitted the response"),
         }
     }
+    async fn open_document(&mut self, uri: &Url, source: &str) -> Result<()> {
+        self.rpc("textDocument/didOpen", json!({"textDocument":{"uri":uri,"languageId":"verum","version":1,"text":source}}), false).await?;
+        Ok(())
+    }
+
+    async fn evidence(&mut self, command: &Command, uri: &Url, hash: &Text, active: Option<(Text, i32)>) -> Result<Value> {
+        let expected = command.argument["expectedSourceHash"].as_str().context("Evidence requires a SHA-256 source hash")?;
+        ensure!(expected.eq_ignore_ascii_case(hash.as_str()), "Evidence source hash differs from the requested revision");
+        let transient = active.is_none();
+        let version = if let Some((active_hash, version)) = active {
+            ensure!(active_hash == *hash, "Another revision is active in Studio; refresh analysis before requesting evidence");
+            version
+        } else {
+            // A cold evidence read must not evict an editor buffer or keep a stale disk overlay.
+            self.open_document(uri, &command.source).await?;
+            1
+        };
+        let mut params = command.argument.clone();
+        params["textDocument"] = json!({"uri":uri});
+        params["version"] = json!(version);
+        let result = self.rpc("verum/documentEvidence", params, true).await;
+        if transient {
+            if let Err(error) = self.rpc("textDocument/didClose", json!({"textDocument":{"uri":uri}}), false).await {
+                self.documents.insert(uri.as_str().into(), (hash.clone(), version));
+                return Err(error);
+            }
+        }
+        command.control.check()?;
+        result
+    }
     async fn call(&mut self, command: &Command) -> Result<Value> {
         command.control.check()?;
         if command.method == "project" {
@@ -201,6 +231,9 @@ impl Session {
         let key = Text::from(uri.as_str());
         let hash = crate::workspace::digest(command.source.as_bytes());
         let previous = self.documents.get(&key).cloned();
+        if command.method == "evidence" {
+            return self.evidence(command, &uri, &hash, previous).await;
+        }
         if previous.is_none() && self.documents.len() >= 128 {
             // Bound retained source/AST memory; reopening reconstructs from exact source.
             let old = self.documents.keys().next().cloned();
@@ -224,7 +257,7 @@ impl Session {
                 version
             }
             None => {
-                self.rpc("textDocument/didOpen", json!({"textDocument":{"uri":uri,"languageId":"verum","version":1,"text":command.source}}), false).await?;
+                self.open_document(&uri, &command.source).await?;
                 1
             }
         };
