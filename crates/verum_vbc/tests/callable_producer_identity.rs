@@ -289,6 +289,47 @@ fn method_calls(module: &VbcModule, suffix: &str) -> verum_common::List<Vec<Type
 }
 
 #[test]
+fn borrowed_callback_bound_keeps_the_element_and_predicate_witnesses_distinct() {
+    use verum_vbc::types::{CbgrTier, Mutability, TypeParamId};
+    for (borrow, mutability, tier) in [
+        ("&", Mutability::Immutable, CbgrTier::Tier0),
+        ("&mut ", Mutability::Mutable, CbgrTier::Tier0),
+        ("&checked ", Mutability::Immutable, CbgrTier::Tier1),
+        ("&unsafe ", Mutability::Immutable, CbgrTier::Tier2),
+    ] {
+        let module = compile(&format!(
+            "fn accepts_predicate<A,F: fn({borrow}A) -> Bool>(predicate: F) -> Int {{ 8 }}
+             fn probe() -> Int {{ accepts_predicate(|v: {borrow}Int| -> Bool {{ true }}) }}"
+        ));
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        let predicate = |element| TypeRef::Function {
+            params: vec![TypeRef::Reference {
+                inner: Box::new(element),
+                mutability,
+                tier,
+            }],
+            return_type: Box::new(TypeRef::Concrete(TypeId::BOOL)),
+            contexts: Default::default(),
+        };
+        let decl = module
+            .functions
+            .iter()
+            .find(|function| module.get_string(function.name)
+                .is_some_and(|name| name.ends_with("accepts_predicate")))
+            .expect("predicate factory");
+        let template = predicate(TypeRef::Generic(TypeParamId(0)));
+        assert_eq!(decl.params[0].type_ref, template);
+        assert_eq!(decl.type_params[1].type_bounds.as_slice(), &[template]);
+        let element = TypeRef::Concrete(TypeId::INT);
+        assert_eq!(
+            method_calls(&module, "accepts_predicate").as_slice(),
+            &[vec![element.clone(), predicate(element)]],
+        );
+    }
+}
+
+#[test]
 fn proven_callable_signature_binds_the_declared_method_parameter() {
     let module = compile(
         r#"

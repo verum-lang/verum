@@ -18439,7 +18439,8 @@ impl VbcCodegen {
                     // bound (`fn(R, Self.Item) -> ReduceResult<R>`)
                     // stay as `TypeRef::Generic` rather than
                     // collapsing to `Concrete(PTR)`.
-                    return self.resolve_field_type_ref(bound_ty, generic_param_map);
+                    // A callback bound describes its caller-visible signature, including borrows.
+                    return self.resolve_signature_type_ref(bound_ty, generic_param_map);
                 }
             }
         }
@@ -20776,7 +20777,7 @@ impl VbcCodegen {
                     } else {
                         &method_generic_param_map
                     };
-                    self.resolve_field_type_ref(&ty, map)
+                    self.resolve_signature_type_ref(&ty, map)
                 })
             };
             let fn_own_names: std::collections::HashSet<String> = func
