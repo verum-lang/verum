@@ -7493,23 +7493,23 @@ impl ProtocolChecker {
     /// Get the return type of a protocol method by protocol name and method name.
     /// Used for resolving method calls on &dyn Protocol receivers.
     pub fn get_method_type(&self, protocol_name: &str, method_name: &str) -> Option<Type> {
-        self.dyn_method_contract(protocol_name, method_name).map(|(ty, _)| ty)
+        let method = self.dyn_method_contract(protocol_name, method_name)?;
+        Some(match &method.ty {
+            Type::Function { return_type, .. } => (**return_type).clone(),
+            ty => ty.clone(),
+        })
     }
 
-    /// The result and receiver permission come from the same declaration,
+    /// Parameter types, result, and receiver permission come from one declaration,
     /// including when a dynamic bound inherits that declaration.
     pub(crate) fn dyn_method_contract(
         &self,
         protocol_name: &str,
         method_name: &str,
-    ) -> Option<(Type, Option<ReceiverKind>)> {
+    ) -> Option<&ProtocolMethod> {
         let proto = self.get_protocol_definition(protocol_name)?;
         if let Some(method) = proto.methods.get(&Text::from(method_name)) {
-            let result = match &method.ty {
-                Type::Function { return_type, .. } => (**return_type).clone(),
-                ty => ty.clone(),
-            };
-            return Some((result, method.receiver_kind()));
+            return Some(method);
         }
         proto.super_protocols.iter().find_map(|bound| {
             let parent = bound.protocol.as_ident()?;

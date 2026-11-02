@@ -19181,20 +19181,29 @@ impl TypeChecker {
         bounds: &[Text],
         method: &Ident,
         args: &[Expr],
+        span: Span,
     ) -> Result<Option<InferResult>> {
         for bound in bounds {
-            let mut contract = self.protocol_checker.read()
-                .dyn_method_contract(bound.as_str(), method.name.as_str());
-            if contract.is_none() {
+            let lookup = |checker: &Self| {
+                checker.protocol_checker.read()
+                    .dyn_method_contract(bound.as_str(), method.name.as_str())
+                    .map(|decl| (decl.ty.clone(), decl.receiver_kind()))
+            };
+            let contract = lookup(self).or_else(|| {
                 self.ensure_stdlib_type_loaded_transitive(bound);
-                contract = self.protocol_checker.read()
-                    .dyn_method_contract(bound.as_str(), method.name.as_str());
-            }
-            if let Some((result, receiver)) = contract {
-                for arg in args {
-                    self.infer_expr(arg, InferMode::Synth)?;
+                lookup(self)
+            });
+            if let Some((signature, receiver)) = contract {
+                let Type::Function { params, return_type, .. } = signature else {
+                    return Err(TypeError::NotAFunction { ty: signature.to_string().into(), span });
+                };
+                if params.len() != args.len() {
+                    return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
                 }
-                return Ok(Some(InferResult::method(result, receiver)));
+                for (arg, param) in args.iter().zip(&params) {
+                    self.check_expr(arg, &self.unifier.apply(param))?;
+                }
+                return Ok(Some(InferResult::method(self.unifier.apply(&return_type), receiver)));
             }
         }
         Ok(None)
@@ -19572,7 +19581,7 @@ impl TypeChecker {
         // from the protocol's declared methods. Look up via protocol_checker.
         // ============================================================
         if let Type::DynProtocol { ref bounds, .. } = recv_ty
-            && let Some(result) = self.resolve_dyn_method(bounds, method, args)?
+            && let Some(result) = self.resolve_dyn_method(bounds, method, args, span)?
         {
             return Ok(result);
         }
@@ -19772,7 +19781,7 @@ impl TypeChecker {
                 other => other,
             };
             if let Type::DynProtocol { bounds, .. } = peeled
-                && let Some(result) = self.resolve_dyn_method(bounds, method, args)?
+                && let Some(result) = self.resolve_dyn_method(bounds, method, args, span)?
             {
                 return Ok(result);
             }

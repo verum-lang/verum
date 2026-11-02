@@ -487,3 +487,27 @@ fn dyn_receiver_access_survives_a_deref_and_protocol_inheritance() {
         }
     }
 }
+
+#[test]
+fn dyn_calls_check_arguments_against_the_selected_protocol_method() {
+    let declarations = r#"
+        type Parent is protocol { fn inherited(&self, value: Int) -> Int; };
+        type Source is protocol extends Parent { fn read(&self, value: Int) -> Int; };
+    "#;
+    for method in ["read", "inherited"] {
+        for (arguments, diagnostic) in [
+            ("1", None),
+            ("true", Some("Mismatch")),
+            ("", Some("WrongArgCount")),
+            ("1, 2", Some("WrongArgCount")),
+        ] {
+            let source = format!("{declarations} fn probe(x: &(dyn Source)) -> Int {{ x.{method}({arguments}) }}");
+            let (_, errors) = check(&source, &[]);
+            let matches = match diagnostic {
+                None => errors.is_empty(),
+                Some(kind) => errors.iter().any(|error| error.contains(kind)),
+            };
+            assert!(matches, "x.{method}({arguments}): expected {diagnostic:?}, got {errors:?}");
+        }
+    }
+}

@@ -132,6 +132,47 @@ fn named_protocol_methods_check_the_declared_receiver_access() {
 }
 
 #[test]
+fn archived_dyn_methods_count_only_the_declared_value_parameters() {
+    let owner = "provider";
+    let key: Text = "provider.Counter".into();
+    let mut data = metadata(owner, "public type Counter is protocol { fn read(&self, value: Int) -> Int; };");
+    let parameter = |name: &str, ty: &str| ParamDescriptor {
+        name: name.into(), ty: ty.into(), declared_ty: "".into(), has_default: false, default_literal: None,
+    };
+    let read = MethodSignature {
+        name: "read".into(),
+        dispatch: MethodDispatch { receiver: ReceiverKind::SelfRef, is_async: false, has_generics: false, returns_self: false },
+        params: [parameter("self", "&Self"), parameter("value", "Int")].into_iter().collect(),
+        return_type: "Int".into(), contexts: List::new(),
+    };
+    // Some descriptors carry the implicit receiver as an ABI slot, others already omit it.
+    let mut fallback = read.clone();
+    fallback.name = "fallback".into();
+    fallback.params = List::from_single(parameter("value", "Int"));
+    let descriptor = data.types.get_mut(&key).unwrap();
+    assert!(descriptor.source_declaration.is_none());
+    descriptor.kind = TypeDescriptorKind::Protocol {
+        super_protocols: List::new(), associated_types: List::new(),
+        required_methods: List::from_single(read.clone()), default_methods: List::from_single(fallback.name.clone()),
+    };
+    data.protocols.insert(key, ProtocolDescriptor {
+        name: "Counter".into(), module_path: owner.into(), origin_module_path: None, generic_params: List::new(),
+        super_protocols: List::new(), associated_types: List::new(), required_methods: List::from_single(read),
+        default_methods: List::from_single(fallback), decl_span: None,
+    });
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        for method in ["read", "fallback"] {
+            for (arguments, valid) in [("1", true), ("true", false), ("", false), ("1, 2", false)] {
+                let source = format!("fn call(x: &(dyn provider.Counter)) -> Int {{ x.{method}({arguments}) }}");
+                let (_, errors) = check(decode_metadata(&bytes).unwrap(), &source, eager);
+                assert_eq!(errors.is_empty(), valid, "eager={eager}, {source}: {errors:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn equal_leaf_names_keep_their_declaring_owner() {
     let mut data = metadata("test.first", "public type Carrier<A> is { public value: Type(1), public extra: A };");
     let other = metadata("test.second", "public type Carrier<A> is { public value: Type(2), public extra: A };");

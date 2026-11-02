@@ -2509,6 +2509,33 @@ impl TypeChecker {
         Some((ty, owning_key))
     }
 
+    fn protocol_methods_from_metadata(
+        descriptor: &crate::core_metadata::ProtocolDescriptor,
+    ) -> verum_common::Map<Text, crate::protocol::ProtocolMethod> {
+        let mut methods = verum_common::Map::new();
+        for (signatures, has_default) in [
+            (&descriptor.required_methods, false),
+            (&descriptor.default_methods, true),
+        ] {
+            for signature in signatures {
+                // ProtocolMethod stores call arguments. The ABI can include the receiver in slot zero.
+                let values = match signature.params.split_first() {
+                    Some((first, rest)) if first.name == "self" && signature.dispatch.receiver.meta().has_self => rest,
+                    _ => signature.params.as_slice(),
+                };
+                let params = values.iter()
+                    .map(|param| parse_descriptor_type_string(&param.ty))
+                    .collect();
+                let result = parse_descriptor_type_string(&signature.return_type);
+                let method = crate::protocol::ProtocolMethod::from_metadata(
+                    signature, Type::function(params, result), has_default,
+                );
+                methods.insert(signature.name.clone(), method);
+            }
+        }
+        methods
+    }
+
     /// Register the body of a single stdlib protocol from
     /// `metadata.protocols[name]` into `protocol_checker`.  Idempotent
     /// (no-op if `protocol_checker.get_protocol(name)` already returns
@@ -2520,7 +2547,7 @@ impl TypeChecker {
         name: &Text,
         metadata: &crate::core_metadata::CoreMetadata,
     ) {
-        use crate::protocol::{Protocol, ProtocolMethod};
+        use crate::protocol::Protocol;
         if let Some(descriptor) = metadata.types.get(name)
             && descriptor.source_declaration.is_some()
         {
@@ -2585,57 +2612,7 @@ impl TypeChecker {
             return;
         }
 
-        // Convert each metadata-derived parameter / return type
-        // string back into a structured `Type`.  The
-        // descriptor-string parser handles primitives, bare names,
-        // generic instantiations (`Maybe<T>`), references (`&T`),
-        // function types, and the `__opaque_type_N` /
-        // `__generic_N` placeholders (mapped to fresh TypeVars).
-        // After #131 Layer E landed, codegen emits proper
-        // `TypeRef::Generic` for protocol-level params, method-
-        // local params, AND associated-type projections
-        // (`Self.Item`) — archive_metadata renders the unresolved
-        // ones as `__generic_N` placeholders that the parser
-        // converts to fresh TypeVars.  No additional safety guard
-        // needed at this site.
-        let to_type = |s: &Text| -> Type { parse_descriptor_type_string(s.as_str()) };
-        // RECEIVER STRIP (T0701 result leg): descriptor params carry
-        // `self` as params[0]; every signature consumer counts USER
-        // arguments only (the inherent scheme builder at
-        // modules.rs::metadata_fn_scheme strips it the same way).
-        // Registering it verbatim made `a.cmp(&b)` fail «method `cmp`
-        // expects 2 argument(s), but 1 were provided» — proto-search's
-        // winner carried fn(self, other).
-        let to_params = |m: &crate::core_metadata::MethodSignature| -> List<Type> {
-            m.params
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| {
-                    if i == 0 && p.name.as_str() == "self" {
-                        None
-                    } else {
-                        Some(to_type(&p.ty))
-                    }
-                })
-                .collect()
-        };
-        let mut methods = verum_common::Map::new();
-        for m in protocol_desc.required_methods.iter() {
-            let params: List<Type> = to_params(m);
-            let return_type = to_type(&m.return_type);
-            let method_type = Type::function(params, return_type);
-            let protocol_method =
-                ProtocolMethod::from_metadata(m, method_type, false);
-            methods.insert(m.name.clone(), protocol_method);
-        }
-        for m in protocol_desc.default_methods.iter() {
-            let params: List<Type> = to_params(m);
-            let return_type = to_type(&m.return_type);
-            let method_type = Type::function(params, return_type);
-            let protocol_method =
-                ProtocolMethod::from_metadata(m, method_type, true);
-            methods.insert(m.name.clone(), protocol_method);
-        }
+        let methods = Self::protocol_methods_from_metadata(protocol_desc);
 
         let protocol = Protocol {
             name: name.clone(),
@@ -4277,7 +4254,7 @@ impl TypeChecker {
     /// Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
     pub fn load_stdlib_from_metadata(&mut self, metadata: &crate::core_metadata::CoreMetadata) {
         use crate::core_metadata::TypeDescriptorKind;
-        use crate::protocol::{Protocol, ProtocolImpl, ProtocolMethod};
+        use crate::protocol::{Protocol, ProtocolImpl};
         use crate::ty::Type;
         use verum_common::span::Span;
 
@@ -4526,65 +4503,7 @@ impl TypeChecker {
                 self.register_metadata_source_type(name, descriptor);
                 continue;
             }
-            // Convert core_metadata methods to protocol ProtocolMethods
-            let mut methods = verum_common::Map::new();
-            for m in protocol_desc.required_methods.iter() {
-                // Build function type from method signature
-                // Use the descriptor parser, as the sibling builder at
-                // ~2121 already does (`let to_type = |s| ->
-                // parse_descriptor_type_string(s)`). The "simplified for
-                // now" version this replaces wrapped the rendered text in
-                // `Type::Named { args: EMPTY }`, which discarded BOTH the
-                // reference qualifiers and every type argument.
-                //
-                // Measured (T1033): `core/async/future.vr` declares
-                // `fn poll(&mut self, cx: &mut Context)`, the metadata
-                // file carries `&mut Context` 253 times, the parser has
-                // arms for all three reference tiers — and the protocol
-                // side still arrived as bare `Context`, because this path
-                // never asked the parser. Two producers of one role, one
-                // of them correct.
-                let params: verum_common::List<Type> = m
-                    .params
-                    .iter()
-                    .map(|p| crate::infer::helpers::parse_descriptor_type_string(p.ty.as_str()))
-                    .collect();
-                let return_type =
-                    crate::infer::helpers::parse_descriptor_type_string(m.return_type.as_str());
-                let method_type = Type::function(params, return_type);
-
-                let protocol_method = ProtocolMethod::from_metadata(
-                    m,
-                    method_type,
-                    false, // required methods don't have defaults
-                );
-                methods.insert(m.name.clone(), protocol_method);
-            }
-
-            // Add default methods — same parser as the required loop
-            // above and as the sibling builder at ~2121. This copy of the
-            // "simplified" conversion discarded references and type
-            // arguments exactly like the other one; fixing only the
-            // required loop left half the protocols still wrong, which is
-            // how the measurement went from 2 disagreements to 1 instead
-            // of to 0.
-            for m in protocol_desc.default_methods.iter() {
-                let params: verum_common::List<Type> = m
-                    .params
-                    .iter()
-                    .map(|p| crate::infer::helpers::parse_descriptor_type_string(p.ty.as_str()))
-                    .collect();
-                let return_type =
-                    crate::infer::helpers::parse_descriptor_type_string(m.return_type.as_str());
-                let method_type = Type::function(params, return_type);
-
-                let protocol_method = ProtocolMethod::from_metadata(
-                    m,
-                    method_type,
-                    true, // default methods have implementations
-                );
-                methods.insert(m.name.clone(), protocol_method);
-            }
+            let methods = Self::protocol_methods_from_metadata(protocol_desc);
 
             // Create Protocol struct
             let protocol = Protocol {
