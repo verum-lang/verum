@@ -434,6 +434,30 @@ impl VbcCodegen {
         )
     }
 
+    /// Project an instantiated tuple declaration onto the newly bound locals.
+    /// Reference patterns have their own binding mode and cannot inherit the
+    /// owned element's type. Missing declarations grant no ownership evidence.
+    fn bind_tuple_declaration(&mut self, pattern: &verum_ast::Pattern, ty: &crate::types::TypeRef) {
+        use verum_ast::PatternKind;
+        match (&pattern.kind, ty) {
+            (PatternKind::Tuple(parts), crate::types::TypeRef::Tuple(elements)) if parts.len() == elements.len() => {
+                for (part, element) in parts.iter().zip(elements) {
+                    self.bind_tuple_declaration(part, element);
+                }
+            }
+            (PatternKind::Ident { name, by_ref: false, subpattern: None, .. }, _) => {
+                if let Some(reg) = self.ctx.lookup_var(name.name.as_str()).map(|var| var.reg) {
+                    let discipline = crate::resource_discipline::resource_discipline_with(ty, |id| self.type_by_id(id));
+                    self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
+                    if let Some(declared) = self.declaration_type_name(ty, 0) {
+                        self.ctx.variable_type_names.insert(name.name.to_string(), declared);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn compile_let(
         &mut self,
         pattern: &verum_ast::Pattern,
@@ -594,6 +618,12 @@ impl VbcCodegen {
         // `pending_let_tuple_types` (NOT `match_tuple_element_types`) so
         // consuming it for this bind cannot starve a later match arm; the
         // Tuple arm of `compile_pattern_bind` `.take()`s it.
+        let tuple_declaration = if matches!(pattern.kind, verum_ast::PatternKind::Tuple(_)) {
+            ty.and_then(|ty| self.semantic_type_in_current_scope(&Self::extract_type_name_from_ast(ty)))
+                .or_else(|| value.and_then(|expr| self.source_expression_declaration(expr, None, 0)))
+        } else {
+            None
+        };
         if let verum_ast::PatternKind::Tuple(elems) = &pattern.kind
             && let Some(val) = value
             && let Some(elem_types) = self.infer_tuple_element_type_names(val, elems.len())
@@ -1637,6 +1667,9 @@ impl VbcCodegen {
                 _ => reg,
             }};
             self.compile_pattern_bind(pattern, bound)?;
+            if let Some(declaration) = &tuple_declaration {
+                self.bind_tuple_declaration(pattern, declaration);
+            }
             if transfer {
                 self.ctx.emit(Instruction::LoadUnit { dst: reg });
             }

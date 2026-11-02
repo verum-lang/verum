@@ -323,3 +323,53 @@ async fn probe() -> Int {
 }
 "#, "Future.Output has no ownership declaration");
 }
+
+#[test]
+fn imported_future_uses_the_qualified_factory_and_poll_declarations() {
+    let source = Parser::new(&format!("module core.jobs;\n{ENV}\npublic fn create(v: Int) -> Ready<Int> {{ Ready {{ value: v }} }}")).parse_module().unwrap();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.jobs"));
+    let library = producer.compile_module(&source).unwrap();
+    let probe = Parser::new("module app; async fn probe() -> Int { core.jobs.create(37).await }")
+        .parse_module()
+        .unwrap();
+    // Use the same relocation pass as an archive-backed compilation before
+    // running the consumer, so a pool-local callee ID cannot pass by accident.
+    let mut merged = VbcCodegen::with_config(CodegenConfig::new("app"));
+    merged.import_functions(&producer.export_functions());
+    merged
+        .import_bootstrap_nominal_dependencies(&[&probe], &[&library])
+        .unwrap();
+    let ids = library.functions.iter().map(|f| (f.id.0, f.id)).collect();
+    merged.merge_archive_function_bodies(&library, &ids);
+    merged.collect_unit_declarations(&[&probe]).unwrap();
+    merged
+        .compile_unit_items(&[&probe], ItemFailurePolicy::Strict)
+        .unwrap();
+    let linked = merged.finalize_module_from_state().unwrap();
+    let entry = linked.find_function_by_name("app.probe").unwrap();
+    assert_eq!(
+        Interpreter::new(Arc::new(linked))
+            .execute_function(entry)
+            .unwrap()
+            .as_i64(),
+        37
+    );
+}
+
+#[test]
+fn typed_tuple_factory_preserves_the_declared_future_on_destructuring() {
+    run(
+        r#"
+fn channel<T>(value: T) -> (Int, Ready<T>) { (0, Ready { value: value }) }
+async fn result<A>(x: A) -> A {
+    let (sender, receiver) = channel<A>(x);
+    receiver.await
+}
+async fn probe() -> Int {
+    let (sender, receiver) = channel<Int>(37);
+    if result<Bool>(true).await { receiver.await } else { 0 }
+}
+"#,
+        37,
+    );
+}
