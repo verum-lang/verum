@@ -242,11 +242,8 @@ public async fn* stream_lines(cmd_text: &Text)
 }
 
 fn strip_trailing_newline(s: Text) -> Text {
-    if s.is_empty() { return s; }
-    let mut end = s.len();
-    if end > 0 && s.byte_at(end - 1) == ('\n' as Byte) { end = end - 1; }
-    if end > 0 && s.byte_at(end - 1) == ('\r' as Byte) { end = end - 1; }
-    s.slice(0, end).into()
+    let line = match s.strip_suffix("\n") { Maybe.Some(line) => line, Maybe.None => s };
+    match line.strip_suffix("\r") { Maybe.Some(line) => line, Maybe.None => line }
 }
 
 // =============================================================================
