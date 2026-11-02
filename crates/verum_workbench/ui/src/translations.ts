@@ -1,6 +1,10 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Conversation': 'Беседа',
+  'Switch conversation': 'Переключить беседу',
+  'Other conversations awaiting review: {count}': 'Запросы в других беседах: {count}',
+  'Recent event excerpts. Earlier or large payloads were omitted.': 'Фрагменты недавних событий. Старые или большие сообщения опущены.',
   'Project sources and compiled standard library': 'Исходники проекта и скомпилированная стандартная библиотека',
   'Project sources and compiler builtins': 'Исходники проекта и встроенные средства компилятора',
   'Current module and compiler builtins': 'Текущий модуль и встроенные средства компилятора',

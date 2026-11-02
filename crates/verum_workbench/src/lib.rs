@@ -117,6 +117,12 @@ impl Studio {
                     "Unsupported agent operation"
                 );
                 let provider = self.provider().await?;
+                if let Some(expected) = params.get("connectionId") {
+                    ensure!(
+                        expected == &json!(provider.events.lock().await.connection().to_string()),
+                        "Provider connection changed; reconnect before sending a request"
+                    );
+                }
                 if method == "thread/start" {
                     let role: agent_tools::Role = params.get("role").map(|value| serde_json::from_value(value.clone()))
                         .transpose().context("Expected author or reviewer role")?.unwrap_or_default();

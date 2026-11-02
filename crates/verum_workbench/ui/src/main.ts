@@ -1,3 +1,4 @@
+import { Conversation } from './conversation';
 import { projectSourceIndex, workspaceFilePath } from './project-tree';
 import './style.css';
 import { runtimeSourceRange } from './runtime';
@@ -705,44 +706,85 @@ function appendDetails(parent: HTMLElement, label: Content, value: unknown, key:
 
 let connected = false;
 let authenticated = false;
-let threadId: string | null = null;
-let turnId: string | null = null;
-let sending = false;
-let cursor = 0;
 let agentConnection: string | null = null;
 let eventBusy = false;
-const messageBodies = new Map<string, HTMLElement>();
-const activeReviews = new Map<string, () => void>();
-const eventLog: string[] = [];
-let eventLogLength = 0;
-let eventLogDropped = false;
-const completedTurns = new Set<string>();
-function addMessage(role: 'user' | 'agent' | 'system', text: Content, id?: string) {
-  $('agent-welcome').hidden = true;
+let accountCursor = 0;
+const conversations = new Set<Conversation>();
+const picker = $<HTMLSelectElement>('agent-conversation');
+const composer = $<HTMLTextAreaElement>('agent-input');
+function createConversation() {
+  const conversation = new Conversation();
+  conversations.add(conversation);
+  picker.add(conversation.option);
+  $('agent-messages').append(conversation.log);
+  return conversation;
+}
+let selected = createConversation();
+
+function renderEvents(conversation: Conversation) {
+  setText($('event-count'), String(conversation.events.length));
+  const prefix = conversation.truncated ? t(m('Recent event excerpts. Earlier or large payloads were omitted.')) + '\n\n' : '';
+  setText($('event-content'), prefix + conversation.events.join('\n\n'));
+}
+function selectConversation(conversation: Conversation) {
+  selected.draft = composer.value;
+  selected.scroll = $('agent-messages').scrollTop;
+  selected.log.hidden = true;
+  selected = conversation;
+  selected.option.selected = true;
+  selected.log.hidden = false;
+  composer.value = selected.draft;
+  $<HTMLSelectElement>('agent-role').value = selected.role;
+  $<HTMLSelectElement>('agent-model').value = selected.model;
+  $('agent-messages').scrollTop = selected.scroll;
+  renderEvents(selected);
+  agentState();
+}
+function addMessage(role: 'user' | 'agent' | 'system', text: Content, id?: string, conversation = selected) {
   const container = $('agent-messages');
   const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 90;
   const message = node('div', `message ${role}`); message.append(node('div', 'message-label', role === 'agent' ? m('Codex') : role === 'user' ? m('You') : m('Studio')));
-  const body = node('div', 'message-body', text); message.append(body); container.append(message);
-  if (id) messageBodies.set(id, body);
-  if (nearBottom || role === 'user') container.scrollTop = container.scrollHeight;
+  const body = node('div', 'message-body', text); message.append(body); conversation.log.append(message);
+  if (role === 'user' && !conversation.title && typeof text === 'string') conversation.title = text.split('\n')[0].slice(0, 60);
+  if (id) conversation.messageBodies.set(id, body);
+  if (selected === conversation) {
+    $('agent-welcome').hidden = true;
+    if (nearBottom || role === 'user') container.scrollTop = container.scrollHeight;
+  }
   return body;
 }
 function agentState() {
-  const busy = sending || turnId !== null;
-  const pendingApprovals = activeReviews.size;
+  let totalReviews = 0, anyBusy = false;
+  for (const c of conversations) {
+    totalReviews += c.reviews.size;
+    anyBusy ||= c.busy;
+    const title = c.title || t(m('New conversation'));
+    const role = t(c.role === 'reviewer' ? m('Reviewer') : m('Author'));
+    const state = c.reviews.size ? t(m('Awaiting review: {count}', {count: c.reviews.size})) : c.busy ? t(m('Working')) : '';
+    const label = [role, title, state].filter(Boolean).join(' · ');
+    if (c.option.text !== label) c.option.text = label;
+  }
+  const busy = selected.busy, pending = selected.reviews.size;
+  $('conversation-switcher').hidden = conversations.size < 2;
+  $('agent-welcome').hidden = selected.log.childElementCount !== 0;
   $<HTMLButtonElement>('agent-send').disabled = !connected || !authenticated || busy;
-  $<HTMLTextAreaElement>('agent-input').disabled = !connected || !authenticated;
-  $<HTMLButtonElement>('new-thread').disabled = !connected || !authenticated || busy || pendingApprovals > 0;
-  $<HTMLSelectElement>('agent-role').disabled = threadId !== null || busy;
-  $<HTMLSelectElement>('agent-model').disabled = threadId !== null || busy;
-  setAttribute($('agent-model'), 'title', threadId ? m('Model is fixed for this conversation. Start a new conversation to choose another model.') : m('Choose the model for a new conversation'));
-  setAttribute($('agent-context-info'), 'title', $<HTMLSelectElement>('agent-role').value === 'reviewer' ? m('Only the selected path and saved revision accompany the review task.') : m('The current editor source is included with each message'));
+  composer.disabled = !connected || !authenticated;
+  $<HTMLButtonElement>('new-thread').disabled = !connected || !authenticated;
+  $<HTMLSelectElement>('agent-role').disabled = selected.thread !== null || busy;
+  $<HTMLSelectElement>('agent-model').disabled = selected.thread !== null || busy;
+  setAttribute($('agent-model'), 'title', selected.thread ? m('Model is fixed for this conversation. Start a new conversation to choose another model.') : m('Choose the model for a new conversation'));
+  setAttribute($('agent-context-info'), 'title', selected.role === 'reviewer' ? m('Only the selected path and saved revision accompany the review task.') : m('The current editor source is included with each message'));
   $('agent-stop').hidden = !busy;
-  setText($('agent-progress'), pendingApprovals ? m('Awaiting review: {count}', { count: pendingApprovals }) : busy ? m('Codex is working…') : connected ? authenticated ? m('Connected · edits and tools require review') : m('Local provider ready · sign in to start a conversation') : '');
-  setText($('approval-count'), pendingApprovals ? String(pendingApprovals) : '');
-  setText($('agent-rail-status'), pendingApprovals ? m('{count} review', { count: pendingApprovals }) : busy ? m('Working') : authenticated ? m('Ready') : connected ? m('Sign in') : m('Offline'));
-  $('agent-rail').dataset.attention = String(pendingApprovals > 0);
+  setText($('agent-progress'), pending ? m('Awaiting review: {count}', { count: pending }) : totalReviews > pending ? m('Other conversations awaiting review: {count}', {count: totalReviews - pending}) : busy ? m('Codex is working…') : connected ? authenticated ? m('Connected · edits and tools require review') : m('Local provider ready · sign in to start a conversation') : '');
+  setText($('approval-count'), totalReviews ? String(totalReviews) : '');
+  setText($('agent-rail-status'), totalReviews ? m('{count} review', { count: totalReviews }) : anyBusy ? m('Working') : authenticated ? m('Ready') : connected ? m('Sign in') : m('Offline'));
+  $('agent-rail').dataset.attention = String(totalReviews > 0);
 }
+picker.addEventListener('change', () => {
+  const conversation = [...conversations].find(c => c.option.selected);
+  if (conversation) selectConversation(conversation);
+});
+document.addEventListener('studio:language', () => { renderEvents(selected); agentState(); });
 function accountLabel(value: unknown): Content {
   const record = parseArguments(value);
   const account = parseArguments(record.account ?? record);
@@ -782,123 +824,135 @@ async function loginAgent() {
   const link = node('a', 'button primary', m('Open Codex sign-in')); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; content.append(link);
   await dialog(m('Connect your account'), content, [{ value: 'close', label: m('Done') }]);
 }
-async function newThread(internal = false) {
-  if (turnId || (sending && !internal) || activeReviews.size) throw new Error(t(m('Finish or stop the current turn and resolve requests before starting another conversation.')));
-  const model = $<HTMLSelectElement>('agent-model').value;
-  const result = await api<{ thread?: { id: string }; id?: string }>('agent.request', { method: 'thread/start', role: $<HTMLSelectElement>('agent-role').value, params: model ? { model } : {} });
-  const id = result.thread?.id || result.id; if (!id) throw new Error(t(m('Codex did not return a conversation ID.')));
-  resetAgentConversation(); threadId = id;
-  agentState(); announce(m('New conversation started'));
-}
 async function sendMessage() {
-  const field = $<HTMLTextAreaElement>('agent-input'), text = field.value.trim();
-  if (!text || sending || turnId) return;
-  if (!authenticated) throw new Error(t(m('Sign in to your Codex account before starting a conversation.')));
+  const c = selected, text = composer.value.trim(), connection = agentConnection;
+  if (!text || c.busy) return;
+  if (!authenticated || !connection) throw new Error(t(m('Sign in to your Codex account before starting a conversation.')));
   const source = editor.source(), path = currentPath, snapshotSavedHash = savedHash;
-  sending = true; agentState(); field.value = '';
+  const live = () => conversations.has(c) && agentConnection === connection;
+  c.sending = true; c.draft = ''; composer.value = ''; agentState();
   try {
-    if (!connected) await connectAgent();
-    if (!threadId) await newThread(true);
-    const reviewer = $<HTMLSelectElement>('agent-role').value === 'reviewer';
-    addMessage('user', text);
-    const model = $<HTMLSelectElement>('agent-model').value;
-    const context = reviewer
+    if (!c.thread) {
+      const result = await api<{ thread?: { id: string }; id?: string }>('agent.request', { method: 'thread/start', connectionId: connection, role: c.role, params: c.model ? { model: c.model } : {} });
+      if (!live()) return;
+      const id = result.thread?.id || result.id;
+      if (!id) throw new Error(t(m('Codex did not return a conversation ID.')));
+      c.thread = id;
+    }
+    const context = c.role === 'reviewer'
       ? `${text}\n\nSelected workspace path: ${path}\nSaved file SHA-256: ${snapshotSavedHash ?? '(unsaved file)'}`
       : `${text}\n\nCurrent Verum editor source (may contain unsaved edits):\nPath: ${path}\nSource SHA-256: ${await sha256(source)}\nSaved file SHA-256: ${snapshotSavedHash ?? '(new file; not saved)'}\n<verum_source>\n${source}\n</verum_source>`;
-    const result = await api<{ turn?: { id: string; status?: string } }>('agent.request', { method: 'turn/start', params: { threadId, input: [{ type: 'text', text: context }], ...(model ? { model } : {}) } });
-    if (result.turn?.id && !completedTurns.has(result.turn.id) && result.turn.status !== 'completed' && result.turn.status !== 'failed' && result.turn.status !== 'interrupted') turnId = result.turn.id;
-  } catch (error) { addMessage('system', m('Message could not be sent: {error}', { error: errorText(error) })); if (!field.value) field.value = text; }
-  finally { sending = false; agentState(); }
+    if (!live()) return;
+    addMessage('user', text, undefined, c); agentState();
+    const result = await api<{ turn?: { id: string; status?: string } }>('agent.request', { method: 'turn/start', connectionId: connection, params: { threadId: c.thread, input: [{ type: 'text', text: context }], ...(c.model ? { model: c.model } : {}) } });
+    if (!live()) return;
+    if (result.turn?.id && !['completed', 'failed', 'interrupted'].includes(result.turn.status || '')) c.start(result.turn.id);
+  } catch (error) {
+    if (!live()) return;
+    addMessage('system', m('Message could not be sent: {error}', { error: errorText(error) }), undefined, c);
+    if (selected === c && !composer.value) composer.value = text;
+    else if (selected !== c && !c.draft) c.draft = text;
+  } finally { c.sending = false; agentState(); }
 }
-$('agent-role').addEventListener('change', agentState);
+$('agent-role').addEventListener('change', () => { selected.role = $<HTMLSelectElement>('agent-role').value; agentState(); });
+$('agent-model').addEventListener('change', () => { selected.model = $<HTMLSelectElement>('agent-model').value; });
 bind('agent-connect', connectAgent); bind('agent-login', loginAgent);
 bind('new-thread', () => {
-  if (turnId || sending || activeReviews.size) throw new Error(t(m('Finish the current turn and resolve requests before starting another conversation.')));
-  resetAgentConversation(); agentState(); $('agent-input').focus();
+  const blank = [...conversations].find(c => !c.thread && !c.busy && !c.title && !(selected === c ? composer.value : c.draft));
+  selectConversation(blank ?? createConversation()); composer.focus();
 });
 bind('agent-suggestion', () => { $<HTMLTextAreaElement>('agent-input').value = t(m('Explain this Verum source and suggest one useful experiment. Use Verum tools to check your claims.')); if (connected) $('agent-input').focus(); else notice(m('Connect Codex to start this conversation.')); });
 $('agent-form').addEventListener('submit', event => { event.preventDefault(); sendMessage().catch(fail); });
 bind('agent-stop', async () => {
-  if (!threadId || !turnId) throw new Error(t(m('The turn is still starting. Try Stop again when its identifier arrives.')));
-  await api('agent.request', { method: 'turn/interrupt', params: { threadId, turnId } });
-  setText($('agent-progress'), m('Stopping the current turn…'));
+  const c = selected;
+  if (!c.thread || !c.turn) throw new Error(t(m('The turn is still starting. Try Stop again when its identifier arrives.')));
+  await api('agent.request', { method: 'turn/interrupt', connectionId: agentConnection, params: { threadId: c.thread, turnId: c.turn } });
+  if (selected === c && c.turn) setText($('agent-progress'), m('Stopping the current turn…'));
 });
 
 type RpcMessage = { id?: string | number; method?: string; params?: Record<string, unknown>; error?: unknown; result?: unknown };
 type AgentEvent = { seq: number; reviewId?: string; reviewKind?: unknown; message: RpcMessage };
 function resetAgentConversation() {
-  for (const expire of activeReviews.values()) expire();
-  activeReviews.clear(); threadId = null; turnId = null; cursor = 0;
-  completedTurns.clear(); messageBodies.clear(); eventLog.length = 0; eventLogLength = 0; eventLogDropped = false;
-  $('agent-messages').querySelectorAll('.message,.approval').forEach(element => element.remove());
-  setText($('event-count'), '0'); setText($('event-content'), '');
-  $('agent-welcome').hidden = false;
+  for (const c of conversations) {
+    for (const expire of c.reviews.values()) expire();
+    c.log.remove(); c.option.remove();
+  }
+  conversations.clear(); accountCursor = 0;
+  selectConversation(createConversation());
 }
 async function pollEvents() {
-  if (!connected || eventBusy) return; eventBusy = true;
-  const owner = threadId, connection = agentConnection;
+  if (!connected || eventBusy) return;
+  eventBusy = true;
   try {
-    const result = await api<{ connectionId: string; cursor: number; events: AgentEvent[]; gap: boolean; pendingReviews: string[]; recoveredReviews: AgentEvent[] }>('agent.events', { after: cursor, threadId: owner });
-    if (agentConnection !== connection || owner !== threadId) return;
-    if (result.connectionId !== connection) {
-      connected = false; authenticated = false; agentConnection = null;
-      resetAgentConversation(); agentState(); return;
-    }
-    const live = new Set(result.pendingReviews);
-    for (const [id, expire] of activeReviews) if (!live.has(id)) expire();
-    if (result.gap) addMessage('system', m('Some session events are no longer available. This conversation history is incomplete; inspect source and results before continuing.'));
-    for (const event of [...result.recoveredReviews, ...result.events]) {
-      if (agentConnection !== connection || owner !== threadId) return;
-      if (event.reviewId && !live.has(event.reviewId)) continue;
-      await receiveEvent(event.message, event.reviewId, event.reviewKind);
-    }
-    if (agentConnection !== connection || owner !== threadId) return;
-    cursor = result.cursor;
-    setText($('event-count'), String(eventLog.length));
-    setText($('event-content'), `${eventLogDropped ? 'Recent event excerpts (older or large payloads omitted). Full pending requests appear in their review cards.\n\n' : ''}${eventLog.join('\n\n')}`);
+    // A background turn may be waiting for a review while the author is typing
+    // elsewhere. Keep its cursor moving independently of the visible transcript.
+    const watched = [...conversations].filter(c => c === selected || c.busy || c.reviews.size);
+    const results = await Promise.allSettled(watched.map(pollConversation));
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
   } finally { eventBusy = false; }
 }
-async function receiveEvent(message: RpcMessage, reviewId?: string, hostKind?: unknown) {
-  const serialized = pretty(message);
-  const excerpt = serialized.length > 4096 ? `${serialized.slice(0, 4096)}\n[Event payload excerpt]` : serialized;
-  if (serialized.length > 4096) eventLogDropped = true;
-  eventLog.push(excerpt); eventLogLength += excerpt.length;
-  while (eventLog.length > 150 || eventLogLength > 65536) { eventLogLength -= eventLog.shift()!.length; eventLogDropped = true; }
+async function pollConversation(c: Conversation) {
+  const owner = c.thread, connection = agentConnection;
+  const live = () => agentConnection === connection && connected && owner === c.thread && conversations.has(c);
+  const result = await api<{ connectionId: string; cursor: number; events: AgentEvent[]; gap: boolean; pendingReviews: string[]; recoveredReviews: AgentEvent[] }>('agent.events', { after: c.cursor, threadId: owner });
+  if (!live()) return;
+  if (result.connectionId !== connection) {
+    connected = false; authenticated = false; agentConnection = null;
+    resetAgentConversation(); agentState(); return;
+  }
+  const pending = new Set(result.pendingReviews);
+  for (const [id, expire] of c.reviews) if (!pending.has(id)) expire();
+  if (result.gap && owner) addMessage('system', m('Some session events are no longer available. This conversation history is incomplete; inspect source and results before continuing.'), undefined, c);
+  for (const event of [...result.recoveredReviews, ...result.events]) {
+    if (!live()) return;
+    if (event.reviewId && !pending.has(event.reviewId)) continue;
+    if (['account/updated', 'account/login/completed', 'studio/disconnected'].includes(event.message.method || '')) {
+      if (event.seq <= accountCursor) continue;
+      accountCursor = event.seq;
+    }
+    await receiveEvent(c, event.message, event.reviewId, event.reviewKind);
+  }
+  if (!live()) return;
+  c.cursor = result.cursor;
+  if (c === selected && (result.events.length || result.recoveredReviews.length)) renderEvents(c);
+}
+async function receiveEvent(c: Conversation, message: RpcMessage, reviewId?: string, hostKind?: unknown) {
+  c.record(pretty(message));
   const method = message.method, params = message.params || {};
-  if (message.id !== undefined && method) { if (reviewId) await showApproval(reviewId, method, params, hostKind); return; }
+  if (message.id !== undefined && method) { if (reviewId) await showApproval(c, reviewId, method, params, hostKind); return; }
   if (method === 'item/agentMessage/delta') {
     const id = String(params.itemId || 'stream');
-    const body = messageBodies.get(id) || addMessage('agent', '', id);
+    const body = c.messageBodies.get(id) || addMessage('agent', '', id, c);
     const container = $('agent-messages'); const stick = container.scrollHeight - container.scrollTop - container.clientHeight < 90;
     body.textContent += typeof params.delta === 'string' ? params.delta : '';
-    if (stick) container.scrollTop = container.scrollHeight;
+    if (stick && c === selected) container.scrollTop = container.scrollHeight;
   } else if (method === 'item/completed') {
     const item = parseArguments(params.item);
     if (item.type === 'agentMessage' && typeof item.text === 'string') {
-      const id = String(item.id || 'stream'); const body = messageBodies.get(id) || addMessage('agent', '', id); setText(body, item.text);
+      const id = String(item.id || 'stream'); const body = c.messageBodies.get(id) || addMessage('agent', '', id, c); setText(body, item.text);
     }
   } else if (method === 'turn/started') {
-    const turn = parseArguments(params.turn); if (typeof turn.id === 'string') turnId = turn.id;
+    const turn = parseArguments(params.turn); if (typeof turn.id === 'string') c.start(turn.id);
   } else if (method === 'turn/completed') {
     const turn = parseArguments(params.turn);
-    if (typeof turn.id === 'string') completedTurns.add(turn.id);
-    if (!turnId || !turn.id || turnId === turn.id) turnId = null;
-    if (turn.status === 'failed' || turn.error) addMessage('system', m('Turn failed: {error}', { error: pretty(turn.error || turn.status) }));
-    else if (turn.status === 'interrupted') addMessage('system', m('Turn interrupted. Completed evidence remains in Results.'));
+    if (typeof turn.id === 'string') c.finish(turn.id);
+    if (turn.status === 'failed' || turn.error) addMessage('system', m('Turn failed: {error}', { error: pretty(turn.error || turn.status) }), undefined, c);
+    else if (turn.status === 'interrupted') addMessage('system', m('Turn interrupted. Completed evidence remains in Results.'), undefined, c);
   } else if (method === 'studio/disconnected') {
-    connected = false; authenticated = false; turnId = null;
+    connected = false; authenticated = false; agentConnection = null; resetAgentConversation();
     addMessage('system', m('Provider disconnected. Reconnect to start a new conversation.'));
   } else if (method === 'account/updated' || method === 'account/login/completed') {
     const account = await api('agent.request', { method: 'account/read', params: {} });
+    if (!conversations.has(c)) return;
     const data = parseArguments(account); authenticated = data.account != null || data.requiresOpenaiAuth === false;
     setText($('agent-account'), accountLabel(account));
-  } else if (method === 'error') addMessage('system', pretty(params));
+  } else if (method === 'error') addMessage('system', pretty(params), undefined, c);
   agentState();
 }
-async function showApproval(reviewId: string, method: string, params: Record<string, unknown>, hostKind: unknown) {
-  if (activeReviews.has(reviewId)) return;
+async function showApproval(c: Conversation, reviewId: string, method: string, params: Record<string, unknown>, hostKind: unknown) {
+  if (c.reviews.has(reviewId)) return;
   const owner = typeof params.threadId === 'string' ? params.threadId : null;
-  if (owner !== null && owner !== threadId) return;
+  if (owner !== null && owner !== c.thread) return;
   const connection = agentConnection;
   const kind = approvalKind(method, hostKind), args = parseArguments(params.arguments);
   const card = node('section', 'approval'); card.setAttribute('aria-label', 'Agent request awaiting review');
@@ -921,27 +975,27 @@ async function showApproval(reviewId: string, method: string, params: Record<str
   const status = node('div', 'approval-status', m('Awaiting your decision. No requested action has been approved.'));
   let responding = false;
   function expire() {
-    activeReviews.delete(reviewId);
+    c.reviews.delete(reviewId);
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
     if (!responding) setText(status, m('This review is no longer pending.'));
     agentState();
   }
   async function respond(approved: boolean) {
-    if (responding) return; responding = true;
+    if (responding || c !== selected || !c.reviews.has(reviewId) || connection !== agentConnection) return; responding = true;
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
     setText(status, approved ? m('Approved · waiting for the tool result…') : m('Declining request…'));
     let result: unknown;
     try { result = await api('agent.respond', { reviewId, threadId: owner, result: approvalReply(method, approved) }); }
     catch (error) {
       responding = false; setText(status, m('Request response failed: {error}', { error: errorText(error) }));
-      if (activeReviews.has(reviewId)) actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      if (c.reviews.has(reviewId)) actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
       return;
     }
     try {
       const response = parseArguments(result);
       setText(status, !approved ? m('Request declined.') : response.success === true ? m('Tool completed. Its result is available below.') : response.success === false ? m('The tool reported a failure. Inspect the response below.') : m('Approval delivered. Inspect the tool result and evidence before treating the request as successful.'));
       if (result !== undefined && result !== null) appendDetails(content, m('Tool response'), result, 'response');
-      activeReviews.delete(reviewId); agentState();
+      c.reviews.delete(reviewId); agentState();
       if (approved && kind === 'source' && typeof args.path === 'string') {
         await refreshFiles();
         if (!switching && args.path === currentPath && !dirty()) {
@@ -953,9 +1007,9 @@ async function showApproval(reviewId: string, method: string, params: Record<str
   }
   actions.append(button(m('Decline'), () => respond(false)));
   if (kind !== 'unsupported' && reviewAvailable) actions.append(button(kind === 'source' ? m('Accept edit') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read') : m('Approve operation'), () => respond(true), 'button primary'));
-  if (connection !== agentConnection || (owner !== null && owner !== threadId)) return;
-  activeReviews.set(reviewId, expire);
-  card.append(content, actions, status); $('agent-welcome').hidden = true; $('agent-messages').append(card); agentState();
+  if (!conversations.has(c) || connection !== agentConnection || (owner !== null && owner !== c.thread)) return;
+  c.reviews.set(reviewId, expire);
+  card.append(content, actions, status); c.log.append(card); agentState();
   announce(m('Agent request awaiting your review'));
 }
 
@@ -996,7 +1050,8 @@ const commandRegistry = new CommandRegistry([
   control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),
   control('language-status', m('Show module diagnostics')), control('theme', m('Change color theme')),
   control('agent-connect', m('Connect agent')), control('agent-login', m('Sign in'), '', everywhere, () => connected),
-  control('new-thread', m('New conversation')), control('agent-stop', m('Stop agent turn'), '', everywhere, () => turnId !== null),
+  control('new-thread', m('New conversation')),
+  command('agent.switchConversation', m('Switch conversation'), '', () => { setPane('agent'); picker.focus(); }, everywhere, () => conversations.size > 1), control('agent-stop', m('Stop agent turn'), '', everywhere, () => selected.turn !== null),
   command('agent.send', m('Send agent message'), 'Mod+Enter', sendMessage, ['agent'], () => !$<HTMLButtonElement>('agent-send').disabled, '#agent-send'),
   command('view.files', m('Toggle explorer'), 'Mod+B', () => panels.toggle('files'), everywhere, undefined, '[data-toggle-panel="files"]'),
   command('view.agent', m('Toggle collaborator'), 'Mod+Shift+B', () => panels.toggle('agent'), everywhere, undefined, '[data-toggle-panel="agent"]'),
@@ -1059,7 +1114,7 @@ onSessionChange(state => {
       // the editor draft and readable conversation, but retire old actions.
       receipts = []; selectedReceipt = null; renderResults();
       analysisGeneration++; analysisPending = false;
-      connected = false; authenticated = false; threadId = null; turnId = null;
+      connected = false; authenticated = false;
       agentConnection = null; resetAgentConversation();
       document.querySelectorAll<HTMLButtonElement>('#agent-messages button').forEach(button => { button.disabled = true; });
       agentState(); connectionStatus(false);

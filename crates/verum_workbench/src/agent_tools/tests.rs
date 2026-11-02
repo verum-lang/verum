@@ -165,8 +165,12 @@ done
         crate::codex::Codex::connect_with_storage(&executable, root.path(), storage.path())
             .await
             .unwrap();
+    let connection = provider.events.lock().await.connection().to_string();
     *studio.agent.lock().await = Some(Arc::new(provider));
-    let author = json!({"method":"thread/start","params":{}});
+    let author = json!({"method":"thread/start","connectionId":connection,"params":{}});
+    let mut stale = author.clone();
+    stale["connectionId"] = json!("retired");
+    assert!(studio.call("agent.request", stale).await.unwrap_err().to_string().contains("connection changed"));
     let reviewer = json!({"method":"thread/start","role":"reviewer","params":{"role":"author","baseInstructions":"override","dynamicTools":[]}});
     studio.call("agent.request", author.clone()).await.unwrap();
     studio.call("agent.request", reviewer).await.unwrap();
