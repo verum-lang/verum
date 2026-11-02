@@ -293,7 +293,7 @@ async fn actual_stdlib_nominal_universes_reach_project_analysis() {
     let path = std::env::var_os("VERUM_TEST_LIBRARY_METADATA").expect("fresh metadata path");
     let library = crate::library_metadata::LibraryMetadata::load(std::path::Path::new(&path)).unwrap();
     let project = Project::with_library(Some(library.clone()));
-    let uri = project.open("main.vr", "mount core.math.hott.{NType}; fn inspect(x: &NType<0>) {} ");
+    let uri = project.open("main.vr", "mount core.math.hott.{NType}; fn keep(x: &NType<0>) -> &NType<0> { x }");
     let snapshot = project.snapshot(&uri).await;
     assert!(errors(&snapshot).is_empty(), "{snapshot:#}");
     assert_eq!(snapshot["analysis_scope"], "project-sources-with-library-metadata");
@@ -301,6 +301,16 @@ async fn actual_stdlib_nominal_universes_reach_project_analysis() {
     assert!(snapshot["bindings"].as_array().unwrap().iter().any(|binding|
         binding["source_module"] == "core.math.hott" && binding["name"] == "NType"
     ), "{snapshot:#}");
+    for (body, diagnostic) in [
+        ("fn change(x: &NType<0>) -> &NType<1> { x }", "mismatch"),
+        ("fn read(x: &NType<0>) -> Type { x.carrier }", "private"),
+    ] {
+        let rejected = Project::with_library(Some(library.clone()));
+        let uri = rejected.open("bad.vr", &format!("mount core.math.hott.{{NType}}; {body}"));
+        let snapshot = rejected.snapshot(&uri).await;
+        assert!(errors(&snapshot).iter().any(|d| d["message"].as_str()
+            .is_some_and(|m| m.to_lowercase().contains(diagnostic))), "{snapshot:#}");
+    }
 }
 
 #[tokio::test]

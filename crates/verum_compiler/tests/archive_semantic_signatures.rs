@@ -335,7 +335,7 @@ fn actual_stdlib_nominal_universes_reach_the_compiler_pipeline() {
     assert_eq!(descriptor.source_declaration.as_ref(), Some(original), "retain the entire source declaration, including dependent fields");
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("nominal.vr");
-    std::fs::write(&input, "mount core.math.hott.{NType}; fn inspect(x: &NType<0>) {} fn main() {} ").unwrap();
+    std::fs::write(&input, "mount core.math.hott.{NType}; fn keep(x: &NType<0>) -> &NType<0> { x } fn main() {} ").unwrap();
     let mut session = Session::new(CompilerOptions {
         input, verify_mode: VerifyMode::Runtime, output_format: OutputFormat::Human,
         check_only: true, ..Default::default()
@@ -346,17 +346,23 @@ fn actual_stdlib_nominal_universes_reach_the_compiler_pipeline() {
 
 #[test]
 #[ignore = "requires the matching freshly baked stdlib embedded in this test binary"]
-fn actual_stdlib_ntype_private_carrier_retains_module_visibility() {
+fn actual_stdlib_ntype_refuses_index_substitution_and_private_field_access() {
     use verum_compiler::{CompilationPipeline, CompilerOptions, OutputFormat, Session, VerifyMode};
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("dependent.vr");
-    std::fs::write(&input, "mount core.math.hott.{NType}; fn read(x: &NType<0>) -> Type { x.carrier } fn main() {} ").unwrap();
-    let mut session = Session::new(CompilerOptions {
-        input, verify_mode: VerifyMode::Runtime, output_format: OutputFormat::Human,
-        check_only: true, ..Default::default()
-    });
-    let result = CompilationPipeline::new(&mut session).run_check_only();
-    assert!(result.is_err(), "a private stdlib record field was accessible to consumers");
-    let diagnostics = session.format_diagnostics();
-    assert!(diagnostics.contains("E202") && diagnostics.contains("carrier") && !diagnostics.contains("E101"), "wrong refusal: {result:?}\n{diagnostics}");
+    for (body, expected) in [
+        ("fn read(x: &NType<0>) -> Type { x.carrier }", &["E202", "carrier"][..]),
+        ("fn change(x: &NType<0>) -> &NType<1> { x }", &["mismatch"][..]),
+    ] {
+        std::fs::write(&input, format!("mount core.math.hott.{{NType}}; {body} fn main() {{}}")).unwrap();
+        let mut session = Session::new(CompilerOptions {
+            input: input.clone(), verify_mode: VerifyMode::Runtime, output_format: OutputFormat::Human,
+            check_only: true, ..Default::default()
+        });
+        let result = CompilationPipeline::new(&mut session).run_check_only();
+        assert!(result.is_err(), "accepted invalid stdlib consumer: {body}");
+        let diagnostics = session.format_diagnostics();
+        assert!(expected.iter().all(|word| diagnostics.contains(word)) && !diagnostics.contains("E101"),
+            "wrong refusal for {body}: {result:?}\n{diagnostics}");
+    }
 }
