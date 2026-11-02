@@ -8682,7 +8682,19 @@ impl VbcCodegen {
                 // associated types (`F.Output = Text`) and text-mark the
                 // payload, so `print` emits the string, not the pointer-int.
                 if let Some(tr) = self.type_name_to_type_ref_mono(&stripped) {
-                    bind_generic(ptr, &tr, &mut bindings);
+                    // A displayed List<T> can be the nested callee's open
+                    // return template. Its T is unrelated to any caller slot
+                    // until the actual expression establishes that binding.
+                    let actual = if !tr.is_generic() {
+                        Some(tr)
+                    } else if matches!(unwrapped.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }) {
+                        self.source_call_declaration(unwrapped, None, 0)
+                    } else {
+                        self.declared_expression_result(unwrapped, None, 0, 0)
+                    };
+                    if let Some(actual) = actual && self.declared_type_in_scope(&actual) {
+                        bind_generic(ptr, &actual, &mut bindings);
+                    }
                 }
             }
         }

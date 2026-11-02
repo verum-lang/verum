@@ -331,3 +331,104 @@ fn cyclic_dependency_completes_owned_variant_and_record_fields() {
         79
     );
 }
+
+#[test]
+fn empty_collection_borrows_only_the_declared_element_type() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    // The canonical collection's runtime constructor and bootstrap dependencies
+    // follow a different path than an ordinary user-defined static method.
+    for path in [
+        "base",
+        "mem",
+        "sys",
+        "sys/linux",
+        "sys/windows",
+        "sys/darwin",
+        "intrinsics",
+        "text",
+        "collections",
+        "consumer",
+    ] {
+        fs::create_dir_all(core.join(path)).unwrap();
+        fs::write(
+            core.join(path).join("mod.vr"),
+            format!("module core.{};", path.replace('/', ".")),
+        )
+        .unwrap();
+    }
+    fs::write(
+        core.join("mod.vr"),
+        "module core; public module collections; public module consumer;",
+    )
+    .unwrap();
+    fs::write(
+        core.join("collections/mod.vr"),
+        "module core.collections; public module list;",
+    )
+    .unwrap();
+    fs::write(core.join("collections/list.vr"), "module core.collections.list; public type List<T> is { len: Int }; implement<T> List<T> { public fn new() -> List<T> { List { len: 0 } } }").unwrap();
+    fs::write(
+        core.join("consumer/mod.vr"),
+        r#"
+        module core.consumer;
+        mount core.collections.list.List;
+        public type Slot<T> is { value: T };
+        implement<T> Slot<T> { public fn new(x: T) -> Slot<T> { Slot { value: x } } }
+        public type Batch is { clocks: Slot<List<Int>>, names: Slot<List<Text>> };
+        public fn batches<T>(_unrelated: T) -> Batch {
+            Batch { clocks: Slot.new(List.new()), names: Slot.new(List.new()) }
+        }
+    "#,
+    )
+    .unwrap();
+    let archive = bootstrap(&core);
+    let module = archive.load_module("core.consumer").unwrap();
+    let batches = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|name| name.rsplit('.').next() == Some("batches"))
+        })
+        .unwrap();
+    let bytecode = &module.bytecode[batches.bytecode_offset as usize
+        ..(batches.bytecode_offset + batches.bytecode_length) as usize];
+    let calls: Vec<_> = decode_instructions(bytecode)
+        .unwrap()
+        .into_iter()
+        .filter_map(|op| match op {
+            Instruction::CallG { type_args, .. } => Some(type_args),
+            _ => None,
+        })
+        .collect();
+    let batch = module
+        .types
+        .iter()
+        .find(|ty| module.get_string(ty.name) == Some("Batch"))
+        .unwrap();
+    let expected: Vec<_> = batch
+        .fields
+        .iter()
+        .map(|field| {
+            let Some(verum_vbc::types::TypeRef::Instantiated { args, .. }) =
+                &field.declaration_type
+            else {
+                panic!("Slot field missed its declared value type");
+            };
+            args.clone()
+        })
+        .collect();
+    use verum_vbc::types::{TypeId, TypeRef};
+    assert_eq!(
+        expected,
+        [TypeId::INT, TypeId::TEXT].map(|element| {
+            vec![TypeRef::Instantiated {
+                base: TypeId::LIST,
+                args: vec![TypeRef::Concrete(element)],
+            }]
+        })
+    );
+    assert_eq!(calls, expected);
+}

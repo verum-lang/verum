@@ -393,7 +393,7 @@ impl VbcCodegen {
         Some(())
     }
 
-    fn source_call_declaration(
+    pub(super) fn source_call_declaration(
         &self,
         expr: &Expr,
         expected: Option<&TypeRef>,

@@ -350,6 +350,7 @@ pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize)
     match ty {
         TypeRef::Concrete(id) => concrete(*id),
         TypeRef::Generic(id) => declared_ids.contains(id),
+        TypeRef::ConstValue(_) => true,
         TypeRef::AssociatedProjection { base, assoc } => !assoc.is_empty()
             && resolved(base, declared_ids, depth + 1),
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => {
