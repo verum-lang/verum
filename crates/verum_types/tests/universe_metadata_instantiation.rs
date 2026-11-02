@@ -205,3 +205,132 @@ fn metadata_replays_callable_universe_bounds_at_actual_calls() {
         }
     }
 }
+
+fn with_array_signature(source_ty: &str, abi_ty: &str) -> CoreMetadata {
+    let module = parse(&format!(
+        "public fn retain<universe u, const N: Int>(x: {source_ty}) -> Int {{ 0 }}"
+    ));
+    let ItemKind::Function(f) = &module.items[0].kind else {
+        panic!("function")
+    };
+    let mut metadata = metadata(
+        verum_ast::source_signature::source_signature(f, false)
+            .unwrap()
+            .unwrap(),
+    );
+    let descriptor = metadata.functions.values_mut().next().unwrap();
+    descriptor.params[0].ty = abi_ty.into();
+    descriptor.params[0].declared_ty = abi_ty.into();
+    descriptor.return_type = "Int".into();
+    metadata
+}
+
+#[test]
+fn array_evidence_requires_the_same_source_position_and_checked_extent() {
+    for (source, abi) in [
+        ("[Int; -1]", "[Int; 2]"),
+        ("[Int; 3]", "[Int; 2]"),
+        ("[Int; 9223372036854775807 + 1]", "__opaque_src"),
+        ("Bool", "[Int; 2]"),
+        ("([Int; 2], Int)", "([Int; 2], Bool, Int)"),
+        ("&[[Int; 3]; 2]", "&[[Int; 4]; 2]"),
+        ("Left<[Int; 2]>", "Right<[Int; 2]>"),
+        ("[Int; N]", "[Int; 2]"),
+    ] {
+        let metadata = with_array_signature(source, abi);
+        let err = encode_metadata(&metadata).expect_err("unsupported array evidence");
+        assert!(err.contains("array"), "{source} versus {abi}: {err}");
+        let mut bytes = CORE_METADATA_MAGIC.to_vec();
+        bytes.extend_from_slice(&CORE_METADATA_VERSION.to_le_bytes());
+        bytes.extend(bincode::serialize(&metadata).unwrap());
+        assert!(decode_metadata(&bytes).is_err(), "{source} versus {abi}");
+        for eager in [false, true] {
+            let errors = check(metadata.clone(), "fn caller() {}", true, eager);
+            assert!(
+                errors.iter().any(|e| e.contains("array")),
+                "{source} versus {abi}: {errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn matching_and_erased_dimensions_keep_the_checked_source_signature() {
+    for (source, abi) in [
+        ("[Int; N]", "[Int]"),
+        ("[Int; N]", "__opaque_src"),
+        ("&[[Int; 2]; 3]", "&[[Int; 2]; 3]"),
+        ("Boxed<([Int; 2], Int)>", "Boxed<([Int; 2], Int)>"),
+    ] {
+        let bytes = encode_metadata(&with_array_signature(source, abi))
+            .unwrap_or_else(|e| panic!("{source} with {abi}: {e}"));
+        assert!(decode_metadata(&bytes).is_ok(), "{source} with {abi}");
+    }
+    let bytes = encode_metadata(&with_array_signature("[Int; 1 + 1]", "[Int; 2]")).unwrap();
+    for eager in [false, true] {
+        let ok = check(
+            decode_metadata(&bytes).unwrap(),
+            "fn call(x: [Int; 2]) -> Int { test.provider.retain(x) }",
+            true,
+            eager,
+        );
+        assert!(ok.is_empty(), "{ok:?}");
+        let bad = check(
+            decode_metadata(&bytes).unwrap(),
+            "fn call(x: [Int; 3]) -> Int { test.provider.retain(x) }",
+            true,
+            eager,
+        );
+        assert!(
+            bad.iter().any(|e| e.contains("const generic mismatch")),
+            "{bad:?}"
+        );
+    }
+}
+
+#[test]
+fn bracket_generic_arguments_need_the_owners_declared_type_slot() {
+    for (head, admit) in [("T", true), ("const N: Int", false)] {
+        let mut m = with_array_signature("Boxed<[Int; 2]>", "Boxed<[Int; 2]>");
+        let module = parse(&format!(
+            "public type Boxed<{head}> is {{ public level: Type(1) }};"
+        ));
+        let ItemKind::Type(decl) = &module.items[0].kind else {
+            panic!("type")
+        };
+        let td = TypeDescriptor {
+            name: "Boxed".into(),
+            module_path: "test.provider".into(),
+            origin_module_path: None,
+            source_declaration: verum_ast::source_signature::source_type_declaration(decl).unwrap(),
+            generic_params: List::new(),
+            kind: TypeDescriptorKind::Record {
+                fields: List::new(),
+            },
+            size: None,
+            alignment: None,
+            methods: List::new(),
+            implements: List::new(),
+            decl_span: None,
+            is_public: true,
+            is_transparent_wrapper: false,
+            resource_discipline: verum_common::ResourceDiscipline::Unrestricted,
+        };
+        m.types.insert("test.provider.Boxed".into(), td);
+        assert_eq!(encode_metadata(&m).is_ok(), admit, "{head}");
+    }
+}
+
+#[test]
+fn result_and_declared_parameter_spelling_supply_independent_dimension_claims() {
+    for returned in [false, true] {
+        let mut metadata = with_array_signature("[Int; 2]", "[Int; 2]");
+        let descriptor = metadata.functions.values_mut().next().unwrap();
+        if returned {
+            descriptor.return_type = "[Int; 2]".into();
+        } else {
+            descriptor.params[0].declared_ty = "[Int; 3]".into();
+        }
+        assert!(encode_metadata(&metadata).is_err());
+    }
+}

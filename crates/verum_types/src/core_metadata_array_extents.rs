@@ -38,6 +38,10 @@ pub fn validate_archive_array_spelling(spelling: &str) -> Result<(), Text> {
 }
 
 fn check_brackets(spelling: &str) -> Result<(), Text> {
+    visit_archive_extents(spelling, |_| ())
+}
+
+pub(super) fn visit_archive_extents(spelling: &str, mut observe: impl FnMut(usize)) -> Result<(), Text> {
     // Bound the stack and visit every dimension once, including those inside
     // generic arguments, function signatures and other fixed arrays.
     let mut brackets = Vec::new();
@@ -98,7 +102,7 @@ fn check_brackets(spelling: &str) -> Result<(), Text> {
                     if spelling[start..split].trim().is_empty() {
                         return Err("archive array has no element type".into());
                     }
-                    parse_archive_array_extent(&spelling[split + 1..i])?;
+                    observe(parse_archive_array_extent(&spelling[split + 1..i])?);
                 }
             }
             _ => (),
@@ -151,6 +155,7 @@ fn associated(declarations: &[AssociatedTypeDescriptor]) -> Result<(), Text> {
 /// Validate all descriptor type strings before a consumer can cache a scheme.
 pub fn validate_archive_array_extents(metadata: &CoreMetadata) -> Result<(), Text> {
     for decl in metadata.types.values() {
+        super::source_extents::nominal(decl, metadata)?;
         generics(&decl.generic_params)?;
         for ty in &decl.implements {
             check(ty)?;
@@ -194,6 +199,7 @@ pub fn validate_archive_array_extents(metadata: &CoreMetadata) -> Result<(), Tex
         }
     }
     for protocol in metadata.protocols.values() {
+        super::source_extents::protocol(protocol, metadata)?;
         generics(&protocol.generic_params)?;
         for ty in &protocol.super_protocols {
             check(ty)?;
@@ -203,6 +209,7 @@ pub fn validate_archive_array_extents(metadata: &CoreMetadata) -> Result<(), Tex
         methods(&protocol.default_methods)?;
     }
     for function in metadata.functions.values() {
+        super::source_extents::function(function, metadata)?;
         generics(&function.generic_params)?;
         signature(&function.params, &function.return_type)?;
     }

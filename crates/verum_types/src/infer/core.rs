@@ -1538,7 +1538,7 @@ impl TypeChecker {
     /// Probe only the existing ordered index along the module's ancestors and
     /// its bare lookup alias, so a field lookup does not scan the complete archive.
     /// Every key must still carry the exact requested declaration owner.
-    pub(super) fn metadata_type_with_declaring_key<'a>(
+    pub(crate) fn metadata_type_with_declaring_key<'a>(
         metadata: &'a crate::core_metadata::CoreMetadata,
         declaring_key: &Text,
     ) -> Maybe<&'a crate::core_metadata::TypeDescriptor> {

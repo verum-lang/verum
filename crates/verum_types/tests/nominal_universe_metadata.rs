@@ -296,3 +296,50 @@ fn lean_replays_observed_metadata_field_levels() {
     std::fs::write(&path, tampered).unwrap();
     assert!(!replay().status.success(), "independent replay accepted a lowered field level");
 }
+
+#[test]
+fn nominal_record_array_extents_follow_the_declared_field() {
+    let m = metadata(
+        "test.provider",
+        "public type Carrier is { public value: &[[Int; 2]; 3], public level: Type(1) };",
+    );
+    for (field, abi, admitted) in [
+        ("value", "&[[Int; 2]; 3]", true),
+        ("value", "&[[Int; 3]; 2]", false),
+        ("missing", "&[[Int; 2]; 3]", false),
+    ] {
+        let mut fixture = m.clone();
+        let d = fixture.types.values_mut().next().unwrap();
+        let TypeDescriptorKind::Record { fields } = &mut d.kind else {
+            panic!("record")
+        };
+        fields[0].name = field.into();
+        fields[0].ty = abi.into();
+        assert_eq!(encode_metadata(&fixture).is_ok(), admitted, "{field} {abi}");
+    }
+}
+
+#[test]
+fn protocol_extent_uses_the_value_parameter_after_the_receiver() {
+    use verum_ast::decl::{ProtocolItemKind, TypeDeclBody};
+    let base = metadata("test.provider",
+        "public type Producer is protocol { fn measure(&self, x: [Int; 2]) -> Type(1); };");
+    for (abi, valid) in [("[Int; 2]", true), ("[Int; 3]", false)] {
+        let mut data = base.clone();
+        let descriptor = data.types.values_mut().next().unwrap();
+        let source = descriptor.source_declaration.as_ref().unwrap();
+        let TypeDeclBody::Protocol(body) = &source.body else { panic!("protocol") };
+        let ProtocolItemKind::Function { decl, .. } = &body.items[0].kind else { panic!("method") };
+        descriptor.kind = TypeDescriptorKind::Protocol {
+            super_protocols: List::new(), associated_types: List::new(), default_methods: List::new(),
+            required_methods: List::from_single(MethodSignature {
+                name: "measure".into(), dispatch: MethodDispatch::from_declaration(decl),
+                params: List::from_single(ParamDescriptor {
+                    name: "p0".into(), ty: abi.into(), declared_ty: "".into(), has_default: false, default_literal: None,
+                }),
+                return_type: "__opaque_src".into(), contexts: List::new(),
+            }),
+        };
+        assert_eq!(encode_metadata(&data).is_ok(), valid, "{abi}");
+    }
+}

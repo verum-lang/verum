@@ -8,6 +8,9 @@
 use serde::{Deserialize, Serialize};
 use verum_common::{List, Maybe, OrderedMap, Text};
 
+#[path = "core_metadata_source_extents.rs"]
+mod source_extents;
+
 #[path = "core_metadata_array_extents.rs"]
 mod array_extents;
 pub use array_extents::{parse_archive_array_extent, validate_archive_array_extents, validate_archive_array_spelling};
