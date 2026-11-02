@@ -258,7 +258,7 @@ implement FileDesc {
     }
 
     /// Get the raw file descriptor value.
-    fn as_raw(&self) -> Int {
+    public fn as_raw(&self) -> Int {
         self.0
     }
 

@@ -264,6 +264,14 @@ extern {
         timeout: &DarwinTimespec,
     ) -> Int32;
 
+    /// Single writable record at the FFI boundary. The compiler can marshal
+    /// and write it back without treating a list of boxed records as a C array.
+    @ffi_name("kevent")
+    fn receive_kevent(
+        kq: Int32, changelist: &unsafe KEvent, nchanges: Int32,
+        event: &mut KEvent, nevents: Int32, timeout: &unsafe DarwinTimespec,
+    ) -> Int32;
+
     /// kevent64 (extended). Same `int`/Int32 discipline as `kevent`;
     /// `flags` is the size_t-shaped 64-bit `unsigned int` per the macOS
     /// kevent64.h declaration.
@@ -739,7 +747,7 @@ public type MachTimebaseInfo is {
     denom: UInt32,
 };
 
-/// kevent structure (32-bit ident)
+/// Darwin kevent with a pointer-width identifier and data field.
 public type KEvent is {
     ident: Int,
     filter: Int16,
@@ -749,14 +757,7 @@ public type KEvent is {
     udata: &unsafe Byte,
 };
 
-/// kevent64 structure (64-bit ident)
-/// A zeroed `KEvent`, for the fixed-size arrays a kqueue driver keeps.
-///
-/// A FREE function, not `implement KEvent`: a second `KEvent` is declared
-/// privately in `core/sys/fs_watch.vr`, and giving a colliding name methods
-/// moves `check-type-name-collisions` off its baseline (measured on `Stat`
-/// the same day). Replaces `@zero<KEvent>()`, which is not a meta-function
-/// and typed as `Unit` — see T1352.
+/// A zero-initialized kevent for an input or output slot.
 public fn kevent_zeroed() -> KEvent {
     return KEvent {
         ident: 0,
@@ -1539,6 +1540,46 @@ public fn safe_kqueue() -> Result<FileDesc, OSError> {
     } else {
         Result.Ok(FileDesc(result))
     }
+}
+
+/// Register a vnode descriptor for edge-triggered filesystem notifications.
+public fn watch_vnode(queue: FileDesc, fd: FileDesc, mask: UInt32) -> Result<(), OSError> {
+    let change = KEvent {
+        ident: fd.as_raw(), filter: EVFILT_VNODE, flags: EV_ADD | EV_CLEAR,
+        fflags: mask, data: 0, udata: 0 as &unsafe Byte,
+    };
+    let timeout = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
+    let result = unsafe { kevent(queue.as_raw() as Int32, &change, 1, 0 as &unsafe KEvent, 0, &timeout) };
+    if result < 0 {
+        let err = errno();
+        return Result.Err(OSError.new(err, errno_to_message(err)));
+    }
+    Result.Ok(())
+}
+
+/// Receive a single vnode notification. Negative timeout blocks indefinitely.
+public fn wait_vnode(queue: FileDesc, timeout_ms: Int) -> Result<Maybe<(Int, UInt32)>, OSError> {
+    let timeout = DarwinTimespec {
+        tv_sec: timeout_ms / 1000, tv_nsec: (timeout_ms % 1000) * 1_000_000,
+    };
+    let mut event = kevent_zeroed();
+    let result = unsafe {
+        let kq = queue.as_raw() as Int32;
+        if timeout_ms < 0 {
+            receive_kevent(kq, 0 as &unsafe KEvent, 0, &mut event, 1, 0 as &unsafe DarwinTimespec)
+        } else {
+            receive_kevent(kq, 0 as &unsafe KEvent, 0, &mut event, 1, &timeout)
+        }
+    };
+    if result < 0 {
+        let err = errno();
+        return Result.Err(OSError.new(err, errno_to_message(err)));
+    }
+    if result == 0 { return Result.Ok(Maybe.None); }
+    if (event.flags & EV_ERROR) != 0 {
+        return Result.Err(OSError.new(event.data, errno_to_message(event.data)));
+    }
+    Result.Ok(Maybe.Some((event.ident, event.fflags)))
 }
 
 /// Sleep for duration
