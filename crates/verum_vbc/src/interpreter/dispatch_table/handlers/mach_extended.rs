@@ -189,8 +189,10 @@ mod mach_arms_never_fake_success {
     fn state_reading(operands: &[u8]) -> InterpreterState {
         let mut module = VbcModule::new("t0110_mach".to_string());
         let name = module.strings.intern("t0110_mach_probe");
-        module.bytecode.extend_from_slice(operands);
-        module.add_function(FunctionDescriptor::new(name));
+        let mut function = FunctionDescriptor::new(name);
+        function.bytecode_offset = module.append_bytecode(operands);
+        function.bytecode_length = operands.len() as u32;
+        module.add_function(function);
 
         let mut state = InterpreterState::new(Arc::new(module));
         state

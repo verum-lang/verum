@@ -3132,17 +3132,14 @@ impl InterpreterState {
         let frame = self.call_stack.current()?;
         let func = self.module.get_function(frame.function)?;
         let start = func.bytecode_offset as usize;
-        let end = start + func.bytecode_length as usize;
+        let end = start.checked_add(func.bytecode_length as usize)?;
         self.module.bytecode.get(start..end)
     }
 
     /// Gets a byte from bytecode at the given offset.
     #[inline]
     pub fn read_byte(&self, offset: u32) -> Option<u8> {
-        let frame = self.call_stack.current()?;
-        let func = self.module.get_function(frame.function)?;
-        let idx = func.bytecode_offset as usize + offset as usize;
-        self.module.bytecode.get(idx).copied()
+        self.current_bytecode()?.get(offset as usize).copied()
     }
 
     /// Resets the interpreter state (clears stack, registers, heap).

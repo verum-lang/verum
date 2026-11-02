@@ -169,6 +169,16 @@ pub fn decode_signed_varint(data: &[u8], offset: &mut usize) -> VbcResult<i64> {
 // Fixed-Width Encoding
 // ============================================================================
 
+#[inline]
+fn decode_fixed<const N: usize>(data: &[u8], offset: &mut usize) -> VbcResult<[u8; N]> {
+    let bytes = data
+        .get(*offset..)
+        .and_then(|tail| tail.first_chunk::<N>())
+        .ok_or_else(|| VbcError::eof(*offset, N))?;
+    *offset += N;
+    Ok(*bytes)
+}
+
 /// Encodes a u16 in little-endian.
 #[inline]
 pub fn encode_u16(value: u16, output: &mut Vec<u8>) {
@@ -178,14 +188,7 @@ pub fn encode_u16(value: u16, output: &mut Vec<u8>) {
 /// Decodes a u16 in little-endian.
 #[inline]
 pub fn decode_u16(data: &[u8], offset: &mut usize) -> VbcResult<u16> {
-    if *offset + 2 > data.len() {
-        return Err(VbcError::eof(*offset, 2));
-    }
-    let bytes: [u8; 2] = data[*offset..*offset + 2]
-        .try_into()
-        .map_err(|_| VbcError::eof(*offset, 2))?;
-    *offset += 2;
-    Ok(u16::from_le_bytes(bytes))
+    Ok(u16::from_le_bytes(decode_fixed(data, offset)?))
 }
 
 /// Encodes a u32 in little-endian.
@@ -197,14 +200,7 @@ pub fn encode_u32(value: u32, output: &mut Vec<u8>) {
 /// Decodes a u32 in little-endian.
 #[inline]
 pub fn decode_u32(data: &[u8], offset: &mut usize) -> VbcResult<u32> {
-    if *offset + 4 > data.len() {
-        return Err(VbcError::eof(*offset, 4));
-    }
-    let bytes: [u8; 4] = data[*offset..*offset + 4]
-        .try_into()
-        .map_err(|_| VbcError::eof(*offset, 4))?;
-    *offset += 4;
-    Ok(u32::from_le_bytes(bytes))
+    Ok(u32::from_le_bytes(decode_fixed(data, offset)?))
 }
 
 /// Encodes a u64 in little-endian.
@@ -216,14 +212,7 @@ pub fn encode_u64(value: u64, output: &mut Vec<u8>) {
 /// Decodes a u64 in little-endian.
 #[inline]
 pub fn decode_u64(data: &[u8], offset: &mut usize) -> VbcResult<u64> {
-    if *offset + 8 > data.len() {
-        return Err(VbcError::eof(*offset, 8));
-    }
-    let bytes: [u8; 8] = data[*offset..*offset + 8]
-        .try_into()
-        .map_err(|_| VbcError::eof(*offset, 8))?;
-    *offset += 8;
-    Ok(u64::from_le_bytes(bytes))
+    Ok(u64::from_le_bytes(decode_fixed(data, offset)?))
 }
 
 /// Encodes an i64 in little-endian.
@@ -235,14 +224,7 @@ pub fn encode_i64(value: i64, output: &mut Vec<u8>) {
 /// Decodes an i64 in little-endian.
 #[inline]
 pub fn decode_i64(data: &[u8], offset: &mut usize) -> VbcResult<i64> {
-    if *offset + 8 > data.len() {
-        return Err(VbcError::eof(*offset, 8));
-    }
-    let bytes: [u8; 8] = data[*offset..*offset + 8]
-        .try_into()
-        .map_err(|_| VbcError::eof(*offset, 8))?;
-    *offset += 8;
-    Ok(i64::from_le_bytes(bytes))
+    Ok(i64::from_le_bytes(decode_fixed(data, offset)?))
 }
 
 /// Encodes an f64 in little-endian.
@@ -254,27 +236,13 @@ pub fn encode_f64(value: f64, output: &mut Vec<u8>) {
 /// Decodes an f64 in little-endian.
 #[inline]
 pub fn decode_f64(data: &[u8], offset: &mut usize) -> VbcResult<f64> {
-    if *offset + 8 > data.len() {
-        return Err(VbcError::eof(*offset, 8));
-    }
-    let bytes: [u8; 8] = data[*offset..*offset + 8]
-        .try_into()
-        .map_err(|_| VbcError::eof(*offset, 8))?;
-    *offset += 8;
-    Ok(f64::from_le_bytes(bytes))
+    Ok(f64::from_le_bytes(decode_fixed(data, offset)?))
 }
 
 /// Decodes an f32 in little-endian.
 #[inline]
 pub fn decode_f32(data: &[u8], offset: &mut usize) -> VbcResult<f32> {
-    if *offset + 4 > data.len() {
-        return Err(VbcError::eof(*offset, 4));
-    }
-    let bytes: [u8; 4] = data[*offset..*offset + 4]
-        .try_into()
-        .map_err(|_| VbcError::eof(*offset, 4))?;
-    *offset += 4;
-    Ok(f32::from_le_bytes(bytes))
+    Ok(f32::from_le_bytes(decode_fixed(data, offset)?))
 }
 
 /// Decodes a single byte.

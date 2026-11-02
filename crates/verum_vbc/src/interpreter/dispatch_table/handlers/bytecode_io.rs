@@ -2,6 +2,8 @@
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
+use crate::encoding;
+use crate::error::VbcResult;
 use crate::instruction::{Reg, RegRange};
 use crate::types::TypeId;
 use crate::value::Value;
@@ -10,31 +12,37 @@ use crate::value::Value;
 // Bytecode Reading Helpers (inlined for performance)
 // ============================================================================
 
+/// Decode against the active function and publish the new PC only on success.
+#[inline(always)]
+fn read_operand<T>(
+    state: &mut InterpreterState,
+    decode: impl FnOnce(&[u8], &mut usize) -> VbcResult<T>,
+) -> InterpreterResult<T> {
+    let pc = state.pc() as usize;
+    let bytes = state.current_bytecode().ok_or_else(|| InterpreterError::InvalidBytecode {
+        pc,
+        message: "missing current function bytecode".to_string(),
+    })?;
+    let mut next = pc;
+    let value = decode(bytes, &mut next).map_err(|error| InterpreterError::InvalidBytecode {
+        pc,
+        message: error.to_string(),
+    })?;
+    // A function descriptor bounds the slice length to u32.
+    state.set_pc(next as u32);
+    Ok(value)
+}
+
 /// Reads a register index from bytecode.
 #[inline(always)]
 pub(super) fn read_reg(state: &mut InterpreterState) -> InterpreterResult<Reg> {
-    let byte = read_u8(state)?;
-    if byte < 128 {
-        Ok(Reg(byte as u16))
-    } else {
-        let high = (byte & 0x7F) as u16;
-        let low = read_u8(state)? as u16;
-        Ok(Reg((high << 8) | low))
-    }
+    read_operand(state, encoding::decode_reg)
 }
 
 /// Reads a single byte from bytecode.
 #[inline(always)]
 pub(super) fn read_u8(state: &mut InterpreterState) -> InterpreterResult<u8> {
-    let pc = state.pc();
-    let byte = state
-        .read_byte(pc)
-        .ok_or_else(|| InterpreterError::InvalidBytecode {
-            pc: pc as usize,
-            message: "unexpected end of bytecode".to_string(),
-        })?;
-    state.advance_pc(1);
-    Ok(byte)
+    read_operand(state, encoding::decode_u8)
 }
 
 /// Reads a signed byte from bytecode.
@@ -46,89 +54,44 @@ pub(super) fn read_i8(state: &mut InterpreterState) -> InterpreterResult<i8> {
 /// Reads a 16-bit unsigned integer from bytecode (little-endian).
 #[inline(always)]
 pub(super) fn read_u16(state: &mut InterpreterState) -> InterpreterResult<u16> {
-    let b0 = read_u8(state)? as u16;
-    let b1 = read_u8(state)? as u16;
-    Ok(b0 | (b1 << 8))
+    read_operand(state, encoding::decode_u16)
 }
 
 /// Reads a 32-bit unsigned integer from bytecode (little-endian).
 #[inline(always)]
 pub(super) fn read_u32(state: &mut InterpreterState) -> InterpreterResult<u32> {
-    let b0 = read_u8(state)? as u32;
-    let b1 = read_u8(state)? as u32;
-    let b2 = read_u8(state)? as u32;
-    let b3 = read_u8(state)? as u32;
-    Ok(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24))
+    read_operand(state, encoding::decode_u32)
 }
 
 /// Reads a variable-length unsigned integer (varint) from bytecode.
 #[inline(always)]
 pub(super) fn read_varint(state: &mut InterpreterState) -> InterpreterResult<u64> {
-    // Fast path: single-byte varint (values 0-127), most common case
-    let byte = read_u8(state)?;
-    if byte & 0x80 == 0 {
-        return Ok(byte as u64);
-    }
-
-    // Multi-byte varint
-    let mut result = (byte & 0x7F) as u64;
-    let mut shift = 7;
-    loop {
-        let byte = read_u8(state)?;
-        result |= ((byte & 0x7F) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return Ok(result);
-        }
-        shift += 7;
-        if shift >= 64 {
-            return Err(InterpreterError::InvalidBytecode {
-                pc: state.pc() as usize,
-                message: "varint overflow".to_string(),
-            });
-        }
-    }
+    read_operand(state, encoding::decode_varint)
 }
 
 /// Reads a variable-length signed integer (signed varint) from bytecode.
 #[inline(always)]
 pub(super) fn read_signed_varint(state: &mut InterpreterState) -> InterpreterResult<i64> {
-    let unsigned = read_varint(state)?;
-    // ZigZag decoding
-    Ok(((unsigned >> 1) as i64) ^ -((unsigned & 1) as i64))
+    read_operand(state, encoding::decode_signed_varint)
 }
 
 /// Reads a 64-bit float from bytecode.
 #[inline(always)]
 pub(super) fn read_f64(state: &mut InterpreterState) -> InterpreterResult<f64> {
-    let mut bytes = [0u8; 8];
-    for b in &mut bytes {
-        *b = read_u8(state)?;
-    }
-    Ok(f64::from_le_bytes(bytes))
+    read_operand(state, encoding::decode_f64)
 }
 
 /// Reads a register range from bytecode.
 #[inline(always)]
 pub(super) fn read_reg_range(state: &mut InterpreterState) -> InterpreterResult<RegRange> {
-    let start = read_reg(state)?;
-    let count = read_u8(state)?;
-    Ok(RegRange { start, count })
+    read_operand(state, encoding::decode_reg_range)
 }
 
 /// Decode the full witness using the same structural reader as archive/mono.
 /// Runtime dispatch may project a head at its own boundary; witness transport
 /// must not erase reference, array, callable, or associated-type structure.
 pub(super) fn read_type_ref(state: &mut InterpreterState) -> InterpreterResult<crate::types::TypeRef> {
-    let pc = state.pc() as usize;
-    let mut next = pc;
-    let bytes = state.current_bytecode().ok_or_else(|| InterpreterError::InvalidBytecode {
-        pc, message: "missing current function bytecode".to_string(),
-    })?;
-    let ty = crate::bytecode::decode_type_ref(bytes, &mut next).map_err(|error| InterpreterError::InvalidBytecode {
-        pc, message: error.to_string(),
-    })?;
-    state.set_pc(next as u32);
-    Ok(ty)
+    read_operand(state, crate::bytecode::decode_type_ref)
 }
 
 // ============================================================================
