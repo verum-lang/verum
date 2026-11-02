@@ -112,6 +112,20 @@ fn a_reference_to_shared_still_dereferences_the_wrapper() {
 }
 
 #[test]
+fn borrowed_and_owned_shared_fields_use_the_declared_deref() {
+    for ty in ["Shared<Cell>", "&Shared<Cell>"] {
+        let payload = operations(&format!("fn probe(s: {ty}) -> Int {{ s.padding }}"));
+        assert_eq!(
+            payload.iter().filter(|op| op.ends_with("Shared.deref")).count(),
+            1,
+            "{payload:?}"
+        );
+        let own = operations(&format!("fn probe(s: {ty}) -> Cell {{ s.value }}"));
+        assert!(!own.iter().any(|op| op.ends_with("Shared.deref")), "{own:?}");
+    }
+}
+
+#[test]
 fn temporary_receiver_is_evaluated_once() {
     let ops = operations(
         "fn make() -> Shared<Cell> { Shared { value: Cell { padding: 41, value: 777 } } } fn probe() -> Int { make().load() }",

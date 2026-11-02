@@ -23653,8 +23653,8 @@ impl VbcCodegen {
     }
 
     /// Materialize exactly the same receiver steps used by field inference.
-    /// Transparent allocating carriers use the established Deref opcode;
-    /// declared user Deref implementations retain their exact method owner.
+    /// Heap is a native allocation. Other smart pointers can supply their own
+    /// projection, including when the receiver borrows the pointer wrapper.
     fn chase_deref_for_field(
         &mut self,
         base_reg: Reg,
@@ -23669,14 +23669,14 @@ impl VbcCodegen {
         let mut current_type = chain.first().cloned().unwrap_or(base_type);
         for target in chain.iter().skip(1) {
             let base = Self::strip_generic_args(&current_type);
-            let method = if self.is_allocating_wrapper(base) {
+            let method = if base == verum_common::well_known_types::WellKnownType::Heap.as_str() {
                 None
             } else {
-                let Some(method) = self.registered_receiver_method(&current_type, "deref") else {
-                    break;
-                };
-                Some(method)
+                self.registered_receiver_method(&current_type, "deref")
             };
+            if method.is_none() && !self.is_allocating_wrapper(base) {
+                break;
+            }
             let derefed = self.ctx.alloc_temp();
             if let Some(method) = method {
                 let method_id = self.intern_string(&method);

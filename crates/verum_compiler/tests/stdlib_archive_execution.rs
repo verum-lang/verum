@@ -149,6 +149,29 @@ fn supervisor_constructors_use_declared_ownership() {
     assert_eq!(execute_from_archive(source), 87);
 }
 
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn owned_and_borrowed_smart_pointers_reach_their_payload() {
+    let source = r#"
+        module app;
+        mount core.base.memory.{Heap, Shared};
+        type Pair is { first: Int, second: Int };
+        fn borrowed(owner: &Shared<Pair>) -> Int { owner.first * 100 + owner.second }
+        fn owned(owner: Shared<Pair>) -> Int { owner.first * 100 + owner.second }
+        fn borrowed_heap(owner: &Heap<Pair>) -> Int { owner.first * 100 + owner.second }
+        fn owned_heap(owner: Heap<Pair>) -> Int { owner.first * 100 + owner.second }
+        fn main() -> Int {
+            let owner: Shared<Pair> = Shared.new(Pair { first: 13, second: 17 });
+            assert_eq(borrowed(&owner), 1317);
+            assert_eq(owned(owner), 1317);
+            let heap: Heap<Pair> = Heap.new(Pair { first: 13, second: 17 });
+            assert_eq(borrowed_heap(&heap), 1317);
+            owned_heap(heap)
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 1317);
+}
+
 #[cfg(unix)]
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and a Unix socket"]
