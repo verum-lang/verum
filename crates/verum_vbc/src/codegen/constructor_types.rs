@@ -316,20 +316,10 @@ impl VbcCodegen {
                 type_args,
                 args,
             } => {
-                let ExprKind::Path(path) = &receiver.kind else {
-                    return None;
-                };
-                let owner = path.to_string();
-                // Only a declared type namespace selects a static callable.
-                // A value receiver needs its separate self-argument evidence.
-                if self.ctx.lookup_var(&owner).is_some()
-                    || self
-                        .semantic_type_in_current_scope(&owner)?
-                        .base_type_id()
-                        .is_none()
-                {
-                    return None;
-                }
+                // Dotted free functions and static methods use the same source
+                // namespace grammar. Flatten only namespace paths; a value
+                // receiver needs a separately established self declaration.
+                let owner = self.try_flatten_module_path_resolved(receiver)?.join(".");
                 (format!("{owner}.{}", method.name), type_args, args)
             }
             _ => return None,
