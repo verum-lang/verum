@@ -77,7 +77,10 @@ mount core.intrinsics.{
 };
 mount sync.{AtomicBool, AtomicU8, AtomicU16, AtomicU64, MemoryOrdering, Mutex, RwLock};
 mount core.sync.once.OnceLock;
-mount core.{List, Map, Text, Maybe, Result, TypeId};
+mount core.base.memory.Shared;
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.collections.list.List;
 mount async.{Future, Task, JoinHandle};
 mount async.task.spawn_detached;
 

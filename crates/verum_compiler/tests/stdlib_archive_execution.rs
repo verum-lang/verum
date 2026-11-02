@@ -8,6 +8,23 @@ use verum_vbc::{
     interpreter::Interpreter,
 };
 
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn supervisor_constructors_use_declared_ownership() {
+    let source = r#"
+        module app;
+        mount core.runtime.supervisor.{SupervisorHandle, SupervisorConfig};
+        fn main() -> Int {
+            let root = SupervisorHandle.root(SupervisorConfig.one_for_one("root"));
+            let child = SupervisorHandle.new(SupervisorConfig.rest_for_one("child"));
+            if root.id().raw() != 0 { return 1; }
+            if child.id().raw() == 0 { return 2; }
+            87
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 87);
+}
+
 #[cfg(unix)]
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and a Unix socket"]
