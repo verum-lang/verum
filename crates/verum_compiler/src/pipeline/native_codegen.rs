@@ -100,37 +100,15 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("  Converting AST to VBC bytecode (multi-module)");
 
-        // For multi-file projects, merge project module items into the main module.
-        // This ensures all types, functions, and constants from sibling .vr files
-        // are compiled as part of a single VBC compilation unit, avoiding
-        // cross-module argument tracking issues in CallM/Call instructions.
-        let module = if !self.project_modules.is_empty() {
-            let mut merged = module.clone();
-            for (path, proj_module) in &self.project_modules {
-                info!(
-                    "  Merging project module '{}' ({} items)",
-                    path.as_str(),
-                    proj_module.items.len()
-                );
-                for item in &proj_module.items {
-                    // Skip mount statements from project modules (they reference
-                    // sibling modules that are already merged)
-                    if matches!(&item.kind, verum_ast::ItemKind::Mount(_)) {
-                        continue;
-                    }
-                    merged.items.push(item.clone());
-                }
-            }
-            merged
-        } else {
-            module.clone()
-        };
+        // compile_ast_to_vbc collects sibling declarations and bodies under
+        // their respective owners. Keep the application entry AST distinct.
+        let entry_name = self.project_main_name(module)?;
 
         // Phase 1: Convert AST to VBC bytecode with full multi-module resolution
         // This uses the same path as the interpreter, collecting stdlib imports
         // and resolving cross-module dependencies before compilation.
         let vbc_module = self
-            .compile_ast_to_vbc(&module)
+            .compile_ast_to_vbc(module)
             .map_err(|e| anyhow::anyhow!("Failed to compile AST to VBC: {:?}", e))?;
 
         info!(
@@ -510,6 +488,7 @@ impl<'s> CompilationPipeline<'s> {
             None => {
                 let needs_metal = self.lower_optimize_and_emit_object(
                     &vbc_module,
+                    entry_name.as_deref(),
                     module_name,
                     &build_dir,
                     &obj_path,
@@ -693,6 +672,7 @@ impl<'s> CompilationPipeline<'s> {
     fn lower_optimize_and_emit_object(
         &self,
         vbc_module: &std::sync::Arc<verum_vbc::module::VbcModule>,
+        entry_name: Option<&str>,
         module_name: &str,
         build_dir: &Path,
         obj_path: &Path,
@@ -832,7 +812,7 @@ impl<'s> CompilationPipeline<'s> {
         lowering.set_escape_analysis(escape_result);
 
         lowering
-            .lower_module(&vbc_module)
+            .lower_module_with_entry(vbc_module, entry_name)
             .map_err(|e| anyhow::anyhow!("Failed to lower VBC to LLVM IR: {:?}", e))?;
 
         // Report CBGR statistics

@@ -129,3 +129,32 @@ fn two_zero_argument_qualified_mains_are_still_ambiguous() {
         other => panic!("expected Ambiguous, got {other:?}"),
     }
 }
+
+#[test]
+fn project_entry_excludes_both_dependencies_and_never_falls_back() {
+    let module = module_with_arities(&[
+        ("widget.main.main", 0),
+        ("consumer.main.main", 0),
+        ("another.main.main", 0),
+        ("invalid.main.main", 1),
+        ("main", 0),
+    ]);
+    assert_eq!(
+        module.entry_main_for(Some("consumer.main.main")),
+        EntryMain::Unique { index: 1 }
+    );
+    assert_eq!(module.entry_main_for(Some("missing.main")), EntryMain::None);
+    assert_eq!(
+        module.entry_main_for(Some("invalid.main.main")),
+        EntryMain::None
+    );
+}
+
+#[test]
+fn duplicate_declarations_of_the_project_entry_are_ambiguous() {
+    let module = module_with_fns(&["app.main", "lib.main", "app.main"]);
+    assert!(matches!(
+        module.entry_main_for(Some("app.main")),
+        EntryMain::Ambiguous { .. }
+    ));
+}

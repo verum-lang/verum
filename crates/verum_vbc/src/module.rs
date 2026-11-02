@@ -729,6 +729,12 @@ impl VbcModule {
     /// violation on the very first program a newcomer writes with a
     /// module header.
     pub fn entry_main(&self) -> EntryMain {
+        self.entry_main_for(None)
+    }
+
+    /// Select the exact entry declared by the application source. With no
+    /// application declaration, standalone modules retain ordinary discovery.
+    pub fn entry_main_for(&self, expected: Option<&str>) -> EntryMain {
         let mut bare: Option<usize> = None;
         let mut bare_all: Vec<usize> = Vec::new();
         let mut qualified: Vec<(usize, String)> = Vec::new();
@@ -744,7 +750,7 @@ impl VbcModule {
             // exactly one entry. The qualified form this rule exists
             // for is the `module X;` header prefix, which is a MODULE
             // path, not a type.
-            if func.is_method() {
+            if func.is_method() || expected.is_some_and(|entry| name != entry) {
                 continue;
             }
             // An entry point takes no arguments, because that is how

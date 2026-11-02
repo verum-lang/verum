@@ -554,7 +554,7 @@ impl<'s> CompilationPipeline<'s> {
         // be compared against the one printed at compile time (T0737).
         super::vbc_codegen::trace_module_fingerprint(&vbc_module, "from-cache");
 
-        self.interpret_vbc(vbc_module, args)
+        self.interpret_vbc(vbc_module, args, None)
     }
 
     pub fn run_interpreter(&mut self, args: List<Text>) -> Result<()> {

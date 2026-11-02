@@ -401,3 +401,56 @@ fn package_root_preserves_a_nested_src_module() {
 fn explicit_source_root_preserves_a_nested_src_module() {
     assert_nested_src_modules_remain_distinct(false);
 }
+
+#[test]
+fn project_entry_with_two_dependency_mains_keeps_the_root_declaration() {
+    let fixture = Fixture::new();
+    write(
+        &fixture.dependency.join("src/main.vr"),
+        "module greeting.main; fn main() -> Int { 72 }",
+    );
+    let second = fixture.directory.path().join("another-package");
+    write(
+        &second.join("src/main.vr"),
+        "module other.main; fn main() -> Int { 93 }",
+    );
+    let mut session = fixture.session(fixture.dependency.clone());
+    let mut resolver = session.cog_resolver().unwrap().clone();
+    resolver.register_cog("other", "1.2.3", second);
+    session.set_cog_resolver(resolver);
+    session.options_mut().check_only = false;
+    CompilationPipeline::new_interpreter(&mut session)
+        .run_interpreter(Default::default())
+        .expect("run the project entry");
+    assert_eq!(session.take_exit_code(), Some(42));
+}
+
+#[test]
+fn malformed_or_ambiguous_root_cannot_delegate_entry_to_a_dependency() {
+    let fixture = Fixture::new();
+    write(
+        &fixture.dependency.join("src/main.vr"),
+        "module greeting.main; fn main() {}",
+    );
+    for (declarations, error) in [
+        ("fn main(value: Int) {}", "No zero-argument main"),
+        ("fn main() {} fn main() {}", "ambiguous entry point"),
+    ] {
+        write(
+            &fixture.consumer.join("src/main.vr"),
+            &format!("module consumer.main; {declarations}"),
+        );
+        let mut session = fixture.session(fixture.dependency.clone());
+        let mut pipeline = CompilationPipeline::new_interpreter(&mut session);
+        let file = pipeline.phase_load_source().unwrap();
+        let entry = pipeline.phase_parse(file).unwrap();
+        pipeline.load_external_cog_modules().unwrap();
+        assert!(
+            pipeline
+                .project_main_name(&entry)
+                .unwrap_err()
+                .to_string()
+                .contains(error)
+        );
+    }
+}

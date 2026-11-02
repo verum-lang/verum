@@ -946,6 +946,25 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     /// 3. Emit global constructors/destructors
     /// 4. Verify the module
     pub fn lower_module(&mut self, vbc_module: &VbcModule) -> Result<()> {
+        self.lower_module_with_entry(vbc_module, None)
+    }
+
+    /// Lower with the application's declaration as the executable root.
+    pub fn lower_module_with_entry(
+        &mut self,
+        vbc_module: &VbcModule,
+        expected: Option<&str>,
+    ) -> Result<()> {
+        use verum_vbc::module::EntryMain;
+        let entry_index = match vbc_module.entry_main_for(expected) {
+            EntryMain::Unique { index } => Some(index),
+            verdict if expected.is_some() => {
+                return Err(super::error::LlvmLoweringError::VerificationFailed(
+                    format!("Cannot resolve project entry {expected:?}: {verdict:?}").into(),
+                ));
+            }
+            _ => None,
+        };
         self.native_calls.clear();
         // Phase 0.4: Pre-declare every POSIX syscall under the
         // canonical Verum-ABI signature from the
@@ -971,7 +990,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         self.declare_posix_functions();
 
         // Phase 1: Forward declare all functions
-        self.declare_functions(vbc_module)?;
+        self.declare_functions(vbc_module, entry_index)?;
         self.array_returns = verum_common::Shared::new(
             super::array_storage::selected_source_returns(vbc_module,
                 |id| self.functions.get(&id).copied()),
@@ -1007,7 +1026,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // ~16 threads) multiply that peak, which is how single
         // machines ended up with multi-hundred-GB verum processes.
         let reachable_for_lowering: Option<std::collections::HashSet<u32>> = {
-            let reach = verum_vbc::reachability::analyze(vbc_module);
+            let entry = entry_index.map(|index| vbc_module.functions[index].id.0);
+            let reach = verum_vbc::reachability::analyze_with_roots(vbc_module, entry.as_slice());
             tracing::debug!(
                 "reachability: {} of {} functions reachable ({} CallM method names)",
                 reach.reachable_ids.len(),
@@ -1034,7 +1054,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // contract (over-approximates, never under-approximates).
             let kill_switch =
                 std::env::var("VERUM_NO_REACHABILITY_LOWERING").as_deref() == Ok("1");
-            let has_entry = vbc_module.find_function_by_name("main").is_some();
+            let has_entry = entry_index.is_some();
             if scoped_lowering_enabled(kill_switch, has_entry) {
                 Some(ids)
             } else {
@@ -2077,7 +2097,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         used.set_section(Some("llvm.metadata"));
     }
 
-    fn declare_functions(&mut self, vbc_module: &VbcModule) -> Result<()> {
+    fn declare_functions(
+        &mut self,
+        vbc_module: &VbcModule,
+        entry_index: Option<usize>,
+    ) -> Result<()> {
         use verum_vbc::types::TypeId;
         use verum_vbc::types::TypeRef;
 
@@ -2085,11 +2109,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // VbcModule::entry_main). Index, not name: duplicate-named
         // descriptors exist (paired emitters), and renaming by
         // spelling would turn every twin into verum_main.
-        let entry_index = match vbc_module.entry_main() {
-            verum_vbc::module::EntryMain::Unique { index } => Some(index),
-            _ => None,
-        };
-
         // Source bodies are emitted after this declaration pass. Their LLVM
         // symbols are still bodyless here, but are not disposable forward stubs.
         let mut pending_source_bodies = Set::new();
@@ -2214,8 +2233,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // `module X;` program's `X.main` unrenamed — the shim's
             // weak verum_main won the link and the binary silently
             // exited 1 while Tier 0 at least said "no main".
-            let func_name = if raw_name == "main" || Some(func_idx) == entry_index {
+            let func_name = if Some(func_idx) == entry_index {
                 "verum_main".to_string()
+            } else if raw_name == "main" {
+                // The platform shim owns the process symbol. A dependency's
+                // bare main remains reachable through its ordinary VBC id.
+                format!("__verum_nonentry_main_{func_idx}")
             } else {
                 raw_name.to_string()
             };

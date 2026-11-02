@@ -77,6 +77,7 @@ impl<'s> CompilationPipeline<'s> {
         let t_codegen = std::time::Instant::now();
 
         // Step 1: Compile AST to VBC
+        let entry_name = self.project_main_name(module)?;
         let vbc_module = self.compile_ast_to_vbc(module)?;
         if trace {
             eprintln!(
@@ -104,7 +105,7 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        self.interpret_vbc(vbc_module, List::new())
+        self.interpret_vbc(vbc_module, List::new(), entry_name.as_deref())
     }
 
     /// One execution path for freshly compiled, cached and argument-bearing
@@ -114,6 +115,7 @@ impl<'s> CompilationPipeline<'s> {
         &self,
         module: std::sync::Arc<verum_vbc::module::VbcModule>,
         args: List<Text>,
+        entry_name: Option<&str>,
     ) -> Result<()> {
         crate::api::ensure_scripting_compiler_installed();
         let mut interpreter = VbcInterpreter::try_new(module)?;
@@ -135,7 +137,7 @@ impl<'s> CompilationPipeline<'s> {
                 verum_vbc::interpreter::diagnostics::MAX_CBGR_EVENTS)?;
         }
         let result = (|| {
-            let main = self.find_main_function_id(&interpreter.state.module)?;
+            let main = self.find_main_function_id(&interpreter.state.module, entry_name)?;
             interpreter.run_global_ctors()
                 .map_err(|error| anyhow::anyhow!("VBC global_ctors error: {error:?}"))?;
             let parameters = interpreter.state.module.get_function(main)
@@ -261,6 +263,7 @@ impl<'s> CompilationPipeline<'s> {
         self.phase_ffi_validation(module)?;
 
         // Step 1: Compile AST to VBC
+        let entry_name = self.project_main_name(module)?;
         let vbc_module = self.compile_ast_to_vbc(module)?;
 
         // Capture for the script-mode persistent cache. The CLI runner
@@ -270,46 +273,72 @@ impl<'s> CompilationPipeline<'s> {
         // typecheck + verify + codegen entirely.
         self.session.record_compiled_vbc(vbc_module.clone());
 
-        self.interpret_vbc(vbc_module, args)
+        self.interpret_vbc(vbc_module, args, entry_name.as_deref())
     }
 
-    /// Find the program entry function in the VBC module and return
-    /// its function ID.
-    ///
-    /// Strict mode separation (matches the AST-level
-    /// `EntryDetectionPhase::detect_entry_point`):
-    ///
-    ///  • **Application** entry = `main` (in a non-script module).
-    ///  Prefer it when present.
-    ///  • **Script** entry = `__verum_script_main` (the synthesised
-    ///  wrapper from script-tagged modules).
-    ///
-    /// The two are not interchangeable. A `fn main` declared *inside*
-    /// a script module is a regular callable function, not the
-    /// program entry — the AST-level pass already filtered such
-    /// `main`s out, so by the time we reach the VBC the only `main`
-    /// in the function table came from an application module. We
-    /// preserve the precedence (`main` first, then wrapper) only as
-    /// a defence-in-depth: if both names somehow appear in the VBC,
-    /// the application entry still wins.
-    pub(super) fn find_main_function_id(&self, vbc_module: &VbcModule) -> Result<VbcFunctionId> {
-        // First pass: script entry `__verum_script_main`. Its presence
-        // is sufficient evidence that the source was a script, and the
-        // strict-role contract says a script's entry is the wrapper —
-        // never any user-declared `fn main` that may also be in the
-        // function table (it's a regular callable function in script
-        // mode, not the program entry).
-        for (idx, func_desc) in vbc_module.functions.iter().enumerate() {
-            if let Some(name) = vbc_module.get_string(func_desc.name) {
-                if name == "__verum_script_main" {
+    /// The application entry belongs to the project input AST; dependency bodies
+    /// can also contain a callable main. Competing declarations of the very
+    /// same symbol are refused before their names could lose source identity.
+    pub(super) fn project_main_name(&self, entry: &Module) -> Result<Option<String>> {
+        if self.session.cog_resolver().is_none()
+            || !self.input_belongs_to_a_cog()
+            || entry.is_script()
+        {
+            return Ok(None);
+        }
+        use verum_ast::ItemKind;
+        use verum_vbc::codegen::VbcCodegen;
+        fn mains(module: &Module) -> impl Iterator<Item = &verum_ast::FunctionDecl> {
+            module.items.iter().filter_map(|item| match &item.kind {
+                ItemKind::Function(function) if function.name.name.as_str() == "main" => {
+                    Some(function)
+                }
+                _ => None,
+            })
+        }
+        let mut declared = mains(entry);
+        let main = declared.next().ok_or_else(|| {
+            anyhow::anyhow!("No main function in the project entry source")
+        })?;
+        anyhow::ensure!(
+            declared.next().is_none(),
+            "ambiguous entry point: multiple main declarations in the project entry source"
+        );
+        anyhow::ensure!(
+            main.body.is_some() && main.params.is_empty(),
+            "No zero-argument main function in the project entry source"
+        );
+        let owner = VbcCodegen::resolve_full_module_path(entry, "");
+        let name = owner
+            .as_ref()
+            .map_or_else(|| "main".into(), |path| format!("{path}.main"));
+        for sibling in self.project_modules.values() {
+            if sibling.file_id != entry.file_id
+                && mains(sibling).next().is_some()
+                && VbcCodegen::resolve_full_module_path(sibling, "") == owner
+            {
+                anyhow::bail!("ambiguous entry point: another source also declares {name}");
+            }
+        }
+        Ok(Some(name))
+    }
+
+    /// A project with installed dependencies supplies its source declaration.
+    /// Scripts use their generated wrapper. Other standalone modules use
+    /// ordinary VBC application entry discovery.
+    pub(super) fn find_main_function_id(
+        &self,
+        vbc_module: &VbcModule,
+        entry_name: Option<&str>,
+    ) -> Result<VbcFunctionId> {
+        if entry_name.is_none() {
+            for (idx, function) in vbc_module.functions.iter().enumerate() {
+                if vbc_module.get_string(function.name) == Some("__verum_script_main") {
                     return Ok(VbcFunctionId(idx as u32));
                 }
             }
         }
-        // Second pass: application entry, by the ONE rule both tiers
-        // share (bare `main`, or the unique `X.main` a `module X;`
-        // header produced — see VbcModule::entry_main).
-        match vbc_module.entry_main() {
+        match vbc_module.entry_main_for(entry_name) {
             verum_vbc::module::EntryMain::Unique { index } => {
                 Ok(VbcFunctionId(index as u32))
             }
@@ -534,7 +563,10 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         // Step 3: Try main() first, fall back to @test function discovery
-        if let Ok(main_func_id) = self.find_main_function_id(&interpreter.state.module) {
+        let application_main = self.project_main_name(module).and_then(|entry| {
+            self.find_main_function_id(&interpreter.state.module, entry.as_deref())
+        });
+        if let Ok(main_func_id) = application_main {
             // Traditional mode: execute main()
             debug!(
                 "Executing main function via VBC interpreter (function ID: {})",
