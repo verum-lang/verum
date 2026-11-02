@@ -10033,63 +10033,16 @@ pub(super) fn dispatch_primitive_method(
     // `add` / `offset` method via the Sub / Add protocols.
     if receiver.is_ptr() && !receiver.is_nil() {
         let ptr_addr = receiver.as_ptr::<u8>() as usize;
-        // Pointer-arithmetic methods (`sub` / `byte_sub` / `add` / `byte_add`
-        // / `offset`) require an INTEGER offset as the first argument.  When
-        // the argument is itself a pointer (Duration / Instant / SystemTime /
-        // any heap-allocated record), the call is dispatching to a user-
-        // defined Sub / Add / Offset protocol impl — not pointer arithmetic.
-        //
-        // **FUNDAMENTAL FIX 2026-05-27 (round 14b)** — extend the
-        // `arg0.is_int()` gate with a receiver-side `header.type_id != 0`
-        // check.  The arg0-side gate alone is insufficient: every
-        // single-field-record-unboxed record like
-        // `WaitGroup { handle: Int }` defines a method `add(delta: Int)`
-        // whose user-defined body MUST run (to dispatch
-        // `__waitgroup_add_raw(handle, delta)`) — but `delta: Int`
-        // satisfies `arg0.is_int()` and the receiver, being heap-allocated,
-        // satisfies `is_ptr()`, so pointer arithmetic mis-fires and
-        // returns `ptr.wrapping_add(delta)` instead of incrementing the
-        // backing counter.  Reading the `ObjectHeader` at the receiver
-        // pointer and rejecting type_id != 0 (i.e., a structured record
-        // with a known type) restricts the intercept to genuine raw
-        // pointers (`TypeId(0)` is the no-header sentinel returned by
-        // `ObjectHeader::ref_or_stub` for misaligned or unheadered ptrs).
-        //
-        // Closes the operator-method-dispatch shadow surfaced by the
-        // Round-13 Option-B signed-Duration refactor AND the WaitGroup
-        // `.add(delta)` mis-routing surfaced by the Round 14b sync
-        // conformance sweep.  Same root class applies to ANY user record
-        // that defines `sub` / `add` / `offset` via Sub / Add / Offset
-        // protocol impls.
         let arg0 = if args.count > 0 {
             Some(state.get_reg(Reg(args.start.0)))
         } else {
             None
         };
         let arg0_is_int = arg0.is_some_and(|v| v.is_int());
-        // Receiver-side narrowing for the pointer-arithmetic methods
-        // (`sub` / `byte_sub` / `add` / `byte_add` / `offset`): a
-        // structured record (type_id != 0 in its ObjectHeader) is NEVER
-        // a legitimate target for pointer arithmetic — its `.add(n)` /
-        // `.sub(n)` must dispatch to the user-defined Sub / Add / Offset
-        // protocol impl.  `ref_or_stub` returns the all-zero stub for
-        // misaligned / unheadered raw pointers (TypeId(0)), which IS
-        // the shape on which pointer arithmetic is semantically valid.
-        //
-        // Closes the WaitGroup `.add(delta)` mis-routing surfaced by
-        // the Round 14b sync conformance sweep — `WaitGroup { handle: Int }.add(1)`
-        // pre-fix dispatched to `ptr.wrapping_add(1)` instead of
-        // `__waitgroup_add_raw(handle, 1)` because the arg0.is_int()
-        // gate alone matched a single-field-record-unboxed receiver +
-        // Int-typed argument.  Same defect class as
-        // [[duration_single_field_record_unboxing_2026-05-27]].
-        let receiver_is_structured_record = {
-            let header = unsafe {
-                heap::ObjectHeader::ref_or_stub(receiver.as_ptr::<u8>())
-            };
-            header.type_id != crate::TypeId(0)
-        };
-        let allow_ptr_arith = arg0_is_int && !receiver_is_structured_record;
+        // Only the VM heap owns object headers. Raw buffers can contain any
+        // bit pattern, including a valid-looking type ID in their first word.
+        let managed = state.heap.contains(receiver.as_ptr::<heap::ObjectHeader>());
+        let allow_ptr_arith = arg0_is_int && !managed;
         match method {
             "sub" | "byte_sub" if allow_ptr_arith => {
                 let n = arg0.unwrap().as_i64() as usize;
@@ -10108,64 +10061,14 @@ pub(super) fn dispatch_primitive_method(
             "is_null" => {
                 return Ok(Some(Value::from_bool(ptr_addr == 0)));
             }
-            // **T0146 — raw-pointer `read`/`write` gate.** These two
-            // arms were UNGATED: every `x.read(buf)` / `x.write(buf)`
-            // CallM whose receiver is any heap object was intercepted
-            // as a raw pointer dereference and returned `*ptr` garbage
-            // — the io/ Read/Write protocol surface (BufferCursor /
-            // BufReader / Take / Chain receivers) never reached typed
-            // dispatch. Same defect class as the pointer-arithmetic
-            // arms above, which got their structured-record gate in
-            // the 2026-05-27 fundamental fix; `read`/`write` were left
-            // out of it. The gate here is REGISTERED-TID-driven rather
-            // than `type_id != 0`: a CBGR DATA pointer's probed
-            // "header" is the stored payload bytes, which can fake an
-            // arbitrary nonzero tid — but a tid that resolves to a
-            // real TypeDescriptor means the receiver is (with
-            // overwhelming probability) a live typed record whose
-            // `read`/`write` belongs to its protocol surface, so
-            // typed dispatch (the resolved_protocol_dispatch consult
-            // and the name cascade) must run instead. Genuinely raw
-            // pointers (headerless, TypeId(0) stub, or garbage tids)
-            // keep the historical raw semantics.
-            // CBGR-tracked pointers are excluded from the gate (their
-            // probed "header" is stored-payload bytes — an Int in slot
-            // 0 can fake any tid), so allocator-produced raw pointers
-            // keep raw `read`/`write` unconditionally. The gate itself
-            // is part of the T0146 typed-dispatch restoration and
-            // rides the SAME kill-switch as the carried-fact map: an
-            // EMPTY `resolved_protocol_dispatch`
-            // (VERUM_DISABLE_PROTOCOL_DISPATCH=1, or an assembly that
-            // never built it) restores the pristine raw-arm behavior
-            // bit-for-bit — one coherent switch for the whole
-            // restoration, zero per-call env cost.
-            "read" | "write"
-                if !state.module.resolved_protocol_dispatch.is_empty()
-                    && !state.cbgr_allocations.contains(
-                        &ptr_addr.wrapping_sub(
-                            verum_common::layout::ALLOCATION_HEADER_SIZE as usize,
-                        ),
-                    )
-                    && !state.cbgr_mutable_ptrs.contains(&ptr_addr)
-                    && state
-                        .module
-                        .get_type(
-                            unsafe {
-                                heap::ObjectHeader::ref_or_stub(receiver.as_ptr::<u8>())
-                            }
-                            .type_id,
-                        )
-                        .is_some() =>
-            {
-                // Structured, registered receiver — not a raw pointer.
-                // Fall through to typed dispatch.
-            }
-            "read" => {
+            // Heap objects dispatch read/write to their declared methods even
+            // when the module carries no protocol-dispatch table.
+            "read" if !managed && args.count == 0 => {
                 let val = unsafe { *(ptr_addr as *const Value) };
                 return Ok(Some(val));
             }
-            "write" => {
-                let val = state.get_reg(Reg(args.start.0));
+            "write" if !managed && args.count == 1 => {
+                let val = arg0.unwrap();
                 unsafe {
                     *(ptr_addr as *mut Value) = val;
                 }

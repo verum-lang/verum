@@ -10,6 +10,29 @@ use verum_vbc::{
 
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn rwlock_methods_preserve_the_declared_lock_result() {
+    let source = r#"
+        module app;
+        mount core.sync.rwlock.{RwLock, RwLockReadGuard, RwLockWriteGuard};
+        mount core.sync.mutex.LockResult;
+        mount core.base.result.Result;
+        fn main() -> Int {
+            let first = RwLock.new(17);
+            let second = RwLock.new(25);
+            let read = match first.read() {
+                Result.Ok(guard) => *guard, Result.Err(_) => -100,
+            };
+            let write = match second.write() {
+                Result.Ok(guard) => *guard, Result.Err(_) => -100,
+            };
+            read + write
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 42);
+}
+
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn supervisor_constructors_use_declared_ownership() {
     let source = r#"
         module app;
