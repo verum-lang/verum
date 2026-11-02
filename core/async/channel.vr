@@ -319,35 +319,22 @@ implement<T> Sender<T> {
     // with the unsent value preserved.
     //
 
-    // For an unbounded channel this degenerates to `send` because
-    // there is no capacity limit — the timeout only applies to the
-    // wait-for-slot path.
+    // try_send performs the capacity check and insertion under one lock.
     public fn send_timeout(&self, value: T, duration: Duration) -> Result<(), SendError<T>> {
-        if self.inner.closed.load(MemoryOrdering.Acquire) {
-            return Result.Err(SendError(value));
-        }
-        // Unbounded: send succeeds immediately.
-        if self.inner.capacity.is_none() {
-            return self.send(value);
-        }
-        // Bounded: poll for slot availability up to `duration`. Phase 1
-        // uses a spin-with-sleep loop against the queue length; a
-        // futex-backed sender-side wait is a future replacement.
-        let deadline = Instant.now().saturating_add(duration);
+        let started = Instant.now();
+        let mut pending = value;
         loop {
-            match self.try_send(value) {
+            match self.try_send(pending) {
                 Result.Ok(()) => return Result.Ok(()),
-                Result.Err(TrySendError.Full(returned_value)) => {
-                    if Instant.now() >= deadline {
-                        return Result.Err(SendError(returned_value));
-                    }
-                    // Short sleep to avoid busy-looping; the real
-                    // wake-up path is the bounded-channel reader
-                    // futex_wake on pop (reserved extension point).
-                    sleep_millis(1);
+                Result.Err(TrySendError.Disconnected(unsent)) => {
+                    return Result.Err(SendError(unsent));
                 }
-                Result.Err(TrySendError.Disconnected(returned_value)) => {
-                    return Result.Err(SendError(returned_value));
+                Result.Err(TrySendError.Full(unsent)) => {
+                    if started.elapsed() >= duration {
+                        return Result.Err(SendError(unsent));
+                    }
+                    pending = unsent;
+                    sleep_millis(1);
                 }
             }
         }
@@ -997,7 +984,7 @@ public fn channel<T>() -> (Sender<T>, Receiver<T>) {
     // literals and relative module paths are both fragile here.
     let no_waker: Maybe<Waker> = Maybe.None;
     let no_wakers: List<Waker> = List.new();
-    let inner = Shared.new(ChannelInner {
+    let state: ChannelInner<T> = ChannelInner {
         queue: Mutex.new(Deque.new()),
         capacity: Maybe.None,
         closed: AtomicBool.new(false),
@@ -1005,7 +992,8 @@ public fn channel<T>() -> (Sender<T>, Receiver<T>) {
         receiver_waker: Mutex.new(no_waker),
         sender_wakers: Mutex.new(no_wakers),
         notify_seq: AtomicInt.new(0),
-    });
+    };
+    let inner = Shared.new(state);
 
     (Sender { inner: inner.clone() }, Receiver { inner: inner })
 }
@@ -1016,7 +1004,7 @@ public fn bounded<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
 
     let no_waker: Maybe<Waker> = Maybe.None;
     let no_wakers: List<Waker> = List.new();
-    let inner = Shared.new(ChannelInner {
+    let state: ChannelInner<T> = ChannelInner {
         queue: Mutex.new(Deque.with_capacity(capacity)),
         capacity: Maybe.Some(capacity),
         closed: AtomicBool.new(false),
@@ -1024,7 +1012,8 @@ public fn bounded<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
         receiver_waker: Mutex.new(no_waker),
         sender_wakers: Mutex.new(no_wakers),
         notify_seq: AtomicInt.new(0),
-    });
+    };
+    let inner = Shared.new(state);
 
     (Sender { inner: inner.clone() }, Receiver { inner: inner })
 }
