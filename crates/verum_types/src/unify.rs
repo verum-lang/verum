@@ -1904,7 +1904,7 @@ impl Unifier {
             // But Unknown -> T requires explicit narrowing (is-check)
             // In unification context, we allow it to avoid false positives
             // since the type checker handles narrowing elsewhere
-            (Unknown, _) | (_, Unknown) => Ok(Substitution::new()),
+            (Unknown, other) | (other, Unknown) if !other.contains_capability_restriction() => Ok(Substitution::new()),
 
             // Same types
             (Unit, Unit)
@@ -4952,14 +4952,14 @@ impl Unifier {
             // the general primitive case below; only the cross-type
             // coercions are removed here.
 
-            // CapabilityRestricted types: `T with [C1, C2]`
-            // Two capability-restricted types unify if their base types unify
-            (CapabilityRestricted { base: b1, .. }, CapabilityRestricted { base: b2, .. }) => {
-                self.unify_inner(b1, b2, span)
+            // Permission equality is symmetric. Giving away a permission is a
+            // directed value conversion, checked by Subtyping at the use site.
+            (CapabilityRestricted { base: left, capabilities: held },
+             CapabilityRestricted { base: right, capabilities: required })
+                if held.is_satisfied_by(required) && required.is_satisfied_by(held) =>
+            {
+                self.unify_inner(left, right, span)
             }
-            // Capability-restricted type unifies with its base type (forgetful upcast)
-            (CapabilityRestricted { base, .. }, other)
-            | (other, CapabilityRestricted { base, .. }) => self.unify_inner(base, other, span),
 
             // Placeholder types: forward-declared recursive types have placeholder inner
             // types that must unify while the declaration resolves — but ONLY with their

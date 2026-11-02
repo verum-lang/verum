@@ -2140,7 +2140,14 @@ impl TypeChecker {
                 // Extract concrete type args from expected type (e.g., Int from Box<Int>)
                 // CRITICAL FIX: If expected is a type variable and this is a generic type,
                 // create fresh type variables for the type parameters.
-                let type_args: List<Type> = match expected {
+                // The constructor creates a nominal value. Its expected view can
+                // attenuate that value, while a spread must itself supply the
+                // requested permissions and is checked against the original view.
+                let record_expected = match expected {
+                    Type::CapabilityRestricted { base, .. } => base.as_ref(),
+                    ty => ty,
+                };
+                let type_args: List<Type> = match record_expected {
                     Type::Named { args, .. } | Type::Generic { args, .. } if !args.is_empty() => args.clone(),
                     Type::Named { args, .. } if args.is_empty() && !type_params.is_empty() => {
                         // Named type without args but we have type params - create fresh vars
@@ -2363,7 +2370,7 @@ impl TypeChecker {
                     path: resolved_path,
                     args: type_args,
                 };
-                self.unifier.unify(&actual_struct_ty, expected, expr.span)?;
+                self.unifier.unify(&actual_struct_ty, record_expected, expr.span)?;
 
                 Ok(InferResult::new(expected.clone()))
     }
@@ -2420,67 +2427,6 @@ impl TypeChecker {
         })
     }
 
-    /// A capability set may only be GIVEN AWAY, never acquired.
-    ///
-    /// `Store with [Read, Write]` may be passed where `Store with [Read]`
-    /// is required — that is attenuation, and it is the direction the
-    /// feature exists to make ordinary. The reverse must be refused: a
-    /// caller holding only `[Read]` cannot satisfy a callee that needs to
-    /// write, and accepting it makes the annotation decoration.
-    ///
-    /// AN UNRESTRICTED VALUE IS NOT A DEFECT. A plain `Store` carries no
-    /// stated restriction, i.e. full rights, so passing it where any
-    /// restriction is required is itself an attenuation. Refusing that
-    /// would make every capability parameter unreachable from ordinary
-    /// code, which is how a feature gets declared and then never used.
-    ///
-    /// `unify` cannot host this rule: it peels the wrapper in BOTH
-    /// directions by design, because a capability does not change what a
-    /// value IS. The rule is directional, so it belongs where a direction
-    /// exists — checking an actual against an expected.
-    fn check_capability_attenuation(
-        &mut self,
-        actual: &Type,
-        expected: &Type,
-        span: verum_ast::Span,
-    ) -> Result<()> {
-        fn caps(ty: &Type) -> Option<&crate::capability::TypeCapabilitySet> {
-            match ty {
-                Type::CapabilityRestricted { capabilities, .. } => Some(capabilities),
-                Type::Reference { inner, .. }
-                | Type::CheckedReference { inner, .. }
-                | Type::UnsafeReference { inner, .. } => caps(inner),
-                _ => None,
-            }
-        }
-        let required = match caps(expected) {
-            Some(c) => c,
-            None => return Ok(()),
-        };
-        let applied = self.unifier.apply(actual);
-        let held = match caps(&applied) {
-            Some(c) => c,
-            // Unrestricted: full rights, so any restriction is a give-away.
-            None => return Ok(()),
-        };
-        // The lattice, not plain membership: `ReadWrite` grants `Read`.
-        if required.is_satisfied_by(held) {
-            return Ok(());
-        }
-        let want: Vec<String> = required.names().iter().map(|n| n.to_string()).collect();
-        let have: Vec<String> = held.names().iter().map(|n| n.to_string()).collect();
-        Err(TypeError::OtherWithCodeSpanned {
-            code: verum_common::Text::from("E411"),
-            msg: verum_common::Text::from(format!(
-                "capability cannot be widened: this value carries [{}], and [{}] is required\n  \
-                 note: a capability may be given away, never acquired",
-                have.join(", "),
-                want.join(", "),
-            )),
-            span,
-        })
-    }
-
     /// Is this expression a value the compiler is HOLDING — a literal,
     /// possibly negated or parenthesised?
     ///
@@ -2530,7 +2476,6 @@ impl TypeChecker {
         self.check_integer_literal_fits(expr, expected)?;
 
         let result = self.synth_expr(expr)?;
-        self.check_capability_attenuation(&result.ty, expected, expr.span)?;
         self.check_record_conversion_visibility(&result.ty, expected, expr.span)?;
         if std::env::var("VERUM_TRACE_QUALPATH").is_ok()
             && matches!(&expr.kind, ExprKind::MethodCall { .. })
@@ -2766,6 +2711,24 @@ impl TypeChecker {
                 return Ok(InferResult::new(expected.clone()));
             }
             Err(_e) => {
+                // Equality can infer a complete restricted type. A conversion
+                // involving permissions needs directed evidence at every nested
+                // position before structural, alias, or protocol recovery.
+                let expected_ty = self.unifier.apply(expected);
+                if resolved_result_ty.contains_capability_restriction()
+                    || expected_ty.contains_capability_restriction()
+                {
+                    if self.subtyping.is_subtype(&resolved_result_ty, &expected_ty) {
+                        return Ok(InferResult::new(expected.clone()));
+                    }
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E411".into(),
+                        msg: format!(
+                            "capability conversion refused: this value carries `{resolved_result_ty}`, and `{expected_ty}` is required"
+                        ).into(),
+                        span,
+                    });
+                }
                 // SCOPE-AWARE VARIANT CONSTRUCTOR RESOLUTION
                 // When a variant constructor call (e.g., Ok(value)) fails to unify with the
                 // expected type, check if an alternative parent type defines the same constructor.
@@ -2988,56 +2951,6 @@ impl TypeChecker {
                                 }
                             }
                         }
-                    }
-                }
-
-                // ============================================================
-                // CAPABILITY ATTENUATION COERCION
-                // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 12 - Capability Attenuation as Types
-                // ============================================================
-                // Automatic capability attenuation: T with [More] → T with [Less]
-                // When actual has more capabilities than expected, automatically attenuate.
-                //
-
-                // Example:
-                // ```verum
-                // fn analyze(db: Database with [Read]) -> Stats { ... }
-                // fn process(db: Database with [Read, Write]) {
-                //  analyze(db); // OK: automatic attenuation [Read, Write] → [Read]
-                // }
-                // ```
-                //
-
-                // Cases handled:
-                // 1. CapabilityRestricted → CapabilityRestricted (subset of capabilities)
-                // 2. CapabilityRestricted → Base (forgetful upcast)
-                // 3. Base → CapabilityRestricted (ERROR: cannot add capabilities)
-                if let (
-                    Type::CapabilityRestricted {
-                        base: base1,
-                        capabilities: caps1,
-                    },
-                    Type::CapabilityRestricted {
-                        base: base2,
-                        capabilities: caps2,
-                    },
-                ) = (&result.ty, expected)
-                {
-                    // Check if base types unify
-                    if self.unifier.unify(base1, base2, span).is_ok() {
-                        // Check if caps1 ⊇ caps2 (actual has MORE capabilities)
-                        // Uses TypeCapabilitySet::is_subset_of for proper set comparison
-                        if caps2.is_subset_of(caps1) {
-                            // Automatic attenuation: actual has more capabilities, coerce to expected
-                            return Ok(InferResult::new(expected.clone()));
-                        }
-                    }
-                }
-
-                // Also handle: T with [Caps] → T (forgetful upcast)
-                if let Type::CapabilityRestricted { base, .. } = &result.ty {
-                    if self.unifier.unify(base, expected, span).is_ok() {
-                        return Ok(InferResult::new(expected.clone()));
                     }
                 }
 

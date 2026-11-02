@@ -9,6 +9,7 @@
 import VerumExternalReplay.KernelSoundness
 import VerumExternalReplay.TypeAlgebra
 import VerumExternalReplay.IntegerBoundEntailment
+import VerumExternalReplay.CapabilityAttenuation
 import VerumExternalReplay.UniverseLevels
 import VerumExternalReplay.UniverseInstantiation
 import VerumExternalReplay.RecordTelescope

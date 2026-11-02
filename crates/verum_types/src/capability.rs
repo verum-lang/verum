@@ -1341,11 +1341,9 @@ mod tests {
             "T with [Read] should NOT be subtype of T with [Read, Write, Admin]"
         );
 
-        // T with [Caps] should be subtype of T (forgetful upcast)
-        assert!(
-            subtyping.is_subtype(&full_type, &db_type),
-            "T with [Read, Write, Admin] should be subtype of T"
-        );
+        assert!(subtyping.is_subtype(&db_type, &read_type));
+        assert!(!subtyping.is_subtype(&read_type, &db_type));
+        assert!(!subtyping.is_subtype(&full_type, &db_type));
 
         // Same capabilities => subtype (reflexive)
         let read_type2 = Type::CapabilityRestricted {

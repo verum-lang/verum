@@ -10,7 +10,7 @@
 //
 // Tests subtyping rules for capability-restricted types:
 // - T with [A, B, C] <: T with [A, B] (more capabilities is subtype)
-// - T with [Caps] <: T (forgetful upcast)
+// - An unrestricted value may be handed out with fewer rights.
 
 // ============================================================================
 // SUBTYPING: MORE CAPABILITIES IS SUBTYPE OF FEWER
@@ -35,23 +35,17 @@ fn test_admin_to_readonly() -> () {
 }
 
 // ============================================================================
-// SUBTYPING: FORGETFUL UPCAST
+// AN UNRESTRICTED VALUE CAN BE ATTENUATED
 // ============================================================================
 
-// Test 4: T with [Caps] <: T (forget capabilities)
-fn test_forget_capabilities() -> () {
-    let restricted: Database with [Read] = get_readonly_db();
-    let unrestricted: Database = restricted;  // Should work: forget capabilities
+fn test_plain_to_readonly() -> () {
+    let full = Database { _marker: 0 };
+    let readonly: Database with [Read] = full;
 }
 
-// Test 5: Pass capability-restricted to unrestricted function
-fn accept_any_db(db: Database) -> () {
-    // Function doesn't care about capabilities
-}
-
-fn test_pass_restricted_to_unrestricted() -> () {
-    let readonly: Database with [Read] = get_readonly_db();
-    accept_any_db(readonly);  // Should work
+fn test_pass_plain_to_restricted() -> () {
+    let full = Database { _marker: 0 };
+    let _ = analyze(full);
 }
 
 // ============================================================================
@@ -115,8 +109,8 @@ fn main() {
     test_readwrite_to_read();
     test_admin_to_readwrite();
     test_admin_to_readonly();
-    test_forget_capabilities();
-    test_pass_restricted_to_unrestricted();
+    test_plain_to_readonly();
+    test_pass_plain_to_restricted();
     test_attenuation_at_call();
     test_chain_attenuation();
     print("Capability subtyping tests passed");

@@ -131,9 +131,17 @@ impl Type {
     /// A backend without a faithful representation must decline the whole
     /// type, including opaque containers whose translation skips arguments.
     pub fn contains_record_field(&self) -> bool {
+        self.contains_type(|ty| matches!(ty, Type::RecordField { .. }))
+    }
+
+    pub(crate) fn contains_capability_restriction(&self) -> bool {
+        self.contains_type(|ty| matches!(ty, Type::CapabilityRestricted { .. }))
+    }
+
+    fn contains_type(&self, predicate: impl Fn(&Type) -> bool) -> bool {
         let mut stack = vec![self];
         while let Some(ty) = stack.pop() {
-            if matches!(ty, Type::RecordField { .. }) {
+            if predicate(ty) {
                 return true;
             }
             push_type_children!(ty, stack);

@@ -71,7 +71,10 @@ fn a_restriction_behind_a_reference_still_reaches_the_fields() {
     let cs = complaints(&format!(
         "{STORE}public fn reads(s: &Store with [Read]) -> Int {{ s.n }}"
     ));
-    assert!(cs.is_empty(), "the wrapper sits under the reference: {cs:?}");
+    assert!(
+        cs.is_empty(),
+        "the wrapper sits under the reference: {cs:?}"
+    );
 }
 
 #[test]
@@ -127,5 +130,130 @@ fn the_widening_refusal_names_both_sets() {
     assert!(
         msg.contains("carries") && msg.contains("required"),
         "the refusal must name what is held and what is needed: {cs:?}"
+    );
+}
+
+#[test]
+fn restrictions_survive_value_boundaries() {
+    for body in [
+        "fn full(s: Store) -> Int { s.n } fn leak(s: Store with [Read]) -> Int { full(s) }",
+        "fn leak(s: Store with [Read]) -> Store { s }",
+        "fn leak(s: Store with [Read]) -> Store { let full: Store = s; full }",
+        "fn leak(s: Store with [Read]) -> Store { Store { ..s } }",
+        "fn leak(s: (Store with [Read], Int)) -> (Store, Int) { s }",
+        "fn leak(f: fn(Store) -> Int) -> fn(Store with [Read]) -> Int { f }",
+        "fn leak(s: &mut Store with [Read]) -> &mut Store { s }",
+        "fn leak(s: Store with [Read]) -> unknown { s }",
+        "fn leak(s: Store with [Read]) -> Store { s as Store }",
+        "type View is Store with [Read]; fn leak(s: View) -> Store { s }",
+        "fn same<T>(x: T) -> T { x } fn leak(s: Store with [Read]) -> Store { same(s) }",
+        "fn leak(s: &mut Store) -> &mut Store with [Read] { s }",
+        "type Cell<T> is { value: T }; fn leak(s: Cell<Store with [Read]>) -> Cell<Store> { s }",
+    ] {
+        let errors = complaints(&format!("{STORE}{body}"));
+        assert!(
+            errors.iter().any(|error| {
+                error.contains("ReadOnly")
+                    && ["E411", "E401", "E400"]
+                        .iter()
+                        .any(|code| error.contains(code))
+            }),
+            "expected a permission or carrier mismatch for {body}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn safe_variance_preserves_authority_through_aggregates_and_callbacks() {
+    for body in [
+        "fn fresh() -> Store with [Read] { Store { n: 1, tag: \"fresh\" } }",
+        "fn narrow(s: (Store, Int)) -> (Store with [Read], Int) { s }",
+        "fn narrow(f: fn(Store with [Read]) -> Int) -> fn(Store) -> Int { f }",
+        "fn same(s: &mut Store with [Read]) -> &mut Store with [Read] { s }",
+        "fn identity<T>(s: T) -> T { s } fn keep(s: Store with [Read]) -> Store with [Read] { identity(s) }",
+    ] {
+        let errors = complaints(&format!("{STORE}{body}"));
+        assert!(errors.is_empty(), "rejected {body}: {errors:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires the pinned Lean toolchain"]
+fn native_permissions_and_equality_correspond_to_the_lean_model() {
+    use std::{fmt::Write, path::Path, process::Command};
+    use verum_ast::{Capability::*, Span};
+    use verum_types::{Unifier, capability::TypeCapabilitySet, subtype::Subtyping, ty::Type};
+
+    let scopes = [
+        (".full", None),
+        (".restricted []", Some(vec![])),
+        (".restricted [.read]", Some(vec![ReadOnly])),
+        (".restricted [.write]", Some(vec![WriteOnly])),
+        (".restricted [.readWrite]", Some(vec![ReadWrite])),
+        (
+            ".restricted [.read, .write]",
+            Some(vec![ReadOnly, WriteOnly]),
+        ),
+        (".restricted [.admin]", Some(vec![Admin])),
+        (".restricted [.admin, .read]", Some(vec![Admin, ReadOnly])),
+        (".restricted [.other 0]", Some(vec![Execute])),
+        (
+            ".restricted [.other 1]",
+            Some(vec![Custom("publish".into())]),
+        ),
+    ]
+    .map(|(name, rights)| {
+        (
+            name,
+            rights.map_or(Type::Int, |rights| Type::CapabilityRestricted {
+                base: Box::new(Type::Int),
+                capabilities: TypeCapabilitySet::from_list(rights.into()),
+            }),
+        )
+    });
+    let mut source = include_str!(
+        "../../../verification/external/lean/VerumExternalReplay/CapabilityAttenuation.lean"
+    )
+    .to_owned();
+    source.push_str("\nopen Verum.CapabilityAttenuation\n");
+    let checker = Subtyping::new();
+    for (source_name, actual) in &scopes {
+        for (target_name, expected) in &scopes {
+            let forward = format!("accepts ({source_name}) ({target_name})");
+            let reverse = format!("accepts ({target_name}) ({source_name})");
+            let accepted = checker.is_subtype(actual, expected);
+            let equal = Unifier::new()
+                .unify(actual, expected, Span::dummy())
+                .is_ok();
+            writeln!(source, "example : {forward} = {accepted} := by decide").unwrap();
+            writeln!(
+                source,
+                "example : ({forward} && {reverse}) = {equal} := by decide"
+            )
+            .unwrap();
+        }
+    }
+    source.push_str("#print axioms preserves_permissions\n");
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("Check.lean");
+    std::fs::write(&path, source).unwrap();
+    let output = Command::new(std::env::var_os("VERUM_LEAN").unwrap_or_else(|| "lean".into()))
+        .arg(&path)
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../verification/external/lean"))
+        .output()
+        .unwrap();
+    let diagnostics = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.status.success(), "{diagnostics}");
+    assert!(
+        diagnostics.contains("Verum.CapabilityAttenuation.preserves_permissions"),
+        "{diagnostics}"
+    );
+    assert!(
+        !diagnostics.contains("sorryAx") && !diagnostics.contains("warning:"),
+        "{diagnostics}"
     );
 }

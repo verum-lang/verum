@@ -1017,32 +1017,14 @@ impl Subtyping {
                 c2.is_satisfied_by(c1)
             }
 
-            // Capability-restricted to base type coercion
-            // T with [Caps] <: T (forgetful upcast)
-            // A capability-restricted value can be used where the unrestricted base is expected
-            (CapabilityRestricted { base, .. }, t2) => self.is_subtype(base, t2),
+            // An unrestricted carrier grants its full interface. It may be
+            // attenuated; erasing an existing restriction restores that interface.
+            (CapabilityRestricted { .. }, _) => false,
+            (actual, CapabilityRestricted { base, .. }) => self.is_subtype(actual, base),
 
-            // Base type to capability-restricted: NOT allowed automatically
-            // T </: T with [Caps] (would need to prove capabilities are available)
-            // This must be done explicitly via `provide` or explicit casting
-
-            // =============================================================================
-            // Unknown type subtyping (top type)
-            // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 13.2 - Unknown Type
-            // =============================================================================
-            //
-
-            // Unknown is the TOP type (dual of Never):
-            // - Any type T <: unknown (any value can be assigned to unknown)
-            // - unknown <: T only if T == unknown (nothing can be done without narrowing)
-            //
-
-            // This enables safe FFI, deserialization, and rapid prototyping by
-            // forcing explicit type narrowing (via `x is T` or pattern matching).
-
-            // T <: unknown for any T (unknown is the top type)
-            // Any value can be assigned to unknown
-            (_, Unknown) => true,
+            // Dynamic narrowing cannot recover a permission view after its
+            // type has been erased. Keep that evidence even inside aggregates.
+            (actual, Unknown) => !actual.contains_capability_restriction(),
 
             // unknown <: T only if T == unknown
             // This case is already handled by reflexivity (t1 == t2 => true)
