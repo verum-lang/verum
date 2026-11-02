@@ -68,4 +68,17 @@ async fn release_library_imports_keep_their_declared_owners() {
             "private or absent declaration was accepted: {mount}: {analysis}"
         );
     }
+    for (source, valid) in [
+        ("fn bytes(t: &Text) -> &[Byte] { t.as_bytes() }", true),
+        ("fn owned(t: Text) -> List<Byte> { t.into_bytes() }", true),
+        ("fn wrong(t: &Text) -> Bool { t.as_bytes() }", false),
+        ("type Packet is { n: Int }; fn wrong(p: Packet) -> Int { p.as_bytes().len() }", false),
+    ] {
+        let analysis = studio.call("language.request", json!({"path":"main.vr", "source":source}))
+            .await.unwrap();
+        assert_eq!(analysis["result"]["parsed"], true, "{source}");
+        let diagnostics = analysis["result"]["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.iter().all(|d| d["severity"] != 1), valid,
+            "{source}: {diagnostics:?}");
+    }
 }
