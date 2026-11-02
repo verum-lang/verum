@@ -94,6 +94,8 @@ fn partial_carrier_changes_and_mutable_borrows_require_reconstruction() {
 #[test]
 fn mutable_bindings_cannot_give_a_witness_a_stable_index() {
     for body in [
+        "type Exclusive is &mut Pack; fn stale(x: Exclusive) -> Pack { let w = x.witness; Pack { carrier: x.carrier, witness: w } }",
+        "type Exclusive is &mut Pack; type Nested is { public child: Exclusive }; fn stale(x: Nested) -> Pack { let w = x.child.witness; Pack { carrier: x.child.carrier, witness: w } }",
         "fn stale(mut x: Pack, y: Pack) -> Pack { let old = x.witness; x = y; Pack { carrier: x.carrier, witness: old } }",
         "fn stale(x: &mut Pack, y: Pack) -> Pack { let old = x.witness; *x = y; Pack { carrier: x.carrier, witness: old } }",
     ] {
@@ -122,4 +124,96 @@ fn overwriting_a_place_cannot_reinterpret_an_existing_witness() {
             "{body}: {problems:?}"
         );
     }
+}
+
+#[test]
+fn method_receivers_preserve_the_carrier_of_an_existing_witness() {
+    let methods = "implement Pack {
+        public fn swap_in(&mut self, y: Pack) { *self = y; }
+        public fn inspect(&self) -> Int { 1 }
+    }";
+    let shared = format!("{methods}
+        fn stable(x: Pack) -> Pack {{ let w = x.witness; x.inspect(); Pack {{ carrier: x.carrier, witness: w }} }}");
+    assert_eq!(errors(&shared), Vec::<String>::new());
+    let replace = format!("{methods}
+        fn stale(x: Pack, y: Pack) -> Pack {{ let w = x.witness; x.swap_in(y); Pack {{ carrier: x.carrier, witness: w }} }}");
+    let problems = errors(&replace);
+    assert!(
+        problems
+            .iter()
+            .any(|e| e.contains("cannot mutate a receiver")),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn method_autoref_respects_the_complete_access_path() {
+    let methods = "implement Pack {
+        fn overwrite(&mut self, y: Pack) { *self = y; }
+        fn view(&self) -> &Pack { self }
+        fn separate(&self, y: Pack) -> Pack { y }
+    }";
+    for body in [
+        "fn reject(x: &Pack, y: Pack) { x.overwrite(y); }",
+        "fn reject(p: &Pair, y: Pack) { p.left.overwrite(y); }",
+        "fn reject(x: Pack, y: Pack) { x.view().overwrite(y); }",
+        "type Alias is Pack; fn reject(x: &Alias, y: Pack) { x.overwrite(y); }",
+    ] {
+        let problems = errors(&format!("{methods}\n{body}"));
+        assert!(
+            problems.iter().any(|e| e.contains("shared reference")),
+            "{body}: {problems:?}"
+        );
+    }
+    for body in [
+        "fn allow(x: &mut Pack, y: Pack) { x.overwrite(y); }",
+        "fn allow(x: &Pack, y: Pack, z: Pack) { let w = x.witness; x.separate(y).overwrite(z); }",
+    ] {
+        assert_eq!(
+            errors(&format!("{methods}\n{body}")),
+            Vec::<String>::new(),
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn protocol_implementation_cannot_escalate_receiver_permission() {
+    let declared = "type Inspect is protocol { fn inspect(&self, y: Pack); };";
+    let valid = "implement Inspect for Pack { fn inspect(&self, y: Pack) {} }
+                 fn accept(x: Pack, y: Pack) { let w = x.witness; x.inspect(y); }";
+    assert_eq!(
+        errors(&format!("{declared}\n{valid}")),
+        Vec::<String>::new()
+    );
+    let generics = "fn observe<T: Inspect>(x: &T, y: Pack) { x.inspect(y); }";
+    assert_eq!(
+        errors(&format!("{declared}\n{generics}")),
+        Vec::<String>::new()
+    );
+    let invalid = "implement Inspect for Pack { fn inspect(&mut self, y: Pack) { *self = y; } }";
+    let problems = errors(&format!("{declared}\n{invalid}"));
+    assert!(
+        problems
+            .iter()
+            .any(|e| e.contains("E427") && e.contains("receiver")),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn tier_conversion_cannot_strengthen_a_nested_reference() {
+    for input in ["&(&Pack)", "&(&mut Pack)"] {
+        let problems = errors(&format!(
+            "fn reject(p: {input}) -> &checked mut Pack {{ p.to_checked_mut() }}"
+        ));
+        assert!(
+            problems.iter().any(|e| e.contains("shared reference")),
+            "{input}: {problems:?}"
+        );
+    }
+    assert_eq!(
+        errors("fn allow(p: &mut Pack) -> &checked mut Pack { p.to_checked_mut() }"),
+        Vec::<String>::new()
+    );
 }

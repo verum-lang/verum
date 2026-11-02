@@ -2130,42 +2130,11 @@ impl TypeChecker {
                         // Build method type from signature, EXCLUDING self parameter
                         // (it's implicit in method calls). Track receiver kind for
                         // object safety analysis.
-                        let mut resolved_receiver_kind = verum_common::Maybe::None;
-                        let param_types: Result<List<Type>> = method
-                            .params
-                            .iter()
-                            .filter_map(|p| {
-                                use verum_ast::decl::FunctionParamKind;
-                                match &p.kind {
-                                    FunctionParamKind::SelfRef
-                                    | FunctionParamKind::SelfRefChecked
-                                    | FunctionParamKind::SelfRefUnsafe => {
-                                        resolved_receiver_kind = verum_common::Maybe::Some(
-                                            crate::protocol::ReceiverKind::SelfRef,
-                                        );
-                                        None // Skip self - implicit
-                                    }
-                                    FunctionParamKind::SelfRefMut
-                                    | FunctionParamKind::SelfRefCheckedMut
-                                    | FunctionParamKind::SelfRefUnsafeMut => {
-                                        resolved_receiver_kind = verum_common::Maybe::Some(
-                                            crate::protocol::ReceiverKind::SelfMut,
-                                        );
-                                        None // Skip self - implicit
-                                    }
-                                    FunctionParamKind::SelfValue
-                                    | FunctionParamKind::SelfValueMut
-                                    | FunctionParamKind::SelfOwn
-                                    | FunctionParamKind::SelfOwnMut => {
-                                        resolved_receiver_kind = verum_common::Maybe::Some(
-                                            crate::protocol::ReceiverKind::SelfValue,
-                                        );
-                                        None // Skip self - implicit
-                                    }
-                                    FunctionParamKind::Regular { ty, .. } => {
-                                        Some(self.ast_to_type(ty))
-                                    }
-                                }
+                        let resolved_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(method));
+                        let param_types: Result<List<Type>> = method.params.iter()
+                            .filter_map(|p| match &p.kind {
+                                FunctionParamKind::Regular { ty, .. } => Some(self.ast_to_type(ty)),
+                                _ => None,
                             })
                             .collect();
 
@@ -3857,42 +3826,11 @@ impl TypeChecker {
                         // Build method type from signature, EXCLUDING self parameter
                         // (it's implicit in method calls). Track receiver kind for
                         // object safety analysis.
-                        let mut resolved_receiver_kind = verum_common::Maybe::None;
-                        let param_types: Result<List<Type>> = method
-                            .params
-                            .iter()
-                            .filter_map(|p| {
-                                use verum_ast::decl::FunctionParamKind;
-                                match &p.kind {
-                                    FunctionParamKind::SelfRef
-                                    | FunctionParamKind::SelfRefChecked
-                                    | FunctionParamKind::SelfRefUnsafe => {
-                                        resolved_receiver_kind = verum_common::Maybe::Some(
-                                            crate::protocol::ReceiverKind::SelfRef,
-                                        );
-                                        None // Skip self - implicit
-                                    }
-                                    FunctionParamKind::SelfRefMut
-                                    | FunctionParamKind::SelfRefCheckedMut
-                                    | FunctionParamKind::SelfRefUnsafeMut => {
-                                        resolved_receiver_kind = verum_common::Maybe::Some(
-                                            crate::protocol::ReceiverKind::SelfMut,
-                                        );
-                                        None // Skip self - implicit
-                                    }
-                                    FunctionParamKind::SelfValue
-                                    | FunctionParamKind::SelfValueMut
-                                    | FunctionParamKind::SelfOwn
-                                    | FunctionParamKind::SelfOwnMut => {
-                                        resolved_receiver_kind = verum_common::Maybe::Some(
-                                            crate::protocol::ReceiverKind::SelfValue,
-                                        );
-                                        None // Skip self - implicit
-                                    }
-                                    FunctionParamKind::Regular { ty, .. } => {
-                                        Some(self.ast_to_type(ty))
-                                    }
-                                }
+                        let resolved_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(method));
+                        let param_types: Result<List<Type>> = method.params.iter()
+                            .filter_map(|p| match &p.kind {
+                                FunctionParamKind::Regular { ty, .. } => Some(self.ast_to_type(ty)),
+                                _ => None,
                             })
                             .collect();
 
@@ -5067,7 +5005,7 @@ impl TypeChecker {
                     args: verum_common::List::new(),
                 };
                 // Track receiver kind for object safety checks
-                let mut method_receiver_kind = verum_common::Maybe::None;
+                let method_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(func));
 
                 // Register method-level generic params as fresh TypeVars
                 // BEFORE lowering the signature. Without this step,
@@ -5119,34 +5057,10 @@ impl TypeChecker {
                     }
                 }
 
-                // Collect only non-self parameters (self is implicit in method calls)
-                let params: verum_common::List<Type> = func
-                    .params
-                    .iter()
-                    .filter_map(|p| {
-                        match &p.kind {
-                            verum_ast::decl::FunctionParamKind::SelfRef => {
-                                method_receiver_kind =
-                                    verum_common::Maybe::Some(crate::protocol::ReceiverKind::SelfRef);
-                                None // Skip self param - it's implicit
-                            }
-                            verum_ast::decl::FunctionParamKind::SelfRefMut => {
-                                method_receiver_kind = verum_common::Maybe::Some(
-                                    crate::protocol::ReceiverKind::SelfMut,
-                                );
-                                None // Skip self param - it's implicit
-                            }
-                            verum_ast::decl::FunctionParamKind::SelfValue
-                            | verum_ast::decl::FunctionParamKind::SelfValueMut => {
-                                method_receiver_kind =
-                                    verum_common::Maybe::Some(crate::protocol::ReceiverKind::SelfValue);
-                                None // Skip self param - it's implicit
-                            }
-                            verum_ast::decl::FunctionParamKind::Regular { ty, .. } => {
-                                self.ast_to_type(ty).ok()
-                            }
-                            _ => Some(Type::Var(crate::ty::TypeVar::fresh())),
-                        }
+                let params: List<Type> = func.params.iter()
+                    .filter_map(|p| match &p.kind {
+                        FunctionParamKind::Regular { ty, .. } => self.ast_to_type(ty).ok(),
+                        _ => None,
                     })
                     .collect();
                 let return_type = if let verum_common::Maybe::Some(ref ret) = func.return_type {
@@ -6024,6 +5938,8 @@ impl TypeChecker {
                                     // receiver args to their correct positional
                                     // TypeVars and leaves impl_vars_outside free
                                     // (to be inferred from bounds / unification).
+                                    method_scheme.receiver_kind =
+                                        Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                     method_scheme.impl_var_count = impl_vars_in_for_type.len();
                                     self.record_explicit_method_vars(&mut method_scheme, func);
                                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5370 count={}", impl_vars_in_for_type.len()); }
@@ -6368,6 +6284,8 @@ impl TypeChecker {
 
                                 let mut method_scheme =
                                     self.ctx.generalize_with_vars(method_ty, &ordered_vars);
+                                method_scheme.receiver_kind =
+                                    Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                 method_scheme.impl_var_count = impl_vars_in_for_type.len();
                                 if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5671 count={}", impl_vars_in_for_type.len()); }
 
@@ -6503,6 +6421,8 @@ impl TypeChecker {
 
                                 let mut method_scheme =
                                     self.ctx.generalize_with_vars(method_ty, &ordered_vars);
+                                method_scheme.receiver_kind =
+                                    Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                 method_scheme.impl_var_count = impl_vars_in_for_type.len();
                                 if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5802 count={}", impl_vars_in_for_type.len()); }
 
@@ -6632,6 +6552,7 @@ impl TypeChecker {
                                 // like U in chain<U: Iterator<Item = Self.Item>> must NOT be bound to
                                 // receiver type args (Range's Int). Without this, bind_limit falls back
                                 // to fresh_vars.len() and pins U := Int (see #57).
+                                method_scheme.receiver_kind = proto_method.receiver_kind;
                                 method_scheme.impl_var_count = impl_type_vars.len();
 
                                 // CRITICAL: Transfer type param bounds from the protocol method
@@ -8595,6 +8516,17 @@ impl TypeChecker {
                             verum_common::Maybe::Some(m) => m,
                             verum_common::Maybe::None => return None,
                         };
+                        // Archive-only protocol descriptors can erase self's
+                        // permission. Source declarations retain the contract.
+                        if self.protocols_with_known_defaults.contains_key(&proto_ident)
+                            && let Some(declared) = proto_method.receiver_kind
+                            && !declared.meta().allows_mutation
+                            && crate::core_metadata::ReceiverKind::from_declaration(func).meta().allows_mutation
+                        {
+                            return Some((func.name.name.clone(),
+                                "implementation requires a mutable or owned receiver where the protocol grants shared access".into(),
+                                func.span));
+                        }
                         let impl_ty = crate::method_resolution::function_decl_to_type(func);
                         // The protocol's OWN parameters, plus the
                         // method's: both are bound elsewhere than in

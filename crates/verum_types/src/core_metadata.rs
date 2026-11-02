@@ -662,6 +662,17 @@ pub struct ReceiverKindMeta {
 }
 
 impl ReceiverKind {
+    /// Source receiver permission before method parameters are lowered.
+    pub(crate) fn from_declaration(function: &verum_ast::FunctionDecl) -> Self {
+        use verum_ast::decl::FunctionParamKind::*;
+        match function.params.first().map(|p| &p.kind) {
+            Some(SelfRef | SelfRefChecked | SelfRefUnsafe) => Self::SelfRef,
+            Some(SelfRefMut | SelfRefCheckedMut | SelfRefUnsafeMut) => Self::SelfMut,
+            Some(SelfValue | SelfValueMut | SelfOwn | SelfOwnMut) => Self::SelfValue,
+            Some(Regular { .. }) | None => Self::None,
+        }
+    }
+
     /// All variants in declaration order.
     pub const ALL: &'static [Self] =
         &[Self::None, Self::SelfValue, Self::SelfRef, Self::SelfMut];

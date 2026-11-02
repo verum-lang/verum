@@ -6019,6 +6019,8 @@ impl TypeChecker {
                         let qualified_name = format!("{}.{}", method_owner, func.name.name);
                         let mut method_scheme =
                             self.ctx.generalize_with_vars(func_ty, &ordered_vars);
+                        method_scheme.receiver_kind =
+                            Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                         method_scheme.impl_var_count = impl_type_vars.len();
                         method_scheme.impl_self_type = self.current_self_type.clone();
                         if !method_type_bounds.is_empty() {
@@ -6137,6 +6139,8 @@ impl TypeChecker {
                         // This prevents method-level type vars (like F in modify<F>)
                         // from being incorrectly bound to receiver type args during
                         // method call resolution.
+                        method_scheme.receiver_kind =
+                            Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                         method_scheme.impl_var_count = impl_type_vars.len();
                         if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=modules.rs:4465 count={}", impl_type_vars.len()); }
 
@@ -9141,44 +9145,11 @@ impl TypeChecker {
                                 // to handle types not yet in scope during protocol registration.
                                 // Self parameter is EXCLUDED from params (it's implicit in method calls)
                                 // but its receiver kind is tracked for object safety analysis.
-                                let mut proto_method_receiver_kind = verum_common::Maybe::None;
-                                let params: List<Type> = decl
-                                    .params
-                                    .iter()
-                                    .filter_map(|p| {
-                                        match &p.kind {
-                                            FunctionParamKind::SelfRef
-                                            | FunctionParamKind::SelfRefChecked
-                                            | FunctionParamKind::SelfRefUnsafe => {
-                                                proto_method_receiver_kind =
-                                                    verum_common::Maybe::Some(
-                                                        crate::protocol::ReceiverKind::SelfRef,
-                                                    );
-                                                None // Skip self - implicit in method calls
-                                            }
-                                            FunctionParamKind::SelfRefMut
-                                            | FunctionParamKind::SelfRefCheckedMut
-                                            | FunctionParamKind::SelfRefUnsafeMut => {
-                                                proto_method_receiver_kind =
-                                                    verum_common::Maybe::Some(
-                                                        crate::protocol::ReceiverKind::SelfMut,
-                                                    );
-                                                None // Skip self - implicit in method calls
-                                            }
-                                            FunctionParamKind::SelfValue
-                                            | FunctionParamKind::SelfValueMut
-                                            | FunctionParamKind::SelfOwn
-                                            | FunctionParamKind::SelfOwnMut => {
-                                                proto_method_receiver_kind =
-                                                    verum_common::Maybe::Some(
-                                                        crate::protocol::ReceiverKind::SelfValue,
-                                                    );
-                                                None // Skip self - implicit in method calls
-                                            }
-                                            FunctionParamKind::Regular { ty, .. } => {
-                                                Some(self.ast_to_type_lenient(ty))
-                                            }
-                                        }
+                                let proto_method_receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(decl));
+                                let params: List<Type> = decl.params.iter()
+                                    .filter_map(|p| match &p.kind {
+                                        FunctionParamKind::Regular { ty, .. } => Some(self.ast_to_type_lenient(ty)),
+                                        _ => None,
                                     })
                                     .collect();
 
@@ -9663,6 +9634,8 @@ impl TypeChecker {
 
                     // impl_var_count = 1 (the `I` type parameter)
                     // This tells method resolution to bind fresh_vars[0] to the whole receiver type
+                    method_scheme.receiver_kind =
+                        Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                     method_scheme.impl_var_count = 1;
 
                     if !method_type_var_bounds.is_empty() {
@@ -15243,6 +15216,18 @@ impl TypeChecker {
 
     /// Look up a field type on a record or named type.
     /// Returns the field type if found, None otherwise.
+    /// Alternating aliases and references can expose more than one receiver
+    /// layer. Read and assignment must resolve the same field.
+    pub(super) fn normalize_field_receiver(&self, ty: &Type) -> Type {
+        let mut head = self.normalize_type(self.unwrap_reference_type(ty));
+        for _ in 0..64 {
+            let referent = self.unwrap_reference_type(&head);
+            if std::ptr::eq(referent, &head) { break; }
+            head = self.normalize_type(referent);
+        }
+        head
+    }
+
     /// Spec: Field access type resolution
     pub(super) fn lookup_field_type(&self, ty: &Type, field_name: &str) -> Option<Type> {
         self.resolve_to_record_type(ty)?.get(field_name).cloned()
@@ -18571,7 +18556,7 @@ impl TypeChecker {
         // Collect the method chain into a vector (in reverse order)
         // For a.b().c().d(), we collect: [(d, type_args_d, args_d), (c, type_args_c, args_c), (b, type_args_b, args_b)]
         // and base = a
-        let mut chain: Vec<(&Ident, &List<verum_ast::ty::GenericArg>, &[Expr], Span)> = Vec::new();
+        let mut chain: Vec<(&Expr, &Ident, &List<verum_ast::ty::GenericArg>, &[Expr], Span)> = Vec::new();
         let mut current_receiver = receiver;
         let mut current_method = method;
         let mut current_type_args = type_args;
@@ -18581,6 +18566,7 @@ impl TypeChecker {
         loop {
             // Add the current method call to the chain
             chain.push((
+                current_receiver,
                 current_method,
                 current_type_args,
                 current_args,
@@ -18650,79 +18636,82 @@ impl TypeChecker {
                 None => false,
             }
         };
-        let old_call_context = self.in_call_arg_context;
-        self.in_call_arg_context = true;
-        let mut current_ty = if base_is_module_alias || base_is_module_path {
-            Type::Var(TypeVar::fresh())
-        } else {
-            let base_result = self.synth_expr(current_receiver)?;
-            base_result.ty
-        };
-        self.in_call_arg_context = old_call_context;
-
-        // Step 2: Process each method call iteratively (in reverse order to apply from base)
-        //
-
-        // CRITICAL: The first method call in the chain needs different handling than subsequent calls.
-        // - For `Int.max_value().min(0)`:
-        //  - First call (max_value): receiver is Path("Int"), needs static method lookup
-        //  - Second call (min): receiver is result of max_value(), needs instance method lookup
-        //
-
-        // CRITICAL FIX: Use precomputed receiver type for ALL calls to avoid double-synthesis.
-        // The receiver was already synthesized at lines 29405-29406 with in_call_arg_context=true.
-        // Re-synthesizing in infer_method_call_inner_impl would happen with context=false,
-        // causing use_value() instead of borrow_value() - breaking affine tracking in loops.
-        //
-
-        // For the first call: use infer_method_call_with_recv_type (skip_static=false) to
-        // preserve static method lookup based on receiver.kind (e.g., Int.max_value()).
-        //
-
-        // For subsequent calls: use infer_method_call_with_recv_type_skip_static (skip_static=true)
-        // because receiver.kind is the original base, not the actual receiver.
-        let mut is_first_call = true;
-        for (method, type_args, args, span) in chain.into_iter().rev() {
-            let result = if is_first_call {
-                // First call: pass precomputed type but allow static method lookup
-                // This fixes affine tracking in loops while preserving Int.max_value() patterns
-                self.infer_method_call_with_recv_type(
-                    current_ty.clone(),
-                    current_receiver,
-                    method,
-                    type_args,
-                    args,
-                    span,
-                )?
+        self.with_place_types(current_receiver, |tc| {
+            let old_call_context = tc.in_call_arg_context;
+            tc.in_call_arg_context = true;
+            let base_type = if base_is_module_alias || base_is_module_path {
+                Ok(Type::Var(TypeVar::fresh()))
             } else {
-                // Subsequent calls: use precomputed type from previous call result
-                // Skip static lookup since receiver.kind is the original base expression
-                self.infer_method_call_with_recv_type_skip_static(
-                    current_ty.clone(),
-                    current_receiver,
-                    method,
-                    type_args,
-                    args,
-                    span,
-                )?
+                tc.synth_expr(current_receiver).map(|result| result.ty)
             };
-            current_ty = result.ty;
-            // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
-            // Only attempt for direct projection types (not deeply nested) to avoid stack overflow
-            if let Type::Generic { name, args } = &current_ty {
-                if name.as_str().starts_with("::") && !args.is_empty() {
-                    let assoc_name = &name.as_str()[2..];
-                    if let Some(resolved) =
-                        self.try_resolve_associated_type_projection(&args[0], assoc_name)
-                    {
-                        current_ty = resolved;
+            tc.in_call_arg_context = old_call_context;
+            let mut current_ty = base_type?;
+
+            // Step 2: Process each method call iteratively (in reverse order to apply from base)
+            //
+
+            // CRITICAL: The first method call in the chain needs different handling than subsequent calls.
+            // - For `Int.max_value().min(0)`:
+            //  - First call (max_value): receiver is Path("Int"), needs static method lookup
+            //  - Second call (min): receiver is result of max_value(), needs instance method lookup
+            //
+
+            // CRITICAL FIX: Use precomputed receiver type for ALL calls to avoid double-synthesis.
+            // The receiver was already synthesized at lines 29405-29406 with in_call_arg_context=true.
+            // Re-synthesizing in infer_method_call_inner_impl would happen with context=false,
+            // causing use_value() instead of borrow_value() - breaking affine tracking in loops.
+            //
+
+            // For the first call: use infer_method_call_with_recv_type (skip_static=false) to
+            // preserve static method lookup based on receiver.kind (e.g., Int.max_value()).
+            //
+
+            // For subsequent calls: use infer_method_call_with_recv_type_skip_static (skip_static=true)
+            // because receiver.kind is the original base, not the actual receiver.
+            let mut is_first_call = true;
+            for (step_receiver, method, type_args, args, span) in chain.into_iter().rev() {
+                let result = if is_first_call {
+                    // First call: pass precomputed type but allow static method lookup
+                    // This fixes affine tracking in loops while preserving Int.max_value() patterns
+                    tc.infer_method_call_with_recv_type(
+                        current_ty.clone(),
+                        current_receiver,
+                        method,
+                        type_args,
+                        args,
+                        span,
+                    )?
+                } else {
+                    // Subsequent calls: use precomputed type from previous call result
+                    // A later call operates on the preceding result. Its actual
+                    // expression distinguishes that value or borrow from the chain root.
+                    tc.infer_method_call_with_recv_type_skip_static(
+                        current_ty.clone(),
+                        step_receiver,
+                        method,
+                        type_args,
+                        args,
+                        span,
+                    )?
+                };
+                current_ty = result.ty;
+                // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
+                // Only attempt for direct projection types (not deeply nested) to avoid stack overflow
+                if let Type::Generic { name, args } = &current_ty {
+                    if name.as_str().starts_with("::") && !args.is_empty() {
+                        let assoc_name = &name.as_str()[2..];
+                        if let Some(resolved) =
+                            tc.try_resolve_associated_type_projection(&args[0], assoc_name)
+                        {
+                            current_ty = resolved;
+                        }
                     }
                 }
+                is_first_call = false;
             }
-            is_first_call = false;
-        }
 
-        Ok(InferResult::new(current_ty))
+            Ok(InferResult::new(current_ty))
+        })
     }
 
     /// Infer type for method call: receiver.method(args)
@@ -19127,6 +19116,32 @@ impl TypeChecker {
         precomputed_recv_ty: Option<Type>,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
+        self.with_place_types(receiver, |tc| {
+            let mut receiver_type = precomputed_recv_ty;
+            let mut result = tc.resolve_method_call(
+                receiver, method, type_args, args, span, &mut receiver_type, skip_static_lookup,
+            )?;
+            // The call executes after its arguments. They may have opened a
+            // dependent witness on this place even if none was live on entry.
+            // An erased receiver or a fallback signature supplies no read-only authority.
+            match result.receiver_kind.take() {
+                Some(kind) if !kind.meta().allows_mutation => {}
+                _ => tc.check_dependent_write_access(receiver, receiver_type.as_ref())?,
+            }
+            Ok(result)
+        })
+    }
+
+    fn resolve_method_call(
+        &mut self,
+        receiver: &Expr,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+        precomputed_recv_ty: &mut Option<Type>,
+        skip_static_lookup: bool,
+    ) -> Result<InferResult> {
         self.clear_pending_arity();
         self.infer_method_call_inner_impl_traced_entry(receiver, method);
         if crate::ctor_trace_enabled() {
@@ -19427,8 +19442,8 @@ impl TypeChecker {
             ctx_ty
         } else if let Some(mounted) = mounted_recv_ty {
             self.unifier.apply(&mounted)
-        } else if let Some(precomputed) = precomputed_recv_ty {
-            self.unifier.apply(&precomputed)
+        } else if let Some(precomputed) = precomputed_recv_ty.as_ref() {
+            self.unifier.apply(precomputed)
         } else {
             // Normal case: synthesize receiver type
             let recv_result = self.synth_expr(receiver)?;
@@ -19442,16 +19457,26 @@ impl TypeChecker {
         }
 
         // Strip refinement types: methods on Float{{<predicate>}} should resolve as Float methods
-        let recv_ty_raw = match recv_ty_raw {
+        let recv_ty_raw: &Type = precomputed_recv_ty.insert(match recv_ty_raw {
             Type::Refined { base, .. } => *base,
             Type::Sigma { fst_type, .. } => *fst_type,
             other => other,
-        };
+        });
 
-        self.load_source_receiver_methods(&recv_ty_raw)?;
-        self.check_source_method_visibility(&recv_ty_raw, method.name.as_str(), span)?;
+        self.load_source_receiver_methods(recv_ty_raw)?;
+        self.check_source_method_visibility(recv_ty_raw, method.name.as_str(), span)?;
 
-        if let Some(r) = self.resolve_reference_type_method(&recv_ty_raw, method, args, span)? {
+        if let Some(mut r) = self.resolve_reference_type_method(recv_ty_raw, method, args, span)? {
+            // These intrinsics inspect a reference or reborrow its target.
+            // Returning a mutable handle retains the receiver's write authority.
+            use crate::core_metadata::ReceiverKind;
+            r.receiver_kind = Some(match &r.ty {
+                Type::Reference { mutable: true, .. }
+                | Type::CheckedReference { mutable: true, .. }
+                | Type::UnsafeReference { mutable: true, .. }
+                | Type::Pointer { mutable: true, .. } => ReceiverKind::SelfMut,
+                _ => ReceiverKind::SelfRef,
+            });
             if crate::ctor_trace_enabled() {
                 eprintln!(
                     "[ctor-trace] reference-resolver {} -> {}",
@@ -19466,7 +19491,7 @@ impl TypeChecker {
         // AUTO-DEREFERENCE: For method calls on references/Heap, use the underlying type
         // This enables ref.len() to call .len() on the underlying value
         // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
-        let recv_ty_derefed = Self::auto_deref_for_method_call(&recv_ty_raw);
+        let recv_ty_derefed = Self::auto_deref_for_method_call(recv_ty_raw);
 
         // Use the same transparent-alias substitution as unification. This
         // retains qualified declaration owners and instantiated arguments
@@ -19511,12 +19536,17 @@ impl TypeChecker {
                 }
                 let pc = self.protocol_checker.read();
                 if let Some(method_ty) = pc.get_method_type(bound_name.as_str(), method_name_str) {
+                    let receiver_kind = self.protocols_with_known_defaults.contains_key(bound_name)
+                        .then(|| pc.get_protocol(bound_name)?.methods.get(&method.name)?.receiver_kind)
+                        .flatten();
                     drop(pc);
                     // Infer arguments (type check them)
                     for arg in args.iter() {
                         let _ = self.infer_expr(arg, InferMode::Synth)?;
                     }
-                    return Ok(InferResult::new(method_ty));
+                    // Erased protocol metadata provides no shared-access
+                    // contract. A vtable call may select a mutating implementor.
+                    return Ok(InferResult::method(method_ty, receiver_kind));
                 }
             }
         }
@@ -19886,7 +19916,7 @@ impl TypeChecker {
         // type params; for ordinary type-var dispatch, every protocol is fair
         // game (that's how `x.fmt()` on `T: Display` works today).
         self.resolve_method_via_protocol_search(
-            recv_ty, recv_ty_raw, receiver, method, type_args, args, span, skip_static_lookup,
+            recv_ty, recv_ty_raw.clone(), receiver, method, type_args, args, span, skip_static_lookup,
         )
     }
 
@@ -20221,7 +20251,7 @@ impl TypeChecker {
                             return None;
                         }
                         let explicit_vars = scheme.fresh_explicit_method_vars(&fresh_vars);
-                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds))
+                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind))
                     })
                 };
                 if crate::ctor_trace_enabled() && early_method_info.is_none() {
@@ -20231,7 +20261,7 @@ impl TypeChecker {
                     );
                 }
 
-                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds)) =
+                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind)) =
                     early_method_info
                 {
                     // #91/#95 — STATIC-DISPATCH ONLY.  Stamp the
@@ -20440,7 +20470,7 @@ impl TypeChecker {
                                         final_return_type
                                     );
                                 }
-                                return Ok(Some(InferResult::new(final_return_type)));
+                                return Ok(Some(InferResult::method(final_return_type, receiver_kind)));
                             }
                             // signature_mismatch: fall through to protocol/fallback paths
                             if crate::ctor_trace_enabled() {
@@ -20926,62 +20956,26 @@ impl TypeChecker {
             // Auto-deref through one reference level for tier conversion methods
             // Handles `self.to_managed()` inside `implement Ref<T> for &checked T` where self: &&checked T
             (
-                Type::Reference { inner, .. },
-                method @ ("to_checked" | "as_checked" | "to_managed" | "as_managed" | "to_unsafe"
+                Type::Reference { inner, mutable: outer_mut },
+                conversion @ ("to_checked" | "as_checked" | "to_managed" | "as_managed" | "to_unsafe"
                 | "as_unsafe" | "to_checked_mut" | "to_managed_mut" | "to_unsafe_mut"),
             ) if args.is_empty() => {
-                let derefed = inner.as_ref().clone();
-                match (&derefed, method) {
-                    (Type::Reference { inner, mutable }, "to_checked" | "as_checked") => {
-                        return Ok(Some(InferResult::new(Type::CheckedReference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        })));
-                    }
-                    (Type::CheckedReference { inner, mutable }, "to_managed" | "as_managed") => {
-                        return Ok(Some(InferResult::new(Type::Reference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        })));
-                    }
-                    (Type::Reference { inner, mutable }, "to_unsafe" | "as_unsafe") => {
-                        return Ok(Some(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        })));
-                    }
-                    (Type::CheckedReference { inner, mutable }, "to_unsafe" | "as_unsafe") => {
-                        return Ok(Some(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        })));
-                    }
-                    (Type::Reference { inner, .. }, "to_checked_mut") => {
-                        return Ok(Some(InferResult::new(Type::CheckedReference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        })));
-                    }
-                    (Type::CheckedReference { inner, .. }, "to_managed_mut") => {
-                        return Ok(Some(InferResult::new(Type::Reference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        })));
-                    }
-                    (Type::Reference { inner, .. }, "to_unsafe_mut") => {
-                        return Ok(Some(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        })));
-                    }
-                    (Type::CheckedReference { inner, .. }, "to_unsafe_mut") => {
-                        return Ok(Some(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        })));
-                    }
-                    _ => {}
+                // Reborrow across both edges. A shared outer reference
+                // cannot lend the exclusive capability stored behind it.
+                let (inner_mut, nested) = match inner.as_ref() {
+                    Type::Reference { mutable, inner } => (*mutable, inner),
+                    Type::CheckedReference { mutable, inner } => (*mutable, inner),
+                    _ => return Ok(None),
+                };
+                let mutable = *outer_mut && inner_mut;
+                if matches!(conversion, "to_checked_mut" | "to_managed_mut" | "to_unsafe_mut") && !mutable {
+                    return Err(TypeError::SharedReferenceWrite { span });
                 }
+                let reborrow = match inner.as_ref() {
+                    Type::Reference { .. } => Type::Reference { inner: nested.clone(), mutable },
+                    _ => Type::CheckedReference { inner: nested.clone(), mutable },
+                };
+                return self.resolve_reference_type_method(&reborrow, method, args, span);
             }
             _ => {}
         }
@@ -21513,14 +21507,12 @@ impl TypeChecker {
                             // Look up the method in the protocol definition AND its superprotocols.
                             // When Hashable extends Eq + Hash, calling hash() on T: Hashable
                             // must find hash() in the Hash superprotocol.
-                            let method_ty_opt = self
-                                .find_method_in_protocol_hierarchy(
-                                    &Text::from(protocol_name),
-                                    &method_name_text,
-                                )
-                                .map(|pm| pm.ty.clone());
-
-                            if let Some(method_ty) = method_ty_opt {
+                            if let Some((owner, declaration)) = self.find_method_in_protocol_hierarchy(
+                                &protocol_key, &method_name_text,
+                            ) {
+                                let receiver_kind = self.protocols_with_known_defaults
+                                    .contains_key(&owner).then_some(declaration.receiver_kind).flatten();
+                                let method_ty = declaration.ty;
                                 // Substitute protocol type parameters with bound args.
                                 // E.g., for E: Module<Text, DynTensor<Float>>, substitute In->Text, Out->DynTensor<Float>
                                 // so that forward's fn(In) -> Out becomes fn(Text) -> DynTensor<Float>.
@@ -21735,7 +21727,7 @@ impl TypeChecker {
                                     }
 
                                     let resolved_return = self.unifier.apply(return_type);
-                                    return Ok(InferResult::new(resolved_return));
+                                    return Ok(InferResult::method(resolved_return, receiver_kind));
                                 }
                             }
                         }
@@ -23244,7 +23236,10 @@ impl TypeChecker {
                                         // Apply substitution to return type
                                         let resolved_return = self.unifier.apply(return_type);
                                         let resolved_return = self.resolve_assoc_projections_deep(&resolved_return);
-                                        return Ok(Some(InferResult::new(resolved_return)));
+                                        let receiver_kind = self.protocols_with_known_defaults
+                                            .contains_key(&protocol_name)
+                                            .then_some(method.receiver_kind).flatten();
+                                        return Ok(Some(InferResult::method(resolved_return, receiver_kind)));
                                     }
                                 }
                             }
@@ -23346,7 +23341,7 @@ impl TypeChecker {
                                     &method_name,
                                 );
 
-                                if let Some(protocol_method) = found_method {
+                                if let Some((owner, protocol_method)) = found_method {
                                     // Found the method in a bounded protocol!
                                     // CRITICAL: Instantiate fresh type variables for each call
                                     // Without this, multiple calls like fa.map(f).map(g) would
@@ -23431,7 +23426,9 @@ impl TypeChecker {
                                             constructor.as_ref(),
                                         );
 
-                                        return Ok(Some(InferResult::new(final_return)));
+                                        let receiver_kind = self.protocols_with_known_defaults
+                                            .contains_key(&owner).then_some(protocol_method.receiver_kind).flatten();
+                                        return Ok(Some(InferResult::method(final_return, receiver_kind)));
                                     }
                                 }
                             }
@@ -23486,7 +23483,8 @@ impl TypeChecker {
                         }
 
                         let resolved_return = self.unifier.apply(return_type);
-                        return Ok(Some(InferResult::new(resolved_return)));
+                        return Ok(Some(InferResult::method(resolved_return,
+                            Some(crate::core_metadata::ReceiverKind::None))));
                     }
                     // Field exists but is not a function - return its type directly
                     // for zero-arg "method" calls (field access sugar)
@@ -23657,7 +23655,7 @@ impl TypeChecker {
                                 let impl_vc = scheme.impl_var_count;
                                 let (ty, fresh_vars, type_bounds) =
                                     scheme.instantiate_with_type_bounds();
-                                found = Some(((ty, fresh_vars, impl_vc), type_bounds));
+                                found = Some(((ty, fresh_vars, impl_vc), type_bounds, scheme.receiver_kind));
                                 found_alias_name = Some(alias_name.clone());
                                 break;
                             }
@@ -23668,7 +23666,7 @@ impl TypeChecker {
             };
 
             if let (
-                Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds)),
+                Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds, receiver_kind)),
                 Some(_alias_name),
             ) = (alias_method_info.0, alias_method_info.1)
             {
@@ -23706,7 +23704,7 @@ impl TypeChecker {
                         self.check_expr(arg, &resolved_param)?;
                     }
                     let resolved_return = self.unifier.apply(return_type);
-                    return Ok(Some(InferResult::new(resolved_return)));
+                    return Ok(Some(InferResult::method(resolved_return, receiver_kind)));
                 }
             }
         }
@@ -23799,6 +23797,7 @@ impl TypeChecker {
                                 candidate_name.clone(),
                                 (ty, fresh_vars, impl_vc),
                                 type_bounds,
+                                scheme.receiver_kind,
                             )
                         })
                     })
@@ -23809,6 +23808,7 @@ impl TypeChecker {
                 _matched_name,
                 (method_ty, ordered_fresh_vars, impl_var_count),
                 type_bounds,
+                receiver_kind,
             )) = fallback_method_info
             {
                 // Register type bounds
@@ -23913,7 +23913,7 @@ impl TypeChecker {
 
                         let subst_return_type = return_type.apply_subst(&combined_subst);
                         let final_return_type = self.unifier.apply(&subst_return_type);
-                        return Ok(Some(InferResult::new(final_return_type)));
+                        return Ok(Some(InferResult::method(final_return_type, receiver_kind)));
                     }
                     // signature_mismatch: fall through to generic method fallbacks
                 }
@@ -24488,7 +24488,7 @@ impl TypeChecker {
                         let (ty, fresh_vars, type_bounds) =
                             scheme.instantiate_with_type_bounds();
                         let explicit_vars = scheme.fresh_explicit_method_vars(&fresh_vars);
-                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds))
+                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind))
                     })
                 })
             })
@@ -24502,7 +24502,7 @@ impl TypeChecker {
             // AND that function type bounds (like F: fn(T) -> U) are preserved for closure checking.
             let _ = type_name_text; // Used in original code but now method_info_opt is computed above
 
-            if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds)) =
+            if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind)) =
                 method_info_opt
             {
                 // CRITICAL: Register type bounds for fresh type variables
@@ -24725,7 +24725,7 @@ impl TypeChecker {
                             // Without this, return type still has unresolved L2 type variable.
                             let final_return_type = self.unifier.apply(&subst_return_type);
 
-                            return Ok((Some(InferResult::new(final_return_type)), false));
+                            return Ok((Some(InferResult::method(final_return_type, receiver_kind)), false));
                         }
                     }
                 }
@@ -25173,7 +25173,7 @@ bake to have this verified.",
         span: Span,
         skip_static_lookup: bool,
     ) -> Result<Option<InferResult>> {
-        if let Some(r) = self.try_resolve_super_path_call(
+        if let Some(mut r) = self.try_resolve_super_path_call(
             receiver, method, args, span, skip_static_lookup,
         )? {
             if crate::ctor_trace_enabled() {
@@ -25182,10 +25182,11 @@ bake to have this verified.",
                     method.name, r.ty
                 );
             }
+            r.receiver_kind = Some(crate::core_metadata::ReceiverKind::None);
             return Ok(Some(r));
         }
 
-        if let Some(r) =
+        if let Some(mut r) =
             self.try_resolve_module_call(receiver, method, type_args, args, span, skip_static_lookup)?
         {
             if crate::ctor_trace_enabled() {
@@ -25194,6 +25195,7 @@ bake to have this verified.",
                     method.name, r.ty
                 );
             }
+            r.receiver_kind = Some(crate::core_metadata::ReceiverKind::None);
             return Ok(Some(r));
         }
 

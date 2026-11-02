@@ -512,3 +512,24 @@ fn later_method_chain_uses_the_declared_return_owner() {
         );
     }
 }
+
+#[test]
+fn shared_method_access_uses_the_selected_archive_receivers_permission() {
+    for receiver in ["&Builder", "&mut Builder", "Unit"] {
+        let mut data = metadata(false, true);
+        let method = data.functions.get_mut(&"core.alpha.Builder.read".into()).unwrap();
+        method.params[0].ty = receiver.into();
+        method.params[0].declared_ty = Text::new();
+        for eager in [false, true] {
+            let mut checker = checker(data.clone(), eager, true, &[]);
+            let errors = check_source(&mut checker,
+                "mount core.alpha.Builder; fn probe(b: &Builder) -> Int { b.read() }");
+            if receiver == "&Builder" {
+                assert!(errors.is_empty(), "{errors:?}");
+            } else {
+                assert!(errors.iter().any(|error| error.contains("SharedReferenceWrite")),
+                    "{receiver}, eager={eager}: {errors:?}");
+            }
+        }
+    }
+}

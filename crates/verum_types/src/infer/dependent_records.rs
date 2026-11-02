@@ -135,6 +135,21 @@ impl TypeChecker {
         Ok(Some((fields, layout)))
     }
 
+    fn stable_receiver_type(&self, ty: &Type, span: Span) -> Result<bool> {
+        let mut head = self.place_reference_head(ty, span)?;
+        for _ in 0..64 {
+            match head {
+                Type::Reference {
+                    mutable: false,
+                    inner,
+                } => head = self.place_reference_head(&inner, span)?,
+                Type::Named { .. } | Type::Generic { .. } | Type::Record(_) => return Ok(true),
+                _ => return Ok(false),
+            }
+        }
+        Ok(false)
+    }
+
     /// A projection can escape into the type of another value. Consequently its
     /// root must remain stable even after ordinary evaluation has finished.
     fn record_receiver(&mut self, expr: &Expr, origin: Span) -> Result<RecordReceiver> {
@@ -149,21 +164,14 @@ impl TypeChecker {
             ExprKind::Path(path) if path.segments.len() == 1 => {
                 let name = path.last_segment_name();
                 let scheme = self.ctx.env.lookup(name).ok_or_else(unstable)?;
-                let mut ty = &scheme.ty;
-                while let Type::Reference {
-                    mutable: false,
-                    inner,
-                } = ty
-                {
-                    ty = inner;
-                }
-                if !matches!(
-                    ty,
-                    Type::Named { .. } | Type::Generic { .. } | Type::Record(_)
-                ) {
+                if !self.stable_receiver_type(&scheme.ty, expr.span)? {
                     return Err(unstable());
                 }
-                let binding = self.ctx.env.receiver_id(name, origin).ok_or_else(unstable)?;
+                let binding = self
+                    .ctx
+                    .env
+                    .receiver_id(name, origin)
+                    .ok_or_else(unstable)?;
                 Ok(RecordReceiver {
                     binding,
                     fields: Default::default(),
@@ -177,18 +185,8 @@ impl TypeChecker {
                 let fields = self
                     .resolve_to_record_type(&self.record_conversion_head(&parent_ty))
                     .ok_or_else(unstable)?;
-                let mut field_ty = fields.get(&field.name).ok_or_else(unstable)?;
-                while let Type::Reference {
-                    mutable: false,
-                    inner,
-                } = field_ty
-                {
-                    field_ty = inner;
-                }
-                if !matches!(
-                    field_ty,
-                    Type::Named { .. } | Type::Generic { .. } | Type::Record(_)
-                ) {
+                let field_ty = fields.get(&field.name).ok_or_else(unstable)?;
+                if !self.stable_receiver_type(field_ty, expr.span)? {
                     return Err(unstable());
                 }
                 let mut receiver = self.record_receiver(parent, origin)?;
@@ -238,48 +236,6 @@ impl TypeChecker {
         }
         let place = self.record_receiver(receiver, span)?;
         layout.projection(field, field_ty, place, span).map(Some)
-    }
-
-    /// A mutable borrow, method receiver, or compound assignment can change a
-    /// field without passing through the plain assignment expression.
-    pub(super) fn check_dependent_write_place(&mut self, place: &Expr) -> Result<()> {
-        if self
-            .ctx
-            .lookup_type("__has_dependent_record_layouts")
-            .is_none()
-        {
-            return Ok(());
-        }
-        if let ExprKind::Field { expr, field } = &place.kind {
-            let ty = self.synth_expr_for_field_access(expr)?.ty;
-            self.dependent_field_type(expr, &ty, field.name.as_str(), true, place.span)?;
-        }
-        let mut root = place;
-        loop {
-            match &root.kind {
-                ExprKind::Field { expr, .. }
-                | ExprKind::Index { expr, .. }
-                | ExprKind::Paren(expr)
-                | ExprKind::Unary {
-                    op: verum_ast::UnOp::Deref,
-                    expr,
-                } => root = expr,
-                ExprKind::Path(path) => {
-                    if let Some(verum_ast::ty::PathSegment::Name(name)) = path.segments.first()
-                        && let Err(projection) = self.ctx.env.note_record_place_write(&name.name)
-                    {
-                        return Err(TypeError::DependentReceiverMutation {
-                            receiver: name.name.clone(),
-                            projection,
-                            mutation: place.span,
-                        });
-                    }
-                    break;
-                }
-                _ => break,
-            }
-        }
-        Ok(())
     }
 
     fn carrier_value(&mut self, value: &Expr, expected: &Type) -> Result<Type> {

@@ -1227,13 +1227,12 @@ impl TypeChecker {
                 op: UnOp::RefMut,
                 expr: inner,
             } => {
-                self.check_dependent_write_place(inner)?;
                 if let Type::Reference {
                     mutable: true,
                     inner: expected_inner,
                 } = expected
                 {
-                    match self.check_expr(inner, expected_inner) {
+                    match self.with_checked_write(inner, |tc| tc.check_expr(inner, expected_inner)) {
                         Ok(_) => {
                             // Borrow tracking for aliasing detection
                             // CRITICAL: Do NOT discard the Result — borrow conflicts must propagate
@@ -4479,9 +4478,9 @@ impl TypeChecker {
                         // SPECIAL CASE: Assignment operations need different handling
                         // to avoid checking initialization of the target (LHS).
                         Binary { op, left, right } => {
-                            if matches!(op, BinOp::Assign) {
-                                // For assignments, use the non-iterative path which handles
-                                // init tracking properly via check_expr_assignment_target
+                            if op.is_assignment() {
+                                // Every write needs its original place for permission checking.
+                                // Plain assignment also has distinct initialization rules.
                                 let result = self.infer_binop(*op, left, right, e.span)?;
                                 value_stack.push(result.ty);
                             } else {
@@ -4638,6 +4637,10 @@ impl TypeChecker {
                     let inner_ty = value_stack.pop().ok_or_else(|| {
                         TypeError::Other("Internal error: value stack underflow (unary)".into())
                     })?;
+
+                    if matches!(op, UnOp::Deref) {
+                        self.observe_place_operand(inner_expr, &inner_ty);
+                    }
 
                     // ============================================================
                     // NLL: Release borrow at last use for Deref operations
@@ -9965,15 +9968,7 @@ impl TypeChecker {
             return Ok(InferResult::new(ty));
         }
 
-        // CRITICAL FIX: Unwrap reference types before field access
-        // When we have `&Point`, we need to dereference to get `Point` first
-        // This handles &T, &checked T, &unsafe T, and nested references
-        let dereferenced_ty = self.unwrap_reference_type(&resolved_ty);
-
-        // CRITICAL FIX: Normalize type to resolve type aliases before field access
-        // When we have a type alias like `type CreateTokenRequestDto is { name: Text, ... }`,
-        // we need to resolve it to the underlying Record type before checking fields
-        let normalized_ty = self.normalize_type(dereferenced_ty);
+        let normalized_ty = self.normalize_field_receiver(&resolved_ty);
 
         // f10a integration completion (leg B): field access on an
         // ASSOCIATED-TYPE PROJECTION receiver. AssociatedProjection

@@ -277,7 +277,7 @@ impl TypeChecker {
         current
     }
 
-    fn conversion_nominal_head<'a>(&self, ty: &'a Type) -> Maybe<(Text, &'a [Type])> {
+    pub(super) fn conversion_nominal_head<'a>(&self, ty: &'a Type) -> Maybe<(Text, &'a [Type])> {
         match ty {
             Type::Named { path, args } => Some((self.path_to_string(path), args.as_slice())),
             Type::Generic { name, args } => Some((name.clone(), args.as_slice())),

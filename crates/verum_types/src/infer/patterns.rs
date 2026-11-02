@@ -3532,6 +3532,7 @@ impl TypeChecker {
                     var_protocol_bounds: Map::new(),
                     impl_var_count: 0,
                     impl_self_type: None,
+                    receiver_kind: None,
                     explicit_method_vars: None,
                     universe_params: List::new(),
                 },

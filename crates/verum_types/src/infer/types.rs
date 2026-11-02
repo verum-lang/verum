@@ -4180,7 +4180,7 @@ fn substitute_refinement_binder(
         &self,
         protocol_name: &Text,
         method_name: &Text,
-    ) -> Option<crate::protocol::ProtocolMethod> {
+    ) -> Option<(Text, crate::protocol::ProtocolMethod)> {
         // Get the protocol definition
         let protocol_checker_guard = self.protocol_checker.read();
         let protocol_opt = protocol_checker_guard.get_protocol(protocol_name);
@@ -4188,7 +4188,7 @@ fn substitute_refinement_binder(
             // First, check if this protocol directly has the method
             for (_, protocol_method) in &protocol.methods {
                 if &protocol_method.name == method_name {
-                    return Some(protocol_method.clone());
+                    return Some((protocol_name.clone(), protocol_method.clone()));
                 }
             }
 

@@ -19,6 +19,7 @@ mod universe_parameters;
 mod call_obligations;
 mod preparation;
 mod dependent_records;
+mod write_places;
 mod record_kernel;
 mod field_visibility;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
@@ -470,6 +471,9 @@ pub enum InferMode {
 /// Result of type inference.
 #[derive(Debug, Clone)]
 pub struct InferResult {
+    /// Only present until the method-call boundary has checked the selected
+    /// receiver against the actual place after evaluating the arguments.
+    receiver_kind: Option<crate::core_metadata::ReceiverKind>,
     /// Inferred or checked type
     pub ty: Type,
     /// Any verification conditions generated
@@ -481,11 +485,16 @@ impl InferResult {
         Self {
             ty,
             vcs: List::new(),
+            receiver_kind: None,
         }
     }
 
+    fn method(ty: Type, receiver_kind: Option<crate::core_metadata::ReceiverKind>) -> Self {
+        Self { receiver_kind, ..Self::new(ty) }
+    }
+
     pub fn with_vcs(ty: Type, vcs: List<crate::refinement::VerificationCondition>) -> Self {
-        Self { ty, vcs }
+        Self { ty, vcs, receiver_kind: None }
     }
 }
 
@@ -574,6 +583,7 @@ pub struct FunctionContract {
 /// The main type checker.
 pub struct TypeChecker {
     analysis_control: Option<crate::AnalysisControl>,
+    place_operands: Vec<std::collections::HashMap<usize, Option<Type>>>,
     /// Type context
     pub(crate) ctx: TypeContext,
     /// Unifier

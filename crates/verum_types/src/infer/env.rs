@@ -1067,6 +1067,7 @@ impl TypeChecker {
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
+            place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -1227,6 +1228,7 @@ impl TypeChecker {
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
+            place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -1388,6 +1390,7 @@ impl TypeChecker {
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
+            place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -2380,6 +2383,12 @@ impl TypeChecker {
     /// This is like synth_expr but skips the full initialization check for simple paths,
     /// since field/index access checks the specific field/index instead.
     pub(super) fn synth_expr_for_field_access(&mut self, expr: &Expr) -> Result<InferResult> {
+        let result = self.infer_field_operand(expr)?;
+        self.observe_place_operand(expr, &result.ty);
+        Ok(result)
+    }
+
+    fn infer_field_operand(&mut self, expr: &Expr) -> Result<InferResult> {
         use verum_ast::expr::ExprKind;
 
         // For simple paths, skip the full initialization check - the caller handles field-specific checks
@@ -2575,8 +2584,7 @@ impl TypeChecker {
                     }
                     return Ok(InferResult::new(ty));
                 }
-                let dereferenced_ty = self.unwrap_reference_type(&obj_result.ty);
-                let mut normalized_ty = self.normalize_type(dereferenced_ty);
+                let mut normalized_ty = self.normalize_field_receiver(&obj_result.ty);
 
                 // Never propagation: any field access on Never produces Never
                 if matches!(normalized_ty, Type::Never) {
@@ -12381,9 +12389,7 @@ with .to_float() or .to_int() (at {:?})",
                 self.check_assignment_aliasing(left, _span)?;
 
                 let right_result = self.synth_expr(right)?;
-                self.check_dependent_write_place(left)?;
-                // For assignment LHS, use the special method that skips init checking
-                self.check_expr_assignment_target(left, &right_result.ty)?;
+                self.with_checked_write(left, |tc| tc.check_expr_assignment_target(left, &right_result.ty))?;
 
                 Ok(InferResult::new(Type::unit()))
             }
@@ -12395,47 +12401,40 @@ with .to_float() or .to_int() (at {:?})",
             // protocol implementations registered by the stdlib.
             AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | BitAndAssign
             | BitOrAssign | BitXorAssign | ShlAssign | ShrAssign => {
-                self.check_dependent_write_place(left)?;
-                let left_result = self.synth_expr(left)?;
-
-                match &left_result.ty {
-                    Type::Int | Type::Float => {
-                        let right_result = self.synth_expr(right)?;
-                        self.unifier
-                            .unify(&left_result.ty, &right_result.ty, _span)?;
-                    }
-                    Type::Text if matches!(op, AddAssign) => {
-                        let right_result = self.synth_expr(right)?;
-                        self.unifier.unify(&right_result.ty, &Type::text(), _span)?;
-                    }
-                    Type::Var(_) => {
-                        let right_result = self.synth_expr(right)?;
-                        self.unifier
-                            .unify(&left_result.ty, &right_result.ty, _span)?;
-                    }
-                    _ => {
-                        // For Named and other types: try check_expr for literal
-                        // coercion, fall back to synth + unify.
-                        if self.check_expr(right, &left_result.ty).is_err() {
-                            let right_result = self.synth_expr(right)?;
-                            self.unifier
-                                .unify(&right_result.ty, &left_result.ty, _span)?;
-                        }
-                    }
-                }
-                Ok(InferResult::new(Type::unit()))
+                self.with_checked_write(left, |tc| tc.infer_compound_write(left, right, op, _span))
             }
 
-            // All BinOp variants are handled above.
-            // This fallback is kept for safety - if a new variant is added,
-            // this provides a clear error message.
             #[allow(unreachable_patterns)]
-            _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                "Binary operator {} requires protocol implementation.\n  \
-                 Hint: Ensure operand types implement the required protocol (e.g., Add, Sub, Mul, Div)",
-                op
-            )))),
+            _ => Err(TypeError::Other(format!("Unsupported binary operator {op}").into())),
         }
+    }
+
+    fn infer_compound_write(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        op: BinOp,
+        span: Span,
+    ) -> Result<InferResult> {
+        let left_ty = self.synth_expr(left)?.ty;
+        match &left_ty {
+            Type::Int | Type::Float | Type::Var(_) => {
+                let right_ty = self.synth_expr(right)?.ty;
+                self.unifier.unify(&right_ty, &left_ty, span)?;
+            }
+            Type::Text if op == BinOp::AddAssign => {
+                let right_ty = self.synth_expr(right)?.ty;
+                self.unifier.unify(&right_ty, &left_ty, span)?;
+            }
+            _ => {
+                // Contextual checking admits literals at a concrete numeric width.
+                if self.check_expr(right, &left_ty).is_err() {
+                    let right_ty = self.synth_expr(right)?.ty;
+                    self.unifier.unify(&right_ty, &left_ty, span)?;
+                }
+            }
+        }
+        Ok(InferResult::new(Type::unit()))
     }
 
     /// Infer type for unary operation.
@@ -12575,8 +12574,12 @@ with .to_float() or .to_int() (at {:?})",
 
     pub(super) fn infer_unop(&mut self, op: UnOp, expr: &Expr, _span: Span) -> Result<InferResult> {
         if matches!(op, UnOp::RefMut | UnOp::RefCheckedMut | UnOp::RefUnsafeMut) {
-            self.check_dependent_write_place(expr)?;
+            return self.with_checked_write(expr, |tc| tc.infer_unop_operand(op, expr, _span));
         }
+        self.infer_unop_operand(op, expr, _span)
+    }
+
+    fn infer_unop_operand(&mut self, op: UnOp, expr: &Expr, _span: Span) -> Result<InferResult> {
         use UnOp::*;
 
         match op {
@@ -12825,6 +12828,7 @@ with .to_float() or .to_int() (at {:?})",
             }
             Deref => {
                 let result = self.synth_expr(expr)?;
+                self.observe_place_operand(expr, &result.ty);
 
                 // ============================================================
                 // NLL: Release borrow at last use

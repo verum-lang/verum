@@ -52,6 +52,9 @@ pub struct TypeScheme {
     /// A zero count means no leading variable is bound positionally from
     /// receiver arguments. Static source methods retain their exact pattern below.
     pub impl_var_count: usize,
+    /// Permission of the implicit receiver stripped from the callable arguments.
+    /// Legacy descriptors without this information cannot establish a shared borrow.
+    pub(crate) receiver_kind: Option<crate::core_metadata::ReceiverKind>,
     /// Declared implementation receiver using this scheme's type variables.
     /// This preserves reordered, nested and fixed receiver arguments without
     /// inferring the implementation relationship from a method's return type.
@@ -135,6 +138,7 @@ impl TypeScheme {
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
             impl_self_type: None,
+            receiver_kind: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }
@@ -150,6 +154,7 @@ impl TypeScheme {
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
             impl_self_type: None,
+            receiver_kind: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }
@@ -166,6 +171,7 @@ impl TypeScheme {
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
             impl_self_type: None,
+            receiver_kind: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }
@@ -187,6 +193,7 @@ impl TypeScheme {
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
             impl_self_type: None,
+            receiver_kind: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }

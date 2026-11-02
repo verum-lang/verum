@@ -1941,6 +1941,9 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
+    #[error("cannot write through a shared reference")]
+    SharedReferenceWrite { span: verum_ast::Span },
+
     /// The checker retains the first projection that made this place a type index.
     #[error("cannot mutate a receiver used as a dependent type index (`{receiver}`)")]
     DependentReceiverMutation {
@@ -2172,7 +2175,7 @@ impl TypeError {
             AsmOutputNotLvalue { span } => *span,
             AnalysisCancelled | RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
             OtherWithCodeSpanned { span, .. } => *span,
-            UniverseBinding { span, .. } => *span,
+            UniverseBinding { span, .. } | SharedReferenceWrite { span } => *span,
             DependentReceiverMutation { mutation, .. } => *mutation,
             PositivityViolation { span, .. } => *span,
             UnknownVariantConstructor { span, .. } => *span,
@@ -2187,7 +2190,7 @@ impl TypeError {
     /// the build rather than getting masked by `tracing::debug!`.
     pub fn is_soundness_critical(&self) -> bool {
         matches!(self, TypeError::PositivityViolation { .. } | TypeError::UniverseBinding { .. }
-            | TypeError::DependentReceiverMutation { .. })
+            | TypeError::DependentReceiverMutation { .. } | TypeError::SharedReferenceWrite { .. })
     }
 
     /// Convert to diagnostic for error reporting with span information
@@ -3426,6 +3429,14 @@ impl TypeError {
                 .message("Analysis cancelled or deadline exceeded; no verdict is available")
                 .build(),
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
+
+            SharedReferenceWrite { span } => {
+                let mut builder = DiagnosticBuilder::error().message(self.to_string());
+                if let Some(span) = convert_span(*span) {
+                    builder = builder.span(span);
+                }
+                builder.build()
+            }
 
             DependentReceiverMutation { receiver, projection, mutation } => {
                 let mut builder = DiagnosticBuilder::error().message(self.to_string());

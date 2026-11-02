@@ -1007,6 +1007,7 @@ impl TypeChecker {
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
+            place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -3939,6 +3940,23 @@ impl TypeChecker {
                 }
             };
             let mut scheme = scheme;
+            use crate::core_metadata::ReceiverKind;
+            scheme.receiver_kind = if let Some(signature) = &fn_desc.source_signature {
+                Some(ReceiverKind::from_declaration(signature))
+            } else if is_static {
+                Some(ReceiverKind::None)
+            } else {
+                fn_desc.params.first().and_then(|p| match to_type(&p.ty) {
+                    Type::Reference { mutable, .. }
+                    | Type::CheckedReference { mutable, .. }
+                    | Type::UnsafeReference { mutable, .. } => {
+                        Some(if mutable { ReceiverKind::SelfMut } else { ReceiverKind::SelfRef })
+                    }
+                    // Legacy archives can encode self as Unit. Such a slot
+                    // cannot establish the callee's permission to borrow.
+                    _ => None,
+                })
+            };
             Self::record_metadata_explicit_slots(fn_desc, &scope_vars, &mut scheme);
             bucket.insert(method_name.clone(), scheme.clone());
             if is_static {
@@ -4208,6 +4226,7 @@ impl TypeChecker {
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
             analysis_control: None,
+            place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
