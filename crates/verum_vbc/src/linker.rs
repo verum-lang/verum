@@ -1383,6 +1383,7 @@ mod tests {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_signature: None,
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");

@@ -9702,6 +9702,17 @@ impl VbcCodegen {
     }
 
     fn collect_declarations(&mut self, item: &Item) -> CodegenResult<()> {
+        let unsupported_universe = match &item.kind {
+            ItemKind::Type(declaration) => verum_ast::source_signature::type_declaration_uses_universes(declaration),
+            ItemKind::Const(declaration) => verum_ast::source_signature::type_uses_universes(&declaration.ty),
+            ItemKind::Static(declaration) => verum_ast::source_signature::type_uses_universes(&declaration.ty),
+            _ => Ok(false),
+        }.map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
+        if unsupported_universe {
+            return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                "universe-bearing type, const, and static declarations require a metadata carrier; only free-function signatures are supported".into(),
+            )));
+        }
         match &item.kind {
             ItemKind::Function(func) => {
                 // Check if this is a single-function FFI declaration:
@@ -10970,6 +10981,8 @@ impl VbcCodegen {
     }
 
     fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
+        verum_ast::source_signature::source_signature(func, false)
+            .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let base_name = func.name.name.to_string();
 
         // Mangle the name if we're inside a nested function scope
@@ -13665,6 +13678,8 @@ impl VbcCodegen {
         type_name: &str,
         impl_generics: &[String],
     ) -> CodegenResult<()> {
+        verum_ast::source_signature::source_signature(func, true)
+            .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let self_type_name = self.declared_impl_type_name(type_name);
         let func_name = func.name.name.to_string();
         let qualified_name = format!("{}.{}", type_name, func_name);
@@ -19637,6 +19652,8 @@ impl VbcCodegen {
         func: &FunctionDecl,
         impl_type_name: Option<&String>,
     ) -> CodegenResult<()> {
+        let source_signature = verum_ast::source_signature::source_signature(func, impl_type_name.is_some())
+            .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let base_name = func.name.name.to_string();
 
         // Build the lookup name - use qualified name for impl functions
@@ -20673,6 +20690,7 @@ impl VbcCodegen {
         self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         descriptor.has_source_body = func.body.is_some();
+        descriptor.source_signature = source_signature;
         if impl_type_name.is_none() {
             descriptor.visibility = if matches!(func.visibility, verum_ast::Visibility::Public) {
                 crate::types::Visibility::Public

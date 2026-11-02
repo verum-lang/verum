@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 # Internal crates
 verum_common = { workspace = true }
-verum_ast = { workspace = true, optional = true }
+verum_ast = { workspace = true }
 verum_lexer = { workspace = true, optional = true } # For TokenStream serialization in meta-system
 verum_cbgr = { workspace = true } # CBGR tier analysis (always enabled for industrial quality)
 verum_fast_parser = { workspace = true, optional = true } # For mount resolution in codegen (compilation parser; LSP extras live in verum_parser)
@@ -27,6 +27,7 @@ indexmap = { version = "2.13", features = ["serde"] }
 # Serialization
 serde = { workspace = true }
 bincode = "1.3"
+serde_json = { workspace = true }
 
 # Errors
 thiserror = { workspace = true }
@@ -105,7 +106,6 @@ foreign-types-shared = { version = "0.3", optional = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 pretty_assertions = { workspace = true }
-serde_json = { workspace = true }
 verum_fast_parser = { workspace = true }
 verum_lexer = { workspace = true }
 
@@ -123,7 +123,7 @@ default = ["compression", "table_dispatch", "mlir-jit"]
 compression = ["dep:zstd", "dep:lz4_flex"]
 computed_goto = [] # Enable computed goto dispatch (platform-specific)
 table_dispatch = [] # Function table dispatch (~40% faster) - ALWAYS USED
-codegen = ["dep:verum_ast", "dep:verum_lexer", "dep:verum_fast_parser"] # Enable AST to VBC code generation with mount resolution
+codegen = ["dep:verum_lexer", "dep:verum_fast_parser"] # Enable AST to VBC code generation with mount resolution
 parallel = ["dep:rayon"] # Enable parallel scans and monomorphization
 metal = ["dep:metal", "dep:objc", "dep:block", "dep:foreign-types-shared"] # Metal GPU backend (macOS)
 ffi = ["dep:libloading", "dep:libffi"] # FFI runtime support for interpreter

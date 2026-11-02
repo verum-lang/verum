@@ -202,6 +202,9 @@ pub enum CodegenErrorKind {
 
     /// Feature not yet implemented.
     NotImplemented(String),
+
+    /// Declaration evidence cannot be erased even in lenient bootstrap mode.
+    InvalidSourceSignature(String),
 }
 
 impl CodegenError {
@@ -373,7 +376,8 @@ impl CodegenError {
             // be evaluated — must halt the build in EVERY mode; see
             // `SkipClass::Fatal`.
             CodegenErrorKind::StaticAssertionFailed { .. }
-            | CodegenErrorKind::AmbiguousConstructor { .. } => SkipClass::Fatal,
+            | CodegenErrorKind::AmbiguousConstructor { .. }
+            | CodegenErrorKind::InvalidSourceSignature(_) => SkipClass::Fatal,
             _ => SkipClass::BugClass,
         }
     }
@@ -548,6 +552,7 @@ impl fmt::Display for CodegenErrorKind {
             }
             Self::Internal(msg) => write!(f, "internal compiler error: {}", msg),
             Self::NotImplemented(feature) => write!(f, "not yet implemented: {}", feature),
+            Self::InvalidSourceSignature(message) => write!(f, "invalid source signature: {message}"),
         }
     }
 }

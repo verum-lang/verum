@@ -121,7 +121,7 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.27 retains declaration-owned semantic function results.
 /// Version 2.28 retains checked closure environment declarations.
 /// Version 2.29 adds declaration-owned typed destruction, including sum payloads.
-pub const VERSION_MINOR: u16 = 29;
+pub const VERSION_MINOR: u16 = 30;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

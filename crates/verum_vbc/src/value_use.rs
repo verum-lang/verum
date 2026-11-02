@@ -56,7 +56,7 @@ impl ValueUsePlan {
             .collect();
         let type_ids: List<_> = descriptor.type_params.iter().map(|p| p.id).collect();
         // Confine the existing serializer's Vec output to this encoding boundary.
-        let encoded = bincode::serialize(&(
+        let mut encoded = bincode::serialize(&(
             params,
             type_ids,
             &descriptor.return_type,
@@ -67,6 +67,9 @@ impl ValueUsePlan {
             uses,
         ))
         .ok()?;
+        if let Some(signature) = &descriptor.source_signature {
+            encoded.extend(bincode::serialize(signature).ok()?);
+        }
         Some(*blake3::hash(&encoded).as_bytes())
     }
     /// Any semantic signature rewrite needs an explicit producer revalidation.

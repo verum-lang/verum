@@ -1753,10 +1753,33 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::Deserialization("invalid semantic result presence".into())),
      }
  } else { None };
+ let source_signature = if fmt_minor >= 30 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => {
+             let length = decode_varint(self.data, &mut self.offset)?;
+             if length > crate::source_signature_codec::MAX_SOURCE_SIGNATURE_BYTES as u64 {
+                 return Err(VbcError::Deserialization("source signature exceeds byte budget".into()));
+             }
+             let length = length as usize;
+             let end = self.offset.checked_add(length)
+                 .filter(|end| *end <= self.data.len())
+                 .ok_or_else(|| VbcError::Deserialization("truncated source signature".into()))?;
+             let signature = crate::source_signature_codec::decode(&self.data[self.offset..end], parent_type.is_some())?;
+             if signature.params.len() != params.len() {
+                 return Err(VbcError::Deserialization("source signature parameter arity mismatch".into()));
+             }
+             self.offset = end;
+             Some(signature)
+         }
+         _ => return Err(VbcError::Deserialization("invalid source signature presence".into())),
+     }
+ } else { None };
  Ok(FunctionDescriptor {
  has_source_body,
  semantic_params,
  semantic_return,
+ source_signature,
  value_uses,
  explicit_type_param_ids,
  id,

@@ -1702,6 +1702,7 @@ impl VbcModule {
                     value_uses: None,
                     semantic_params: None,
                     semantic_return: None,
+                    source_signature: None,
                     explicit_type_param_ids: Vec::new(),
                     id: FunctionId(self.functions.len() as u32),
                     name: name_id,
@@ -2573,6 +2574,10 @@ pub struct FunctionDescriptor {
     /// the ABI return descriptor cannot supply this source fact (v2.27).
     #[serde(default)]
     pub semantic_return: Option<TypeRef>,
+    /// Complete body-free source signature for universe-bearing free functions
+    /// (v2.30). This is declaration evidence, independent of runtime ABI types.
+    #[serde(default)]
+    pub source_signature: Option<verum_ast::FunctionDecl>,
     /// Unique function ID.
     pub id: FunctionId,
 
@@ -2841,6 +2846,7 @@ impl Default for FunctionDescriptor {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_signature: None,
             id: FunctionId(0),
             name: StringId::EMPTY,
             parent_type: None,
@@ -4176,6 +4182,7 @@ mod precompile_extension_tests {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_signature: None,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -4235,6 +4242,7 @@ mod precompile_extension_tests {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_signature: None,
         };
         m.functions.push(desc);
 

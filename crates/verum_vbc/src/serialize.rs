@@ -830,6 +830,16 @@ impl Serializer {
         // v2.27: semantic results are independent of the erased ABI result.
         self.output.push(desc.semantic_return.is_some() as u8);
         if let Some(ty) = &desc.semantic_return { self.serialize_type_ref(ty)?; }
+        // v2.30: declaration syntax is independent of the erased ABI.
+        self.output.push(desc.source_signature.is_some() as u8);
+        if let Some(signature) = &desc.source_signature {
+            if signature.params.len() != desc.params.len() {
+                return Err(crate::error::VbcError::Serialization("source signature parameter arity mismatch".into()));
+            }
+            let bytes = crate::source_signature_codec::encode(signature, desc.parent_type.is_some())?;
+            encode_varint(bytes.len() as u64, &mut self.output);
+            self.output.extend_from_slice(&bytes);
+        }
         Ok(())
     }
 
