@@ -64,6 +64,7 @@ mod statements;
 mod value_uses;
 mod place_copies;
 mod formal_parameters;
+mod protocol_results;
 mod constructor_types;
 mod declaration_interface;
 mod field_visibility;
@@ -1092,6 +1093,10 @@ pub struct VbcCodegen {
     /// linkage without the carried structure.  `ctx.generic_type_params`
     /// is a name-only HashSet, hence this parallel carry.
     current_impl_ast_generics: Option<verum_common::List<verum_ast::ty::GenericParam>>,
+    /// The implementation's where predicates travel with its inline bounds.
+    current_impl_where_clause: Option<verum_ast::ty::WhereClause>,
+    /// Protocol instantiations guaranteed by the current callable's binder IDs.
+    current_protocol_bounds: std::collections::HashMap<crate::types::TypeParamId, Vec<TypeRef>>,
     /// Exact source impl target, scoped only around its own method compiler.
     current_impl_semantic_target: Option<verum_ast::Type>,
 
@@ -2337,6 +2342,8 @@ impl VbcCodegen {
             sibling_impl_counters: std::collections::HashMap::new(),
             sibling_pairing_counters: std::collections::HashMap::new(),
             current_impl_ast_generics: None,
+            current_impl_where_clause: None,
+            current_protocol_bounds: Default::default(),
             current_impl_semantic_target: None,
             source_type_mounts: Map::new(),
             imported_declaration_type_bindings: Map::new(),
@@ -5746,6 +5753,7 @@ impl VbcCodegen {
                 // generics for the descriptor fill inside
                 // compile_function; cleared after the item loop.
                 let previous_generics = self.current_impl_ast_generics.replace(impl_decl.generics.clone());
+                let previous_where = std::mem::replace(&mut self.current_impl_where_clause, impl_decl.generic_where_clause.clone());
 
                 for impl_item in impl_decl.items.iter() {
                     // Honour `@cfg` gates on impl items. ImplItem and
@@ -5821,6 +5829,7 @@ impl VbcCodegen {
                             if let Err(error) = self.handle_body_failure(
                                 func, type_name.as_deref(), error, policy, &mut first_strict_err,
                             ) {
+                                self.current_impl_where_clause = previous_where;
                                 self.current_impl_ast_generics = previous_generics;
                                 return Err(error);
                             }
@@ -5829,6 +5838,7 @@ impl VbcCodegen {
                     }
                 }
                 self.current_impl_ast_generics = previous_generics;
+                self.current_impl_where_clause = previous_where;
             }
             ItemKind::Pattern(pat_decl) => {
                 self.ctx.generic_type_params.clear();
@@ -19549,6 +19559,17 @@ impl VbcCodegen {
         func: &FunctionDecl,
         impl_type_name: Option<&String>,
     ) -> CodegenResult<()> {
+        let outer_bounds = std::mem::take(&mut self.current_protocol_bounds);
+        let result = self.compile_function_body(func, impl_type_name);
+        self.current_protocol_bounds = outer_bounds;
+        result
+    }
+
+    fn compile_function_body(
+        &mut self,
+        func: &FunctionDecl,
+        impl_type_name: Option<&String>,
+    ) -> CodegenResult<()> {
         let source_signature = verum_ast::source_signature::source_signature(func, impl_type_name.is_some())
             .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let base_name = func.name.name.to_string();
@@ -20005,6 +20026,17 @@ impl VbcCodegen {
         let declared_ids: verum_common::List<_> = caller_generics.values()
             .chain(caller_shadows.values()).copied().map(crate::types::TypeParamId).collect();
         caller_generics.extend(caller_shadows.clone());
+        let mut bounds = std::collections::HashMap::new();
+        if impl_type_name.is_some() {
+            self.collect_receiver_protocols(
+                self.current_impl_ast_generics.as_deref().unwrap_or_default(),
+                self.current_impl_where_clause.as_ref(), &receiver_generics, &declared_ids, &mut bounds,
+            );
+        }
+        self.collect_receiver_protocols(
+            &func.generics, func.generic_where_clause.as_ref(), &caller_generics, &declared_ids, &mut bounds,
+        );
+        self.current_protocol_bounds = bounds;
         self.ctx.current_generic_param_ids = caller_generics;
 
         // Add function's generic parameters to context for recognition in expressions.

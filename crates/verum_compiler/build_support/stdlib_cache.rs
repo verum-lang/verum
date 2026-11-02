@@ -78,6 +78,7 @@ pub(crate) fn producer_hasher(
         "crates/verum_vbc/src/codegen/expressions.rs",
         // Selection and protocol-await lowering share this producer module.
         "crates/verum_vbc/src/codegen/select.rs",
+        "crates/verum_vbc/src/codegen/protocol_results.rs",
         "crates/verum_vbc/src/codegen/constructor_types.rs",
         "crates/verum_vbc/src/mono/method_calls.rs",
         "crates/verum_vbc/src/codegen/statements.rs",

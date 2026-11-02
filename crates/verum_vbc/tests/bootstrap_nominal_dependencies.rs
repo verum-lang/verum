@@ -583,3 +583,89 @@ fn sibling_sum_does_not_shadow_a_files_explicit_mount() {
     }
     assert!(bundled_sum_patterns("SiblingOnly", true).is_err());
 }
+
+fn awaited_bound_pattern(body: &str) -> verum_vbc::codegen::CodegenResult<VbcModule> {
+    let sums = producer("package", "
+        module package.sums;
+        public type First<T> is Empty | Good(T);
+        public type Second<T> is Good(T) | Empty;
+        public type RemoteValue is Empty | Ready(Int);
+        public type Remote is protocol { async fn fetch(&self) -> RemoteValue; };
+    ");
+    let ast = source(&format!(
+        "module service.adapter;
+         mount package.sums.{{First, Second, Remote}};
+         type Endpoint is protocol {{ async fn invoke(&self) -> First<Int>; }};
+         type Other<T> is protocol {{ async fn invoke(&self) -> Second<T>; }};
+         type Adapter<R> is {{ inner: R }};
+         {body}"
+    ));
+    let files = [&ast];
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("service"));
+    codegen.import_bootstrap_nominal_dependencies(&files, &[&sums])?;
+    codegen.collect_unit_declarations(&files)?;
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&files, verum_vbc::codegen::ItemFailurePolicy::Strict)?;
+    codegen.finalize_module_from_state()
+}
+
+#[test]
+fn awaited_protocol_method_uses_the_receiver_binders_declared_result() {
+    use verum_vbc::{Instruction, bytecode::decode_instructions};
+    let module = awaited_bound_pattern("
+        type RemoteValue is Ready(Int) | Empty;
+        async fn remote<R: Remote>(item: R) -> Int {
+            match item.fetch().await { Ready(n) => n, _ => 0 }
+        }
+        implement<R: Endpoint> Adapter<R> {
+            async fn from_field(&self) -> Int {
+                match self.inner.invoke().await { Good(n) => n, _ => 0 }
+            }
+            async fn shadow<R: Other<Int>>(&self, item: R) -> Int {
+                match item.invoke().await { Good(n) => n, _ => 0 }
+            }
+        }
+        async fn from_argument<R>(item: R) -> Int where type R: Endpoint {
+            match item.invoke().await { Good(n) => n, _ => 0 }
+        }
+    ").unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    for (name, tag) in [("from_field", 1), ("shadow", 0), ("from_argument", 1), ("remote", 1)] {
+        let function = module.functions.iter().find(|f| module.strings.get(f.name)
+            .is_some_and(|path| path.rsplit('.').next() == Some(name))).unwrap();
+        let start = function.bytecode_offset as usize;
+        let ops = decode_instructions(&module.bytecode[start..start + function.bytecode_length as usize]).unwrap();
+        assert!(ops.iter().any(|op| matches!(op, Instruction::IsVar { tag: actual, .. } if *actual == tag)),
+            "{name}: {ops:?}");
+    }
+}
+
+#[test]
+fn awaited_protocol_result_rejects_an_absent_variant() {
+    let err = awaited_bound_pattern("
+        type Unrelated is Absent(Int) | Nope;
+        implement<R: Endpoint> Adapter<R> {
+            async fn handle(&self) -> Int {
+                match self.inner.invoke().await { Absent(n) => n, _ => 0 }
+            }
+        }
+    ").unwrap_err().to_string();
+    assert!(err.contains("no declared tag") && err.contains("Absent") && err.contains("First"), "{err}");
+}
+
+#[test]
+fn awaited_protocol_result_refuses_ambiguous_or_uninstantiated_bounds() {
+    for (declaration, bounds, reason) in [
+        ("type Unrelated is Good(Int) | None;", "Endpoint + Other<Int>", "ambiguous protocol method"),
+        ("type Child is protocol extends Other<Int> {};", "Child", "no declared tag"),
+    ] {
+        let err = awaited_bound_pattern(&format!(
+            "{declaration}
+             async fn handle<R: {bounds}>(item: R) -> Int {{
+                 match item.invoke().await {{ Good(n) => n, _ => 0 }}
+             }}"
+        )).unwrap_err().to_string();
+        assert!(err.contains(reason), "{bounds}: {err}");
+    }
+}

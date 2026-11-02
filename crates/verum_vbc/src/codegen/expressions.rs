@@ -673,14 +673,15 @@ impl VbcCodegen {
 
         let expected = self.ctx.match_scrutinee_type.as_deref()
             .map(Self::strip_wrapper_type).map(Self::strip_generic_args);
-        expected.and_then(|owner| {
-            self.nominal_type_id(owner).and_then(|id| self.type_by_id(id))
-                .and_then(|descriptor| self.descriptor_variant(descriptor, path))
-                .map(|variant| variant.tag)
-                .or_else(|| self.ctx.find_variant_by_type_and_name(owner, path))
-                .or_else(|| self.ctx.find_variant_parent_type(owner)
-                    .and_then(|parent| self.ctx.find_variant_by_type_and_name(&parent, path)))
-        })
+        if let Some(descriptor) = expected.and_then(|owner| self.nominal_type_id(owner))
+            .and_then(|id| self.type_by_id(id))
+            && descriptor.kind == crate::types::TypeKind::Sum && !descriptor.variants.is_empty()
+        {
+            return self.descriptor_variant(descriptor, path).map(|variant| variant.tag);
+        }
+        expected.and_then(|owner| self.ctx.find_variant_by_type_and_name(owner, path)
+            .or_else(|| self.ctx.find_variant_parent_type(owner)
+                .and_then(|parent| self.ctx.find_variant_by_type_and_name(&parent, path))))
         .or_else(|| self.ctx.lookup_function_in_scope(path).and_then(|info| info.variant_tag))
         .or_else(|| {
             let owner = self.ctx.variable_type_names.get("self")?;
@@ -11135,7 +11136,7 @@ impl VbcCodegen {
     /// A value receiver whose implementation depends on a caller binder.
     /// Pattern aliases carry their declared pointee in the lexical binding
     /// table. Reading that type does not move or clone the aliased place.
-    fn bound_receiver_declaration(&self, receiver: &Expr) -> Option<crate::types::TypeRef> {
+    pub(super) fn bound_receiver_declaration(&self, receiver: &Expr) -> Option<crate::types::TypeRef> {
         use crate::types::TypeRef;
         if self.ctx.current_generic_param_ids.is_empty()
             && self.ctx.generic_type_params_ordered.is_empty()
@@ -26442,6 +26443,9 @@ impl VbcCodegen {
                 else { self.compile_unary(UnOp::RefMut, inner)? }
                 .or_internal("Future await has no value")?;
             return self.compile_protocol_future_await(future, poll, owned);
+        }
+        if let Some(output) = self.bound_async_method_output(Self::normalized_place(inner)).transpose()? {
+            self.ctx.declared_result_types.insert(span, Some(output));
         }
         let task_reg = self
             .compile_expr(inner)?
