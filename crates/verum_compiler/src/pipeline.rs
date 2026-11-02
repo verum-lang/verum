@@ -938,6 +938,8 @@ pub struct CompilationPipeline<'s> {
     /// Accumulates function info across modules (e.g., core's Some/None used by collections).
     /// Only populated in StdlibBootstrap mode.
     global_function_registry: std::collections::HashMap<String, verum_vbc::codegen::FunctionInfo>,
+    /// Source-owned native ABI tables for cross-module stdlib calls.
+    global_foreign_interfaces: std::sync::Arc<verum_vbc::codegen::ForeignInterfaces>,
 
     /// Global record field-layout registry for cross-module field-index
     /// resolution in stdlib bootstrap (defect D2b).  Accumulates
@@ -1260,6 +1262,7 @@ impl<'s> CompilationPipeline<'s> {
             // Stdlib bootstrap mode fields - empty for normal mode
             stdlib_resolver: None,
             global_function_registry: std::collections::HashMap::new(),
+            global_foreign_interfaces: Default::default(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_field_name_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
@@ -1377,6 +1380,7 @@ impl<'s> CompilationPipeline<'s> {
             // Stdlib bootstrap mode fields - initialized
             stdlib_resolver: Some(resolver),
             global_function_registry: std::collections::HashMap::new(),
+            global_foreign_interfaces: Default::default(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_field_name_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),

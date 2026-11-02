@@ -30,7 +30,7 @@ use verum_modules::{
     ModuleInfo, ModulePath, extract_exports_from_module, resolve_glob_reexports,
     resolve_specific_reexport_kinds,
 };
-use verum_vbc::codegen::VbcCodegen;
+use verum_vbc::codegen::{ForeignInterfaces, VbcCodegen};
 
 use super::BuildMode;
 use crate::core_compiler::{CoreConfig, StdlibCompilationResult, StdlibModule};
@@ -1031,6 +1031,7 @@ one module and therefore never seeded",
                         );
                         let info = FunctionInfo {
                             has_source_body: false,
+                            foreign_declaration: None,
                             callable_signature: None,
                             type_param_ids: Vec::new(),
                             explicit_type_param_ids: Vec::new(),
@@ -1176,6 +1177,7 @@ one module and therefore never seeded",
                         };
                         let info = FunctionInfo {
                             has_source_body: func.body.is_some(),
+                            foreign_declaration: None,
                             callable_signature: None,
                             type_param_ids: verum_vbc::codegen::VbcCodegen::declared_type_param_ids(func, parent_names, &impl_names),
                             explicit_type_param_ids: verum_vbc::codegen::VbcCodegen::declared_explicit_type_param_ids(func, parent_names, &impl_names),
@@ -1346,6 +1348,7 @@ one module and therefore never seeded",
                             .collect();
                         let info = FunctionInfo {
                             has_source_body: false,
+                            foreign_declaration: None,
                             callable_signature: None,
                             type_param_ids: Vec::new(),
                             explicit_type_param_ids: Vec::new(),
@@ -1408,6 +1411,7 @@ one module and therefore never seeded",
         config: &CoreConfig,
         target: &verum_ast::cfg::TargetConfig,
     ) -> Result<Vec<verum_vbc::VbcModule>> {
+        let mut foreign = ForeignInterfaces::default();
         let mut next_method = self.global_function_registry.values()
             .map(|info| info.id.0)
             .filter(|id| verum_vbc::stub_ranges::in_stage1(*id))
@@ -1428,11 +1432,19 @@ one module and therefore never seeded",
                 let interface = declarations.collect_declaration_interface(&sources)
                     .map_err(|error| anyhow::anyhow!("collecting interface for {name}: {error}"))?;
                 if !available.is_empty() {
+                    declarations.export_foreign_interfaces(&interface, &mut foreign);
                     // The declaring compiler selects the method (including protocol
                     // implementations). Publish that identity before any body is
                     // compiled. Consumer-pool signatures come from the interface
                     // importer, never the declaring compiler's numeric type IDs.
                     let exports = declarations.export_function_view();
+                    for (name, info) in &exports {
+                        if info.foreign_declaration.as_deref().and_then(|key| key.rsplit_once('#'))
+                            .is_some_and(|(path, _)| path == name.as_str())
+                        {
+                            self.global_function_registry.insert(name.to_string(), (*info).clone());
+                        }
+                    }
                     for method in &interface.functions {
                         if method.parent_type.is_none() || !method.has_source_body { continue; }
                         let Some(owner) = method.origin_module.and_then(|id| interface.strings.get(id)) else { continue };
@@ -1457,7 +1469,9 @@ one module and therefore never seeded",
             Ok(resolved)
         };
         let nominal_interfaces = collect(&[])?;
-        collect(&nominal_interfaces.iter().collect::<Vec<_>>())
+        let resolved = collect(&nominal_interfaces.iter().collect::<Vec<_>>())?;
+        self.global_foreign_interfaces = Arc::new(foreign);
+        Ok(resolved)
     }
 
     fn import_core_nominal_dependencies(
@@ -1556,6 +1570,7 @@ one module and therefore never seeded",
                         .collect();
                     let info = FunctionInfo {
                         has_source_body: func.body.is_some(),
+                        foreign_declaration: None,
                         callable_signature: None,
                         type_param_ids: verum_vbc::codegen::VbcCodegen::declared_type_param_ids(func, &[], &[]),
                         explicit_type_param_ids: verum_vbc::codegen::VbcCodegen::declared_explicit_type_param_ids(func, &[], &[]),
@@ -1699,6 +1714,7 @@ one module and therefore never seeded",
                     );
                     let info = FunctionInfo {
                         has_source_body: false,
+                        foreign_declaration: None,
                         callable_signature: None,
                         type_param_ids: Vec::new(),
                         explicit_type_param_ids: Vec::new(),
@@ -2317,6 +2333,7 @@ one module and therefore never seeded",
         };
 
         let mut codegen = VbcCodegen::with_config(codegen_config);
+        codegen.set_foreign_interfaces(self.global_foreign_interfaces.clone());
 
         // Import functions and protocols from previously compiled modules
         codegen.import_functions(&self.global_function_registry);

@@ -6794,6 +6794,7 @@ impl VbcCodegen {
             }
             let info = FunctionInfo {
                 has_source_body: false,
+                foreign_declaration: None,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -7163,94 +7164,10 @@ impl VbcCodegen {
         // Only an EXACT scoped_functions hit counts (the (module, name)
         // entry written when THIS unit's declaration registered); the
         // in-scope helper's bare-key fallback must not jump the queue.
-        let unit_decl_lookup: Option<(String, FunctionInfo)> = if !func_name.contains('.')
-            && !func_name.contains("::")
-        {
-            if self.ctx.unit_declared_fns.contains(&func_name) {
-                // Live registration only — reading a cached FunctionInfo
-                // goes stale when ids renumber after declaration.
-                //
-                // SCOPE-AWARE (the rule stated on `scoped_functions`):
-                // resolve through `lookup_function_in_scope`, not the bare
-                // `functions` slot. The old comment here assumed "the
-                // user-phase decl registered LAST, so the bare key holds
-                // the unit's own fn" — true for a single user compilation
-                // unit, FALSE when many modules compile into one context,
-                // as during the stdlib bake: the bare key then holds
-                // whichever module registered last. A traced bake measured
-                // 76 cross-module captures that way, e.g. `trim_ws` /
-                // `is_ws` / `split_commas` each declared by
-                // net.content_negotiation, net.http_cache AND
-                // net.http_range yet all three bound to one id, so two of
-                // every three executed another module's body.
-                //
-                // `lookup_function_in_scope` falls back to the bare table
-                // when no scope is active or the module has no scoped
-                // entry, so single-unit user compiles are unchanged.
-                //
-                // ARITY-AWARE (T1191). The probe must ask for the arity
-                // the CALL SITE uses. The bare slot is held by whichever
-                // same-name registration `register_function`'s collision
-                // policy left there, and that policy hands the bare key
-                // to the SMALLER arity — so a unit's own `fn count(xs)`
-                // is parked in `count#1` while bare `count` keeps a
-                // stdlib zero-argument namesake. An arity-blind probe
-                // reads that arity-0 entry, the filter below rejects it,
-                // and the ladder falls through to the global suffix
-                // scan, which found exactly one arity-1 `.count` key and
-                // bound it: a user program's own function silently ran
-                // `core.database.sqlite.native.eqp_node_emitter.node.count`.
-                //
-                // The registration trace is the whole story in eight
-                // lines (`VERUM_TRACE_FNREG=count`): five stdlib `count`s
-                // claim the bare key — four of arity 0, one of arity 1
-                // demoted to `count#1` — and then the user's own arity-1
-                // declaration arrives and is demoted to `count#1` too.
-                // The declaration was never missing; it was unreachable
-                // through an arity-blind key, and `unit_declared_fns`
-                // said so all along (the callbind trace prints
-                // `unit_declared=true` beside `arm=later-arm`).
-                //
-                // `lookup_function_with_arity_in_scope` keeps the same
-                // scope-first discipline and adds the `name#arity`
-                // probe. It can still return a wrong-arity primary when
-                // no alt-key exists; the filter below is what rejects
-                // that — see the T1304 note under it for the one case
-                // the filter now lets through.
-                //
-                // T1304. The filter asks `arity_admits`, not `==`, and
-                // that ONE word is the whole of this task's runtime half.
-                //
-                // `open` is declared `(path, oflag, ...)` — two fixed
-                // parameters — and called `open(path, flags, mode)`.
-                // The lookup above now returns the extern (that is the
-                // sibling change in `context.rs`), and an `==` filter
-                // here threw it straight back out. `unit_decl_lookup`
-                // became `None`, the ladder fell through to the global
-                // scan, and the scan found `core.sys.linux.syscall.open`
-                // — three parameters, a real id, another platform's
-                // wrapper. `user_fn_matches_arity` below then said yes,
-                // a plain `Call` was emitted, and on darwin that body is
-                // a panic-stub: `func_id=4269801458`, no file created at
-                // either tier. The declaration was never missing; an
-                // arity-exact filter made it unreachable.
-                //
-                // Non-variadic names are untouched: `arity_admits`
-                // returns `param_count == arity` for every name that is
-                // not a registered variadic FFI declaration.
-                let candidate = self
-                    .ctx
-                    .lookup_function_with_arity_in_scope(&func_name, args.len())
-                    .cloned();
-                candidate
-                    .filter(|info| {
-                        self.ctx.arity_admits(&func_name, info, args.len())
-                            && is_free_fn(info)
-                    })
-                    .map(|info| (func_name.clone(), info))
-            } else {
-                None
-            }
+        let unit_decl_lookup = if unit_declares_this_name {
+            self.ctx.lookup_source_call(&func_name, args.len())
+                .filter(|info| is_free_fn(info))
+                .map(|info| (func_name.clone(), info.clone()))
         } else {
             None
         };
@@ -7871,33 +7788,19 @@ impl VbcCodegen {
             return self.compile_record_call_form(&func_name, &func_info, args);
         }
 
-        // T1304 — A VARIADIC EXTERN MAY BE CALLED WITH MORE ARGUMENTS
-        // THAN IT DECLARES. That is the whole point of `...`, and until
-        // this exception existed the marker was a syntax with no
-        // semantics: measured on one declaration, `snprintf(buf, 32,
-        // fmt)` compiled and ran while `snprintf(buf, 32, fmt, 42)`
-        // answered `expected 3, found 4`.
-        //
-        // The fact is read from the FFI symbol rather than carried on
-        // `FunctionInfo`, because it is ALREADY there and already
-        // correct: `create_ffi_signature` sets
-        // `FfiSignature.is_variadic` from the declaration, the archive
-        // round-trips it (serialize.rs has the test), and Tier 1
-        // already builds `fn_type(params, is_variadic)` from it in six
-        // places. Adding a sixth signature flag to `FunctionInfo` would
-        // have meant 63 mechanical insertions across five files — one of
-        // them a file another session is holding uncommitted — to
-        // duplicate a fact the tree already records.
-        //
-        // The relaxation is one-directional: it can only ADMIT extra
-        // arguments for a name that resolves to a variadic extern, never
-        // reject a call that was previously accepted.
-        let callee_is_variadic_extern = self
-            .ffi_function_map
-            .get(&func_name)
-            .and_then(|sid| self.ffi_symbols.get(sid.0 as usize))
-            .map(|sym| sym.signature.is_variadic)
-            .unwrap_or(false);
+        // The selected declaration governs the native ABI for every stage of
+        // this call, including aliases, callbacks and reference write-back.
+        let ffi_symbol = if let Some(key) = func_info.foreign_declaration.as_deref() {
+            Some(self.resolve_foreign_symbol(key).ok_or_else(|| CodegenError::internal(
+                format!("foreign declaration `{key}` has no symbol in this module"),
+            ))?)
+        } else if func_info.id.0 == u32::MAX {
+            self.get_ffi_symbol_id(&resolved_name).or_else(|| self.get_ffi_symbol_id(&func_name))
+        } else {
+            None
+        };
+        let callee_is_variadic_extern = ffi_symbol.and_then(|id| self.get_ffi_symbol(id))
+            .is_some_and(|symbol| symbol.signature.is_variadic);
 
         // Check argument count — allow fewer args if function has default params
         if args.len() > func_info.param_count && !callee_is_variadic_extern {
@@ -7970,8 +7873,7 @@ impl VbcCodegen {
         let mut scalar_ref_args: std::collections::HashSet<u8> = std::collections::HashSet::new(); // FFI scalar ref args (strip &/&mut)
 
         // Check if this is an FFI function (needed for special argument handling)
-        let ffi_symbol_id_opt = self.get_ffi_symbol_id(&func_name);
-        let is_ffi_call = ffi_symbol_id_opt.is_some();
+        let is_ffi_call = ffi_symbol.is_some();
 
         for (i, arg) in args.iter().enumerate() {
             // Check for array element reference pattern (&arr[idx]) for FFI calls
@@ -7984,7 +7886,7 @@ impl VbcCodegen {
             // Check for function callback pattern for FFI calls
             // If this parameter expects a FnPtr and the argument is a function reference,
             // we need to create a trampoline callback
-            if let Some(ffi_symbol_id) = ffi_symbol_id_opt
+            if let Some(ffi_symbol_id) = ffi_symbol
                 && let Some(callback_sig_id) =
                     self.get_callback_signature_id(ffi_symbol_id, i as u8)
             {
@@ -8046,10 +7948,10 @@ impl VbcCodegen {
                 // Check if this argument is a function callback
                 let callback_info = callback_infos.iter().find(|info| info.arg_idx == i as u8);
 
-                if is_array_ref {
+                if let Some(symbol) = ffi_symbol.filter(|_| is_array_ref) {
                     // Compile array element reference specially for FFI
                     // This marshals the array to a temporary C buffer
-                    let arg_val = self.compile_ffi_array_ref(arg, &func_name, i)?;
+                    let arg_val = self.compile_ffi_array_ref(arg, symbol, &func_name, i)?;
                     arg_results.push(arg_val);
                 } else if let Some(cb_info) = callback_info {
                     // Compile function callback using CreateCallback
@@ -8207,68 +8109,7 @@ impl VbcCodegen {
         // Allocate result register
         let result = self.ctx.alloc_temp();
 
-        // Check if this is an FFI function.
-        //
-
-        // User-defined function with the *same basename and matching arity* wins
-        // over the FFI symbol — otherwise `fn read() -> Int { 42 }` silently
-        // dispatches to the libc `read(fd, buf, nbyte)` syscall and blows up at
-        // runtime with `argument count mismatch: expected 3, got 0`. The
-        // arity-aware lookup at the top of compile_call (line 2658) has already
-        // resolved `func_info` to the user's function; we just need to guard
-        // the FFI dispatch here so we don't flip back to the extern.
-        //
-        // …but "user-defined function" must mean one THIS file declares.
-        // The guard also fired for an unrelated module's function that
-        // merely shares the name, and then the extern lost its own call:
-        // a file declaring `extern { fn open(path, oflag, mode) }` and
-        // calling `open(...)` bound to `core.sys.linux.syscall.open` —
-        // another platform's wrapper, bodyless on this target, so the
-        // call became an unresolved stub and the program panicked.
-        // `getpid`, whose name nothing else declares, worked; the C
-        // names people actually bind (open/read/write/close/select) are
-        // exactly the contested ones.
-        //
-        // The discriminator is that the winner arrived under a QUALIFIED
-        // foreign key while the call was written bare, and this file
-        // declares that bare name as an extern.
-        let unit_declares_extern =
-            self.ctx.unit_declared_fns.contains(&func_name) && self.is_ffi_function(&func_name);
-        // FOREIGN means "belongs to another module", not "is qualified".
-        //
-        // `resolved_name.contains('.')` alone called THIS module's own
-        // function foreign — every user function is registered under
-        // `<module>.<name>` — so an ordinary `fn read(x: &Big) -> Int`
-        // in a file that also happens to be named-after-a-libc-symbol
-        // satisfied both halves of the guard, the guard turned itself
-        // off, and the call was emitted as the POSIX `read`. It failed
-        // with "argument count mismatch: expected 3, got 1", naming an
-        // extern the author never wrote. Renaming the function to
-        // anything not in libc fixed it, which is not a property a
-        // program should have to know about.
-        // Falls back to the unit's configured name, the way every other
-        // module-scoped decision in codegen does: a file with no
-        // `module X;` header still HAS a module, and without the
-        // fallback the own-module test could not fire for it — which is
-        // exactly the single-file script a newcomer writes.
-        let own_module_prefix = {
-            let m = self
-                .ctx
-                .current_source_module
-                .as_deref()
-                .unwrap_or(&self.config.module_name);
-            (!m.is_empty()).then(|| format!("{m}."))
-        };
-        let resolved_is_foreign = resolved_name.contains('.')
-            && !func_name.contains('.')
-            && !own_module_prefix
-                .as_deref()
-                .is_some_and(|p| resolved_name.starts_with(p));
-        let user_fn_matches_arity = func_info.param_count == args.len()
-            && func_info.intrinsic_name.is_none()
-            && func_info.id.0 != u32::MAX
-            && !(unit_declares_extern && resolved_is_foreign);
-        if !user_fn_matches_arity && let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
+        if let Some(ffi_symbol_id) = ffi_symbol {
             // Emit FfiExtended.CallFfiC instruction
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
@@ -8299,7 +8140,7 @@ impl VbcCodegen {
 
             // Phase 4: Emit requires assertions before FFI call (debug mode only)
             if self.optimization_level() < 2
-                && let Some(contract) = self.get_ffi_contract_exprs(&func_name)
+                && let Some(contract) = self.ffi_contract_exprs.get(&ffi_symbol_id)
             {
                 let requires_exprs: Vec<_> = contract.requires.clone();
                 let fn_name = contract.function_name.clone();
@@ -8333,7 +8174,7 @@ impl VbcCodegen {
 
             // Phase 4: Emit ensures assertions after FFI call (debug mode only)
             if self.optimization_level() < 2
-                && let Some(contract) = self.get_ffi_contract_exprs(&func_name)
+                && let Some(contract) = self.ffi_contract_exprs.get(&ffi_symbol_id)
                 && !contract.ensures.is_empty()
             {
                 let ensures_exprs: Vec<_> = contract.ensures.clone();
@@ -9465,6 +9306,7 @@ impl VbcCodegen {
     fn compile_ffi_array_ref(
         &mut self,
         arg: &Expr,
+        symbol: crate::module::FfiSymbolId,
         func_name: &str,
         arg_idx: usize,
     ) -> CodegenResult<Reg> {
@@ -9511,15 +9353,7 @@ impl VbcCodegen {
             .compile_expr(index)?
             .or_internal("index expression has no value")?;
 
-        // Get the FFI symbol to determine the expected element type
-        let ffi_symbol_id = self.get_ffi_symbol_id(func_name).ok_or_else(|| {
-            CodegenError::internal("FFI function not found for array marshalling")
-        })?;
-
-        // Determine element type from FFI signature parameter type
-        // The parameter type should be CType::Ptr or CType::ArrayPtr
-        // We need to infer the element type from context or use a default (i64)
-        let element_type_tag = self.get_ffi_array_element_type(ffi_symbol_id, arg_idx, func_name);
+        let element_type_tag = self.get_ffi_array_element_type(symbol, arg_idx, func_name);
 
         // Allocate result register for the marshalled pointer
         let result = self.ctx.alloc_temp();
@@ -17993,6 +17827,7 @@ impl VbcCodegen {
         }
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -32398,6 +32233,7 @@ impl VbcCodegen {
         // Register the closure function
         let info = super::FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: lexical_param_ids.to_vec(),
             explicit_type_param_ids: Vec::new(),
@@ -33799,6 +33635,7 @@ impl VbcCodegen {
         let param_names: Vec<String> = capture_names.iter().map(|(n, _)| n.clone()).collect();
         let info = super::FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -42909,6 +42746,7 @@ impl VbcCodegen {
         // Register the generator function
         let info = super::FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),

@@ -1123,6 +1123,9 @@ pub struct FunctionInfo {
     /// True only when the selected declaration has a source body, including {}.
     /// Synthetic bytecode and legacy descriptors do not establish this fact.
     pub has_source_body: bool,
+    /// Lexical identity of a foreign declaration. Symbol indices belong to a
+    /// single module, while this key can follow the declaration through mounts.
+    pub foreign_declaration: Option<std::sync::Arc<str>>,
     /// Proven source callable signature, excluding a closure's hidden environment.
     /// None means unknown, independently of the descriptor's legacy ABI defaults.
     pub callable_signature: Option<TypeRef>,
@@ -3835,6 +3838,10 @@ impl CodegenContext {
         name: &str,
         declared: &'a FunctionInfo,
     ) -> &'a FunctionInfo {
+        if declared.id.0 == u32::MAX {
+            // Externs share a non-callable sentinel, never an implementation.
+            return declared;
+        }
         self.functions.get(name).filter(|info| info.id == declared.id)
             .or_else(|| {
                 let scope = self.source_function_scope();
@@ -3858,6 +3865,17 @@ impl CodegenContext {
         self.scoped_functions.get(&key)
             .filter(|info| info.param_count == arity)
             .map(|info| self.live_scoped_function(name, info))
+    }
+
+    /// A declaration in the current source can also admit a variadic tail.
+    /// An ambient bare-name registration is never evidence of local ownership.
+    pub(super) fn lookup_source_call(&self, name: &str, arity: usize) -> Option<&FunctionInfo> {
+        self.lookup_declared_function_with_arity(name, arity).or_else(|| {
+            let key = (self.source_function_scope().to_owned(), name.to_owned());
+            let primary = self.scoped_functions.get(&key)?;
+            let own = self.lookup_declared_function_with_arity(name, primary.param_count)?;
+            self.arity_admits(name, own, arity).then_some(own)
+        })
     }
 
     /// **Scope-aware function lookup** (#17/#39 foundation).
@@ -3972,7 +3990,10 @@ impl CodegenContext {
         // keyed by the bare symbol, so both spellings are asked.
         let bare = name.rsplit('.').next().unwrap_or(name);
         let is_declared_variadic =
-            self.variadic_ffi_fns.contains(bare) || self.variadic_ffi_fns.contains(name);
+            info.foreign_declaration.as_deref().map_or_else(
+                || self.variadic_ffi_fns.contains(bare) || self.variadic_ffi_fns.contains(name),
+                |key| self.variadic_ffi_fns.contains(key),
+            );
 
         let (admitted, verdict): (bool, &str) = if arity < info.param_count {
             // Variadic does not mean "any call". Fewer arguments than the

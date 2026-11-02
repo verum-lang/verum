@@ -809,6 +809,7 @@ mod security_tests {
 
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -1595,6 +1596,7 @@ mod stress_tests {
         for i in 0..1000 {
             let info = FunctionInfo {
                 has_source_body: false,
+                foreign_declaration: None,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -2473,6 +2475,7 @@ mod cross_module_path_tests {
     fn make_func_info(id: u32, param_count: usize, is_async: bool) -> FunctionInfo {
         FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -2700,6 +2703,7 @@ mod cross_module_path_tests {
 
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -2741,6 +2745,7 @@ mod cross_module_path_tests {
 
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),

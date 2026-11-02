@@ -454,6 +454,21 @@ pub struct FfiContractExprs {
     pub function_name: String,
 }
 
+/// Native declarations shared by separately compiled source units. The ABI
+/// and callback signatures refer to their owner's tables until a call uses them.
+#[derive(Default)]
+pub struct ForeignInterfaces {
+    entries: std::collections::HashMap<String, ForeignInterface>,
+}
+
+#[derive(Clone)]
+struct ForeignInterface {
+    owner: std::sync::Arc<VbcModule>,
+    symbol: FfiSymbolId,
+    callbacks: Vec<(u8, FfiSymbolId)>,
+    contract: Option<FfiContractExprs>,
+}
+
 /// Detailed report of `MakeVariant` / `MakeVariantTyped`
 /// emissions across a module's bytecode (#146 Phase 3e).
 ///
@@ -816,6 +831,8 @@ pub struct VbcCodegen {
     // ========================================================================
     // FFI Tables (populated from @ffi extern blocks)
     // ========================================================================
+    foreign_interfaces: std::sync::Arc<ForeignInterfaces>,
+
     /// FFI libraries (native libraries to load).
     ffi_libraries: Vec<FfiLibrary>,
 
@@ -825,10 +842,7 @@ pub struct VbcCodegen {
     /// Map from function name to FFI symbol ID (for FFI function call detection).
     ffi_function_map: std::collections::HashMap<String, FfiSymbolId>,
 
-    /// FFI symbol index → C-side dlsym name, when `@ffi_name` /
-    /// `@link_name` overrides the Verum extern fn name. `build_module`
-    /// prefers this over the fn name so the runtime resolves the real
-    /// C symbol (`recvfrom`, not `recvfrom_ffi`).
+    /// Native link names by symbol index. Synthetic callback signatures are unnamed.
     ffi_symbol_link_names: std::collections::HashMap<u32, String>,
 
     /// Map from library name to library ID (for deduplication).
@@ -845,7 +859,7 @@ pub struct VbcCodegen {
     /// FFI contract AST expressions indexed by function name.
     /// Used to compile requires/ensures into assertions at call sites.
     /// Separate from ffi_contracts because AST types can't be in verum_vbc::module.
-    ffi_contract_exprs: std::collections::HashMap<String, FfiContractExprs>,
+    ffi_contract_exprs: std::collections::HashMap<FfiSymbolId, FfiContractExprs>,
 
     /// Context group definitions: group_name → [context_name, ...]
     /// Grammar: context_group_def = 'using' identifier '=' context_list_def ';'
@@ -2251,6 +2265,7 @@ impl VbcCodegen {
             nested_function_scope: Vec::new(),
             cfg_evaluator,
             // FFI tables
+            foreign_interfaces: Default::default(),
             ffi_libraries: Vec::new(),
             ffi_symbols: Vec::new(),
             ffi_function_map: std::collections::HashMap::new(),
@@ -4057,6 +4072,7 @@ impl VbcCodegen {
             self.next_func_id = self.next_func_id.saturating_add(1);
             let info = FunctionInfo {
                 has_source_body: false,
+                foreign_declaration: None,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -4606,6 +4622,7 @@ impl VbcCodegen {
             self.next_func_id = self.next_func_id.saturating_add(1);
             let info = FunctionInfo {
                 has_source_body: false,
+                foreign_declaration: None,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -6657,6 +6674,7 @@ impl VbcCodegen {
                 };
                 let info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -9470,6 +9488,7 @@ impl VbcCodegen {
         self.ffi_libraries.clear();
         self.ffi_symbols.clear();
         self.ffi_function_map.clear();
+        self.ffi_symbol_link_names.clear();
         self.ffi_library_map.clear();
         self.ffi_callback_signatures.clear();
         self.ffi_contracts.clear();
@@ -9606,6 +9625,7 @@ impl VbcCodegen {
             let sentinel_id = FunctionId(u32::MAX - *tag);
             let info = FunctionInfo {
                 has_source_body: false,
+                foreign_declaration: None,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -9750,6 +9770,7 @@ impl VbcCodegen {
 
             let info = FunctionInfo {
                 has_source_body: false,
+                foreign_declaration: None,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -11398,6 +11419,7 @@ impl VbcCodegen {
         );
         let info = FunctionInfo {
             has_source_body: func.body.is_some(),
+            foreign_declaration: None,
             callable_signature,
             type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
             explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
@@ -11668,6 +11690,7 @@ impl VbcCodegen {
 
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -12004,7 +12027,7 @@ impl VbcCodegen {
     /// the FfiExtended instruction using the FFI symbol ID, not via the Call instruction.
     /// This ensures that FFI function declarations don't interfere with the function ID
     /// assignment for regular functions.
-    fn register_ffi_extern_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
+    fn register_ffi_extern_function(&mut self, func: &FunctionDecl, symbol: FfiSymbolId) -> CodegenResult<()> {
         let name = func.name.name.to_string();
 
         // Extract parameter names
@@ -12029,6 +12052,7 @@ impl VbcCodegen {
         };
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -12054,35 +12078,38 @@ impl VbcCodegen {
                 param_closure_return_type_names: Vec::new(),
         };
 
-        // An extern declaration is this unit's OWN binding for the name,
-        // and it claims unit-level precedence exactly like a bodied
-        // declaration does. Registering only into `functions` left the
-        // name outside `unit_declared_fns`, so the `unit_decl_lookup`
-        // gate never opened for it and a foreign free function of the
-        // same name captured the call.
-        //
-        // Measured: a file declaring `extern { fn open(path, oflag, mode) }`
-        // and calling `open(...)` bound to `core.sys.linux.syscall.open`
-        // — another platform's wrapper, with no body on this target, so
-        // the call became an unresolved stub and the program panicked.
-        // `getpid`, whose name nothing else declares, worked. The C
-        // names people actually bind (`open`, `read`, `write`, `close`,
-        // `select`) are exactly the contested ones.
-        //
-        // Not gated on `prefer_existing_functions`: that flag exists so
-        // a later module's bodied declaration does not displace an
-        // earlier one during the bake, and an extern is not a body. The
-        // lookup this feeds is scope-aware — a module that declares no
-        // such extern finds nothing under its own scope and falls
-        // through unchanged.
-        if !name.contains('.') && !name.contains("::") {
-            self.ctx.unit_declared_fns.insert(name.clone());
-        }
-        self.ctx.register_function(name.clone(), info.clone());
-        // An extern is a source declaration even when a foreign overload owns
-        // the ambient name/arity slots during bootstrap.
-        self.ctx.register_source_function(&name, &info);
+        self.register_foreign_declaration(&name, info, symbol, self.extract_ffi_symbol_name(&func.attributes));
         Ok(())
+    }
+
+    fn register_foreign_declaration(
+        &mut self,
+        name: &str,
+        mut info: FunctionInfo,
+        symbol: FfiSymbolId,
+        link_name: Option<String>,
+    ) {
+        let scope = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+        let path = if scope.is_empty() { name.to_owned() } else { format!("{scope}.{name}") };
+        let key = format!("{path}#{}", info.param_count);
+        self.ffi_symbol_link_names.insert(symbol.0, link_name.unwrap_or_else(|| name.to_owned()));
+        self.ffi_function_map.insert(name.to_owned(), symbol);
+        self.ffi_function_map.insert(key.clone(), symbol);
+        if self.ffi_symbols[symbol.0 as usize].signature.is_variadic {
+            self.ctx.variadic_ffi_fns.insert(name.to_owned());
+            self.ctx.variadic_ffi_fns.insert(key.clone());
+        }
+        info.foreign_declaration = Some(key.into());
+        self.ctx.unit_declared_fns.insert(name.to_owned());
+        self.ctx.register_function(name.to_owned(), info.clone());
+        self.ctx.register_source_function(name, &info);
+        if path != name {
+            // Publish the declaration before resolving any re-exports. A mount
+            // of this exact path must never fall back to the umbrella's alias.
+            self.mount_installed_qualified_keys.remove(&path);
+            self.decl_installed_qualified_keys.insert(path.clone());
+            self.ctx.register_function_authoritative(path, info);
+        }
     }
 
     /// Registers import aliases so that aliased function names can be resolved.
@@ -14033,6 +14060,7 @@ impl VbcCodegen {
         self.ctx.current_impl_type_name = saved_impl;
         let info = FunctionInfo {
             has_source_body: func.body.is_some(),
+            foreign_declaration: None,
             callable_signature,
             type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
             explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
@@ -14135,8 +14163,6 @@ impl VbcCodegen {
     fn register_ffi_functions(&mut self, boundary: &FFIBoundary) -> CodegenResult<()> {
         for ffi_func in boundary.functions.iter() {
             let name = ffi_func.name.name.to_string();
-            let id = FunctionId(self.next_func_id);
-            self.next_func_id = self.next_func_id.saturating_add(1);
 
             // Extract parameter names from FFI signature
             let param_names: Vec<String> = ffi_func
@@ -14151,10 +14177,11 @@ impl VbcCodegen {
 
             let info = FunctionInfo {
                 has_source_body: false,
+                foreign_declaration: None,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
-                id,
+                id: FunctionId(u32::MAX),
                 param_count: param_names.len(),
                 param_names,
                 param_type_names: vec![],
@@ -14176,7 +14203,6 @@ impl VbcCodegen {
                 param_closure_return_type_names: Vec::new(),
             };
 
-            self.ctx.register_function(name.clone(), info);
 
             // Also create FfiSymbol entry with error protocol from the AST
             let signature = self.create_ffi_signature_from_boundary(ffi_func);
@@ -14199,16 +14225,7 @@ impl VbcCodegen {
                 validated: true,
                 ownership,
             });
-            self.ffi_function_map.insert(name.clone(), symbol_id);
-            // T1304/T1397 — a variadic declaration must stay findable by
-            // an over-long call. `ctx` resolves functions by EXACT arity and
-            // `FunctionInfo` has no variadic flag, so `open(path, flags, mode)`
-            // could not reach `open(path, flags, ...)` and fell through to a
-            // stage-5 stub. Same fact `expressions.rs` already reads for the
-            // argument-COUNT check — that one runs AFTER resolution.
-            if self.ffi_symbols[symbol_id.0 as usize].signature.is_variadic {
-                self.ctx.variadic_ffi_fns.insert(name.clone());
-            }
+            self.register_foreign_declaration(&name, info, symbol_id, None);
 
             // Store contract metadata (requires/ensures) for debug-mode assertion generation
             if !ffi_func.requires.is_empty() || !ffi_func.ensures.is_empty() {
@@ -14234,7 +14251,7 @@ impl VbcCodegen {
                     ensures: ffi_func.ensures.iter().cloned().collect(),
                     function_name: name.clone(),
                 };
-                self.ffi_contract_exprs.insert(name, contract_exprs);
+                self.ffi_contract_exprs.insert(symbol_id, contract_exprs);
             }
         }
         Ok(())
@@ -14462,8 +14479,6 @@ impl VbcCodegen {
         };
 
         for func in extern_block.functions.iter() {
-            let func_name = func.name.name.to_string();
-
             // Create FFI signature from function parameters and return type
             let signature = self.create_ffi_signature(func);
             // FunctionDecl uses extern_abi (e.g., "C", "stdcall") — map to convention.
@@ -14485,24 +14500,6 @@ impl VbcCodegen {
                 ownership: FfiOwnership::default(),
             });
 
-            // Track function name -> FFI symbol ID mapping
-            self.ffi_function_map.insert(func_name.clone(), symbol_id);
-            // T1304/T1397 — a variadic declaration must stay findable by
-            // an over-long call. `ctx` resolves functions by EXACT arity and
-            // `FunctionInfo` has no variadic flag, so `open(path, flags, mode)`
-            // could not reach `open(path, flags, ...)` and fell through to a
-            // stage-5 stub. Same fact `expressions.rs` already reads for the
-            // argument-COUNT check — that one runs AFTER resolution.
-            if self.ffi_symbols[symbol_id.0 as usize].signature.is_variadic {
-                self.ctx.variadic_ffi_fns.insert(func_name.clone());
-            }
-            // Honor `@ffi_name` / `@link_name`: the dlsym key is the C
-            // symbol, not the Verum extern fn name — extern-block fns
-            // are FunctionDecls carrying their per-fn attributes.
-            if let Some(c_name) = self.extract_ffi_symbol_name(&func.attributes) {
-                self.ffi_symbol_link_names.insert(symbol_id.0, c_name);
-            }
-
             // Register callback signature symbols for function pointer parameters.
             // This allows CreateCallback to find the correct signature when passing
             // Verum functions to FFI calls.
@@ -14511,7 +14508,7 @@ impl VbcCodegen {
             // Register FFI function for lookup WITHOUT consuming a function ID.
             // FFI functions don't need function IDs because they're called via
             // FfiExtended instruction using the FFI symbol ID, not via Call instruction.
-            self.register_ffi_extern_function(func)?;
+            self.register_ffi_extern_function(func, symbol_id)?;
         }
         Ok(())
     }
@@ -14709,6 +14706,7 @@ impl VbcCodegen {
 
                 let getter_info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -14745,6 +14743,7 @@ impl VbcCodegen {
 
                 let setter_info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -15185,8 +15184,6 @@ impl VbcCodegen {
             -1 // Default library (platform default)
         };
 
-        let func_name = func.name.name.to_string();
-
         // Create FFI signature from function parameters and return type
         let signature = self.create_ffi_signature(func);
         let convention = Self::extern_abi_to_convention(&func.extern_abi);
@@ -15206,23 +15203,6 @@ impl VbcCodegen {
             ownership: FfiOwnership::default(),
         });
 
-        // Track function name -> FFI symbol ID mapping
-        self.ffi_function_map.insert(func_name.clone(), symbol_id);
-        // T1304/T1397 — a variadic declaration must stay findable by
-        // an over-long call. `ctx` resolves functions by EXACT arity and
-        // `FunctionInfo` has no variadic flag, so `open(path, flags, mode)`
-        // could not reach `open(path, flags, ...)` and fell through to a
-        // stage-5 stub. Same fact `expressions.rs` already reads for the
-        // argument-COUNT check — that one runs AFTER resolution.
-        if self.ffi_symbols[symbol_id.0 as usize].signature.is_variadic {
-            self.ctx.variadic_ffi_fns.insert(func_name.clone());
-        }
-        // Honor `@ffi_name` / `@link_name` for standalone `@ffi` externs
-        // too (same rationale as the boundary path).
-        if let Some(c_name) = self.extract_ffi_symbol_name(&func.attributes) {
-            self.ffi_symbol_link_names.insert(symbol_id.0, c_name);
-        }
-
         // Register callback signature symbols for function pointer parameters.
         // This allows CreateCallback to find the correct signature when passing
         // Verum functions to FFI calls.
@@ -15231,7 +15211,7 @@ impl VbcCodegen {
         // Register FFI function for lookup WITHOUT consuming a function ID.
         // FFI functions don't need function IDs because they're called via
         // FfiExtended instruction using the FFI symbol ID, not via Call instruction.
-        self.register_ffi_extern_function(func)?;
+        self.register_ffi_extern_function(func, symbol_id)?;
 
         Ok(())
     }
@@ -15666,6 +15646,63 @@ impl VbcCodegen {
         }
     }
 
+    /// Publish native declarations against the exact interface that owns their ABI.
+    pub fn export_foreign_interfaces(
+        &self,
+        module: &VbcModule,
+        interfaces: &mut ForeignInterfaces,
+    ) {
+        // Keep only ABI tables alive after the metadata pass. Names are in the
+        // owner's string pool and layouts may reference other layouts by index.
+        if self.ffi_function_map.is_empty() {
+            return;
+        }
+        let mut owner = VbcModule::new(module.name.clone());
+        owner.strings = module.strings.clone();
+        owner.ffi_symbols = module.ffi_symbols.clone();
+        owner.ffi_libraries = module.ffi_libraries.clone();
+        owner.ffi_layouts = module.ffi_layouts.clone();
+        let owner = std::sync::Arc::new(owner);
+        for (key, symbol) in &self.ffi_function_map {
+            // Bare names are convenience lookups. Only a source declaration owns a key.
+            if !self.ctx.functions.get(key).is_some_and(|info| info.foreign_declaration.as_deref() == Some(key)) {
+                continue;
+            }
+            let callbacks = self.ffi_callback_signatures.iter().filter_map(|(&(s, arg), &callback)|
+                (s == *symbol).then_some((arg, callback))).collect();
+            interfaces.entries.insert(key.clone(), ForeignInterface {
+                owner: owner.clone(), symbol: *symbol, callbacks,
+                contract: self.ffi_contract_exprs.get(symbol).cloned(),
+            });
+        }
+    }
+
+    /// Share the immutable producer interfaces. Each used ABI is imported once.
+    pub fn set_foreign_interfaces(&mut self, interfaces: std::sync::Arc<ForeignInterfaces>) {
+        self.ctx.variadic_ffi_fns.extend(interfaces.entries.iter().filter_map(|(key, entry)| {
+            entry.owner.ffi_symbols[entry.symbol.0 as usize].signature.is_variadic.then(|| key.clone())
+        }));
+        self.foreign_interfaces = interfaces;
+    }
+
+    fn resolve_foreign_symbol(&mut self, key: &str) -> Option<FfiSymbolId> {
+        if let Some(symbol) = self.get_ffi_symbol_id(key) {
+            return Some(symbol);
+        }
+        let foreign = self.foreign_interfaces.entries.get(key)?.clone();
+        let mut cache = std::collections::HashMap::new();
+        let local = FfiSymbolId(self.import_archive_ffi_symbol(&foreign.owner, foreign.symbol.0, &mut cache)?);
+        for (arg, callback) in foreign.callbacks {
+            let callback = self.import_archive_ffi_symbol(&foreign.owner, callback.0, &mut cache)?;
+            self.ffi_callback_signatures.insert((local, arg), FfiSymbolId(callback));
+        }
+        if let Some(contract) = foreign.contract {
+            self.ffi_contract_exprs.insert(local, contract);
+        }
+        self.ffi_function_map.insert(key.to_owned(), local);
+        Some(local)
+    }
+
     /// Checks if a function name is an FFI function.
     pub fn is_ffi_function(&self, name: &str) -> bool {
         self.ffi_function_map.contains_key(name)
@@ -15683,7 +15720,7 @@ impl VbcCodegen {
 
     /// Gets the FFI contract expressions for a function name.
     pub fn get_ffi_contract_exprs(&self, name: &str) -> Option<&FfiContractExprs> {
-        self.ffi_contract_exprs.get(name)
+        self.get_ffi_symbol_id(name).and_then(|id| self.ffi_contract_exprs.get(&id))
     }
 
     /// Returns the optimization level from codegen config.
@@ -16053,6 +16090,7 @@ impl VbcCodegen {
 
                     let info = FunctionInfo {
                         has_source_body: false,
+                        foreign_declaration: None,
                         callable_signature: None,
                         type_param_ids: Vec::new(),
                         explicit_type_param_ids: Vec::new(),
@@ -16590,6 +16628,7 @@ impl VbcCodegen {
 
                 let info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -17039,6 +17078,7 @@ impl VbcCodegen {
 
                 let info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -17157,6 +17197,7 @@ impl VbcCodegen {
 
                 let info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -17225,6 +17266,7 @@ impl VbcCodegen {
 
                 let info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -17262,6 +17304,7 @@ impl VbcCodegen {
 
                 let info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -17316,6 +17359,7 @@ impl VbcCodegen {
                 // `Q.of(rep: T) -> Q`
                 let of_info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -17350,6 +17394,7 @@ impl VbcCodegen {
                 // `q.rep(&self) -> T`
                 let rep_info = FunctionInfo {
                     has_source_body: false,
+                    foreign_declaration: None,
                     callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
@@ -17510,6 +17555,7 @@ impl VbcCodegen {
         let return_type_name = self.extract_type_name(ty);
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -21017,6 +21063,7 @@ impl VbcCodegen {
         self.next_func_id = self.next_func_id.saturating_add(1);
         let info = FunctionInfo {
             has_source_body: false,
+            foreign_declaration: None,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -24143,6 +24190,7 @@ impl VbcCodegen {
                         // diagnosis.
                         crate::codegen::FunctionInfo {
                             has_source_body: false,
+                            foreign_declaration: None,
                             callable_signature: None,
                             type_param_ids: Vec::new(),
                             explicit_type_param_ids: Vec::new(),
@@ -25843,29 +25891,14 @@ impl VbcCodegen {
             }
         }
 
-        // Add FFI symbols, interning symbol names where available.
-        // We transfer ALL symbols including synthetic callback signatures.
-        // Build a reverse map from symbol_id to function name for named symbols.
-        let id_to_name: std::collections::HashMap<u32, &String> = self
-            .ffi_function_map
-            .iter()
-            .map(|(name, id)| (id.0, name))
-            .collect();
-
-        // Transfer all FFI symbols in order. The dlsym key is the
-        // C-side symbol: prefer an `@ffi_name`/`@link_name` override
-        // (`ffi_symbol_link_names`) over the Verum extern fn name, so
-        // `@ffi_name("recvfrom") fn recvfrom_ffi` resolves `recvfrom`.
-        // Otherwise fall back to the fn name from the function map;
-        // synthetic callback signatures keep StringId(0).
+        // The native link name belongs to the symbol, independently of how many
+        // source aliases resolve to it. Callback signatures have no link name.
         for (idx, symbol) in self.ffi_symbols.iter().enumerate() {
-            let mut symbol_entry = symbol.clone();
-            if let Some(c_name) = self.ffi_symbol_link_names.get(&(idx as u32)) {
-                symbol_entry.name = module.intern_string(c_name);
-            } else if let Some(func_name) = id_to_name.get(&(idx as u32)) {
-                symbol_entry.name = module.intern_string(func_name);
+            let mut entry = symbol.clone();
+            if let Some(name) = self.ffi_symbol_link_names.get(&(idx as u32)) {
+                entry.name = module.intern_string(name);
             }
-            module.ffi_symbols.push(symbol_entry);
+            module.ffi_symbols.push(entry);
         }
 
         // Transfer FFI struct layouts for @repr(C) types.
@@ -28250,13 +28283,8 @@ impl VbcCodegen {
     /// consumer-side `ffi_symbols` index (or `None` if the archive index
     /// is out of range).
     ///
-    /// Dedup is by symbol NAME via `ffi_function_map`: a name already
-    /// registered (the user's own `extern fn`, or a previously-imported
-    /// archive symbol) is reused so the consumer keeps a single canonical
-    /// entry per native symbol. This matches `build_module`'s finalize,
-    /// which re-interns each symbol's name from `ffi_function_map` — so an
-    /// imported symbol MUST be registered there or it would serialize
-    /// nameless (`StringId(0)`) and fail `dlsym`.
+    /// A native link name can have several library bindings and ABI views.
+    /// Only reuse an entry after remapping its complete signature into this module.
     fn import_archive_ffi_symbol(
         &mut self,
         archive_module: &crate::module::VbcModule,
@@ -28272,14 +28300,6 @@ impl VbcCodegen {
             .get(sym.name)
             .unwrap_or("")
             .to_string();
-
-        // Dedup against an already-registered symbol of the same name.
-        if !sym_name.is_empty()
-            && let Some(&existing) = self.ffi_function_map.get(&sym_name)
-        {
-            cache.insert(archive_sym_idx, existing.0);
-            return Some(existing.0);
-        }
 
         // Resolve + import the owning library, preserving the
         // cross-platform tag (a `kernel32.dll` symbol stays Windows even
@@ -28325,43 +28345,27 @@ impl VbcCodegen {
             }
         }
 
-        let new_idx = self.ffi_symbols.len() as u32;
-        // `sym_name` is moved into `ffi_function_map` below; the variadic
-        // set needs the same string.
-        let sym_name_for_variadic = sym_name.clone();
-        let mut new_sym = sym;
-        new_sym.name = StringId(0); // finalize re-interns from ffi_function_map
-        new_sym.library_idx = new_library_idx;
-        new_sym.signature = signature;
-        self.ffi_symbols.push(new_sym);
-        if !sym_name.is_empty() {
-            self.ffi_function_map
-                .insert(sym_name, FfiSymbolId(new_idx));
-        }
-        // T1304 — the variadic fact crosses the archive seam WITH the
-        // symbol.
-        //
-        // This is the FOURTH writer of `ffi_function_map`, and the only
-        // one that is not a declaration: it imports a symbol out of the
-        // baked archive when a copied body references it, cloning
-        // `sym.signature` wholesale — so `is_variadic` is already correct
-        // here and was simply never read.
-        //
-        // It is NOT what makes Tier 1 work; the caller
-        // (`merge_archive_function_bodies`) copies already-emitted
-        // bytecode and only remaps the `symbol_idx` operand, so no call is
-        // re-resolved on that path. What this reaches is a consumer
-        // codegen that resolves a name against an IMPORTED symbol — a user
-        // file mounting a variadic extern and calling it with a tail. The
-        // three declaration-time sites cannot see that compile.
-        //
-        // One-directional, like the rest of the change: it can only make a
-        // previously-refused call resolvable.
-        if !sym_name_for_variadic.is_empty()
-            && self.ffi_symbols[new_idx as usize].signature.is_variadic
+        let mut imported = sym;
+        imported.name = StringId(0); // Filled from the symbol's link name at finalization.
+        imported.library_idx = new_library_idx;
+        imported.signature = signature;
+        if !sym_name.is_empty()
+            && let Some(&id) = self.ffi_function_map.get(&sym_name)
+            && self.ffi_symbol_link_names.get(&id.0) == Some(&sym_name)
+            && self.ffi_symbols.get(id.0 as usize) == Some(&imported)
         {
-            self.ctx.variadic_ffi_fns.insert(sym_name_for_variadic);
+            cache.insert(archive_sym_idx, id.0);
+            return Some(id.0);
         }
+        let new_idx = self.ffi_symbols.len() as u32;
+        if !sym_name.is_empty() {
+            if imported.signature.is_variadic {
+                self.ctx.variadic_ffi_fns.insert(sym_name.clone());
+            }
+            self.ffi_symbol_link_names.insert(new_idx, sym_name.clone());
+            self.ffi_function_map.entry(sym_name).or_insert(FfiSymbolId(new_idx));
+        }
+        self.ffi_symbols.push(imported);
         cache.insert(archive_sym_idx, new_idx);
         Some(new_idx)
     }
