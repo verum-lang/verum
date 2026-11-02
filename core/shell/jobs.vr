@@ -14,8 +14,6 @@
 // Composability principles:
 //  * `background()` returns immediately — caller awaits or cancels later.
 //  * `parallel(cmds)` is a convenience over a fanout-fanin nursery.
-//  * Every spawned job inherits the parent's `ShellContext` (DI), so cwd
-//  and env_overrides are deterministic across siblings.
 //  * `JobHandle.kill()` sends SIGTERM, gives a grace window, then SIGKILL —
 //  identical to the Executor's cancellation semantics.
 //
@@ -34,14 +32,13 @@
 )
 module core.shell.jobs;
 
-mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.{List, Text, Bool, Int};
+mount core.base.{Maybe, Result};
 mount core.base.protocols.{Display, Debug, Clone};
-mount core.async.task.{TaskHandle, JoinError};
+mount core.async.task.{JoinHandle, JoinError, spawn};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancelReason};
-mount core.async.nursery.{Nursery, NurseryOptions, NurseryErrorBehavior, with_nursery};
-mount core.async.task.{spawn};
+mount core.async.nursery.{TaskHandle, Nursery, NurseryOptions, NurseryErrorBehavior};
 mount core.time.duration.{Duration};
-mount core.shell.context.{ShellContext};
 mount core.shell.exec.{sh, sh_check, sh_with_cancel};
 mount core.shell.result.{ShellResult, ShellError};
 
@@ -52,20 +49,24 @@ mount core.shell.result.{ShellResult, ShellError};
 public type JobHandle is {
     /// Inner async task. Only the resolution matters; we don't expose the
     /// task surface directly to keep the contract focused on Result.
-    inner: TaskHandle<Result<ShellResult, ShellError>>,
+    inner: JoinHandle<Result<ShellResult, ShellError>>,
     /// Source of cancellation for this specific job. Calling `kill()` /
     /// `terminate()` triggers it.
     cancel: CancellationTokenSource,
     /// Diagnostic — the command line as dispatched.
     command: Text,
-    /// Grace period before SIGKILL after SIGTERM.
-    grace: Duration,
 }
 
 implement JobHandle {
+    public(super) fn from_task(
+        inner: JoinHandle<Result<ShellResult, ShellError>>, cancel: CancellationTokenSource, command: Text,
+    ) -> JobHandle {
+        JobHandle { inner, cancel, command }
+    }
+
     /// Awaits the job to completion. Returns the typed result or error.
     public async fn wait(self) -> Result<ShellResult, ShellError> {
-        match self.inner.join().await {
+        match self.inner.await {
             Result.Ok(r)  => r,
             Result.Err(e) => Result.Err(ShellError.SpawnFailed {
                 command: self.command,
@@ -106,24 +107,11 @@ public fn background_with_grace(cmd_text: &Text, grace: Duration)
     -> JobHandle
 
 {
-    let ctx = ShellContext.default();
     let cmd = cmd_text.clone();
     let cancel = CancellationTokenSource.new();
     let token = cancel.token();
-    let g = grace;
-    // Capture the active context so spawned task observes parent's cwd/env
-    // even when the shell is later mutated locally.
-    let captured_ctx = ctx.clone();
-    let task = spawn(async move {
-
-        sh_with_cancel(&cmd, &token, g).await
-    });
-    JobHandle {
-        inner: task,
-        cancel,
-        command: cmd_text.clone(),
-        grace: g,
-    }
+    let task = spawn(async move { sh_with_cancel(&cmd, &token, grace).await });
+    JobHandle.from_task(task, cancel, cmd_text.clone())
 }
 
 // =============================================================================
@@ -229,32 +217,27 @@ public async fn fanout(
 ) -> Result<List<Result<ShellResult, ShellError>>, ShellError>
 
 {
-    let opts = NurseryOptions { on_error: policy, ..NurseryOptions.default() };
-    let outcome = with_nursery(opts, |nursery| {
-        let mut handles: List<TaskHandle<Result<ShellResult, ShellError>>> = [];
-        for cmd in cmds.iter() {
-            let c = cmd.clone();
-            handles.push(nursery.spawn(async move { sh_check(&c).await }));
+    let mut nursery = Nursery.with_options(NurseryOptions.default().with_error_behavior(policy));
+    let mut handles: List<TaskHandle<Result<ShellResult, ShellError>>> = [];
+    for cmd in cmds.iter() {
+        let command = cmd.clone();
+        handles.push(nursery.spawn(async move { sh_check(&command).await }));
+    }
+    // A nursery counts completion as each TaskHandle observes its terminal
+    // poll. Drive every handle before asking the nursery for its outcome.
+    let mut out: List<Result<ShellResult, ShellError>> = [];
+    for handle in handles.into_iter() {
+        match handle.await {
+            Result.Ok(result) => out.push(result),
+            Result.Err(error) => out.push(Result.Err(ShellError.SpawnFailed {
+                command: "<nursery task>".into(), reason: error.to_string(),
+            })),
         }
-        handles
-    }).await;
-    match outcome {
-        Result.Ok(handles) => {
-            let mut out: List<Result<ShellResult, ShellError>> = [];
-            for h in handles.into_iter() {
-                match h.join().await {
-                    Result.Ok(r)  => out.push(r),
-                    Result.Err(_) => out.push(Result.Err(ShellError.SpawnFailed {
-                        command: "<nursery task>".into(),
-                        reason:  "task aborted by nursery".into(),
-                    })),
-                }
-            }
-            Result.Ok(out)
-        }
-        Result.Err(_) => Result.Err(ShellError.SpawnFailed {
-            command: "<nursery>".into(),
-            reason:  "nursery exited with error".into(),
+    }
+    match nursery.wait_all().await {
+        Result.Ok(_) => Result.Ok(out),
+        Result.Err(error) => Result.Err(ShellError.SpawnFailed {
+            command: "<nursery>".into(), reason: error.to_string(),
         }),
     }
 }

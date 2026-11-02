@@ -31,6 +31,7 @@ module core.shell.executor;
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.time.duration.{Duration};
+mount core.async.timer.{sleep};
 mount core.async.cancellation.{CancellationToken, CancelReason};
 mount core.async.backoff.{Backoff, BackoffStrategy};
 mount core.io.process.{ExitStatus};
@@ -235,21 +236,15 @@ implement Executor {
 
 async fn sleep_then(d: &Duration, token: &Maybe<CancellationToken>) {
     match token {
-        Maybe.None => time_sleep(*d).await,
+        Maybe.None => sleep(*d).await,
         Maybe.Some(t) => {
             // If cancellation fires during the sleep, wake immediately.
             select {
-                _ = time_sleep(*d).await => {},
+                _ = sleep(*d).await => {},
                 _ = t.cancelled().await => {},
             }
         }
     }
-}
-
-// Bridge to the time API. Imported here as a local stub so we don't drag in
-// every consumer of core.time. Real builds resolve this to core.time.sleep.
-async fn time_sleep(d: Duration) {
-    core.time.sleep(d).await
 }
 
 implement Clone for Executor {
