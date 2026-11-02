@@ -308,3 +308,49 @@ fn renamed_mount_does_not_claim_its_original_spelling() {
         assert!(errors.is_empty(), "eager={eager}: {errors:?}");
     }
 }
+
+#[test]
+fn source_variant_payload_can_mount_an_archived_type_by_its_declaring_owner() {
+    let consumer = "fn inspect(e: app.outer.Failure) -> Int { match e { app.outer.Failure.Absent => 1, app.outer.Failure.Bad(_) => 2 } }";
+    let outer =
+        "mount core.mixed.defining.{Packet as Cause}; public type Failure is Absent | Bad(Cause);";
+    for eager in [false, true] {
+        let errors = check_with_modules(
+            "",
+            "app.main",
+            consumer,
+            metadata(OWNER, KEY),
+            eager,
+            &[("app.outer", outer)],
+        );
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        let errors = check_with_modules(
+            "",
+            "app.main",
+            consumer,
+            metadata("foreign.owner", KEY),
+            eager,
+            &[("app.outer", outer)],
+        );
+        assert!(
+            !errors.is_empty(),
+            "foreign descriptor accepted, eager={eager}"
+        );
+        let mut private = metadata(OWNER, KEY);
+        for descriptor in private.types.values_mut() {
+            descriptor.is_public = false;
+        }
+        let errors = check_with_modules(
+            "",
+            "app.main",
+            consumer,
+            private,
+            eager,
+            &[("app.outer", outer)],
+        );
+        assert!(
+            !errors.is_empty(),
+            "private descriptor accepted, eager={eager}"
+        );
+    }
+}

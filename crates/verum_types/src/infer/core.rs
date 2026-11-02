@@ -2252,7 +2252,7 @@ impl TypeChecker {
         self.load_mounted_type(name, canonical_module, false)
     }
 
-    fn load_mounted_type(
+    pub(super) fn load_mounted_type(
         &mut self,
         name: &str,
         canonical_module: &str,

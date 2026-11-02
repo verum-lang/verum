@@ -28,6 +28,70 @@ fn source_mount_binds_name(tree: &verum_ast::decl::MountTree, name: &str) -> boo
     }
 }
 
+/// Visit the declaration paths explicitly bound to a spelling in a module.
+fn named_mount_targets(
+    mount: &verum_ast::MountDecl,
+    owner: &ModulePath,
+    name: &str,
+    mut visit: impl FnMut(ModulePath),
+) {
+    use verum_ast::{
+        decl::{MountTree, MountTreeKind},
+        ty::{Path, PathSegment},
+    };
+    use verum_modules::imports::path_to_module_path_resolved;
+
+    fn walk<'a>(
+        tree: &'a MountTree,
+        alias: Option<&verum_ast::Ident>,
+        name: &str,
+        prefixes: &mut Vec<&'a Path>,
+        visit: &mut impl FnMut(&[&Path], &Path),
+    ) {
+        match &tree.kind {
+            MountTreeKind::Path(leaf) => {
+                let Some(PathSegment::Name(last)) = leaf.segments.last() else {
+                    return;
+                };
+                let binding = tree.alias.as_ref().or(alias).unwrap_or(last);
+                if binding.name == name {
+                    visit(prefixes, leaf);
+                }
+            }
+            MountTreeKind::Nested { prefix, trees } => {
+                prefixes.push(prefix);
+                for child in trees {
+                    walk(child, None, name, prefixes, visit);
+                }
+                prefixes.pop();
+            }
+            MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+        }
+    }
+    walk(
+        &mount.tree,
+        mount.alias.as_ref(),
+        name,
+        &mut Vec::new(),
+        &mut |prefixes, leaf| {
+            if prefixes.is_empty() {
+                visit(path_to_module_path_resolved(leaf, owner));
+            } else {
+                let segments = prefixes
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(leaf))
+                    .flat_map(|part| part.segments.iter().cloned())
+                    .collect();
+                visit(path_to_module_path_resolved(
+                    &Path::new(segments, mount.span),
+                    owner,
+                ));
+            }
+        },
+    );
+}
+
 impl TypeChecker {
     /// Bind refinement names in the file that declared the type, using the
     /// same declaration inventory and import resolver as module loading. This
@@ -126,6 +190,9 @@ impl TypeChecker {
             return Ok((ty, Some(key)));
         }
         let (head, tail) = name.split_once('.').unwrap_or((name, ""));
+        if let Some((ty, key)) = self.source_mounted_archive_type(head, tail, span)? {
+            return Ok((ty, Some(key)));
+        }
         let binding = self.core_metadata.as_ref().and_then(|metadata|
             metadata.declaration_type_bindings.get(&self.current_module_path)
                 .and_then(|bindings| bindings.get(&Text::from(head))).cloned());
@@ -149,6 +216,74 @@ impl TypeChecker {
             name: name.into(),
             span,
         })
+    }
+
+    /// A source module may privately mount an archive-only declaration in a public signature.
+    fn source_mounted_archive_type(
+        &mut self,
+        head: &str,
+        tail: &str,
+        span: Span,
+    ) -> Result<Option<(Type, Text)>> {
+        if self.core_metadata.is_none() {
+            return Ok(None);
+        }
+        let owner = ModulePath::from_str(self.current_module_path.as_str());
+        let mut targets = Set::new();
+        {
+            let registry = self.module_registry.read();
+            let inline = self
+                .inline_modules
+                .get(&self.current_module_path)
+                .and_then(|module| module.items.as_ref());
+            let file =
+                self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry);
+            if let Some(items) = inline.or_else(|| file.as_ref().map(|module| &module.ast.items)) {
+                for item in items {
+                    if let verum_ast::ItemKind::Mount(mount) = &item.kind {
+                        named_mount_targets(mount, &owner, head, |path| {
+                            targets.insert(path);
+                        });
+                    }
+                }
+            }
+        }
+        let mut paths = targets.into_iter();
+        let Some(path) = paths.next() else {
+            return Ok(None);
+        };
+        if paths.next().is_some() {
+            return Err(TypeError::TypeNotFound {
+                name: head.into(),
+                span,
+            });
+        }
+        let path: Text = if tail.is_empty() {
+            path.to_string()
+        } else {
+            format!("{path}.{tail}")
+        }
+        .into();
+        let Some((module, leaf)) = path.rsplit_once('.') else {
+            return Ok(None);
+        };
+        let (declared, owner) = self
+            .reexport_source_module_for(module, leaf)
+            .unwrap_or_else(|| (leaf.into(), module.into()));
+        let key: Text = format!("{owner}.{declared}").into();
+        if !self.core_metadata.as_ref().is_some_and(|metadata| {
+            Self::metadata_type_with_declaring_key(metadata, &key).is_some()
+        }) {
+            return Ok(None);
+        }
+        if let Some(resolved) =
+            self.resolve_qualified_source_type_with_parameter_key(&path, span)?
+        {
+            return Ok(Some(resolved));
+        }
+        self.load_mounted_type(leaf, module, true)
+            .map(Some)
+            .ok_or(TypeError::TypeNotFound { name: path, span })
     }
 
     /// Resolve a lexical source name through its declaration and explicit
