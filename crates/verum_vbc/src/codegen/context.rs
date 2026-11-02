@@ -2456,8 +2456,16 @@ impl CodegenContext {
         &mut self,
         is_error_path: bool,
     ) -> (Vec<(String, Reg)>, Vec<Vec<Instruction>>) {
+        self.exit_scope_with_locals(is_error_path, |name, reg, _| (name, reg))
+    }
+
+    pub(super) fn exit_scope_with_locals<V>(
+        &mut self,
+        is_error_path: bool,
+        local: impl FnMut(String, Reg, Option<TypeRef>) -> V,
+    ) -> (Vec<V>, Vec<Vec<Instruction>>) {
         let defers = self.pop_defer_scope(is_error_path);
-        let vars = self.registers.exit_scope_with_hints(|name, hints| {
+        let vars = self.registers.exit_scope_with_hints(local, |name, hints| {
             if let Some(kind) = hints.kind {
                 self.variable_types.insert(name.to_owned(), kind);
             } else {

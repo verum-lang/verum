@@ -53,9 +53,9 @@ impl ValueUseRecorder {
         );
         id
     }
-    pub fn forget(&mut self, reg: Reg) {
-        self.active.remove(&reg);
+    pub(super) fn forget(&mut self, reg: Reg) -> Option<BindingFact> {
         self.forwarded.remove(&reg);
+        self.active.remove(&reg)
     }
     pub fn set_type(&mut self, reg: Reg, ty: TypeRef, discipline: ResourceDiscipline) {
         if let Some(fact) = self.active.get_mut(&reg) {
@@ -367,6 +367,20 @@ impl super::VbcCodegen {
 
     /// Both generic and concrete transfers require the same active declaration.
     /// Borrowed aliases, captured cells and raw views never acquire its ownership.
+    /// Instantiated destructor bodies receive the lexical type arguments used
+    /// at construction. Semantic IDs retain their native runtime cleanup.
+    /// An erased heap header only identifies the declaration.
+    pub(super) fn emit_local_drop(&mut self, src: Reg, declared: Option<&TypeRef>) {
+        if let Some(ty @ TypeRef::Instantiated { base, .. }) = declared
+            && !base.is_semantic_type()
+            && self.type_by_id(*base).is_some_and(|descriptor| descriptor.drop_fn.is_some())
+        {
+            self.ctx.emit(Instruction::DropTyped { src, type_ref: ty.clone() });
+        } else {
+            self.ctx.emit(Instruction::DropRef { src });
+        }
+    }
+
     fn named_binding_fact(&self, name: &str, reg: Reg) -> Maybe<&BindingFact> {
         let binding = self.ctx.lookup_var(name)?;
         if binding.reg != reg || binding.is_cell || binding.is_pattern_alias
@@ -473,7 +487,9 @@ impl super::VbcCodegen {
             if borrowed_or_raw {
                 continue;
             }
-            self.ctx.emit(Instruction::DropRef { src: binding.reg });
+            let declared = self.ctx.registers.value_uses.active.get(&binding.reg)
+                .and_then(|fact| fact.declaration_type.clone());
+            self.emit_local_drop(binding.reg, declared.as_ref());
         }
         if let Some(fact) = returned_fact {
             self.ctx.registers.value_uses.forward_result(returned, fact);

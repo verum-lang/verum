@@ -9,6 +9,35 @@ use verum_vbc::{
 };
 
 #[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn bounded_channel_preserves_payloads_and_destroys_generic_endpoints() {
+    let source = r#"
+        module app;
+        mount core.async.channel.{Sender, Receiver, bounded};
+        mount core.time.duration.Duration;
+        fn main() -> Int {
+            let (sender, mut receiver): (Sender<Int>, Receiver<Int>) = bounded<Int>(1);
+            if sender.send_timeout(13, Duration.zero()).is_err() { return 1; }
+            let full = match sender.send_timeout(17, Duration.from_millis(3)) {
+                Result.Err(e) => e.0,
+                Result.Ok(()) => {return 2;}
+            };
+            let first = receiver.try_recv().unwrap();
+            receiver.close();
+            let closed = match sender.send_timeout(19, Duration.zero()) {
+                Result.Err(e) => e.0,
+                Result.Ok(()) => {return 3;}
+            };
+            assert(first == 13, "queue payload lost");
+            assert(full == 17, "timed-out payload lost");
+            assert(closed == 19, "disconnected payload lost");
+            first * 10000 + full * 100 + closed
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 13 * 10000 + 17 * 100 + 19);
+}
+
+#[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and loopback TCP"]
 fn weft_overload_sends_the_complete_http_response() {
     let source = r#"

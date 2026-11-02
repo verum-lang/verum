@@ -1558,10 +1558,7 @@ pub(in super::super) fn handle_drop_ref(
             // finalize), so gating the band excludes exactly the
             // native-representation set.  Their .vr `Drop` impls remain
             // meaningful for the self-hosted/AOT record layer only.
-            let semantic_band = crate::types::TypeId::FIRST_SEMANTIC
-                ..=crate::types::TypeId::LAST_SEMANTIC;
-            let type_desc_idx = if type_id.0 >= crate::types::TypeId::FIRST_USER
-                && !semantic_band.contains(&type_id.0)
+            let type_desc_idx = if !type_id.is_builtin() && !type_id.is_semantic_type()
             {
                 state.module.type_index_by_id(type_id)
             } else {
@@ -1736,8 +1733,7 @@ pub(in super::super) fn handle_drop_ref(
                             };
 
                             if let Some(ftid) = field_type_id
-                                && ftid.0 >= crate::types::TypeId::FIRST_USER
-                                && !semantic_band.contains(&ftid.0)
+                                && !ftid.is_builtin() && !ftid.is_semantic_type()
                             {
                                 let has_drop = state
                                     .module

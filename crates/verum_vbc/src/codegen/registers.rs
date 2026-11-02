@@ -337,21 +337,22 @@ impl RegisterAllocator {
     /// variable bindings to their previous values.
     /// Returns the variables that were removed (for potential drop calls).
     pub fn exit_scope(&mut self) -> Vec<(String, Reg)> {
-        self.exit_scope_with_hints(|_, _| {})
+        self.exit_scope_with_hints(|name, reg, _| (name, reg), |_, _| {})
     }
 
-    pub(super) fn exit_scope_with_hints(
+    pub(super) fn exit_scope_with_hints<V>(
         &mut self,
+        mut local: impl FnMut(String, Reg, Option<crate::types::TypeRef>) -> V,
         mut restore: impl FnMut(&str, ShadowedTypeHints),
-    ) -> Vec<(String, Reg)> {
+    ) -> Vec<V> {
         let mut removed = Vec::new();
 
         if let Some(scope) = self.scope_stack.pop() {
             // First, remove all variables defined in this scope
             for name in &scope.scope_vars {
                 if let Some(info) = self.variables.remove(name) {
-                    removed.push((name.clone(), info.reg));
-                    self.value_uses.forget(info.reg);
+                    let ty = self.value_uses.forget(info.reg).and_then(|fact| fact.declaration_type);
+                    removed.push(local(name.clone(), info.reg, ty));
                     // Recycle the register
                     if self.recycle_temps && info.kind == RegisterKind::Local {
                         self.free_list.push(info.reg);

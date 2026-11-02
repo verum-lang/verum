@@ -21383,7 +21383,7 @@ impl VbcCodegen {
         };
 
         // Exit scope (handles defers and drops)
-        let (vars, defers) = self.ctx.exit_scope(false);
+        let (vars, defers) = self.ctx.exit_scope_with_locals(false, |name, reg, ty| (name, reg, ty));
 
         // Emit defer instructions
         for defer_instrs in defers {
@@ -21407,7 +21407,7 @@ impl VbcCodegen {
         // soundness across `pop_frame`'s own slot-generation bump is
         // handled by interpreter-side stabilisation in `do_return`
         // (commit chain phase 3).
-        for (name, var_reg) in vars.iter().rev() {
+        for (name, var_reg, declared) in vars.iter().rev() {
             // T1539: the tail value has just been handed to final_result.
             // Only a consumer using the result receives that obligation.
             // Discarded tails retain ordinary local cleanup.
@@ -21457,14 +21457,14 @@ impl VbcCodegen {
             if is_raw_typed {
                 continue;
             }
-            self.ctx.emit(Instruction::DropRef { src: *var_reg });
+            self.emit_local_drop(*var_reg, declared.as_ref());
         }
 
         if let Some(outer_type_names) = outer_type_names {
             // Restore only bindings declared in the scope being left.
             // Refinements of an outer binding (e.g. List -> List<Record>
             // after push) remain valid when no local shadows that binding.
-            for (name, _) in &vars {
+            for (name, _, _) in &vars {
                 if let Some(outer_type) = outer_type_names.get(name) {
                     self.ctx.variable_type_names.insert(name.clone(), outer_type.clone());
                 } else {
