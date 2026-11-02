@@ -116,6 +116,22 @@ fn protocol_method_results_retain_the_declared_level() {
 }
 
 #[test]
+fn named_protocol_methods_check_the_declared_receiver_access() {
+    let data = metadata("provider", "public type Counter is protocol { fn read(&self) -> Type(1); fn increment(&mut self) -> Type(1); };");
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn read(x: &provider.Counter) -> Type(1) { x.read() } fn increment(x: &mut provider.Counter) -> Type(1) { x.increment() }", eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn invalid(x: &provider.Counter) -> Type(1) { x.increment() }", eager);
+        assert!(errors.iter().any(|error| error.contains("cannot write through a shared reference")),
+            "eager={eager}: {errors:?}");
+    }
+}
+
+#[test]
 fn equal_leaf_names_keep_their_declaring_owner() {
     let mut data = metadata("test.first", "public type Carrier<A> is { public value: Type(1), public extra: A };");
     let other = metadata("test.second", "public type Carrier<A> is { public value: Type(2), public extra: A };");

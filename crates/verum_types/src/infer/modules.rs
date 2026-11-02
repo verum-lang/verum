@@ -24064,7 +24064,7 @@ impl TypeChecker {
                             }
 
                             let resolved_return = self.unifier.apply(return_type);
-                            return Ok(Some(InferResult::new(resolved_return)));
+                            return Ok(Some(InferResult::method(resolved_return, proto_method.receiver_kind())));
                         }
                     }
                 }
