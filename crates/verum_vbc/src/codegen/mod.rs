@@ -17615,7 +17615,8 @@ impl VbcCodegen {
             self.ctx.current_source_module = previous_module;
             let folded_integer = match compiled {
                 Ok(value) => value,
-                Err(error) => {
+                Err(mut error) => {
+                    error.context.get_or_insert_with(|| format!("in constant initializer `{name}`"));
                     self.ctx.end_function();
                     match policy {
                         ItemFailurePolicy::Strict => {

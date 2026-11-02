@@ -278,3 +278,13 @@ fn literal_accessors_and_inlined_reads_preserve_runtime_tags_and_all_integer_bit
         }
     }
 }
+
+#[test]
+fn out_of_range_signed_constant_reports_its_declaration() {
+    let ast = Parser::new("module certificate; const FNV_OFFSET: Int = 0xcbf29ce484222325;")
+        .parse_module().unwrap();
+    let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
+    assert!(matches!(error.kind, CodegenErrorKind::InvalidLiteral(_)), "{error}");
+    assert!(error.to_string().contains("certificate.FNV_OFFSET"), "{error}");
+    assert!(error.span.is_some());
+}
