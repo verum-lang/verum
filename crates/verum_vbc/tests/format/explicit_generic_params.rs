@@ -35,6 +35,9 @@ fn function_bytes(minor: u16) -> Vec<u8> {
     if minor >= 27 {
         bytes.push(0); // v2.27 optional semantic result
     }
+    if minor >= 30 {
+        bytes.push(0); // v2.30 optional source-level signature
+    }
     bytes
 }
 
@@ -89,7 +92,15 @@ fn v216_truncated_or_oversized_generic_tail_is_rejected() {
 
 #[test]
 fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
-    for (minor, one_len) in [(15, 41), (16, 42), (19, 42), (20, 43), (22, 43), (26, 44), (crate::format::VERSION_MINOR, 45)] {
+    for minor in 15..=crate::format::VERSION_MINOR {
+        let one_len = match minor {
+            15 => 41,
+            16..=19 => 42,
+            20..=22 => 43,
+            23..=26 => 44,
+            27..=29 => 45,
+            _ => 46,
+        };
         let mut bytes = function_bytes(minor);
         assert_eq!(bytes.len(), one_len);
         append_next_descriptor(&mut bytes, minor);
@@ -103,8 +114,20 @@ fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
             assert!(descriptor.explicit_type_param_ids.is_empty());
             assert!(descriptor.value_uses.is_none());
             assert!(descriptor.semantic_return.is_none());
+            assert!(descriptor.source_signature.is_none());
             assert_eq!(reader.offset, expected, "minor={minor}");
         }
+    }
+}
+
+#[test]
+fn v230_source_signature_tail_rejects_missing_and_malformed_bytes() {
+    let prefix = function_bytes(29);
+    for tail in [&[][..], &[2][..], &[1][..], &[1, 4, 0][..]] {
+        let bytes = [prefix.as_slice(), tail].concat();
+        let mut reader = Deserializer::new(&bytes);
+        reader.header = Some(VbcHeader { version_minor: 30, ..VbcHeader::default() });
+        assert!(reader.parse_function_descriptor().is_err(), "tail={tail:?}");
     }
 }
 
