@@ -40,6 +40,12 @@ pub(super) struct ValueUseRecorder {
     return_use_capture: List<ReturnUseCapture>,
 }
 impl ValueUseRecorder {
+    pub(super) fn captured_declaration(&self, binding: &super::RegisterInfo) -> Maybe<TypeRef> {
+        self.active.get(&binding.reg)
+            .filter(|fact| fact.id == binding.binding_id)
+            .and_then(|fact| fact.declaration_type.clone())
+    }
+
     pub fn allocate(&mut self, reg: Reg) -> BindingId {
         let id = BindingId(self.next_binding);
         self.next_binding = self.next_binding.saturating_add(1);
@@ -260,6 +266,21 @@ impl ValueUseRecorder {
 }
 
 impl super::VbcCodegen {
+    pub(super) fn bind_capture_declarations(
+        &mut self,
+        captures: &[(String, bool)],
+        declarations: &[Maybe<TypeRef>],
+    ) {
+        for ((name, _), declaration) in captures.iter().zip(declarations) {
+            if let (Some(binding), Some(ty)) = (self.ctx.lookup_var(name), declaration) {
+                let reg = binding.reg;
+                let discipline = crate::resource_discipline::resource_discipline_with(ty,
+                    |id| self.type_index_of(id).and_then(|i| self.types.get(i)));
+                self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
+            }
+        }
+    }
+
     /// A consuming local use selects transfer from the exact source binding's
     /// resolved declaration. This reads declaration facts, not the optional
     /// observation plan; budget exhaustion may discard receipts but cannot

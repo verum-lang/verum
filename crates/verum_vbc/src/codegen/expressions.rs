@@ -31980,9 +31980,7 @@ impl VbcCodegen {
                 let already_cell = info.is_cell;
                 // Snapshot the declaration before mutable-cell boxing. The
                 // cell representation must not turn owned data into a borrow.
-                capture_types.push(self.ctx.registers.value_uses.active.get(&var_reg)
-                    .filter(|fact| fact.id == info.binding_id)
-                    .and_then(|fact| fact.declaration_type.clone()));
+                capture_types.push(self.ctx.registers.value_uses.captured_declaration(info));
 
                 if is_mut && !already_cell {
                     // Mutable capture: allocate a heap cell to share state between
@@ -32291,14 +32289,7 @@ impl VbcCodegen {
         // Begin closure function compilation
         self.ctx.begin_function(&closure_name, &all_params, closure_return_type_ref.clone());
         self.ctx.bind_captured_array_facts(captured_arrays);
-        for ((name, _), ty) in captures.iter().zip(capture_types) {
-            if let (Some(binding), Some(ty)) = (self.ctx.lookup_var(name), ty) {
-                let reg = binding.reg;
-                let discipline = crate::resource_discipline::resource_discipline_with(ty,
-                    |id| self.type_index_of(id).and_then(|i| self.types.get(i)));
-                self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
-            }
-        }
+        self.bind_capture_declarations(captures, capture_types);
 
         // CLOSURE-CAPTURE-TYPE-1: re-instate the captures' types on the
         // far side of the clear, so the body resolves field indices
@@ -33580,11 +33571,13 @@ impl VbcCodegen {
         let mut capture_regs = Vec::with_capacity(free_vars.len());
         let mut capture_names: Vec<(String, bool)> = Vec::with_capacity(free_vars.len());
         let mut capture_type_names: Vec<Option<String>> = Vec::with_capacity(free_vars.len());
+        let mut capture_types = Vec::with_capacity(free_vars.len());
         for var_name in &free_vars {
             if let Some(info) = self.ctx.lookup_var(var_name) {
                 capture_regs.push(info.reg);
                 capture_names.push((var_name.clone(), info.is_mutable));
                 capture_type_names.push(self.ctx.variable_type_names.get(var_name).cloned());
+                capture_types.push(self.ctx.registers.value_uses.captured_declaration(info));
             }
         }
 
@@ -33643,6 +33636,7 @@ impl VbcCodegen {
         self.ctx
             .begin_function(&spawn_func_name, &capture_names, None);
         self.ctx.bind_captured_array_facts(captured_arrays);
+        self.bind_capture_declarations(&capture_names, &capture_types);
         // Inject captured variable type names for VBC codegen (method dispatch, etc.)
         // EXCEPT for types handled by built-in opcodes — those use compiled .vr methods
         // with &self ABI that doesn't match raw i64 spawn parameters. For these types, we only
@@ -33690,44 +33684,18 @@ impl VbcCodegen {
         descriptor.locals_count = capture_names.len() as u16;
         for (i, pname) in param_names.iter().enumerate() {
             let pname_id = crate::types::StringId(self.intern_string(pname));
-            // Preserve actual type of captured variable for correct LLVM lowering
-            let type_name = capture_type_names.get(i).and_then(|t| t.as_deref());
-            let base_type = type_name.map(|t| {
-                // Strip generic args: "List<Int>" → "List", "Map<K,V>" → "Map"
-                if let Some(pos) = t.find('<') {
-                    &t[..pos]
+            // A spawn frame has no lexical type-parameter roster. Keep concrete
+            // declarations intact in its ABI. The legacy untyped word fallback
+            // is never evidence for callable capture admission.
+            let type_ref = capture_types[i].clone()
+                .or_else(|| capture_type_names[i].as_deref()
+                    .and_then(|name| self.type_name_to_type_ref_mono(name)))
+                .and_then(|ty| if ty.is_generic() {
+                    ty.base_type_id().map(crate::types::TypeRef::Concrete)
                 } else {
-                    t
-                }
-            });
-            let type_ref = match base_type {
-                Some("Text") | Some("String") => {
-                    crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT)
-                }
-                Some("List") => crate::types::TypeRef::Instantiated {
-                    base: crate::types::TypeId::LIST,
-                    args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
-                },
-                Some("Float") => crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT),
-                Some("Bool") => crate::types::TypeRef::Concrete(crate::types::TypeId::BOOL),
-                Some("Map") => crate::types::TypeRef::Instantiated {
-                    base: crate::types::TypeId::MAP,
-                    args: vec![
-                        crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
-                        crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
-                    ],
-                },
-                Some("Channel") => crate::types::TypeRef::Concrete(crate::types::TypeId::CHANNEL),
-                Some("Set") => crate::types::TypeRef::Instantiated {
-                    base: crate::types::TypeId::SET,
-                    args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
-                },
-                Some("Deque") => crate::types::TypeRef::Instantiated {
-                    base: crate::types::TypeId::DEQUE,
-                    args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
-                },
-                _ => crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
-            };
+                    Some(ty)
+                })
+                .unwrap_or(crate::types::TypeRef::Concrete(crate::types::TypeId::INT));
             descriptor.params.push(crate::module::ParamDescriptor {
                 name: pname_id,
                 type_ref,

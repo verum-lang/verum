@@ -71,6 +71,49 @@ fn immutable_mutable_and_nested_environments_keep_content_declarations() {
 }
 
 #[test]
+fn spawned_function_descriptor_preserves_declared_element_types() {
+    for (declaration, expected) in [
+        ("probe(values: List<Bool>)", TypeRef::instantiated(TypeId::LIST, [TypeRef::Concrete(TypeId::BOOL)])),
+        ("probe<T>(values: List<T>)", TypeRef::Concrete(TypeId::LIST)),
+    ] {
+        let source = format!("async fn {declaration} -> Int {{
+            let task = spawn {{ values.len() }};
+            task.await
+        }}");
+        for bootstrap in [false, true] {
+            let module = compile(&source, bootstrap);
+            let worker = module.functions.iter().find(|f|
+                module.get_string(f.name).is_some_and(|name| name.contains("$spawn$"))
+            ).unwrap();
+            assert_eq!(worker.params.len(), 1);
+            assert_eq!(worker.params[0].type_ref, expected);
+        }
+    }
+}
+
+#[test]
+fn spawned_blocks_preserve_declarations_for_nested_callable_admission() {
+    for bootstrap in [false, true] {
+        for discipline in ["", "affine", "linear"] {
+            let source = format!(
+                "type {discipline} Token is {{ value: Int }}; async fn probe() -> Int {{
+                    let token: Token = Token {{ value: 7 }};
+                    let task = spawn {{ let read = || token.value; read() }};
+                    task.await
+                }}"
+            );
+            let result = execute(compile(&source, bootstrap));
+            if discipline.is_empty() {
+                assert_eq!(result.unwrap(), 7);
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.contains("capture 0 requires unrestricted ownership"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
 fn owned_affine_and_linear_captures_refuse_before_callable_creation() {
     for discipline in ["affine", "linear"] {
         for mutable in ["", "mut "] {
