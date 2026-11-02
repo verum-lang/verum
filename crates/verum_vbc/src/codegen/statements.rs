@@ -437,18 +437,29 @@ impl VbcCodegen {
     /// Project an instantiated tuple declaration onto the newly bound locals.
     /// Reference patterns have their own binding mode and cannot inherit the
     /// owned element's type. Missing declarations grant no ownership evidence.
-    fn bind_tuple_declaration(&mut self, pattern: &verum_ast::Pattern, ty: &crate::types::TypeRef) {
+    pub(super) fn bind_tuple_declaration(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        ty: &crate::types::TypeRef,
+        borrow: Option<crate::types::Mutability>,
+    ) {
         use verum_ast::PatternKind;
         match (&pattern.kind, ty) {
             (PatternKind::Tuple(parts), crate::types::TypeRef::Tuple(elements)) if parts.len() == elements.len() => {
                 for (part, element) in parts.iter().zip(elements) {
-                    self.bind_tuple_declaration(part, element);
+                    self.bind_tuple_declaration(part, element, borrow);
                 }
             }
             (PatternKind::Ident { name, by_ref: false, subpattern: None, .. }, _) => {
                 if let Some(reg) = self.ctx.lookup_var(name.name.as_str()).map(|var| var.reg) {
-                    let discipline = crate::resource_discipline::resource_discipline_with(ty, |id| self.type_by_id(id));
-                    self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
+                    let binding = if let Some(mutability) = borrow {
+                        self.ctx.reference_bindings.insert(name.name.to_string());
+                        crate::types::TypeRef::reference(ty.clone(), mutability, crate::types::CbgrTier::Tier0)
+                    } else {
+                        ty.clone()
+                    };
+                    let discipline = crate::resource_discipline::resource_discipline_with(&binding, |id| self.type_by_id(id));
+                    self.ctx.registers.value_uses.set_type(reg, binding, discipline);
                     if let Some(declared) = self.declaration_type_name(ty, 0) {
                         self.ctx.variable_type_names.insert(name.name.to_string(), declared);
                     }
@@ -1668,7 +1679,7 @@ impl VbcCodegen {
             }};
             self.compile_pattern_bind(pattern, bound)?;
             if let Some(declaration) = &tuple_declaration {
-                self.bind_tuple_declaration(pattern, declaration);
+                self.bind_tuple_declaration(pattern, declaration, None);
             }
             if transfer {
                 self.ctx.emit(Instruction::LoadUnit { dst: reg });

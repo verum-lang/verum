@@ -19081,45 +19081,45 @@ impl VbcCodegen {
                 offset,
             });
 
-        // Bind pattern
-        self.ctx.enter_scope();
-        self.compile_pattern_bind(pattern, elem_reg)?;
-
-        // Propagate the iterator's element type to the for-loop binding so
-        // field accesses inside the body (`u.name`) resolve against the
-        // right type instead of falling through `resolve_field_index`'s
-        // "scan all types, pick most fields" tiebreaker, which silently
-        // picks a wrong layout and panics downstream with
-        // `field access out of bounds`. Mirrors let-RHS type propagation.
-        //
-        // Two iter-expression shapes are supported:
-        //
-        //   (a) `for x in container`  — `iter` is the container itself
-        //       (List<T> / Set<T> / Deque<T> / BinaryHeap<T> / BTreeSet<T> /
-        //       Range<T> / RangeInclusive<T>). Element = T.
-        //
-        //   (b) `for x in container.iter()` / `.iter_mut()` / `.into_iter()`
-        //       — `iter` is a MethodCall whose receiver IS the container
-        //       and whose method produces an iterator. The iterator's
-        //       Item is the same as the container's element. Recurse to
-        //       the receiver and apply the (a) extraction there.
-        //
-        // Pre-this branch only (a) propagated. Path (b) — the by-far
-        // most common form in user code — left the loop binder
-        // unregistered in `variable_type_names`. Downstream chained
-        // method calls then fell into the `extract_expr_type_name`
-        // method-call hardcode at line ~15280 and mis-inferred the
-        // result as `"Maybe"`, structurally breaking `(*p).map(...)
-        // .map(...)` on iterator-derived references.
-        let container_for_element = if let verum_ast::ExprKind::MethodCall {
-            receiver, method, ..
-        } = &iter.kind
-            && matches!(method.name.as_str(), "iter" | "iter_mut" | "into_iter")
-        {
-            Some(receiver.as_ref())
+        // Resolve the item before declaring locals that may shadow the iterable itself.
+        let (container_for_element, borrow) = match &iter.kind {
+            ExprKind::MethodCall { receiver, method, .. } => match method.name.as_str() {
+                "iter" => (Some(receiver.as_ref()), Some(crate::types::Mutability::Immutable)),
+                "iter_mut" => (Some(receiver.as_ref()), Some(crate::types::Mutability::Mutable)),
+                "into_iter" => (Some(receiver.as_ref()), None),
+                _ => (None, None),
+            },
+            _ => (None, None),
+        };
+        let tuple_item = if matches!(pattern.kind, verum_ast::PatternKind::Tuple(_)) {
+            use crate::types::{TypeId, TypeRef};
+            let container = container_for_element.unwrap_or(iter);
+            let declared = self.declared_expression_result(container, None, 0, 0);
+            let mut owner = declared.as_ref();
+            while let Some(TypeRef::Reference { inner, .. }) = owner {
+                owner = Some(inner);
+            }
+            match owner {
+                Some(TypeRef::Instantiated { base, args })
+                    if matches!(*base, TypeId::LIST | TypeId::SET | TypeId::DEQUE) && args.len() == 1 => {
+                        args.first().cloned()
+                    }
+                Some(TypeRef::Array { element, .. } | TypeRef::Slice(element)) => Some(element.as_ref().clone()),
+                _ => None,
+            }
         } else {
             None
         };
+        self.ctx.enter_scope();
+        if let Some(item) = tuple_item {
+            let mode = borrow.map_or(PatternBindingMode::Value, |mutability| {
+                PatternBindingMode::Borrowed(mutability, CbgrTier::Tier0)
+            });
+            self.compile_pattern_bind_mode(pattern, elem_reg, &mode)?;
+            self.bind_tuple_declaration(pattern, &item, borrow);
+        } else {
+            self.compile_pattern_bind(pattern, elem_reg)?;
+        }
         // ITER-BINDER-CHAR-1 (factory leg, hoisted): the factory-method
         // fact must not depend on extract_expr_type_name succeeding —
         // inside stdlib bodies (`for ch in self.chars()` in text.vr at
@@ -21302,6 +21302,17 @@ impl VbcCodegen {
         self.compile_pattern_bind_mode(pattern, scrutinee, &PatternBindingMode::Value)
     }
 
+    fn emit_field_reference(&mut self, dst: Reg, owner: Reg, field: u32) {
+        let mut operands = Vec::new();
+        Self::write_reg(&mut operands, dst.0);
+        Self::write_reg(&mut operands, owner.0);
+        crate::encoding::encode_varint(u64::from(field), &mut operands);
+        self.ctx.emit(Instruction::CbgrExtended {
+            sub_op: crate::instruction::CbgrSubOpcode::RefField as u8,
+            operands,
+        });
+    }
+
     fn compile_pattern_bind_mode(
         &mut self,
         pattern: &verum_ast::Pattern,
@@ -21372,11 +21383,19 @@ impl VbcCodegen {
                         self.ctx.registers.alloc_fresh();
                     }
 
-                    self.ctx.emit(Instruction::Unpack {
-                        dst_start: first_elem,
-                        tuple: scrutinee,
-                        count: elements.len() as u8,
-                    });
+                    if mode.is_borrowed() {
+                        for (i, part) in elements.iter().enumerate() {
+                            if !matches!(part.kind, PatternKind::Wildcard) {
+                                self.emit_field_reference(Reg(first_elem.0 + i as u16), scrutinee, i as u32);
+                            }
+                        }
+                    } else {
+                        self.ctx.emit(Instruction::Unpack {
+                            dst_start: first_elem,
+                            tuple: scrutinee,
+                            count: elements.len() as u8,
+                        });
+                    }
 
                     // Snapshot per-element types recorded by `compile_match`
                     // when the scrutinee was a tuple expression — used to
@@ -22062,14 +22081,7 @@ impl VbcCodegen {
                         // Plain record: extract field by type-specific position
                         let field_idx = self.resolve_field_index(Some(&field_key), &field_name);
                         if needs_ref {
-                            let mut operands = Vec::new();
-                            Self::write_reg(&mut operands, field_reg.0);
-                            Self::write_reg(&mut operands, scrutinee.0);
-                            crate::encoding::encode_varint(field_idx as u64, &mut operands);
-                            self.ctx.emit(Instruction::CbgrExtended {
-                                sub_op: crate::instruction::CbgrSubOpcode::RefField as u8,
-                                operands,
-                            });
+                            self.emit_field_reference(field_reg, scrutinee, field_idx);
                         } else {
                             self.ctx.emit(Instruction::GetF {
                                 dst: field_reg,

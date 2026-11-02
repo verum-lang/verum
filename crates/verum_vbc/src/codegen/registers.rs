@@ -112,6 +112,14 @@ pub enum RegisterKind {
     Captured,
 }
 
+/// Name-indexed receiver hints belong to the same lexical binding as its register.
+#[derive(Debug, Clone)]
+pub(super) struct ShadowedTypeHints {
+    pub nominal: Option<String>,
+    pub kind: Option<super::context::VarTypeKind>,
+    pub reference: bool,
+}
+
 /// Marker for scope boundaries.
 #[derive(Debug, Clone)]
 struct ScopeMarker {
@@ -119,7 +127,7 @@ struct ScopeMarker {
     scope_vars: Vec<String>,
     /// Shadowed variables that need to be restored on scope exit.
     /// Maps variable name to its previous RegisterInfo.
-    shadowed_vars: Vec<(String, RegisterInfo)>,
+    shadowed_vars: Vec<(String, RegisterInfo, Option<ShadowedTypeHints>)>,
     shadowed_value_facts: verum_common::List<(Reg, super::value_uses::BindingFact)>,
 }
 
@@ -195,6 +203,15 @@ impl RegisterAllocator {
     /// name already exists (shadowing), the old binding is saved and will be
     /// restored when the scope exits.
     pub fn alloc_local(&mut self, name: &str, is_mutable: bool) -> Reg {
+        self.alloc_local_with_hints(name, is_mutable, || None)
+    }
+
+    pub(super) fn alloc_local_with_hints(
+        &mut self,
+        name: &str,
+        is_mutable: bool,
+        hints: impl FnOnce() -> Option<ShadowedTypeHints>,
+    ) -> Reg {
         let reg = self.alloc_fresh();
         let binding_id = self.value_uses.allocate(reg);
         let scope_level = self.scope_stack.len() - 1;
@@ -208,7 +225,7 @@ impl RegisterAllocator {
             }
             scope
                 .shadowed_vars
-                .push((name.to_string(), old_info.clone()));
+                .push((name.to_string(), old_info.clone(), hints()));
         }
 
         self.variables.insert(
@@ -320,6 +337,13 @@ impl RegisterAllocator {
     /// variable bindings to their previous values.
     /// Returns the variables that were removed (for potential drop calls).
     pub fn exit_scope(&mut self) -> Vec<(String, Reg)> {
+        self.exit_scope_with_hints(|_, _| {})
+    }
+
+    pub(super) fn exit_scope_with_hints(
+        &mut self,
+        mut restore: impl FnMut(&str, ShadowedTypeHints),
+    ) -> Vec<(String, Reg)> {
         let mut removed = Vec::new();
 
         if let Some(scope) = self.scope_stack.pop() {
@@ -339,7 +363,10 @@ impl RegisterAllocator {
                 self.value_uses.active.insert(reg, fact);
             }
             // Restore shadowed variables in reverse order (LIFO)
-            for (name, info) in scope.shadowed_vars.into_iter().rev() {
+            for (name, info, hints) in scope.shadowed_vars.into_iter().rev() {
+                if let Some(hints) = hints {
+                    restore(&name, hints);
+                }
                 self.variables.insert(name, info);
             }
         }
@@ -358,7 +385,7 @@ impl RegisterAllocator {
             .variables
             .iter()
             .chain(self.scope_stack.iter().flat_map(|scope| {
-                scope.shadowed_vars.iter().map(|(name, info)| (name, info))
+                scope.shadowed_vars.iter().map(|(name, info, _)| (name, info))
             }))
             .filter(|(_, info)| info.kind == RegisterKind::Local && seen.insert(info.binding_id))
             .map(|(name, info)| (verum_common::Text::from(name.as_str()), info.clone()))

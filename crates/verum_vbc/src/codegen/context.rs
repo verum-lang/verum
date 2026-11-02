@@ -2457,7 +2457,23 @@ impl CodegenContext {
         is_error_path: bool,
     ) -> (Vec<(String, Reg)>, Vec<Vec<Instruction>>) {
         let defers = self.pop_defer_scope(is_error_path);
-        let vars = self.registers.exit_scope();
+        let vars = self.registers.exit_scope_with_hints(|name, hints| {
+            if let Some(kind) = hints.kind {
+                self.variable_types.insert(name.to_owned(), kind);
+            } else {
+                self.variable_types.remove(name);
+            }
+            if hints.reference {
+                self.reference_bindings.insert(name.to_owned());
+            } else {
+                self.reference_bindings.remove(name);
+            }
+            if let Some(nominal) = hints.nominal {
+                self.variable_type_names.insert(name.to_owned(), nominal);
+            } else {
+                self.variable_type_names.remove(name);
+            }
+        });
         (vars, defers)
     }
 
@@ -2721,7 +2737,13 @@ impl CodegenContext {
 
     /// Defines a new variable.
     pub fn define_var(&mut self, name: &str, is_mutable: bool) -> Reg {
-        self.registers.alloc_local(name, is_mutable)
+        self.registers.alloc_local_with_hints(name, is_mutable, || {
+            Some(super::registers::ShadowedTypeHints {
+                nominal: self.variable_type_names.get(name).cloned(),
+                kind: self.variable_types.get(name).copied(),
+                reference: self.reference_bindings.contains(name),
+            })
+        })
     }
 
     /// Allocates a temporary register.
