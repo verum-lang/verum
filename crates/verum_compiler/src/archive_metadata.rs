@@ -1701,130 +1701,19 @@ fn register_module_metadata(
         }
     }
 
-    // Pass 2.5: synthesize TypeDescriptors for built-in primitive types
-    // referenced by `Parent.method`-shaped function names that are
-    // absent from `module.types`.
-    //
-    // Background: primitives like `Int`, `Byte`, `USize`, `ISize`,
-    // `UInt8..128`, `Int8..128`, `Float`, `Float32`, `Float64`,
-    // `Bool`, `Char` are BUILT-IN — their `TypeId` is recognised by
-    // the runtime / VBC model but the stdlib's `implement <Primitive>
-    // { … }` block doesn't emit a `module.types` entry for them (the
-    // type ALREADY exists at the VM layer).  As a side-effect the
-    // builder's `type_id_to_name` map — assembled from `module.types`
-    // — has NO entry for the primitive's TypeId, so
-    // `fn_desc.parent_type` (`Option<TypeId>`) resolves to `None` in
-    // Pass 2 above even though the impl method's VBC-stored function
-    // name is `"Int.checked_add"`.  Aliased TypeIds compound this:
-    // TypeId(14) maps to all of USize / ISize / Ptr; TypeId(6) to
-    // Byte / U8 / UInt8; the lossy `TypeId → name` direction can't
-    // recover the canonical name.
-    //
-    // The typechecker's lazy-load path
-    // (`ensure_stdlib_type_loaded`) consults `metadata.types[Int]`
-    // and bails when it isn't there, so the inherent_methods bucket
-    // for Int stays empty — every `n.checked_add(m)` /
-    // `n.wrapping_sub(k)` user-side call site fails with `no method
-    // named X found for type Int` despite the method descriptor
-    // sitting in `metadata.functions` keyed under the simple name.
-    //
-    // **Fix**: parse the function-name STRING for the canonical
-    // `Type.method` shape and use that prefix as the parent name.
-    // This preserves the stdlib's `implement <Name> { … }` choice of
-    // user-visible name regardless of the lossy TypeId.  Then
-    // synthesize an empty stub TypeDescriptor for each unique parent
-    // name and push the simple method names into its `methods` list.
-    //
-    // The stub carries no fields / variants / generics — primitives
-    // are opaque at the source layer, and the typechecker's
-    // `register_builtins` (the canonical primitive registrar) has
-    // already populated the actual `Type` entries; this stub serves
-    // ONLY as a method-name catalogue the lazy loader can iterate.
-    //
-    // Closes task #15.  Unblocks every inherent-method call on a
-    // built-in primitive whose `implement <Primitive> { … }` block
-    // lives in `core/base/primitives.vr`.  Touches core-tests/base/
-    // primitives/* (8 files) + every user-code site that calls
-    // `checked_*`, `wrapping_*`, `saturating_*`, `rotate_*`,
-    // `count_ones`, `leading_zeros`, `to_le_bytes`, etc. on any
-    // primitive integer / float / Bool / Char type.
-    //
-    // The synthesized descriptor is intentionally minimal so the
-    // typechecker's `ensure_stdlib_type_loaded` short-circuits the
-    // "already in ctx" branch (because `register_builtins` registered
-    // the primitive's Type entry), proceeds to
-    // `register_inherent_methods_from_metadata`, and enumerates the
-    // `methods` list we just populated.
-    //
-    // The list of canonical primitive type names is fixed by the
-    // language model: integer / float / boolean / character / byte /
-    // pointer-sized.  We accept ANY uppercase-leading dotted-prefix
-    // as a candidate but only synthesize for the closed set —
-    // user-defined types with the same shape are filtered by
-    // `is_canonical_primitive_name` below to keep the metadata layer
-    // strictly bounded to primitives we know to be runtime-built-in.
-    fn is_canonical_primitive_name(name: &str) -> bool {
-        matches!(
-            name,
-            "Int" | "Float" | "Bool" | "Char" | "Byte" | "USize" | "ISize"
-                | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
-                | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
-                | "Float32" | "Float64"
-        )
-    }
-    // ARCH-P2 (metadata determinism): both walks below were HashMap
-    // hash-order — the per-primitive method-list ORDER and the
-    // insertion order of synthesized descriptors into the
-    // insertion-ordered `meta.types` flipped per bake (byte-diff of two
-    // runtime.core_metadata bakes: a 143-byte primitive-name run,
-    // Int32/Float/… vs UInt32/ISize/… — the tail of the types table).
-    // Deterministic: sorted function keys feed the buckets; sorted
-    // parent names drive the merge/insert loop.
-    let mut synthesized_primitives: HashMap<Text, List<Text>> = HashMap::new();
-    let mut fn_keys_sorted: Vec<&Text> = meta.functions.keys().collect();
-    fn_keys_sorted.sort();
-    for key in fn_keys_sorted {
-        let dot = match key.as_str().find('.') {
-            Some(d) => d,
-            None => continue,
-        };
-        let parent_str = &key.as_str()[..dot];
-        if !is_canonical_primitive_name(parent_str) {
+    // Scalars can have source methods without a nominal descriptor. Look up
+    // just their prefix in the ordered function index. Both declaration order
+    // and each method list stay deterministic across module registration.
+    for &parent in SCALAR_METHOD_OWNERS {
+        let parent_name = Text::from(parent);
+        if meta.types.contains_key(&parent_name) {
             continue;
         }
-        let parent = Text::from(parent_str);
-        if meta.types.contains_key(&parent) {
-            continue;
-        }
-        let method_simple = Text::from(&key.as_str()[dot + 1..]);
-        let bucket = synthesized_primitives
-            .entry(parent)
-            .or_default();
-        if !bucket.iter().any(|m| m == &method_simple) {
-            bucket.push(method_simple);
-        }
-    }
-    let mut synthesized_sorted: Vec<(Text, List<Text>)> =
-        synthesized_primitives.into_iter().collect();
-    synthesized_sorted.sort_by(|a, b| a.0.cmp(&b.0));
-    for (parent_name, methods) in synthesized_sorted {
-        // **Merge-or-synthesize**: when the primitive is already in
-        // `meta.types` (from some prior Pass 1/2 registration via
-        // source-declared impl block), MERGE the discovered methods
-        // into its existing methods list instead of skipping.  Pre-fix
-        // the gate at this site short-circuited on the
-        // `contains_key` check, so primitives with empty methods lists
-        // (Pass 2 couldn't resolve fn_desc.parent_type → name because
-        // the primitive's TypeId isn't in the producing module's
-        // local type_id_to_name map) stayed empty forever and every
-        // `let a: UInt8 = 200; a.wrapping_add(b)` call failed with
-        // `no method named 'wrapping_add' found for type 'UInt8'`.
-        if let Some(existing) = meta.types.get_mut(&parent_name) {
-            for m in methods.iter() {
-                if !existing.methods.iter().any(|em| em == m) {
-                    existing.methods.push(m.clone());
-                }
-            }
+        let prefix = format!("{parent}.");
+        let methods: List<Text> = meta.functions.range(Text::from(prefix.as_str())..)
+            .map_while(|(key, _)| key.as_str().strip_prefix(&prefix).map(Text::from))
+            .collect();
+        if methods.is_empty() {
             continue;
         }
         let descriptor = TypeDescriptor {
@@ -1857,48 +1746,18 @@ fn register_module_metadata(
     }
 }
 
-/// Task #21 — primitive parent-type recovery from a VBC-stored
-/// function name.
-///
-/// Returns `Maybe::Some(parent)` when `name` is of shape
-/// `<CanonicalPrimitive>.<method>` (e.g. `"UInt8.wrapping_add"`)
-/// — the prefix is the inherent method's parent type when the
-/// VBC TypeId can't be resolved via the module's local
-/// `type_id_to_name` map.
-///
-/// Lossy TypeId aliasing makes the codegen-time prefix the
-/// authoritative source of truth for primitive method parents:
-/// TypeId(6) is shared by Byte / U8 / UInt8; TypeId(14) by
-/// USize / ISize / Ptr; the typechecker dispatches by NAME so
-/// the qualified form must carry the user-visible parent.
+// Lexicographic order also determines synthetic descriptor publication order.
+const SCALAR_METHOD_OWNERS: &[&str] = &[
+    "Bool", "Byte", "Char", "Float", "Float32", "Float64", "ISize", "Int",
+    "Int128", "Int16", "Int32", "Int64", "Int8", "UInt128", "UInt16",
+    "UInt32", "UInt64", "UInt8", "USize",
+];
+
+/// A scalar's declared spelling distinguishes ABI aliases such as Byte and UInt8.
 fn recover_primitive_parent_from_name(name: &str) -> Maybe<Text> {
-    let dot = match name.find('.') {
-        Some(d) => d,
-        None => return Maybe::None,
-    };
-    let prefix = &name[..dot];
-    let tail = &name[dot + 1..];
-    // Tail must be a single segment — a `<Module>.<fn>` free
-    // function (e.g. `core.shell.exec.run`) has further dots
-    // and isn't an inherent method.
-    if tail.contains('.') {
-        return Maybe::None;
-    }
-    // Closed set of compiler-built-in primitive types; mirrored
-    // from `is_canonical_primitive_name` in Pass 2.5 so the two
-    // gates stay in sync.
-    let is_primitive = matches!(
-        prefix,
-        "Int" | "Float" | "Bool" | "Char" | "Byte" | "USize" | "ISize"
-            | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
-            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
-            | "Float32" | "Float64"
-    );
-    if is_primitive {
-        Maybe::Some(Text::from(prefix))
-    } else {
-        Maybe::None
-    }
+    let (parent, method) = name.split_once('.')?;
+    (!method.contains('.') && SCALAR_METHOD_OWNERS.binary_search(&parent).is_ok())
+        .then(|| parent.into())
 }
 
 fn convert_generic_params(
