@@ -389,3 +389,48 @@ fn local_without_a_type_hint_shadows_an_unrelated_global() {
     assert_eq!(verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
         .execute_function(id).unwrap().try_as_i64(), Some(42));
 }
+
+#[test]
+fn a_borrowed_slice_binder_carries_its_declared_element_into_field_patterns() {
+    let dependency = Parser::new(
+        r#"
+        module queue;
+        public type Kind is Write | Read;
+        public type Op is { public kind: Kind };
+        "#,
+    )
+    .parse_module()
+    .unwrap();
+    let dependency = VbcCodegen::with_config(CodegenConfig::new("queue"))
+        .compile_module(&dependency)
+        .unwrap();
+    let consumer = Parser::new(
+        r#"
+        module consumer;
+        mount queue.{Op, Read};
+        fn count(ops: &[Op]) -> Int {
+            let mut reads = 0;
+            for op in ops {
+                match op.kind { Read => { reads += 1; }, _ => {} }
+            }
+            reads
+        }
+        "#,
+    )
+    .parse_module()
+    .unwrap();
+    let mut gen_ = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    gen_.import_archive_module_types(&dependency);
+    gen_.collect_unit_declarations(&[&consumer]).unwrap();
+    gen_.resolve_pending_imports();
+    gen_.compile_unit_items(&[&consumer], verum_vbc::codegen::ItemFailurePolicy::Strict)
+        .unwrap();
+    let module = gen_.finalize_module_from_state().unwrap();
+    let id = module.find_function_by_name("consumer.count").unwrap();
+    let body = module.get_function(id).unwrap().instructions.as_ref().unwrap();
+    let tags: Vec<_> = body.iter().filter_map(|op| match op {
+        Instruction::IsVar { tag, .. } => Some(*tag),
+        _ => None,
+    }).collect();
+    assert_eq!(tags, [1]);
+}

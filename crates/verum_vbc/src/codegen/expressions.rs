@@ -19151,7 +19151,10 @@ impl VbcCodegen {
             },
             _ => (None, None),
         };
-        let tuple_item = if matches!(pattern.kind, verum_ast::PatternKind::Tuple(_)) {
+        let item_type = if matches!(
+            pattern.kind,
+            verum_ast::PatternKind::Ident { .. } | verum_ast::PatternKind::Tuple(_)
+        ) {
             use crate::types::{TypeId, TypeRef};
             let container = container_for_element.unwrap_or(iter);
             let declared = self.declared_expression_result(container, None, 0, 0);
@@ -19171,12 +19174,12 @@ impl VbcCodegen {
             None
         };
         self.ctx.enter_scope();
-        if let Some(item) = tuple_item {
+        if let Some(item) = &item_type {
             let mode = borrow.map_or(PatternBindingMode::Value, |mutability| {
                 PatternBindingMode::Borrowed(mutability, CbgrTier::Tier0)
             });
             self.compile_pattern_bind_mode(pattern, elem_reg, &mode)?;
-            self.bind_tuple_declaration(pattern, &item, borrow);
+            self.bind_pattern_declaration(pattern, item, borrow);
         } else {
             self.compile_pattern_bind(pattern, elem_reg)?;
         }
@@ -19211,7 +19214,8 @@ impl VbcCodegen {
                 self.ctx.register_variable_type(&binder, var_type);
             }
         }
-        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+        if item_type.is_none()
+            && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
             && let Some(iter_ty) =
                 self.extract_expr_type_name(container_for_element.unwrap_or(iter))
         {

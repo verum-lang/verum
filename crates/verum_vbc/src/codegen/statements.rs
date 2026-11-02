@@ -434,10 +434,10 @@ impl VbcCodegen {
         )
     }
 
-    /// Project an instantiated tuple declaration onto the newly bound locals.
+    /// Project a declaration onto the names introduced by a binding pattern.
     /// Reference patterns have their own binding mode and cannot inherit the
     /// owned element's type. Missing declarations grant no ownership evidence.
-    pub(super) fn bind_tuple_declaration(
+    pub(super) fn bind_pattern_declaration(
         &mut self,
         pattern: &verum_ast::Pattern,
         ty: &crate::types::TypeRef,
@@ -447,7 +447,7 @@ impl VbcCodegen {
         match (&pattern.kind, ty) {
             (PatternKind::Tuple(parts), crate::types::TypeRef::Tuple(elements)) if parts.len() == elements.len() => {
                 for (part, element) in parts.iter().zip(elements) {
-                    self.bind_tuple_declaration(part, element, borrow);
+                    self.bind_pattern_declaration(part, element, borrow);
                 }
             }
             (PatternKind::Ident { name, by_ref: false, subpattern: None, .. }, _) => {
@@ -1679,7 +1679,7 @@ impl VbcCodegen {
             }};
             self.compile_pattern_bind(pattern, bound)?;
             if let Some(declaration) = &tuple_declaration {
-                self.bind_tuple_declaration(pattern, declaration, None);
+                self.bind_pattern_declaration(pattern, declaration, None);
             }
             if transfer {
                 self.ctx.emit(Instruction::LoadUnit { dst: reg });
