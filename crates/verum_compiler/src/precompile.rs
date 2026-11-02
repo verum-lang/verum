@@ -2063,7 +2063,9 @@ fn bind_source_declarations(
         /// e.g. `core.architecture.types` for
         /// `core/architecture/types.vr`.
         source_module: String,
-        /// Only a top-level declaration of the same kind authorizes identity.
+        /// An inline member can only be reached through its scope or a declared mount.
+        file_scope: bool,
+        /// Only a module member of the same kind authorizes identity.
         declaration: Option<(DeclarationKind, bool)>,
         /// Span+filename the diagnostic emitter ultimately renders.
         decl_span: DeclSpan,
@@ -2116,6 +2118,20 @@ fn bind_source_declarations(
             };
             let rel_str = rel_path.to_string_lossy().replace('\\', "/");
             let source_module = crate::stdlib_index::file_path_to_module_path(&rel_str);
+            index_scope(&module.items, &source_module, &rel_str, true, true, name_index);
+        }
+
+        fn index_scope(
+            items: &[verum_ast::Item],
+            owner: &str,
+            file: &str,
+            file_scope: bool,
+            public_scope: bool,
+            name_index: &mut HashMap<String, Vec<Candidate>>,
+        ) {
+            let public = |visibility: &verum_ast::decl::Visibility| {
+                public_scope && matches!(visibility, verum_ast::decl::Visibility::Public)
+            };
 
             let record_decl = |ident: &verum_ast::Ident,
                                declaration: Option<(DeclarationKind, bool)>,
@@ -2125,10 +2141,11 @@ fn bind_source_declarations(
                     .entry(ident.name.as_str().to_string())
                     .or_default()
                     .push(Candidate {
-                        source_module: source_module.clone(),
+                        source_module: owner.to_owned(),
+                        file_scope,
                         declaration,
                         decl_span: DeclSpan {
-                            file: Text::from(rel_str.as_str()),
+                            file: Text::from(file),
                             start: span.start,
                             end: span.end,
                         },
@@ -2148,10 +2165,11 @@ fn bind_source_declarations(
                     .entry(qualified)
                     .or_default()
                     .push(Candidate {
-                        source_module: source_module.clone(),
+                        source_module: owner.to_owned(),
+                        file_scope,
                         declaration: None,
                         decl_span: DeclSpan {
-                            file: Text::from(rel_str.as_str()),
+                            file: Text::from(file),
                             start: span.start,
                             end: span.end,
                         },
@@ -2208,7 +2226,7 @@ fn bind_source_declarations(
                     walk_block_items(b, on_item);
                 }
             };
-            for item in &module.items {
+            for item in items {
                 match &item.kind {
                     ItemKind::Function(fd) => walk_fn_body(fd, &mut on_item),
                     ItemKind::Impl(d) => {
@@ -2228,31 +2246,39 @@ fn bind_source_declarations(
             }
             drop(on_item);
 
-            for item in &module.items {
+            for item in items {
                 match &item.kind {
+                    ItemKind::Module(module) => {
+                        if let Some(children) = &module.items {
+                            let child = format!("{owner}.{}", module.name.name);
+                            index_scope(
+                                children, &child, file, false, public(&module.visibility), name_index,
+                            );
+                        }
+                    }
                     ItemKind::Function(d) => record_decl(
                         &d.name,
-                        Some((DeclarationKind::Function, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        Some((DeclarationKind::Function, public(&d.visibility))),
                         name_index,
                     ),
                     ItemKind::Type(d) => record_decl(
                         &d.name,
-                        Some((DeclarationKind::Nominal, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        Some((DeclarationKind::Nominal, public(&d.visibility))),
                         name_index,
                     ),
                     ItemKind::Protocol(d) => record_decl(
                         &d.name,
-                        Some((DeclarationKind::Nominal, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        Some((DeclarationKind::Nominal, public(&d.visibility))),
                         name_index,
                     ),
                     ItemKind::Const(d) => record_decl(
                         &d.name,
-                        Some((DeclarationKind::Value, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        Some((DeclarationKind::Value, public(&d.visibility))),
                         name_index,
                     ),
                     ItemKind::Static(d) => record_decl(
                         &d.name,
-                        Some((DeclarationKind::Value, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                        Some((DeclarationKind::Value, public(&d.visibility))),
                         name_index,
                     ),
                     // Contexts register BOTH a TypeDescriptor and a
@@ -2264,7 +2290,7 @@ fn bind_source_declarations(
                     ItemKind::Context(d) => {
                         record_decl(
                             &d.name,
-                            Some((DeclarationKind::Nominal, matches!(d.visibility, verum_ast::decl::Visibility::Public))),
+                            Some((DeclarationKind::Nominal, public(&d.visibility))),
                             name_index,
                         );
                         // Register every method as
@@ -2417,9 +2443,16 @@ fn bind_source_declarations(
                 }))
             };
             let has_glob_owner = source_owner.is_none() && candidates.iter().filter(matches_kind).any(|c| through_glob(&c));
+            // A recorded origin can be refined through its own exports. A unique
+            // leaf in an unrelated file is evidence only for an unowned archive shell.
+            let has_source_route = source_owner.is_some() || has_glob_owner;
+            if !has_source_route && declared != entry {
+                return None;
+            }
             let mut declarations = candidates
                 .iter()
                 .filter(matches_kind)
+                .filter(|c| has_source_route || c.file_scope)
                 .filter(|c| source_owner.is_none_or(|owner| c.source_module == owner))
                 .filter(|c| !has_glob_owner || through_glob(c))
                 .filter_map(|c| {

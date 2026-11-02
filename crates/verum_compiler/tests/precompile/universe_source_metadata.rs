@@ -329,6 +329,51 @@ fn source_binding_does_not_overwrite_a_foreign_protocol_abi() {
         .contains("semantic and ABI-only declarations disagree for core.indexed.Contract"));
 }
 
+#[test]
+fn inline_factory_origin_survives_sidecar_source_binding() {
+    use verum_common::Text;
+    use verum_vbc::{archive::ArchiveBuilder, codegen::{CodegenConfig, VbcCodegen}};
+
+    let root = tempfile::tempdir().unwrap();
+    let source = r#"
+        module core.factory;
+        public type Factory is { value: Int };
+        public module Factory {
+            public fn map(value: Int) -> Int { value }
+            fn filter(value: Int) -> Int { value }
+            module Hidden {
+                public fn nested(value: Int) -> Int { value }
+            }
+        }
+    "#;
+    std::fs::write(root.path().join("factory.vr"), source).unwrap();
+    std::fs::write(root.path().join("unrelated.vr"),
+        "fn map(v: Int) -> Int { v } public fn filter(v: Int) -> Int { v } public fn foreign(v: Int) -> Int { v }"
+    ).unwrap();
+    let ast = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("core")).compile_module(&ast).unwrap();
+    let mut archive = ArchiveBuilder::stdlib();
+    archive.add_module("core", &module, &[]).unwrap();
+    let mut metadata = crate::archive_metadata::archive_to_core_metadata(&archive.finish()).unwrap();
+    let mut unresolved = metadata.functions.get(&Text::from("core.factory.Factory.map")).unwrap().clone();
+    unresolved.name = "core.absent.foreign".into();
+    unresolved.origin_module_path = Some("core.absent".into());
+    unresolved.is_public = false;
+    metadata.functions.insert(unresolved.name.clone(), unresolved);
+
+    super::bind_source_declarations(&mut metadata, root.path(), &[], false);
+    for (key, origin, public) in [
+        ("core.factory.Factory.map", "core.factory.Factory", true),
+        ("core.factory.Factory.filter", "core.factory.Factory", false),
+        ("core.factory.Factory.Hidden.nested", "core.factory.Factory.Hidden", false),
+        ("core.absent.foreign", "core.absent", false),
+    ] {
+        let fd = metadata.functions.get(&Text::from(key)).expect(key);
+        assert_eq!(fd.origin_module_path.as_deref(), Some(origin), "{key}");
+        assert_eq!(fd.is_public, public, "{key}");
+    }
+}
+
 /// Reuse the publication path on an explicitly supplied, freshly baked archive.
 /// This gate never substitutes a cached artifact or silently skips absent input.
 #[test]
