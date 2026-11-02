@@ -101,8 +101,15 @@ pub(super) fn wrap_in_variant(
     tag: u32,
     fields: &[Value],
 ) -> InterpreterResult<Value> {
-    let type_id = lookup_type_id_by_name(state, type_name)
-        .unwrap_or(TypeId(verum_common::layout::synthetic_variant_type_id(tag)));
+    // These host API return types have ABI identities even when a lazy
+    // application has no descriptors or a user module reuses the short name.
+    use verum_common::well_known_types::type_names;
+    let type_id = match type_name {
+        type_names::MAYBE => TypeId::MAYBE,
+        type_names::RESULT => TypeId::RESULT,
+        _ => lookup_type_id_by_name(state, type_name)
+            .unwrap_or(TypeId(verum_common::layout::synthetic_variant_type_id(tag))),
+    };
     let field_count = fields.len() as u32;
     let obj = state.heap.alloc_variant(type_id, tag, field_count)?;
     state.record_allocation();
@@ -508,3 +515,27 @@ pub(super) fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str)
 #[cfg(test)]
 #[path = "../../../../tests/unit/record_probe_tests.rs"]
 mod record_probe_tests;
+
+#[cfg(test)]
+mod host_variant_tests {
+    use super::*;
+    use std::sync::Arc;
+    use verum_common::well_known_types::{maybe_success_tag, result_success_tag, type_names};
+
+    #[test]
+    fn builtin_host_results_keep_their_abi_identity_with_shadowed_names() {
+        let mut state = InterpreterState::new(Arc::new(crate::module::VbcModule::new("test".into())));
+        for (name, expected, tag) in [
+            (type_names::MAYBE, TypeId::MAYBE, maybe_success_tag()),
+            (type_names::RESULT, TypeId::RESULT, result_success_tag()),
+        ] {
+            state.type_name_index.insert(name.to_owned(), TypeId(9000));
+            let item = wrap_in_variant(&mut state, name, tag, &[Value::from_i64(71)]).unwrap();
+            let ptr = item.as_ptr::<u8>();
+            // The host constructor just allocated this variant in state's live heap.
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+            assert_eq!(header.type_id, expected);
+            assert_eq!(unsafe { heap::variant_tag(ptr) }, tag);
+        }
+    }
+}
