@@ -201,3 +201,47 @@ fn ambiguity_is_fatal_even_in_lenient_body_compilation() {
         .expect_err("unresolved source ownership must not become a panic stub");
     assert!(error.to_string().contains("E431"), "{error}");
 }
+
+#[test]
+fn file_local_and_mounted_constructors_execute_with_their_declared_tags() {
+    use verum_vbc::codegen::ItemFailurePolicy;
+    let sources = [
+        "module first; public type A is Other | Clash(Int); fn first_probe() -> Int { let x = Clash(7); match x { A.Clash(v) => v, _ => -1 } }",
+        "module second; public type B is Clash(Int) | Other; fn second_probe() -> Int { let x = Clash(9); match x { B.Clash(v) => v, _ => -2 } }",
+        "module client; mount first.Clash; fn mounted_probe() -> Int { let x = Clash(17); match x { A.Clash(v) => v, _ => -3 } }",
+    ];
+    for reverse in [false, true] {
+        let mut modules: Vec<_> = sources
+            .iter()
+            .map(|s| Parser::new(s).parse_module().unwrap())
+            .collect();
+        if reverse {
+            modules.reverse();
+        }
+        let units: Vec<_> = modules.iter().collect();
+        let mut cg = VbcCodegen::new();
+        cg.collect_unit_declarations(&units).unwrap();
+        cg.compile_unit_items(&units, ItemFailurePolicy::Strict)
+            .unwrap();
+        let module = cg.finalize_module().unwrap();
+        let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let decoded = Arc::new(verum_vbc::deserialize::deserialize_module(&wire).unwrap());
+        for (entry, expected, tag) in [
+            ("first.first_probe", 7, 1),
+            ("second.second_probe", 9, 0),
+            ("client.mounted_probe", 17, 1),
+        ] {
+            let id = decoded.find_function_by_name(entry).expect(entry);
+            let body = module.functions.iter().find(|f| f.id == id).unwrap();
+            let typed = body.instructions.as_ref().unwrap().iter().any(|op| {
+                matches!(op,
+                Instruction::MakeVariantTyped { tag: actual, .. } if *actual == tag)
+            });
+            assert!(typed, "{entry}: {:?}", body.instructions);
+            let result = Interpreter::new(decoded.clone())
+                .execute_function(id)
+                .unwrap();
+            assert_eq!(result.as_i64(), expected, "{entry}, reverse={reverse}");
+        }
+    }
+}

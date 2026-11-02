@@ -2120,6 +2120,10 @@ impl VbcCodegen {
                     }
                     if ambiguous { None } else { found }
                 });
+                let func_info_opt = if func_info_opt.as_ref().is_none_or(|info| info.variant_tag.is_some()) {
+                    self.select_colliding_constructor(name, None, self.ctx.current_return_type_name.as_deref(), ident.span)?
+                        .cloned().or(func_info_opt)
+                } else { func_info_opt };
                 if let Some(func_info) = func_info_opt {
                     // Check if this is a variant constructor
                     if let Some(tag) = func_info.variant_tag {
@@ -2321,10 +2325,6 @@ impl VbcCodegen {
                 // function-reference lookup — see CONST-GENERIC-PARAM-SHADOW-1
                 // above — so an impl's const param shadows any global of the
                 // same name.)
-
-                self.require_constructor_owner(
-                    name, None, self.ctx.current_return_type_name.as_deref(), ident.span,
-                )?;
 
                 // Fallback for nullary variant constructors not yet registered as functions.
                 // Try to find a qualified name (Type.Variant) that matches.
@@ -6371,6 +6371,16 @@ impl VbcCodegen {
             func_name
         };
 
+        // Resolve a bare source constructor before a deferred mount can turn
+        // its name into an external function call with no bytecode body.
+        if !has_module_prefix && !func_name.contains(['.', ':'])
+            && let Some(owner) = self.select_colliding_constructor(
+                &func_name, Some(args.len()), self.ctx.current_return_type_name.as_deref(), func.span,
+            )?.and_then(|info| info.parent_type_name.clone())
+        {
+            return self.compile_variant_constructor_hinted(&func_name, args, Some(&owner));
+        }
+
         // #44-B: `T.method(args)` — a static call on a GENERIC TYPE PARAM
         // (typechecker stamp `StaticCall{"T.default"}`). No registered
         // function can ever match a type-param prefix, so pre-fix the
@@ -7700,30 +7710,17 @@ impl VbcCodegen {
 
         // Context selects a whole declaration: changing only the tag while
         // retaining another parent's metadata produces a different nominal sum.
-        if func_info.variant_tag.is_some()
-            && !func_name.contains("::")
-            && !func_name.contains('.')
-        {
-            self.require_constructor_owner(
-                &func_name, Some(args.len()), self.ctx.current_return_type_name.as_deref(), func.span,
-            )?;
-        }
         if let Some(tag) = func_info.variant_tag {
-            let context_type = self.ctx.current_return_type_name.as_deref()
-                .or(self.ctx.match_scrutinee_type.as_deref())
-                .map(Self::strip_generic_args);
             let contextual_info = if !func_name.contains("::") && !func_name.contains('.') {
-                context_type.and_then(|owner| {
+                let expected = self.ctx.current_return_type_name.as_deref()
+                    .or(self.ctx.match_scrutinee_type.as_deref());
+                expected.and_then(|ty| {
+                    let owner = Self::strip_generic_args(ty);
                     self.ctx.lookup_function(&format!("{owner}.{func_name}"))
-                        .filter(|info| {
-                            info.variant_tag.is_some()
-                                && info.param_count == args.len()
-                                && info.parent_type_name.as_deref() == Some(owner)
-                        })
+                        .filter(|info| info.variant_tag.is_some() && info.param_count == args.len()
+                            && info.parent_type_name.as_deref() == Some(owner))
                 })
-            } else {
-                None
-            };
+            } else { None };
             let selected = contextual_info.unwrap_or(&func_info);
             let final_tag = selected.variant_tag.unwrap_or(tag);
             let parent = self.resolve_variant_parent(selected, &func_name);
@@ -11791,17 +11788,18 @@ impl VbcCodegen {
         self.compile_variant_constructor_hinted(name, args, None)
     }
 
-    /// A collision is recorded by source constructor registration. The exact
-    /// contextual owner may resolve it; suffix order and synthesized tags may not.
-    fn require_constructor_owner(
+    /// Select the declaration itself, so disambiguation determines both the
+    /// runtime type ID and its constructor tag. Unrelated compilation units do
+    /// not contribute bare names to the declaring source module.
+    fn select_colliding_constructor(
         &self,
         name: &str,
         arity: Option<usize>,
         expected: Option<&str>,
         span: verum_ast::Span,
-    ) -> CodegenResult<()> {
+    ) -> CodegenResult<Option<&FunctionInfo>> {
         if !self.variant_collisions.contains(name) || self.ctx.get_var_reg(name).is_ok() {
-            return Ok(());
+            return Ok(None);
         }
         if self.ctx.unit_declared_fns.contains(name)
             && self
@@ -11809,29 +11807,73 @@ impl VbcCodegen {
                 .lookup_function_in_scope(name)
                 .is_some_and(|info| info.variant_tag.is_none())
         {
-            return Ok(());
+            return Ok(None);
         }
-        let mut owners = verum_common::Set::<verum_common::Text>::new();
-        for (key, info) in &self.ctx.functions {
-            if info.variant_tag.is_none() || arity.is_some_and(|arity| info.param_count != arity) {
-                continue;
-            }
-            if let Some(parent) = &info.parent_type_name {
-                if *key == format!("{parent}.{name}") {
-                    owners.insert(verum_common::Text::from(parent.as_str()));
+        let matches = |info: &FunctionInfo| {
+            info.variant_tag.is_some() && arity.is_none_or(|n| n == info.param_count)
+        };
+        let candidate = |owner: &str| {
+            self.ctx
+                .functions
+                .get(&format!("{owner}.{name}"))
+                .filter(|info| info.parent_type_name.as_deref() == Some(owner) && matches(info))
+        };
+        if let Some(owner) = expected.map(Self::strip_generic_args) {
+            if !owner.contains('.') {
+                if let Some(module) = self.ctx.current_source_module.as_deref()
+                    && let Some(info) = candidate(&format!("{module}.{owner}"))
+                {
+                    return Ok(Some(info));
+                }
+                if let Some(path) = self.mounted_type_path(owner)
+                    && let Some(info) = candidate(path)
+                {
+                    return Ok(Some(info));
                 }
             }
+            if let Some(info) = candidate(owner) {
+                return Ok(Some(info));
+            }
+        }
+        let mut owners = verum_common::List::new();
+        let mut local = Vec::new();
+        let mut mounted = Vec::new();
+        let mount = self
+            .mounted_type_path(name)
+            .and_then(|path| path.rsplit_once('.'));
+        for key in self.ctx.functions.qualified_suffix_candidates(name) {
+            let Some(owner) = key.rsplit_once('.').map(|(owner, _)| owner) else {
+                continue;
+            };
+            let info = &self.ctx.functions[&key];
+            if info.parent_type_name.as_deref() != Some(owner) || !matches(info) {
+                continue;
+            }
+            if let Some((module, _)) = owner.rsplit_once('.')
+                && self.ctx.current_source_module.as_deref() == Some(module)
+            {
+                local.push(info);
+            }
+            if let Some((prefix, original)) = mount
+                && original == name
+                && (owner == prefix
+                    || owner
+                        .rsplit_once('.')
+                        .is_some_and(|(module, _)| module == prefix))
+            {
+                mounted.push(info);
+            }
+            owners.push(verum_common::Text::from(owner));
+        }
+        let visible = if local.is_empty() { &mounted } else { &local };
+        if let [info] = visible.as_slice() {
+            return Ok(Some(*info));
         }
         if owners.len() < 2 {
-            return Ok(());
+            return Ok(owners
+                .first()
+                .and_then(|owner| self.ctx.functions.get(&format!("{owner}.{name}"))));
         }
-        let expected = expected.map(|ty| Self::strip_generic_args(ty));
-        if expected.is_some_and(|owner| owners.iter().any(|candidate| candidate.as_str() == owner))
-        {
-            return Ok(());
-        }
-        let mut owners: verum_common::List<_> = owners.into_iter().collect();
-        owners.sort();
         Err(CodegenError::with_span(
             CodegenErrorKind::AmbiguousConstructor {
                 name: name.into(),
@@ -11905,9 +11947,10 @@ impl VbcCodegen {
                     .as_ref()
                     .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
             });
-        self.require_constructor_owner(
+        let selected = self.select_colliding_constructor(
             name, Some(args.len()), context_type.as_deref(), verum_ast::Span::dummy(),
-        )?;
+        )?.cloned();
+        let context_type = selected.as_ref().and_then(|info| info.parent_type_name.clone()).or(context_type);
         let direct_tag = self.ctx.lookup_function_in_scope(name).and_then(|info| {
             // Only accept the direct hit when we lack a context type or
             // when the parent matches it; otherwise fall through to the
@@ -11954,7 +11997,7 @@ impl VbcCodegen {
         } else {
             None
         };
-        let tag = direct_tag
+        let tag = selected.as_ref().and_then(|info| info.variant_tag).or(direct_tag)
             .or(context_aware_tag)
             .or_else(|| self.ctx.find_variant_by_suffix_and_args(name, args.len()))
             .or_else(|| {
