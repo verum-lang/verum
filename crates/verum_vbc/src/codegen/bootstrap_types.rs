@@ -561,20 +561,15 @@ impl VbcCodegen {
                 }
             }
         }
-        let maps: Vec<HashMap<u32, u32>> = available
-            .iter()
-            .enumerate()
-            .map(|(mi, _)| {
-                source_keys
-                    .iter()
-                    .filter_map(|(&(owner, source), key)| {
-                        (owner == mi)
-                            .then(|| target_ids.get(key).map(|id| (source.0, id.0)))
-                            .flatten()
-                    })
-                    .collect()
-            })
-            .collect();
+        // Source IDs are local to their archive module. Partition the exact
+        // (module, source ID) identities once instead of rescanning the whole
+        // catalogue for every module; equal numeric IDs never share a map.
+        let mut maps = vec![HashMap::<u32, u32>::new(); available.len()];
+        for (&(owner, source), key) in &source_keys {
+            if let Some(target) = target_ids.get(key) {
+                maps[owner].insert(source.0, target.0);
+            }
+        }
         for key in &selected {
             let (mi, ti) = catalog[key];
             let module = available[mi];
