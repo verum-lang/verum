@@ -389,3 +389,18 @@ fn panicking_entry_factories_do_not_leave_phantom_names() {
     registry.entry("panic.f".into()).or_insert(info(2, 2));
     assert_index(&registry);
 }
+
+#[test]
+fn lookup_by_id_uses_the_resolved_name_only_while_it_matches() {
+    let mut ctx = CodegenContext::new();
+    let original = FunctionId(71);
+    ctx.functions.insert("first".into(), info(original.0, 1));
+    assert_eq!(ctx.lookup_function_by_id(original).unwrap().param_count, 1);
+    ctx.lookup_function("first").unwrap();
+    ctx.functions.insert("alias".into(), info(original.0, 1));
+    ctx.functions.insert("first".into(), info(72, 3));
+    assert_eq!(ctx.lookup_function_by_id(original).unwrap().id, original);
+    ctx.functions.remove("alias");
+    assert!(ctx.lookup_function_by_id(original).is_none());
+    assert_eq!(ctx.lookup_function_by_id(FunctionId(72)).unwrap().param_count, 3);
+}

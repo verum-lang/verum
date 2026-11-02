@@ -3891,16 +3891,17 @@ impl CodegenContext {
     /// node, codegen retrieves the FunctionInfo here without
     /// re-deriving it through string-based name resolution.
     ///
-    /// Implementation: linear scan over the function table; the
-    /// fast path runs once per resolved method-call site so the
-    /// O(N) cost is bounded by the call's argument-evaluation work
-    /// already performed.  An id→name reverse-index is a future
-    /// micro-optimisation if profiling shows this on the hot path.
+    /// Most IDs come directly from a successful name lookup. Reuse its
+    /// spelling while it still identifies this live declaration. Imports
+    /// may rebind a name, and ID-only clients need no prior name lookup.
     pub fn lookup_function_by_id(
         &self,
         id: crate::module::FunctionId,
     ) -> Option<&FunctionInfo> {
-        self.functions.values().find(|f| f.id == id)
+        self.resolved_name_by_id.borrow().get(&id.0)
+            .and_then(|name| self.functions.get(name))
+            .filter(|info| info.id == id)
+            .or_else(|| self.functions.values().find(|info| info.id == id))
     }
 
     /// **Scope-aware arity-disambiguated lookup** (#17/#39).
