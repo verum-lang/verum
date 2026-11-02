@@ -128,6 +128,47 @@ fn sqlite_snapshot_checks_execute_from_the_published_archive() {
     assert_eq!(execute_from_archive(source), 13);
 }
 
+#[cfg(unix)]
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn shell_child_polls_both_pipes_and_consumes_its_exit_status() {
+    let source = r#"
+        module app;
+        mount core.io.process.{Command, Child, ExitStatus, Stdio};
+        fn main() -> Int {
+            let mut command = Command.new("/bin/sh".into());
+            command.arg("-c".into());
+            command.arg("printf A; printf B >&2; exit 7".into());
+            command.stdout(Stdio.Piped);
+            command.stderr(Stdio.Piped);
+            let mut child = command.spawn().unwrap();
+            let mut output = 0;
+            let mut errors = 0;
+            let mut code = -1;
+            let mut polls = 0;
+            while polls < 100000 {
+                polls = polls + 1;
+                if code < 0 {
+                    if let Maybe.Some(status) = child.try_wait().unwrap() { code = status.code(); }
+                }
+                if let Maybe.Some(bytes) = child.read_stdout_ready(16).unwrap() {
+                    for byte in bytes { output = output * 256 + byte as Int; }
+                }
+                if let Maybe.Some(bytes) = child.read_stderr_ready(16).unwrap() {
+                    for byte in bytes { errors = errors * 256 + byte as Int; }
+                }
+                if code >= 0 && child.output_is_closed() {
+                    return code * 65536 + output * 256 + errors;
+                }
+            }
+            child.close_output();
+            if code < 0 { let _ = child.kill(); let _ = child.wait(); }
+            -1
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 7 * 65536 + 65 * 256 + 66);
+}
+
 fn execute_from_archive(source: &str) -> i64 {
     let archive =
         PathBuf::from(std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("candidate .vbca"));
