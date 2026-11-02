@@ -31840,13 +31840,16 @@ impl VbcCodegen {
         }
         let key = self.registered_receiver_method(&owner, method)?;
         let info = self.ctx.lookup_qualified_function(&key)?;
-        let params = self.functions.iter().find(|f| f.descriptor.id == info.id)
-            .map(|f| f.descriptor.params.iter().map(|p| p.type_ref.clone()).collect::<verum_common::List<_>>())
-            .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0).map(|params| params.as_slice().into()))?;
-        let receiver_slots = usize::from(info.param_names.first().is_some_and(|name| name == "self"));
-        let TypeRef::Function { params, .. } = params.get(argument + receiver_slots)? else {
-            return None;
-        };
+        let slot = argument + usize::from(info.param_names.first().is_some_and(|name| name == "self"));
+        let parameter = self.ctx.source_callable_bounds.get(&(info.id, slot))
+            .or_else(|| info.callable_signature.as_ref().and_then(|signature| match signature {
+                TypeRef::Function { params, .. } => params.get(slot).filter(|ty| matches!(ty, TypeRef::Function { .. })),
+                _ => None,
+            }))
+            .or_else(|| self.functions.iter().find(|f| f.descriptor.id == info.id)
+                .and_then(|f| f.descriptor.params.get(slot)).map(|p| &p.type_ref))
+            .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0)?.get(slot))?;
+        let TypeRef::Function { params, .. } = parameter else { return None };
         let mut substitution = self.callable_owner_substitution(&owner)?;
         for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
             if let (Some(ty), Some(id)) = (arg.type_for_declared_slot(), id)

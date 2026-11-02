@@ -369,3 +369,31 @@ fn recursive_associated_binding_remains_unknown() {
     let (module, _) = projected_consumer("", "Item", "Self.Item", "Stage<Payload>");
     assert!(finish_witness(&module)[1].is_generic());
 }
+
+#[test]
+fn protocol_defaults_instantiate_callback_bounds_before_method_bodies_exist() {
+    let source = parse(r#"
+        module consumer;
+        type State is Idle | Active;
+        type Feed<T> is { item: T };
+        type Probe is { state: State };
+        type Inspect is protocol {
+            fn read(&self) -> Feed<State>;
+            fn active(&self) -> Bool { self.read().test(|item| item is Active) }
+        };
+        implement Inspect for Probe {
+            fn read(&self) -> Feed<State> { Feed { item: self.state } }
+        }
+        implement<T> Feed<T> {
+            fn test<F: fn(T) -> Bool>(self, f: F) -> Bool { f(self.item) }
+        }
+    "#);
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    cg.collect_unit_declarations(&[&source]).unwrap();
+    cg.resolve_pending_imports();
+    cg.compile_default_methods_with_policy(verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+    let module = cg.finalize_module_from_state().unwrap();
+    let closure = module.functions.iter().find(|f| module.get_string(f.name)
+        .is_some_and(|name| name.contains("active$closure$"))).expect("default's predicate");
+    assert_eq!(closure.params[1].type_ref, nominal(&module, "State"));
+}

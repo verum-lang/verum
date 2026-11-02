@@ -77,6 +77,9 @@ pub struct CodegenContext {
     /// Exact declaration inputs in this codegen pool, never ABI-derived.
     /// Archive entries are installed only after their source TypeIds are remapped.
     pub semantic_fn_params: Map<FunctionId, verum_common::List<Option<TypeRef>>>,
+    /// Structural callable constraints on source formals before their body is lowered.
+    /// The semantic parameter itself remains the declared generic parameter.
+    pub(super) source_callable_bounds: Map<(FunctionId, usize), TypeRef>,
 
     /// Source identity of locally compiled closure bodies. Their semantic
     /// signature lives in FunctionInfo, separately from ABI storage defaults.
@@ -1685,6 +1688,7 @@ impl CodegenContext {
             archive_fn_param_types: HashMap::new(),
             archive_fn_parameter_generics: Map::new(),
             semantic_fn_params: Map::new(),
+            source_callable_bounds: Map::new(),
             compiled_closures: Map::new(),
             resolved_name_by_id: std::cell::RefCell::new(HashMap::new()),
             registers: RegisterAllocator::new(),
@@ -4992,6 +4996,7 @@ impl CodegenContext {
         self.functions.clear();
         self.archive_function_ids.clear();
         self.semantic_fn_params.clear();
+        self.source_callable_bounds.clear();
         self.scoped_functions.clear();
         self.unit_declared_fns.clear();
         // ARCH-P2 stage 1 — the canonical index is DUAL-keyed with

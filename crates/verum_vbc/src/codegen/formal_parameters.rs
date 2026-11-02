@@ -73,6 +73,26 @@ impl VbcCodegen {
         result
     }
 
+    pub(super) fn record_source_callable_bounds(
+        &mut self,
+        id: crate::module::FunctionId,
+        function: &FunctionDecl,
+        scope: &std::collections::HashMap<String, u16>,
+        parameters: &[Option<TypeRef>],
+    ) {
+        for (slot, (parameter, semantic)) in function.params.iter().zip(parameters).enumerate() {
+            let (FunctionParamKind::Regular { ty, .. }, Some(generic @ TypeRef::Generic(_))) =
+                (&parameter.kind, semantic)
+            else {
+                continue;
+            };
+            let bound = self.substitute_fn_bound_for_generic(generic.clone(), ty, &function.generics, scope);
+            if matches!(bound, TypeRef::Function { .. }) {
+                self.ctx.source_callable_bounds.insert((id, slot), bound);
+            }
+        }
+    }
+
     pub(super) fn source_semantic_parameters(
         &self,
         function: &FunctionDecl,
