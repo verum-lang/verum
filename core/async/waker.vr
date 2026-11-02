@@ -108,7 +108,7 @@ implement RawWaker {
 // carries its own inline vtable), so a Waker is self-contained: no
 // dangling references, no separate vtable allocation, no static-init
 // hazard.
-public type Waker is {
+public type affine Waker is {
     raw: RawWaker,
 };
 

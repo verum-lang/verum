@@ -1,0 +1,146 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: async, cancellation, waker, ownership
+// @description: Equivalent polls retain one waker; replacement, cancellation and drop release it exactly once.
+mount core.async.cancellation.CancellationToken;
+mount core.async.future.Future;
+mount core.async.waker.{Waker, RawWaker, RawWakerVTable, Context};
+
+static mut CLONES: Int = 0;
+static mut DROPS: Int = 0;
+static mut CONSUMED_WAKES: Int = 0;
+static mut WAKES: Int = 0;
+static mut REENTRANT_TOKEN: Maybe<CancellationToken> = Maybe.None;
+static mut REENTRANT_WAKES: Int = 0;
+static mut LATE_CALLBACKS: Int = 0;
+// Keep the callback values themselves: a separately created closure may have
+// a distinct identity even when it refers to the same top-level function.
+static CALLBACKS: RawWakerVTable = RawWakerVTable.new(
+    counted_clone, counted_wake, counted_wake_by_ref, counted_drop
+);
+static REENTRANT_CALLBACKS: RawWakerVTable = RawWakerVTable.new(
+    reentrant_clone, reentrant_wake, reentrant_wake_by_ref, counted_drop
+);
+
+fn counted_clone(data: &unsafe Byte) -> RawWaker {
+    CLONES = CLONES + 1;
+    RawWaker.new(data, counted_vtable())
+}
+fn counted_wake(data: &unsafe Byte) {
+    CONSUMED_WAKES = CONSUMED_WAKES + 1;
+    counted_wake_by_ref(data);
+}
+fn counted_wake_by_ref(data: &unsafe Byte) {
+    // The raw pointer is an opaque identity and is never dereferenced.
+    WAKES = WAKES + (data as Int);
+}
+fn counted_drop(_data: &unsafe Byte) {
+    DROPS = DROPS + 1;
+}
+fn counted_vtable() -> RawWakerVTable {
+    CALLBACKS
+}
+fn counted_waker(identity: Int) -> Waker {
+    Waker.from_raw(RawWaker.new(identity as &unsafe Byte, counted_vtable()))
+}
+
+fn reentrant_clone(data: &unsafe Byte) -> RawWaker {
+    CLONES = CLONES + 1;
+    RawWaker.new(data, REENTRANT_CALLBACKS)
+}
+fn reentrant_wake(data: &unsafe Byte) {
+    CONSUMED_WAKES = CONSUMED_WAKES + 1;
+    reentrant_wake_by_ref(data);
+}
+fn reentrant_wake_by_ref(_data: &unsafe Byte) {
+    REENTRANT_WAKES = REENTRANT_WAKES + 1;
+    match &REENTRANT_TOKEN {
+        Maybe.Some(token) => {
+            assert(token.is_cancelled(), "cancellation is published before wake");
+            assert(token.reason().is_some(), "reason is visible to the wake callback");
+            let waker = counted_waker(4);
+            let mut cx = Context.from_waker(&waker);
+            let mut future = token.cancelled();
+            let clones_before = CLONES;
+            assert(future.poll(&mut cx).is_ready(), "a reentrant poll is ready");
+            assert(CLONES == clones_before, "ready poll does not retain a waiter");
+            let late = token.register(|| { LATE_CALLBACKS = LATE_CALLBACKS + 1; });
+            assert(LATE_CALLBACKS == 1, "late callback observes cancellation immediately");
+            drop(late);
+            drop(future);
+            drop(waker);
+        },
+        Maybe.None => panic("reentrant token is absent"),
+    }
+}
+
+fn main() {
+    let token = CancellationToken.new();
+    let mut future = token.cancelled();
+    let first = counted_waker(1);
+    let equivalent = counted_waker(1);
+    let second = counted_waker(2);
+    assert(first.will_wake(&equivalent), "equivalent direct wakers");
+    assert(!first.will_wake(&second), "distinct direct wakers");
+    let cloned = first.clone();
+    assert(cloned.will_wake(&first), "cloning preserves wake identity");
+    drop(cloned);
+    assert(CLONES == 1 && DROPS == 1, "one clone owns one release");
+    print("Cancellation: wake identities checked");
+    let mut cx = Context.from_waker(&first);
+    assert(future.poll(&mut cx).is_pending());
+    assert(DROPS == 1, "the registered clone stays live");
+    let first_clones = CLONES;
+    assert(first_clones == 2, "initial registration retains exactly one handle");
+    cx = Context.from_waker(&equivalent);
+    let mut index = 0;
+    while index < 32 {
+        assert(future.poll(&mut cx).is_pending());
+        index = index + 1;
+    }
+    assert(CLONES == first_clones, "equivalent wake targets reuse registration");
+    print("Cancellation: repeated polls reused registration");
+    cx = Context.from_waker(&second);
+    assert(future.poll(&mut cx).is_pending());
+    assert(CLONES == first_clones + 1, "new wake target retains exactly one handle");
+    assert(DROPS == 2, "replacement releases the previous wake handle");
+    assert(WAKES == 0, "registration does not wake");
+    print("Cancellation: changed waker replaced registration");
+    token.cancel();
+    assert(WAKES == 2, "only the active wake target is notified");
+    assert(CONSUMED_WAKES == 1, "cancellation consumes the retained handle once");
+    assert(future.poll(&mut cx).is_ready());
+    print("Cancellation: cancellation woke the active waiter");
+    drop(future);
+    assert(DROPS == 2, "a consumed wake handle cannot be released a second time");
+
+    let other = CancellationToken.new();
+    let mut pending = other.cancelled();
+    assert(pending.poll(&mut cx).is_pending());
+    assert(CLONES == first_clones + 2, "pending future retains one wake handle");
+    drop(pending);
+    assert(DROPS == 3, "dropping a pending future releases its wake handle");
+    other.cancel();
+    assert(WAKES == 2, "only the active wake target is notified");
+
+    let reentrant_token = CancellationToken.new();
+    REENTRANT_TOKEN = Maybe.Some(reentrant_token.clone());
+    let reentrant = Waker.from_raw(RawWaker.new(3 as &unsafe Byte, REENTRANT_CALLBACKS));
+    let mut reentrant_cx = Context.from_waker(&reentrant);
+    let mut reentrant_future = reentrant_token.cancelled();
+    assert(reentrant_future.poll(&mut reentrant_cx).is_pending());
+    reentrant_token.cancel();
+    assert(REENTRANT_WAKES == 1, "registered wake callback ran once");
+    assert(LATE_CALLBACKS == 1, "late callback was not lost");
+    assert(reentrant_future.poll(&mut reentrant_cx).is_ready());
+    drop(reentrant_future);
+    drop(reentrant);
+    drop(first);
+    drop(equivalent);
+    drop(second);
+    // Five raw handles were constructed directly (including the callback's
+    // local handle). Every clone is released by exactly one drop or wake.
+    assert(5 + CLONES == DROPS + CONSUMED_WAKES, "all raw wake handles released exactly once");
+    assert(CONSUMED_WAKES == 2, "only the two registered notifications consumed handles");
+    print("Cancellation: equivalent wakers, replacement, cancellation and drop passed");
+}

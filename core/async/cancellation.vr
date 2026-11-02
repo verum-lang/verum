@@ -216,7 +216,7 @@ implement Eq for CancellationError {
 type RegistrationId is Int;
 
 // An awaiting future's registered wake-slot.
-type WaiterEntry is {
+type affine WaiterEntry is {
     id: RegistrationId,
     waker: Waker,
 };
@@ -329,29 +329,68 @@ implement CancellationFlag {
         true
     }
 
-    // Register a waker; returns RegistrationId.
-    // If already cancelled, wakes the waker immediately and returns 0.
-    fn register_waiter(&self, waker: Waker) -> RegistrationId {
+    // The waiter table owns the sole retained wake handle. Repeated polls
+    // reuse an equivalent target; replacement preserves the registration ID.
+    // User clone/drop/wake callbacks always run outside the registry lock.
+    fn register_waiter(&self, previous_id: RegistrationId, waker: &Waker) -> RegistrationId {
         if self.is_cancelled() {
-            waker.wake();
+            waker.wake_by_ref();
             return 0;
         }
-        let id = self.next_id.fetch_add(1, MemoryOrdering.Relaxed);
+
+        if previous_id != 0 {
+            let wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
+            for entry in wg.iter() {
+                if entry.id == previous_id && entry.waker.will_wake(waker) {
+                    return previous_id;
+                }
+            }
+        }
+
+        let replacement = waker.clone();
         let mut wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
         // Re-check under lock: avoid lost-wake race with concurrent cancel.
         if self.is_cancelled() {
             drop(wg);
-            waker.wake();
+            replacement.wake();
             return 0;
         }
-        wg.push(WaiterEntry { id: id, waker: waker });
+
+        let mut existing_index: Maybe<Int> = Maybe.None;
+        for (index, entry) in wg.iter().enumerate() {
+            if entry.id == previous_id {
+                existing_index = Maybe.Some(index);
+                break;
+            }
+        }
+        if let Maybe.Some(index) = existing_index {
+            let entry: &mut WaiterEntry = wg.get_mut(index).unwrap();
+            let previous = replace(&mut entry.waker, replacement);
+            drop(wg);
+            drop(previous);
+            return previous_id;
+        }
+
+        let id = self.next_id.fetch_add(1, MemoryOrdering.Relaxed);
+        wg.push(WaiterEntry { id: id, waker: replacement });
         id
     }
 
     fn deregister_waiter(&self, id: RegistrationId) {
         if id == 0 { return; }
         let mut wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
-        wg.retain(|w| w.id != id);
+        let mut existing_index: Maybe<Int> = Maybe.None;
+        for (index, entry) in wg.iter().enumerate() {
+            if entry.id == id {
+                existing_index = Maybe.Some(index);
+                break;
+            }
+        }
+        if let Maybe.Some(index) = existing_index {
+            let removed = wg.remove(index);
+            drop(wg);
+            drop(removed);
+        }
     }
 
     fn register_callback(&self, cb: fn()) -> RegistrationId {
@@ -538,7 +577,7 @@ implement CancellationToken {
 // Completes exactly once when the token is cancelled. If polled after the
 // flag is already cancelled, returns Ready immediately.
 
-public type CancelledFuture is {
+public type affine CancelledFuture is {
     flag: Shared<CancellationFlag>,
     registration_id: RegistrationId,
 };
@@ -553,12 +592,7 @@ implement Future for CancelledFuture {
             return Poll.Ready(r);
         }
 
-        // Slow path — register (or refresh) our waker.
-        // Deregister any prior registration (executor may re-poll with a new waker).
-        if self.registration_id != 0 {
-            self.flag.deregister_waiter(self.registration_id);
-        }
-        self.registration_id = self.flag.register_waiter(cx.waker().clone());
+        self.registration_id = self.flag.register_waiter(self.registration_id, cx.waker());
 
         // Re-check state after registration: if cancellation fired between
         // the is_cancelled check and the register call, register_waiter
