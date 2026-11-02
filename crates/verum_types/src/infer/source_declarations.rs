@@ -28,12 +28,18 @@ fn source_mount_binds_name(tree: &verum_ast::decl::MountTree, name: &str) -> boo
     }
 }
 
-/// Visit the declaration paths explicitly bound to a spelling in a module.
-fn named_mount_targets(
+#[derive(Clone, Copy)]
+enum MountTargetKind {
+    Named,
+    Glob,
+}
+
+/// Visit explicitly named targets and the glob surfaces that could export a spelling.
+fn source_mount_targets(
     mount: &verum_ast::MountDecl,
     owner: &ModulePath,
     name: &str,
-    mut visit: impl FnMut(ModulePath),
+    mut visit: impl FnMut(ModulePath, MountTargetKind),
 ) {
     use verum_ast::{
         decl::{MountTree, MountTreeKind},
@@ -46,7 +52,7 @@ fn named_mount_targets(
         alias: Option<&verum_ast::Ident>,
         name: &str,
         prefixes: &mut Vec<&'a Path>,
-        visit: &mut impl FnMut(&[&Path], &Path),
+        visit: &mut impl FnMut(&[&Path], &Path, MountTargetKind),
     ) {
         match &tree.kind {
             MountTreeKind::Path(leaf) => {
@@ -55,7 +61,7 @@ fn named_mount_targets(
                 };
                 let binding = tree.alias.as_ref().or(alias).unwrap_or(last);
                 if binding.name == name {
-                    visit(prefixes, leaf);
+                    visit(prefixes, leaf, MountTargetKind::Named);
                 }
             }
             MountTreeKind::Nested { prefix, trees } => {
@@ -65,7 +71,8 @@ fn named_mount_targets(
                 }
                 prefixes.pop();
             }
-            MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+            MountTreeKind::Glob(path) => visit(prefixes, path, MountTargetKind::Glob),
+            MountTreeKind::File { .. } => {}
         }
     }
     walk(
@@ -73,9 +80,9 @@ fn named_mount_targets(
         mount.alias.as_ref(),
         name,
         &mut Vec::new(),
-        &mut |prefixes, leaf| {
+        &mut |prefixes, leaf, kind| {
             if prefixes.is_empty() {
-                visit(path_to_module_path_resolved(leaf, owner));
+                visit(path_to_module_path_resolved(leaf, owner), kind);
             } else {
                 let segments = prefixes
                     .iter()
@@ -83,10 +90,10 @@ fn named_mount_targets(
                     .chain(std::iter::once(leaf))
                     .flat_map(|part| part.segments.iter().cloned())
                     .collect();
-                visit(path_to_module_path_resolved(
-                    &Path::new(segments, mount.span),
-                    owner,
-                ));
+                visit(
+                    path_to_module_path_resolved(&Path::new(segments, mount.span), owner),
+                    kind,
+                );
             }
         },
     );
@@ -225,11 +232,13 @@ impl TypeChecker {
         tail: &str,
         span: Span,
     ) -> Result<Option<(Type, Text)>> {
-        if self.core_metadata.is_none() {
+        let Some(metadata) = self.core_metadata.as_ref() else {
             return Ok(None);
-        }
+        };
         let owner = ModulePath::from_str(self.current_module_path.as_str());
         let mut targets = Set::new();
+        let mut explicit_globs = Vec::new();
+        let mut implicit_globs = Vec::new();
         {
             let registry = self.module_registry.read();
             let inline = self
@@ -241,8 +250,30 @@ impl TypeChecker {
             if let Some(items) = inline.or_else(|| file.as_ref().map(|module| &module.ast.items)) {
                 for item in items {
                     if let verum_ast::ItemKind::Mount(mount) = &item.kind {
-                        named_mount_targets(mount, &owner, head, |path| {
-                            targets.insert(path);
+                        source_mount_targets(mount, &owner, head, |path, kind| match kind {
+                            MountTargetKind::Named => {
+                                targets.insert(path);
+                            }
+                            MountTargetKind::Glob if tail.is_empty() => {
+                                let module = path.to_string();
+                                let (leaf, declared_owner) = self
+                                    .reexport_source_module_for(&module, head)
+                                    .unwrap_or_else(|| (head.into(), module.into()));
+                                let key: Text = format!("{declared_owner}.{leaf}").into();
+                                if Self::metadata_type_with_declaring_key(metadata, &key)
+                                    .is_some_and(|descriptor| descriptor.is_public)
+                                {
+                                    // The language injector prepends a synthetic prelude mount.
+                                    // User-written mounts have priority, independent of source order.
+                                    let globs = if mount.span.is_empty() {
+                                        &mut implicit_globs
+                                    } else {
+                                        &mut explicit_globs
+                                    };
+                                    globs.push((leaf, declared_owner, path));
+                                }
+                            }
+                            MountTargetKind::Glob => {}
                         });
                     }
                 }
@@ -250,7 +281,43 @@ impl TypeChecker {
         }
         let mut paths = targets.into_iter();
         let Some(path) = paths.next() else {
-            return Ok(None);
+            let globs = if explicit_globs.is_empty() {
+                implicit_globs
+            } else {
+                explicit_globs
+            };
+            let Some((leaf, declared_owner, _)) = globs.first() else {
+                return Ok(None);
+            };
+            if globs.iter().any(|(name, owner, _)| name != leaf || owner != declared_owner) {
+                return Err(TypeError::TypeNotFound { name: head.into(), span });
+            }
+            // A live declaration or an explicit re-export controls its own spelling,
+            // including visibility. Stale archive metadata cannot override that route.
+            for (_, _, surface) in &globs {
+                let qualified: Text = format!("{surface}.{head}").into();
+                let source_claims_name = {
+                    let registry = self.module_registry.read();
+                    self.get_module_with_path_aliases(&surface.to_string(), &registry)
+                        .is_some_and(|module| module.ast.items.iter().any(|item| match &item.kind {
+                            verum_ast::ItemKind::Type(decl) => decl.name.name == head,
+                            verum_ast::ItemKind::Mount(mount) => source_mount_binds_name(&mount.tree, head),
+                            _ => false,
+                        }))
+                };
+                if source_claims_name
+                    && let Some(resolved) = self.resolve_qualified_source_type_with_parameter_key(&qualified, span)?
+                {
+                    return Ok(Some(resolved));
+                }
+            }
+            let key: Text = format!("{declared_owner}.{leaf}").into();
+            if let Some(resolved) = self.resolve_qualified_source_type_with_parameter_key(&key, span)? {
+                return Ok(Some(resolved));
+            }
+            return self.load_mounted_type(leaf, declared_owner, true)
+                .map(Some)
+                .ok_or(TypeError::TypeNotFound { name: head.into(), span });
         };
         if paths.next().is_some() {
             return Err(TypeError::TypeNotFound {
@@ -265,16 +332,14 @@ impl TypeChecker {
         }
         .into();
         let Some((module, leaf)) = path.rsplit_once('.') else {
-            return Ok(None);
+            return Err(TypeError::TypeNotFound { name: path, span });
         };
         let (declared, owner) = self
             .reexport_source_module_for(module, leaf)
             .unwrap_or_else(|| (leaf.into(), module.into()));
         let key: Text = format!("{owner}.{declared}").into();
-        if !self.core_metadata.as_ref().is_some_and(|metadata| {
-            Self::metadata_type_with_declaring_key(metadata, &key).is_some()
-        }) {
-            return Ok(None);
+        if Self::metadata_type_with_declaring_key(metadata, &key).is_none() {
+            return Err(TypeError::TypeNotFound { name: path, span });
         }
         if let Some(resolved) =
             self.resolve_qualified_source_type_with_parameter_key(&path, span)?

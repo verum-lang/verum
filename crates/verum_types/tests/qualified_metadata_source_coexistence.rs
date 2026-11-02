@@ -354,3 +354,76 @@ fn source_variant_payload_can_mount_an_archived_type_by_its_declaring_owner() {
         );
     }
 }
+
+#[test]
+fn archived_glob_types_in_source_signatures_require_a_public_unambiguous_export() {
+    let consumer = "fn inspect(e: app.outer.Failure) -> Int { match e { app.outer.Failure.Absent => 1, app.outer.Failure.Bad(_) => 2 } }";
+    let mut archive = metadata(OWNER, KEY);
+    let mut other = archive.types.get(&Text::from(KEY)).unwrap().clone();
+    other.origin_module_path = Some("core.other".into());
+    archive.types.insert("core.other.Packet".into(), other);
+    let mut private = archive.types.get(&Text::from(KEY)).unwrap().clone();
+    private.is_public = false;
+    private.origin_module_path = Some("core.hidden".into());
+    archive.types.insert("core.hidden.Packet".into(), private);
+    for (surface, owner) in [
+        ("core.prelude", OWNER),
+        ("core.same", OWNER),
+        ("core.other_surface", "core.other"),
+        ("core.private_surface", "core.hidden"),
+    ] {
+        archive.module_reexports.insert(
+            surface.into(),
+            List::from_iter([("Cause".into(), "Packet".into(), owner.into())]),
+        );
+    }
+    for eager in [false, true] {
+        for (mounts, accepts) in [
+            ("mount core.prelude.*;", true),
+            ("mount core.{prelude.*};", true),
+            ("mount core.prelude.*; mount core.same.*;", true),
+            ("mount core.unrelated.*;", false),
+            ("mount core.private_surface.*;", false),
+            ("mount core.prelude.*; mount core.absent.{Cause};", false),
+            ("mount core.prelude.*; mount core.other_surface.*;", false),
+            ("mount core.other_surface.*; mount core.prelude.*;", false),
+        ] {
+            let outer = format!("{mounts} public type Failure is Absent | Bad(Cause);");
+            let errors = check_with_modules(
+                "",
+                "app.main",
+                consumer,
+                archive.clone(),
+                eager,
+                &[("app.outer", &outer)],
+            );
+            if accepts {
+                assert!(errors.is_empty(), "eager={eager}, {mounts}: {errors:?}");
+            } else {
+                assert!(
+                    errors.iter().any(|e| e.contains("TypeNotFound")),
+                    "eager={eager}, {mounts}: {errors:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_archive_glob_cannot_make_a_live_private_declaration_public() {
+    let consumer = "fn inspect(e: app.outer.Failure) -> Int { match e { app.outer.Failure.Absent => 1, app.outer.Failure.Bad(_) => 2 } }";
+    for (owner_source, expected) in [
+        ("type Packet is { public body: Bool };", "VisibilityError"),
+        ("public mount core.absent.{Packet};", "TypeNotFound"),
+    ] {
+        let errors = check_with_modules(
+            owner_source,
+            "app.main",
+            consumer,
+            metadata(OWNER, KEY),
+            false,
+            &[("app.outer", "mount core.mixed.defining.*; public type Failure is Absent | Bad(Packet);")],
+        );
+        assert!(errors.iter().any(|error| error.contains(expected)), "{owner_source}: {errors:?}");
+    }
+}
