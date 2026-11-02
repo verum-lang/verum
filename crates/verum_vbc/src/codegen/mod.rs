@@ -314,7 +314,6 @@ struct DefaultConstraintScope {
     receiver: crate::types::TypeId,
     instance: Option<ConcreteImplType>,
     protocol: crate::types::ProtocolId,
-    source_module: String,
 }
 
 /// A blanket protocol implementation waiting to be monomorphized onto
@@ -1231,8 +1230,10 @@ pub struct VbcCodegen {
     /// necessary because default methods may reference functions from other modules
     /// that haven't been registered yet during declaration collection.
     ///
-    /// Stored as (func_decl, type_name) pairs.
-    pending_default_methods: Vec<(verum_ast::FunctionDecl, String)>,
+    /// Each body carries its concrete receiver and the lexical owner of its source.
+    pending_default_methods: Vec<(verum_ast::FunctionDecl, String, Option<String>)>,
+    /// Lexical lookup for an inherited body; its function still belongs to the concrete receiver.
+    default_body_type_scope: Option<String>,
     /// T0701 (default-steals-slot class): default-method
     /// MATERIALISATION registrations, deferred to
     /// `compile_pending_default_methods` (which runs after the WHOLE
@@ -1247,6 +1248,7 @@ pub struct VbcCodegen {
     pending_default_registrations: Vec<(
         verum_ast::FunctionDecl,
         String,
+        Option<String>,
         Option<DefaultConstraintScope>,
     )>,
     /// Local associated equalities indexed by the full specialized impl receiver.
@@ -1820,17 +1822,26 @@ impl VbcCodegen {
         }
     }
 
+    fn lexical_type_scope(&self) -> &str {
+        self.default_body_type_scope.as_deref().or(self.ctx.current_source_module.as_deref())
+            .unwrap_or(&self.config.module_name)
+    }
+
     /// Select a mount from the current source's retained declaration scope.
     /// A known source with no such mount must not consult another file's flat
     /// context table. The fallback supports callers that seed a context without
     /// collecting source declarations.
     fn mounted_type_path(&self, name: &str) -> Maybe<&str> {
-        let owner = self.ctx.current_source_module.as_deref()
-            .unwrap_or(&self.config.module_name);
-        match self.source_type_mounts.get(&Text::from(owner)) {
-            Some(mounts) => mounts.get(&Text::from(name)).and_then(Option::as_ref).map(Text::as_str),
-            None => self.ctx.mounted_types.get(name).map(|path| path.as_str()),
+        let owner = self.lexical_type_scope();
+        let owner = Text::from(owner);
+        let name_key = Text::from(name);
+        if let Some(mounts) = self.source_type_mounts.get(&owner) {
+            return mounts.get(&name_key).and_then(Option::as_deref);
         }
+        if let Some(scope) = self.imported_declaration_type_bindings.get(&owner) {
+            return scope.as_ref()?.get(&name_key).and_then(Option::as_deref);
+        }
+        self.ctx.mounted_types.get(name).map(String::as_str)
     }
 
     /// Source spelling for a protocol bound in a published signature. A
@@ -2527,6 +2538,7 @@ impl VbcCodegen {
             context_names: Vec::new(),
             // Pending default protocol methods for deferred compilation
             pending_default_methods: Vec::new(),
+            default_body_type_scope: None,
             pending_default_registrations: Vec::new(),
             concrete_impl_bindings: HashMap::new(),
             blanket_impls: Vec::new(),
@@ -3456,7 +3468,7 @@ impl VbcCodegen {
                     // materialisation below — explicit bodies from
                     // LATER blocks must win the unsuffixed slot.
                     self.pending_default_registrations
-                        .push((body_func.clone(), type_name.to_string(), None));
+                        .push((body_func.clone(), type_name.to_string(), None, None));
                 }
                 per_proto_overrides
                     .entry(derived.clone())
@@ -3517,11 +3529,10 @@ impl VbcCodegen {
                             receiver,
                             instance: instance.cloned(),
                             protocol: crate::types::ProtocolId(protocol.0),
-                            source_module: protocol_info.source_module.clone(),
                         })
                     });
                     self.pending_default_registrations
-                        .push((default_func.clone(), type_name.to_string(), constraints));
+                        .push((default_func.clone(), type_name.to_string(), Some(protocol_info.source_module.clone()), constraints));
                 }
             }
         }
@@ -3603,7 +3614,7 @@ impl VbcCodegen {
         // every explicit impl body already owns its unsuffixed slot
         // and a default only fills slots that are still empty.
         let deferred = std::mem::take(&mut self.pending_default_registrations);
-        for (default_func, type_name, constraints) in deferred {
+        for (default_func, type_name, source, constraints) in deferred {
             let full_method_name =
                 format!("{}.{}", type_name, default_func.name.name);
             // INSTRUMENT (VERUM_TRACE_DEFREG=<substring>): whether a
@@ -3629,8 +3640,8 @@ impl VbcCodegen {
             if self.ctx.lookup_function(&full_method_name).is_some() {
                 continue;
             }
-            if let Some(constraints) = constraints {
-                let previous_module = self.ctx.current_source_module.replace(constraints.source_module);
+            if let (Some(constraints), Some(owner)) = (constraints, &source) {
+                let previous_module = self.ctx.current_source_module.replace(owner.clone());
                 let contradicts = self.default_binding_contradicts(
                     &default_func,
                     &type_name,
@@ -3645,13 +3656,13 @@ impl VbcCodegen {
             }
             self.register_impl_function(&default_func, &type_name, &[])?;
             self.pending_default_methods
-                .push((default_func, type_name));
+                .push((default_func, type_name, source));
         }
 
         // Take ownership of pending methods to avoid borrow conflicts
         let pending = std::mem::take(&mut self.pending_default_methods);
 
-        for (default_func, type_name) in pending {
+        for (default_func, type_name, source) in pending {
             // Check if the function body was already compiled (e.g., by explicit impl in main module)
             let full_method_name = format!("{}.{}", type_name, default_func.name.name);
 
@@ -3703,7 +3714,10 @@ impl VbcCodegen {
                     self.ctx.generic_type_params_ordered.push(n);
                 }
             }
-            if let Err(e) = self.compile_function(&default_func, Some(&type_name)) {
+            let previous_source = std::mem::replace(&mut self.default_body_type_scope, source);
+            let body = self.compile_function(&default_func, Some(&type_name));
+            self.default_body_type_scope = previous_source;
+            if let Err(e) = body {
                 // Skip - some default methods may have unresolvable dependencies
                 // (e.g., FFI functions, external symbols not available in VBC).
                 // Surface via warn-level so silent body-compile failures of
@@ -7130,7 +7144,7 @@ impl VbcCodegen {
     fn collect_declaration_type_bindings(&self) -> CodegenResult<crate::declaration_bindings_codec::Bindings> {
         let mut owners = std::collections::BTreeSet::new();
         for descriptor in &self.types {
-            if descriptor.source_declaration.is_some() {
+            if descriptor.source_declaration.is_some() || descriptor.kind == crate::types::TypeKind::Protocol {
                 owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
                     .map(String::as_str).unwrap_or(&self.config.module_name));
             }
@@ -8701,6 +8715,7 @@ impl VbcCodegen {
             self.type_field_type_names.extend(fields.into_iter()
                 .filter(|((owner, _), _)| owner.starts_with(&prefix)));
         }
+        self.retain_default_method_types(files);
         Ok(())
     }
 

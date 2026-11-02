@@ -5,7 +5,7 @@ use super::{
     remap_type_ref_archive,
 };
 use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
-use crate::types::{TypeDescriptor, TypeId, TypeRef};
+use crate::types::{TypeDescriptor, TypeId, TypeKind, TypeRef};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use verum_ast::{ItemKind, MountTree, MountTreeKind, Visitor};
 use verum_common::{Map, Text};
@@ -186,7 +186,7 @@ fn mounts(
 
 struct SourceNames<'a> {
     names: BTreeSet<String>,
-    codegen: &'a VbcCodegen,
+    codegen: Option<&'a VbcCodegen>,
 }
 impl Visitor for SourceNames<'_> {
     fn visit_path(&mut self, path: &verum_ast::Path) {
@@ -197,17 +197,20 @@ impl Visitor for SourceNames<'_> {
         // The parser represents dotted free calls as MethodCall/Field. Reuse
         // the call lowering's module-path interpretation before matching the
         // exact source-owned function catalog.
+        let Some(codegen) = self.codegen else {
+            return verum_ast::visitor::walk_expr(self, expr);
+        };
         match &expr.kind {
             verum_ast::ExprKind::MethodCall {
                 receiver, method, ..
             } => {
-                if let Some(mut path) = self.codegen.try_flatten_module_path_resolved(receiver) {
+                if let Some(mut path) = codegen.try_flatten_module_path_resolved(receiver) {
                     path.push(method.name.to_string());
                     self.names.insert(path.join("."));
                 }
             }
             verum_ast::ExprKind::Field { .. } => {
-                if let Some(path) = self.codegen.try_flatten_module_path_resolved(expr) {
+                if let Some(path) = codegen.try_flatten_module_path_resolved(expr) {
                     self.names.insert(path.join("."));
                 }
             }
@@ -327,7 +330,7 @@ impl VbcCodegen {
             };
             let mut paths = SourceNames {
                 names: BTreeSet::new(),
-                codegen: self,
+                codegen: Some(self),
             };
             let mut bindings = HashMap::new();
             let mut globs = Vec::new();
@@ -492,6 +495,38 @@ impl VbcCodegen {
             let (mi, ti) = catalog[&key];
             let module = available[mi];
             let ty = &module.types[ti];
+            // Inherited default bodies and their where-clauses carry source
+            // paths beyond the protocol's runtime TypeRefs. Select those
+            // dependencies from the declaring file, even if the implementor
+            // never names them.
+            if ty.kind == TypeKind::Protocol
+                && let Some((owner, name)) = key.rsplit_once('.')
+                && let Some(protocol) = self.protocol_registry.get(name)
+                && protocol.source_module == owner
+            {
+                let mounts = module.declaration_type_bindings.get(&Text::from(owner));
+                let mut paths = SourceNames { names: BTreeSet::new(), codegen: None };
+                for method in protocol.default_methods.values() {
+                    paths.visit_function(method);
+                }
+                for name in paths.names {
+                    let local = crate::module::qualify_module_name(owner, &name);
+                    let dependency = if catalog.contains_key(&local) {
+                        Some(local)
+                    } else if let Some(mount) = mounts.and_then(|scope| scope.get(&Text::from(name.as_str()))) {
+                        mount.as_ref().map(|path| path.to_string())
+                    } else if name.contains('.') {
+                        Some(name)
+                    } else {
+                        None
+                    };
+                    if let Some(dependency) = dependency
+                        && catalog.contains_key(&dependency) && selected.insert(dependency.clone())
+                    {
+                        pending.push(dependency);
+                    }
+                }
+            }
             add_dependencies(mi, &key, descriptor_ids(ty), &mut selected, &mut pending)?;
             let methods = methods_by_owner.entry(mi).or_insert_with(|| {
                 let mut methods = HashMap::<&str, Vec<usize>>::new();
@@ -584,7 +619,7 @@ impl VbcCodegen {
         for key in &selected {
             let (mi, ti) = catalog[key];
             let module = available[mi];
-            if module.types[ti].source_declaration.is_some() {
+            if module.types[ti].source_declaration.is_some() || module.types[ti].kind == TypeKind::Protocol {
                 let owner = module.types[ti].origin_module.and_then(|id| module.strings.get(id))
                     .unwrap_or(&module.name);
                 self.retain_declaration_type_scope(module, owner)?;
@@ -761,7 +796,7 @@ impl VbcCodegen {
                 Self::canonical_sum_type_id(owner, leaf)
             })
         };
-        let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+        let owner = self.lexical_type_scope();
         // A declaration in this file shadows its imports. A same-named type in
         // a different file of the bootstrap unit owns only its qualified name.
         if !name.contains('.')
@@ -769,11 +804,14 @@ impl VbcCodegen {
         {
             return Some(*local);
         }
-        if self.source_type_mounts.get(&Text::from(owner))
-            .and_then(|bindings| bindings.get(&Text::from(name))) == Some(&None)
-        {
-            return None;
-        }
+        let owner_key = Text::from(owner);
+        let name_key = Text::from(name);
+        let binding = match self.source_type_mounts.get(&owner_key) {
+            Some(scope) => scope.get(&name_key),
+            None => self.imported_declaration_type_bindings.get(&owner_key)
+                .and_then(Option::as_ref).and_then(|scope| scope.get(&name_key)),
+        };
+        if binding == Some(&None) { return None; }
         if let Some(mounted) = self.mounted_type_path(name) {
             return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")));
         }

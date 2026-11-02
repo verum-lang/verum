@@ -41,6 +41,66 @@ impl ConcreteImplType {
 }
 
 impl VbcCodegen {
+    /// Capture the nominal declarations a foreign implementor will need when
+    /// checking inherited default signatures and bodies. Resolve them as
+    /// ordinary signatures in this file, including their generic binders.
+    pub(super) fn retain_default_method_types(&mut self, files: &[&verum_ast::Module]) {
+        use verum_ast::{ItemKind, TypeDeclBody, Visitor};
+        use verum_common::{Map, Text};
+        struct Names<'a> {
+            cg: &'a VbcCodegen,
+            scope: &'a std::collections::HashMap<String, u16>,
+            ids: &'a [crate::types::TypeParamId],
+            bindings: &'a mut Map<Text, Option<Text>>,
+        }
+        impl Visitor for Names<'_> {
+            fn visit_type(&mut self, ty: &verum_ast::Type) {
+                if let verum_ast::TypeKind::Path(path) = &ty.kind {
+                    if let Some(TypeRef::Concrete(id)) = self.cg.semantic_formal_type(ty, self.scope, self.ids)
+                        && let Some(descriptor) = self.cg.type_by_id(id)
+                        && descriptor.kind != crate::types::TypeKind::Primitive
+                        && let Some(owner) = self.cg.type_declaration_identity(descriptor)
+                    {
+                        self.bindings.insert(path.to_string().replace("::", ".").into(), Some(owner));
+                    }
+                } else {
+                    verum_ast::visitor::walk_type(self, ty);
+                }
+            }
+        }
+        for file in files {
+            let owner = Self::resolve_full_module_path(file, &self.config.module_name)
+                .unwrap_or_else(|| self.config.module_name.clone());
+            let previous = self.ctx.current_source_module.replace(owner.clone());
+            let mut bindings = Map::new();
+            for item in &file.items {
+                let ItemKind::Type(ty) = &item.kind else { continue };
+                if !matches!(ty.body, TypeDeclBody::Protocol(_)) { continue; }
+                let Some(protocol) = self.protocol_registry.get(ty.name.name.as_str())
+                    .filter(|info| info.source_module == owner) else { continue };
+                let parent_names: Vec<_> = ty.generics.iter().filter_map(|parameter| {
+                    use verum_ast::ty::GenericParamKind;
+                    match &parameter.kind {
+                        GenericParamKind::Type { name, .. } | GenericParamKind::HigherKinded { name, .. } =>
+                            Some(name.name.to_string()),
+                        _ => None,
+                    }
+                }).collect();
+                for method in protocol.default_methods.values() {
+                    let (mut scope, shadow) = Self::declaration_generic_param_maps(method, &parent_names, &parent_names);
+                    let ids = Self::ordered_generic_param_ids(&scope, &shadow);
+                    scope.extend(shadow);
+                    Names { cg: self, scope: &scope, ids: &ids, bindings: &mut bindings }.visit_function(method);
+                }
+            }
+            self.ctx.current_source_module = previous;
+            if !bindings.is_empty() {
+                let lexical = self.source_type_mounts.entry(owner.into()).or_default();
+                for (name, binding) in bindings { lexical.entry(name).or_insert(binding); }
+            }
+        }
+    }
+
     fn concrete_impl_type(&self, ty: &verum_ast::Type, depth: usize) -> Option<ConcreteImplType> {
         use verum_ast::ty::{GenericArg, TypeKind};
         use verum_common::well_known_types::type_names;

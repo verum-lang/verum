@@ -131,3 +131,100 @@ fn imported_protocol_defaults_keep_their_declaration_identity() {
         );
     }
 }
+
+#[test]
+fn inherited_default_equality_uses_the_protocols_nominal_dependency() {
+    let provider = r#"
+        module lib.stream;
+        public type Verdict<T, E> is | Accepted(T) | Rejected(E);
+        public type Signal is | Ready | Failed(Int);
+        public type Stream is protocol {
+            type Item;
+            fn local_tag(&self) -> Int {
+                let value: Signal = Signal.Failed(7);
+                match value { Signal.Failed(n) => n, Signal.Ready => 0 }
+            }
+            fn take(&mut self) -> Self.Item;
+            fn tag(&self, value: Verdict<Int, Int>) -> Int {
+                match value { Verdict.Accepted(_) => 1, Verdict.Rejected(_) => 2 }
+            }
+            fn inspect<T, E>(mut self) -> Int where Self.Item = Verdict<T, E> {
+                match self.take() { Verdict.Accepted(_) => 1, Verdict.Rejected(_) => 2 }
+            }
+        };
+    "#;
+    let foreign = Parser::new("module decoy; public type Verdict<T, E> is | Unrelated(T, E);")
+        .parse_module()
+        .unwrap();
+    let decoy = VbcCodegen::with_config(CodegenConfig::new("decoy"))
+        .compile_module(&foreign)
+        .unwrap();
+    for (imports, item, take, guard, expected) in [
+        ("", "Piece", "Piece.Root", true, Ok(false)),
+        (
+            "mount decoy.{Verdict};",
+            "Verdict<Int, Int>",
+            "Verdict.Unrelated(1, 2)",
+            true,
+            Ok(false),
+        ),
+        (
+            "mount lib.stream.{Verdict};",
+            "Verdict<Int, Int>",
+            "Verdict.Accepted(4)",
+            true,
+            Ok(true),
+        ),
+        (
+            "mount decoy.{Verdict}; mount lib.stream.{Verdict as Original};",
+            "Original<Int, Int>",
+            "Original.Accepted(4)",
+            true,
+            Ok(true),
+        ),
+        ("", "Piece", "Piece.Root", false, Err("no declared tag")),
+    ] {
+        let src = if guard {
+            provider.into()
+        } else {
+            provider.replace(" where Self.Item = Verdict<T, E>", "")
+        };
+        let src = Parser::new(&src).parse_module().unwrap();
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("lib"));
+        producer.collect_unit_declarations(&[&src]).unwrap();
+        let protocols = producer.export_protocols();
+        let module = producer.finalize_module_from_state().unwrap();
+
+        let src = format!(
+            "module app.path; mount lib.stream.{{Stream}}; {imports}
+            type Piece is | Root | Leaf(Int);
+            type Cursor is {{ at: Int }};
+            implement Stream for Cursor {{
+                type Item = {item};
+                fn take(&mut self) -> {item} {{ {take} }}
+            }}"
+        );
+        let receiver = Parser::new(&src).parse_module().unwrap();
+        let mut compiler = VbcCodegen::with_config(CodegenConfig::new("app"));
+        compiler.import_protocols(&protocols);
+        compiler
+            .import_bootstrap_nominal_dependencies(&[&receiver], &[&module, &decoy])
+            .unwrap();
+        compiler.collect_unit_declarations(&[&receiver]).unwrap();
+        compiler.resolve_pending_imports();
+        let result = compiler.compile_default_methods_with_policy(ItemFailurePolicy::Strict);
+        match expected {
+            Ok(present) => {
+                result.unwrap_or_else(|e| panic!("{imports} {item}: {e}"));
+                assert!(compiler.export_functions().contains_key("Cursor.local_tag"));
+                assert!(compiler.export_functions().contains_key("Cursor.tag"));
+                assert_eq!(
+                    compiler.export_functions().contains_key("Cursor.inspect"),
+                    present,
+                    "{imports}"
+                );
+            }
+            Err(message) => assert!(result.unwrap_err().to_string().contains(message)),
+        }
+    }
+}
