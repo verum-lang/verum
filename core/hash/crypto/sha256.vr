@@ -134,7 +134,25 @@ implement Sha256 {
             ],
             buf: [0; 64],
             buf_len: 0,
-            length_bytes: 0,
+            length_bytes: 0_u64,
+        }
+    }
+
+    /// Resume hashing independently from the current prefix. Copy only the
+    /// buffered bytes that can contribute to a subsequent digest.
+    public fn fork(&self) -> Sha256 {
+        let mut buf: [Byte; 64] = [0; 64];
+        let mut i = 0;
+        while i < self.buf_len {
+            buf[i] = self.buf[i];
+            i = i + 1;
+        }
+        Sha256 {
+            h: [self.h[0], self.h[1], self.h[2], self.h[3],
+                self.h[4], self.h[5], self.h[6], self.h[7]],
+            buf: buf,
+            buf_len: self.buf_len,
+            length_bytes: self.length_bytes,
         }
     }
 
@@ -232,50 +250,6 @@ implement Sha256 {
 // Core compression function — FIPS 180-4 §6.2.2
 // =============================================================================
 
-// Bitwise helpers per FIPS 180-4 §4.1.2. Marked @inline so the compiler
-// folds them into the round body — each round is 3 adds and 7 bit-ops,
-// function-call overhead would dominate otherwise.
-
-@inline
-fn ch(x: UInt32, y: UInt32, z: UInt32) -> UInt32 {
-    // Bitwise-NOT via XOR with all-ones — self-contained so we don't
-    // depend on primitive-type method dispatch in the VBC interpreter.
-    (x & y) ^ ((x ^ 0xFFFFFFFF_u32) & z)
-}
-
-@inline
-fn maj(x: UInt32, y: UInt32, z: UInt32) -> UInt32 {
-    (x & y) ^ (x & z) ^ (y & z)
-}
-
-// Rotate-right is inlined via shift-or to avoid depending on the
-// method-dispatch table for primitive types in the VBC interpreter;
-// keeps the reference implementation self-contained.
-@inline
-fn rotr32(x: UInt32, n: UInt32) -> UInt32 {
-    (x >> n) | (x << (32_u32 - n))
-}
-
-@inline
-fn big_sigma0(x: UInt32) -> UInt32 {
-    rotr32(x, 2) ^ rotr32(x, 13) ^ rotr32(x, 22)
-}
-
-@inline
-fn big_sigma1(x: UInt32) -> UInt32 {
-    rotr32(x, 6) ^ rotr32(x, 11) ^ rotr32(x, 25)
-}
-
-@inline
-fn small_sigma0(x: UInt32) -> UInt32 {
-    rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> 3_u32)
-}
-
-@inline
-fn small_sigma1(x: UInt32) -> UInt32 {
-    rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> 10_u32)
-}
-
 /// Core compression: merge one 64-byte block into hash state.
 /// FIPS 180-4 §6.2.2 steps 1-4.
 ///
@@ -301,15 +275,13 @@ fn compress_block(h: &mut [UInt32; 8], block: &[Byte]) {
              | (block[t * 4 + 3] as UInt32);
         t = t + 1;
     }
-    // Extend to W[16..64] — FIPS step 1. Break the chained
-    // .wrapping_add into sequential let-bindings (WS-6 fix family):
-    // chained UInt32.wrapping_add misdispatches through SkipWhileIter
-    // in the VBC codegen, producing method-not-found + retry loop.
+    // UInt32 addition wraps at 32 bits, as required by FIPS 180-4.
     while t < 64 {
-        let s1 = small_sigma1(w[t - 2]);
-        let s2 = s1.wrapping_add(w[t - 7]);
-        let s3 = s2.wrapping_add(small_sigma0(w[t - 15]));
-        w[t] = s3.wrapping_add(w[t - 16]);
+        let x = w[t - 15];
+        let y = w[t - 2];
+        let sigma0 = ((x >> 7) | (x << 25)) ^ ((x >> 18) | (x << 14)) ^ (x >> 3);
+        let sigma1 = ((y >> 17) | (y << 15)) ^ ((y >> 19) | (y << 13)) ^ (y >> 10);
+        w[t] = sigma1 + w[t - 7] + sigma0 + w[t - 16];
         t = t + 1;
     }
 
@@ -324,34 +296,35 @@ fn compress_block(h: &mut [UInt32; 8], block: &[Byte]) {
     let mut hh = h[7];
 
     // Round loop — FIPS step 3. 64 rounds.
-    // Break chained .wrapping_add (WS-6 fix family).
+    let round_constants = K;
     t = 0;
     while t < 64 {
-        let m1 = hh.wrapping_add(big_sigma1(e));
-        let m2 = m1.wrapping_add(ch(e, f, g));
-        let m3 = m2.wrapping_add(K[t]);
-        let t1 = m3.wrapping_add(w[t]);
-        let t2 = big_sigma0(a).wrapping_add(maj(a, b, c));
+        let sigma1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
+        let sigma0 = ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10));
+        let choose = g ^ (e & (f ^ g));
+        let majority = (a & b) ^ (c & (a ^ b));
+        let t1 = hh + sigma1 + choose + round_constants[t] + w[t];
+        let t2 = sigma0 + majority;
         hh = g;
         g = f;
         f = e;
-        e = d.wrapping_add(t1);
+        e = d + t1;
         d = c;
         c = b;
         b = a;
-        a = t1.wrapping_add(t2);
+        a = t1 + t2;
         t = t + 1;
     }
 
     // Feed-forward into H — FIPS step 4.
-    h[0] = h[0].wrapping_add(a);
-    h[1] = h[1].wrapping_add(b);
-    h[2] = h[2].wrapping_add(c);
-    h[3] = h[3].wrapping_add(d);
-    h[4] = h[4].wrapping_add(e);
-    h[5] = h[5].wrapping_add(f);
-    h[6] = h[6].wrapping_add(g);
-    h[7] = h[7].wrapping_add(hh);
+    h[0] = h[0] + a;
+    h[1] = h[1] + b;
+    h[2] = h[2] + c;
+    h[3] = h[3] + d;
+    h[4] = h[4] + e;
+    h[5] = h[5] + f;
+    h[6] = h[6] + g;
+    h[7] = h[7] + hh;
 }
 
 // =============================================================================

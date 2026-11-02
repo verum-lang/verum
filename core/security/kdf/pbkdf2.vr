@@ -41,7 +41,7 @@
 module core.security.kdf.pbkdf2;
 
 mount core.collections.list.{List};
-mount core.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
+mount core.mac.hmac.{PreparedHmacSha256, hmac_sha384, hmac_sha512};
 
 public type Pbkdf2Error is
       OutputTooLong
@@ -116,7 +116,7 @@ public fn pbkdf2_hmac_sha256(
     if iterations == 0_u32 || iterations > MAX_PBKDF2_ITERATIONS {
         return Result.Err(Pbkdf2Error.BadIterations);
     }
-    pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha256)
+    pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha256(PreparedHmacSha256.new(password)))
 }
 
 public fn pbkdf2_hmac_sha384(
@@ -149,11 +149,11 @@ public fn pbkdf2_hmac_sha512(
 // Core engine
 // =============================================================================
 
-type PRF is Sha256 | Sha384 | Sha512;
+type PRF is Sha256(PreparedHmacSha256) | Sha384 | Sha512;
 
 fn hlen(prf: &PRF) -> Int {
     match prf {
-        PRF.Sha256 => 32,
+        PRF.Sha256(_) => 32,
         PRF.Sha384 => 48,
         PRF.Sha512 => 64,
     }
@@ -161,8 +161,8 @@ fn hlen(prf: &PRF) -> Int {
 
 fn prf_eval(prf: &PRF, key: &[Byte], msg: &[Byte]) -> List<Byte> {
     match prf {
-        PRF.Sha256 => {
-            let d = hmac_sha256(key, msg);
+        PRF.Sha256(prepared) => {
+            let d = prepared.mac(msg);
             bytes_of(&d[..])
         },
         PRF.Sha384 => {

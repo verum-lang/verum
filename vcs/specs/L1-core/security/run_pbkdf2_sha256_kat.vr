@@ -1,0 +1,60 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, pbkdf2, hmac, sha256
+// @expected-stdout: OK
+// @expected-exit: 0
+
+mount core.security.kdf.pbkdf2.pbkdf2_hmac_sha256;
+mount core.hash.crypto.sha256.Sha256;
+mount core.mac.hmac.PreparedHmacSha256;
+
+fn assert_hex(bytes: &[Byte], expected: Text) {
+    let digits = "0123456789abcdef".as_bytes();
+    let hex = expected.as_bytes();
+    assert(hex.len() == bytes.len() * 2);
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i] as Int;
+        assert(hex[i * 2] == digits[byte >> 4]);
+        assert(hex[i * 2 + 1] == digits[byte & 15]);
+        i = i + 1;
+    }
+}
+
+fn main() {
+    // Python hashlib.pbkdf2_hmac("sha256", bytes(range(65)),
+    //     bytes([0, 255, 128, 0, 13]), iterations, 65).
+    // Exercises key hashing, binary input, three independent block
+    // indices, a truncated last block and reuse across successive U values.
+    let mut key: [Byte; 65] = [0; 65];
+    let mut i = 0;
+    while i < 65 {
+        key[i] = i as Byte;
+        i = i + 1;
+    }
+    // A fork at a partial block owns its buffered prefix. Finalizing the
+    // fork pads two blocks and must leave the original digest intact.
+    let mut prefix = Sha256.new();
+    prefix.update(&key[..61]);
+    let mut branched = prefix.fork();
+    let suffix: [Byte; 2] = [0, 255];
+    branched.update(&suffix);
+    let extended = branched.finalize();
+    let original = prefix.finalize();
+    assert_hex(&extended[..], "5a34e279fe8ad0f7fab7d5c36d664503b5e363d11021a42abfd920b419b1d688");
+    assert_hex(&original[..], "4b5c2783c91ceccb7c839213bcbb6a902d7fe8c2ec866877a51f433ea17f3e85");
+
+    let prepared = PreparedHmacSha256.new(&key);
+    let empty = prepared.mac("".as_bytes());
+    let abc = prepared.mac("abc".as_bytes());
+    assert_hex(&empty[..], "93ff3114f20ef700222fc1c0334737a51a88740dc0dd2ce0ab3151f0a4a0e85a");
+    assert_hex(&abc[..], "dfbffee4671bad00ed5d1e1999d55ed3b0cc774ac357f9ebf649c1612414fcec");
+
+    let salt: [Byte; 5] = [0, 255, 128, 0, 13];
+    let once = pbkdf2_hmac_sha256(&key, &salt, 1_u32, 65).unwrap();
+    assert_hex(once.as_slice(), "82e686bec8d16fd7b089ac8bd303257ecf19463fd636e23dd71023eda62bc2fbe5a832245281246c2306f179abe796fc64b489f25a85da1a7b5b3e0f3424ecaf64");
+    let twice = pbkdf2_hmac_sha256(&key, &salt, 2_u32, 65).unwrap();
+    assert_hex(twice.as_slice(), "544c094c42ba02e306a509afc9a6b39effb181b1bbec278407c8a1e66d53143a02dc3865396d6dd51ce28d39f5c04d5988b8cad00b6483a463b42e7fa3a1ccac41");
+    print("OK");
+}

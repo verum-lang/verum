@@ -140,6 +140,32 @@ implement HmacSha256 {
     }
 }
 
+/// The RFC 2104 section 4 precomputed inner and outer hash states for
+/// authenticating multiple messages with one key. Both states are secret
+/// key material. Each evaluation forks them before absorbing its message.
+public type PreparedHmacSha256 is {
+    inner: Sha256,
+    outer: Sha256,
+};
+
+implement PreparedHmacSha256 {
+    public fn new(key: &[Byte]) -> PreparedHmacSha256 {
+        let keyed = HmacSha256.new(key);
+        let mut outer = Sha256.new();
+        outer.update(keyed.outer_key.as_slice());
+        PreparedHmacSha256 { inner: keyed.inner, outer: outer }
+    }
+
+    public fn mac(&self, data: &[Byte]) -> [Byte; 32] {
+        let mut inner = self.inner.fork();
+        inner.update(data);
+        let digest = inner.finalize();
+        let mut outer = self.outer.fork();
+        outer.update(&digest);
+        outer.finalize()
+    }
+}
+
 /// One-shot HMAC-SHA-256. RFC 4231 vectors pass byte-exact.
 @inline
 public fn hmac_sha256(key: &[Byte], data: &[Byte]) -> [Byte; 32] {
