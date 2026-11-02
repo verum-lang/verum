@@ -10334,17 +10334,33 @@ impl VbcCodegen {
                                 let resolved = (|| -> Option<Vec<(String, crate::types::TypeRef)>> {
                                     use crate::types::{TypeParamId, TypeRef};
                                     let parent_tid = *self.type_name_to_id.get(ty_name.as_str())?;
-                                    let parent = self.type_by_id(parent_tid)?;
-                                    let owner_ids: Vec<_> = parent.type_params.iter().map(|p| p.id).collect();
+                                    // A canonical record can still have its source-pool ID
+                                    // here. Compare semantic receivers in the same ABI space
+                                    // used by formal parameter resolution and archive import.
+                                    let (owner_tid, parameters) = match self.type_by_id(parent_tid) {
+                                        Some(parent) => {
+                                            let owner = parent.origin_module
+                                                .and_then(|id| self.ctx.strings.get(id.0 as usize))
+                                                .map(String::as_str)
+                                                .or(self.ctx.current_source_module.as_deref());
+                                            let id = parent.canonical_record_type_id(&ty_name, owner)
+                                                .unwrap_or(parent_tid);
+                                            (id, parent.type_params.as_slice())
+                                        }
+                                        None if crate::types::TypeId::from_well_known_scalar_name(&ty_name)
+                                            == Some(parent_tid) => (parent_tid, &[][..]),
+                                        None => return None,
+                                    };
+                                    let owner_ids: Vec<_> = parameters.iter().map(|p| p.id).collect();
                                     let owner_template = if owner_ids.is_empty() {
-                                        TypeRef::Concrete(parent_tid)
+                                        TypeRef::Concrete(owner_tid)
                                     } else {
-                                        TypeRef::Instantiated { base: parent_tid,
+                                        TypeRef::Instantiated { base: owner_tid,
                                             args: owner_ids.iter().copied().map(TypeRef::Generic).collect() }
                                     };
                                     let mut param_map = std::collections::HashMap::new();
                                     let mut used_ids: std::collections::HashSet<_> = owner_ids.iter().map(|id| id.0).collect();
-                                    for parameter in &parent.type_params {
+                                    for parameter in parameters {
                                         let name = self.ctx.strings.get(parameter.name.0 as usize)?;
                                         param_map.insert(name.clone(), parameter.id.0);
                                     }
@@ -26440,7 +26456,16 @@ impl VbcCodegen {
         // id (archive_claimed=false → no shadow) and stamped its
         // objects with the foreign identity.
         self.archive_claimed_type_ids.insert(new_id.0);
-        let new_name_id = crate::types::StringId(self.ctx.intern_string_raw(&name_str));
+        // When a source declaration has already claimed the leaf, carry the
+        // imported owner's spelling through serialization and the next import.
+        let shadowed_by_source = !owns_simple_key && self.user_claimed_type_names.iter()
+            .any(|(_, leaf)| leaf == &name_str);
+        let descriptor_name = if shadowed_by_source {
+            qualified_key.as_ref().unwrap_or(&name_str)
+        } else {
+            &name_str
+        };
+        let new_name_id = StringId(self.ctx.intern_string_raw(descriptor_name));
 
         // Type parameters
         let mut new_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
