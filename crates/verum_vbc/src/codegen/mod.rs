@@ -953,6 +953,9 @@ pub struct VbcCodegen {
     /// bodies (each module's literals resolve against its own types;
     /// already-compiled bodies keep their baked indices).
     user_claimed_type_names: std::collections::HashSet<(String, String)>,
+    /// Exact local declarations reached through a cyclic bootstrap dependency.
+    /// Their IDs are final, but their imported field types are provisional.
+    bootstrap_local_forwards: std::collections::HashSet<Text>,
     /// T1369 — which MODULE won the simple type key, so a sibling's
     /// declaration cannot mistake that key's id for its own.
     /// `claim_local_type_id` reads it; `claim_user_type_name` writes it.
@@ -2277,6 +2280,7 @@ impl VbcCodegen {
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
             user_claimed_type_names: std::collections::HashSet::new(),
+            bootstrap_local_forwards: Default::default(),
             type_name_claim_owner: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
             type_field_refinements: std::collections::HashMap::new(),
@@ -6987,7 +6991,17 @@ impl VbcCodegen {
 
     fn push_type_dedupe(&mut self, ty: crate::types::TypeDescriptor) {
         let eligible = self.impl_only_scalar_carrier(&ty);
-        self.push_type_with_carrier_eligibility(ty, eligible);
+        self.push_type_with_carrier_eligibility(ty, eligible, false);
+    }
+
+    fn push_declared_type(&mut self, ty: TypeDescriptor) {
+        let complete_forward = self.type_declaration_identity(&ty).is_some_and(|owner| {
+            self.type_by_id(ty.id)
+                .is_some_and(|prior| self.type_declaration_identity(prior).as_ref() == Some(&owner))
+                && self.bootstrap_local_forwards.remove(&owner)
+        });
+        let eligible = self.impl_only_scalar_carrier(&ty);
+        self.push_type_with_carrier_eligibility(ty, eligible, complete_forward);
     }
 
     /// Canonical declaration identity in this codegen's string pool. Semantic
@@ -7138,7 +7152,7 @@ impl VbcCodegen {
         Ok(())
     }
 
-    fn push_type_with_carrier_eligibility(&mut self, mut ty: TypeDescriptor, eligible: bool) {
+    fn push_type_with_carrier_eligibility(&mut self, mut ty: TypeDescriptor, eligible: bool, complete_forward: bool) {
         if self.check_source_declaration_error().is_err() {
             return;
         }
@@ -7309,7 +7323,7 @@ impl VbcCodegen {
                     incoming.protocols = std::mem::take(&mut slot.protocols);
                 }
             };
-            if (existing_empty && new_richer) || semantic_enrichment {
+            if complete_forward || (existing_empty && new_richer) || semantic_enrichment {
                 let mut ty = ty;
                 preserve_protocols(&mut self.types[idx], &mut ty);
                 self.types[idx] = ty;
@@ -15863,7 +15877,7 @@ impl VbcCodegen {
                             alias_target: Some(target_ref),
                             ..Default::default()
                         };
-                        self.push_type_dedupe(type_desc);
+                        self.push_declared_type(type_desc);
                         return Ok(());
                     }
                 }
@@ -15891,7 +15905,11 @@ impl VbcCodegen {
                 let type_id = self.claim_local_type_id(&type_name);
                 if !self.ctx.prefer_existing_functions {
                     self.ctx.clear_variants_for_type(&type_name);
-                } else if self.ctx.has_variants_for_type(&type_name)
+                } else if !self.bootstrap_local_forwards.contains(&Text::from(
+                    crate::module::qualify_module_name(
+                        self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name), &type_name,
+                    ),
+                )) && self.ctx.has_variants_for_type(&type_name)
                     && self.type_by_id(type_id).is_some_and(|declaration|
                         declaration.kind == crate::types::TypeKind::Sum
                             && !declaration.variants.is_empty())
@@ -16334,7 +16352,7 @@ impl VbcCodegen {
                     type_id.0,
                     sum_desc.variants.len(),
                 );
-                self.push_type_dedupe(sum_desc);
+                self.push_declared_type(sum_desc);
             }
 
             // Record types: register the type name as a constructor
@@ -16563,7 +16581,7 @@ impl VbcCodegen {
                     });
                 }
 
-                self.push_type_dedupe(type_desc);
+                self.push_declared_type(type_desc);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -16824,7 +16842,7 @@ impl VbcCodegen {
                     }
                 }
 
-                self.push_type_dedupe(type_desc);
+                self.push_declared_type(type_desc);
             }
 
             // Type aliases: register mapping from alias name to base type
@@ -16934,7 +16952,7 @@ impl VbcCodegen {
                     declared_layout: None,
                     source_declaration: None,
                 };
-                self.push_type_dedupe(type_desc);
+                self.push_declared_type(type_desc);
             }
 
             // Newtype and tuple types: register the type name as constructor
@@ -17015,7 +17033,7 @@ impl VbcCodegen {
                     ),
                     });
                 type_desc.size = 8; // single inner value (one Value-slot)
-                self.push_type_dedupe(type_desc);
+                self.push_declared_type(type_desc);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -17130,7 +17148,7 @@ impl VbcCodegen {
                     });
                 }
                 type_desc.size = (types.len() as u32) * 8;
-                self.push_type_dedupe(type_desc);
+                self.push_declared_type(type_desc);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -17201,7 +17219,7 @@ impl VbcCodegen {
                     origin_module: self.current_origin_module_sid(),
                     ..Default::default()
                 };
-                self.push_type_dedupe(type_desc);
+                self.push_declared_type(type_desc);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -17389,7 +17407,7 @@ impl VbcCodegen {
                     ..Default::default()
                 };
                 type_desc.size = 8;
-                self.push_type_dedupe(type_desc);
+                self.push_declared_type(type_desc);
             }
         }
         Ok(())
@@ -26840,7 +26858,7 @@ impl VbcCodegen {
         // archive-local TypeIds that codegen-side `self.types`
         // doesn't have at this point in the per-type-import loop).
 
-        self.push_type_with_carrier_eligibility(imported, carrier_eligible);
+        self.push_type_with_carrier_eligibility(imported, carrier_eligible, false);
     }
 
     /// Translate only identities declared by this archive module. A same-leaf

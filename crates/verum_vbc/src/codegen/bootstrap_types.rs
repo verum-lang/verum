@@ -613,6 +613,11 @@ impl VbcCodegen {
                 Some(owner),
                 Some(carrier_eligible),
             );
+            if let Some((owner, leaf)) = key.rsplit_once('.')
+                && self.user_claimed_type_names.contains(&(owner.to_owned(), leaf.to_owned()))
+            {
+                self.bootstrap_local_forwards.insert(Text::from(key.as_str()));
+            }
             let local = target_ids[key];
             // Old descriptors without origin still have a known owning unit.
             // Carry it now so a second import cannot attribute them to us.

@@ -112,17 +112,7 @@ public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFutur
         );
         fs::write(path, source).unwrap();
     }
-    let output = root.path().join("runtime.vbca");
-    let mut session = Session::new(CompilerOptions {
-        input: core.join("mod.vr"),
-        ..Default::default()
-    });
-    let result =
-        CompilationPipeline::new_core(&mut session, CoreConfig::new(&core).with_output(&output))
-            .compile_core()
-            .unwrap();
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let archive = read_archive_from_file(&output).unwrap();
+    let archive = bootstrap(&core);
     for (module, name) in [
         ("core.scheduler", "choose"),
         ("core.network", "accept"),
@@ -158,15 +148,37 @@ public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFutur
             "{name}: {panics:?}"
         );
     }
-    let app = verum_fast_parser::Parser::new(
-        "module app; mount core.network.tcp.forward; async fn main() -> Int { forward().await }",
-    )
-    .parse_module()
-    .unwrap();
+    assert_eq!(
+        execute(
+            &archive,
+            "module app; mount core.network.tcp.forward; async fn main() -> Int { forward().await }",
+        ),
+        37
+    );
+}
+
+fn bootstrap(core: &std::path::Path) -> verum_vbc::archive::VbcArchive {
+    let output = core.parent().unwrap().join("runtime.vbca");
+    let mut session = Session::new(CompilerOptions {
+        input: core.join("mod.vr"),
+        ..Default::default()
+    });
+    let result =
+        CompilationPipeline::new_core(&mut session, CoreConfig::new(core).with_output(&output))
+            .compile_core()
+            .unwrap();
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    read_archive_from_file(&output).unwrap()
+}
+
+fn execute(archive: &verum_vbc::archive::VbcArchive, source: &str) -> i64 {
+    let app = verum_fast_parser::Parser::new(source)
+        .parse_module()
+        .unwrap();
     let mut codegen =
         verum_vbc::codegen::VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("app"));
     verum_compiler::archive_ctx_loader::ArchiveCtxCache::new().apply_lazy_with_types(
-        &archive,
+        archive,
         &mut codegen,
         &app,
         &[],
@@ -182,5 +194,104 @@ public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFutur
         .execute_function(main)
         .unwrap();
     assert!(value.is_int());
-    assert_eq!(value.as_i64(), 37);
+    value.as_i64()
+}
+
+#[test]
+fn cyclic_dependency_completes_owned_variant_and_record_fields() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (path, source) in [
+        (
+            "mod.vr",
+            "module core; public module values; public module workers; public module clock; public module coordination;",
+        ),
+        (
+            "values/mod.vr",
+            "module core.values; public type Maybe<T> is None | Some(T);",
+        ),
+        (
+            "coordination/mod.vr",
+            "module core.coordination; public type Mutex<T> is { data: T }; implement<T> Mutex<T> { public fn new(data: T) -> Mutex<T> { Mutex { data: data } } }",
+        ),
+        (
+            "clock/mod.vr",
+            "module core.clock; public module instant; public mount .instant.{Instant};",
+        ),
+        (
+            "clock/instant.vr",
+            r#"
+            module core.clock.instant;
+            mount core.workers.cancellation.CancelReason;
+            public type Instant is { nanos: Int };
+            implement Instant { public fn record_reason(&self, _reason: CancelReason) -> Int { self.nanos } }
+        "#,
+        ),
+        (
+            "workers/mod.vr",
+            "module core.workers; public module cancellation;",
+        ),
+        (
+            "workers/cancellation.vr",
+            r#"
+            module core.workers.cancellation;
+            mount core.clock.Instant;
+            mount core.coordination.Mutex;
+            mount core.values.Maybe;
+            public type CancelReason is Cancelled | Timeout { deadline: Instant };
+            public type Flag is { reason: Mutex<Maybe<CancelReason>> };
+            public fn probe() -> Int {
+                let flag = Flag { reason: Mutex.new(Maybe.None) };
+                match flag.reason.data { Maybe.None => 79, Maybe.Some(_) => 0 }
+            }
+        "#,
+        ),
+    ] {
+        let file = core.join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, source).unwrap();
+    }
+    let archive = bootstrap(&core);
+    let module = archive.load_module("core.workers").unwrap();
+    let ty = |name: &str| {
+        module
+            .types
+            .iter()
+            .find(|ty| module.get_string(ty.name) == Some(name))
+            .unwrap()
+    };
+    let reason = ty("CancelReason");
+    let timeout = reason
+        .variants
+        .iter()
+        .find(|v| module.get_string(v.name) == Some("Timeout"))
+        .unwrap();
+    let clock = timeout.fields[0]
+        .declaration_type
+        .as_ref()
+        .unwrap()
+        .base_type_id()
+        .unwrap();
+    assert_eq!(
+        module.get_string(module.get_type(clock).unwrap().origin_module.unwrap()),
+        Some("core.clock.instant")
+    );
+    let flag = ty("Flag");
+    let mutex = flag.fields[0]
+        .declaration_type
+        .as_ref()
+        .unwrap()
+        .base_type_id()
+        .unwrap();
+    assert_eq!(
+        module.get_string(module.get_type(mutex).unwrap().origin_module.unwrap()),
+        Some("core.coordination")
+    );
+    assert_eq!(
+        execute(
+            &archive,
+            "module app; mount core.workers.cancellation.probe; fn main() -> Int { probe() }"
+        ),
+        79
+    );
 }
