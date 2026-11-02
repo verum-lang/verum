@@ -585,9 +585,10 @@ implement TlsStream {
         buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
-        select {
-            r = self.read_async(buf).await => Ok(r),
+        let operation = TlsReadFut { stream: self, buf: buf };
+        select biased {
             reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = operation.await => Ok(r),
         }
     }
 
@@ -600,9 +601,10 @@ implement TlsStream {
         buf: &List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
-        select {
-            r = self.write_async(buf).await => Ok(r),
+        let operation = TlsWriteFut { stream: self, buf: buf };
+        select biased {
             reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = operation.await => Ok(r),
         }
     }
 
