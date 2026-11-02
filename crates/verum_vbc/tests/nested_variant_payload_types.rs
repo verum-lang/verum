@@ -191,3 +191,35 @@ fn unresolved_variant_patterns_have_no_runtime_tag() {
         .expect_err("unresolved variant name must not become a discriminant");
     assert!(error.to_string().contains("Unresolved"), "{error}");
 }
+
+#[test]
+fn tuple_patterns_use_each_elements_declared_variant_order() {
+    assert_eq!(
+        run(
+            r#"
+type Left is Other | Hit;
+type Right is Hit | Other;
+fn classify(left: Left, right: Right) -> Int {
+    match (left, right) {
+        (Hit, Hit) => 7,
+        (Hit, Other) => 5,
+        (Other, Hit) => 3,
+        (Other, Other) => 1,
+    }
+}
+fn nested(pair: (Right, Left), left: Left) -> Int {
+    match (left, pair) { (Hit, (Hit, Other)) => 2, _ => 0 }
+}
+fn probe() -> Int {
+    classify(Left.Hit, Right.Hit) * 1000
+    + classify(Left.Hit, Right.Other) * 100
+    + classify(Left.Other, Right.Hit) * 10
+    + classify(Left.Other, Right.Other)
+    + nested((Right.Hit, Left.Other), Left.Hit)
+}
+"#,
+            None,
+        ),
+        7533
+    );
+}

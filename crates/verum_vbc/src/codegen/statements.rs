@@ -619,16 +619,7 @@ impl VbcCodegen {
                 self.ctx.reference_bound_vars.remove(&name.to_string());
             }
         }
-        // `let (a, b, …) = <expr>` — record the destructured elements'
-        // types so downstream method dispatch on the bound names
-        // (`a.as_bytes()`) resolves a receiver type. `compile_match` only
-        // populates `match_tuple_element_types` for a tuple-LITERAL
-        // scrutinee; a let-destructure of an expression that evaluates to
-        // a tuple (`&rec.field[i]`) never set it — the
-        // RECORD-LET-REF-TYPE-LOSS defect. Uses the dedicated
-        // `pending_let_tuple_types` (NOT `match_tuple_element_types`) so
-        // consuming it for this bind cannot starve a later match arm; the
-        // Tuple arm of `compile_pattern_bind` `.take()`s it.
+        // Preserve tuple element declarations for downstream calls through bound names.
         let tuple_declaration = if matches!(pattern.kind, verum_ast::PatternKind::Tuple(_)) {
             ty.and_then(|ty| self.source_type_in_current_scope(ty))
                 .or_else(|| value.and_then(|expr| self.source_expression_declaration(expr, None, 0)))

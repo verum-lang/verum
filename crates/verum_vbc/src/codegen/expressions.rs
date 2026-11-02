@@ -19448,7 +19448,26 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
-    /// Set [`CodegenContext::match_scrutinee_type`] (+ tuple element types)
+    /// Preserve the type of each tuple component, including nested literals.
+    /// An unknown component leaves the declarations of its siblings intact.
+    fn pattern_subject_type(&self, expr: &Expr) -> Option<String> {
+        if let ExprKind::Tuple(elements) = &expr.kind {
+            let types: Vec<_> = elements
+                .iter()
+                .map(|elem| self.pattern_subject_type(elem).unwrap_or_else(|| "_".into()))
+                .collect();
+            let trailing = if types.len() == 1 { "," } else { "" };
+            return Some(format!("({}{trailing})", types.join(", ")));
+        }
+        self.extract_expr_type_name(expr)
+    }
+
+    fn pattern_tuple_types(&self) -> Option<Vec<Option<String>>> {
+        let subject = Self::strip_wrapper_type(self.ctx.match_scrutinee_type.as_deref()?);
+        Self::split_tuple_type_name(subject)
+    }
+
+    /// Set [`CodegenContext::match_scrutinee_type`]
     /// for a pattern binding against `scrutinee`, applying the
     /// `Heap<T>`/`Shared<T>` transparent-wrapper unwrap.
     ///
@@ -19464,8 +19483,7 @@ impl VbcCodegen {
     /// field guess, no `Deref` on a `Heap<Record>` payload) → runtime
     /// "GetFieldNamed: no TypeDescriptor for runtime type_id=…".
     ///
-    /// Returns the previous `(match_scrutinee_type,
-    /// match_tuple_element_types)`; the caller MUST restore them with
+    /// Returns the previous scrutinee type. The caller restores it with
     /// [`Self::exit_scrutinee_type_for_bind`] once the pattern is bound.
     /// (The binding's type is recorded PERSISTENTLY into
     /// `ctx.variable_type_names` by `compile_pattern_bind`, so restoring
@@ -19480,13 +19498,13 @@ impl VbcCodegen {
         &mut self,
         scrutinee: &Expr,
         patterns: impl Iterator<Item = &'p verum_ast::Pattern>,
-    ) -> (Option<String>, Option<Vec<Option<String>>>) {
+    ) -> Option<String> {
         // Resolved BEFORE the `take()` below, so a nested scrutinee still
         // sees the enclosing `match_scrutinee_type` while it resolves —
         // preserving `compile_match`'s pre-T0147 ordering exactly.
         // `extract_expr_type_name` handles variables, field access, method
         // calls etc.
-        let scrutinee_type = self.extract_expr_type_name(scrutinee);
+        let scrutinee_type = self.pattern_subject_type(scrutinee);
 
         // TUPLE-TYPE-TRACK-1 oracle: VERUM_TRACE_SCRUT=1 prints every
         // scrutinee type resolution (the input to variant-payload
@@ -19499,29 +19517,7 @@ impl VbcCodegen {
             );
         }
 
-        let prev = (
-            self.ctx.match_scrutinee_type.take(),
-            self.ctx.match_tuple_element_types.take(),
-        );
-        self.ctx.match_scrutinee_type = scrutinee_type;
-
-        // When the scrutinee is a tuple expression `(a, b, …)`, record
-        // each element's type name so the tuple-pattern destructure
-        // path can set `match_scrutinee_type` per-element before
-        // recursing into sub-patterns.  Closes the bug where
-        // `match (self, other) { (Some(a), Some(b)) => a == b }`
-        // inside `impl Eq for Maybe<T>` lost `Maybe<T>` context for
-        // the inner element pattern; payload-type inference in
-        // `Some(a)` then registered `a` with no type → `a == b`
-        // codegen fell through to a primitive `CmpI` on the Maybe
-        // wrapper value (returning `false` for `Some(5) == Some(5)`).
-        if let ExprKind::Tuple(elems) = &scrutinee.kind {
-            let elem_types: Vec<Option<String>> = elems
-                .iter()
-                .map(|e| self.extract_expr_type_name(e))
-                .collect();
-            self.ctx.match_tuple_element_types = Some(elem_types);
-        }
+        let prev = std::mem::replace(&mut self.ctx.match_scrutinee_type, scrutinee_type);
 
         // Heap<T>/Shared<T> are transparent wrappers in VBC — no actual heap indirection.
         // Heap.new(inner) passes through the inner value at LLVM level.
@@ -19557,14 +19553,8 @@ impl VbcCodegen {
         prev
     }
 
-    /// Restore the `(match_scrutinee_type, match_tuple_element_types)`
-    /// pair returned by [`Self::enter_scrutinee_type_for_bind`].
-    pub(crate) fn exit_scrutinee_type_for_bind(
-        &mut self,
-        prev: (Option<String>, Option<Vec<Option<String>>>),
-    ) {
-        self.ctx.match_scrutinee_type = prev.0;
-        self.ctx.match_tuple_element_types = prev.1;
+    pub(crate) fn exit_scrutinee_type_for_bind(&mut self, previous: Option<String>) {
+        self.ctx.match_scrutinee_type = previous;
     }
 
     /// Tests if a pattern matches a value.
@@ -20162,7 +20152,11 @@ impl VbcCodegen {
                         count: elements.len() as u8,
                     });
 
+                    let element_types = self.pattern_tuple_types();
+                    let parent = self.ctx.match_scrutinee_type.take();
                     for (i, elem) in elements.iter().enumerate() {
+                        self.ctx.match_scrutinee_type =
+                            element_types.as_ref().and_then(|types| types.get(i)?.clone());
                         let elem_reg = Reg(first_elem.0 + i as u16);
                         let elem_match = self.ctx.alloc_temp();
                         self.compile_pattern_test(elem, elem_reg, elem_match)?;
@@ -20182,6 +20176,8 @@ impl VbcCodegen {
 
                         self.ctx.free_temp(elem_match);
                     }
+
+                    self.ctx.match_scrutinee_type = parent;
 
                     // Free unpacked registers
                     for i in 0..elements.len() {
@@ -21434,32 +21430,15 @@ impl VbcCodegen {
                         });
                     }
 
-                    // Snapshot per-element types recorded by `compile_match`
-                    // when the scrutinee was a tuple expression — used to
-                    // reset `match_scrutinee_type` per-element so payload-
-                    // type inference in nested variant patterns
-                    // (`Some(a)` against `&Maybe<T>` element) registers
-                    // `a` with the correct concrete type.
-                    // Prefer the let-destructure element types (CONSUME them
-                    // so they cannot leak to a later statement), else the
-                    // match element types (CLONE — see the RECORD-LET note).
-                    // `from_let` records whether these came from a genuine
-                    // `let (a, b) = …` destructure (pending was set) vs a
-                    // match arm; only the former should write
-                    // `variable_type_names`.
-                    let from_let = self.ctx.pending_let_tuple_types.is_some();
-                    let elem_types = self
-                        .ctx
-                        .pending_let_tuple_types
-                        .take()
-                        .or_else(|| self.ctx.match_tuple_element_types.clone());
-                    let prev_st = self.ctx.match_scrutinee_type.clone();
+                    let declared = self.ctx.pending_let_tuple_types.take();
+                    let from_let = declared.is_some();
+                    let elem_types = declared.or_else(|| self.pattern_tuple_types());
+                    let prev_st = self.ctx.match_scrutinee_type.take();
                     let owned_mode = PatternBindingMode::Value;
                     for (i, elem) in elements.iter().enumerate() {
                         let elem_reg = Reg(first_elem.0 + i as u16);
-                        if let Some(ref types) = elem_types {
-                            self.ctx.match_scrutinee_type = types.get(i).cloned().flatten();
-                        }
+                        self.ctx.match_scrutinee_type =
+                            elem_types.as_ref().and_then(|types| types.get(i)?.clone());
                         let element_mode = match mode {
                             PatternBindingMode::Tuple(modes) => modes.get(i).unwrap_or(&owned_mode),
                             _ => mode,
@@ -29809,25 +29788,7 @@ impl VbcCodegen {
         None
     }
 
-    /// Infers the custom type name for an expression used as an operand.
-    ///
-    /// Infer the per-element type names of a tuple-typed expression, for
-    /// recording `let (a, b, …) = <expr>` destructure bindings' types.
-    ///
-    /// `compile_match` only populates `match_tuple_element_types` when the
-    /// scrutinee is a tuple LITERAL `(x, y)`; a `let`-destructure of an
-    /// expression that merely *evaluates* to a tuple (`&rec.field[i]`)
-    /// never set it, so the bound identifiers stayed untyped and
-    /// downstream method dispatch (`a.as_bytes()`) could not resolve a
-    /// receiver — the RECORD-LET-REF-TYPE-LOSS defect. Inline `pair.0`
-    /// worked only because it re-infers the element type on the spot; the
-    /// bound name has no such second chance, so its type MUST be recorded
-    /// at bind time.
-    ///
-    /// A `&`/`&mut`-borrow of a tuple destructures to the same element
-    /// types. Returns `None` (leaving the bindings untyped — the pre-fix
-    /// behaviour, never a regression) when the type is not a
-    /// recognisable N-tuple.
+    /// Infer element types when binding a tuple-valued expression or a borrow of it.
     pub(crate) fn infer_tuple_element_type_names(
         &self,
         expr: &Expr,
@@ -29855,24 +29816,19 @@ impl VbcCodegen {
             .infer_expr_type_name(inner)
             .or_else(|| self.infer_expr_type_name(expr))
             .or_else(|| self.extract_expr_type_name(inner))?;
-        let elems = Self::split_tuple_type_name(&type_name)?;
-        if elems.len() != arity {
-            return None;
-        }
-        Some(
-            elems
-                .into_iter()
-                .map(|s| if s.is_empty() || s == "_" { None } else { Some(s) })
-                .collect(),
-        )
+        Self::split_tuple_type_name(&type_name).filter(|fields| fields.len() == arity)
     }
 
     /// Split a rendered tuple type name `"(A, B<C, D>, (E, F))"` into its
     /// top-level element type names, respecting `<>` / `()` / `[]`
     /// nesting. Returns `None` for a non-tuple (`"(X)"` is a parenthesised
     /// type, not a 1-tuple).
-    fn split_tuple_type_name(name: &str) -> Option<Vec<String>> {
+    fn split_tuple_type_name(name: &str) -> Option<Vec<Option<String>>> {
         let inner = name.trim().strip_prefix('(')?.strip_suffix(')')?;
+        let element = |text: &str| {
+            let ty = text.trim();
+            (!ty.is_empty() && ty != "_").then(|| ty.to_owned())
+        };
         let mut out = Vec::new();
         let mut depth = 0i32;
         let mut cur = String::new();
@@ -29887,16 +29843,16 @@ impl VbcCodegen {
                     cur.push(ch);
                 }
                 ',' if depth == 0 => {
-                    out.push(cur.trim().to_string());
+                    out.push(element(&cur));
                     cur.clear();
                 }
                 _ => cur.push(ch),
             }
         }
         if !cur.trim().is_empty() {
-            out.push(cur.trim().to_string());
+            out.push(element(&cur));
         }
-        if out.len() < 2 {
+        if out.is_empty() || (out.len() == 1 && !inner.trim_end().ends_with(',')) {
             return None;
         }
         Some(out)

@@ -514,27 +514,7 @@ pub struct CodegenContext {
     /// we store it here so pattern binding can use the qualified variant name.
     pub match_scrutinee_type: Option<String>,
 
-    /// When the match scrutinee is a tuple expression `(a, b, c)`, this holds
-    /// the per-element type names so that the tuple-pattern destructure path
-    /// in `compile_pattern_bind` can set [`Self::match_scrutinee_type`]
-    /// per-element before recursing into each sub-pattern.  Without this,
-    /// `match (self, other) { (Some(a), Some(b)) => a == b }` inside a
-    /// protocol impl would lose `Maybe<T>` context for the inner element
-    /// pattern; payload-type inference in `Some(a)` would then fail to
-    /// register `a`'s type, falling through to a primitive `CmpI` on the
-    /// Maybe wrapper instead of dispatching `a == b` correctly.  Set in
-    /// `compile_match` when the scrutinee is `ExprKind::Tuple(_)`; cleared
-    /// to `None` for non-tuple scrutinees.
-    pub match_tuple_element_types: Option<Vec<Option<String>>>,
-
-    /// Per-element type names for a `let (a, b, …) = <tuple-expr>`
-    /// destructure, set by `compile_let` and CONSUMED (`.take()`) by the
-    /// Tuple arm of `compile_pattern_bind`. Kept separate from
-    /// `match_tuple_element_types` (which `compile_match` populates and
-    /// must survive across ALL arms of a multi-arm match) so consuming it
-    /// for one let-destructure cannot starve a later match arm — the
-    /// RECORD-LET-REF-TYPE-LOSS fix must not regress
-    /// `match (self, other) { … }` element typing.
+    /// Element declarations for the next tuple `let` binding, consumed by its pattern.
     pub pending_let_tuple_types: Option<Vec<Option<String>>>,
 
     /// T0272: signedness of an `Int128`/`UInt128`-annotated let binding whose
@@ -1749,7 +1729,6 @@ impl CodegenContext {
             closure_param_type_hints: Map::new(),
             closure_return_type_hints: Map::new(),
             match_scrutinee_type: None,
-            match_tuple_element_types: None,
             pending_let_tuple_types: None,
             pending_i128_literal_signed: None,
             pending_transmute_target: None,
