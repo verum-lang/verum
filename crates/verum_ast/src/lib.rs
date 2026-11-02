@@ -130,6 +130,7 @@ pub mod meta_value;
 pub mod pattern;
 pub mod pretty;
 pub mod prelude;
+pub mod source_signature;
 pub mod span;
 pub mod stmt;
 pub mod ty;

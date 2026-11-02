@@ -1,0 +1,698 @@
+//! Declaration-owned signatures that retain source universe binders.
+//!
+//! These checks establish a bounded, closed annotation carrier, not that its
+//! constraints hold. Consumers must elaborate it in the declaring module and
+//! instantiate its quantified levels independently at each use.
+
+use crate::decl::{FunctionDecl, FunctionParamKind};
+use crate::ty::{
+    GenericParam, GenericParamKind, TypeBound, TypeBoundKind, TypeKind, UniverseLevelExpr,
+    WherePredicateKind,
+};
+use crate::visitor::{Visitor, walk_expr, walk_type};
+use serde::Serialize;
+use verum_common::{List, Map, Text};
+
+type Result<T> = std::result::Result<T, Text>;
+
+/// Determine whether a source signature needs the universe-preserving carrier.
+/// The executable function body is neither inspected nor cloned.
+pub fn signature_uses_universes(function: &FunctionDecl) -> Result<bool> {
+    check_size(function)?;
+    let mut scan = SignatureScan::new(false);
+    scan.visit_function(function);
+    scan.finish().map(|_| scan.uses_universes)
+}
+
+/// Detect universe annotations in an independently declared type, such as a
+/// static or constant annotation, without interpreting rendered names.
+pub fn type_uses_universes(ty: &crate::Type) -> Result<bool> {
+    Budget { nodes: 0, bytes: 0 }
+        .visit(ty, 0)
+        .map_err(|error| error.0)?;
+    let mut scan = SignatureScan::new(false);
+    scan.visit_type(ty);
+    scan.finish().map(|_| scan.uses_universes)
+}
+
+/// Detect universe semantics in a legacy cached type declaration. A cache may
+/// refuse this declaration when it lacks a structured carrier; guessing from
+/// rendered names or silently treating levels as ordinary type slots is unsound.
+pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<bool> {
+    Budget { nodes: 0, bytes: 0 }
+        .visit(declaration, 0)
+        .map_err(|error| error.0)?;
+    let mut scan = SignatureScan::new(false);
+    scan.visit_type_decl(declaration);
+    scan.finish().map(|_| scan.uses_universes)
+}
+
+/// Capture the entire declaration signature, with only its executable body
+/// removed. Ordinary signatures retain their established metadata path.
+pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Option<FunctionDecl>> {
+    if !signature_uses_universes(function)? {
+        return Ok(None);
+    }
+    let mut scan = SignatureScan::new(true);
+    scan.visit_function(function);
+    scan.finish()?;
+    supported(&scan, is_method || function.is_method())?;
+    // Do not clone the body just to discard it: it is outside the carrier's
+    // size budget and can contain arbitrarily larger executable syntax.
+    Ok(Some(FunctionDecl {
+        visibility: function.visibility.clone(),
+        is_async: function.is_async,
+        is_meta: function.is_meta,
+        stage_level: function.stage_level,
+        is_pure: function.is_pure,
+        is_generator: function.is_generator,
+        is_cofix: function.is_cofix,
+        is_unsafe: function.is_unsafe,
+        is_transparent: function.is_transparent,
+        extern_abi: function.extern_abi.clone(),
+        is_variadic: function.is_variadic,
+        name: function.name.clone(),
+        generics: function.generics.clone(),
+        params: function.params.clone(),
+        return_type: function.return_type.clone(),
+        throws_clause: function.throws_clause.clone(),
+        std_attr: function.std_attr.clone(),
+        contexts: function.contexts.clone(),
+        generic_where_clause: function.generic_where_clause.clone(),
+        meta_where_clause: function.meta_where_clause.clone(),
+        decreases: function.decreases.clone(),
+        requires: function.requires.clone(),
+        ensures: function.ensures.clone(),
+        attributes: function.attributes.clone(),
+        body: None,
+        span: function.span,
+    }))
+}
+
+/// Validate a decoded universe signature before using any of its annotations.
+/// A body, free/wrong-kind level reference, unsupported binding scope or universe
+/// kind bound, or budget failure is an error; it must not activate a lossy
+/// metadata fallback.
+pub fn validate_source_signature(function: &FunctionDecl, is_method: bool) -> Result<()> {
+    if function.body.is_some() {
+        return Err("source signature must not contain a function body".into());
+    }
+    check_size(function)?;
+    let mut scan = SignatureScan::new(true);
+    scan.visit_function(function);
+    scan.finish()?;
+    supported(&scan, is_method || function.is_method())
+}
+
+fn supported(scan: &SignatureScan, is_method: bool) -> Result<()> {
+    if scan.uses_universes && is_method {
+        return Err("universe-bearing method signatures are not supported in metadata".into());
+    }
+    if scan.universe_in_rank_two {
+        return Err("universe-bearing rank-2 signatures are not supported in metadata".into());
+    }
+    Ok(())
+}
+
+struct SignatureScan {
+    validate: bool,
+    uses_universes: bool,
+    universe_in_rank_two: bool,
+    rank_two_depth: usize,
+    type_bound_depth: usize,
+    scopes: List<Map<Text, bool>>,
+    error: Option<Text>,
+}
+
+impl SignatureScan {
+    fn new(validate: bool) -> Self {
+        Self {
+            validate,
+            uses_universes: false,
+            universe_in_rank_two: false,
+            rank_two_depth: 0,
+            type_bound_depth: 0,
+            scopes: List::new(),
+            error: None,
+        }
+    }
+    fn finish(&self) -> Result<()> {
+        self.error.clone().map_or(Ok(()), Err)
+    }
+    fn fail(&mut self, message: impl Into<Text>) {
+        if self.error.is_none() {
+            self.error = Some(message.into());
+        }
+    }
+    fn universe(&mut self) {
+        self.uses_universes = true;
+        self.universe_in_rank_two |= self.rank_two_depth != 0;
+        if self.validate && self.type_bound_depth != 0 {
+            // Lexical closure alone does not establish the formation judgment
+            // promised by a kind bound, even for a concrete universe level.
+            self.fail("universe-containing type bounds require unsupported formation checking");
+        }
+    }
+    fn bound(&self, name: &Text) -> Option<bool> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+    fn push_generics(&mut self, parameters: &List<GenericParam>) {
+        let mut names = Map::new();
+        for parameter in parameters {
+            let name = match &parameter.kind {
+                GenericParamKind::Type { name, .. }
+                | GenericParamKind::HigherKinded { name, .. }
+                | GenericParamKind::KindAnnotated { name, .. }
+                | GenericParamKind::Const { name, .. }
+                | GenericParamKind::Meta { name, .. }
+                | GenericParamKind::Context { name }
+                | GenericParamKind::Level { name } => &name.name,
+                GenericParamKind::Lifetime { .. } => continue,
+            };
+            let is_level = matches!(parameter.kind, GenericParamKind::Level { .. });
+            if is_level {
+                self.universe();
+            }
+            if names.insert(name.clone(), is_level).is_some() && self.validate {
+                self.fail(format!(
+                    "duplicate generic binder `{name}` in source signature"
+                ));
+            }
+        }
+        self.scopes.push(names);
+        for parameter in parameters {
+            match &parameter.kind {
+                GenericParamKind::Type {
+                    bounds, default, ..
+                } => {
+                    self.bounds(bounds);
+                    if let Some(ty) = default {
+                        self.visit_type(ty);
+                    }
+                }
+                GenericParamKind::HigherKinded { bounds, .. }
+                | GenericParamKind::KindAnnotated { bounds, .. } => self.bounds(bounds),
+                GenericParamKind::Const { ty, .. } => self.visit_type(ty),
+                GenericParamKind::Meta { ty, refinement, .. } => {
+                    self.visit_type(ty);
+                    if let Some(expr) = refinement {
+                        self.visit_expr(expr);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    fn bounds(&mut self, bounds: &List<TypeBound>) {
+        self.type_bound_depth += 1;
+        for bound in bounds {
+            match &bound.kind {
+                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
+                    self.visit_type(ty)
+                }
+                TypeBoundKind::AssociatedTypeEquality { eq_type, .. } => self.visit_type(eq_type),
+                TypeBoundKind::AssociatedTypeBound { bounds, .. } => self.bounds(bounds),
+                _ => {}
+            }
+        }
+        self.type_bound_depth -= 1;
+    }
+    fn context(&mut self, context: &crate::context::ContextRequirement) {
+        for ty in &context.args {
+            self.visit_type(ty);
+        }
+        if let Some(condition) = &context.condition {
+            self.visit_expr(condition);
+        }
+        for transform in &context.transforms {
+            for argument in &transform.args {
+                self.visit_expr(argument);
+            }
+        }
+    }
+    fn attributes(&mut self, attributes: &List<crate::attr::Attribute>) {
+        for attribute in attributes {
+            if let Some(arguments) = &attribute.args {
+                for argument in arguments {
+                    self.visit_expr(argument);
+                }
+            }
+        }
+    }
+    fn level(&mut self, level: &UniverseLevelExpr) {
+        match level {
+            UniverseLevelExpr::Variable(name)
+                if self.validate && self.bound(&name.name) != Some(true) =>
+            {
+                self.fail(format!(
+                    "unbound or wrong-kind universe binder `{}` in source signature",
+                    name.name
+                ));
+            }
+            UniverseLevelExpr::Max(a, b) => {
+                self.level(a);
+                self.level(b);
+            }
+            UniverseLevelExpr::Succ(level) => self.level(level),
+            _ => {}
+        }
+    }
+}
+
+impl Visitor for SignatureScan {
+    fn visit_where_predicate(&mut self, predicate: &crate::ty::WherePredicate) {
+        match &predicate.kind {
+            WherePredicateKind::Type { ty, bounds } => {
+                self.type_bound_depth += 1;
+                self.visit_type(ty);
+                self.bounds(bounds);
+                self.type_bound_depth -= 1;
+            }
+            WherePredicateKind::Meta { constraint } => self.visit_expr(constraint),
+            WherePredicateKind::Value { predicate } => self.visit_expr(predicate),
+            WherePredicateKind::Ensures { postcondition } => self.visit_expr(postcondition),
+        }
+    }
+    fn visit_type_decl(&mut self, declaration: &crate::TypeDecl) {
+        use crate::decl::{ProtocolItemKind, TypeDeclBody};
+        self.push_generics(&declaration.generics);
+        self.attributes(&declaration.attributes);
+        for parameter in &declaration.value_params {
+            self.visit_function_param(parameter);
+        }
+        match &declaration.body {
+            TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) => {
+                for clause in [
+                    &declaration.generic_where_clause,
+                    &declaration.meta_where_clause,
+                    &body.generic_where_clause,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    self.visit_where_clause(clause);
+                }
+                for ty in &body.extends {
+                    self.visit_type(ty);
+                }
+                for item in &body.items {
+                    match &item.kind {
+                        ProtocolItemKind::Function { decl, .. } => self.visit_function(decl),
+                        ProtocolItemKind::Type {
+                            type_params,
+                            where_clause,
+                            default_type,
+                            ..
+                        } => {
+                            self.push_generics(type_params);
+                            if let Some(clause) = where_clause {
+                                self.visit_where_clause(clause);
+                            }
+                            if let Some(ty) = default_type {
+                                self.visit_type(ty);
+                            }
+                            self.scopes.pop();
+                        }
+                        ProtocolItemKind::Const { ty, .. } => self.visit_type(ty),
+                        ProtocolItemKind::Axiom(axiom) => {
+                            self.push_generics(&axiom.generics);
+                            self.visit_axiom(axiom);
+                            self.scopes.pop();
+                        }
+                    }
+                }
+            }
+            _ => crate::visitor::walk_type_decl(self, declaration),
+        }
+        self.scopes.pop();
+    }
+    fn visit_function(&mut self, function: &FunctionDecl) {
+        self.push_generics(&function.generics);
+        for parameter in &function.params {
+            self.attributes(&parameter.attributes);
+            if let FunctionParamKind::Regular {
+                pattern,
+                ty,
+                default_value,
+            } = &parameter.kind
+            {
+                self.visit_pattern(pattern);
+                self.visit_type(ty);
+                if let Some(value) = default_value {
+                    self.visit_expr(value);
+                }
+            }
+        }
+        if let Some(ty) = &function.return_type {
+            self.visit_type(ty);
+        }
+        if let Some(throws) = &function.throws_clause {
+            for ty in &throws.error_types {
+                self.visit_type(ty);
+            }
+        }
+        for context in &function.contexts {
+            self.context(context);
+        }
+        for clause in [&function.generic_where_clause, &function.meta_where_clause]
+            .into_iter()
+            .flatten()
+        {
+            self.visit_where_clause(clause);
+        }
+        for expression in function
+            .decreases
+            .iter()
+            .chain(&function.requires)
+            .chain(&function.ensures)
+        {
+            self.visit_expr(expression);
+        }
+        self.attributes(&function.attributes);
+        self.scopes.pop();
+    }
+    fn visit_type(&mut self, ty: &crate::Type) {
+        if self.error.is_some() {
+            return;
+        }
+        match &ty.kind {
+            TypeKind::Universe { level } => {
+                self.universe();
+                if let Some(level) = level {
+                    self.level(level);
+                }
+            }
+            TypeKind::Path(path) if self.validate => {
+                if let [crate::ty::PathSegment::Name(name)] = path.segments.as_slice()
+                    && self.bound(&name.name) == Some(true)
+                {
+                    self.fail(format!(
+                        "universe binder `{}` used as an ordinary type",
+                        name.name
+                    ));
+                }
+            }
+            TypeKind::Rank2Function {
+                type_params,
+                params,
+                return_type,
+                contexts,
+                where_clause,
+                ..
+            } => {
+                self.rank_two_depth += 1;
+                self.push_generics(type_params);
+                for parameter in params {
+                    self.visit_type(parameter);
+                }
+                self.visit_type(return_type);
+                if let Some(clause) = where_clause {
+                    self.visit_where_clause(clause);
+                }
+                for context in &contexts.requirements {
+                    self.context(context);
+                }
+                self.scopes.pop();
+                self.rank_two_depth -= 1;
+            }
+            TypeKind::Function { contexts, .. } => {
+                walk_type(self, ty);
+                for context in &contexts.requirements {
+                    self.context(context);
+                }
+            }
+            TypeKind::Existential { bounds, .. } => self.bounds(bounds),
+            _ => walk_type(self, ty),
+        }
+    }
+    fn visit_expr(&mut self, expression: &crate::Expr) {
+        if self.error.is_none() {
+            walk_expr(self, expression);
+        }
+    }
+}
+
+// A serialization walk bounds *every* retained AST field, including token trees,
+// attributes and expression forms that the semantic visitor does not interpret.
+// No bytes are produced. Root body is skipped before it can consume any budget.
+const MAX_DEPTH: usize = 128;
+const MAX_NODES: usize = 65_536;
+const MAX_TEXT_BYTES: usize = 1_048_576;
+
+#[derive(Debug)]
+struct BudgetError(Text);
+impl std::fmt::Display for BudgetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl std::error::Error for BudgetError {}
+impl serde::ser::Error for BudgetError {
+    fn custom<T: std::fmt::Display>(message: T) -> Self {
+        Self(format!("{message}").into())
+    }
+}
+struct Budget {
+    nodes: usize,
+    bytes: usize,
+}
+impl Budget {
+    fn visit<T: ?Sized + Serialize>(
+        &mut self,
+        value: &T,
+        depth: usize,
+    ) -> std::result::Result<(), BudgetError> {
+        if depth > MAX_DEPTH || self.nodes >= MAX_NODES {
+            return Err(BudgetError(
+                "source signature exceeds its structural budget".into(),
+            ));
+        }
+        self.nodes += 1;
+        value.serialize(Frame {
+            budget: self,
+            depth,
+        })
+    }
+    fn text(&mut self, bytes: usize) -> std::result::Result<(), BudgetError> {
+        self.bytes = self
+            .bytes
+            .checked_add(bytes)
+            .ok_or_else(|| BudgetError("source signature text budget overflow".into()))?;
+        if self.bytes > MAX_TEXT_BYTES {
+            return Err(BudgetError(
+                "source signature exceeds its text budget".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+fn check_size(function: &FunctionDecl) -> Result<()> {
+    Budget { nodes: 0, bytes: 0 }
+        .visit(function, 0)
+        .map_err(|error| error.0)
+}
+struct Frame<'a> {
+    budget: &'a mut Budget,
+    depth: usize,
+}
+struct Compound<'a> {
+    frame: Frame<'a>,
+    skip_body: bool,
+}
+macro_rules! primitive {
+    ($($name:ident($ty:ty)),* $(,)?) => { $(fn $name(self, _: $ty) -> std::result::Result<(), BudgetError> { Ok(()) })* };
+}
+impl<'a> serde::Serializer for Frame<'a> {
+    type Ok = ();
+    type Error = BudgetError;
+    type SerializeSeq = Compound<'a>;
+    type SerializeTuple = Compound<'a>;
+    type SerializeTupleStruct = Compound<'a>;
+    type SerializeTupleVariant = Compound<'a>;
+    type SerializeMap = Compound<'a>;
+    type SerializeStruct = Compound<'a>;
+    type SerializeStructVariant = Compound<'a>;
+    primitive!(
+        serialize_bool(bool),
+        serialize_i8(i8),
+        serialize_i16(i16),
+        serialize_i32(i32),
+        serialize_i64(i64),
+        serialize_i128(i128),
+        serialize_u8(u8),
+        serialize_u16(u16),
+        serialize_u32(u32),
+        serialize_u64(u64),
+        serialize_u128(u128),
+        serialize_f32(f32),
+        serialize_f64(f64),
+        serialize_char(char)
+    );
+    fn serialize_str(self, value: &str) -> std::result::Result<(), BudgetError> {
+        self.budget.text(value.len())
+    }
+    fn serialize_bytes(self, value: &[u8]) -> std::result::Result<(), BudgetError> {
+        self.budget.text(value.len())
+    }
+    fn serialize_none(self) -> std::result::Result<(), BudgetError> {
+        Ok(())
+    }
+    fn serialize_some<T: ?Sized + Serialize>(
+        self,
+        value: &T,
+    ) -> std::result::Result<(), BudgetError> {
+        self.budget.visit(value, self.depth + 1)
+    }
+    fn serialize_unit(self) -> std::result::Result<(), BudgetError> {
+        Ok(())
+    }
+    fn serialize_unit_struct(self, _: &'static str) -> std::result::Result<(), BudgetError> {
+        Ok(())
+    }
+    fn serialize_unit_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+    ) -> std::result::Result<(), BudgetError> {
+        Ok(())
+    }
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+        self,
+        _: &'static str,
+        value: &T,
+    ) -> std::result::Result<(), BudgetError> {
+        self.budget.visit(value, self.depth + 1)
+    }
+    fn serialize_newtype_variant<T: ?Sized + Serialize>(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        value: &T,
+    ) -> std::result::Result<(), BudgetError> {
+        self.budget.visit(value, self.depth + 1)
+    }
+    fn serialize_seq(self, _: Option<usize>) -> std::result::Result<Compound<'a>, BudgetError> {
+        Ok(Compound {
+            frame: self,
+            skip_body: false,
+        })
+    }
+    fn serialize_tuple(self, _: usize) -> std::result::Result<Compound<'a>, BudgetError> {
+        self.serialize_seq(None)
+    }
+    fn serialize_tuple_struct(
+        self,
+        _: &'static str,
+        _: usize,
+    ) -> std::result::Result<Compound<'a>, BudgetError> {
+        self.serialize_seq(None)
+    }
+    fn serialize_tuple_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> std::result::Result<Compound<'a>, BudgetError> {
+        self.serialize_seq(None)
+    }
+    fn serialize_map(self, _: Option<usize>) -> std::result::Result<Compound<'a>, BudgetError> {
+        self.serialize_seq(None)
+    }
+    fn serialize_struct(
+        self,
+        name: &'static str,
+        _: usize,
+    ) -> std::result::Result<Compound<'a>, BudgetError> {
+        let skip_body = self.depth == 0 && name == "FunctionDecl";
+        Ok(Compound {
+            frame: self,
+            skip_body,
+        })
+    }
+    fn serialize_struct_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> std::result::Result<Compound<'a>, BudgetError> {
+        self.serialize_seq(None)
+    }
+}
+macro_rules! compound {
+    ($trait:ident, $method:ident) => {
+        impl serde::ser::$trait for Compound<'_> {
+            type Ok = ();
+            type Error = BudgetError;
+            fn $method<T: ?Sized + Serialize>(
+                &mut self,
+                value: &T,
+            ) -> std::result::Result<(), BudgetError> {
+                self.frame.budget.visit(value, self.frame.depth + 1)
+            }
+            fn end(self) -> std::result::Result<(), BudgetError> {
+                Ok(())
+            }
+        }
+    };
+}
+compound!(SerializeSeq, serialize_element);
+compound!(SerializeTuple, serialize_element);
+compound!(SerializeTupleStruct, serialize_field);
+compound!(SerializeTupleVariant, serialize_field);
+impl serde::ser::SerializeMap for Compound<'_> {
+    type Ok = ();
+    type Error = BudgetError;
+    fn serialize_key<T: ?Sized + Serialize>(
+        &mut self,
+        value: &T,
+    ) -> std::result::Result<(), BudgetError> {
+        self.frame.budget.visit(value, self.frame.depth + 1)
+    }
+    fn serialize_value<T: ?Sized + Serialize>(
+        &mut self,
+        value: &T,
+    ) -> std::result::Result<(), BudgetError> {
+        self.frame.budget.visit(value, self.frame.depth + 1)
+    }
+    fn end(self) -> std::result::Result<(), BudgetError> {
+        Ok(())
+    }
+}
+impl serde::ser::SerializeStruct for Compound<'_> {
+    type Ok = ();
+    type Error = BudgetError;
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        name: &'static str,
+        value: &T,
+    ) -> std::result::Result<(), BudgetError> {
+        if self.skip_body && name == "body" {
+            return Ok(());
+        }
+        self.frame.budget.visit(value, self.frame.depth + 1)
+    }
+    fn end(self) -> std::result::Result<(), BudgetError> {
+        Ok(())
+    }
+}
+impl serde::ser::SerializeStructVariant for Compound<'_> {
+    type Ok = ();
+    type Error = BudgetError;
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        _: &'static str,
+        value: &T,
+    ) -> std::result::Result<(), BudgetError> {
+        self.frame.budget.visit(value, self.frame.depth + 1)
+    }
+    fn end(self) -> std::result::Result<(), BudgetError> {
+        Ok(())
+    }
+}
