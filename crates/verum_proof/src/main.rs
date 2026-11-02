@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use verum_proof::{admission::ReplayOutcome, limits::ReplayLimits, proof_checker::Foundation};
 
-const USAGE: &str = "usage: verum-proof [--foundation function-extensionality] [--max-bytes N] [--max-nodes N] [--max-depth N] [--wall-ms N] [--cpu-seconds N] [--memory-bytes N] [--stack-bytes N] [--output-bytes N] < judgment.json";
+const USAGE: &str = "usage: verum-proof [--foundation function-extensionality] [--max-bytes N] [--max-nodes N] [--max-depth N] [--wall-ms N] [--cpu-seconds N] [--memory-bytes N] [--stack-bytes N] [--output-bytes N] < judgment.json\n       verum-proof export-lean < judgment.json > Proof.lean";
 
 fn options(args: &[String]) -> Result<(Foundation, ReplayLimits), String> {
     let mut foundation = Foundation::Intensional;
@@ -52,6 +52,18 @@ fn main() -> std::io::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "--help" {
         println!("{USAGE}");
+        return Ok(());
+    }
+    if args.as_slice() == ["export-lean"] {
+        let mut bytes = Vec::new();
+        std::io::stdin().take(verum_proof::admission::MAX_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+        match verum_proof::lean_export::source(&bytes) {
+            Ok(lean) => std::io::stdout().lock().write_all(lean.as_bytes())?,
+            Err(reason) => {
+                eprintln!("Lean export refused: {reason}");
+                std::process::exit(2);
+            }
+        }
         return Ok(());
     }
     if let Some(first) = args.first() {

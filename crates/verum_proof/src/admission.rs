@@ -368,12 +368,10 @@ pub fn replay_with_foundation(bytes: &[u8], foundation: Foundation) -> Report {
     replay_with_limits(bytes, foundation, AdmissionLimits::default())
 }
 
-/// Select structural admission resources independently of the submitted proof.
-/// This in-process entry point does not sandbox evaluation; untrusted inputs
-/// should use the isolated process API as well.
-pub fn replay_with_limits(bytes: &[u8], foundation: Foundation, limits: AdmissionLimits) -> Report {
+/// Parse one exact, well-scoped judgment. Structural admission does not establish its theorem.
+pub(crate) fn decode_judgment(bytes: &[u8], foundation: Foundation, limits: AdmissionLimits) -> Result<Judgment, Report> {
     let refusal = |outcome: ReplayOutcome, stage: &str, code: &str, message: &str| {
-        Report::refusal(foundation, limits, outcome, stage, code, message)
+        Err(Report::refusal(foundation, limits, outcome, stage, code, message))
     };
     if !limits.is_valid() {
         return refusal(
@@ -452,6 +450,20 @@ pub fn replay_with_limits(bytes: &[u8], foundation: Foundation, limits: Admissio
             "The certificate claims a different formal statement.",
         );
     }
+    Ok(judgment)
+}
+
+/// Select structural admission resources independently of the submitted proof.
+/// This in-process entry point does not sandbox evaluation; untrusted inputs
+/// should use the isolated process API as well.
+pub fn replay_with_limits(bytes: &[u8], foundation: Foundation, limits: AdmissionLimits) -> Report {
+    let judgment = match decode_judgment(bytes, foundation, limits) {
+        Ok(judgment) => judgment,
+        Err(report) => return report,
+    };
+    let refusal = |outcome: ReplayOutcome, stage: &str, code: &str, message: &str| {
+        Report::refusal(foundation, limits, outcome, stage, code, message)
+    };
     let report_failure = |stage: &str, error: &CheckError| {
         let (outcome, code) = classify_check_failure(error);
         refusal(
