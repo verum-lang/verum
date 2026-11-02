@@ -17574,6 +17574,34 @@ impl VbcCodegen {
         Ok(())
     }
 
+    fn inline_scalar(info: &FunctionInfo) -> Option<CodegenResult<verum_ast::checked_const::Scalar>> {
+        use verum_ast::checked_const::Scalar;
+        if info.param_count != 0 { return None; }
+        let value = info.intrinsic_name.as_deref()?.strip_prefix("__const_val_")?;
+        let invalid = || CodegenError::internal(format!("invalid scalar constant encoding `{value}` for {:?}", info.id));
+        Some(if info.return_type == Some(TypeRef::Concrete(TypeId::BOOL))
+            || info.return_type_name.as_deref() == Some("Bool")
+        {
+            match value {
+                "0" => Ok(Scalar::Bool(false)),
+                "1" => Ok(Scalar::Bool(true)),
+                _ => Err(invalid()),
+            }
+        } else {
+            value.parse().map(Scalar::Int).map_err(|_| invalid())
+        })
+    }
+
+    fn load_scalar_constant(&mut self, dst: Reg, scalar: verum_ast::checked_const::Scalar) -> Instruction {
+        use verum_ast::checked_const::Scalar;
+        match scalar {
+            Scalar::Bool(false) => Instruction::LoadFalse { dst },
+            Scalar::Bool(true) => Instruction::LoadTrue { dst },
+            Scalar::Int(value) if i16::try_from(value).is_ok() => Instruction::LoadI { dst, value },
+            Scalar::Int(value) => Instruction::LoadK { dst, const_id: self.ctx.add_const_int(value).0 },
+        }
+    }
+
     fn declare_constant(
         &mut self, name: &str, expr: &verum_ast::Expr, ty: &verum_ast::ty::Type, local: Option<&str>,
     ) -> CodegenResult<FunctionInfo> {
@@ -17596,6 +17624,7 @@ impl VbcCodegen {
         self.constant_initializers.insert(id, (expr.clone(),
             self.current_count_module_scope().map(Into::into), bindings));
         let intrinsic_name = Self::extract_const_literal_value(expr).map(|v| format!("__const_val_{v}"));
+        let result_type = self.ast_type_to_type_ref(ty);
         let return_type_name = self.extract_type_name(ty);
         let info = FunctionInfo {
             has_source_body: false,
@@ -17609,7 +17638,7 @@ impl VbcCodegen {
             is_async: false,
             is_generator: false,
             contexts: vec![],
-            return_type: None,
+            return_type: Some(result_type.clone()),
             yield_type: None,
             intrinsic_name,
             variant_tag: None,
@@ -17629,8 +17658,7 @@ impl VbcCodegen {
         let name = if !owner.is_empty() && owner != "main" && !symbol.contains('.') && !symbol.contains("::") {
             format!("{owner}.{symbol}")
         } else { symbol.to_owned() };
-        let result_type = self.ast_type_to_type_ref(ty);
-        if let Some(value) = Self::extract_const_literal_value(expr) {
+        if let Some(value) = Self::inline_scalar(&info).transpose()? {
             let name_id = StringId(self.intern_string(&name));
             let mut descriptor = self.new_fn_descriptor(name_id);
             descriptor.id = id;
@@ -17640,14 +17668,7 @@ impl VbcCodegen {
             descriptor.intrinsic_name = info.intrinsic_name.as_ref().map(|n| StringId(self.intern_string(n)));
             descriptor.register_count = 1;
             let dst = Reg(0);
-            let load = match &expr.kind {
-                verum_ast::ExprKind::Literal(lit) => match &lit.kind {
-                    verum_ast::literal::LiteralKind::Bool(true) => Instruction::LoadTrue { dst },
-                    verum_ast::literal::LiteralKind::Bool(false) => Instruction::LoadFalse { dst },
-                    _ => Instruction::LoadI { dst, value },
-                },
-                _ => Instruction::LoadI { dst, value },
-            };
+            let load = self.load_scalar_constant(dst, value);
             self.functions.push(VbcFunction::new(descriptor, vec![load, Instruction::Ret { value: dst }]));
         } else {
             self.pending_constants.push(PendingConstant {
@@ -17729,7 +17750,8 @@ impl VbcCodegen {
                 };
                 if let Some(value) = folded_integer {
                     let result_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: result_reg, value });
+                    let load = self.load_scalar_constant(result_reg, verum_ast::checked_const::Scalar::Int(value));
+                    self.ctx.emit(load);
                     self.ctx.emit(Instruction::Ret { value: result_reg });
                 } else if let Some(result_reg) = self.compile_expr(&expr)? {
                     self.ctx.emit(Instruction::Ret { value: result_reg });

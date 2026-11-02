@@ -250,3 +250,31 @@ fn a_constant_from_a_sibling_body_is_unbound() {
     let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
     assert!(error.to_string().contains("PRIVATE_N"), "{error}");
 }
+
+#[test]
+fn literal_accessors_and_inlined_reads_preserve_runtime_tags_and_all_integer_bits() {
+    let source = r#"
+        module scalars;
+        const FLAG: Bool = (true);
+        const WIDE: Int = 9223372036854775807;
+        const FOLDED: Int = 9223372036854775805 + 2;
+        fn flag() -> Bool { FLAG }
+        fn wide() -> Int { WIDE }
+        fn qualified_flag() -> Bool { scalars.FLAG }
+        fn qualified_wide() -> Int { scalars.WIDE }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = Shared::new(verum_vbc::deserialize::deserialize_module(&bytes).unwrap()).into_arc();
+    let mut interpreter = Interpreter::new(module.clone());
+    for name in ["FLAG", "flag", "qualified_flag", "WIDE", "wide", "qualified_wide", "FOLDED"] {
+        let function = module.find_function_by_name(&format!("scalars.{name}")).unwrap();
+        let value = interpreter.execute_function(function).unwrap();
+        if matches!(name, "FLAG" | "flag" | "qualified_flag") {
+            assert!(value.is_bool() && value.as_bool(), "{name}: {value:?}");
+        } else {
+            assert_eq!(value.as_i64(), i64::MAX, "{name}");
+        }
+    }
+}

@@ -2227,26 +2227,13 @@ impl VbcCodegen {
                         // Two formats:
                         //  "__const_val_N" — user-defined const with extracted literal value N
                         //  "__const_NAME" — well-known stdlib constant resolved by name
+                        if let Some(value) = Self::inline_scalar(&func_info).transpose()? {
+                            let dest = self.ctx.alloc_temp();
+                            let load = self.load_scalar_constant(dest, value);
+                            self.ctx.emit(load);
+                            return Ok(Some(dest));
+                        }
                         if let Some(ref iname) = func_info.intrinsic_name {
-                            if let Some(val_str) = iname.strip_prefix("__const_val_") {
-                                // Dynamic constant with encoded value. Large
-                                // magnitudes (Int.MIN = i64::MIN, …) MUST go
-                                // through the constant pool — LoadI carries a
-                                // 48-bit inline immediate and truncates
-                                // i64::MIN (low 48 bits 0) to 0.
-                                let value: i64 = val_str.parse().unwrap_or(0);
-                                let dest = self.ctx.alloc_temp();
-                                if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
-                                    self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                                } else {
-                                    let const_id = self.ctx.add_const_int(value);
-                                    self.ctx.emit(Instruction::LoadK {
-                                        dst: dest,
-                                        const_id: const_id.0,
-                                    });
-                                }
-                                return Ok(Some(dest));
-                            }
                             if let Some(const_name) = iname.strip_prefix("__const_") {
                                 let dest = self.ctx.alloc_temp();
                                 // Cross-compilation: build target dictates
@@ -17203,12 +17190,11 @@ impl VbcCodegen {
                     // Check if this is an associated constant with a known value
                     // (registered via __const_val_N naming convention).
                     if func_info.param_count == 0
-                        && let Some(ref iname) = func_info.intrinsic_name
-                        && let Some(val_str) = iname.strip_prefix("__const_val_")
+                        && let Some(value) = Self::inline_scalar(&func_info).transpose()?
                     {
-                        let value: i64 = val_str.parse().unwrap_or(0);
                         let dest = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        let load = self.load_scalar_constant(dest, value);
+                        self.ctx.emit(load);
                         return Ok(Some(Some(dest)));
                     }
                     return Ok(Some(self.compile_static_method_call(&func_info, args, type_args)?));
@@ -19872,13 +19858,7 @@ impl VbcCodegen {
                                 None
                             }
                         })
-                        .and_then(|info| {
-                            info.intrinsic_name.as_ref().and_then(|iname| {
-                                iname
-                                    .strip_prefix("__const_val_")
-                                    .and_then(|v| v.parse::<i64>().ok())
-                            })
-                        });
+                        .and_then(Self::inline_scalar).transpose()?;
 
                     // Guard: if the match scrutinee is a primitive Int, NEVER emit
                     // a variant-tag check (`IsVar`). Even when the const_value lookup
@@ -19913,10 +19893,8 @@ impl VbcCodegen {
                     if let Some(const_val) = const_value {
                         // This is a constant pattern — emit value comparison
                         let const_reg = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: const_reg,
-                            value: const_val,
-                        });
+                        let load = self.load_scalar_constant(const_reg, const_val);
+                        self.ctx.emit(load);
                         self.ctx.emit(Instruction::CmpI {
                             op: CompareOp::Eq,
                             dst: result,
@@ -24064,19 +24042,9 @@ impl VbcCodegen {
                 let dest = self.ctx.alloc_temp();
                 if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
                     // Check if this is an inlineable constant (__const_val_N)
-                    if let Some(ref iname) = func_info.intrinsic_name
-                        && let Some(val_str) = iname.strip_prefix("__const_val_")
-                    {
-                        let value: i64 = val_str.parse().unwrap_or(0);
-                        // Large magnitudes (Int.MIN = i64::MIN, …) MUST use the
-                        // constant pool — LoadI's 48-bit inline immediate
-                        // truncates i64::MIN (low 48 bits 0) to 0.
-                        if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                        } else {
-                            let const_id = self.ctx.add_const_int(value);
-                            self.ctx.emit(Instruction::LoadK { dst: dest, const_id: const_id.0 });
-                        }
+                    if let Some(value) = Self::inline_scalar(&func_info).transpose()? {
+                        let load = self.load_scalar_constant(dest, value);
+                        self.ctx.emit(load);
                         return Ok(Some(dest));
                     }
                     // It's a constant - call it to get value
@@ -24133,19 +24101,9 @@ impl VbcCodegen {
                 let dest = self.ctx.alloc_temp();
                 if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
                     // Check if this is an inlineable constant (__const_val_N)
-                    if let Some(ref iname) = func_info.intrinsic_name
-                        && let Some(val_str) = iname.strip_prefix("__const_val_")
-                    {
-                        let value: i64 = val_str.parse().unwrap_or(0);
-                        // Large magnitudes (Int.MIN = i64::MIN, …) MUST use the
-                        // constant pool — LoadI's 48-bit inline immediate
-                        // truncates i64::MIN (low 48 bits 0) to 0.
-                        if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                        } else {
-                            let const_id = self.ctx.add_const_int(value);
-                            self.ctx.emit(Instruction::LoadK { dst: dest, const_id: const_id.0 });
-                        }
+                    if let Some(value) = Self::inline_scalar(&func_info).transpose()? {
+                        let load = self.load_scalar_constant(dest, value);
+                        self.ctx.emit(load);
                         return Ok(Some(dest));
                     }
                     self.ctx.emit(Instruction::Call {
@@ -24214,11 +24172,9 @@ impl VbcCodegen {
                         && !func_info.is_async
                         && !func_info.is_generator
                     {
-                        if let Some(ref iname) = func_info.intrinsic_name
-                            && let Some(val_str) = iname.strip_prefix("__const_val_")
-                        {
-                            let value: i64 = val_str.parse().unwrap_or(0);
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        if let Some(value) = Self::inline_scalar(&func_info).transpose()? {
+                            let load = self.load_scalar_constant(dest, value);
+                            self.ctx.emit(load);
                             return Ok(Some(dest));
                         }
                         self.ctx.emit(Instruction::Call {
@@ -24307,11 +24263,9 @@ impl VbcCodegen {
                     if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
                     {
                         // Check if this is an inlineable constant (__const_val_N)
-                        if let Some(ref iname) = func_info.intrinsic_name
-                            && let Some(val_str) = iname.strip_prefix("__const_val_")
-                        {
-                            let value: i64 = val_str.parse().unwrap_or(0);
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        if let Some(value) = Self::inline_scalar(&func_info).transpose()? {
+                            let load = self.load_scalar_constant(dest, value);
+                            self.ctx.emit(load);
                             return Ok(Some(dest));
                         }
                         self.ctx.emit(Instruction::Call {
@@ -24490,43 +24444,22 @@ impl VbcCodegen {
                     // short-circuits on the first `Some` then filters would
                     // pick the wrong entry and never reach the qualified
                     // `.Type.CONST` suffix that resolves the real const.
-                    let extract_const = |fi: &FunctionInfo| -> Option<String> {
-                        if fi.param_count != 0 {
-                            return None;
-                        }
-                        fi.intrinsic_name
-                            .as_ref()
-                            .and_then(|n| n.strip_prefix("__const_val_"))
-                            .map(|s| s.to_string())
-                    };
                     let const_val = self
                         .ctx
                         .lookup_function(&qualified_colon)
-                        .and_then(extract_const)
+                        .and_then(Self::inline_scalar)
                         .or_else(|| {
-                            self.ctx.lookup_function(&qualified_dot).and_then(extract_const)
+                            self.ctx.lookup_function(&qualified_dot).and_then(Self::inline_scalar)
                         })
                         .or_else(|| {
                             self.ctx
                                 .find_function_by_suffix(&suffix_dot)
-                                .and_then(extract_const)
+                                .and_then(Self::inline_scalar)
                         });
-                    if let Some(val_str) = const_val {
-                        // e.g. `Int.MIN` (= __const_val_-9223372036854775808).
-                        // Large magnitudes MUST use the constant pool — LoadI
-                        // carries a 48-bit inline immediate and truncates
-                        // i64::MIN (low 48 bits 0) to 0.
-                        let value: i64 = val_str.parse().unwrap_or(0);
+                    if let Some(value) = const_val.transpose()? {
                         let result = self.ctx.alloc_temp();
-                        if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
-                            self.ctx.emit(Instruction::LoadI { dst: result, value });
-                        } else {
-                            let const_id = self.ctx.add_const_int(value);
-                            self.ctx.emit(Instruction::LoadK {
-                                dst: result,
-                                const_id: const_id.0,
-                            });
-                        }
+                        let load = self.load_scalar_constant(result, value);
+                        self.ctx.emit(load);
                         return Ok(Some(result));
                     }
                 }
@@ -45158,14 +45091,12 @@ impl VbcCodegen {
         depth: usize,
     ) -> CodegenResult<Option<verum_ast::checked_const::Scalar>> {
         use verum_ast::{checked_const::{Scalar, EvalError}, expr::ExprKind};
-        use crate::types::{TypeId, TypeRef};
         let invalid = || CodegenError::with_span(
             super::error::CodegenErrorKind::InvalidLiteral(
                 "constant integer is out of range or has invalid arithmetic".to_string(),
             ),
             expr.span,
         );
-        let checked = |value: Option<i64>| value.map(|value| Some(Scalar::Int(value))).ok_or_else(invalid);
         if depth >= 128 {
             return Err(CodegenError::with_span(
                 super::error::CodegenErrorKind::InvalidLiteral(
@@ -45256,14 +45187,9 @@ impl VbcCodegen {
                 // intermediates. A legacy inline integer carrier alone loses
                 // Bool and may have been extracted through an unsupported call.
                 if !self.constant_initializers.contains_key(&info.id)
-                    && let Some(value) = info.intrinsic_name.as_deref()
-                        .and_then(|name| name.strip_prefix("__const_val_"))
+                    && let Some(value) = Self::inline_scalar(&info)
                 {
-                    if info.return_type == Some(TypeRef::Concrete(TypeId::BOOL))
-                        || info.return_type_name.as_deref() == Some("Bool") {
-                        return match value {"0" => Ok(Some(Scalar::Bool(false))), "1" => Ok(Some(Scalar::Bool(true))), _ => Err(invalid())};
-                    }
-                    return checked(value.parse::<i64>().ok());
+                    return value.map(Some);
                 }
                 if let Some(value) = cached.get(&info.id) {
                     return Ok(Some(*value));
