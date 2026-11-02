@@ -19171,6 +19171,30 @@ impl TypeChecker {
         })
     }
 
+    fn resolve_dyn_method(
+        &mut self,
+        bounds: &[Text],
+        method: &Ident,
+        args: &[Expr],
+    ) -> Result<Option<InferResult>> {
+        for bound in bounds {
+            let mut contract = self.protocol_checker.read()
+                .dyn_method_contract(bound.as_str(), method.name.as_str());
+            if contract.is_none() {
+                self.ensure_stdlib_type_loaded_transitive(bound);
+                contract = self.protocol_checker.read()
+                    .dyn_method_contract(bound.as_str(), method.name.as_str());
+            }
+            if let Some((result, receiver)) = contract {
+                for arg in args {
+                    self.infer_expr(arg, InferMode::Synth)?;
+                }
+                return Ok(Some(InferResult::method(result, receiver)));
+            }
+        }
+        Ok(None)
+    }
+
     fn resolve_method_call(
         &mut self,
         receiver: &Expr,
@@ -19542,52 +19566,10 @@ impl TypeChecker {
         // When receiver is &dyn Protocol (DynProtocol type), resolve method
         // from the protocol's declared methods. Look up via protocol_checker.
         // ============================================================
-        if let Type::DynProtocol { ref bounds, .. } = recv_ty {
-            for bound_name in bounds {
-                // A protocol that arrived through the archive is not in the
-                // checker until something asks for it, and this lookup was
-                // not asking — so EVERY method on a `dyn` over a stdlib
-                // protocol failed to resolve. Measured outside `core/`:
-                //
-                //   fn a(w: &mut (dyn EscapeWriter)) { w.begin_sync(); }
-                //   error<E400>: no method named `begin_sync` found for
-                //                type `dyn EscapeWriter`
-                //
-                // and inside `core/`, where name resolution is lenient, the
-                // same call degraded to `Unknown` and surfaced only when `?`
-                // was applied to it — 23 such diagnostics in
-                // `core/term/render/diff.vr` alone, every one of them
-                // blaming the question mark for a method that was never
-                // found.
-                //
-                // Loading here is not the side-effecting kind: this is type
-                // INFERENCE, which cannot answer without the protocol, as
-                // opposed to a diagnostic pass that has its answer already.
-                // The load runs only when the direct lookup missed, so a
-                // protocol already registered costs nothing.
-                let known = {
-                    let pc = self.protocol_checker.read();
-                    pc.get_method_type(bound_name.as_str(), method_name_str)
-                        .is_some()
-                };
-                if !known {
-                    self.ensure_stdlib_type_loaded_transitive(bound_name);
-                }
-                let pc = self.protocol_checker.read();
-                if let Some(method_ty) = pc.get_method_type(bound_name.as_str(), method_name_str) {
-                    let receiver_kind = pc.get_protocol(bound_name)
-                        .and_then(|protocol| protocol.methods.get(&method.name))
-                        .and_then(|method| method.receiver_kind());
-                    drop(pc);
-                    // Infer arguments (type check them)
-                    for arg in args.iter() {
-                        let _ = self.infer_expr(arg, InferMode::Synth)?;
-                    }
-                    // Erased protocol metadata provides no shared-access
-                    // contract. A vtable call may select a mutating implementor.
-                    return Ok(InferResult::method(method_ty, receiver_kind));
-                }
-            }
+        if let Type::DynProtocol { ref bounds, .. } = recv_ty
+            && let Some(result) = self.resolve_dyn_method(bounds, method, args)?
+        {
+            return Ok(result);
         }
 
         if let Some(r) = self.resolve_inherent_and_collection_method(
@@ -19784,19 +19766,10 @@ impl TypeChecker {
                 | Type::Ownership { inner, .. } => inner.as_ref(),
                 other => other,
             };
-            if let Type::DynProtocol { bounds, .. } = peeled {
-                for bound_name in bounds {
-                    let pc = self.protocol_checker.read();
-                    if let Some(method_ty) =
-                        pc.get_method_type(bound_name.as_str(), method.name.as_str())
-                    {
-                        drop(pc);
-                        for arg in args.iter() {
-                            let _ = self.infer_expr(arg, InferMode::Synth)?;
-                        }
-                        return Ok(InferResult::new(method_ty));
-                    }
-                }
+            if let Type::DynProtocol { bounds, .. } = peeled
+                && let Some(result) = self.resolve_dyn_method(bounds, method, args)?
+            {
+                return Ok(result);
             }
         }
 

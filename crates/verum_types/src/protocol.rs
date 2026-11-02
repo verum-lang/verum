@@ -7881,24 +7881,28 @@ impl ProtocolChecker {
     /// Get the return type of a protocol method by protocol name and method name.
     /// Used for resolving method calls on &dyn Protocol receivers.
     pub fn get_method_type(&self, protocol_name: &str, method_name: &str) -> Option<Type> {
+        self.dyn_method_contract(protocol_name, method_name).map(|(ty, _)| ty)
+    }
+
+    /// The result and receiver permission come from the same declaration,
+    /// including when a dynamic bound inherits that declaration.
+    pub(crate) fn dyn_method_contract(
+        &self,
+        protocol_name: &str,
+        method_name: &str,
+    ) -> Option<(Type, Option<ReceiverKind>)> {
         let proto = self.get_protocol_definition(protocol_name)?;
-        let method_text = Text::from(method_name);
-        // First check direct methods
-        if let Some(method) = proto.methods.get(&method_text) {
-            return match &method.ty {
-                Type::Function { return_type, .. } => Some((**return_type).clone()),
-                _ => Some(method.ty.clone()),
+        if let Some(method) = proto.methods.get(&Text::from(method_name)) {
+            let result = match &method.ty {
+                Type::Function { return_type, .. } => (**return_type).clone(),
+                ty => ty.clone(),
             };
+            return Some((result, method.receiver_kind()));
         }
-        // Then check parent (super) protocols recursively
-        for super_bound in &proto.super_protocols {
-            if let Some(super_name) = super_bound.protocol.as_ident() {
-                if let Some(ty) = self.get_method_type(super_name.name.as_str(), method_name) {
-                    return Some(ty);
-                }
-            }
-        }
-        None
+        proto.super_protocols.iter().find_map(|bound| {
+            let parent = bound.protocol.as_ident()?;
+            self.dyn_method_contract(parent.name.as_str(), method_name)
+        })
     }
 
     /// Look up an associated type definition from a protocol

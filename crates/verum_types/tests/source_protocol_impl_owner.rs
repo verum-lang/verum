@@ -455,3 +455,35 @@ fn source_registration_does_not_relax_coherence_for_another_declaration() {
     ));
     assert_eq!(table.all_implementations().len(), before);
 }
+
+#[test]
+fn dyn_receiver_access_survives_a_deref_and_protocol_inheritance() {
+    let declarations = r#"
+        type Parent is protocol { fn inherited(&self) -> Int; };
+        type Source is protocol extends Parent {
+            fn read(&self) -> Int;
+            fn change(&mut self) -> Int;
+        };
+        type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+        type Holder<T> is { inner: T };
+        implement<T> Deref for Holder<T> {
+            type Target = T;
+            fn deref(&self) -> &T { &self.inner }
+        }
+    "#;
+    for receiver in ["&Holder<dyn Source>", "&(dyn Source)"] {
+        for (method, writable) in [("read", false), ("inherited", false), ("change", true)] {
+            let source =
+                format!("{declarations} fn probe(x: {receiver}) -> Int {{ x.{method}() }}");
+            let (_, errors) = check(&source, &[]);
+            if writable {
+                assert!(
+                    errors.iter().any(|e| e.contains("SharedReferenceWrite")),
+                    "{receiver} {method}: {errors:?}"
+                );
+            } else {
+                assert!(errors.is_empty(), "{receiver} {method}: {errors:?}");
+            }
+        }
+    }
+}
