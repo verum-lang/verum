@@ -360,6 +360,9 @@ enum Commands {
  /// raw stdin without auto-print.
         #[clap(long, short = 'e', value_name = "EXPR", conflicts_with = "file")]
         eval: Option<String>,
+        /// Resolve interpreted stdin (`-`) as this project file without writing it.
+        #[clap(long, value_name = "PATH", requires = "file", conflicts_with_all = ["eval", "aot"])]
+        stdin_filepath: Option<PathBuf>,
  /// Run via interpreter (overrides the project execution tier)
         #[clap(long, conflicts_with = "aot")]
         interp: bool,
@@ -3138,6 +3141,7 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Run {
             file,
             eval,
+            stdin_filepath,
             interp,
             aot,
             release,
@@ -3175,6 +3179,14 @@ fn run_command(cli: Cli) -> Result<()> {
             verum_error::crash::set_command("run");
             verum_error::crash::set_tier(tier_label);
 
+            if stdin_filepath.is_some()
+                && (file.as_ref().map(|f| f.as_str()) != Some("-") || tier_num == Some(1))
+            {
+                return Err(CliError::InvalidArgument(
+                    "--stdin-filepath requires interpreted standard input (-)".into(),
+                ));
+            }
+
  // Inline-eval and stdin sources synthesise a temporary
  // script file with a shebang prefix so they flow through
  // the same script-mode pipeline as on-disk scripts —
@@ -3204,6 +3216,12 @@ fn run_command(cli: Cli) -> Result<()> {
                 std::io::stdin()
                     .read_to_string(&mut buf)
                     .map_err(|e| CliError::Custom(format!("read stdin: {e}")))?;
+                if let Some(path) = stdin_filepath {
+                    let report = runtime_report.request(buf.as_bytes(), false)?;
+                    return commands::file::run_stdin_at(
+                        path, buf, args_list, timings, permission_flags, report,
+                    );
+                }
                 let report = runtime_report.request(buf.as_bytes(), true)?;
                 let tmp = commands::file::synthesize_script_temp(&buf, "stdin")
                     .map_err(|e| CliError::Custom(format!("synthesize stdin: {e}")))?;

@@ -48,7 +48,9 @@ async fn plans_permissions_and_receipts_describe_the_actual_child_arguments() {
         jobs.start(&request, dir.path().join("lesson.vr")).unwrap();
         let receipt = done(&jobs).await;
         assert_eq!(receipt["status"], "succeeded", "{receipt}");
-        let expected = format!("run\n--interp\n{}-\n", flag.map(|value| format!("{value}\n")).unwrap_or_default());
+        let expected = format!("run\n--interp\n{}--stdin-filepath\n{}\n-\n",
+            flag.map(|value| format!("{value}\n")).unwrap_or_default(),
+            dir.path().join("lesson.vr").display());
         assert_eq!(receipt["stdout"], expected);
         for (key, value) in plan.as_object().unwrap() {
             assert_eq!(&receipt[key], value, "{key} must be the executed plan");

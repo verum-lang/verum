@@ -330,6 +330,39 @@ pub fn run_with_tier_and_flags(
     run_with_observation(file, args, skip_verify, tier, timings, permission_flags, None)
 }
 
+/// Execute the supplied buffer at its logical project path. Only sibling
+/// modules and dependencies are read from the filesystem.
+pub fn run_stdin_at(
+    path: PathBuf,
+    source: String,
+    args: List<Text>,
+    timings: bool,
+    permission_flags: crate::script::permission_flags::PermissionFlags,
+    runtime_report: Option<crate::runtime_diagnostics::ReportRequest>,
+) -> Result<(), CliError> {
+    let input = std::path::absolute(path)?;
+    if input.file_name().is_none() || input.is_dir() {
+        return Err(CliError::InvalidArgument(
+            "--stdin-filepath must name a file".into(),
+        ));
+    }
+    let options = CompilerOptions {
+        input: input.clone(),
+        script_mode: true,
+        language_features: crate::feature_overrides::scratch_features()?,
+        ..Default::default()
+    };
+    run_script_interpreted(
+        &input,
+        options,
+        args,
+        timings,
+        permission_flags,
+        runtime_report,
+        Some(source),
+    )
+}
+
 pub fn run_with_observation(
     file: &str,
     args: List<Text>,
@@ -384,7 +417,7 @@ pub fn run_with_observation(
             };
 
             run_script_interpreted(
-                &input, options, args, timings, permission_flags, runtime_report,
+                &input, options, args, timings, permission_flags, runtime_report, None,
             )?;
         }
         1 => {
@@ -743,6 +776,7 @@ fn run_script_interpreted(
     timings: bool,
     permission_flags: crate::script::permission_flags::PermissionFlags,
     runtime_report: Option<crate::runtime_diagnostics::ReportRequest>,
+    stdin_source: Option<String>,
 ) -> Result<(), CliError> {
     use crate::script::cache::ScriptCache;
     use crate::script::context::{ScriptContext, ScriptContextOptions};
@@ -753,6 +787,14 @@ fn run_script_interpreted(
     // future codegen-emitted permission asserts will encode the
     // resolved set into the bytecode.)
     let mut extra_flags = cache_flag_inputs(&options);
+    let in_memory = stdin_source.is_some();
+    if in_memory {
+        // Identical editor buffers can mount different siblings in different projects.
+        extra_flags.push(format!(
+            "stdin-entry={}",
+            hex::encode(input.as_os_str().as_encoded_bytes())
+        ));
+    }
     // T0523: the stdlib the script will execute against is a cache-key
     // contributor — without it, editing core/ and rerunning the SAME
     // script executed bytecode compiled against the OLD stdlib and
@@ -779,8 +821,11 @@ fn run_script_interpreted(
         compiler_version: env!("CARGO_PKG_VERSION").to_string(),
         extra_cache_flags: extra_flags,
     };
-    let ctx = ScriptContext::from_path(input, &ctx_opts)
-        .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
+    let ctx = match stdin_source {
+        Some(source) => ScriptContext::from_source(input, source.into_bytes(), &ctx_opts),
+        None => ScriptContext::from_path(input, &ctx_opts),
+    }
+    .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
     let mut runtime_report = runtime_report
         .map(|request| request.open(&ctx.source))
         .transpose()?;
@@ -803,7 +848,9 @@ fn run_script_interpreted(
             // grants, and rewritten when the inputs have drifted.
             // The lockfile is the authoritative pinned record for
             // reproducibility / drift detection across machines.
-            persist_script_lockfile(&ctx, input, &resolved.locked)?;
+            if !in_memory {
+                persist_script_lockfile(&ctx, input, &resolved.locked)?;
+            }
             script_cog_resolver = Some(resolved.resolver);
         }
     }
@@ -829,44 +876,34 @@ fn run_script_interpreted(
     // Cache hit short-circuit. Non-fatal on any error path (eviction
     // races, schema mismatch, etc.) — fall through to a regular
     // compile+run.
-    if let Some(c) = cache.as_ref() {
-        match ctx.cache_lookup(c) {
-            Ok(Some(entry)) => {
-                ui::status("Running", &format!("{} (cached VBC)", input.display()));
-                return execute_cached_vbc(
-                    input,
-                    options,
-                    args,
-                    &entry.vbc,
-                    timings,
-                    permission_policy,
-                    script_cog_resolver,
-                    runtime_report,
-                );
-            }
-            Ok(None) => { /* miss — fall through */ }
-            Err(e) => ui::warn(&format!("script cache lookup failed: {e}")),
+    let cached = cache.as_ref().and_then(|cache| match ctx.cache_lookup(cache) {
+        Ok(entry) => entry,
+        Err(error) => {
+            ui::warn(&format!("script cache lookup failed: {error}"));
+            None
         }
-    }
-
-    // 4. Cache miss: run the pipeline. The session captures the
-    //  compiled VBC via `record_compiled_vbc` so we can pull it
-    //  back here for cache-store.
+    });
     options.input = input.to_path_buf();
-    ui::status("Running", &format!("{} (interpreter)", input.display()));
     let mut session = Session::new(options);
-    // Compile the bytes used for permission parsing and cache identity. The
-    // entry must not change between ScriptContext and the compiler's read.
-    let source = std::str::from_utf8(&ctx.source)
-        .map_err(|error| CliError::Custom(format!("Script source is not UTF-8: {error}")))?;
-    session.load_source_string(source, input.to_path_buf())
-        .map_err(|error| CliError::Custom(format!("Load script snapshot: {error}")))?;
+    // Both compilation and CBGR source locations use the snapshot that determined
+    // the permissions and cache identity, including when running cached bytecode.
+    if cached.is_none() || runtime_report.is_some() {
+        let source = std::str::from_utf8(&ctx.source)
+            .map_err(|error| CliError::Custom(format!("Script source is not UTF-8: {error}")))?;
+        session.load_source_string(source, input.to_path_buf())
+            .map_err(|error| CliError::Custom(format!("Load script snapshot: {error}")))?;
+    }
     if let Some(policy) = permission_policy {
         session.set_script_permission_policy(policy);
     }
     if let Some(resolver) = script_cog_resolver {
         session.set_cog_resolver(resolver);
     }
+    if let Some(entry) = cached {
+        ui::status("Running", &format!("{} (cached VBC)", input.display()));
+        return execute_cached_vbc(session, args, &entry.vbc, timings, runtime_report);
+    }
+    ui::status("Running", &format!("{} (interpreter)", input.display()));
     let result = {
         let mut pipeline = CompilationPipeline::new(&mut session);
         pipeline.run_interpreter(args)
@@ -960,13 +997,10 @@ fn run_script_interpreted(
 /// CBGR, refinement asserts, intrinsic dispatch — so a cached run is
 /// observationally identical to a fresh compile.
 fn execute_cached_vbc(
-    input: &std::path::Path,
-    mut options: CompilerOptions,
+    mut session: Session,
     args: List<Text>,
     vbc_bytes: &[u8],
     timings: bool,
-    permission_policy: Option<verum_compiler::session::ScriptPermissionPolicy>,
-    cog_resolver: Option<verum_modules::cog_resolver::CogResolver>,
     mut runtime_report: Option<crate::runtime_diagnostics::ReportFile>,
 ) -> Result<(), CliError> {
     let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes)
@@ -989,14 +1023,6 @@ fn execute_cached_vbc(
     let _ = vbc_module.resolve_external_bands();
     let _ = vbc_module.synthesize_intrinsic_band_wrappers();
     let _ = vbc_module.resolve_protocol_dispatch();
-    options.input = input.to_path_buf();
-    let mut session = Session::new(options);
-    if let Some(policy) = permission_policy {
-        session.set_script_permission_policy(policy);
-    }
-    if let Some(resolver) = cog_resolver {
-        session.set_cog_resolver(resolver);
-    }
     let result = {
         let mut pipeline = CompilationPipeline::new(&mut session);
         pipeline.run_compiled_vbc(std::sync::Arc::new(vbc_module), args)

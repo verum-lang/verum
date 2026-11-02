@@ -137,13 +137,6 @@ impl Jobs {
                 .context("Too many active runs")?;
             self.jobs.remove(index);
         }
-        // An entry snapshot retains its source directory for relative module resolution.
-        let mut snapshot = tempfile::Builder::new()
-            .prefix(".verum-workbench-")
-            .suffix(".vr")
-            .tempfile_in(source_path.parent().context("Source parent")?)?;
-        snapshot.write_all(source.as_bytes())?;
-        snapshot.as_file().sync_all()?;
         let id: Text = uuid::Uuid::new_v4().to_string().into();
         let evidence_path = private_dir(&self.root, &[".verum-studio", "runs", &id])?;
         std::fs::write(evidence_path.join("source.vr"), source)?;
@@ -168,12 +161,10 @@ impl Jobs {
                 declaration: plan.declaration.as_ref().expect("validated declaration").to_string(),
             })
         } else { None };
-        let input = if let Some(request) = &proof_request {
+        let (input, snapshot) = if let Some(request) = &proof_request {
             command.arg("--worker");
-            Some(List::from(serde_json::to_vec(request)?))
+            (Some(List::from(serde_json::to_vec(request)?)), None)
         } else if plan.kind == OperationKind::Run {
-            // The CLI stdin entry selects script syntax without inventing a
-            // wrapper or a second compiler in Studio.
             command.args(["run", "--interp"]);
             if let Some(flag) = plan.permissions.and_then(|policy| policy.cli_flag()) {
                 command.arg(flag);
@@ -182,11 +173,16 @@ impl Jobs {
                 command.arg("--runtime-report").arg(evidence_path.join("runtime.json"))
                     .arg("--runtime-run-id").arg(id.as_str());
             }
-            command.arg("-");
-            Some(source.as_bytes().iter().copied().collect())
+            command.arg("--stdin-filepath").arg(&source_path).arg("-");
+            (Some(source.as_bytes().iter().copied().collect()), None)
         } else {
+            let mut snapshot = tempfile::Builder::new()
+                .prefix(".verum-workbench-")
+                .suffix(".vr")
+                .tempfile_in(source_path.parent().context("Source parent")?)?;
+            snapshot.write_all(source.as_bytes())?;
             command.arg("check").arg(snapshot.path());
-            None
+            (None, Some(snapshot))
         };
         let child = command
             .spawn()
