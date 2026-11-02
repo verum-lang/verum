@@ -116,6 +116,26 @@ fn type_id(module: &verum_vbc::module::VbcModule, name: &str) -> verum_vbc::type
 }
 
 #[test]
+fn inferred_factory_results_carry_their_own_receiver_witnesses() {
+    let module = compile(r#"
+type Cell<Item> is { value: Item };
+implement<Item> Cell<Item> {
+    fn make(value: Item) -> Cell<Item> { Cell { value } }
+    fn first(&self) -> Item { self.value }
+    fn second(&self) -> Item { self.value }
+}
+fn probe() -> Int {
+    let number = Cell.make(25);
+    let flag = Cell.make(true);
+    if flag.second() { number.first() } else { 0 }
+}
+"#);
+    use verum_vbc::types::TypeId;
+    assert_eq!(call(&module, "Cell.first"), [TypeRef::Concrete(TypeId::INT)]);
+    assert_eq!(call(&module, "Cell.second"), [TypeRef::Concrete(TypeId::BOOL)]);
+}
+
+#[test]
 fn partial_explicit_arguments_leave_later_method_parameters_inferred() {
     let module = compile(
         r#"

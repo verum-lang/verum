@@ -146,16 +146,16 @@ impl VbcCodegen {
                     _ => CbgrTier::Tier0,
                 },
             }),
-            ExprKind::MethodCall { receiver, method, type_args, .. } => {
+            ExprKind::MethodCall { receiver, method, type_args, args } => {
                 let selected = emitted.and_then(|(reg, start, end)|
-                    self.copy_selected_call_result(reg, start, end, type_args));
+                    self.copy_selected_call_result(reg, start, end, type_args, args, depth));
                 if selected.is_some() { return selected; }
                 let owner = self.extract_expr_type_name(receiver)?;
                 self.declared_method_result_type(&owner, method.name.as_str(), type_args)
             }
-            ExprKind::Call { type_args, .. } => {
+            ExprKind::Call { type_args, args, .. } => {
                 let (reg, start, end) = emitted?;
-                self.copy_selected_call_result(reg, start, end, type_args)
+                self.copy_selected_call_result(reg, start, end, type_args, args, depth)
             }
             // Raw pointers, dynamic calls and unresolved
             // expressions cannot establish the missing declaration authority.
@@ -209,6 +209,7 @@ impl VbcCodegen {
 
     fn copy_selected_call_result(
         &self, reg: Reg, start: usize, end: usize, type_args: &[verum_ast::ty::GenericArg],
+        source_args: &[Expr], depth: usize,
     ) -> Maybe<TypeRef> {
         let (index, op) = self.copy_result_producer(reg, start, end)?;
         let (id, args) = match op {
@@ -238,7 +239,26 @@ impl VbcCodegen {
         }
         // Layout-only archive returns and unbound slots remain unknown. In
         // particular, CallG's ABI witnesses cannot reconstruct reference layers.
-        super::constructor_types::fully_bound(return_type, &substitution).then(|| substitution.apply(return_type))
+        if super::constructor_types::fully_bound(return_type, &substitution) {
+            return Some(substitution.apply(return_type));
+        }
+        // Temporaries such as literal arguments have no lexical binding. For a
+        // direct call, independently instantiate the selected source signature
+        // from its operands and require agreement with the emitted call.
+        let Instruction::CallG { type_args: witnesses, .. } = op else { return None; };
+        if info.type_param_ids.len() != witnesses.len() || params.len() != source_args.len() {
+            return None;
+        }
+        let result = self.source_call_result(info, type_args, source_args, None, depth)?;
+        for (id, witness) in info.type_param_ids.iter().zip(witnesses) {
+            if let Some(bound) = substitution.get(*id) {
+                if bound != witness { return None; }
+            } else {
+                substitution.bind(*id, witness.clone());
+            }
+        }
+        (super::constructor_types::fully_bound(return_type, &substitution)
+            && result == substitution.apply(return_type)).then_some(result)
     }
 
     pub(super) fn copy_type_is_value(&self, ty: &TypeRef) -> bool {

@@ -430,6 +430,17 @@ impl VbcCodegen {
         let function = self
             .ctx
             .lookup_function_with_arity_in_scope(&name, args.len())?;
+        self.source_call_result(function, type_args, args, expected, depth)
+    }
+
+    pub(super) fn source_call_result(
+        &self,
+        function: &FunctionInfo,
+        type_args: &[verum_ast::ty::GenericArg],
+        args: &[Expr],
+        expected: Option<&TypeRef>,
+        depth: usize,
+    ) -> Option<TypeRef> {
         let TypeRef::Function {
             params,
             return_type,
