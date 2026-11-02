@@ -18,6 +18,10 @@ use std::collections::{HashMap, HashSet};
 use verum_cbgr::tier_types::Tier0Reason;
 use verum_common::{Map, Text};
 
+#[path = "function_registry.rs"]
+mod function_registry;
+pub use function_registry::{FunctionRegistry, FunctionRegistryEntry};
+
 /// ARCH-P2 canonical id→name choice — ONE total order over a
 /// FunctionId's registration-key set, shared by every site that picks
 /// a serialized/recorded name (stub descriptors ×3 incl. stage-3,
@@ -245,7 +249,7 @@ pub struct CodegenContext {
     bytes_intern: HashMap<Vec<u8>, u32>,
 
     /// Function registry for lookups.
-    pub functions: HashMap<String, FunctionInfo>,
+    pub functions: FunctionRegistry,
     /// BAKED-DEFAULT-ARG-1: per-function default-parameter expressions,
     /// keyed by the SAME name as `functions`. `defaults[i]` is Some(expr)
     /// when param `i` declares `= expr`. Call sites with fewer args than
@@ -1710,7 +1714,7 @@ impl CodegenContext {
             string_intern: HashMap::new(),
             bytes: Vec::new(),
             bytes_intern: HashMap::new(),
-            functions: HashMap::new(),
+            functions: FunctionRegistry::new(),
             function_param_defaults: HashMap::new(),
             ambiguous_function_names: std::collections::HashSet::new(),
             scoped_functions: HashMap::new(),
@@ -4888,7 +4892,7 @@ impl CodegenContext {
     /// This is used during stdlib compilation to collect functions
     /// registered in this module for use by later modules.
     pub fn export_functions(&self) -> std::collections::HashMap<String, FunctionInfo> {
-        self.functions.clone()
+        self.functions.as_map().clone()
     }
 
     // ==================== Utilities ====================

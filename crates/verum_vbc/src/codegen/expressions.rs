@@ -6857,8 +6857,6 @@ impl VbcCodegen {
                 return None;
             }
             let func_dotted = func_name.replace("::", ".");
-            let suffix_dot = format!(".{}", func_dotted);
-            let suffix_colon = format!("::{}", func_name);
             // Two-phase resolve: phase 1 collects every key that
             // *suffix-matches* either separator form and ends the borrow on
             // `self.ctx.functions`; phase 2 then filters by arity using the
@@ -6866,15 +6864,8 @@ impl VbcCodegen {
             // Splitting the borrows keeps the closure single-immutable-borrow
             // per phase, which is what the borrow checker is happiest with
             // under the surrounding chained `.or_else(...)` plumbing.
-            let mut suffix_keys: Vec<String> = self
-                .ctx
-                .functions
-                .keys()
-                .filter(|k| k.ends_with(&suffix_dot) || k.ends_with(&suffix_colon))
-                .cloned()
-                .collect();
-            suffix_keys.sort();
-            suffix_keys.dedup();
+            let suffix_keys = self.ctx.functions
+                .qualified_suffix_candidates_with_forms(&func_dotted, &func_name);
             let mut candidates: Vec<String> = suffix_keys
                 .into_iter()
                 .filter(|k| {
@@ -6928,17 +6919,7 @@ impl VbcCodegen {
             && !is_qualified_module_path
             && !args.is_empty()
         {
-            let suffix_dot = format!(".{}", func_name);
-            let suffix_colon = format!("::{}", func_name);
-            let mut qualified_keys: Vec<String> = self
-                .ctx
-                .functions
-                .keys()
-                .filter(|k| k.ends_with(&suffix_dot) || k.ends_with(&suffix_colon))
-                .cloned()
-                .collect();
-            qualified_keys.sort();
-            qualified_keys.dedup();
+            let qualified_keys = self.ctx.functions.qualified_suffix_candidates(&func_name);
             // Filter to STRICT-arity matches.
             //
             // **Critical correctness invariant**: `lookup_function_with_arity`
