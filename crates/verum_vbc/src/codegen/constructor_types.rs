@@ -347,8 +347,7 @@ impl VbcCodegen {
                 let verum_ast::ty::GenericArg::Type(argument) = argument else {
                     return None;
                 };
-                let actual = self
-                    .semantic_type_in_current_scope(&Self::extract_type_name_from_ast(argument))?;
+                let actual = self.source_type_in_current_scope(argument)?;
                 if !self.bind_source_declaration(&TypeRef::Generic(*id), &actual, &mut bindings) {
                     return None;
                 }

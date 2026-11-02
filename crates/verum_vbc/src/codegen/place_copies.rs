@@ -21,9 +21,13 @@ impl VbcCodegen {
     /// Undeclared names never become positional generic placeholders.
     pub(super) fn semantic_type_in_current_scope(&self, name: &str) -> Maybe<TypeRef> {
         let ast = verum_fast_parser::Parser::new(name).parse_type().ok()?;
+        self.source_type_in_current_scope(&ast)
+    }
+
+    pub(super) fn source_type_in_current_scope(&self, ast: &verum_ast::Type) -> Maybe<TypeRef> {
         let ids: Vec<_> = self.ctx.current_generic_param_ids.values()
             .copied().map(crate::types::TypeParamId).collect();
-        self.semantic_formal_type(&ast, &self.ctx.current_generic_param_ids, &ids)
+        self.semantic_formal_type(ast, &self.ctx.current_generic_param_ids, &ids)
     }
 
     pub(super) fn declared_expression_result(

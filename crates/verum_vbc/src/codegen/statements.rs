@@ -619,7 +619,7 @@ impl VbcCodegen {
         // consuming it for this bind cannot starve a later match arm; the
         // Tuple arm of `compile_pattern_bind` `.take()`s it.
         let tuple_declaration = if matches!(pattern.kind, verum_ast::PatternKind::Tuple(_)) {
-            ty.and_then(|ty| self.semantic_type_in_current_scope(&Self::extract_type_name_from_ast(ty)))
+            ty.and_then(|ty| self.source_type_in_current_scope(ty))
                 .or_else(|| value.and_then(|expr| self.source_expression_declaration(expr, None, 0)))
         } else {
             None
@@ -1391,7 +1391,7 @@ impl VbcCodegen {
                     // collection's type parameter and leaves the callee's
                     // `LoadT{Generic}` unresolved.
                     self.ctx.current_return_type_full =
-                        Some(Self::extract_type_name_from_ast(ty));
+                        Some(Self::render_field_type_name(ty, true));
                     saved
                 })
         } else {

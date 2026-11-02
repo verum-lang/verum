@@ -326,10 +326,10 @@ async fn probe() -> Int {
 
 #[test]
 fn imported_future_uses_the_qualified_factory_and_poll_declarations() {
-    let source = Parser::new(&format!("module core.jobs;\n{ENV}\npublic fn create<T>(v: T) -> Ready<T> {{ Ready {{ value: v }} }}")).parse_module().unwrap();
+    let source = Parser::new(&format!("module core.jobs;\n{ENV}\npublic type Token is {{ code: Int }}; public fn empty<T>() -> (Int, Ready<Maybe<T>>) {{ (0, Ready {{ value: Maybe.None }}) }} public fn create<T>(v: T) -> Ready<T> {{ Ready {{ value: v }} }}")).parse_module().unwrap();
     let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.jobs"));
     let library = producer.compile_module(&source).unwrap();
-    let probe = Parser::new("module app; async fn probe() -> Int { core.jobs.create(37).await }")
+    let probe = Parser::new("module app; type Token is { flag: Bool }; async fn probe() -> Int { let (_, rx) = core.jobs.empty<core.jobs.Token>(); let value: core.jobs.Maybe<core.jobs.Token> = rx.await; core.jobs.create(37).await }")
         .parse_module()
         .unwrap();
     // Use the same relocation pass as an archive-backed compilation before
