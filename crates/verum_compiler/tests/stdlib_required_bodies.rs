@@ -61,3 +61,23 @@ fn malformed_source_file_prevents_publication_of_its_siblings() {
     assert!(format!("{error:#}").contains("sibling.vr"), "{error:#}");
     assert!(!output.exists());
 }
+
+#[test]
+fn missing_file_mount_prevents_archive_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir(&core).unwrap();
+    let input = core.join("mod.vr");
+    fs::write(&input, "module core; mount ./missing.vr;").unwrap();
+    let output = root.path().join("runtime.vbca");
+    let mut session = Session::new(CompilerOptions {
+        input,
+        ..Default::default()
+    });
+    let error =
+        CompilationPipeline::new_core(&mut session, CoreConfig::new(&core).with_output(&output))
+            .compile_core()
+            .expect_err("required mount must resolve");
+    assert!(format!("{error:#}").contains("missing.vr"), "{error:#}");
+    assert!(!output.exists());
+}

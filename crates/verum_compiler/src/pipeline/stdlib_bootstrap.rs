@@ -146,109 +146,26 @@ impl<'s> CompilationPipeline<'s> {
         // ====================================================================
         //
 
-        // Before module-registry registration, walk every
-        // parsed module for `MountTreeKind::File` declarations
-        // (`mount ./helper.vr;`). For each, the resolver
-        // loads the referenced file via the loader's sandbox,
-        // parses it, and surfaces it as a synthetic module
-        // ready to be registered alongside its peers.
-        //
-
-        // This plugs file mounts into the existing
-        // module-path pipeline with zero new resolution
-        // codepaths — the synthesised module name (alias or
-        // file basename) becomes the canonical module-path
-        // identifier in the registry, and downstream import
-        // resolution treats it identically to any other
-        // module.
-        //
-
-        // Soft-fail strategy: file-mount resolution errors
-        // surface as warnings during stdlib bootstrap (no
-        // user-authored file mounts in core/ today, so any
-        // failure is a regression in our own infrastructure)
-        // and as hard errors during normal compilation.
-        if !modules_to_compile.is_empty() {
-            let mut resolver_seeds: Vec<(PathBuf, verum_ast::Module)> = Vec::new();
-            for (_mod_name, files) in &all_parsed_modules {
-                for (path, ast) in files {
-                    resolver_seeds.push((path.clone(), ast.clone()));
-                }
-            }
-            match verum_modules::file_mount::resolve_file_mounts(
-                &mut self.module_loader,
-                &resolver_seeds,
-                |source| {
-                    use verum_fast_parser::VerumParser;
-                    use verum_lexer::Lexer;
-                    let lexer = Lexer::new(source.source.as_str(), source.file_id);
-                    let parser = VerumParser::new();
-                    parser.parse_module(lexer, source.file_id).map_err(|errs| {
-                        let summary: String = errs
-                            .iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<_>>()
-                            .join("; ");
-                        verum_modules::error::ModuleError::Other {
-                            message: verum_common::Text::from(format!(
-                                "parse error in file mount `{}`: {}",
-                                source.file_path.display(),
-                                summary
-                            )),
-                            span: None,
-                        }
+        let seeds = all_parsed_modules.iter().flat_map(|(_, files)| files);
+        let resolved = verum_modules::file_mount::resolve_file_mounts(
+            &mut self.module_loader,
+            seeds,
+            |source| {
+                let lexer = verum_lexer::Lexer::new(source.source.as_str(), source.file_id);
+                verum_fast_parser::VerumParser::new()
+                    .parse_module(lexer, source.file_id)
+                    .map_err(|errors| verum_modules::error::ModuleError::Other {
+                        message: Text::from(format!(
+                            "parse error in file mount `{}`: {}",
+                            source.file_path.display(),
+                            errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "),
+                        )),
+                        span: None,
                     })
-                },
-            ) {
-                Ok(resolved) => {
-                    if !resolved.is_empty() && config.verbose {
-                        eprintln!(
-                            "Phase 1.25: Resolved {} file-relative mount(s)",
-                            resolved.len()
-                        );
-                    }
-                    // Each resolved file becomes its own
-                    // module entry in `all_parsed_modules`,
-                    // with the synthesised name acting as
-                    // the canonical module path. The
-                    // existing Phase 1.5 registration loop
-                    // picks them up uniformly.
-                    for entry in resolved {
-                        // Re-parse the source for AST
-                        // ownership — the parsed module from
-                        // the resolver callback is dropped.
-                        // (Cheap: the loader cached the read,
-                        // and parse is fast.)
-                        let lexer = verum_lexer::Lexer::new(entry.source.as_str(), entry.file_id);
-                        let parser = verum_fast_parser::VerumParser::new();
-                        let ast = match parser.parse_module(lexer, entry.file_id) {
-                            Ok(m) => m,
-                            Err(e) => {
-                                return Err(anyhow::anyhow!(
-                                    "Parse error re-parsing file mount `{}`: {:?}",
-                                    entry.absolute_path.display(),
-                                    e
-                                ));
-                            }
-                        };
-                        all_parsed_modules.push((
-                            entry.synthetic_name.clone(),
-                            vec![(entry.absolute_path.clone(), ast)],
-                        ));
-                    }
-                }
-                Err(e) => {
-                    // During stdlib bootstrap there should
-                    // be no file mounts; if there are, log
-                    // a clear warning rather than aborting
-                    // (defensive — keeps stdlib compilation
-                    // resilient to accidental mount syntax
-                    // sneaking into core/).
-                    if config.verbose {
-                        eprintln!("Phase 1.25: file-mount resolution warning: {}", e);
-                    }
-                }
-            }
+            },
+        ).map_err(|error| anyhow::anyhow!("resolving stdlib file mounts: {error}"))?;
+        for entry in resolved {
+            all_parsed_modules.push((entry.synthetic_name, vec![(entry.absolute_path, entry.module)]));
         }
 
         // ====================================================================

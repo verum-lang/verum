@@ -76,6 +76,8 @@ pub struct ResolvedFileMount {
     pub absolute_path: PathBuf,
     /// Source contents of the loaded file.
     pub source: Text,
+    /// Parsed once during traversal and transferred to the registry.
+    pub module: verum_ast::Module,
     /// Stable FileId allocated by the loader.
     pub file_id: verum_ast::FileId,
 }
@@ -83,9 +85,14 @@ pub struct ResolvedFileMount {
 impl ResolvedFileMount {
     /// Construct from a `ModuleSource` produced by
     /// `loader.load_file_mount`.
-    fn from_source(synthetic_name: String, source: ModuleSource) -> Self {
+    fn from_source(
+        synthetic_name: String,
+        source: ModuleSource,
+        module: verum_ast::Module,
+    ) -> Self {
         Self {
             synthetic_name,
+            module,
             absolute_path: source.file_path,
             source: source.source,
             file_id: source.file_id,
@@ -109,30 +116,34 @@ impl ResolvedFileMount {
 /// callback shape (rather than a hard dep on
 /// verum_fast_parser) keeps this module dep-light — callers
 /// that want a custom parser can plug it in.
-pub fn resolve_file_mounts<P>(
+pub fn resolve_file_mounts<'a, P>(
     loader: &mut ModuleLoader,
-    seeds: &[(PathBuf, verum_ast::Module)],
+    seeds: impl IntoIterator<Item = &'a (PathBuf, verum_ast::Module)>,
     mut parse_one: P,
 ) -> ModuleResult<Vec<ResolvedFileMount>>
 where
     P: FnMut(&ModuleSource) -> ModuleResult<verum_ast::Module>,
 {
     let mut output: Vec<ResolvedFileMount> = Vec::new();
-    // (importing-file path, AST to scan, depth).
-    let mut frontier: Vec<(PathBuf, verum_ast::Module, usize)> = seeds
-        .iter()
-        .map(|(path, ast)| (path.clone(), ast.clone(), 0))
-        .collect();
-    // Dedupe by absolute path so a diamond pattern doesn't
-    // re-parse the shared file.
-    let mut visited: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    for (path, _, _) in &frontier {
-        if let Ok(canonical) = std::fs::canonicalize(path) {
-            visited.insert(canonical);
+    // Only edges enter the worklist. In particular an ordinary dotted mount
+    // never needs a filesystem lookup or a copy of its containing syntax tree.
+    let mut frontier = Vec::new();
+    let mut seed_paths = Vec::new();
+    for (path, ast) in seeds {
+        seed_paths.push(path);
+        let edges = file_mount_edges(ast);
+        if !edges.is_empty() {
+            frontier.push((path.clone(), edges, 0));
         }
     }
-
-    while let Some((importing_path, ast, depth)) = frontier.pop() {
+    if frontier.is_empty() {
+        return Ok(output);
+    }
+    let mut visited: std::collections::HashSet<_> = seed_paths
+        .into_iter()
+        .filter_map(|path| std::fs::canonicalize(path).ok())
+        .collect();
+    while let Some((importing_path, edges, depth)) = frontier.pop() {
         if depth >= MAX_MOUNT_DEPTH {
             return Err(ModuleError::Other {
                 message: Text::from(format!(
@@ -143,27 +154,22 @@ where
                 span: None,
             });
         }
-        for item in ast.items.iter() {
-            let ItemKind::Mount(decl) = &item.kind else {
-                continue;
-            };
-            let MountTreeKind::File { path: rel_path, .. } = &decl.tree.kind else {
-                continue;
-            };
-            let synthetic_name = synth_module_name(decl, rel_path.as_str());
-
-            // Load + parse the referenced file.
+        for (rel_path, synthetic_name) in edges {
             let source = loader.load_file_mount(rel_path.as_str(), &importing_path)?;
-            let abs = source.file_path.clone();
-            if !visited.insert(abs.clone()) {
-                // Already seen — skip but keep walking the
-                // existing entry's mounts.
+            if !visited.insert(source.file_path.clone()) {
                 continue;
             }
             let parsed = parse_one(&source)?;
-
-            output.push(ResolvedFileMount::from_source(synthetic_name, source));
-            frontier.push((abs, parsed, depth + 1));
+            frontier.push((
+                source.file_path.clone(),
+                file_mount_edges(&parsed),
+                depth + 1,
+            ));
+            output.push(ResolvedFileMount::from_source(
+                synthetic_name,
+                source,
+                parsed,
+            ));
         }
     }
 
@@ -171,6 +177,22 @@ where
     // downstream ModuleId allocation is stable across runs.
     output.sort_by(|a, b| a.synthetic_name.cmp(&b.synthetic_name));
     Ok(output)
+}
+
+fn file_mount_edges(module: &verum_ast::Module) -> Vec<(Text, String)> {
+    module
+        .items
+        .iter()
+        .filter_map(|item| {
+            let ItemKind::Mount(decl) = &item.kind else {
+                return None;
+            };
+            let MountTreeKind::File { path, .. } = &decl.tree.kind else {
+                return None;
+            };
+            Some((path.clone(), synth_module_name(decl, path.as_str())))
+        })
+        .collect()
 }
 
 /// Derive a synthetic module name for a file mount. Alias
