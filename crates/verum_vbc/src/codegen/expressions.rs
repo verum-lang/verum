@@ -647,6 +647,47 @@ impl VbcCodegen {
         })
     }
 
+    fn pattern_declaration(&self, path: &str) -> Option<&FunctionInfo> {
+        if let Some((head, member)) = path.rsplit_once('.')
+            && !self.local_concrete_types.contains(head)
+            && let Some(mounted) = self.mounted_type_path(head)
+            && let Some(info) = self.ctx.lookup_qualified_function(&format!("{mounted}.{member}"))
+        {
+            return Some(info);
+        }
+        self.ctx.lookup_function_in_scope(path)
+    }
+
+    /// Resolve a qualified constructor within its named owner. Bare patterns may use the scrutinee.
+    fn pattern_variant_tag(&self, path: &str) -> Option<u32> {
+        if let Some((owner, member)) = path.rsplit_once('.') {
+            if let Some(descriptor) = self.nominal_type_id(owner).and_then(|id| self.type_by_id(id))
+                && descriptor.kind == crate::types::TypeKind::Sum
+                && !descriptor.variants.is_empty()
+            {
+                return self.descriptor_variant(descriptor, member).map(|variant| variant.tag);
+            }
+            // A module-qualified constructor may exist before its nominal descriptor does.
+            return self.pattern_declaration(path).and_then(|info| info.variant_tag);
+        }
+
+        let expected = self.ctx.match_scrutinee_type.as_deref()
+            .map(Self::strip_wrapper_type).map(Self::strip_generic_args);
+        expected.and_then(|owner| {
+            self.nominal_type_id(owner).and_then(|id| self.type_by_id(id))
+                .and_then(|descriptor| self.descriptor_variant(descriptor, path))
+                .map(|variant| variant.tag)
+                .or_else(|| self.ctx.find_variant_by_type_and_name(owner, path))
+                .or_else(|| self.ctx.find_variant_parent_type(owner)
+                    .and_then(|parent| self.ctx.find_variant_by_type_and_name(&parent, path)))
+        })
+        .or_else(|| self.ctx.lookup_function_in_scope(path).and_then(|info| info.variant_tag))
+        .or_else(|| {
+            let owner = self.ctx.variable_type_names.get("self")?;
+            self.ctx.find_variant_by_type_and_name(Self::strip_generic_args(owner), path)
+        })
+    }
+
     /// The scrutinee's nominal descriptor owns each payload slot. A known
     /// descriptor with an unresolved slot is distinct from absent metadata:
     /// callers must not replace the former with a sibling constructor cache.
@@ -19703,28 +19744,8 @@ impl VbcCodegen {
                     // arm). Constants from imported modules are parsed as Variant patterns
                     // because they start with uppercase letters. We detect them by checking
                     // if the function info has a __const_val_ intrinsic name.
-                    let const_value = self
-                        .ctx
-                        .lookup_function_in_scope(&variant_name)
-                        .or_else(|| self.ctx.lookup_function_in_scope(&dot_name))
-                        .or_else(|| {
-                            if let Some(simple) = variant_name.rsplit("::").next() {
-                                self.ctx.lookup_function_in_scope(simple)
-                            } else {
-                                None
-                            }
-                        })
+                    let const_value = self.pattern_declaration(&dot_name)
                         .and_then(Self::inline_scalar).transpose()?;
-
-                    // Guard: if the match scrutinee is a primitive Int, NEVER emit
-                    // a variant-tag check (`IsVar`). Even when the const_value lookup
-                    // fails (e.g. the constant isn't resolvable in this scope), the
-                    // IsVar codegen would treat the Int scrutinee as a sum-type
-                    // pointer and dereference it at offset 0x18 — SEGV at runtime.
-                    // For Int scrutinees, fall back to a literal-zero comparison
-                    // (which matches nothing) so the next arm runs. This is
-                    // strictly safer than emitting IsVar on a non-pointer value.
-                    // Tracked under #109.
                     let scrutinee_is_int =
                         self.ctx.match_scrutinee_type.as_deref().is_some_and(|t| {
                             let base = t.split('<').next().unwrap_or(t);
@@ -19759,178 +19780,13 @@ impl VbcCodegen {
                         });
                         self.ctx.free_temp(const_reg);
                     } else {
-                        // Regular variant — check tag
-                        //
-                        // **Scrutinee-aware-first** ordering (closes task #22
-                        // flat-variant tag drift):
-                        //
-                        // When `variant_name` is a simple unqualified form
-                        // (no `::` / no `.`) AND the surrounding match's
-                        // scrutinee type is known, prefer the
-                        // scrutinee-type-disambiguated lookup BEFORE the
-                        // bare-name `lookup_function(variant_name)` cascade.
-                        // Multiple stdlib types declare same-named
-                        // variants (`Ok` / `Err` across Result + IoError +
-                        // every fallible-effect carrier; `Some` / `None`
-                        // across Maybe + various option-shaped types; etc.).
-                        // The bare-name slot is first-wins under
-                        // `prefer_existing_functions` archive load, and the
-                        // FIRST-registered variant's tag may differ from
-                        // the scrutinee's parent type's tag for the same
-                        // simple name (Result.Err = 1 but if some other
-                        // type's Err with tag = 0 won the race, bare
-                        // lookup returns tag = 0, IsVar mis-fires).
-                        //
-                        // The pre-fix cascade tried bare lookup FIRST and
-                        // only consulted `match_scrutinee_type` as a
-                        // fallback when the bare lookup missed — a hit
-                        // (even on the wrong type's variant) short-
-                        // circuited the chain and committed to the wrong
-                        // tag.  Reordering means: if we know the
-                        // scrutinee type, that type's variant table is
-                        // authoritative for the variant name; only fall
-                        // through to bare lookup when scrutinee-aware
-                        // resolution has no answer.
-                        //
-                        // Mirrors the architectural pattern established
-                        // by task #21's `register_function_authoritative`
-                        // (user-bound binding wins over passive
-                        // archive-load) — here the scrutinee context is
-                        // the user-bound binding, the bare-name slot is
-                        // the passive race.
-                        let is_simple = !variant_name.contains("::") && !variant_name.contains('.');
-                        let scrutinee_first_tag: Option<u32> = if is_simple {
-                            if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
-                                let base_type =
-                                    scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
-                                self.ctx
-                                    .find_variant_by_type_and_name(base_type, &variant_name)
-                                    .or_else(|| {
-                                        let parent =
-                                            self.ctx.find_variant_parent_type(base_type);
-                                        parent.and_then(|p| {
-                                            self.ctx
-                                                .find_variant_by_type_and_name(&p, &variant_name)
-                                        })
-                                    })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-                        let owner_and_variant = dot_name.rsplit_once('.').or_else(|| {
-                            let scrutinee = Self::strip_wrapper_type(self.ctx.match_scrutinee_type.as_deref()?);
-                            Some((Self::strip_generic_args(scrutinee), dot_name.as_str()))
-                        });
-                        let declaration_tag = owner_and_variant
-                            .and_then(|(owner, variant)| {
-                                self.descriptor_variant(self.type_by_id(self.nominal_type_id(owner)?)?, variant)
-                            })
-                            .map(|v| v.tag);
-                        let tag = declaration_tag.or(scrutinee_first_tag)
-                            .or_else(|| {
-                                self.ctx
-                                    .lookup_function_in_scope(&variant_name)
-                                    .and_then(|info| info.variant_tag)
-                            })
-                            .or_else(|| {
-                                self.ctx
-                                    .lookup_function_in_scope(&dot_name)
-                                    .and_then(|info| info.variant_tag)
-                            })
-                            .or_else(|| {
-                                // Try simple name (last segment) for unqualified lookup
-                                if let Some(simple) = variant_name.rsplit("::").next() {
-                                    self.ctx
-                                        .lookup_function_in_scope(simple)
-                                        .and_then(|info| info.variant_tag)
-                                } else {
-                                    None
-                                }
-                            })
-                            .or_else(|| {
-                                // Simple name not found (likely in collision set).
-                                // Try qualified name using match scrutinee type if available.
-                                let simple =
-                                    variant_name.rsplit("::").next().unwrap_or(&variant_name);
-                                if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
-                                    // Strip generic arguments from scrutinee type
-                                    // (e.g., "Maybe<Int>" -> "Maybe") since variants are
-                                    // registered under the base type name without generics.
-                                    let base_type =
-                                        scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
-                                    // Try direct qualified lookup first
-                                    self.ctx
-                                        .find_variant_by_type_and_name(base_type, simple)
-                                        .or_else(|| {
-                                            // scrutinee_type might be a variant name itself
-                                            // (e.g., variable typed as "Done" instead of "State").
-                                            // Look up the parent type of the scrutinee_type variant.
-                                            let parent =
-                                                self.ctx.find_variant_parent_type(base_type);
-                                            parent.and_then(|p| {
-                                                self.ctx.find_variant_by_type_and_name(&p, simple)
-                                            })
-                                        })
-                                } else {
-                                    None
-                                }
-                            })
-                            .or_else(|| {
-                                // **Impl-self-type fallback** (closes the Maybe.cmp /
-                                // Result.cmp tag-drift bug): when the simple-name
-                                // cascade has fallen through every prior tier AND
-                                // `match_scrutinee_type` is None, but we are
-                                // compiling inside an `implement Trait for Type`
-                                // block, the impl's `self` type is the natural
-                                // disambiguator for variant lookup.  The
-                                // `compile_pattern_bind` for `match (self, other)
-                                // { (None, _) => …, … }` inside `Ord for Maybe<T>`
-                                // never propagates `Maybe` into
-                                // `match_scrutinee_type` for the outer tuple
-                                // scrutinee — `extract_expr_type_name(&Tuple)` has
-                                // no tuple-aware handler and returns `None`.
-                                //
-                                // Without this tier, the variant-lookup chain
-                                // bottoms out at the hash-of-name fallback below
-                                // (None → 144); the precompiled archive's
-                                // `Maybe.cmp` body emits `IsVar tag=144` and
-                                // runtime IsVar against a real Maybe value (tag
-                                // 0 or 1) never matches — the (Some, Some)
-                                // tail-arm fires on garbage payloads, surfacing
-                                // as "method 'cmp' not found on receiver of
-                                // runtime kind Float" because the recursive
-                                // `a.cmp(b)` call gets whatever bits ended up
-                                // in those registers.
-                                //
-                                // Reading `variable_type_names["self"]` recovers
-                                // the impl's nominal type (`extract_impl_type_name`
-                                // strips generics so the lookup name is `"Maybe"`,
-                                // which matches the variant-table key directly).
-                                // The qualified `<Type>.<Variant>` form was
-                                // already registered by `register_type_constructors`
-                                // — it was just the SIMPLE form that got wiped
-                                // by a subsequent collision; this tier picks up
-                                // the qualified entry that's still live.
-                                if let Some(self_type) =
-                                    self.ctx.variable_type_names.get("self")
-                                {
-                                    let base_type = self_type
-                                        .split('<')
-                                        .next()
-                                        .unwrap_or(self_type);
-                                    let simple = variant_name
-                                        .rsplit("::")
-                                        .next()
-                                        .unwrap_or(&variant_name);
-                                    self.ctx
-                                        .find_variant_by_type_and_name(base_type, simple)
-                                } else {
-                                    None
-                                }
-                            });
                         if scrutinee_is_int {
+                            if dot_name.contains('.') {
+                                return Err(CodegenError::with_span(
+                                    CodegenErrorKind::UnsupportedPattern(format!("unresolved scalar constant '{dot_name}'")),
+                                    pattern.span,
+                                ));
+                            }
                             // #109 guard: Int scrutinee + unresolved-constant arm.
                             // Compare against zero (which won't match any non-zero
                             // errno-style code) so dispatch falls through to the
@@ -19948,11 +19804,9 @@ impl VbcCodegen {
                                 b: zero_reg,
                             });
                             self.ctx.free_temp(zero_reg);
-                            // Skip the tag-payload pattern walk below; nothing to bind.
-
                             return Ok(());
                         }
-                        let tag = tag.ok_or_else(|| CodegenError::internal(format!(
+                        let tag = self.pattern_variant_tag(&dot_name).ok_or_else(|| CodegenError::internal(format!(
                             "no declared tag for variant pattern '{}' on {:?}",
                             variant_name, self.ctx.match_scrutinee_type
                         )))?;

@@ -8425,6 +8425,8 @@ impl VbcCodegen {
         self.alias_scope = Some(verum_ast::decl::locally_visible_type_names(
             module.items.as_slice(),
         ));
+        let owner = Self::resolve_full_module_path(module, &self.config.module_name)
+            .unwrap_or_else(|| self.config.module_name.clone());
         for item in module.items.iter() {
             if !self.should_compile_item(item) {
                 continue;
@@ -8432,6 +8434,11 @@ impl VbcCodegen {
             if let ItemKind::Type(type_decl) = &item.kind {
                 match self.declared_alias_target_name(type_decl) {
                     Some(target) => {
+                        let source_target = crate::module::qualify_module_name(&owner, &target);
+                        if self.type_name_to_id.contains_key(&source_target) {
+                            let alias = crate::module::qualify_module_name(&owner, type_decl.name.name.as_str());
+                            self.type_aliases.insert(alias, source_target);
+                        }
                         self.type_aliases
                             .entry(type_decl.name.name.to_string())
                             .or_insert(target);
