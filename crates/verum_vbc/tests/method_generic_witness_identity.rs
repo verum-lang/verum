@@ -518,3 +518,19 @@ fn probe() -> Int {
         .unwrap();
     assert_eq!(value.as_i64(), 9);
 }
+
+#[test]
+fn receiver_value_and_method_type_are_distinct_closure_witnesses() {
+    let produced = compile("type Cell<A, N: meta Int> is { value: A };
+        implement<A, N: meta Int> Cell<A, N> {
+            fn project<B>(&self, sample: B) -> Int { let read = || N; read() }
+        }
+        fn probe() -> Int { let c: Cell<Bool, 19> = Cell { value: true }; c.project<Int>(7) }");
+    let bytes = verum_vbc::serialize::serialize_module(&produced).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    let args = call(&module, "Cell.project");
+    assert_eq!(args, vec![TypeRef::Concrete(verum_vbc::types::TypeId::BOOL), TypeRef::ConstValue(19), TypeRef::Concrete(verum_vbc::types::TypeId::INT)]);
+    let entry = module.functions.iter().find(|f| module.get_string(f.name).unwrap().ends_with("probe")).unwrap().id;
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module)).execute_function(entry).unwrap();
+    assert_eq!(value.as_i64(), 19);
+}

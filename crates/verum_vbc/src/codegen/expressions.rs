@@ -8680,7 +8680,10 @@ impl VbcCodegen {
                     }
                     return None;
                 }
-                d.params.iter().map(|p| p.type_ref.clone()).collect()
+                d.params.iter().enumerate().map(|(index, param)| {
+                    d.semantic_parameter_types().and_then(|params| params.get(index))
+                        .and_then(Option::as_ref).unwrap_or(&param.type_ref).clone()
+                }).collect()
             } else if let Some(trs) = self.ctx.archive_fn_param_types.get(&func_id) {
                 // Bootstrap also retains semantic inputs, but a callback's
                 // semantic type O does not carry its declared fn(E) -> F bound.
@@ -8717,7 +8720,11 @@ impl VbcCodegen {
                         || info.return_type.as_ref().is_some_and(|ty| ty.is_generic())) {
                     return None;
                 }
-                trs.clone()
+                let semantic = self.ctx.semantic_fn_params.get(&crate::module::FunctionId(func_id));
+                trs.iter().enumerate().map(|(index, abi)| {
+                    semantic.and_then(|params| params.get(index)).and_then(Option::as_ref)
+                        .unwrap_or(abi).clone()
+                }).collect()
             } else if let Some(params) = self.ctx.semantic_fn_params.get(&crate::module::FunctionId(func_id)) {
                 // Deferred initializers can call a source declaration before
                 // its body is emitted. Its semantic signature already owns

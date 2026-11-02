@@ -10159,7 +10159,7 @@ impl VbcCodegen {
                             // and method resolution. We do NOT register by simple name to avoid
                             // collisions with standalone functions of the same name.
                             if let Some(ref ty_name) = type_name {
-                                self.register_declared_impl_function(func, &impl_decl.kind, ty_name, &self.resolve_impl_generics(impl_decl).0)?;
+                                self.register_declared_impl_function(func, &impl_decl.kind, ty_name, &self.resolve_impl_generics(impl_decl).2)?;
 
                                 // If this is a Drop impl and the function is named "drop",
                                 // record the drop function ID in the TypeDescriptor
@@ -13899,11 +13899,12 @@ impl VbcCodegen {
         impl_type_name: Option<&str>,
         fallback_generics: &[String],
     ) -> (std::collections::HashMap<String, u16>, std::collections::HashMap<String, u16>) {
-        let parent_names: Vec<String> = impl_type_name
-            .and_then(|name| self.type_name_to_id.get(name))
-            .and_then(|id| self.type_by_id(*id))
-            .map(|desc| desc.type_params.iter().filter_map(|p| self.ctx.strings.get(p.name.0 as usize).cloned()).collect())
-            .unwrap_or_default();
+        let parent_names: Vec<String> = impl_type_name.and_then(|name| {
+            self.ctx.type_generic_params.get(name).cloned().or_else(|| {
+                let descriptor = self.type_by_id(*self.type_name_to_id.get(name)?)?;
+                Some(descriptor.type_params.iter().filter_map(|p| self.ctx.strings.get(p.name.0 as usize).cloned()).collect())
+            })
+        }).unwrap_or_default();
         Self::declaration_generic_param_maps(func, &parent_names, fallback_generics)
     }
 
@@ -20187,14 +20188,13 @@ impl VbcCodegen {
             }
         }
 
-        let inherited_generics: Vec<String> = self.ctx.generic_type_params.iter().cloned().collect();
         let (mut caller_generics, caller_shadows) = self.function_generic_param_maps(
-            func, impl_type_name.map(|name| name.as_str()), &inherited_generics,
+            func, impl_type_name.map(|name| name.as_str()), &self.ctx.generic_type_params_ordered,
         );
         let receiver_generics = caller_generics.clone();
         let declared_ids: verum_common::List<_> = caller_generics.values()
             .chain(caller_shadows.values()).copied().map(crate::types::TypeParamId).collect();
-        caller_generics.extend(caller_shadows);
+        caller_generics.extend(caller_shadows.clone());
         self.ctx.current_generic_param_ids = caller_generics;
 
         // Add function's generic parameters to context for recognition in expressions.
@@ -20854,10 +20854,7 @@ impl VbcCodegen {
         // landed with `default: Heap`.  Result: `Maybe<Int>.unwrap_or(0)`
         // failed at user-code typecheck with `expected 'Heap',
         // found 'Int'`.
-        let fallback_generics: Vec<String> = self.ctx.generic_type_params.iter().cloned().collect();
-        let (method_generic_param_map, method_shadow_band) = self.function_generic_param_maps(
-            func, impl_type_name.map(|n| n.as_str()), &fallback_generics,
-        );
+        let (method_generic_param_map, method_shadow_band) = (receiver_generics, caller_shadows);
         let shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
         descriptor.explicit_type_param_ids = Self::explicit_generic_param_ids(
             func, &method_generic_param_map, &method_shadow_band,

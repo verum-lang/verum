@@ -1032,7 +1032,9 @@ one module and therefore never seeded",
                 for item in &ast.items {
                     if let ItemKind::Type(decl) = &item.kind {
                         let names = decl.generics.iter().filter_map(|p| match &p.kind {
-                            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.to_string()),
+                            verum_ast::ty::GenericParamKind::Type { name, .. }
+                            | verum_ast::ty::GenericParamKind::Const { name, .. }
+                            | verum_ast::ty::GenericParamKind::Meta { name, .. } => Some(name.name.to_string()),
                             _ => None,
                         }).collect();
                         owner_generics.entry(decl.name.name.to_string()).and_modify(|v| *v = None).or_insert(Some(names));
@@ -1297,7 +1299,9 @@ one module and therefore never seeded",
                                 .into_iter().filter(|name| parent_names.contains(name)).collect()
                         } else {
                             impl_decl.generics.iter().filter_map(|p| match &p.kind {
-                                verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.to_string()),
+                                verum_ast::ty::GenericParamKind::Type { name, .. }
+                                | verum_ast::ty::GenericParamKind::Const { name, .. }
+                                | verum_ast::ty::GenericParamKind::Meta { name, .. } => Some(name.name.to_string()),
                                 _ => None,
                             }).collect()
                         };
