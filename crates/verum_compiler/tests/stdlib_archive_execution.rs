@@ -213,6 +213,34 @@ fn execute_from_archive(source: &str) -> i64 {
 
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn composed_simplex_actions_execute_from_the_published_archive() {
+    let source = r#"
+        module app;
+        mount core.math.simplicial.{Simplex, simplex_standard};
+        mount core.math.infinity_category.{FunctorAction, compose_functors, identity_functor, functor_action};
+        mount core.math.examples.{PointSimplicialSet, IdentityInfinityFunctor};
+
+        fn main() -> Int {
+            let s = simplex_standard(2);
+            let add: FunctorAction<PointSimplicialSet, PointSimplicialSet> =
+                FunctorAction.from_map(|x: &Simplex| simplex_standard(x.dimension() + 1));
+            let twice: FunctorAction<PointSimplicialSet, PointSimplicialSet> =
+                FunctorAction.from_map(|x: &Simplex| simplex_standard(x.dimension() * 2));
+            let lifted = functor_action<PointSimplicialSet, PointSimplicialSet, IdentityInfinityFunctor>();
+            assert(lifted.preserves_faces(&s, 0));
+            assert(lifted.preserves_degeneracies(&s, 0));
+            assert(!add.preserves_faces(&s, 0));
+            assert(!add.preserves_degeneracies(&s, 0));
+            let identity = identity_functor<PointSimplicialSet>();
+            assert_eq(identity.apply(&s).dimension(), 2);
+            compose_functors(twice, add).apply(&s).dimension()
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 6);
+}
+
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn archived_function_ids_are_unique_within_each_module() {
     let path = std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("candidate .vbca");
     let archive = read_archive_from_file(path).unwrap();
