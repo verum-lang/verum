@@ -208,6 +208,9 @@ fn file_local_and_mounted_constructors_execute_with_their_declared_tags() {
     let sources = [
         "module first; public type A is Other | Clash(Int); fn first_probe() -> Int { let x = Clash(7); match x { A.Clash(v) => v, _ => -1 } }",
         "module second; public type B is Clash(Int) | Other; fn second_probe() -> Int { let x = Clash(9); match x { B.Clash(v) => v, _ => -2 } }",
+        "module holder; public type Register is Blank | Num(Int);",
+        "module elsewhere; public type Pair is Num(Int, Int) | Empty;",
+        "module machine; mount holder.Register; fn make_num() -> Int { let v = Num(23); match v { Register.Num(x) => x, _ => -4 } }",
         "module client; mount first.Clash; fn mounted_probe() -> Int { let x = Clash(17); match x { A.Clash(v) => v, _ => -3 } }",
     ];
     for reverse in [false, true] {
@@ -230,6 +233,7 @@ fn file_local_and_mounted_constructors_execute_with_their_declared_tags() {
             ("first.first_probe", 7, 1),
             ("second.second_probe", 9, 0),
             ("client.mounted_probe", 17, 1),
+            ("machine.make_num", 23, 1),
         ] {
             let id = decoded.find_function_by_name(entry).expect(entry);
             let body = module.functions.iter().find(|f| f.id == id).unwrap();

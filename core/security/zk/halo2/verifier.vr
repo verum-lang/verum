@@ -87,7 +87,7 @@ public fn verify(
         VerifyResult.PublicInputArity(e, g) => Result.Err(PublicInputArity { expected: e, got: g }),
         VerifyResult.MalformedProof(why)   => Result.Err(VerifierError.MalformedProof(why)),
         VerifyResult.MalformedInput(idx)   => Result.Err(MalformedPublicInput(idx)),
-        VerifyResult.SrsMismatch           => Result.Err(SrsMismatch),
+        VerifyResult.SrsMismatch           => Result.Err(VerifierError.SrsMismatch),
         VerifyResult.Backend(why)          => Result.Err(BackendError(why)),
     }
 }
@@ -112,7 +112,7 @@ public fn verify_batch(
         VerifyResult.PublicInputArity(e, g) => Result.Err(PublicInputArity { expected: e, got: g }),
         VerifyResult.MalformedProof(why)   => Result.Err(VerifierError.MalformedProof(why)),
         VerifyResult.MalformedInput(idx)   => Result.Err(MalformedPublicInput(idx)),
-        VerifyResult.SrsMismatch           => Result.Err(SrsMismatch),
+        VerifyResult.SrsMismatch           => Result.Err(VerifierError.SrsMismatch),
         VerifyResult.Backend(why)          => Result.Err(BackendError(why)),
     }
 }

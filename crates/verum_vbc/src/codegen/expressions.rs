@@ -11863,6 +11863,19 @@ impl VbcCodegen {
         if let [info] = visible.as_slice() {
             return Ok(Some(*info));
         }
+        // Bootstrap registers both the local spelling and the canonical
+        // spelling of a mounted type. These are the same constructor only
+        // when this source's mount names that declaration and every candidate
+        // is one of its two spellings.
+        for owner in &owners {
+            if !owner.contains(".")
+                && let Some(path) = self.mounted_type_path(owner.as_str())
+                && owners.iter().all(|other| other == owner || other.as_str() == path)
+                && let Some(info) = candidate(path)
+            {
+                return Ok(Some(info));
+            }
+        }
         if owners.len() < 2 {
             return Ok(owners
                 .first()
