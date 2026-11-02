@@ -1665,8 +1665,7 @@ pub use helpers::parse_descriptor_type_string;
 pub(crate) use helpers::{
     mount_tree_exports_name, resolve_builtin_meta_type, levenshtein_distance,
     expr_kind_description, type_kind_description, extract_quantity_from_attrs,
-    walk_stmt_for_qtt_usage, resolve_primitive_method, meta_value_to_literal,
-    make_maybe_type, span_to_line_col,
+    walk_stmt_for_qtt_usage, meta_value_to_literal, span_to_line_col,
     collect_named_types_from_module,
     register_variant_signature_for_lazy,
 };

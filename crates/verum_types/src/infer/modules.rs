@@ -42,7 +42,7 @@ use super::{
     span_to_line_col, levenshtein_distance,
     collect_inline_mount_reexports_recursive,
     mount_tree_exports_name, extract_quantity_from_attrs, walk_stmt_for_qtt_usage,
-    resolve_primitive_method, meta_value_to_literal,
+    meta_value_to_literal,
 };
 #[allow(unused_imports)]
 use std::time::Instant;
@@ -22767,26 +22767,30 @@ impl TypeChecker {
         }
 
 
-        let method_name_text = verum_common::Text::from(method.name.as_str());
         if let Some(r) = self.try_protocol_object_dispatch(&recv_ty, method, type_args, args, span)? {
             return Ok(r);
         }
 
 
-        // HARDCODED FALLBACK: Primitive method return types for Int/Float/Bool/Char/Byte.
-        // This is reached when inherent_methods (from stdlib .vr implement blocks) did
-        // not contain the method. In normal compilation with stdlib loaded, this should
-        // be dead code — all methods are registered via Pass 5 (register_impl_block).
-        // HARDCODE(#7): Remove once inherent_methods always has these signatures.
-        // This fallback is dead code when stdlib is fully loaded via Pass 5.
-        if let Some(return_ty) =
-            resolve_primitive_method(&recv_ty, &method_name_text, args.len())
-        {
-            // Type check args (primitives accept Int/Float/Bool args)
-            for arg in args.iter() {
-                let _ = self.synth_expr(arg)?;
+        // CBGR exposes epoch_caps() as an integer, including after assignment to a
+        // local. Its projections inspect bits without conferring a capability (T2144).
+        let packed_integer = match &recv_ty {
+            Type::Int => true,
+            Type::Named { path, args } if args.is_empty() => path.as_ident().is_some_and(|id| {
+                let name = id.name.as_str();
+                name != "Byte" && verum_common::well_known_types::type_names::is_integer_type(name)
+            }),
+            _ => false,
+        };
+        if packed_integer && args.is_empty() {
+            let result = match method.name.as_str() {
+                "epoch" | "raw" => Some(Type::Int),
+                "can_read" | "can_write" | "can_extend" | "is_unique" => Some(Type::Bool),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return Ok(InferResult::method(result, Some(crate::core_metadata::ReceiverKind::SelfValue)));
             }
-            return Ok(InferResult::method(return_ty, Some(crate::core_metadata::ReceiverKind::SelfValue)));
         }
 
         // A structural copy borrows its input. Only a checked layout can
@@ -24386,10 +24390,6 @@ impl TypeChecker {
             type_names_to_try.push(name);
         }
         type_names_to_try.extend(fallback_type_names);
-
-        // NOTE: resolve_primitive_method was previously called FIRST here, overriding stdlib.
-        // Now stdlib definitions take priority. The fallback at the end of method resolution
-        // still calls resolve_primitive_method for methods not yet covered by stdlib.
 
         // Track whether a method was found but rejected by specialization (for error reporting)
         let mut specialization_rejected = false;
@@ -26890,6 +26890,33 @@ bake to have this verified.",
                     }
                 }
 
+                // Scalar instance methods also support an explicit receiver, for example
+                // Int.min(a, b). Resolve the declaration before interpreting argument zero
+                // as self. Static functions have their normal precedence.
+                if verum_common::well_known_types::type_names::is_primitive_value_type(type_name)
+                    && let verum_ast::ty::PathSegment::Name(designator) = &path.segments[0]
+                    && let Some(owner) = self.ctx.lookup_type(type_name).cloned()
+                {
+                    if self.ctx.env.is_locally_bound_value(designator.name.as_str()) {
+                        return Ok(None);
+                    }
+                    self.lazy_load_receiver_methods(&owner);
+                    let has_instance = self.inherent_methods.read().get(&type_name_text)
+                        .is_some_and(|methods| {
+                            methods.contains_key(&method.name)
+                                && !methods.contains_key(&Text::from(format!("$static${method_name}")))
+                        });
+                    if has_instance {
+                        let Some((value, rest)) = args.split_first() else {
+                            return Err(self.arity_error(method.name.clone(), 1, 0, span));
+                        };
+                        self.check_expr(value, &owner)?;
+                        return self.infer_method_call_inner_impl(
+                            value, method, type_args, rest, span, Some(owner), true,
+                        ).map(Some);
+                    }
+                }
+
                 // Try to look up the qualified variant constructor or static method.
                 let mut env_resolved = false;
                 if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
@@ -27155,50 +27182,6 @@ bake to have this verified.",
                             let resolved_return =
                                 self.unifier.apply(&fresh_return);
                             return Ok(Some(InferResult::new(resolved_return)));
-                        }
-                    }
-
-                    // Fallback: Handle primitive type static method calls.
-                    // For example: Int.min(10, 20), Float.pi(), Int.default()
-                    // These are static calls where the receiver is a primitive type name.
-                    // We resolve them by converting to instance method calls on the primitive type.
-                    {
-                        let prim_ty = match type_name {
-                            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "UInt"
-                            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "Byte" => {
-                                Some(Type::Int)
-                            }
-                            "Float" | "Float32" | "Float64" => Some(Type::Float),
-                            "Bool" => Some(Type::Bool),
-                            "Char" => Some(Type::Char),
-                            "Text" => Some(Type::Text),
-                            _ => None,
-                        };
-                        if let Some(prim) = prim_ty {
-                            // Try as a static method: arg_count = args.len() (no self)
-                            // If resolve_primitive_method handles it with args.len() args, use that.
-                            // Otherwise try with args.len()-1 (first arg is "self").
-                            if let Some(result_ty) =
-                                resolve_primitive_method(&prim, method_name, args.len())
-                            {
-                                // Static method with all args as params
-                                for arg in args.iter() {
-                                    self.synth_expr(arg)?;
-                                }
-                                return Ok(Some(InferResult::new(result_ty)));
-                            }
-                            // Try treating first arg as self for instance-like statics
-                            // e.g., Int.min(10, 20) -> 10.min(20) where arg_count=1
-                            if !args.is_empty() {
-                                if let Some(result_ty) =
-                                    resolve_primitive_method(&prim, method_name, args.len() - 1)
-                                {
-                                    for arg in args.iter() {
-                                        self.synth_expr(arg)?;
-                                    }
-                                    return Ok(Some(InferResult::new(result_ty)));
-                                }
-                            }
                         }
                     }
 
