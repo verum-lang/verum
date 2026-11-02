@@ -18,6 +18,8 @@ use std::path::Path;
 
 #[path = "build_support/stdlib_cache.rs"]
 mod stdlib_cache;
+#[path = "build_support/bake_receipt.rs"]
+mod bake_receipt;
 
 
 /// BAKE-RACE-LOCK-1 (task #44): advisory inter-process lock for the stdlib
@@ -144,6 +146,17 @@ pub(crate) fn main() {
     let project_root = Path::new(&manifest_dir).parent().unwrap().parent().unwrap();
     let core_dir = project_root.join("core");
 
+    let producer_hasher =
+        stdlib_cache::producer_hasher(project_root, PRECOMPILE_SCHEMA_VERSION, |path| {
+            println!("cargo:rerun-if-changed={}", path.display());
+        });
+    let producer = producer_hasher.finalize().to_hex();
+    // This identity belongs to the compiled producer, even when invoked
+    // later from a different checkout or with a different source directory.
+    let target = env::var("TARGET").expect("Cargo target triple");
+    println!("cargo:rustc-env=VERUM_BAKE_PRODUCER={producer}");
+    println!("cargo:rustc-env=VERUM_BAKE_TARGET={target}");
+
     if !core_dir.exists() {
         // No core/ directory — skip embedding (for CI or minimal builds)
         let archive_path = Path::new(&out_dir).join("stdlib_archive.bin");
@@ -157,9 +170,9 @@ pub(crate) fn main() {
     }
 
     // Collect all .vr files
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-    collect_vr_files(&core_dir, &core_dir, &mut files);
-    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut files = bake_receipt::source_files(&core_dir).expect("read stdlib source inputs");
+    let source_digest =
+        bake_receipt::source_digests(files.iter().map(|(p, b)| (p.as_str(), b.as_slice())));
 
     // Drop files backing `@cfg(runtime = "embedded"|"none")` module
     // declarations from the DEFAULT bake (task #44 —
@@ -312,7 +325,7 @@ pub(crate) fn main() {
     //   1. Compute a content-addressed key. It is NOT blake3(core/**/*.vr)
     //      alone: the key also mixes in PRECOMPILE_SCHEMA_VERSION and a
     //      curated list of compiler source files (parser, VBC codegen,
-    //      intrinsic dispatch, well-known types) — see `compute_core_blake3`, which
+    //      intrinsic dispatch, well-known types) — see `stdlib_cache::producer_hasher`, which
     //      documents why. A Rust-side codegen change therefore invalidates
     //      the cache on purpose; describing the key as core/-only made a
     //      reader predict a cache HIT for exactly that edit.
@@ -360,7 +373,7 @@ pub(crate) fn main() {
 
     // COMPUTED UNCONDITIONALLY, and it must stay that way.
     //
-    // `compute_core_blake3` does two things: it derives the cache key, and it
+    // `stdlib_cache::producer_hasher` does two things: it derives the cache key, and it
     // emits the `cargo:rerun-if-changed` line for every path in the curated
     // list. The second is not part of the work the flag skips — it is the
     // CONTRACT stating when this script must run again.
@@ -383,7 +396,9 @@ pub(crate) fn main() {
     // (`target/debug/build/verum_compiler-*/output`): a normal run declared
     // 2564 paths, a run with the flag declared 2550 — the 13 curated codegen
     // paths plus the checksum file below, gone.
-    let current_hash = compute_core_blake3(&core_dir, &files);
+    let source_files = files.iter().map(|(path, bytes)| (path.as_str(), bytes.as_slice()));
+    let current_hash = stdlib_cache::finish_archive_key(producer_hasher, source_files)
+        .to_hex().to_string();
 
     // Same reasoning as above, for the same reason: a build that skipped the
     // refresh must still be re-run when a PEER build publishes a new archive,
@@ -391,15 +406,24 @@ pub(crate) fn main() {
     // the block below, so the skip dropped it too.
     println!("cargo:rerun-if-changed={}", checksum_path.display());
 
+    let inputs = bake_receipt::Inputs {
+        producer: &producer,
+        target: &target,
+        source: source_digest,
+    };
+    let receipt_path = bake_receipt::path(&precompile_archive);
+    if !auto_precompile_disabled || receipt_path.is_file() {
+        println!("cargo:rerun-if-changed={}", receipt_path.display());
+    }
+    let cache_matches = || {
+        fs::read_to_string(&checksum_path).is_ok_and(|hash| hash.trim() == current_hash)
+            && precompile_archive.with_extension("core_metadata").is_file()
+            && precompile_archive.with_extension("symbol_graph").is_file()
+            && inputs.verify_file(&precompile_archive).is_ok()
+    };
+
     if !auto_precompile_disabled {
-        let stored_hash = std::fs::read_to_string(&checksum_path)
-            .ok()
-            .map(|s| s.trim().to_string());
-        let needs_refresh = match &stored_hash {
-            Some(h) if h.as_str() == current_hash.as_str()
-                && precompile_archive.is_file() => false,
-            _ => true,
-        };
+        let needs_refresh = !cache_matches();
         if needs_refresh {
             // ── BAKE-RACE-LOCK-1 (task #44) ──────────────────────────────
             // Two hazards observed live (2026-07-11): (a) CONCURRENT builds
@@ -423,16 +447,7 @@ pub(crate) fn main() {
             let _ = std::fs::create_dir_all(&precompile_dir);
             let lock_acquired = acquire_bake_lock(&lock_path);
             // Double-checked refresh decision under the lock.
-            let still_needs_refresh = {
-                let stored_now = std::fs::read_to_string(&checksum_path)
-                    .ok()
-                    .map(|s| s.trim().to_string());
-                !matches!(
-                    &stored_now,
-                    Some(h) if h.as_str() == current_hash.as_str()
-                        && precompile_archive.is_file()
-                )
-            };
+            let still_needs_refresh = !cache_matches();
             if !still_needs_refresh {
                 println!(
                     "cargo:warning=Stdlib precompile: another build refreshed the artefacts while we waited on the bake lock (blake3 {}) — reusing",
@@ -528,13 +543,14 @@ pub(crate) fn main() {
                     // how the symbol-graph sidecar was lost on its first
                     // run (T0753) — the baker wrote it, the publish step
                     // did not know about it.
-                    let published = staged_vbca.is_file()
+                    let staged_receipt = bake_receipt::path(&staged_vbca);
+                    let published = inputs.verify_file(&staged_vbca).is_ok()
+                        && staged_graph.is_file()
                         && staged_meta.is_file()
                         && std::fs::rename(&staged_meta, &publish_meta).is_ok()
-                        && std::fs::rename(&staged_vbca, &precompile_archive).is_ok();
-                    if published && staged_graph.is_file() {
-                        let _ = std::fs::rename(&staged_graph, &publish_graph);
-                    }
+                        && std::fs::rename(&staged_vbca, &precompile_archive).is_ok()
+                        && std::fs::rename(&staged_graph, &publish_graph).is_ok()
+                        && std::fs::rename(staged_receipt, bake_receipt::path(&precompile_archive)).is_ok();
                     if published {
                         let _ = std::fs::create_dir_all(checksum_path.parent().unwrap());
                         let _ = std::fs::write(&checksum_path, &current_hash);
@@ -596,7 +612,11 @@ pub(crate) fn main() {
     if precompile_archive.is_file() {
         match fs::read(&precompile_archive) {
             Ok(bytes) => {
-                let _ = fs::write(&runtime_vbc_path, &bytes);
+                if !auto_precompile_disabled && !stale_stdlib_fallback_allowed() {
+                    inputs.verify(&precompile_archive, blake3::hash(&bytes))
+                        .expect("stdlib archive changed before embedding");
+                }
+                fs::write(&runtime_vbc_path, &bytes).expect("write verified stdlib archive");
                 println!(
                     "cargo:rustc-env=STDLIB_RUNTIME_VBC_PATH={}",
                     runtime_vbc_path.display()
@@ -1491,38 +1511,7 @@ fn parse_module_decl_name(trimmed: &str) -> Option<String> {
     }
 }
 
-fn collect_vr_files(dir: &Path, root: &Path, files: &mut Vec<(String, Vec<u8>)>) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                // Skip build-artifact directories. `core/target/test/` holds
-                // `*.merged.vr` files synthesized by the test harness
-                // (`synthesise_test_main_only`); baking them into the stdlib
-                // archive injects DUPLICATE function definitions (module path
-                // `core.target.test.*`) that shadow the fresh `@test` fns by
-                // leaf-name lookup with STALE bytecode — the root of
-                // HARNESS-FIDELITY #26 (e.g. atomic `match`-on-MemoryOrder
-                // returning the wrong arm). They are never stdlib sources.
-                if path.file_name().is_some_and(|n| n == "target") {
-                    continue;
-                }
-                collect_vr_files(&path, root, files);
-            } else if path.extension().is_some_and(|e| e == "vr") {
-                let relative = path
-                    .strip_prefix(root)
-                    .unwrap()
-                    .to_string_lossy()
-                    .to_string();
-                // Normalize to forward slashes for cross-platform consistency
-                let relative = relative.replace('\\', "/");
-                if let Ok(content) = fs::read(&path) {
-                    files.push((relative, content));
-                }
-            }
-        }
-    }
-}
+
 
 fn build_archive(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut archive = Vec::new();
@@ -2052,26 +2041,4 @@ fn assert_last_good_schema_compatible(checksum_path: &Path) {
         if last_good.is_empty() { "<unrecorded>" } else { last_good },
         PRECOMPILE_SCHEMA_VERSION,
     );
-}
-
-fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
-    let _ = core_dir;
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR is always set by cargo");
-    let project_root = std::path::Path::new(&manifest_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("crates/verum_compiler is always two levels below project root");
-    let mut sorted: Vec<&(String, Vec<u8>)> = files.iter().collect();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
-    stdlib_cache::compute_archive_key(
-        project_root,
-        PRECOMPILE_SCHEMA_VERSION,
-        sorted
-            .into_iter()
-            .map(|(path, bytes)| (path.as_str(), bytes.as_slice())),
-        |path| println!("cargo:rerun-if-changed={}", path.display()),
-    )
-    .to_hex()
-    .to_string()
 }

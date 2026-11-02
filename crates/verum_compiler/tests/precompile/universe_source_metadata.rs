@@ -447,6 +447,5 @@ fn frozen_stdlib_sidecars_pass_source_validation() {
     let archive = std::path::PathBuf::from(std::env::var_os("VERUM_TEST_FROZEN_STDLIB")
         .expect("explicit freshly baked stdlib archive required"));
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
-    super::write_core_metadata_alongside_archive(&archive, Some(&root), true).unwrap();
-    super::write_symbol_graph_alongside_archive(&archive, true).unwrap();
+    super::regenerate_stdlib_sidecars(&archive, &root, true).unwrap();
 }

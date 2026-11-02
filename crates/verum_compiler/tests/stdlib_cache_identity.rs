@@ -6,6 +6,9 @@
 mod build_script;
 #[path = "../build_support/stdlib_cache.rs"]
 mod stdlib_cache;
+#[allow(dead_code)]
+#[path = "../build_support/bake_receipt.rs"]
+mod bake_receipt;
 
 use std::{
     fs,
@@ -252,6 +255,7 @@ fn no_auto_still_reports_parser_dependencies_without_refreshing() {
             .env_remove("VERUM_ALLOW_STALE_STDLIB")
             .env(flag, value)
             .env(CHILD, "1")
+            .env("TARGET", env!("VERUM_BAKE_TARGET"))
             .env("PATH", root.path().join("no-executables"))
             .env("OUT_DIR", &output)
             .env("CARGO_MANIFEST_DIR", &manifest)
@@ -362,6 +366,15 @@ fn cargo_rechecks_auto_precompile_policy_on_environment_changes() {
         )
         .unwrap();
     }
+    let producer = stdlib_cache::producer_hasher(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, |_| {}).finalize().to_hex();
+    let inputs = bake_receipt::Inputs {
+        producer: producer.as_str(),
+        target: env!("VERUM_BAKE_TARGET"),
+        source: bake_receipt::source_digests(CORE.iter().copied()),
+    };
+    fs::write(cache.join("runtime.vbca.receipt"), inputs.encode(
+        blake3::hash(b"policy-control sentinel; not an archive")
+    )).unwrap();
     fs::write(
         cache.join("runtime.vbca.checksum"),
         expected_key.to_hex().as_str(),
@@ -536,5 +549,40 @@ fn main() {{
                 flag.is_none()
             );
         }
+    }
+}
+
+#[test]
+fn receipt_requires_the_producer_target_and_unambiguous_source_boundaries() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("runtime.vbca");
+    fs::write(&archive, b"archive bytes").unwrap();
+    let inputs = |producer, target, merged| {
+        let source = if merged {
+            bake_receipt::source_digests([("a.vr", b"x\0b.vr\0y".as_slice())])
+        } else {
+            bake_receipt::source_digests([("a.vr", b"x".as_slice()), ("b.vr", b"y".as_slice())])
+        };
+        bake_receipt::Inputs {
+            source,
+            producer,
+            target,
+        }
+    };
+    let original = inputs("producer-a", "first-target", false);
+    fs::write(
+        bake_receipt::path(&archive),
+        original.encode(blake3::hash(b"archive bytes")),
+    )
+    .unwrap();
+    original.verify_file(&archive).unwrap();
+    let merged = inputs("producer-a", "first-target", true);
+    assert_eq!(original.source.sdk, merged.source.sdk);
+    for mismatch in [
+        merged,
+        inputs("producer-b", "first-target", false),
+        inputs("producer-a", "second-target", false),
+    ] {
+        assert!(mismatch.verify_file(&archive).is_err());
     }
 }

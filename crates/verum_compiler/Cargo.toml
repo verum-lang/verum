@@ -70,11 +70,11 @@ hex = { workspace = true }
 # Content-addressed storage dependencies
 zstd = "0.13"
 filetime = "0.2"
+tempfile = "3.14"
 
 [dev-dependencies]
 proptest = { workspace = true }
 criterion = { workspace = true }
-tempfile = "3.14"
 
 [[bench]]
 name = "compilation_regression"

@@ -4,12 +4,22 @@
 
 use std::path::Path;
 
+#[cfg(test)]
 pub(crate) fn compute_archive_key<'a>(
     project_root: &Path,
     schema: &str,
     sorted_core_files: impl IntoIterator<Item = (&'a str, &'a [u8])>,
-    mut report_dependency: impl FnMut(&Path),
+    report_dependency: impl FnMut(&Path),
 ) -> blake3::Hash {
+    let producer = producer_hasher(project_root, schema, report_dependency);
+    finish_archive_key(producer, sorted_core_files)
+}
+
+pub(crate) fn producer_hasher(
+    project_root: &Path,
+    schema: &str,
+    mut report_dependency: impl FnMut(&Path),
+) -> blake3::Hasher {
     let mut hasher = blake3::Hasher::new();
     // Mix the schema-version tag in first so any wire-format bump
     // forces a full re-precompile even when source hasn't changed.
@@ -129,6 +139,8 @@ pub(crate) fn compute_archive_key<'a>(
         // archive did not, and the "green" bake had verified nothing.
         "crates/verum_compiler/src/pipeline/refinement_verify.rs",
         "crates/verum_compiler/src/precompile.rs",
+        "crates/verum_compiler/build_support/stdlib_cache.rs",
+        "crates/verum_compiler/build_support/bake_receipt.rs",
         "crates/verum_compiler/src/archive_metadata.rs",
         // The bootstrap compiler itself. `stdlib_bootstrap.rs` parses every
         // `core/` file, decides which declarations survive to registration,
@@ -243,6 +255,13 @@ pub(crate) fn compute_archive_key<'a>(
             }
         }
     }
+    hasher
+}
+
+pub(crate) fn finish_archive_key<'a>(
+    mut hasher: blake3::Hasher,
+    sorted_core_files: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+) -> blake3::Hash {
     hasher.update(b"core:");
     for (rel_path, bytes) in sorted_core_files {
         // Path-prefix the content to avoid two files swapping

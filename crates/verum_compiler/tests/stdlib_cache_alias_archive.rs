@@ -80,3 +80,54 @@ fn generic_parameter_aliases_survive_the_actual_bootstrap_archive() {
     assert_eq!(marker.variants.len(), 1);
     assert_eq!(module.get_string(marker.variants[0].name), Some("T"));
 }
+
+#[test]
+fn source_attested_sidecars_require_the_exact_full_bake() {
+    use verum_compiler::precompile::{
+        PrecompileConfig, precompile_stdlib, regenerate_stdlib_sidecars,
+    };
+    use verum_vbc::archive::{ArchiveFlags, read_archive_from_file, write_archive_to_file};
+
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().join("core");
+    std::fs::create_dir(&root).unwrap();
+    let original = "public fn value() -> Int { 41 }";
+    std::fs::write(root.join("mod.vr"), original).unwrap();
+    let archive = fixture.path().join("runtime.vbca");
+    precompile_stdlib(&PrecompileConfig {
+        stdlib_path: root.clone(),
+        output_path: archive.clone(),
+        target_triple: None,
+        verbose: false,
+    })
+    .unwrap();
+    regenerate_stdlib_sidecars(&archive, &root, false).expect("source and original VBC");
+
+    let metadata = archive.with_extension("core_metadata");
+    std::fs::write(&metadata, b"preserve on refusal").unwrap();
+    let refused = || {
+        let error = regenerate_stdlib_sidecars(&archive, &root, false).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("matching full bake"),
+            "{error:#}"
+        );
+        assert_eq!(std::fs::read(&metadata).unwrap(), b"preserve on refusal");
+    };
+    std::fs::write(root.join("mod.vr"), "public fn value() -> Int { 42 }").unwrap();
+    refused();
+    std::fs::write(root.join("mod.vr"), original).unwrap();
+
+    let receipt = archive.with_added_extension("receipt");
+    let contents = std::fs::read(&receipt).unwrap();
+    std::fs::remove_file(&receipt).unwrap();
+    refused();
+    std::fs::write(&receipt, contents).unwrap();
+    let mut replacement = read_archive_from_file(&archive).unwrap();
+    replacement
+        .header
+        .flags
+        .toggle(ArchiveFlags::STRIP_FIELD_NAMES);
+    write_archive_to_file(&replacement, &archive).unwrap();
+    read_archive_from_file(&archive).expect("replacement is a valid, different archive");
+    refused();
+}

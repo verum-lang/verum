@@ -26,6 +26,9 @@ use crate::options::CompilerOptions;
 use crate::pipeline::CompilationPipeline;
 use crate::session::Session;
 
+#[path = "../build_support/bake_receipt.rs"]
+mod bake_receipt;
+
 /// Configuration for the [`precompile_stdlib`] entry point.
 #[derive(Debug, Clone)]
 pub struct PrecompileConfig {
@@ -35,10 +38,7 @@ pub struct PrecompileConfig {
     /// Output `.vbca` path. Phase-5 build-script consumers expect
     /// `target/precompiled-stdlib/runtime.vbca` by default.
     pub output_path: PathBuf,
-    /// Optional target-triple override. `None` = host triple. Phase
-    /// 4b will read this and emit per-target variants for cfg-
-    /// conditional functions; today the value is recorded in the
-    /// archive header but selection is host-only.
+    /// Optional requested target. The current producer emits its own target only.
     pub target_triple: Option<String>,
     /// Verbose progress reporting.
     pub verbose: bool,
@@ -103,13 +103,31 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
     }
 
     if let Some(parent) = cfg.output_path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create output directory {}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory {}", parent.display()))?;
     }
 
-    let core_config = CoreConfig::new(cfg.stdlib_path.clone())
-        .with_output(cfg.output_path.clone());
+    let target = env!("VERUM_BAKE_TARGET");
+    if cfg
+        .target_triple
+        .as_deref()
+        .is_some_and(|requested| requested != target)
+    {
+        anyhow::bail!(
+            "stdlib bytecode generation targets {target}; requested {:?}",
+            cfg.target_triple
+        );
+    }
+    let parent = cfg
+        .output_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let stage = tempfile::tempdir_in(parent)?;
+    let source = stage.path().join("core");
+    let inputs = snapshot_bake_inputs(&cfg.stdlib_path, &source)?;
+    let staged_archive = stage.path().join("runtime.vbca");
+    let core_config = CoreConfig::new(source.clone()).with_output(staged_archive.clone());
     let core_config = if cfg.verbose {
         let mut c = core_config;
         c.verbose = true;
@@ -122,7 +140,7 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
     // `CompilerOptions` defaults are sufficient.
     let mut session = Session::new(CompilerOptions::default());
     let mut pipeline = CompilationPipeline::new_core(&mut session, core_config);
-    let result = pipeline
+    let mut result = pipeline
         .compile_core()
         .context("CompilationPipeline::compile_core failed during stdlib precompile")?;
 
@@ -153,18 +171,38 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
     // stdlib `.vr` (568 files) with the full parser to recover
     // them.  That fallback alone was burning ~250ms of cold-start
     // typecheck time on hello-world.
+    if !result.errors.is_empty() {
+        anyhow::bail!(
+            "stdlib bytecode generation reported {} errors",
+            result.errors.len()
+        );
+    }
+    let archive_bytes = std::fs::read(&staged_archive)?;
+    let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(&archive_bytes))?;
     write_core_metadata_alongside_archive(
-        &result.output_path,
-        Some(&cfg.stdlib_path),
+        &staged_archive,
+        &archive,
+        &source,
+        inputs.source.sdk,
         cfg.verbose,
     )?;
-
-    // T0753: the archive's own call-graph index.  Every compiler start
-    // used to rebuild it by decoding all 590 entries and disassembling
-    // every body — 350–810 ms and most of a ~700 MB peak, for an answer
-    // that depends only on the archive.  Written here, read as bytes.
-    write_symbol_graph_alongside_archive(&result.output_path, cfg.verbose)?;
-
+    write_symbol_graph_alongside_archive(&staged_archive, &archive, cfg.verbose)?;
+    std::fs::write(
+        bake_receipt::path(&staged_archive),
+        inputs.encode(blake3::hash(&archive_bytes)),
+    )?;
+    for ext in ["core_metadata", "symbol_graph"] {
+        std::fs::rename(
+            staged_archive.with_extension(ext),
+            cfg.output_path.with_extension(ext),
+        )?;
+    }
+    std::fs::rename(&staged_archive, &cfg.output_path)?;
+    std::fs::rename(
+        bake_receipt::path(&staged_archive),
+        bake_receipt::path(&cfg.output_path),
+    )?;
+    result.output_path = cfg.output_path.clone();
     Ok(result)
 }
 
@@ -175,19 +213,15 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
 /// a bake that silently ships without its index produces a compiler
 /// that is correct and slow, which is exactly the failure this task
 /// exists to stop shipping unnoticed.
-fn write_symbol_graph_alongside_archive(archive_path: &Path, verbose: bool) -> Result<()> {
-    let archive = verum_vbc::archive::read_archive_from_file(archive_path)
-        .with_context(|| {
-            format!(
-                "read freshly-written archive {} for symbol-graph extraction",
-                archive_path.display()
-            )
-        })?;
-    let baked = crate::archive_ctx_loader::SymbolGraph::scan_and_encode(&archive);
+fn write_symbol_graph_alongside_archive(
+    archive_path: &Path,
+    archive: &verum_vbc::archive::VbcArchive,
+    verbose: bool,
+) -> Result<()> {
+    let baked = crate::archive_ctx_loader::SymbolGraph::scan_and_encode(archive);
     let out_path = archive_path.with_extension("symbol_graph");
-    std::fs::write(&out_path, baked.as_bytes()).with_context(|| {
-        format!("write symbol graph sidecar {}", out_path.display())
-    })?;
+    std::fs::write(&out_path, baked.as_bytes())
+        .with_context(|| format!("write symbol graph sidecar {}", out_path.display()))?;
     if verbose {
         eprintln!(
             "verum stdlib precompile: symbol graph {} functions / {} entries, {:.1} KB -> {}",
@@ -211,22 +245,14 @@ fn write_symbol_graph_alongside_archive(archive_path: &Path, verbose: bool) -> R
 /// requires this sidecar to land on disk.
 fn write_core_metadata_alongside_archive(
     archive_path: &Path,
-    stdlib_source_root: Option<&Path>,
+    archive: &verum_vbc::archive::VbcArchive,
+    root: &Path,
+    source_hash: blake3::Hash,
     verbose: bool,
 ) -> Result<()> {
-    // Archive uses the verum_vbc custom binary format (with `write_archive`
-    // / `read_archive`), not bincode — so use the canonical reader.
-    let archive = verum_vbc::archive::read_archive_from_file(archive_path)
-        .with_context(|| {
-            format!(
-                "read freshly-written archive {} for metadata extraction",
-                archive_path.display()
-            )
-        })?;
-
-    let mut metadata = crate::archive_metadata::archive_to_core_metadata(&archive)
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
-    if let Some(root) = stdlib_source_root {
+    let metadata = {
+        let mut metadata = crate::archive_metadata::archive_to_core_metadata(archive)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
         let (names, decl_nodes, declaring_modules) = scan_context_declarations(root);
         metadata.context_declarations = names;
         metadata.context_declaring_modules = declaring_modules;
@@ -264,7 +290,7 @@ fn write_core_metadata_alongside_archive(
         // schema-version salt — the SDK is the *source*, not the
         // archive, so its identity is invariant under compiler
         // upgrades.
-        metadata.content_hash = compute_source_blake3_for_root(root);
+        metadata.content_hash = *source_hash.as_bytes();
 
         // Task #20 — populate `module_reexports` from each .vr file's
         // `public mount X.{...}` declarations so user-compile's
@@ -345,7 +371,8 @@ fn write_core_metadata_alongside_archive(
         // implements `Eq` fails MethodNotFound despite the default
         // declaration on PartialEq.
         scan_protocol_supers(&mut metadata, root, verbose);
-    }
+        metadata
+    };
     // Re-export expansion and source signature injection both change the published
     // surface. Validate the finished table with the compiler's actual module loader.
     let registry = verum_modules::ModuleRegistry::new();
@@ -382,77 +409,53 @@ fn write_core_metadata_alongside_archive(
     Ok(())
 }
 
-/// Walks the stdlib source tree (recursive) for `.vr` files and
-/// extracts every public `context Name { ... }` /
-/// `context protocol Name { ... }` declaration.  Returns BOTH the
-/// names list AND the full `ContextDecl` AST nodes, so the runtime
-/// fast-path can register full method signatures via
-/// `register_stdlib_context_full` without re-parsing source.
-///
-/// Cheap quick-filter (`.contains("public context ")`) gates the
-/// expensive full parse — only files with at least one stdlib
-/// context get parsed.  Spans are preserved as-emitted (parser
-/// produces FileId(0) + dummy ranges in this isolated context),
-/// which keeps the bincode payload reproducible across precompile
-/// invocations.
-///
-/// #104 — Compute the blake3-32 source-tree hash for `core/`,
-/// matching the convention used by `verum stdlib install`'s
-/// `compute_source_blake3`.  Path-prefixed, byte-content-hashed,
-/// sorted lexicographically; **no schema-version salt** because
-/// the SDK is the *source* (compiler-version-invariant), not the
-/// precompile artefact.
-///
-/// Stored in `CoreMetadata.content_hash` so `SdkLookup::find` can
-/// derive the expected on-disk install prefix from the binary's
-/// embedded metadata.
-fn compute_source_blake3_for_root(root: &Path) -> [u8; 32] {
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let p = entry.path();
-            // Skip `target/` trees — codegen/test-harness output, not
-            // stdlib source.  Sweeping them poisoned the precompile:
-            // `core/target/test/*.merged.vr` harness residue compiled
-            // as if it were stdlib (garbage type-context, 355 of the
-            // 580 FIELD-INTERN fallbacks) and perturbed the content
-            // hash on every test run (cache thrash).
-            if p.file_name().and_then(|n| n.to_str()) == Some("target") {
-                continue;
-            }
-            if p.is_dir() {
-                walk(root, &p, out);
-                continue;
-            }
-            if p.extension().and_then(|e| e.to_str()) != Some("vr") {
-                continue;
-            }
-            let rel = match p.strip_prefix(root) {
-                Ok(r) => r.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
-            };
-            let bytes = match std::fs::read(&p) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            out.push((rel, bytes));
-        }
+/// Capture the sorted source bytes under the SDK path-prefixed BLAKE3 convention.
+fn snapshot_bake_inputs(root: &Path, snapshot: &Path) -> Result<bake_receipt::Inputs<'static>> {
+    // All compiler and metadata passes read this same private snapshot. Editing
+    // a source during a long bake cannot rebind its bytecode to different bytes.
+    let files = bake_receipt::source_files(root)?;
+    let source =
+        bake_receipt::source_digests(files.iter().map(|(p, b)| (p.as_str(), b.as_slice())));
+    for (name, bytes) in files {
+        let path = snapshot.join(name);
+        std::fs::create_dir_all(path.parent().context("invalid source path")?)?;
+        std::fs::write(path, bytes)?;
     }
-    walk(root, root, &mut files);
-    files.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(bake_receipt::Inputs {
+        producer: env!("VERUM_BAKE_PRODUCER"),
+        target: env!("VERUM_BAKE_TARGET"),
+        source,
+    })
+}
 
-    let mut hasher = blake3::Hasher::new();
-    for (rel, bytes) in &files {
-        hasher.update(rel.as_bytes());
-        hasher.update(b"\0");
-        hasher.update(bytes);
-        hasher.update(b"\0");
+/// Regenerate source-attested sidecars only from the bytecode and inputs
+/// recorded by the full producer. Legacy archives remain readable.
+pub fn regenerate_stdlib_sidecars(
+    archive_path: &Path,
+    source_root: &Path,
+    verbose: bool,
+) -> Result<()> {
+    let parent = archive_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let stage = tempfile::tempdir_in(parent)?;
+    let source = stage.path().join("core");
+    let inputs = snapshot_bake_inputs(source_root, &source)?;
+    let bytes = std::fs::read(archive_path)?;
+    let digest = blake3::hash(&bytes);
+    inputs
+        .verify(archive_path, digest)
+        .context("cannot regenerate source-attested sidecars; a matching full bake is required")?;
+    let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes))?;
+    let staged = stage.path().join("runtime.vbca");
+    write_core_metadata_alongside_archive(&staged, &archive, &source, inputs.source.sdk, verbose)?;
+    write_symbol_graph_alongside_archive(&staged, &archive, verbose)?;
+    inputs.verify_file(archive_path)?;
+    for ext in ["core_metadata", "symbol_graph"] {
+        std::fs::rename(staged.with_extension(ext), archive_path.with_extension(ext))?;
     }
-    *hasher.finalize().as_bytes()
+    Ok(())
 }
 
 /// Result names ordered via BTreeSet for deterministic output;
