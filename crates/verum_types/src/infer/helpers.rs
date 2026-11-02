@@ -1835,6 +1835,39 @@ mod build_metadata_function_scheme_tests {
 /// blobs that never unify with `Type::Generic { name: "IoResult",
 /// args: [Type::Named { Metadata }] }` at call sites.
 pub fn parse_descriptor_type_string(raw: &str) -> Type {
+    parse_descriptor_type(raw, &|name| name.into())
+}
+
+/// Interpret erased ABI spellings in the signature owner's scope. Identical
+/// protocol leaves from different modules must remain distinct under wrappers.
+pub(super) fn parse_function_descriptor_type(
+    raw: &str,
+    function: &crate::core_metadata::FunctionDescriptor,
+    metadata: &crate::core_metadata::CoreMetadata,
+) -> Type {
+    let owner = function.origin_module_path.as_ref().filter(|name| !name.is_empty())
+        .unwrap_or(&function.module_path);
+    parse_descriptor_type(raw, &|name| {
+        let local = verum_common::qualified_name::qualify_module_name(owner, name);
+        if TypeChecker::metadata_type_with_declaring_key(metadata, &local)
+            .is_some_and(|ty| matches!(ty.kind, crate::core_metadata::TypeDescriptorKind::Protocol { .. }))
+        {
+            return local;
+        }
+        let (head, tail) = name.split_once('.').unwrap_or((name, ""));
+        if let Some(bindings) = metadata.declaration_type_bindings.get(owner)
+            && let Some(Some(target)) = bindings.get(&Text::from(head))
+        {
+            return if tail.is_empty() { target.clone() } else { format!("{target}.{tail}").into() };
+        }
+        // Even legacy metadata without a mount scope must not bind a bare
+        // name to an unrelated protocol in the consumer.
+        if name.contains('.') { name.into() } else { local }
+    })
+}
+
+fn parse_descriptor_type(raw: &str, resolve_bound: &impl Fn(&str) -> Text) -> Type {
+    let parse = |nested: &str| parse_descriptor_type(nested, resolve_bound);
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "()" {
         return Type::Unit;
@@ -1890,8 +1923,9 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
         if let Some(body) = dyn_body {
             let bounds: List<Text> = body
                 .split('+')
-                .map(|b| Text::from(b.trim()))
-                .filter(|b| !b.is_empty())
+                .map(str::trim)
+                .filter(|bound| !bound.is_empty())
+                .map(resolve_bound)
                 .collect();
             if !bounds.is_empty() {
                 return Type::DynProtocol {
@@ -1908,25 +1942,25 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
     // "&unsafe T" strips to a garbage `Named { "unsafe T" }`.
     if let Some(rest) = trimmed.strip_prefix("&unsafe mut ") {
         return Type::UnsafeReference {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: true,
         };
     }
     if let Some(rest) = trimmed.strip_prefix("&unsafe ") {
         return Type::UnsafeReference {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: false,
         };
     }
     if let Some(rest) = trimmed.strip_prefix("&checked mut ") {
         return Type::CheckedReference {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: true,
         };
     }
     if let Some(rest) = trimmed.strip_prefix("&checked ") {
         return Type::CheckedReference {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: false,
         };
     }
@@ -1939,25 +1973,25 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
     // workaround (prelude does not seed the volatile names).
     if let Some(rest) = trimmed.strip_prefix("*mut ") {
         return Type::Pointer {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: true,
         };
     }
     if let Some(rest) = trimmed.strip_prefix("*const ") {
         return Type::Pointer {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: false,
         };
     }
     if let Some(rest) = trimmed.strip_prefix("&mut ") {
         return Type::Reference {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: true,
         };
     }
     if let Some(rest) = trimmed.strip_prefix('&') {
         return Type::Reference {
-            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            inner: Box::new(parse(rest.trim_start())),
             mutable: false,
         };
     }
@@ -1972,11 +2006,11 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
         // A single part with no top-level comma is a PARENTHESISED
         // type, not a 1-tuple — parse the inner type transparently.
         if parts.len() == 1 {
-            return parse_descriptor_type_string(parts[0].trim());
+            return parse(parts[0].trim());
         }
         let elems: List<Type> = parts
             .into_iter()
-            .map(|p| parse_descriptor_type_string(p.trim()))
+            .map(|p| parse(p.trim()))
             .collect();
         return Type::Tuple(elems);
     }
@@ -1996,7 +2030,7 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
             _ => inner,
         };
         return Type::Slice {
-            element: Box::new(parse_descriptor_type_string(elem_text.trim())),
+            element: Box::new(parse(elem_text.trim())),
         };
     }
     // **Function-type spelling** (`fn(arg1, arg2, ...) -> ret`) — must
@@ -2059,7 +2093,7 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
                 if !names.is_empty() {
                     let spelling = format!("fn{}", body_text);
                     let (vars, body) = with_rank2_binders(&names, || {
-                        parse_descriptor_type_string(&spelling)
+                        parse(&spelling)
                     });
                     return Type::Forall {
                         vars,
@@ -2096,13 +2130,13 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
             } else {
                 split_top_level_commas(args_text)
                     .into_iter()
-                    .map(|s| parse_descriptor_type_string(s.trim()))
+                    .map(|s| parse(s.trim()))
                     .collect()
             };
             let return_type = if ret_text.is_empty() {
                 Type::Unit
             } else {
-                parse_descriptor_type_string(ret_text)
+                parse(ret_text)
             };
             return Type::Function {
                 params,
@@ -2140,7 +2174,7 @@ pub fn parse_descriptor_type_string(raw: &str) -> Type {
             let inside = &trimmed[open + 1..trimmed.len() - 1];
             let args = split_top_level_commas(inside)
                 .into_iter()
-                .map(|s| parse_descriptor_type_string(s.trim()))
+                .map(|s| parse(s.trim()))
                 .collect();
             // Associated-type projection spelling `::Assoc<Base>` (emitted by
             // `archive_metadata::type_ref_to_text` for `TypeRef::AssociatedProjection`).

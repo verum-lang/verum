@@ -3157,8 +3157,8 @@ impl TypeChecker {
                                     .params
                                     .iter()
                                     .map(|p| {
-                                        let t = parse_descriptor_type_string(
-                                            p.ty.as_str(),
+                                        let t = super::helpers::parse_function_descriptor_type(
+                                            p.ty.as_str(), fd, metadata,
                                         );
                                         if !p.declared_ty.is_empty()
                                             && fd
@@ -3175,7 +3175,7 @@ impl TypeChecker {
                                     })
                                     .collect();
                                 let return_ty =
-                                    parse_descriptor_type_string(fd.return_type.as_str());
+                                    super::helpers::parse_function_descriptor_type(fd.return_type.as_str(), fd, metadata);
                                 (params, return_ty, hof_reconnect)
                             })
                         },
@@ -3358,7 +3358,7 @@ impl TypeChecker {
             // naive `Type::Named { path: "IoResult<Metadata>" }`
             // would never unify with the call-site
             // `Type::Generic { name: "IoResult", args: [Metadata] }`.
-            let to_type = |s: &Text| -> Type { parse_descriptor_type_string(s.as_str()) };
+            let to_type = |s: &Text| super::helpers::parse_function_descriptor_type(s, fn_desc, metadata);
             // Skip the `self` receiver parameter when present.  VBC
             // stores method descriptors with the receiver as the
             // first parameter (named `"self"`) but its `type_ref`

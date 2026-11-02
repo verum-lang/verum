@@ -96,7 +96,10 @@ impl VbcCodegen {
                 name: StringId(self.intern_string(&info.param_names[index])),
                 type_ref,
                 type_name: declared
-                    .map(|ty| StringId(self.intern_string(&Self::extract_type_name_from_ast(ty))))
+                    .map(|ty| {
+                        let name = Self::render_scheme_type_name(ty, &|path| self.declared_dyn_path(path));
+                        StringId(self.intern_string(&name))
+                    })
                     .unwrap_or(StringId::EMPTY),
                 ..Default::default()
             });

@@ -7974,7 +7974,7 @@ impl TypeChecker {
         }
 
         if fd.is_const {
-            let ty = crate::infer::helpers::parse_descriptor_type_string(fd.return_type.as_str());
+            let ty = crate::infer::helpers::parse_function_descriptor_type(fd.return_type.as_str(), &fd, &metadata);
             let owner = fd.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
                 .unwrap_or(&fd.module_path);
             let key = verum_common::qualified_name::qualify_module_name(owner, fd.name.as_str());
@@ -7982,7 +7982,7 @@ impl TypeChecker {
         }
 
         let to_type =
-            |s: &Text| -> Type { crate::infer::helpers::parse_descriptor_type_string(s.as_str()) };
+            |s: &Text| -> Type { crate::infer::helpers::parse_function_descriptor_type(s.as_str(), &fd, &metadata) };
         // The descriptor's DECLARED generic-param names.  Source-verbatim
         // carried spellings (RETNAME-CARRY) intern by NAME ("T"), not by the
         // `__generic_N` placeholder, so the scheme builder needs the name set

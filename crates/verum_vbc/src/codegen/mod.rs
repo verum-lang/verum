@@ -1805,6 +1805,38 @@ impl VbcCodegen {
         }
     }
 
+    /// Source spelling for a protocol bound in a published signature. A
+    /// private mount belongs to this file even when the consumer renames it.
+    fn declared_dyn_path(&self, path: &verum_ast::Path) -> String {
+        let lexical = Self::format_type_path(path);
+        let (head, tail) = lexical.split_once('.').unwrap_or((&lexical, ""));
+        let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+        let local = crate::module::qualify_module_name(owner, &lexical);
+        let declared = |name: &str| self.type_name_to_id.get(name)
+            .and_then(|id| self.type_by_id(*id))
+            .filter(|ty| ty.kind == crate::types::TypeKind::Protocol)
+            .and_then(|ty| self.type_declaration_identity(ty));
+        if declared(&local).is_some_and(|name| name.as_str() == local) {
+            return local;
+        }
+        if let Some(mount) = self.mounted_type_path(head) {
+            let target = if tail.is_empty() { mount.to_owned() } else { format!("{mount}.{tail}") };
+            return declared(&target).map(|key| key.to_string()).unwrap_or(target);
+        }
+        lexical
+    }
+
+    fn format_type_path(path: &verum_ast::Path) -> String {
+        use verum_ast::ty::PathSegment;
+        path.segments.iter().map(|segment| match segment {
+            PathSegment::Name(ident) => ident.name.as_str(),
+            PathSegment::SelfValue => "Self",
+            PathSegment::Super => "super",
+            PathSegment::Cog => "cog",
+            PathSegment::Relative => "",
+        }).collect::<Vec<_>>().join(".")
+    }
+
     /// If `type_name` is a type alias, returns the base type name.
     /// Otherwise, returns the original name.
     ///
@@ -11251,7 +11283,7 @@ impl VbcCodegen {
             .iter()
             .filter_map(|p| {
                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                    let name = Self::extract_scheme_type_name_from_ast(ty);
+                    let name = Self::render_scheme_type_name(ty, &|path| self.declared_dyn_path(path));
                     if !name.is_empty() && name != "()" {
                         Some(name)
                     } else {
@@ -19250,7 +19282,7 @@ impl VbcCodegen {
                     .iter()
                     .filter_map(|b| {
                         if let verum_ast::ty::TypeBoundKind::Protocol(path) = &b.kind {
-                            path.as_ident().map(|id| id.name.to_string())
+                            Some(self.declared_dyn_path(path))
                         } else {
                             None
                         }
@@ -23528,19 +23560,26 @@ impl VbcCodegen {
     /// exact spellings `parse_descriptor_type_string` decodes; inner
     /// rendering delegates unchanged.
     pub fn extract_scheme_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
+        Self::render_scheme_type_name(ty, &Self::format_type_path)
+    }
+
+    fn render_scheme_type_name(
+        ty: &verum_ast::ty::Type,
+        bound_path: &impl Fn(&verum_ast::Path) -> String,
+    ) -> String {
         use verum_ast::ty::TypeKind;
         match &ty.kind {
             TypeKind::Reference { inner, mutable } => format!(
                 "&{}{}",
                 if *mutable { "mut " } else { "" },
-                Self::extract_type_name_from_ast(inner)
+                Self::render_type_name(inner, false, bound_path)
             ),
             TypeKind::CheckedReference { inner, mutable } => format!(
                 "&checked {}{}",
                 if *mutable { "mut " } else { "" },
-                Self::extract_type_name_from_ast(inner)
+                Self::render_type_name(inner, false, bound_path)
             ),
-            _ => Self::extract_type_name_from_ast(ty),
+            _ => Self::render_type_name(ty, false, bound_path),
         }
     }
 
@@ -23552,20 +23591,16 @@ impl VbcCodegen {
     }
 
     fn render_field_type_name(ty: &verum_ast::ty::Type, qualified_paths: bool) -> String {
+        Self::render_type_name(ty, qualified_paths, &Self::format_type_path)
+    }
+
+    fn render_type_name(ty: &verum_ast::ty::Type, qualified_paths: bool, bound_path: &impl Fn(&verum_ast::Path) -> String) -> String {
         use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
         if let Some(name) = ty.kind.primitive_name() {
             return name.to_string();
         }
         match &ty.kind {
-            TypeKind::Path(path) if qualified_paths => path.segments.iter().map(|segment| {
-                match segment {
-                    PathSegment::Name(ident) => ident.name.as_str(),
-                    PathSegment::SelfValue => "Self",
-                    PathSegment::Super => "super",
-                    PathSegment::Cog => "cog",
-                    PathSegment::Relative => "",
-                }
-            }).collect::<Vec<_>>().join("."),
+            TypeKind::Path(path) if qualified_paths => Self::format_type_path(path),
             TypeKind::Path(path) => {
                 // Get the last segment name (handles qualified paths like core.collections.List)
                 // Self is encoded as PathSegment::SelfValue — surface it as the
@@ -23585,14 +23620,14 @@ impl VbcCodegen {
             }
             TypeKind::Generic { base, args } => {
                 // Preserve generic parameters: List<Token> → "List<Token>"
-                let base_name = Self::render_field_type_name(base, qualified_paths);
+                let base_name = Self::render_type_name(base, qualified_paths, bound_path);
                 if args.is_empty() {
                     base_name
                 } else {
                     let arg_strs: Vec<String> = args
                         .iter()
                         .map(|arg| match arg {
-                            GenericArg::Type(ty) => Self::render_field_type_name(ty, qualified_paths),
+                            GenericArg::Type(ty) => Self::render_type_name(ty, qualified_paths, bound_path),
                             // CONST-GENERIC-VALUE-CARRY-1: render the const
                             // value/name (`StackAllocator<1024>`, symbolic
                             // `B<N>`) so name-carried const witnesses can be
@@ -23636,14 +23671,14 @@ impl VbcCodegen {
             // pointer-array.
             TypeKind::Reference { inner, .. }
             | TypeKind::CheckedReference { inner, .. } => {
-                Self::render_field_type_name(inner, qualified_paths)
+                Self::render_type_name(inner, qualified_paths, bound_path)
             }
             TypeKind::UnsafeReference { inner, .. } => {
-                format!("&unsafe {}", Self::render_field_type_name(inner, qualified_paths))
+                format!("&unsafe {}", Self::render_type_name(inner, qualified_paths, bound_path))
             }
             TypeKind::Pointer { inner, mutable, .. } => {
                 let prefix = if *mutable { "*mut " } else { "*const " };
-                format!("{}{}", prefix, Self::render_field_type_name(inner, qualified_paths))
+                format!("{}{}", prefix, Self::render_type_name(inner, qualified_paths, bound_path))
             }
             // Refinement types erase to their base at runtime — the
             // carrier name IS the base name (`Float{>= 0.0, <= 1.0}` →
@@ -23654,9 +23689,9 @@ impl VbcCodegen {
             // refined-typed record fields (META-REFINED-FIELD-FLOATCMP-1).
             // The refinement PREDICATE is not lost: assert emission reads
             // the AST type directly, never this carrier string.
-            TypeKind::Refined { base, .. } => Self::render_field_type_name(base, qualified_paths),
+            TypeKind::Refined { base, .. } => Self::render_type_name(base, qualified_paths, bound_path),
             TypeKind::Slice(inner) => {
-                format!("[{}]", Self::render_field_type_name(inner, qualified_paths))
+                format!("[{}]", Self::render_type_name(inner, qualified_paths, bound_path))
             }
             // Fixed array `[T; N]` — render as `[T]` (the size is irrelevant
             // for type-name / element-type resolution; `extract_element_type`
@@ -23669,7 +23704,7 @@ impl VbcCodegen {
             // slot index (cap_audit_ring's `slot.state` read the wrong field
             // → garbage seq → SIGSEGV at scale).
             TypeKind::Array { element, .. } => {
-                format!("[{}]", Self::render_field_type_name(element, qualified_paths))
+                format!("[{}]", Self::render_type_name(element, qualified_paths, bound_path))
             }
             // Tuple `(A, B, …)` — render the canonical parenthesised form so
             // downstream tuple-element inference can recover the element
@@ -23682,7 +23717,7 @@ impl VbcCodegen {
             TypeKind::Tuple(elements) => {
                 let elem_names: Vec<String> = elements
                     .iter()
-                    .map(|ty| Self::render_field_type_name(ty, qualified_paths))
+                    .map(|ty| Self::render_type_name(ty, qualified_paths, bound_path))
                     .collect();
                 format!("({})", elem_names.join(", "))
             }
@@ -23692,7 +23727,7 @@ impl VbcCodegen {
                     .iter()
                     .filter_map(|b| {
                         if let verum_ast::ty::TypeBoundKind::Protocol(path) = &b.kind {
-                            path.as_ident().map(|id| id.name.to_string())
+                            Some(bound_path(path))
                         } else {
                             None
                         }
@@ -23717,12 +23752,12 @@ impl VbcCodegen {
             } => {
                 let param_names: Vec<String> = params
                     .iter()
-                    .map(|ty| Self::render_field_type_name(ty, qualified_paths))
+                    .map(|ty| Self::render_type_name(ty, qualified_paths, bound_path))
                     .collect();
                 format!(
                     "fn({}) -> {}",
                     param_names.join(", "),
-                    Self::render_field_type_name(return_type, qualified_paths)
+                    Self::render_type_name(return_type, qualified_paths, bound_path)
                 )
             }
             TypeKind::Rank2Function {
@@ -23748,13 +23783,13 @@ impl VbcCodegen {
                     .collect();
                 let param_names: Vec<String> = params
                     .iter()
-                    .map(|ty| Self::render_field_type_name(ty, qualified_paths))
+                    .map(|ty| Self::render_type_name(ty, qualified_paths, bound_path))
                     .collect();
                 format!(
                     "fn<{}>({}) -> {}",
                     quantified.join(", "),
                     param_names.join(", "),
-                    Self::render_field_type_name(return_type, qualified_paths)
+                    Self::render_type_name(return_type, qualified_paths, bound_path)
                 )
             }
             // Projection spellings must MATCH the archive renderer's
@@ -23768,7 +23803,7 @@ impl VbcCodegen {
             TypeKind::AssociatedType { base, assoc } => format!(
                 "::{}<{}>",
                 assoc.name,
-                Self::render_field_type_name(base, qualified_paths)
+                Self::render_type_name(base, qualified_paths, bound_path)
             ),
             TypeKind::Qualified {
                 self_ty,
@@ -23777,7 +23812,7 @@ impl VbcCodegen {
             } => format!(
                 "::{}<{}>",
                 assoc_name.name,
-                Self::render_field_type_name(self_ty, qualified_paths)
+                Self::render_type_name(self_ty, qualified_paths, bound_path)
             ),
             // A shape with no spelling is named as such rather than as a
             // truncated debug dump. `__opaque_src` is the decoder's

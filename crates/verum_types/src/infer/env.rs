@@ -655,7 +655,7 @@ impl TypeChecker {
             }
         }
         let to_type = |s: &verum_common::Text| -> crate::ty::Type {
-            crate::infer::helpers::parse_descriptor_type_string(s.as_str())
+            crate::infer::helpers::parse_function_descriptor_type(s.as_str(), fd, metadata)
         };
         // DECLARED generic-param names (impl-level first, then method/fn
         // level) so the scheme builder can tell a declared generic from a
@@ -840,7 +840,7 @@ impl TypeChecker {
                 continue;
             }
             let const_type =
-                crate::infer::helpers::parse_descriptor_type_string(fd.return_type.as_str());
+                crate::infer::helpers::parse_function_descriptor_type(fd.return_type.as_str(), fd, metadata);
             // Bare-name registration so user code writing
             // `let s = SSO_CAPACITY;` resolves directly through
             // `env.lookup`.

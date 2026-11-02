@@ -430,3 +430,46 @@ fn archived_protocol_object_safety_uses_declared_receivers_and_binders() {
         }
     }
 }
+
+#[test]
+fn nested_dyn_arguments_keep_the_function_declaration_owner() {
+    let mut builder = ArchiveBuilder::new();
+    let mut memory = Parser::new(include_str!("../../../core/base/memory.vr")).parse_module().unwrap();
+    memory.items.retain(|item| matches!(&item.kind, verum_ast::ItemKind::Module(_))
+        || matches!(&item.kind, verum_ast::ItemKind::Type(decl) if ["Shared", "SharedInner"].contains(&decl.name.name.as_str())));
+    let shared = VbcCodegen::with_config(CodegenConfig::new("core.base.memory"))
+        .collect_declaration_interface(&[&memory]).unwrap();
+    builder.add_module("core.base.memory", &shared, &[]).unwrap();
+    let mut libraries = Vec::new();
+    for owner in ["core.alpha", "core.beta"] {
+        let source = format!("module {owner};
+            public type Store is protocol {{ fn load(&self) -> Int; }};
+            public fn consume(store: &Shared<dyn Store>) {{}}");
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let module = VbcCodegen::with_config(CodegenConfig::new(owner))
+            .collect_declaration_interface(&[&ast]).unwrap();
+        builder.add_module(owner, &module, &[]).unwrap();
+        libraries.push(module);
+    }
+    let mounted = Parser::new("module core.api; mount core.beta.{Store as Backend};
+        public fn read_backend(store: &Shared<dyn Backend>) {}").parse_module().unwrap();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.api"));
+    producer.import_bootstrap_nominal_dependencies(&[&mounted], &libraries.iter().collect::<List<_>>()).unwrap();
+    let module = producer.collect_declaration_interface(&[&mounted]).unwrap();
+    builder.add_module("core.api", &module, &[]).unwrap();
+    let metadata = archive_to_core_metadata(&builder.finish()).unwrap();
+    let sidecar = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
+    let decoded = verum_types::core_metadata::decode_metadata(&sidecar).unwrap();
+    for eager in [false, true] {
+        let imports = "mount core.api.{read_backend}; mount core.alpha.{Store as A, consume as take_a};
+            mount core.beta.{Store as B, consume as take_b};";
+        let accepted = errors(&decoded, &format!("{imports}
+            fn accepted(a: &Shared<dyn A>, b: &Shared<dyn B>) {{ take_a(a); take_b(b); read_backend(b); }}"), eager);
+        assert!(accepted.is_empty(), "eager={eager}: {accepted:?}");
+        let rejected = errors(&decoded, &format!("{imports}
+            fn rejected(a: &Shared<dyn A>) {{ take_b(a); }}"), eager);
+        assert!(rejected.iter().any(|error| error.contains("Mismatch")
+            && error.contains("core.alpha.Store") && error.contains("core.beta.Store")),
+            "eager={eager}: {rejected:?}");
+    }
+}
