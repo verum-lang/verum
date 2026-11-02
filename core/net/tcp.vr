@@ -67,7 +67,7 @@ mount core.async.future.{Future};
 mount core.async.stream.{Stream, StreamNext};
 mount core.async.async_iterator.{AsyncIterator};
 mount core.async.cancellation.{CancellationToken, CancellationError};
-mount super.addr.*;
+mount core.net.addr.{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 // =============================================================================
 // V-LLSI Native Socket Imports
