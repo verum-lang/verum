@@ -5025,6 +5025,24 @@ impl VbcCodegen {
             expr: ptr_expr,
         } = &inner.kind
         {
+            // Reborrow the place returned by a declared dereference. Loading
+            // its value first would create a reference to a temporary copy.
+            let method = match op {
+                UnOp::RefMut => Some("deref_mut"),
+                UnOp::Ref => Some("deref"),
+                _ => None,
+            };
+            if let Some(method) = method
+                && let Some(owner) = self.infer_expr_type_name(ptr_expr)
+                && !owner.starts_with(['&', '*'])
+                && self.user_deref_target_type_name(&owner).is_some()
+                && self.registered_receiver_method(&owner, method).is_some()
+            {
+                let receiver = self.compile_expr(ptr_expr)?.or_internal("missing dereference receiver")?;
+                let reference = self.emit_user_deref_reference(receiver, method);
+                self.ctx.free_temp(receiver);
+                return Ok(Some(reference));
+            }
             // Shape gate: Path/Field probe compile-then-check (idempotent
             // recompile on fall-through). METHOD-CALL operands
             // (`&*self.ptr.offset(i)` — the List.fmt_debug element loop,
@@ -12673,9 +12691,7 @@ impl VbcCodegen {
         0
     }
 
-    /// Load the value returned by a registered user Deref implementation.
-    /// Both operator lowering and method-receiver adjustment use this path.
-    fn emit_user_deref_value(&mut self, dest: Reg, receiver: Reg, method: &str) {
+    fn emit_user_deref_reference(&mut self, receiver: Reg, method: &str) -> Reg {
         let reference = self.ctx.alloc_temp();
         let method_id = self.ctx.intern_string_raw(method);
         self.ctx.emit(Instruction::CallM {
@@ -12687,6 +12703,13 @@ impl VbcCodegen {
                 count: 0,
             },
         });
+        reference
+    }
+
+    /// Load the value returned by a registered user Deref implementation.
+    /// Both operator lowering and method-receiver adjustment use this path.
+    fn emit_user_deref_value(&mut self, dest: Reg, receiver: Reg, method: &str) {
+        let reference = self.emit_user_deref_reference(receiver, method);
         self.ctx.emit(Instruction::Deref {
             dst: dest,
             ref_reg: reference,

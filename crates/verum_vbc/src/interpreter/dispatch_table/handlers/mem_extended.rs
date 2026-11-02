@@ -322,38 +322,21 @@ fn mem_extended_body(
             Ok(DispatchResult::Continue)
         }
 
-        // Replace: [dst, dest, src]
-        //
-        // Same CBGR-ref handling as Swap above — `&mut T` materialises
-        // as a CBGR register-ref, not a raw pointer.  Read the current
-        // value out of the abs-register slot, store the new value, and
-        // return the old value in `dst`.
+        // Replace exchanges a typed value at the same place used by *place.
+        // Capture both inputs before writing dst, since registers may alias.
         0x05 => {
-            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
             let dst = read_reg(state)?;
             let dest_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let dest_val = state.get_reg(dest_reg);
-            let src_val = state.get_reg(src_reg);
-            if is_cbgr_ref(&dest_val) {
-                let (abs, _) = decode_cbgr_ref(dest_val);
-                let old = state.registers.get_absolute(abs);
-                state.registers.set_absolute(abs, src_val);
-                state.set_reg(dst, old);
-            } else {
-                // Raw-pointer fallback (legacy).
-                let dest_ptr = dest_val.as_ptr::<u64>();
-                if dest_ptr.is_null() {
-                    return Err(InterpreterError::Panic {
-                        message: "replace: null destination pointer".into(),
-                    });
-                }
-                let new_val_u64 = src_val.as_i64() as u64;
-                let old_val = unsafe { *dest_ptr };
-                unsafe { *dest_ptr = new_val_u64 };
-                state.set_reg(dst, Value::from_i64(old_val as i64));
+            let place = state.get_reg(dest_reg);
+            let value = state.get_reg(src_reg);
+            if place.is_nil() {
+                return Err(InterpreterError::Panic {
+                    message: "replace: null destination pointer".into(),
+                });
             }
-            Ok(DispatchResult::Continue)
+            super::cbgr::load_referent_into(state, dst, place, false)?;
+            super::cbgr::store_referent(state, place, value)
         }
 
         // NewByteList: [dst, cap] — allocate `List<Byte>` with packed

@@ -583,6 +583,15 @@ pub(in super::super) fn handle_deref(
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let ref_val = state.get_reg(src);
+    load_referent_into(state, dst, ref_val, true)
+}
+
+pub(super) fn load_referent_into(
+    state: &mut InterpreterState,
+    dst: Reg,
+    ref_val: Value,
+    allow_reborrow: bool,
+) -> InterpreterResult<DispatchResult> {
     if state.config.count_instructions {
         state.stats.cbgr_stats.tier0_derefs += 1;
     }
@@ -697,7 +706,7 @@ pub(in super::super) fn handle_deref(
                 // Track source so a subsequent RefCreate can create a pointer
                 // reference back to this location instead of a register ref.
                 let value = unsafe { *(base_ptr as *const Value) };
-                state.cbgr_deref_source = Some((dst.0, ptr_addr));
+                state.cbgr_deref_source = allow_reborrow.then_some((dst.0, ptr_addr));
                 state.set_reg(dst, value);
             } else if bridge_extent_room(state, ptr_addr).is_some() {
                 // BRIDGE MEMORY IS DATA (T0705/T0384). An address inside
@@ -989,6 +998,14 @@ pub(in super::super) fn handle_deref_mut(
     let value_reg = read_reg(state)?;
     let ref_val = state.get_reg(ref_reg);
     let value = state.get_reg(value_reg);
+    store_referent(state, ref_val, value)
+}
+
+pub(super) fn store_referent(
+    state: &mut InterpreterState,
+    ref_val: Value,
+    value: Value,
+) -> InterpreterResult<DispatchResult> {
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePtrwrite) {
         let addr = if ref_val.is_ptr() {
             ref_val.as_ptr::<u8>() as usize

@@ -418,3 +418,22 @@ fn probe<U: Reader>(g: Guard<U>) -> Int { g.read() }
         "{ops:?}"
     );
 }
+
+#[test]
+fn replacing_a_reborrowed_record_updates_the_guard_and_returns_the_old_record() {
+    check(r#"
+        type DerefMut is protocol { type Target; fn deref_mut(&mut self) -> &mut Self.Target; };
+        implement<T> DerefMut for Guard<T> {
+            type Target = T;
+            fn deref_mut(&mut self) -> &mut T { &mut self.value }
+        }
+        fn exchange<T>(place: &mut T, value: T) -> T {
+            @intrinsic("replace", place, value)
+        }
+        fn probe() -> Int {
+            let mut guard = Guard { marker: 19, value: Cell { padding: 11, value: 7 } };
+            let old = exchange(&mut *guard, Cell { padding: 13, value: 3 });
+            old.value * 100 + guard.value.value * 10 + guard.marker
+        }
+    "#, Some(749));
+}
