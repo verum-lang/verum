@@ -477,6 +477,7 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     ui::status("Parsing", &format!("{}", manifest.cog.name.as_str()));
 
     let mut session = Session::new(options);
+    let _sources = crate::registry::installed::register(&mut session, &manifest_dir, &manifest)?;
     let mut pipeline = CompilationPipeline::new(&mut session);
 
     // Compile via the unified dispatch — `pipeline.run()` reads

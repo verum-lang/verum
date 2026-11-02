@@ -55,6 +55,7 @@ pub fn execute(_workspace: bool, strict: bool, verbose: bool) -> Result<()> {
 
     // Create session
     let mut session = Session::new(options);
+    let _sources = crate::registry::installed::register(&mut session, &manifest_dir, &manifest)?;
 
     // Create check-only pipeline
     let mut pipeline = CompilationPipeline::new_check(&mut session);

@@ -430,20 +430,77 @@ impl CacheManager {
         Ok(removed)
     }
 
+    /// Materialize exactly the bytes pinned by the project's lock. The caller
+    /// supplies a fresh private directory so stale extracted files cannot win.
+    pub(crate) fn extract_locked_source(
+        &self,
+        name: &str,
+        version: &str,
+        checksum: &str,
+        root: &Path,
+    ) -> Result<()> {
+        use std::io::Read;
+        let path = self.get_cog_path(name, version);
+        let metadata = std::fs::symlink_metadata(&path).map_err(|e| {
+            CliError::Registry(format!(
+                "Cannot open installed archive {}: {e}",
+                path.display()
+            ))
+        })?;
+        let max_archive = super::publication::MAX_ARCHIVE_BYTES;
+        if !metadata.is_file() || metadata.len() > max_archive as u64 {
+            return Err(CliError::Registry(format!(
+                "Invalid installed archive {}",
+                path.display()
+            )));
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)?
+            .take(max_archive as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > max_archive || hex::encode(Sha256::digest(&bytes)) != checksum {
+            return Err(CliError::Registry(format!(
+                "Checksum mismatch for installed cog {name} {version}"
+            )));
+        }
+        // The digest and extraction refer to one snapshot even if another
+        // process concurrently replaces the shared cache entry.
+        const MAX_EXPANDED: usize = 256 * 1024 * 1024;
+        let mut tar = Vec::new();
+        flate2::read::GzDecoder::new(bytes.as_slice())
+            .take(MAX_EXPANDED as u64 + 1)
+            .read_to_end(&mut tar)?;
+        if tar.len() > MAX_EXPANDED {
+            return Err(CliError::Registry(
+                "Expanded cog exceeds the publication limit".into(),
+            ));
+        }
+        let mut paths = std::collections::HashSet::new();
+        for entry in tar::Archive::new(tar.as_slice()).entries()? {
+            let entry = entry?;
+            let path = entry.path()?;
+            let kind = entry.header().entry_type();
+            let safe_key = member_key(&path, kind.is_dir());
+            if !(kind.is_file() || kind.is_dir())
+                || entry.size() > max_archive as u64
+                || !safe_key.is_some_and(|key| paths.insert(key))
+                || paths.len() > 16384
+            {
+                return Err(CliError::Registry(format!(
+                    "Invalid installed cog member {}",
+                    path.display()
+                )));
+            }
+        }
+        unpack_source(tar.as_slice(), root)
+    }
+
     /// Extract package archive
     pub fn extract(&self, cog_path: &Path, dest_dir: &Path) -> Result<()> {
-        use flate2::read::GzDecoder;
-        use tar::Archive;
-
-        let file = std::fs::File::open(cog_path)?;
-        let decoder = GzDecoder::new(file);
-        let mut archive = Archive::new(decoder);
-
-        archive
-            .unpack(dest_dir)
-            .map_err(|e| CliError::Custom(format!("Failed to extract archive: {}", e)))?;
-
-        Ok(())
+        unpack_source(
+            flate2::read::GzDecoder::new(std::fs::File::open(cog_path)?),
+            dest_dir,
+        )
     }
 
     /// Create package archive
@@ -480,6 +537,47 @@ impl CacheManager {
     }
 }
 
+/// Match the portable extraction rules used by publication. Older cache archives
+/// can contain a harmless leading "./", including an explicit root directory.
+fn member_key(path: &Path, directory: bool) -> Option<String> {
+    use std::path::Component;
+    if path.as_os_str().is_empty() || path.to_str()?.len() > 4096 {
+        return None;
+    }
+    let mut components = Vec::new();
+    for part in path.components() {
+        let component = match part {
+            Component::CurDir => continue,
+            Component::Normal(name) => name.to_str()?,
+            _ => return None,
+        };
+        if component.ends_with([' ', '.'])
+            || component
+                .bytes()
+                .any(|b| b.is_ascii_control() || br#"\:*?"<>|"#.contains(&b))
+        {
+            return None;
+        }
+        let folded = component.to_ascii_lowercase();
+        let stem = folded.split('.').next()?;
+        if matches!(stem, "con" | "prn" | "aux" | "nul")
+            || (stem.len() == 4
+                && (stem.starts_with("com") || stem.starts_with("lpt"))
+                && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+        {
+            return None;
+        }
+        components.push(folded);
+    }
+    (directory || !components.is_empty()).then(|| components.join("/"))
+}
+
+fn unpack_source(input: impl std::io::Read, dest: &Path) -> Result<()> {
+    tar::Archive::new(input)
+        .unpack(dest)
+        .map_err(|e| CliError::Custom(format!("Failed to extract archive: {e}")))
+}
+
 /// Cache statistics
 #[derive(Debug, Clone)]
 pub struct CacheStats {
@@ -497,3 +595,7 @@ impl CacheStats {
         self.total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/registry/installed_archive.rs"]
+mod installed_archive;

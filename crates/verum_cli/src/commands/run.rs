@@ -92,7 +92,9 @@ pub fn execute(
 
     // Tier 1 (AOT) builds first then exec's the binary.
     match compilation_tier {
-        CompilationTier::Interpreter => run_vbc_interpreted(&manifest_dir, mode, &bin_name, &args),
+        CompilationTier::Interpreter => {
+            run_vbc_interpreted(&manifest_dir, &manifest, mode, &bin_name, &args)
+        }
         CompilationTier::Aot => {
             // Build first (only the AOT path needs a binary on disk).
             super::build::execute(
@@ -148,6 +150,7 @@ pub fn execute(
 /// path — fixes in the pipeline reach every consumer immediately.
 fn run_vbc_interpreted(
     manifest_dir: &PathBuf,
+    manifest: &Manifest,
     _mode: &str,
     _bin_name: &Text,
     args: &[Text],
@@ -190,6 +193,8 @@ fn run_vbc_interpreted(
         ..Default::default()
     };
     let mut session = Session::new(options);
+    let installed_sources =
+        crate::registry::installed::register(&mut session, manifest_dir, manifest)?;
     let mut pipeline = CompilationPipeline::new_interpreter(&mut session);
 
     // Forward CLI args (List<Text>) to main() if its signature accepts them;
@@ -210,6 +215,7 @@ fn run_vbc_interpreted(
     // (timing prints, future telemetry flushes) runs first. `None`
     // means the program returned `()` or a non-numeric value — exit
     // 0 by convention, which the CLI's normal Ok-path delivers.
+    drop(installed_sources);
     if let Some(code) = session.take_exit_code() {
         std::process::exit(code);
     }

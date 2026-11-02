@@ -7,6 +7,7 @@ pub mod client;
 pub mod content_store;
 pub mod enterprise;
 pub mod ipfs;
+pub(crate) mod installed;
 pub mod lockfile;
 pub mod lockfile_v3;
 pub mod mirror;
