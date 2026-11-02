@@ -327,7 +327,7 @@ fn nominal_library_fixture(target: &str) -> std::sync::Arc<crate::library_metada
     let mut metadata = CoreMetadata { version: CORE_METADATA_VERSION, ..Default::default() };
     for (owner, source) in [
         ("portable.levels", "public type Level is { public value: Type(1) };"),
-        ("foreign.levels", "public type Level is { public value: Type(2) };"),
+        ("foreign.levels", "public type Level is { public value: Type(1) };"),
         ("portable.api", "public type Carrier is { public value: Type(1), public nested: PrivateLevel };"),
     ] {
         let ast = verum_parser::Parser::new(source).parse_module().unwrap();
@@ -373,6 +373,9 @@ async fn nominal_library_levels_and_private_scopes_reach_project_analysis() {
     let after = project.snapshot(&uri).await;
     assert_ne!(before["project_revision"], after["project_revision"]);
     assert!(!errors(&after).is_empty(), "changed private binding reused stale successful analysis: {after:#}");
+    assert!(errors(&after).iter().any(|diagnostic| diagnostic["message"].as_str().is_some_and(|message|
+        message.contains("portable.levels.Level") && message.contains("foreign.levels.Level"))),
+        "expected the changed nominal owner mismatch: {after:#}");
 }
 
 #[tokio::test]
