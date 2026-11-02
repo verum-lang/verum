@@ -70,10 +70,10 @@
 module core.runtime.supervisor;
 
 mount sys.{monotonic_nanos, monotonic_millis};
+mount core.async.timer.{sleep_ms};
 mount core.intrinsics.{
     supervisor_log_escalation,
     supervisor_set_parent,
-    async_sleep_ms as async_sleep_ms_intrinsic,
 };
 mount sync.{AtomicBool, AtomicU8, AtomicU16, AtomicU64, MemoryOrdering, Mutex, RwLock};
 mount core.sync.once.OnceLock;
@@ -81,8 +81,10 @@ mount core.base.memory.Shared;
 mount core.base.maybe.Maybe;
 mount core.base.result.Result;
 mount core.collections.list.List;
-mount async.{Future, Task, JoinHandle};
-mount async.task.spawn_detached;
+mount core.async.future.Future;
+mount core.async.cancellation.{CancellationToken, CancelledFuture, CancelReason};
+mount core.async.select.{Either, select_either};
+mount core.intrinsics.control.{catch_unwind};
 
 // =============================================================================
 // Type Definitions
@@ -837,6 +839,8 @@ public type SupervisorError is
     | ChildNotFound(ChildId)
     /// Supervisor is shutting down
     | ShuttingDown
+    /// A stop was requested but the worker has not acknowledged completion.
+    | ShutdownTimedOut(ChildId)
     /// Child spawn failed
     | SpawnFailed(Text)
     /// Message channel is closed
@@ -857,6 +861,8 @@ implement SupervisorError {
                 f"child not found: {id.raw()}",
             ShuttingDown =>
                 "supervisor is shutting down".into(),
+            ShutdownTimedOut(id) =>
+                f"child {id.raw()} did not stop before the shutdown deadline",
             SpawnFailed(msg) =>
                 f"spawn failed: {msg}",
             ChannelClosed =>
@@ -886,6 +892,8 @@ implement Debug for SupervisorError {
                 f.write_str(f"ChildNotFound({id.raw()})".as_str()),
             ShuttingDown =>
                 f.write_str("ShuttingDown"),
+            ShutdownTimedOut(id) =>
+                f.write_str(f"ShutdownTimedOut({id.raw()})".as_str()),
             SpawnFailed(msg) =>
                 f.write_str(f"SpawnFailed({msg})".as_str()),
             ChannelClosed =>
@@ -907,6 +915,7 @@ implement Eq for SupervisorError {
              TooManyRestarts { count: cb, window_secs: wb }) => ca == cb && wa == wb,
             (ChildNotFound(a),    ChildNotFound(b))    => a.raw() == b.raw(),
             (ShuttingDown,        ShuttingDown)        => true,
+            (ShutdownTimedOut(a), ShutdownTimedOut(b)) => a.raw() == b.raw(),
             (SpawnFailed(a),      SpawnFailed(b))      => a == b,
             (ChannelClosed,       ChannelClosed)       => true,
             (InvalidSpec(a),      InvalidSpec(b))      => a == b,
@@ -939,7 +948,7 @@ public type Supervisor is protocol {
         spec: ChildSpec,
     ) -> Result<ChildId, SupervisorError>
     where type
-        F: Future<T> + Send,
+        F: Future<Output = T> + Send,
         T: Send;
 
     /// Manually restart a child
@@ -1014,11 +1023,12 @@ implement SupervisorHandle {
     /// Get current status
     public fn status(&self) -> SupervisorStatus {
         let inner = &*self.inner;
-        let children = inner.children.read();
+        let children = inner.children.read().unwrap();
 
-        let running_count = children.iter()
-            .filter(|c| c.status().is_active())
-            .count();
+        let mut running_count = 0;
+        for child in children.iter() {
+            if child.get().status().is_active() { running_count += 1; }
+        }
 
         SupervisorStatus {
             id: self.id,
@@ -1039,26 +1049,19 @@ implement SupervisorHandle {
         spec: ChildSpec,
     ) -> Result<ChildId, SupervisorError>
     where type
-        F: Future<T> + Send,
+        F: Future<Output = T> + Send,
         T: Send,
     {
         let inner = &*self.inner;
-
-        // Check if shutting down
-        if !inner.is_running.load(MemoryOrdering.Acquire) {
-            return Result.Err(SupervisorError.ShuttingDown);
-        }
 
         // Generate child ID
         let child_id = ChildId.new();
 
         // Create child state
-        let child_state = ChildState.new(child_id, spec, future_factory);
+        let child_state = ChildState.new<F, T>(child_id, spec, future_factory);
 
-        // Add to children list
-        {
-            let mut children = inner.children.write();
-            children.push(child_state);
+        if !inner.register(child_state) {
+            return Result.Err(SupervisorError.ShuttingDown);
         }
 
         // Spawn the child task
@@ -1072,12 +1075,9 @@ implement SupervisorHandle {
         let inner = &*self.inner;
 
         // Find child
-        let child = {
-            let children = inner.children.read();
-            children.iter()
-                .find(|c| c.id == child_id)
-                .cloned()
-        }.ok_or(SupervisorError.ChildNotFound(child_id))?;
+        let child: Shared<ChildState> = inner.find_child(child_id).ok_or(SupervisorError.ChildNotFound(child_id))?;
+
+        child.stop(child.get().spec.shutdown_timeout_ms).await?;
 
         // Record manual restart and persist to supervisor history.
         let event = child.record_restart(&FailureReason.Manual);
@@ -1091,183 +1091,88 @@ implement SupervisorHandle {
     public async fn terminate(&self, child_id: ChildId) -> Result<(), SupervisorError> {
         let inner = &*self.inner;
 
-        let child = {
-            let children = inner.children.read();
-            children.iter()
-                .find(|c| c.id == child_id)
-                .cloned()
-        }.ok_or(SupervisorError.ChildNotFound(child_id))?;
+        let child: Shared<ChildState> = inner.find_child(child_id).ok_or(SupervisorError.ChildNotFound(child_id))?;
 
-        // Cancel the task
-        if let Maybe.Some(handle) = child.take_handle() {
-            handle.cancel();
-
-            // Wait for shutdown with timeout
-            let timeout_ms = inner.config.shutdown.timeout_ms();
-            select {
-                _ = handle.await => {},
-                _ = async_sleep_ms(timeout_ms as UInt64).await => {
-                    // Force abort after timeout
-                    handle.abort();
-                }
-            }
-        }
-
-        // Update status
-        child.set_status(ChildStatus.Stopped);
-
-        Result.Ok(())
+        child.stop(inner.config.shutdown.timeout_ms()).await
     }
 
     /// Shutdown supervisor and all children
     public async fn shutdown(&self) -> Result<(), SupervisorError> {
         let inner = &*self.inner;
 
-        // Mark as not running
-        inner.is_running.store(false, MemoryOrdering.Release);
-
-        // Get all children (sorted by priority - lower priority first for shutdown)
-        let children = {
-            let children = inner.children.read();
-            let mut sorted: List<Shared<ChildState>> = children.iter().cloned().collect();
-            sorted.sort_by(|a, b| a.get().spec.priority.cmp(&b.get().spec.priority));
-            sorted
+        // Close admission while taking the snapshot, then sort and wait outside the lock.
+        let mut children: List<Shared<ChildState>> = {
+            let registered = inner.children.write().unwrap();
+            inner.is_running.store(false, MemoryOrdering.Release);
+            (*registered).clone()
         };
+        children.sort_by(|a, b| a.get().spec.priority.cmp(&b.get().spec.priority));
 
-        // Shutdown each child
+        let mut result = Result.Ok(());
         for child in children.iter() {
-            if let Maybe.Some(handle) = child.take_handle() {
-                handle.cancel();
-
-                let timeout_ms = child.get().spec.shutdown_timeout_ms;
-                select {
-                    _ = handle.await => {},
-                    _ = async_sleep_ms(timeout_ms as UInt64).await => {
-                        handle.abort();
-                    }
-                }
+            if let Result.Err(error) = child.stop(child.get().spec.shutdown_timeout_ms).await {
+                result = Result.Err(error);
             }
-            child.set_status(ChildStatus.Stopped);
         }
-
-        Result.Ok(())
+        result
     }
 
     /// Internal: Spawn or respawn a child task
     async fn spawn_child(&self, child_id: ChildId) -> Result<(), SupervisorError> {
         let inner = &*self.inner;
 
-        let child = {
-            let children = inner.children.read();
-            children.iter()
-                .find(|c| c.id == child_id)
-                .cloned()
-        }.ok_or(SupervisorError.ChildNotFound(child_id))?;
-
-        // Get future factory (if available)
-        let factory = child.take_factory()
-            .ok_or(SupervisorError.SpawnFailed("factory not available".into()))?;
-
-        // Update status
-        child.set_status(ChildStatus.Starting);
-
-        // Spawn the task
-        let handle = spawn_detached(factory());
-
-        // Store handle
-        child.set_handle(handle);
-
-        // Update status
-        child.set_status(ChildStatus.Running);
-
-        // Start monitoring task
-        self.monitor_child(child_id);
-
+        let (child, run): (Shared<ChildState>, Shared<ChildRun>) = inner.prepare_run(child_id)?;
+        let supervisor = self.clone();
+        let _ = spawn {
+            let reason = match catch_unwind(|| (child.get().factory)(run.stop.clone())) {
+                Result.Ok(reason) => reason,
+                Result.Err(info) => FailureReason.Panic(info.message),
+            };
+            run.finished.cancel();
+            supervisor.child_exited(child, run, reason).await;
+        };
         Result.Ok(())
     }
 
-    /// Internal: Monitor a child and handle failures
-    fn monitor_child(&self, child_id: ChildId) {
-        let handle = self.clone();
-
-        spawn_detached(async move {
-            handle.child_monitor_loop(child_id).await;
-        });
-    }
-
-    /// Internal: Monitor loop for a single child
-    async fn child_monitor_loop(&self, child_id: ChildId) {
+    async fn child_exited(&self, child: Shared<ChildState>, run: Shared<ChildRun>, reason: FailureReason) {
         let inner = &*self.inner;
+        let child_id = child.id;
+        if !inner.is_running.load(MemoryOrdering.Acquire) || !child.should_monitor(&run) {
+            return;
+        }
+        // Should we restart?
+        if !child.get().spec.restart.should_restart(&reason) {
+            child.set_status(ChildStatus.Terminated);
+            return;
+        }
 
-        loop {
-            // Get child state
-            let child = {
-                let children = inner.children.read();
-                children.iter()
-                    .find(|c| c.id == child_id)
-                    .cloned()
-            };
+        // Record restart and check limits
+        if !child.intensity.record_restart() {
+            // Limits exceeded - escalate
+            child.set_status(ChildStatus.Failed);
+            self.handle_escalation(child_id, &reason).await;
+            return;
+        }
 
-            let child = match child {
-                Maybe.Some(c) => c,
-                Maybe.None => { return; } // Child removed, stop monitoring
-            };
-
-            // Wait for task completion
-            let result = if let Maybe.Some(handle) = child.take_handle() {
-                handle.await
-            } else {
-                return; // No handle, stop monitoring
-            };
-
-            // Determine failure reason
-            let reason = match result {
-                Result.Ok(_) => FailureReason.NormalExit,
-                Result.Err(e) if e.is_cancelled() => FailureReason.Cancelled,
-                Result.Err(e) if e.is_panic() => FailureReason.Panic(e.panic_message()),
-                Result.Err(e) => FailureReason.ErrorExit(e.to_string()),
-            };
-
-            // Check if supervisor is still running
-            if !inner.is_running.load(MemoryOrdering.Acquire) {
-                child.set_status(ChildStatus.Stopped);
-                return;
-            }
-
-            // Should we restart?
-            if !child.get().spec.restart.should_restart(&reason) {
-                child.set_status(ChildStatus.Terminated);
-                return;
-            }
-
-            // Record restart and check limits
-            if !child.intensity.record_restart() {
-                // Limits exceeded - escalate
-                child.set_status(ChildStatus.Failed);
-                self.handle_escalation(child_id, &reason).await;
-                return;
-            }
-
-            // Apply supervision strategy
-            match inner.config.strategy {
-                SupervisionStrategy.OneForOne => {
-                    // Just restart this child; persist event.
-                    let event = child.record_restart(&reason);
-                    inner.append_restart_event(event);
-                    if let Result.Err(e) = self.spawn_child(child_id).await {
-                        child.set_status(ChildStatus.Failed);
-                        self.handle_escalation(child_id, &FailureReason.ErrorExit(e.description())).await;
-                        return;
-                    }
+        // Apply supervision strategy
+        match inner.config.strategy {
+            SupervisionStrategy.OneForOne => {
+                // Just restart this child; persist event.
+                let event = child.record_restart(&reason);
+                inner.append_restart_event(event);
+                if let Result.Err(e) = self.spawn_child(child_id).await {
+                    child.set_status(ChildStatus.Failed);
+                    self.handle_escalation(child_id, &FailureReason.ErrorExit(e.description())).await;
+                    return;
                 }
-                SupervisionStrategy.OneForAll => {
-                    // Restart all children
-                    self.restart_all_children(&reason).await;
-                }
-                SupervisionStrategy.RestForOne => {
-                    // Restart this and all children started after
-                    self.restart_rest_for_one(child_id, &reason).await;
-                }
+            }
+            SupervisionStrategy.OneForAll => {
+                // Restart all children
+                self.restart_all_children(&reason).await;
+            }
+            SupervisionStrategy.RestForOne => {
+                // Restart this and all children started after
+                self.restart_rest_for_one(child_id, &reason).await;
             }
         }
     }
@@ -1276,12 +1181,7 @@ implement SupervisorHandle {
     async fn handle_escalation(&self, child_id: ChildId, reason: &FailureReason) {
         let inner = &*self.inner;
 
-        let child = {
-            let children = inner.children.read();
-            children.iter()
-                .find(|c| c.id == child_id)
-                .cloned()
-        };
+        let child = inner.find_child(child_id);
 
         let child_name = child.map(|c| c.get().spec.name.clone())
             .unwrap_or_else(|| "unknown".into());
@@ -1326,15 +1226,14 @@ implement SupervisorHandle {
 
         // Get all children
         let children = {
-            let children = inner.children.read();
-            children.iter().cloned().collect<List<_>>()
+            let children = inner.children.read().unwrap();
+            (*children).clone()
         };
 
         // Stop all in reverse order
         for child in children.iter().rev() {
-            if let Maybe.Some(handle) = child.take_handle() {
-                handle.cancel();
-                let _ = handle.await;
+            if child.stop(child.get().spec.shutdown_timeout_ms).await.is_err() {
+                return;
             }
             child.set_status(ChildStatus.Restarting);
         }
@@ -1355,19 +1254,15 @@ implement SupervisorHandle {
 
         // Get children from failed onwards
         let children_to_restart = {
-            let children = inner.children.read();
-            let idx = children.iter()
-                .position(|c| c.id == failed_id)
-                .unwrap_or(children.len());
-
-            children[idx..].iter().cloned().collect<List<_>>()
+            let children = inner.children.read().unwrap();
+            let idx = children.position_by(|c| c.get().id == failed_id).unwrap_or(children.len());
+            children.slice(idx, children.len())
         };
 
         // Stop in reverse order
         for child in children_to_restart.iter().rev() {
-            if let Maybe.Some(handle) = child.take_handle() {
-                handle.cancel();
-                let _ = handle.await;
+            if child.stop(child.get().spec.shutdown_timeout_ms).await.is_err() {
+                return;
             }
             child.set_status(ChildStatus.Restarting);
         }
@@ -1460,6 +1355,33 @@ public type SupervisorInner is {
 };
 
 implement SupervisorInner {
+    fn register(&self, child: Shared<ChildState>) -> Bool {
+        let mut children = self.children.write().unwrap();
+        let admitted = self.is_running.load(MemoryOrdering.Acquire);
+        if admitted { children.push(child); }
+        admitted
+    }
+
+    fn prepare_run(&self, id: ChildId) -> Result<(Shared<ChildState>, Shared<ChildRun>), SupervisorError> {
+        let children = self.children.read().unwrap();
+        if self.is_running.load(MemoryOrdering.Acquire) {
+            match children.find(|state| state.get().id == id) {
+                Maybe.Some(child) => match child.begin_run() {
+                    Result.Ok(run) => Result.Ok((child, run)),
+                    Result.Err(error) => Result.Err(error),
+                },
+                Maybe.None => Result.Err(SupervisorError.ChildNotFound(id)),
+            }
+        } else {
+            Result.Err(SupervisorError.ShuttingDown)
+        }
+    }
+
+    fn find_child(&self, id: ChildId) -> Maybe<Shared<ChildState>> {
+        let children = self.children.read().unwrap();
+        children.find(|child| child.get().id == id)
+    }
+
     public fn new(id: SupervisorId, config: SupervisorConfig) -> Self {
         Self {
             id: id,
@@ -1483,7 +1405,7 @@ implement SupervisorInner {
     /// allocation when the cap is reached (the eviction is an
     /// in-place rotation, not a re-allocation).
     public fn append_restart_event(&self, event: RestartEvent) {
-        let mut history = self.restart_history.write();
+        let mut history = self.restart_history.write().unwrap();
         if history.len() >= RestartEvent.MAX_HISTORY {
             // Evict oldest entry. remove(0) is O(n) but n is
             // bounded by MAX_HISTORY (100); the absolute cost is
@@ -1499,6 +1421,12 @@ implement SupervisorInner {
 // Child State
 // =============================================================================
 
+/// Each generation owns separate stop and completion notifications.
+type ChildRun is {
+    stop: CancellationToken,
+    finished: CancellationToken,
+};
+
 /// Internal state for a supervised child
 public type ChildState is {
     /// Child ID
@@ -1507,11 +1435,8 @@ public type ChildState is {
     /// Child specification
     spec: ChildSpec,
 
-    /// Task handle (protected by Mutex for ownership transfer)
-    handle: Mutex<Maybe<JoinHandle<()>>>,
-
-    /// Future factory for restarting
-    factory: Mutex<Maybe<Heap<fn() -> Future<()>>>>,
+    run: Mutex<Maybe<Shared<ChildRun>>>,
+    factory: fn(CancellationToken) -> FailureReason,
 
     /// Current status (atomic)
     status: AtomicU8,
@@ -1533,7 +1458,7 @@ implement ChildState {
         factory: fn() -> F,
     ) -> Shared<Self>
     where type
-        F: Future<T> + Send,
+        F: Future<Output = T> + Send,
         T: Send,
     {
         let intensity = RestartIntensity.new(
@@ -1541,19 +1466,19 @@ implement ChildState {
             spec.restart_window_secs,
         );
 
-        // Wrap factory to return () output
-        let wrapped_factory: Heap<fn() -> Future<()>> =
-            Heap.new(move || {
-                async {
-                    let _ = factory().await;
-                }
-            });
+        let wrapped: fn(CancellationToken) -> FailureReason = move |stop: CancellationToken| -> FailureReason {
+            if stop.is_cancelled() { return FailureReason.Cancelled; }
+            match select_either<CancelReason, T, CancelledFuture, F>(stop.cancelled(), factory()).await {
+                Either.Left(_) => FailureReason.Cancelled,
+                Either.Right(_) => FailureReason.NormalExit,
+            }
+        };
 
         Shared.new(Self {
             id: id,
             spec: spec,
-            handle: Mutex.new(Maybe.None),
-            factory: Mutex.new(Maybe.Some(wrapped_factory)),
+            run: Mutex.new(Maybe.None),
+            factory: wrapped,
             status: AtomicU8.new(ChildStatus.Starting.to_u8()),
             intensity: intensity,
             started_at_ms: AtomicU64.new(monotonic_millis()),
@@ -1576,20 +1501,58 @@ implement ChildState {
         self.status.store(status.to_u8(), MemoryOrdering.Release);
     }
 
-    /// Take task handle (for monitoring)
-    public fn take_handle(&self) -> Maybe<JoinHandle<()>> {
-        self.handle.lock().unwrap_or_else(|p| p.into_inner()).take()
+    fn begin_run(&self) -> Result<Shared<ChildRun>, SupervisorError> {
+        let mut current = self.run.lock().unwrap_or_else(|p| p.into_inner());
+        let running = match &*current {
+            Maybe.Some(previous) => !previous.finished.is_cancelled(),
+            Maybe.None => false,
+        };
+        if running {
+            Result.Err(SupervisorError.SpawnFailed("child is still running".into()))
+        } else {
+            let run = Shared.new(ChildRun {
+                stop: CancellationToken.new(), finished: CancellationToken.new(),
+            });
+            *current = Maybe.Some(run.clone());
+            self.set_status(ChildStatus.Running);
+            Result.Ok(run)
+        }
     }
 
-    /// Set task handle
-    public fn set_handle(&self, handle: JoinHandle<()>) {
-        *self.handle.lock().unwrap_or_else(|p| p.into_inner()) = Maybe.Some(handle);
+    fn should_monitor(&self, run: &Shared<ChildRun>) -> Bool {
+        let current = self.run.lock().unwrap_or_else(|p| p.into_inner());
+        match &*current {
+            Maybe.Some(active) => active.ptr_eq(run) && !run.stop.is_cancelled(),
+            Maybe.None => false,
+        }
     }
 
-    /// Take factory (for respawning)
-    public fn take_factory(&self) -> Maybe<Heap<fn() -> Future<()>>> {
-        // Clone the factory (it's a Fn, not FnOnce)
-        self.factory.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    async fn stop(&self, timeout_ms: UInt32) -> Result<(), SupervisorError> {
+        let current = {
+            let slot = self.run.lock().unwrap_or_else(|p| p.into_inner());
+            slot.clone()
+        };
+        if let Maybe.Some(run) = current {
+            run.stop.cancel();
+            let finished: CancellationToken = run.finished.clone();
+            let acknowledged = if timeout_ms == UInt32.MAX {
+                finished.cancelled().await;
+                true
+            } else {
+                select biased {
+                    _ = finished.cancelled().await => true,
+                    _ = sleep_ms(timeout_ms as Int).await => false,
+                }
+            };
+            if !acknowledged && !finished.is_cancelled() {
+                return Result.Err(SupervisorError.ShutdownTimedOut(self.id));
+            }
+            let slot = self.run.lock().unwrap_or_else(|p| p.into_inner());
+            if let Maybe.Some(ref active) = *slot {
+                if active.ptr_eq(&run) { self.set_status(ChildStatus.Stopped); }
+            }
+        }
+        Result.Ok(())
     }
 
     /// Record a restart event for this child and return the
@@ -1649,7 +1612,7 @@ public fn root_supervisor() -> &SupervisorHandle {
 /// Spawn a supervised task with default specification
 public async fn spawn_supervised<F, T>(future: F) -> Result<ChildId, SupervisorError>
 where type
-    F: Future<T> + Send,
+    F: Future<Output = T> + Send,
     T: Send,
 {
     root_supervisor().supervise(|| future, ChildSpec.default()).await
@@ -1661,7 +1624,7 @@ public async fn spawn_permanent<F, T>(
     future_factory: fn() -> F,
 ) -> Result<ChildId, SupervisorError>
 where type
-    F: Future<T> + Send,
+    F: Future<Output = T> + Send,
     T: Send,
 {
     root_supervisor().supervise(
@@ -1676,7 +1639,7 @@ public async fn spawn_temporary<F, T>(
     future: F,
 ) -> Result<ChildId, SupervisorError>
 where type
-    F: Future<T> + Send,
+    F: Future<Output = T> + Send,
     T: Send,
 {
     root_supervisor().supervise(|| future, ChildSpec.temporary(name)).await
@@ -1685,8 +1648,3 @@ where type
 // =============================================================================
 // Async Helper
 // =============================================================================
-
-/// Sleep for specified milliseconds
-async fn async_sleep_ms(ms: UInt64) {
-    async_sleep_ms_intrinsic(ms)
-}

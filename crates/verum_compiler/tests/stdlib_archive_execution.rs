@@ -151,6 +151,61 @@ fn supervisor_constructors_use_declared_ownership() {
 
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn supervisor_acknowledges_each_child_generation_before_shutdown() {
+    let source = r#"
+        module app;
+        mount core.runtime.supervisor.{SupervisorHandle, SupervisorConfig, ChildSpec, SupervisorError};
+        mount core.async.future.Future;
+        mount core.async.poll.Poll;
+        mount core.async.task.yield_now;
+        mount core.async.waker.Context;
+
+        mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+        static POLLS: AtomicInt = AtomicInt.new(0);
+        type Worker is { pending: Bool };
+        implement Future for Worker {
+            type Output = Int;
+            fn poll(&mut self, cx: &mut Context) -> Poll<Int> {
+                POLLS.fetch_add(1, MemoryOrdering.SeqCst);
+                if self.pending {
+                    self.pending = false;
+                    cx.waker().wake_by_ref();
+                    return Poll.Pending;
+                }
+                Poll.Ready(17)
+            }
+        }
+        fn make_worker() -> Worker { Worker { pending: true } }
+
+        async fn main() -> Int {
+            let supervisor = SupervisorHandle.new(SupervisorConfig.one_for_one("workers"));
+            let child = supervisor.supervise<Worker, Int>(make_worker, ChildSpec.temporary("test")).await.unwrap();
+            yield_now().await;
+            assert_eq(POLLS.load(MemoryOrdering.SeqCst), 2);
+            let status = supervisor.status();
+            assert_eq(status.child_count, 1);
+            assert_eq(status.running_count, 0);
+            supervisor.restart(child).await.unwrap();
+            yield_now().await;
+            assert_eq(POLLS.load(MemoryOrdering.SeqCst), 4);
+            supervisor.terminate(child).await.unwrap();
+            supervisor.terminate(child).await.unwrap();
+            assert_eq(supervisor.status().running_count, 0);
+
+            supervisor.shutdown().await.unwrap();
+            supervisor.shutdown().await.unwrap();
+            assert(!supervisor.status().is_running, "shutdown must close admission");
+            match supervisor.supervise<Worker, Int>(make_worker, ChildSpec.temporary("late")).await {
+                Result.Err(SupervisorError.ShuttingDown) => supervisor.status().child_count,
+                _ => -1,
+            }
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 1);
+}
+
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn owned_and_borrowed_smart_pointers_reach_their_payload() {
     let source = r#"
         module app;
