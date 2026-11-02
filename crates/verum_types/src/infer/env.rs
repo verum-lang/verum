@@ -2256,72 +2256,6 @@ impl TypeChecker {
         }
     }
 
-    /// Check aliasing constraints for assignment.
-    /// An assignment like `data[i] = value` requires exclusive (mutable) access to `data`.
-    /// If there are existing immutable borrows, this is an aliasing violation.
-    /// Spec: L0-critical/reference_system/access_rules/ref_conflict_error
-    fn check_assignment_aliasing(&mut self, left: &Expr, span: Span) -> Result<()> {
-        use verum_ast::expr::ExprKind;
-
-        match &left.kind {
-            // Variable assignment: x = value
-            // Check if there are active borrows of x
-            ExprKind::Path(path) => {
-                if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                    let var_name = id.name.as_str();
-                    // Check for borrow conflict - assignment requires exclusive access
-                    if let Some(err) = self
-                        .borrow_tracker
-                        .check_borrow_allowed(var_name, true, span)
-                    {
-                        return Err(err);
-                    }
-                }
-            }
-
-            // Index assignment: data[i] = value
-            // The whole collection needs to be mutably borrowed
-            ExprKind::Index {
-                expr: collection, ..
-            } => {
-                if let Some(collection_name) = self.extract_base_name(collection) {
-                    // Check for borrow conflict - mutation requires exclusive access
-                    if let Some(err) =
-                        self.borrow_tracker
-                            .check_borrow_allowed(&collection_name, true, span)
-                    {
-                        return Err(err);
-                    }
-                }
-            }
-
-            // Field assignment: container.field = value
-            // Check if there are borrows of the field or the whole container
-            ExprKind::Field {
-                expr: receiver,
-                field,
-            } => {
-                if let Some((base_name, _field_path)) =
-                    self.extract_field_path(receiver, field.name.as_str())
-                {
-                    // Check for borrow conflict - field mutation requires exclusive access
-                    if let Some(err) = self
-                        .borrow_tracker
-                        .check_borrow_allowed(&base_name, true, span)
-                    {
-                        return Err(err);
-                    }
-                }
-            }
-
-            _ => {
-                // Other assignment targets - no aliasing check needed
-            }
-        }
-
-        Ok(())
-    }
-
     /// Try to extract a constant index from an expression.
     pub(super) fn try_extract_const_index(&mut self, expr: &Expr) -> Option<i64> {
         use verum_ast::expr::ExprKind;
@@ -10291,8 +10225,16 @@ impl TypeChecker {
                         self.ctx.env.generalize(resolved_ty)
                     };
 
-                    // Bind pattern
+                    // Resolve an alias while its initializer's lexical bindings
+                    // are still visible (the new pattern may shadow one).
+                    let origin = if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+                        && self.is_shared_reference_head(&scheme.ty, val.span)? {
+                        self.bind_reference_result(val, &name.name)?
+                    } else { None };
                     self.bind_pattern_scheme(pattern, scheme.clone())?;
+                    if let (Some(origin), verum_ast::PatternKind::Ident { name, .. }) = (origin, &pattern.kind) {
+                        self.ctx.env.set_reference_origin(&name.name, origin);
+                    }
 
                     // MLS Phase 2b-Followup propagation (#292):
                     // when binding `let x = expr;`, compute the
@@ -12381,13 +12323,6 @@ with .to_float() or .to_int() (at {:?})",
                 // =====================================================================
                 self.handle_assignment(left, _span);
 
-                // =====================================================================
-                // ALIASING CHECK: Assignment to indexed element requires mutable borrow
-                // If `data[i] = value`, we need exclusive access to `data`
-                // Spec: L0-critical/reference_system/access_rules/ref_conflict_error
-                // =====================================================================
-                self.check_assignment_aliasing(left, _span)?;
-
                 let right_result = self.synth_expr(right)?;
                 self.with_checked_write(left, |tc| tc.check_expr_assignment_target(left, &right_result.ty))?;
 
@@ -12458,123 +12393,36 @@ with .to_float() or .to_int() (at {:?})",
     /// one rule diverge; one copy cannot.
     ///
     /// Spec: L0-critical/reference_system/access_rules - Reference aliasing
-    fn track_reference_borrow(&mut self, expr: &Expr, mutable: bool, span: Span) -> Result<()> {
-        match &expr.kind {
-            ExprKind::Path(path) => {
-                if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                    let var_name = id.name.as_str();
-                    // NLL-ARG-BORROW-1: a borrow taken as a call argument
-                    // (`f(&x)`, incl. a generic-method arg synthesized here
-                    // rather than checked) is a TEMPORARY that ends when the
-                    // call returns.  Registering it persistently makes it
-                    // linger in the tracker and phantom-conflict with a later
-                    // `x.mut()` (e.g. `assert(a.is_disjoint(&b)); b.insert(2)`
-                    // -> spurious E310).  Mirror the check-mode path in
-                    // expr.rs: use the non-registering `_for_call` variant.
-                    match (mutable, self.in_call_arg_context) {
-                        (false, true) => {
-                            self.borrow_tracker.borrow_immut_for_call(var_name, span)?;
-                        }
-                        (false, false) => {
-                            self.borrow_tracker.borrow_immut(var_name, span)?;
-                        }
-                        (true, true) => {
-                            self.borrow_tracker.borrow_mut_for_call(var_name, span)?;
-                        }
-                        (true, false) => {
-                            self.borrow_tracker.borrow_mut(var_name, span)?;
-                        }
-                    }
-                }
-            }
-            ExprKind::Field {
-                expr: receiver,
-                field,
-            } => {
-                // Track field borrow: `&container.field` borrows
-                // container.field and also implicitly borrows container,
-                // which is what forbids a later `&mut container`.  Nested
-                // fields keep the full path: container.first.value ->
-                // "first.value".
-                if let Some((base_name, field_path)) =
-                    self.extract_field_path(receiver, field.name.as_str())
-                {
-                    if mutable {
-                        // There is no `borrow_field_mut_for_call`: a mutable
-                        // field borrow registers even in call-arg position.
-                        self.borrow_tracker
-                            .borrow_field_mut(base_name, field_path, span)?;
-                    } else if self.in_call_arg_context {
-                        // NLL-ARG-BORROW-1 second leg: a `&x.field` CALL
-                        // ARGUMENT is a temporary that dies at call return.
-                        self.borrow_tracker
-                            .borrow_field_immut_for_call(base_name, field_path, span)?;
-                    } else {
-                        self.borrow_tracker
-                            .borrow_field_immut(base_name, field_path, span)?;
-                    }
-                }
-            }
-            // Index expression: `&data[i]` borrows the element at index i.
-            // With constant indices, disjoint index borrows are allowed
-            // (borrow splitting).
-            // Spec: L0-critical/reference_system/access_rules/ref_splitting_fields
-            ExprKind::Index {
-                expr: collection,
-                index,
-            } => {
-                if let Some(collection_name) = self.extract_base_name(collection) {
-                    if let Some(idx) = self.try_extract_const_index(index) {
-                        // Negative indices fail at runtime; nothing to track.
-                        if idx >= 0 {
-                            // Constant index: track as "collection[idx]",
-                            // exactly like a field.
-                            let base = verum_common::Text::from(collection_name.as_str());
-                            let index_path = verum_common::Text::from(format!("[{}]", idx));
-                            if mutable {
-                                self.borrow_tracker.borrow_field_mut(base, index_path, span)?;
-                            } else if self.in_call_arg_context {
-                                // NLL-ARG-BORROW-1 second leg (see Field arm).
-                                self.borrow_tracker
-                                    .borrow_field_immut_for_call(base, index_path, span)?;
-                            } else {
-                                self.borrow_tracker
-                                    .borrow_field_immut(base, index_path, span)?;
-                            }
-                        }
-                    } else if self.in_call_arg_context {
-                        // Non-constant index in call-arg position:
-                        // `recv.method(&xs[i])` — the whole-collection borrow
-                        // is a call temporary (NLL-ARG-BORROW-1 second leg;
-                        // live failure: the bubble-sort idiom
-                        // `words[j].cmp(&words[i])` followed by `words[i] = t`
-                        // reported E310 with no live holder — 242 text/text
-                        // tests red on one phantom conflict).
-                        if mutable {
-                            self.borrow_tracker
-                                .borrow_mut_for_call(collection_name.as_str(), span)?;
-                        } else {
-                            self.borrow_tracker
-                                .borrow_immut_for_call(collection_name.as_str(), span)?;
-                        }
-                    } else if mutable {
-                        // Non-constant index: borrow the whole collection.
-                        self.borrow_tracker
-                            .borrow_mut(collection_name.as_str(), span)?;
-                    } else {
-                        self.borrow_tracker
-                            .borrow_immut(collection_name.as_str(), span)?;
-                    }
-                }
-            }
-            _ => {}
+    pub(super) fn track_reference_borrow(&mut self, expr: &Expr, mutable: bool, span: Span) -> Result<()> {
+        let Some((root, projection)) = self.borrow_place(expr) else { return Ok(()) };
+        // Call arguments are temporary here. The conflict check must still
+        // consider the exact same projections as persistent loans and writes.
+        if let Some(err) = self.borrow_tracker.check_place_borrow(
+            &root, projection.as_deref(), mutable, span,
+        ) {
+            return Err(err);
         }
+        if self.in_call_arg_context {
+            return Ok(());
+        }
+        match (projection, mutable) {
+            (Some(field), true) => self.borrow_tracker.borrow_field_mut(root, field, span)?,
+            (Some(field), false) => self.borrow_tracker.borrow_field_immut(root, field, span)?,
+            (None, true) => self.borrow_tracker.borrow_mut(root, span)?,
+            (None, false) => self.borrow_tracker.borrow_immut(root, span)?,
+        };
         Ok(())
     }
 
     pub(super) fn infer_unop(&mut self, op: UnOp, expr: &Expr, _span: Span) -> Result<InferResult> {
         if matches!(op, UnOp::RefMut | UnOp::RefCheckedMut | UnOp::RefUnsafeMut) {
-            return self.with_checked_write(expr, |tc| tc.infer_unop_operand(op, expr, _span));
+            let result = self.with_checked_write(expr, |tc| tc.infer_unop_operand(op, expr, _span))?;
+            if matches!(op, UnOp::RefMut | UnOp::RefCheckedMut) {
+                // Activate only after permission is checked. The loan being
+                // created must never conflict with its own acquisition.
+                self.track_reference_borrow(expr, true, _span)?;
+            }
+            return Ok(result);
         }
         self.infer_unop_operand(op, expr, _span)
     }
@@ -12803,11 +12651,6 @@ with .to_float() or .to_int() (at {:?})",
                 let result = self.synth_expr(expr)?;
                 self.in_call_arg_context = old_call_context;
 
-                // Track mutable borrow for aliasing detection
-                // Spec: L0-critical/reference_system/access_rules - Reference aliasing
-                // NLL: Use different behavior depending on context (call arg vs let binding)
-                self.track_reference_borrow(expr, true, _span)?;
-
                 // Auto-deref smart pointers: &mut Heap<T> -> &mut T, &mut Shared<T> -> &mut T
                 // STDLIB-AGNOSTIC: These are Verum memory types, not Rust types
                 let inner_ty = match &result.ty {
@@ -12829,30 +12672,6 @@ with .to_float() or .to_int() (at {:?})",
             Deref => {
                 let result = self.synth_expr(expr)?;
                 self.observe_place_operand(expr, &result.ty);
-
-                // ============================================================
-                // NLL: Release borrow at last use
-                // Spec: L0-critical/reference_system/access_rules/ref_scope_valid
-                // ============================================================
-                // When a reference variable is dereferenced, this is often its
-                // last use. For NLL purposes, we release the borrow held by the
-                // reference variable, allowing subsequent mutations.
-                //
-
-                // Example:
-                //  let ref_val = &value;
-                //  let read = *ref_val; // Last use - release borrow here
-                //  value = 200; // OK: borrow is released
-                //
-
-                // This is a conservative NLL approximation that works for simple
-                // patterns. Full NLL would require liveness analysis.
-                if let ExprKind::Path(path) = &expr.kind {
-                    if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                        let holder_name = id.name.as_str();
-                        self.borrow_tracker.release_borrow_at_last_use(holder_name);
-                    }
-                }
 
                 match result.ty {
                     Type::Reference { inner, .. } => Ok(InferResult::new(*inner)),
@@ -13051,14 +12870,6 @@ with .to_float() or .to_int() (at {:?})",
                 let result = self.synth_expr(expr)?;
                 self.in_call_arg_context = old_call_context;
 
-                // Track mutable borrow for aliasing detection and escape
-                // analysis — the SAME carrier `RefMut` uses. Tier 1 is the
-                // COMPILER-PROVEN tier: it may not be stricter than the tier-0
-                // default it optimises into, nor looser. See
-                // `track_reference_borrow` for the three shapes that diverged
-                // while this arm kept its own copy of the rule.
-                self.track_reference_borrow(expr, true, _span)?;
-
                 Ok(InferResult::new(Type::checked_reference(true, result.ty)))
             }
             // Three-tier reference system: &unsafe T (Tier 2 - manual proof, 0ns overhead)
@@ -13229,86 +13040,6 @@ with .to_float() or .to_int() (at {:?})",
                 self.extract_implicit_type_params_from_type(self_ty, type_param_names);
             }
             _ => {}
-        }
-    }
-
-    /// Extract the base variable name from any expression, including index access.
-    /// Used for aliasing detection when borrowing collection elements.
-    ///
-    /// Examples:
-    /// - `data` -> Some("data")
-    /// - `data[0]` -> Some("data")
-    /// - `data[i][j]` -> Some("data")
-    /// - `container.field` -> Some("container")
-    /// - `container.field[i]` -> Some("container")
-    /// - Spec: L0-critical/reference_system/access_rules/ref_conflict_error
-    fn extract_base_name(&self, expr: &Expr) -> Option<Text> {
-        match &expr.kind {
-            ExprKind::Path(path) => {
-                // Simple variable: data
-                if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                    Some(verum_common::Text::from(id.name.as_str()))
-                } else {
-                    None
-                }
-            }
-            ExprKind::Field { expr: receiver, .. } => {
-                // Field access: container.field -> "container"
-                self.extract_base_name(receiver)
-            }
-            ExprKind::Index {
-                expr: collection, ..
-            } => {
-                // Index access: data[i] -> "data"
-                self.extract_base_name(collection)
-            }
-            _ => {
-                // Complex expressions not tracked
-                None
-            }
-        }
-    }
-
-    /// Extract the full field path from a field access expression.
-    /// Returns (base_name, full_path) for field-level borrow tracking.
-    ///
-    /// Examples:
-    /// - `container.field` -> Some(("container", "field"))
-    /// - `container.first.value` -> Some(("container", "first.value"))
-    /// - `a.b.c.d` -> Some(("a", "b.c.d"))
-    fn extract_field_path(&self, receiver: &Expr, field: &str) -> Option<(Text, Text)> {
-        match &receiver.kind {
-            ExprKind::Path(path) => {
-                // Simple variable: container.field -> ("container", "field")
-                if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                    Some((
-                        verum_common::Text::from(id.name.as_str()),
-                        verum_common::Text::from(field),
-                    ))
-                } else {
-                    None
-                }
-            }
-            ExprKind::Field {
-                expr: inner_receiver,
-                field: inner_field,
-            } => {
-                // Nested field access: container.first.value
-                // Recursively build the path
-                if let Some((base, inner_path)) =
-                    self.extract_field_path(inner_receiver, inner_field.name.as_str())
-                {
-                    // Append current field: "first" + "value" -> "first.value"
-                    let full_path = verum_common::Text::from(format!("{}.{}", inner_path, field));
-                    Some((base, full_path))
-                } else {
-                    None
-                }
-            }
-            _ => {
-                // Complex expressions not tracked
-                None
-            }
         }
     }
 

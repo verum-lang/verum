@@ -103,13 +103,15 @@ impl TypeChecker {
         // Use iterative inference for expressions that might be deeply nested
         // to avoid stack overflow. Falls back to recursive inference for
         // complex expressions that need full context.
-        self.with_value_obligation_scope(false, |checker| {
+        let result = self.with_value_obligation_scope(false, |checker| {
             if Self::should_use_iterative_inference(expr) {
                 checker.synth_expr_iterative(expr)
             } else {
                 checker.infer_expr(expr, InferMode::Synth)
             }
-        })
+        })?;
+        self.observe_place_operand(expr, &result.ty);
+        Ok(result)
     }
 
     /// Determine if an expression should use iterative inference.
@@ -174,7 +176,9 @@ impl TypeChecker {
         // `Maybe`) passes through untouched.
         let expected = &self.resolve_assoc_projections_deep(expected);
 
-        self.check_expr_inner(expr, expected)
+        let result = self.check_expr_inner(expr, expected)?;
+        self.observe_place_operand(expr, &result.ty);
+        Ok(result)
     }
 
     /// If `resolved_expected` is a function type whose return type expands to a
@@ -1179,38 +1183,7 @@ impl TypeChecker {
                     // Try checking the inner expression against the expected inner type first
                     match self.check_expr(inner, expected_inner) {
                         Ok(_) => {
-                            // Borrow tracking for aliasing detection
-                            // CRITICAL: Do NOT discard the Result — borrow conflicts must propagate
-                            //
-
-                            // Root fix for Issue #4 (NLL over-retain): when
-                            // the `&x` appears in a call-argument position,
-                            // use `borrow_immut_for_call` — a transient
-                            // borrow that does not persist past the call
-                            // boundary. The symmetric `borrow_mut_for_call`
-                            // already exists for the RefMut arm below; the
-                            // missing immut counterpart caused
-                            // `call(&value); mutate(&mut value)` sequences
-                            // to fail with a phantom "previous immutable
-                            // borrow" because the call-arg borrow lingered
-                            // in the tracker with no live holder.
-                            match &inner.kind {
-                                ExprKind::Path(path) => {
-                                    if let Some(verum_ast::ty::PathSegment::Name(id)) =
-                                        path.segments.first()
-                                    {
-                                        let var_name = id.name.as_str();
-                                        if self.in_call_arg_context {
-                                            self.borrow_tracker
-                                                .borrow_immut_for_call(var_name, expr.span)?;
-                                        } else {
-                                            self.borrow_tracker
-                                                .borrow_immut(var_name, expr.span)?;
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
+                            self.track_reference_borrow(inner, false, expr.span)?;
                             Ok(InferResult::new(expected.clone()))
                         }
                         Err(_) => {
@@ -1234,27 +1207,7 @@ impl TypeChecker {
                 {
                     match self.with_checked_write(inner, |tc| tc.check_expr(inner, expected_inner)) {
                         Ok(_) => {
-                            // Borrow tracking for aliasing detection
-                            // CRITICAL: Do NOT discard the Result — borrow conflicts must propagate
-                            // Spec: L0-critical/reference_system/access_rules/ref_aliasing_function
-                            match &inner.kind {
-                                ExprKind::Path(path) => {
-                                    if let Some(verum_ast::ty::PathSegment::Name(id)) =
-                                        path.segments.first()
-                                    {
-                                        let var_name = id.name.as_str();
-                                        if self.in_call_arg_context {
-                                            // NLL: For call arguments, use temporary borrow
-                                            self.borrow_tracker
-                                                .borrow_mut_for_call(var_name, expr.span)?;
-                                        } else {
-                                            // Normal: For let bindings, use strict borrow checking
-                                            self.borrow_tracker.borrow_mut(var_name, expr.span)?;
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
+                            self.track_reference_borrow(inner, true, expr.span)?;
                             Ok(InferResult::new(expected.clone()))
                         }
                         Err(_) => self.synth_and_check(expr, expected),
@@ -1582,7 +1535,7 @@ impl TypeChecker {
                         // (e.g., ::Item[Range<Int>] → Int) before binding.
                         for (param, param_ty) in params.iter().zip(expected_params.iter()) {
                             let normalized_param_ty = self.normalize_type(param_ty);
-                            self.bind_pattern(&param.pattern, &normalized_param_ty)?;
+                            self.bind_parameter_pattern(&param.pattern, &normalized_param_ty)?;
                         }
 
                         // Check body against expected return type with bidirectional inference.
@@ -1684,7 +1637,7 @@ impl TypeChecker {
                         // closure body sees concrete types rather than un-resolved projections.
                         for (param, param_ty) in params.iter().zip(expected_params.iter()) {
                             let normalized_param_ty = self.normalize_type(param_ty);
-                            self.bind_pattern(&param.pattern, &normalized_param_ty)?;
+                            self.bind_parameter_pattern(&param.pattern, &normalized_param_ty)?;
                         }
 
                         // Check body against expected return type with bidirectional inference.
@@ -4642,21 +4595,6 @@ impl TypeChecker {
                         self.observe_place_operand(inner_expr, &inner_ty);
                     }
 
-                    // ============================================================
-                    // NLL: Release borrow at last use for Deref operations
-                    // Spec: L0-critical/reference_system/access_rules/ref_scope_valid
-                    // ============================================================
-                    if matches!(op, UnOp::Deref) {
-                        if let ExprKind::Path(path) = &inner_expr.kind {
-                            if let Some(verum_ast::ty::PathSegment::Name(id)) =
-                                path.segments.first()
-                            {
-                                let holder_name = id.name.as_str();
-                                self.borrow_tracker.release_borrow_at_last_use(holder_name);
-                            }
-                        }
-                    }
-
                     let result_ty = self.compute_unop_result(op, &inner_ty, span)?;
                     value_stack.push(result_ty);
                 }
@@ -6628,7 +6566,7 @@ impl TypeChecker {
                         } else {
                             Type::Var(TypeVar::fresh())
                         };
-                        self.bind_pattern(&param.pattern, &param_ty)?;
+                        self.bind_parameter_pattern(&param.pattern, &param_ty)?;
                         param_types.push(param_ty);
                     }
 
@@ -6727,24 +6665,6 @@ impl TypeChecker {
         if crate::ctor_trace_enabled() {
             eprintln!("[ctor-trace] infer_for_loop ENTER span={:?}", expr.span);
         }
-                    // NLL: Before synthesizing the iterator expression, release any
-                    // expired borrows on the collection being iterated. This handles
-                    // patterns like:
-                    //  let slice = &mut array; slice[0] = 10;
-                    //  for item in &mut array { ... } // slice's borrow has expired
-                    if let ExprKind::Unary { op, expr: inner } = &iter.kind {
-                        if matches!(op, UnOp::Ref | UnOp::RefMut) {
-                            if let ExprKind::Path(path) = &inner.kind {
-                                if let Some(verum_ast::ty::PathSegment::Name(id)) =
-                                    path.segments.first()
-                                {
-                                    let target = verum_common::Text::from(id.name.as_str());
-                                    self.borrow_tracker.nll_release_expired_borrows_for(&target);
-                                }
-                            }
-                        }
-                    }
-
                     let iter_result = self.synth_expr(iter)?;
 
                     // CRITICAL: Apply current substitution to resolve type variables
@@ -8616,15 +8536,6 @@ impl TypeChecker {
                     }
                 }
 
-                // ============================================================
-                // Function Parameter Borrow Checking
-                // Reference safety invariants: managed refs validated at dereference, checked refs proven safe at compile time, unsafe refs unchecked — Aliasing Rules
-                // ============================================================
-                // Check for potential aliasing conflicts between function arguments:
-                // - Multiple mutable references to the same data
-                // - Mutable reference + immutable reference to overlapping data
-                self.check_function_arg_aliasing(args, &params, expr.span)?;
-
                 // Check each argument against parameter type with substitution
                 // NLL: Set call argument context for proper borrow release
                 let old_call_context = self.in_call_arg_context;
@@ -8747,6 +8658,8 @@ impl TypeChecker {
                     }
                 }
                 self.in_call_arg_context = old_call_context;
+
+                self.check_call_loans(args, Some(&params), None)?;
 
                 // Consume affine values passed by value
                 self.consume_affine_call_args(args, &params)?;
@@ -15271,10 +15184,12 @@ impl TypeChecker {
         if leaves {
             self.affine_tracker.enter_leaving_region();
         }
-        for stmt in &block.stmts {
+        let loan_ends = super::loan_ends::LoanEnds::for_block(block);
+        for (index, stmt) in block.stmts.iter().enumerate() {
             let amb_mark = self.pending_ambiguity.len();
             match self.check_stmt(stmt) {
                 Ok(diverges) => {
+                    loan_ends.complete(index, self);
                     if diverges {
                         has_diverging_stmt = true;
                     }
@@ -15413,10 +15328,12 @@ impl TypeChecker {
         // STMT-RECOVERY-1: same push-and-continue as the synth twin
         // above — one failing statement never hides its siblings.
         let mut has_diverging_stmt = false;
-        for stmt in block.stmts.iter() {
+        let loan_ends = super::loan_ends::LoanEnds::for_block(block);
+        for (index, stmt) in block.stmts.iter().enumerate() {
             let amb_mark = self.pending_ambiguity.len();
             match self.check_stmt(stmt) {
                 Ok(diverges) => {
+                    loan_ends.complete(index, self);
                     if diverges {
                         has_diverging_stmt = true;
                         // Once we hit a diverging statement, the rest is

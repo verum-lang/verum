@@ -249,6 +249,15 @@ impl TypeChecker {
         self.bind_pattern_scheme(pattern, TypeScheme::mono(ty.clone()))
     }
 
+    pub(super) fn bind_parameter_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<()> {
+        self.bind_pattern(pattern, ty)?;
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            && self.is_shared_reference_head(ty, pattern.span)? {
+            self.ctx.env.set_reference_origin(&name.name, crate::context::ReferenceOrigin::Parameter);
+        }
+        Ok(())
+    }
+
     /// Bind a pattern to a type scheme.
     /// Recursively extracts variable bindings from active pattern bindings,
     /// assigning Unknown type to each. This is used because active pattern
@@ -3533,6 +3542,7 @@ impl TypeChecker {
                     impl_var_count: 0,
                     impl_self_type: None,
                     receiver_kind: None,
+                    returned_parameter: None,
                     explicit_method_vars: None,
                     universe_params: List::new(),
                 },

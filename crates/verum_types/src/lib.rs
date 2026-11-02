@@ -1941,6 +1941,9 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
+    #[error("cannot establish the original carrier of this reference")]
+    UnknownRecordOrigin { span: verum_ast::Span },
+
     #[error("cannot write through a shared reference")]
     SharedReferenceWrite { span: verum_ast::Span },
 
@@ -2175,7 +2178,7 @@ impl TypeError {
             AsmOutputNotLvalue { span } => *span,
             AnalysisCancelled | RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
             OtherWithCodeSpanned { span, .. } => *span,
-            UniverseBinding { span, .. } | SharedReferenceWrite { span } => *span,
+            UniverseBinding { span, .. } | UnknownRecordOrigin { span } | SharedReferenceWrite { span } => *span,
             DependentReceiverMutation { mutation, .. } => *mutation,
             PositivityViolation { span, .. } => *span,
             UnknownVariantConstructor { span, .. } => *span,
@@ -2190,7 +2193,7 @@ impl TypeError {
     /// the build rather than getting masked by `tracing::debug!`.
     pub fn is_soundness_critical(&self) -> bool {
         matches!(self, TypeError::PositivityViolation { .. } | TypeError::UniverseBinding { .. }
-            | TypeError::DependentReceiverMutation { .. } | TypeError::SharedReferenceWrite { .. })
+            | TypeError::DependentReceiverMutation { .. } | TypeError::SharedReferenceWrite { .. } | TypeError::UnknownRecordOrigin { .. })
     }
 
     /// Convert to diagnostic for error reporting with span information
@@ -3430,7 +3433,7 @@ impl TypeError {
                 .build(),
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
 
-            SharedReferenceWrite { span } => {
+            SharedReferenceWrite { span } | UnknownRecordOrigin { span } => {
                 let mut builder = DiagnosticBuilder::error().message(self.to_string());
                 if let Some(span) = convert_span(*span) {
                     builder = builder.span(span);

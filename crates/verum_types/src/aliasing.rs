@@ -820,36 +820,6 @@ impl BorrowTracker {
         }
     }
 
-    /// NLL: Release expired borrows on a target variable.
-    /// When a new borrow of `target` is requested, any existing borrows held
-    /// by holder variables are considered expired — the holder's last use must
-    /// have already passed for control flow to reach the new borrow point.
-    /// This implements lazy NLL release without requiring full liveness analysis.
-    pub fn nll_release_expired_borrows_for(&mut self, target: &Text) {
-        // Collect holder variables that hold borrows on this target
-        let holders_to_release: List<Text> = self
-            .ref_holders
-            .iter()
-            .filter_map(|(holder, ref_id)| {
-                if let Some(borrow) = self.ref_to_borrow.get(ref_id) {
-                    if &borrow.target == target {
-                        return Some(holder.clone());
-                    }
-                }
-                None
-            })
-            .collect();
-
-        for holder in &holders_to_release {
-            self.release_borrow_at_last_use(holder.as_str());
-        }
-
-        // Also release direct (non-holder) mutable borrows on the target.
-        // Method calls create temporary &mut self borrows that should end
-        // when the method returns.
-        self.active_mut_borrows.remove(target);
-    }
-
     // ==================== Two-Phase Borrow Support ====================
     // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .6 - Two-phase borrows
     //
@@ -986,80 +956,42 @@ impl BorrowTracker {
         is_mutable: bool,
         span: Span,
     ) -> Option<TypeError> {
-        let target_text = Text::from(target);
+        self.check_place_borrow(target, None, is_mutable, span)
+    }
 
-        if is_mutable {
-            // Check for existing mutable borrows
-            if let Some(mut_borrows) = self.active_mut_borrows.get(&target_text) {
-                if let Some(existing) = mut_borrows.first() {
-                    return Some(TypeError::BorrowConflict {
-                        var: target_text,
-                        existing_borrow_span: existing.span,
-                        existing_is_mut: true,
-                        new_borrow_span: span,
-                        new_is_mut: true,
-                    });
+    /// A projection overlaps its ancestors and descendants. Independent fields
+    /// or constant indices on the same binding can be written separately.
+    pub(crate) fn check_place_borrow(
+        &self,
+        target: &str,
+        projection: Option<&str>,
+        mutable: bool,
+        span: Span,
+    ) -> Option<TypeError> {
+        let key = Text::from(target);
+        let conflict = self.active_mut_borrows.get(&key).and_then(|loans| loans.first())
+            .or_else(|| self.active_immut_borrows.get(&key).and_then(|loans|
+                if mutable { loans.first() } else { None }))
+            // Each reader owns a distinct loan, including two readers of
+            // the same field in different scopes.
+            .or_else(|| self.ref_to_borrow.values().find(|loan| {
+                if loan.field_path.is_none() || loan.target != key || (!mutable && !loan.is_mutable) {
+                    return false;
                 }
-            }
-
-            // Check for existing immutable borrows
-            if let Some(immut_borrows) = self.active_immut_borrows.get(&target_text) {
-                if let Some(existing) = immut_borrows.first() {
-                    return Some(TypeError::BorrowConflict {
-                        var: target_text,
-                        existing_borrow_span: existing.span,
-                        existing_is_mut: false,
-                        new_borrow_span: span,
-                        new_is_mut: true,
-                    });
-                }
-            }
-
-            // Check for existing field/index borrows of this target
-            // Mutating a collection conflicts with any element borrow
-            // Spec: L0-critical/reference_system/access_rules/ref_conflict_error
-            let prefix = format!("{}.", target);
-            for (field_key, field_borrow) in self.field_borrows.iter() {
-                if field_key.starts_with(&prefix) {
-                    return Some(TypeError::BorrowConflict {
-                        var: target_text,
-                        existing_borrow_span: field_borrow.span,
-                        existing_is_mut: field_borrow.is_mutable,
-                        new_borrow_span: span,
-                        new_is_mut: true,
-                    });
-                }
-            }
-        } else {
-            // Immutable borrow: only conflicts with mutable borrows
-            if let Some(mut_borrows) = self.active_mut_borrows.get(&target_text) {
-                if let Some(existing) = mut_borrows.first() {
-                    return Some(TypeError::BorrowConflict {
-                        var: target_text,
-                        existing_borrow_span: existing.span,
-                        existing_is_mut: true,
-                        new_borrow_span: span,
-                        new_is_mut: false,
-                    });
-                }
-            }
-
-            // Also check for mutable field borrows
-            let prefix = format!("{}.", target);
-            for (field_key, field_borrow) in self.field_borrows.iter() {
-                if field_key.starts_with(&prefix) && field_borrow.is_mutable {
-                    return Some(TypeError::BorrowConflict {
-                        var: target_text,
-                        existing_borrow_span: field_borrow.span,
-                        existing_is_mut: true,
-                        new_borrow_span: span,
-                        new_is_mut: false,
-                    });
-                }
-            }
-        }
-
-        None
+                let (Some(write), Some(borrow)) = (projection, loan.field_path.as_ref()) else {
+                    return true;
+                };
+                // Field/index labels never contain dots. Zipping until either
+                // path ends treats an ancestor/descendant pair as overlapping.
+                write.split('.').zip(borrow.as_str().split('.')).all(|(a, b)| a == b)
+            }))?;
+        Some(TypeError::BorrowConflict {
+            var: key,
+            existing_borrow_span: conflict.span,
+            existing_is_mut: conflict.is_mutable,
+            new_borrow_span: span,
+            new_is_mut: mutable,
+        })
     }
 
     /// Clone the tracker for branch analysis
@@ -1122,6 +1054,7 @@ impl BorrowTracker {
         let ref_id = borrow.id;
         let scope_depth = borrow.scope_depth;
 
+        self.last_borrow = Some((ref_id, borrow.target.clone(), borrow.is_mutable));
         self.ref_to_borrow.insert(ref_id, borrow.clone());
         self.field_borrows.insert(field_key, borrow);
 

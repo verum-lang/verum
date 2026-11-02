@@ -268,7 +268,7 @@ impl From<TypeError> for VerumError {
             TypeError::Other(msg) => VerumError::Other {
                 message: msg.clone(),
             },
-            error @ (TypeError::DependentReceiverMutation { .. } | TypeError::SharedReferenceWrite { .. }) => VerumError::Other {
+            error @ (TypeError::DependentReceiverMutation { .. } | TypeError::SharedReferenceWrite { .. } | TypeError::UnknownRecordOrigin { .. }) => VerumError::Other {
                 message: error.to_string().into(),
             },
             TypeError::UniverseBinding { message, span } => VerumError::Other {

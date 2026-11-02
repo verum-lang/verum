@@ -167,15 +167,20 @@ impl TypeChecker {
                 if !self.stable_receiver_type(&scheme.ty, expr.span)? {
                     return Err(unstable());
                 }
-                let binding = self
-                    .ctx
+                let reference = matches!(
+                    self.place_reference_head(&scheme.ty, expr.span)?,
+                    Type::Reference { .. }
+                );
+                self.ctx
                     .env
-                    .receiver_id(name, origin)
-                    .ok_or_else(unstable)?;
-                Ok(RecordReceiver {
-                    binding,
-                    fields: Default::default(),
-                })
+                    .project_record_source(name, reference, origin)
+                    .ok_or_else(|| {
+                        if reference {
+                            TypeError::UnknownRecordOrigin { span: expr.span }
+                        } else {
+                            unstable()
+                        }
+                    })
             }
             ExprKind::Field {
                 expr: parent,
@@ -186,6 +191,12 @@ impl TypeChecker {
                     .resolve_to_record_type(&self.record_conversion_head(&parent_ty))
                     .ok_or_else(unstable)?;
                 let field_ty = fields.get(&field.name).ok_or_else(unstable)?;
+                if matches!(
+                    self.place_reference_head(field_ty, expr.span)?,
+                    Type::Reference { mutable: false, .. }
+                ) {
+                    return Err(TypeError::UnknownRecordOrigin { span: expr.span });
+                }
                 if !self.stable_receiver_type(field_ty, expr.span)? {
                     return Err(unstable());
                 }

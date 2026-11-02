@@ -220,7 +220,7 @@ struct Observation {
 
 fn native() -> Observation {
     let module = FastParser::new().parse_module_str(
-        "public type Witness<A> is { public value: A };\npublic type Pack is { public carrier: Type, public witness: Witness<carrier> };",
+        "public type Witness<A> is { public value: A };\npublic type Pack is { public carrier: Type, public witness: Witness<carrier> };\nfn forward<T>(x: &T) -> &T { x }",
         FileId::new(1),
     ).unwrap();
     let mut checker = TypeChecker::new();
@@ -232,7 +232,7 @@ fn native() -> Observation {
     }
     let projected = project_source(
         &mut checker,
-        "|x: &Pack, y: &Pack| (x.witness, y.witness, x.witness)",
+        "|x: &Pack, y: &Pack| { let a = forward(x); let b = a; (x.witness, y.witness, x.witness, b.witness) }",
     );
     assert!(checker.take_deferred_errors().is_empty());
     assert!(!checker.diagnostics().iter().any(|d| d.is_error()));
@@ -300,9 +300,10 @@ fn source_projection_types_retain_binding_and_slot_identity() {
             .iter()
             .map(|(name, _, _)| name.as_str())
             .collect::<Vec<_>>(),
-        ["x", "y", "x"]
+        ["x", "y", "x", "b"]
     );
     assert_eq!(observation.uses[0], observation.uses[2]);
+    assert_eq!(observation.uses[0].1, observation.uses[3].1);
     assert_ne!(observation.uses[0].1, observation.uses[1].1);
 }
 
@@ -380,7 +381,7 @@ fn lean_checks_source_record_projection_ownership() {
     writeln!(claims, "theorem differentReceivers : ({x} : Nat) ≠ {y} := by decide\n#print axioms differentReceivers").unwrap();
     for (i, (name, observed_receiver, observed_slot)) in observation.uses.iter().enumerate() {
         let receiver = match name.as_str() {
-            "x" => x,
+            "x" | "b" => x,
             "y" => y,
             _ => panic!("unexpected source root"),
         };
@@ -407,7 +408,7 @@ fn lean_checks_source_record_projection_ownership() {
     let changed = format!("(.pair (.root 7) (.project {x} {})) := by decide", slot + 1);
     replay::check(
         &claims,
-        &["differentReceivers", "graph0", "graph1", "graph2"],
+        &["differentReceivers", "graph0", "graph1", "graph2", "graph3"],
         &[(&expected, &foreign), (&original, &changed)],
     );
 }

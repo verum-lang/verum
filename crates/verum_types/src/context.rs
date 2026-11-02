@@ -55,6 +55,8 @@ pub struct TypeScheme {
     /// Permission of the implicit receiver stripped from the callable arguments.
     /// Legacy descriptors without this information cannot establish a shared borrow.
     pub(crate) receiver_kind: Option<crate::core_metadata::ReceiverKind>,
+    /// Direct parameter forwarding established from the callable's own source body.
+    pub(crate) returned_parameter: Option<usize>,
     /// Declared implementation receiver using this scheme's type variables.
     /// This preserves reordered, nested and fixed receiver arguments without
     /// inferring the implementation relationship from a method's return type.
@@ -139,6 +141,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
+            returned_parameter: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }
@@ -155,6 +158,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
+            returned_parameter: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }
@@ -172,6 +176,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
+            returned_parameter: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }
@@ -194,6 +199,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
+            returned_parameter: None,
             explicit_method_vars: None,
             universe_params: List::new(),
         }
@@ -1036,10 +1042,32 @@ impl Default for UniverseContext {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum RecordPlace {
-    Mutable,
-    Projected { id: u64, origin: Span },
+#[derive(Clone, Debug)]
+pub(crate) enum ReferenceOrigin {
+    Parameter,
+    Exact(crate::ty::RecordReceiver),
+    Candidates(Box<[crate::ty::RecordReceiver]>),
+}
+
+/// Identity changes on a write. An old alias can never attach its evidence
+/// to a subsequently installed value, even when the binding name is reused.
+#[derive(Clone, Debug, Default)]
+struct RecordPlace {
+    id: Option<u64>,
+    mutable: bool,
+    projection: Option<Span>,
+    reference: Option<ReferenceOrigin>,
+}
+
+impl RecordPlace {
+    fn identity(&mut self) -> Option<u64> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        if let Some(id) = self.id { return Some(id); }
+        let id = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)).ok()?;
+        self.id = Some(id);
+        Some(id)
+    }
 }
 
 /// Type environment maps variables to type schemes.
@@ -1251,32 +1279,14 @@ impl TypeEnv {
     }
 
     pub(crate) fn mark_mutable_place(&mut self, name: &str) {
-        self.record_places.insert(name.into(), RecordPlace::Mutable);
+        self.record_places.entry(name.into()).or_default().mutable = true;
     }
 
-    /// A value used as a type index must remain stable for the lifetime of
-    /// any witnesses that have already escaped into the enclosing scope.
-    pub(crate) fn note_record_place_write(&mut self, name: &str) -> Result<(), Span> {
-        let key = Text::from(name);
-        let mut scope = self;
-        while scope.parent.is_some() {
-            if scope.bindings.contains_key(&key) {
-                if let Some(RecordPlace::Projected { origin, .. }) = scope.record_places.get(&key) {
-                    return Err(*origin);
-                }
-                scope.record_places.insert(key, RecordPlace::Mutable);
-                break;
-            }
-            scope = scope.parent.as_deref_mut().expect("parent scope");
-        }
-        Ok(())
+    pub(crate) fn set_reference_origin(&mut self, name: &str, source: ReferenceOrigin) {
+        self.record_places.entry(name.into()).or_default().reference = Some(source);
     }
 
-    /// Identify the nearest lexical value binding. Shadowing and rebinding
-    /// receive distinct identities, even in different clones of the same scope.
-    pub(crate) fn receiver_id(&mut self, name: &str, origin: Span) -> Option<u64> {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT: AtomicU64 = AtomicU64::new(0);
+    fn local_record_place(&mut self, name: &str) -> Option<&mut RecordPlace> {
         let key = Text::from(name);
         let mut scope = self;
         while scope.parent.is_some() {
@@ -1284,18 +1294,111 @@ impl TypeEnv {
                 if scope.type_parameter_mirrors.contains(&key) {
                     return None;
                 }
-                match scope.record_places.get(&key) {
-                    Some(RecordPlace::Mutable) => return None,
-                    Some(RecordPlace::Projected { id, .. }) => return Some(*id),
-                    None => {}
-                }
-                let id = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)).ok()?;
-                scope.record_places.insert(key, RecordPlace::Projected { id, origin });
-                return Some(id);
+                return Some(scope.record_places.entry(key).or_default());
             }
             scope = scope.parent.as_deref_mut()?;
         }
         None
+    }
+
+    pub(crate) fn check_record_place_write(
+        &mut self,
+        name: &str,
+        permitted: bool,
+    ) -> Result<(), Span> {
+        if let Some(place) = self.local_record_place(name) {
+            if let Some(origin) = place.projection {
+                return Err(origin);
+            }
+            if permitted {
+                *place = RecordPlace {
+                    mutable: true,
+                    ..Default::default()
+                };
+            }
+        }
+        Ok(())
+    }
+
+    /// Borrow formation reserves the current storage identity without claiming
+    /// a witness. Only projection pins it; rebinding invalidates unused identities.
+    pub(crate) fn record_source(
+        &mut self,
+        name: &str,
+        reference: bool,
+    ) -> Option<crate::ty::RecordReceiver> {
+        let place = self.local_record_place(name)?;
+        if reference {
+            match place.reference.as_ref()? {
+                ReferenceOrigin::Exact(source) => return Some(source.clone()),
+                ReferenceOrigin::Candidates(_) => return None,
+                ReferenceOrigin::Parameter => {}
+            }
+        }
+        Some(crate::ty::RecordReceiver {
+            binding: place.identity()?,
+            fields: List::new(),
+        })
+    }
+
+    pub(crate) fn reference_candidates(&mut self, name: &str) -> Vec<crate::ty::RecordReceiver> {
+        if let Some(ReferenceOrigin::Candidates(inputs)) = self
+            .local_record_place(name)
+            .and_then(|place| place.reference.as_ref())
+        {
+            return inputs.to_vec();
+        }
+        self.record_source(name, true).into_iter().collect()
+    }
+
+    pub(crate) fn record_storage_name(&self, id: u64) -> Option<Text> {
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if let Some((name, _)) = env
+                .record_places
+                .iter()
+                .find(|(_, place)| place.id == Some(id))
+            {
+                return Some(name.clone());
+            }
+            scope = env.parent.as_deref();
+        }
+        None
+    }
+
+    pub(crate) fn project_record_source(
+        &mut self,
+        name: &str,
+        reference: bool,
+        origin: Span,
+    ) -> Option<crate::ty::RecordReceiver> {
+        let source = self.record_source(name, reference)?;
+        let holder = self.local_record_place(name)?;
+        if holder.mutable {
+            return None;
+        }
+        if holder.id == Some(source.binding) {
+            holder.projection.get_or_insert(origin);
+            return Some(source);
+        }
+        // Only pin the holder after confirming that the original storage still
+        // exists at this identity. A rejected projection creates no evidence.
+        let mut scope = &mut *self;
+        loop {
+            if let Some(place) = scope
+                .record_places
+                .values_mut()
+                .find(|p| p.id == Some(source.binding))
+            {
+                place.projection.get_or_insert(origin);
+                break;
+            }
+            scope = scope.parent.as_deref_mut()?;
+        }
+        self.local_record_place(name)?
+            .projection
+            .get_or_insert(origin);
+        Some(source)
     }
 
     /// Look up a variable, searching parent scopes if needed

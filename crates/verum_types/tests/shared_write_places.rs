@@ -71,3 +71,159 @@ fn exclusive_references_allow_writes_and_shared_references_can_be_rebound() {
         assert!(errors(body).is_empty(), "{body}: {:?}", errors(body));
     }
 }
+
+#[test]
+fn a_live_shared_alias_blocks_method_activation_and_compound_writes() {
+    let declarations = "
+        type Witness<A> is { value: A };
+        type Pack is { carrier: Type, witness: Witness<carrier> };
+        implement Pack {
+            fn swap_in(&mut self, y: Pack) { *self = y; }
+            fn inspect(&self) -> Int { 1 }
+        }";
+    for mutation in ["x.swap_in(y);", "x.inspect(); x.swap_in(y);"] {
+        let body = format!(
+            "{declarations}
+            fn stale(x: Pack, y: Pack) -> Pack {{ let r = &x; let w = r.witness;
+                {mutation} Pack {{ carrier: r.carrier, witness: w }}
+            }}"
+        );
+        let messages = errors(&body);
+        assert!(
+            messages.iter().any(|m| m.contains("dependent type index")),
+            "{body}: {messages:?}"
+        );
+    }
+    for body in [
+        "implement Boxed { fn inspect(&self) {} fn reset(&mut self) { self.value = 0; } } fn f(x: Boxed) -> Int { let r = &x; x.inspect(); x.reset(); r.value }",
+        "fn f(mut x: Int) -> Int { let r = &x; x += 1; *r }",
+        "fn f(x: Boxed) -> Int { let r = &x; x.value += 1; r.value }",
+        "fn f(mut x: Int) -> Int { let r = &x; let w = &mut (x); *r }",
+    ] {
+        let messages = errors(body);
+        assert!(
+            messages.iter().any(|m| m.contains("borrow")),
+            "{body}: {messages:?}"
+        );
+    }
+    for body in [
+        "fn f(x: Pack) -> Pack { let r = &x; let w = r.witness; x.inspect(); Pack { carrier: r.carrier, witness: w } }",
+        "fn f(x: Pack, y: Pack) { { let r = &x; r.inspect(); } x.swap_in(y); }",
+        "fn f(mut n: Int) -> Int { let w = &mut n; *w += 1; *w }",
+    ] {
+        let messages = errors(&format!("{declarations}\n{body}"));
+        assert!(messages.is_empty(), "{body}: {messages:?}");
+    }
+}
+
+#[test]
+fn writes_respect_overlapping_field_and_element_loans() {
+    let declarations = "type Table is { row: [Int; 2], spare: Int };";
+    for (write, reject) in [
+        ("t.row[0] += 1;", true),
+        ("t.row[i] += 1;", true),
+        ("let w = &mut t.row;", true),
+        ("{ let also = &t.row[0]; } t.row[0] += 1;", true),
+        ("t.row[1] += 1;", false),
+        ("t.spare += 1;", false),
+    ] {
+        let source = format!(
+            "{declarations} fn probe(t: Table, i: Int) -> Int {{
+            let r = &t.row[0]; {write} *r
+        }}"
+        );
+        let messages = errors(&source);
+        if reject {
+            assert!(
+                messages.iter().any(|m| m.contains("borrow")),
+                "{write}: {messages:?}"
+            );
+        } else {
+            assert!(messages.is_empty(), "{write}: {messages:?}");
+        }
+    }
+}
+
+#[test]
+fn a_scalar_dereference_can_end_only_its_last_non_escaping_use() {
+    for source in [
+        "fn change(mut x: Int) -> Int { let r = &x; let a = *r; x = 2; *r }",
+        "fn change(mut x: Int) -> Int { let r = &x; let a = *r; x = 2; let b = *r; b }",
+        "fn change(mut x: Int) -> Int { let r = &x; let keep = r; let a = *r; x = 2; *keep }",
+        "fn change(mut x: Int) -> Int { let r = &x; let keep = &*r; let a = *r; x = 2; *keep }",
+        "fn change(mut x: Int) -> Int { let r = &x; { let a = *r; x = 2; } *r }",
+        "fn change(mut x: Int) -> Int { let r = &x; let a = *r; let b = { x = 2; *r }; b }",
+    ] {
+        let messages = errors(source);
+        assert!(
+            messages.iter().any(|m| m.contains("borrow")),
+            "{source}: {messages:?}"
+        );
+    }
+    for source in [
+        "fn change(mut x: Int) -> Int { let r = &x; let a = *r; x = 2; a }",
+        "fn change(mut x: Int) -> Int { let r = &x; let a = *r; let b = *r; x = 2; a + b }",
+        "fn test_mut(mut x: Int) -> Int { let r = &mut x; *r = 2; let s = &x; *s }",
+        "fn test_field(x: Boxed) -> Int { let r = &x.value; let v = *r; x.value = 2; v }",
+        "fn check(b: Bool) {} fn change(mut x: Int) { let r = &x; check(*r == 1); x = 2; }",
+    ] {
+        let messages = errors(source);
+        assert!(messages.is_empty(), "{source}: {messages:?}");
+    }
+}
+
+#[test]
+fn entering_a_for_loop_does_not_cancel_a_live_loan() {
+    let source = "fn change(mut x: [Int; 2]) -> Int {
+        let r = &x; for item in &mut x {} r[0]
+    }";
+    let messages = errors(source);
+    assert!(
+        messages.iter().any(|m| m.contains("borrow")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn argument_loans_survive_nested_calls_until_the_outer_invocation() {
+    let declarations = "
+        fn borrow<T>(p: &T) -> &T { p }
+        fn choose(c: Bool, a: &Boxed, b: &Boxed) -> &Boxed { if c { a } else { b } }
+        fn take(a: &Boxed, b: &mut Boxed) {}
+        fn reverse(a: &mut Boxed, b: &Boxed) {}
+        fn read(p: &Boxed) -> Int { p.value }
+        fn number(a: Int, b: &mut Boxed) {}
+        type Pair is { left: Boxed, right: Boxed };
+        implement Boxed {
+            fn update(&mut self, other: &Boxed) { self.value = other.value; }
+            fn view(&self) -> &Boxed { self }
+            fn copy_box(&self) -> Boxed { Boxed { value: self.value } }
+        }";
+    for (body, reject) in [
+        ("take(borrow(borrow(&x)), &mut x);", true),
+        ("reverse(&mut x, borrow(&x));", true),
+        ("take(choose(c, &x, &y), &mut y);", true),
+        ("take(if c { &x } else { &y }, &mut x);", true),
+        ("take({ let r = borrow(&x); r }, &mut x);", true),
+        ("x.update(borrow(&x));", true),
+        ("x.update(y.view());", false),
+        ("x.update(x.view());", true),
+        ("x.copy_box().update(&x);", false),
+        ("take(borrow(&p.left), &mut p.right);", false),
+        ("number(read(&x), &mut x);", false),
+        ("take(borrow(&x), &mut y);", false),
+    ] {
+        let source = format!(
+            "{declarations} fn probe(c: Bool, mut x: Boxed, mut y: Boxed, mut p: Pair) {{ {body} }}"
+        );
+        let diagnostics = errors(&source);
+        if reject {
+            assert!(
+                diagnostics.iter().any(|m| m.contains("borrow")),
+                "{body}: {diagnostics:?}"
+            );
+        } else {
+            assert!(diagnostics.is_empty(), "{body}: {diagnostics:?}");
+        }
+    }
+}

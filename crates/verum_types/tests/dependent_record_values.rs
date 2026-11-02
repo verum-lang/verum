@@ -217,3 +217,37 @@ fn tier_conversion_cannot_strengthen_a_nested_reference() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn reference_results_preserve_the_origin_of_a_dependent_projection() {
+    let declarations = "fn borrow<T>(x: &T) -> &T { x }
+        fn relay(x: &Pack) -> &Pack { let a = x; let b = a; return b; }
+        fn second(a: &Pack, b: &Pack) -> &Pack { b }
+        fn choose(c: Bool, a: &Pack, b: &Pack) -> &Pack { if c { a } else { b } }
+        implement Pack { fn swap_in(&mut self, y: Pack) { *self = y; } }";
+    for body in [
+        "fn same(x: Pack) -> Pack { let r = borrow(&x); Pack { carrier: x.carrier, witness: r.witness } }",
+        "fn chain(x: &Pack) -> Pack { let a = borrow(x); let b = borrow(a); Pack { carrier: b.carrier, witness: x.witness } }",
+        "fn nested(p: Pair) -> Pack { let a = borrow(&p.left); Pack { carrier: p.left.carrier, witness: a.witness } }",
+        "fn forwarded(x: &Pack) -> Pack { let a = relay(x); Pack { carrier: x.carrier, witness: a.witness } }",
+        "fn positional(x: &Pack, y: &Pack) -> Pack { let a = second(x, y); Pack { carrier: y.carrier, witness: a.witness } }",
+        "fn end(mut x: Pack, y: Pack) { { let a = borrow(&x); let _ = a; } x = y; }",
+    ] {
+        let problems = errors(&format!("{declarations}\n{body}"));
+        assert!(problems.is_empty(), "{body}: {problems:?}");
+    }
+    for body in [
+        "fn stale(mut x: Pack, y: Pack) -> Pack { let r = borrow(&x); let w = r.witness; x = y; Pack { carrier: r.carrier, witness: w } }",
+        "fn stale(mut x: Pack, y: Pack) -> Pack { let r = borrow(&x); let a = r; let w = a.witness; x.swap_in(y); Pack { carrier: r.carrier, witness: w } }",
+        "fn second_call(mut x: Pack, y: Pack) { fn with_alias(a: &Pack, b: &mut Pack, y: Pack) { let w = a.witness; *b = y; let _ = Pack { carrier: a.carrier, witness: w }; } let r = borrow(&x); with_alias(r, &mut x, y); }",
+        "fn wrong(x: &Pack, y: &Pack) -> Pack { let a = second(x, y); Pack { carrier: x.carrier, witness: a.witness } }",
+        "fn indirect(c: Bool, mut x: Pack, y: Pack) { fn consume(a: &Pack, b: &mut Pack) {} let r = choose(c, &x, &y); let s = r; consume(s, &mut x); }",
+        "fn opaque(c: Bool, x: &Pack, y: &Pack) -> Pack { let a = choose(c, x, y); Pack { carrier: x.carrier, witness: a.witness } }",
+        "fn shadow(x: &Pack, y: &Pack) -> Pack { let a = borrow(x); let x = y; Pack { carrier: x.carrier, witness: a.witness } }",
+        "fn nested_slot(mut x: &Pack, y: &Pack) { let a = borrow(&x); x = y; let _ = a; }",
+        "fn changed_before_projection(mut x: Pack, y: Pack) -> Pack { let a = borrow(&x); x = y; Pack { carrier: a.carrier, witness: a.witness } }",
+    ] {
+        let problems = errors(&format!("{declarations}\n{body}"));
+        assert!(problems.iter().any(|msg| msg.contains("cannot mutate a receiver") || msg.contains("original carrier") || msg.contains("immutable local receiver") || msg.contains("mismatch") || msg.contains("different record receiver") || msg.contains("already borrowed")), "{body}: {problems:?}");
+    }
+}

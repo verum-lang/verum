@@ -11614,6 +11614,8 @@ impl TypeChecker {
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         self.record_explicit_method_vars(&mut scheme, func);
+        scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
+        let source_returned_parameter = scheme.returned_parameter;
         let source_explicit_slots = scheme.explicit_method_vars.clone();
         // Protect builtin polymorphic functions from being overwritten by stdlib functions.
         // During stdlib loading, protocol methods like `Drop.drop(&mut self)` would overwrite
@@ -12154,7 +12156,7 @@ impl TypeChecker {
                         );
                     }
 
-                    self.bind_pattern(pattern, &param_ty)?;
+                    self.bind_parameter_pattern(pattern, &param_ty)?;
                 }
                 FunctionParamKind::SelfValue
                 | FunctionParamKind::SelfValueMut
@@ -12209,6 +12211,9 @@ impl TypeChecker {
                         self.ctx
                             .env
                             .insert("self", TypeScheme::mono(param_ty.clone()));
+                        if self.is_shared_reference_head(&param_ty, param.span)? {
+                            self.ctx.env.set_reference_origin("self", crate::context::ReferenceOrigin::Parameter);
+                        }
                         if matches!(param.kind, FunctionParamKind::SelfValueMut | FunctionParamKind::SelfOwnMut) {
                             self.ctx.env.mark_mutable_place("self");
                         }
@@ -13613,6 +13618,7 @@ impl TypeChecker {
         let mut final_scheme = final_scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         final_scheme.explicit_method_vars = source_explicit_slots;
+        final_scheme.returned_parameter = source_returned_parameter;
         if !self.in_impl_block {
             // T0231 guarded / T1120 declaration channel — see the
             // initial-scheme twin above.
@@ -18829,8 +18835,6 @@ impl TypeChecker {
         if let Some(ref receiver_name) = receiver_name_for_2pb {
             self.borrow_tracker
                 .end_two_phase_borrow(receiver_name.clone());
-            self.borrow_tracker
-                .nll_release_expired_borrows_for(receiver_name);
         }
 
         // Restore context
@@ -18914,8 +18918,6 @@ impl TypeChecker {
         if let Some(ref receiver_name) = receiver_name_for_2pb {
             self.borrow_tracker
                 .end_two_phase_borrow(receiver_name.clone());
-            self.borrow_tracker
-                .nll_release_expired_borrows_for(receiver_name);
         }
 
         // Restore context
@@ -19116,7 +19118,7 @@ impl TypeChecker {
         precomputed_recv_ty: Option<Type>,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
-        self.with_place_types(receiver, |tc| {
+        self.with_call_place_types(receiver, args, |tc| {
             let mut receiver_type = precomputed_recv_ty;
             let mut result = tc.resolve_method_call(
                 receiver, method, type_args, args, span, &mut receiver_type, skip_static_lookup,
@@ -19124,7 +19126,11 @@ impl TypeChecker {
             // The call executes after its arguments. They may have opened a
             // dependent witness on this place even if none was live on entry.
             // An erased receiver or a fallback signature supplies no read-only authority.
-            match result.receiver_kind.take() {
+            let kind = result.receiver_kind.take();
+            let borrow = kind.filter(|kind| kind.meta().is_borrowed)
+                .map(|kind| (receiver, kind.meta().allows_mutation, receiver_type.as_ref()));
+            tc.check_call_loans(args, None, borrow)?;
+            match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
                 _ => tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?,
             }

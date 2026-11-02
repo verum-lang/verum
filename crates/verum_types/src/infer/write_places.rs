@@ -5,6 +5,7 @@ use super::TypeChecker;
 use crate::{Result, TypeError, ty::Type};
 use std::collections::HashMap;
 use verum_ast::{Expr, ExprKind, Span, UnOp};
+use verum_common::Text;
 
 fn unparen(mut expr: &Expr) -> &Expr {
     while let ExprKind::Paren(inner) = &expr.kind {
@@ -34,7 +35,25 @@ impl TypeChecker {
         place: &Expr,
         infer: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
+        self.with_call_place_types(place, &[], infer)
+    }
+
+    pub(super) fn with_call_place_types<T>(
+        &mut self,
+        place: &Expr,
+        args: &[Expr],
+        infer: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
         let mut requested = HashMap::new();
+        for arg in args {
+            let arg = unparen(arg);
+            if !matches!(
+                arg.kind,
+                ExprKind::Literal(_) | ExprKind::Path(_) | ExprKind::Unary { .. }
+            ) {
+                requested.insert(std::ptr::from_ref(arg).addr(), None);
+            }
+        }
         let mut step = unparen(place);
         while let Some((operand, _)) = place_operand(step) {
             step = unparen(operand);
@@ -103,18 +122,64 @@ impl TypeChecker {
             step = unparen(operand);
             target = false;
         }
-        if tracks_indices
-            && let ExprKind::Path(path) = &step.kind
-            && let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice()
-            && let Err(projection) = self.ctx.env.note_record_place_write(&name.name)
-        {
-            return Err(TypeError::DependentReceiverMutation {
-                receiver: name.name.clone(),
-                projection,
-                mutation: write_site,
-            });
+        if let Some((name, projection)) = self.borrow_place(place) {
+            let conflict = self.borrow_tracker.check_place_borrow(
+                &name,
+                projection.as_deref(),
+                true,
+                write_site,
+            );
+            if tracks_indices
+                && let Err(origin) = self
+                    .ctx
+                    .env
+                    .check_record_place_write(&name, conflict.is_none())
+            {
+                return Err(TypeError::DependentReceiverMutation {
+                    receiver: name,
+                    projection: origin,
+                    mutation: write_site,
+                });
+            }
+            if let Some(conflict) = conflict {
+                return Err(conflict);
+            }
         }
         Ok(())
+    }
+
+    /// Resolve the storage a borrow or write may touch. Dynamic projections
+    /// cover their enclosing place; computed receiver values have no lexical root.
+    pub(super) fn borrow_place(&mut self, place: &Expr) -> Option<(Text, Option<String>)> {
+        let mut step = unparen(place);
+        let mut projection = Vec::new();
+        while let Some((operand, _)) = place_operand(step) {
+            match &step.kind {
+                ExprKind::Field { field, .. } => projection.push(field.name.to_string()),
+                ExprKind::Index { index, .. } => {
+                    if let Some(index) = self.try_extract_const_index(index) {
+                        projection.push(format!("[{index}]"));
+                    } else {
+                        // A dynamic subscript can select any element.
+                        projection.clear();
+                    }
+                }
+                // The borrow tracker has no finer location for a pointer
+                // dereference or tuple projection.
+                _ => projection.clear(),
+            }
+            step = unparen(operand);
+        }
+        let ExprKind::Path(path) = &step.kind else {
+            return None;
+        };
+        let root = match path.segments.as_slice() {
+            [verum_ast::ty::PathSegment::Name(name)] => name.name.clone(),
+            [verum_ast::ty::PathSegment::SelfValue] => "self".into(),
+            _ => return None,
+        };
+        projection.reverse();
+        Some((root, (!projection.is_empty()).then(|| projection.join("."))))
     }
 
     /// Expand transparent type names without erasing the permission on a reference.
@@ -179,15 +244,19 @@ impl TypeChecker {
         {
             return Ok(self.unifier.apply(&scheme.ty));
         }
-        let key = std::ptr::from_ref(expr).addr();
+        self.observed_operand_type(expr)
+            .ok_or_else(|| TypeError::UniverseBinding {
+                message: "write permission requires the inferred type of this operand".into(),
+                span: expr.span,
+            })
+    }
+
+    pub(super) fn observed_operand_type(&self, expr: &Expr) -> Option<Type> {
+        let key = std::ptr::from_ref(unparen(expr)).addr();
         self.place_operands
             .iter()
             .rev()
             .find_map(|scope| scope.get(&key)?.as_ref())
             .map(|ty| self.unifier.apply(ty))
-            .ok_or_else(|| TypeError::UniverseBinding {
-                message: "write permission requires the inferred type of this operand".into(),
-                span: expr.span,
-            })
     }
 }
