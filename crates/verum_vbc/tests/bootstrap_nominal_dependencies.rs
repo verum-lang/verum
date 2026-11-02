@@ -669,3 +669,60 @@ fn awaited_protocol_result_refuses_ambiguous_or_uninstantiated_bounds() {
         assert!(err.contains(reason), "{bounds}: {err}");
     }
 }
+
+#[test]
+fn nested_record_pattern_tests_use_the_declared_field_owner() {
+    use verum_vbc::instruction::Instruction;
+    let compile = |inner: &str| {
+        let ast = source(&format!("module test;
+            type Phase is Idle | Busy;
+            type Fault is Busy | Foreign | Delayed {{ phase: Phase }};
+            type Packet<T> is {{ phase: T }};
+            fn variant(x: Fault) -> Int {{ match x {{ Delayed {{ phase: {inner} }} => 1, _ => 0 }} }}
+            fn record(x: Packet<Phase>) -> Int {{ match x {{ Packet {{ phase: {inner} }} => 1, _ => 0 }} }}
+        "));
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("test"));
+        codegen.collect_unit_declarations(&[&ast]).unwrap();
+        codegen.compile_unit_items(&[&ast], verum_vbc::codegen::ItemFailurePolicy::Strict)?;
+        codegen.finalize_module_from_state()
+    };
+    let module = compile("Busy").unwrap();
+    for (name, expected) in [("test.variant", vec![2, 1]), ("test.record", vec![1])] {
+        let function = module.get_function(module.find_function_by_name(name).unwrap()).unwrap();
+        let start = function.bytecode_offset as usize;
+        let body = &module.bytecode[start..start + function.bytecode_length as usize];
+        let tags: Vec<_> = verum_vbc::bytecode::decode_instructions(body).unwrap()
+            .into_iter().filter_map(|op| match op {
+                Instruction::IsVar { tag, .. } => Some(tag),
+                _ => None,
+            }).collect();
+        assert_eq!(tags, expected, "{name}");
+    }
+    compile("Idle").expect("member of the nested field only");
+    assert!(compile("Foreign").is_err(), "an outer variant cannot belong to Phase");
+}
+
+#[test]
+fn database_error_retry_policy_executes_against_the_declared_timeout_phase() {
+    let mut error_source = include_str!("../../../core/database/common/error.vr").to_owned();
+    error_source.push_str("
+        fn check_retry_policy() -> Int {
+            let statement = DbError.TimedOut { phase: TimeoutPhase.TpStatement };
+            let connect = DbError.TimedOut { phase: TimeoutPhase.TpConnect };
+            if statement.is_retryable() && !connect.is_retryable() { 42 } else { 0 }
+        }
+    ");
+    let errors = source(&error_source);
+    let maybe = source(include_str!("../../../core/base/maybe.vr"));
+    let result = source(include_str!("../../../core/base/result.vr"));
+    let text = source(include_str!("../../../core/text/text.vr"));
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.database.common"));
+    codegen.collect_unit_declarations(&[&maybe, &result, &text, &errors]).unwrap();
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&[&errors], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+    let module = codegen.finalize_module_from_state().unwrap();
+    let entry = module.find_function_by_name("core.database.common.error.check_retry_policy").unwrap();
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry).unwrap();
+    assert_eq!(value.try_as_i64(), Some(42));
+}

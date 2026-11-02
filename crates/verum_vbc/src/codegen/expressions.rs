@@ -19600,6 +19600,21 @@ impl VbcCodegen {
     }
 
     /// Tests if a pattern matches a value.
+    /// Test a projected value under its own declaration, restoring the parent
+    /// before checking any sibling, including when lowering fails.
+    fn test_projected_pattern(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        value: Reg,
+        result: Reg,
+        declaration: Option<String>,
+    ) -> CodegenResult<()> {
+        let parent = std::mem::replace(&mut self.ctx.match_scrutinee_type, declaration);
+        let tested = self.compile_pattern_test(pattern, value, result);
+        self.ctx.match_scrutinee_type = parent;
+        tested
+    }
+
     pub(crate) fn compile_pattern_test(
         &mut self,
         pattern: &verum_ast::Pattern,
@@ -19957,11 +19972,7 @@ impl VbcCodegen {
                                                 .and_then(|outer| self.substitute_payload_generic(payload, outer))
                                                 .unwrap_or_else(|| payload.clone()))
                                         });
-                                    let prev_scrutinee_type = std::mem::replace(
-                                        &mut self.ctx.match_scrutinee_type, payload_type,
-                                    );
-                                    self.compile_pattern_test(sub_pat, field_reg, sub_result)?;
-                                    self.ctx.match_scrutinee_type = prev_scrutinee_type;
+                                    self.test_projected_pattern(sub_pat, field_reg, sub_result, payload_type)?;
                                     self.ctx.emit(Instruction::Mov {
                                         dst: result,
                                         src: sub_result,
@@ -20354,7 +20365,9 @@ impl VbcCodegen {
                                 });
 
                                 let field_match = self.ctx.alloc_temp();
-                                self.compile_pattern_test(inner_pattern, field_reg, field_match)?;
+                                let field_type = self.declared_variant_payload_type(&type_name, field_idx as usize)
+                                    .unwrap_or_else(|| self.field_type_name(&field_key, &field.name.name).map(str::to_owned));
+                                self.test_projected_pattern(inner_pattern, field_reg, field_match, field_type)?;
 
                                 let and_label = self.ctx.new_label("rec_and");
                                 self.ctx.emit_forward_jump(&and_label, |offset| {
@@ -20419,7 +20432,14 @@ impl VbcCodegen {
 
                         if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
                             let field_match = self.ctx.alloc_temp();
-                            self.compile_pattern_test(inner_pattern, field_reg, field_match)?;
+                            let field_owner = self.ctx.match_scrutinee_type.as_deref()
+                                .map(Self::strip_wrapper_type)
+                                .filter(|owner| self.nominal_type_id(Self::strip_generic_args(owner)).is_some_and(
+                                    |id| Some(id) == self.nominal_type_id(&type_name),
+                                ))
+                                .unwrap_or(&type_name);
+                            let field_type = self.field_access_type_name(field_owner, &field_name);
+                            self.test_projected_pattern(inner_pattern, field_reg, field_match, field_type)?;
 
                             // result = result && field_match
                             let and_label = self.ctx.new_label("rec_and");
