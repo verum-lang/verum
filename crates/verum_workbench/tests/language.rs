@@ -300,3 +300,34 @@ async fn project_dependency_edits_reach_the_same_studio_and_agent_snapshot() {
         dependency
     );
 }
+
+#[tokio::test]
+async fn architecture_uses_checked_record_dependencies_for_the_current_buffer() {
+    let root = tempfile::tempdir().unwrap();
+    let studio = studio(root.path());
+    for (argument, dependencies) in [
+        ("carrier", json!([0])),
+        ("Int", json!([])),
+        ("Missing", Value::Null),
+    ] {
+        let source = format!(
+            "public type Witness<A> is {{ public value: A }};\n\
+             public type Pack is {{ public carrier: Type, public witness: Witness<{argument}> }};"
+        );
+        let snapshot = studio.call("language.request", json!({
+            "path": "records.vr", "source": source,
+        })).await.unwrap();
+        let record = snapshot["result"]["declarations"].as_array().unwrap().iter()
+            .find(|item| item["name"] == "Pack").unwrap();
+        let fields = record["record_fields"].as_array().unwrap();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0]["name"], "carrier");
+        assert_eq!(fields[1]["annotation"]["source"], format!("Witness<{argument}>"));
+        assert_eq!(fields[1]["depends_on"], dependencies, "{snapshot}");
+        let start = &fields[0]["selection_range"]["start"];
+        assert_eq!(start["line"], 1);
+        assert_eq!(start["character"], source.lines().nth(1).unwrap().find("carrier").unwrap());
+        let diagnostics = snapshot["result"]["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.iter().any(|d| d["severity"] == 1), dependencies.is_null());
+    }
+}

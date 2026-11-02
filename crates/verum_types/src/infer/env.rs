@@ -1579,6 +1579,16 @@ impl TypeChecker {
         self.ctx.lookup_type(name)
     }
 
+    /// A field of a record declared in the current source module. Tooling uses
+    /// the same nominal owner and elaborated type as the expression checker.
+    pub fn local_record_field(&self, name: &str, field: &str) -> Option<&Type> {
+        let key = self.declared_type_key(name);
+        let Type::Record(fields) = self.ctx.lookup_type(&format!("__struct_fields_{key}"))? else {
+            return None;
+        };
+        fields.get(field)
+    }
+
     /// Lookup a type in context (for testing/debugging).
     pub fn lookup_type_for_testing(&self, name: &str) -> Option<Type> {
         self.resolved_type(name).cloned()

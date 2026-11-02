@@ -369,6 +369,23 @@ function renderAnalysis(snapshot: Analysis) {
     const heading = button(declaration.name, () => showRange(declaration.selection_range), 'declaration-name');
     card.append(node('span', 'badge', declaration.kind), heading);
     if (declaration.type_display) card.append(node('code', 'muted', declaration.type_display));
+    const fields = declaration.record_fields;
+    if (fields?.length) {
+      const group = node('details', 'record-members');
+      group.append(node('summary', '', m('Fields ({count})', { count: fields.length })));
+      for (const field of fields) {
+        const row = node('div', 'record-member');
+        row.append(button(field.name, () => showRange(field.selection_range), 'declaration-name'),
+          button(field.annotation.source, () => showRange(field.annotation.range), 'record-annotation'));
+        for (const index of field.depends_on ?? []) {
+          const carrier = fields[index];
+          if (carrier) row.append(button(m('Depends on {field}', { field: carrier.name }),
+            () => showRange(carrier.selection_range), 'record-dependency'));
+        }
+        group.append(row);
+      }
+      card.append(group);
+    }
     if (declaration.requirements.length) {
       card.append(node('p', 'muted', m('Context requirements')));
       for (const requirement of declaration.requirements) card.append(button(requirement.source, () => showRange(requirement.range), 'context-requirement'));

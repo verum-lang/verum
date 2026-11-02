@@ -752,6 +752,12 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .declaration-name { font-family: var(--font-code); padding: 0 8px; color: var(--accent-text); }
 .declaration-card p { margin-top: 10px; }
 .declaration-card > code { display: block; margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+.record-members { margin-top: 8px; }
+.record-members summary { color: var(--muted); cursor: pointer; width: fit-content; }
+.record-member { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding-block: 4px; }
+.record-annotation, .record-dependency { font: inherit; color: var(--muted); text-align: start; overflow-wrap: anywhere; }
+.record-annotation { font-family: var(--font-code); }
+.record-dependency { color: var(--accent-text); }
 .context-requirement { display: block; font-family: var(--font-code); text-align: left; color: var(--accent-text); padding: 8px 0; overflow-wrap: anywhere; }
 .language-hover { max-width: min(440px, 80vw); max-height: 280px; overflow: auto; padding: 12px; }
 #source-status {

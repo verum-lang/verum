@@ -466,6 +466,8 @@ export const translations = {
   'replaced match on line {line}': 'заменено совпадение в строке {line}',
   'replaced {count} matches': 'заменено совпадений: {count}',
   'Project source analysis with resolved imports. Build and proof checks remain separate.': 'Анализ исходного кода проекта с разрешением импортов. Сборка и проверка доказательств выполняются отдельно.',
+  'Fields ({count})': 'Поля ({count})',
+  'Depends on {field}': 'Зависит от {field}',
   'Resolved imports': 'Разрешённые импорты',
   'Indexed source': 'Исходный код проиндексирован',
 } as const;

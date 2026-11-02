@@ -31,6 +31,17 @@ pub struct Declaration {
     pub requirements: List<Requirement>,
     pub preconditions: List<Requirement>,
     pub postconditions: List<Requirement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub record_fields: Option<Vec<RecordMember>>,
+}
+#[derive(Debug, Serialize)]
+pub struct RecordMember {
+    pub name: Text,
+    pub selection_range: Range,
+    pub annotation: Requirement,
+    /// Earlier field ordinals from the compiler. None means analysis could
+    /// not establish the dependencies for this revision.
+    pub depends_on: Option<Vec<usize>>,
 }
 #[derive(Debug, Serialize)]
 pub struct Requirement {
@@ -65,6 +76,7 @@ impl DocumentSnapshot {
                 .into(),
             range: ast_span_to_range(&span, &doc.text),
         };
+        let semantic_fields_available = !doc.diagnostics.iter().any(|d| d.is_error());
         if let Some(module) = &doc.module {
             for item in &module.items {
                 let (name, kind, requirements) = match &item.kind {
@@ -112,6 +124,30 @@ impl DocumentSnapshot {
                     ),
                     _ => (List::new(), List::new()),
                 };
+                let record_fields = match &item.kind {
+                    ItemKind::Type(decl) => match &decl.body {
+                        TypeDeclBody::Record(fields) => Some(fields.iter().map(|field| {
+                            let depends_on = doc.get_symbol(&format!("{}.{}", name, field.name))
+                                .filter(|symbol| symbol.def_span == field.span && semantic_fields_available)
+                                .and_then(|symbol| symbol.ty.as_ref())
+                                .map(|ty| {
+                                    let mut slots: Vec<_> = ty.record_field_slots().into_iter()
+                                        .map(|slot| slot.ordinal).collect();
+                                    slots.sort_unstable();
+                                    slots.dedup();
+                                    slots
+                                });
+                            RecordMember {
+                                name: field.name.name.clone(),
+                                selection_range: ast_span_to_range(&field.name.span, &doc.text),
+                                annotation: requirement(field.ty.span),
+                                depends_on,
+                            }
+                        }).collect()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
                 declarations.push(Declaration {
                     id: format!("{}#{}:{}:{}", uri, item.span.start, item.span.end, kind).into(),
                     name: name.as_str().into(),
@@ -125,6 +161,7 @@ impl DocumentSnapshot {
                     requirements,
                     preconditions,
                     postconditions,
+                    record_fields,
                 });
             }
         }

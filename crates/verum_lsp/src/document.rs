@@ -760,6 +760,11 @@ impl DocumentState {
                 })));
         }
         for (name, symbol) in &mut self.symbols {
+            if matches!(symbol.kind, SymbolKind::Field) {
+                symbol.ty = name.rsplit_once('.').and_then(|(owner, field)|
+                    type_checker.local_record_field(owner, field)).cloned();
+                continue;
+            }
             symbol.ty = if symbol.kind.meta().is_type_introducing {
                 type_checker.resolved_type(name).cloned()
             } else {
