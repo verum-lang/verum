@@ -19,7 +19,7 @@
 //!  * `extract_all_exports` — module → ExportTable conversion.
 //!  * `discover_stdlib_files` + `discover_stdlib_files_recursive`
 //!  — embedded-stdlib unpacking helpers.
-//!  * `parse_stdlib_module` — single-file stdlib parser
+//!  * `parse_module_file` — source module parser
 //!  (with diagnostic emission).
 //!  * `parse_and_register` — atomic parse + register-with-session
 //!  for general-purpose use.
@@ -426,7 +426,7 @@ impl<'s> CompilationPipeline<'s> {
             );
             let mut entries = Vec::with_capacity(file_data.len());
             for (idx, (module_path_str, source_text, file_path)) in file_data.iter().enumerate() {
-                match self.parse_stdlib_module(
+                match self.parse_module_file(
                     module_path_str,
                     &Text::from(source_text.clone()),
                     file_path,
@@ -440,7 +440,7 @@ impl<'s> CompilationPipeline<'s> {
                     }
                     Err(e) => {
                         debug!(
-                            "Failed to parse stdlib module {}: {:?}",
+                            "Failed to parse module {}: {:?}",
                             module_path_str.as_str(),
                             e
                         );
@@ -712,7 +712,7 @@ impl<'s> CompilationPipeline<'s> {
                 })?
                 .into();
             let module = self
-                .parse_stdlib_module(&module_path_str, &source, &file_path)
+                .parse_project_module(&module_path_str, &source, &file_path)
                 .with_context(|| {
                     format!(
                         "Cannot parse external module '{}' at {}",
@@ -757,64 +757,10 @@ impl<'s> CompilationPipeline<'s> {
         // Canonicalize for reliable path comparison
         let immediate_dir = immediate_dir.canonicalize().unwrap_or(immediate_dir);
 
-        // **Project-root walk (#192 fundamental fix)**.
-        //
-        // Pre-fix the project root was the input file's IMMEDIATE
-        // parent directory.  For a file like `core/verify/kernel_v0/soundness.vr`
-        // that picked `kernel_v0/` as the root and used `kernel_v0`
-        // as the project_prefix — so the file's `module
-        // core.verify.kernel_v0.soundness;` declaration mismatched
-        // the loader-derived path `kernel_v0.soundness`.
-        //
-        // Post-fix the loader walks UP from the immediate parent
-        // until it finds a directory carrying a `verum.toml`.  That
-        // is the outermost project root; its directory name (e.g.
-        // `core`) becomes the project_prefix and the relative path
-        // captures the full namespace structure correctly.
-        //
-        // The walk stops at the first `verum.toml` ancestor — if
-        // none exists we fall back to the immediate-dir behaviour
-        // so single-file scripts still work.
-        // Whether a MANIFEST was found, not just where the walk stopped.
-        // The two differ: with no `verum.toml` anywhere above the entry
-        // file, the walk falls back to the entry's own directory, and that
-        // directory is not a project — it may just be where someone keeps
-        // a script next to unrelated ones.
-        let (input_dir, manifest_found) = {
-            let mut cursor = immediate_dir.clone();
-            let mut root: Option<std::path::PathBuf> = None;
-            loop {
-                if Self::project_manifest_path(&cursor).is_some() {
-                    root = Some(cursor.clone());
-                    break;
-                }
-                match cursor.parent() {
-                    Some(p) if p != cursor => {
-                        cursor = p.to_path_buf();
-                    }
-                    _ => break,
-                }
-            }
-            // A manifest counts only if it is NEAR the entry: at the
-            // entry's own directory, one level above it, or the root of
-            // its src/ tree. A distant repository manifest does not make an
-            // unrelated specification or script part of that repository's cog.
-            //
-            // This repository has a `verum.toml` at its root, so without the
-            // distance rule every `.vr` file anywhere under it would be
-            // treated as part of one enormous cog — measured, checking a
-            // single spec file went from 2.03s to 245s, and conformance
-            // specs began loading their neighbours as sibling modules.
-            let found = match &root {
-                Some(r) => {
-                    *r == immediate_dir
-                        || Some(r.as_path()) == immediate_dir.parent()
-                        || immediate_dir.starts_with(r.join("src"))
-                }
-                None => false,
-            };
-            (root.unwrap_or(immediate_dir.clone()), found)
-        };
+        let manifest_root = Self::nearest_manifest_root(&immediate_dir);
+        let manifest_found =
+            manifest_root.is_some_and(|root| Self::owns_source_dir(root, &immediate_dir));
+        let input_dir = manifest_root.unwrap_or(&immediate_dir).to_path_buf();
 
         // The stdlib `core` cog must never be eager-loaded as a user
         // project.  In `Normal` mode `core` is provided by the embedded
@@ -1035,7 +981,7 @@ impl<'s> CompilationPipeline<'s> {
                 }
             };
 
-            match self.parse_stdlib_module(
+            match self.parse_project_module(
                 &module_path_str,
                 &Text::from(source_text.clone()),
                 file_path,
@@ -1135,6 +1081,20 @@ impl<'s> CompilationPipeline<'s> {
     /// Manifest names carry hyphens (`verum-registry`); module paths are
     /// dotted identifiers, so the conversion is the same one the rest of
     /// the toolchain makes.
+    pub(super) fn nearest_manifest_root(directory: &Path) -> Option<&Path> {
+        directory
+            .ancestors()
+            .find(|root| Self::project_manifest_path(root).is_some())
+    }
+
+    /// Match the project loader's entry boundary without adopting standalone
+    /// scripts elsewhere in a repository with a distant manifest.
+    pub(super) fn owns_source_dir(root: &Path, directory: &Path) -> bool {
+        root == directory
+            || Some(root) == directory.parent()
+            || directory.starts_with(root.join("src"))
+    }
+
     pub(super) fn project_manifest_path(dir: &Path) -> Option<PathBuf> {
         ["Verum.toml", "verum.toml"]
             .into_iter()
@@ -1483,8 +1443,23 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
-    /// Parse a stdlib module (similar to parse_and_register but for stdlib).
-    fn parse_stdlib_module(
+    /// Project declarations keep their lexical prelude when a sibling or
+    /// an external cog consumes their signatures in a different checker.
+    fn parse_project_module(
+        &mut self,
+        module_path: &Text,
+        source: &Text,
+        file_path: &Path,
+    ) -> Result<Module> {
+        let mut module = self.parse_module_file(module_path, source, file_path)?;
+        if matches!(self.build_mode, super::BuildMode::Normal) {
+            super::inject_implicit_prelude_mount(&mut module);
+        }
+        Ok(module)
+    }
+
+    /// Parse a module and attach its spans to the source file in this session.
+    fn parse_module_file(
         &mut self,
         module_path: &Text,
         source: &Text,
@@ -1497,18 +1472,11 @@ impl<'s> CompilationPipeline<'s> {
 
         let parser = VerumParser::new();
         let module = parser.parse_module(lexer, file_id).map_err(|errors| {
-            // A stdlib module that fails to parse is either a compiler bug
-            // (the parser can't handle syntax we ship in core/*.vr) or a
-            // stdlib bug (invalid syntax shipped). Either way it causes
-            // every downstream `mount core.*.X` to silently fail with
-            // "module not found", which is a far worse diagnostic than
-            // the real parse error. Emit at WARN so stdlib breakage is
-            // surfaced in normal tooling runs and cannot regress unseen.
             for error in &errors {
-                warn!("Stdlib parse error in {}: {}", module_path.as_str(), error);
+                warn!("Module parse error in {}: {}", module_path.as_str(), error);
             }
             anyhow::anyhow!(
-                "Parsing stdlib module {} failed with {} error(s)",
+                "Parsing module {} failed with {} error(s)",
                 module_path.as_str(),
                 errors.len()
             )

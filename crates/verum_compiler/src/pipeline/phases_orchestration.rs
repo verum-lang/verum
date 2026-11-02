@@ -525,25 +525,37 @@ impl<'s> CompilationPipeline<'s> {
             })
         };
 
-        // Try to compute module path from file if available
-        let current_module_path_str = if let Some(item) = module.items.first() {
-            if let Some(source_file) = self.session.get_source(item.span.file_id) {
-                if let Some(ref file_path) = source_file.path {
-                    let module_path = self.file_path_to_module_path(file_path, &src_root);
-                    debug!(
-                        "phase_type_check: file_path={:?}, src_root={:?}, module_path={}",
-                        file_path, src_root, module_path
-                    );
-                    module_path.to_string()
-                } else {
-                    String::new()
-                }
+        // The entry is intentionally absent from the sibling compilation queue.
+        // Its own lexical declarations and mounts still belong to the registry
+        // used for type checking, under the same owner as in check_project.
+        let mut current_module_path_str = String::new();
+        if let Some(source) = self.session.get_source(module.file_id)
+            && let Some(file_path) = &source.path
+        {
+            if let Some(entry) = file_path.canonicalize().ok()
+                && let Some(dir) = entry.parent()
+                && let Some(root) =
+                    Self::nearest_manifest_root(dir).filter(|root| Self::owns_source_dir(root, dir))
+            {
+                let prefix = Self::project_prefix_for(root);
+                current_module_path_str = Self::project_module_path_for(root, &prefix, &entry);
+                let path = verum_modules::ModulePath::from_str(&current_module_path_str);
+                let id = registry.read().allocate_id();
+                let exports = verum_modules::extract_exports_from_module(module, id, &path)?;
+                let mut info = verum_modules::ModuleInfo::new(
+                    id,
+                    path,
+                    module.clone(),
+                    module.file_id,
+                    source.source.clone(),
+                );
+                info.exports = exports;
+                registry.write().register(info);
             } else {
-                String::new()
+                current_module_path_str =
+                    self.file_path_to_module_path(file_path, &src_root).to_string();
             }
-        } else {
-            String::new()
-        };
+        }
 
         // MODULE-IDENTITY-1 (T0236): install the computed module path as
         // the checker's CURRENT module identity, not just a local passed

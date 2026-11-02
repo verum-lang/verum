@@ -105,7 +105,7 @@ fn check_file(input: PathBuf) -> (bool, String) {
 #[test]
 fn super_mount_from_nested_file_is_not_ambiguous() {
     let (_tmp, leaf) = write_project(&[
-        ("helper.vr", "public type Widget is { id: Int };\n"),
+        ("helper.vr", "public type Widget is { public id: Int };\n"),
         (
             "leaf.vr",
             "mount super.helper.{Widget};\n\

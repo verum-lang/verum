@@ -610,6 +610,58 @@ mod global_options_tests {
 mod project_tests {
     use super::*;
 
+    /// Exercise both check_project and the interpreter's entry recheck on the
+    /// same source. The sibling's local Sample type occurs inside the layout.
+    fn run_mounted_reading(body: &str) -> Output {
+        let (_temp, dir) = create_test_project("owner-probe");
+        fs::write(
+            dir.join("verum.toml"),
+            "[cog]\nname = \"owner-probe\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        create_main_file(&dir, &format!(
+            "module owner_probe.main;\nmount owner_probe.model.{{Reading, read}};\nfn main() {{\n    let mut reading = read().unwrap();\n    {body}\n}}"
+        ));
+        fs::write(dir.join("src/model.vr"), r#"
+            module owner_probe.model;
+            public type Sample is Number(Int) | Missing;
+            public type Reading is {
+                public label: Text,
+                public(cog) value: Int,
+                public entries: Map<Text, Sample>,
+                secret: Int,
+            };
+            public fn read() -> Result<Reading, Text> {
+                let entries: Map<Text, Sample> = Map.new();
+                Result.Ok(Reading { label: "initial", value: 40, entries: entries, secret: 7 })
+            }
+        "#).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_verum"))
+            .args(["run", "--tier", "interpret"])
+            .current_dir(dir)
+            .output()
+            .expect("run mounted record project")
+    }
+
+    #[test]
+    fn mounted_result_keeps_its_layout_and_entry_cog() {
+        let output = run_mounted_reading(r#"
+            reading.label = "updated";
+            print(reading.value + 2);
+            print(reading.label);
+        "#);
+        assert_success(&output, "mounted result");
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "42\nupdated");
+    }
+
+    #[test]
+    fn mounted_result_keeps_its_private_fields() {
+        let output = run_mounted_reading("print(reading.secret);");
+        assert!(!output.status.success(), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("error<E202>") && stderr.contains("'secret' is Private"), "{stderr}");
+    }
+
     /// Test new command creates project
     #[test]
     fn test_new_project() {
