@@ -215,7 +215,7 @@ impl Subtyping {
             // Named types: compare by segments only (ignore span)
             // This must come before the reflexivity check to handle spans correctly
             (Named { path: p1, args: a1 }, Named { path: p2, args: a2 }) => {
-                if p1.segments != p2.segments || a1.len() != a2.len() {
+                if !crate::ty::same_type_path(p1, p2) || a1.len() != a2.len() {
                     return false;
                 }
                 // Check type arguments with proper variance:
@@ -246,12 +246,11 @@ impl Subtyping {
             }
 
             // Cross-comparison: Generic <-> Named
-            // Without declaration identity, only matching single-segment names
-            // establish that both representations designate the same constructor.
+            // Both representations must identify the same complete declaration path.
             // Preserve source/target direction in both representation orders.
             (Generic { name, args: a1 }, Named { path, args: a2 })
             | (Named { path, args: a1 }, Generic { name, args: a2 }) => {
-                if path.as_ident().map(|ident| &ident.name) != Some(name) || a1.len() != a2.len() {
+                if crate::ty::nominal_path_name(path).as_deref() != Some(name.as_str()) || a1.len() != a2.len() {
                     return false;
                 }
                 let variances = self.get_generic_type_variances(name, a1.len());

@@ -3260,25 +3260,10 @@ impl Unifier {
                     }
                 }
 
-                // Compare paths by segment names only, ignoring spans
-                // This is necessary because the same type name appearing in different
-                // locations (e.g., in a type definition vs. in a variable usage) will
-                // have different spans but should still unify.
-                if p1.segments.len() != p2.segments.len() || a1.len() != a2.len() {
-                    // Before failing, check for related tensor type coercions
-                    // (e.g., Tensor ↔ DynTensor, Cotangent<T> ↔ T)
-                    // Uses data-driven tensor_family_types set instead of substring checks.
-                    fn extract_last_name(path: &verum_ast::ty::Path) -> &str {
-                        path.segments
-                            .last()
-                            .map(|s| match s {
-                                verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                                _ => "",
-                            })
-                            .unwrap_or("")
-                    }
-                    let tn1 = extract_last_name(p1);
-                    let tn2 = extract_last_name(p2);
+                let same_head = crate::ty::same_type_path(p1, p2);
+                if !same_head && (p1.segments.len() != p2.segments.len() || a1.len() != a2.len()) {
+                    let tn1 = p1.last_segment_name();
+                    let tn2 = p2.last_segment_name();
                     if self.is_tensor_family(tn1) && self.is_tensor_family(tn2) {
                         return Ok(Substitution::new());
                     }
@@ -3295,101 +3280,28 @@ impl Unifier {
                     if (tn2 == "Byte" || tn2 == "UInt8") && self.is_bytewise_ffi(tn1) {
                         return Ok(Substitution::new());
                     }
-                    // QUALIFIED-LEAF IDENTITY BRIDGE (T0701, the
-                    // semver/regression cluster): the mount-scoped TYPE
-                    // authority speaks QUALIFIED for annotations
-                    // (`core.base.semver.SemVer`) while metadata
-                    // schemes speak BARE (`SemVer`) — ONE nominal, two
-                    // spellings, and respelling either PRODUCER flipped
-                    // sibling clusters red (measured; see the
-                    // CANONICAL-NOMINAL note in infer/modules.rs — the
-                    // true seam is the DefId campaign). Until identity
-                    // is by id, bridge at the identity point: exactly
-                    // one side single-segment, leaves equal, arg counts
-                    // equal → same head, unify the args. Genuine
-                    // cross-module leaf collisions meeting as
-                    // one-bare-one-dotted pairs previously FAILED here
-                    // loudly, so the bridge widens acceptance only for
-                    // spellings the same file scope resolved.
-                    // Kill-switch: VERUM_NO_LEAF_BRIDGE=1.
-                    let leaf_bridge = tn1 == tn2
-                        && !tn1.is_empty()
-                        && (p1.segments.len() == 1) != (p2.segments.len() == 1)
-                        && a1.len() == a2.len()
-                        && std::env::var_os("VERUM_NO_LEAF_BRIDGE").is_none();
-                    if leaf_bridge {
-                        let mut subst = Substitution::new();
-                        for (ty1, ty2) in a1.iter().zip(a2.iter()) {
-                            let s = self.unify_inner(
-                                &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                span,
-                            )?;
-                            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                        }
-                        return Ok(subst);
+                }
+
+                // Legacy descriptors can refer to an imported declaration by its
+                // bare name. Only a whole unqualified path can use this bridge.
+                let matches_bare = |bare: &verum_ast::ty::Path, qualified: &verum_ast::ty::Path| {
+                    let Some(bare) = bare.as_ident() else { return false };
+                    if let Some(ident) = qualified.as_ident() {
+                        return ident.name.as_str().rsplit_once('.')
+                            .is_some_and(|(_, leaf)| bare.name.as_str() == leaf);
                     }
+                    !bare.name.as_str().contains('.')
+                        && bare.name.as_str() == qualified.last_segment_name()
+                        && crate::ty::nominal_path_name(qualified).is_some()
+                };
+                let bare_bridge = !same_head && (matches_bare(p1, p2) || matches_bare(p2, p1))
+                    && std::env::var_os("VERUM_NO_LEAF_BRIDGE").is_none();
+                if a1.len() != a2.len() || !(same_head || bare_bridge) {
                     return Err(TypeError::Mismatch {
                         expected: t2.to_text(),
                         actual: t1.to_text(),
                         span,
                     });
-                }
-
-                // Compare segment names (ignoring spans)
-                for (seg1, seg2) in p1.segments.iter().zip(p2.segments.iter()) {
-                    use verum_ast::ty::PathSegment;
-                    match (seg1, seg2) {
-                        (PathSegment::Name(id1), PathSegment::Name(id2)) => {
-                            if id1.name != id2.name {
-                                // QUALIFIED-LEAF IDENTITY BRIDGE, single-
-                                // segment spelling: the mount-qualified
-                                // authority publishes DOTTED SINGLE
-                                // IDENTS (`core.base.semver.SemVer` as
-                                // one segment — the opaque qualified
-                                // form), which meet the schemes' bare
-                                // `SemVer` head-to-head here. Same
-                                // rationale and kill-switch as the
-                                // segment-count bridge above.
-                                let l1 = id1
-                                    .name
-                                    .as_str()
-                                    .rsplit('.')
-                                    .next()
-                                    .unwrap_or(id1.name.as_str());
-                                let l2 = id2
-                                    .name
-                                    .as_str()
-                                    .rsplit('.')
-                                    .next()
-                                    .unwrap_or(id2.name.as_str());
-                                let one_dotted = id1.name.as_str().contains('.')
-                                    != id2.name.as_str().contains('.');
-                                if l1 == l2
-                                    && one_dotted
-                                    && std::env::var_os("VERUM_NO_LEAF_BRIDGE").is_none()
-                                {
-                                    continue;
-                                }
-                                return Err(TypeError::Mismatch {
-                                    expected: t2.to_text(),
-                                    actual: t1.to_text(),
-                                    span,
-                                });
-                            }
-                        }
-                        (PathSegment::SelfValue, PathSegment::SelfValue)
-                        | (PathSegment::Super, PathSegment::Super)
-                        | (PathSegment::Cog, PathSegment::Cog)
-                        | (PathSegment::Relative, PathSegment::Relative) => {}
-                        _ => {
-                            return Err(TypeError::Mismatch {
-                                expected: t2.to_text(),
-                                actual: t1.to_text(),
-                                span,
-                            });
-                        }
-                    }
                 }
 
                 let mut subst = Substitution::new();
@@ -3558,19 +3470,11 @@ impl Unifier {
                 // method metadata carries a Named application. Preserve the
                 // entire path (including opaque dotted identifiers); a bare
                 // spelling is equivalent only when declaration metadata says so.
-                let path_name: Maybe<verum_common::Text> = path
-                    .segments
-                    .iter()
-                    .map(|segment| match segment {
-                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Maybe<List<_>>>()
-                    .map(|parts| parts.join(".").into());
+                let path_name = crate::ty::nominal_path_name(path);
                 let same_head = path_name.as_ref().is_some_and(|path_name| {
-                    name == path_name
+                    name.as_str() == path_name.as_ref()
                         || self.nominal_identity_resolver.as_ref().is_some_and(|resolve| {
-                            resolve(name.as_str(), path_name.as_str())
+                            resolve(name.as_str(), path_name.as_ref())
                         })
                 });
 

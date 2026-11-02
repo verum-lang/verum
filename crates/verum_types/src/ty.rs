@@ -3562,6 +3562,36 @@ impl fmt::Display for Type {
     }
 }
 
+/// A resolved declaration path can be stored as source segments or as the
+/// dotted key used in archive signatures. Relative syntax has no such key.
+pub(crate) fn nominal_path_name(path: &Path) -> Option<std::borrow::Cow<'_, str>> {
+    if let Some(ident) = path.as_ident() {
+        return Some(ident.name.as_str().into());
+    }
+    let mut name = String::new();
+    for segment in &path.segments {
+        let verum_ast::ty::PathSegment::Name(ident) = segment else { return None };
+        if !name.is_empty() {
+            name.push('.');
+        }
+        name.push_str(ident.name.as_str());
+    }
+    (!name.is_empty()).then(|| name.into())
+}
+
+pub(crate) fn same_type_path(left: &Path, right: &Path) -> bool {
+    use verum_ast::ty::PathSegment;
+    if left.segments.len() == right.segments.len()
+        && left.segments.iter().zip(&right.segments).all(|(a, b)| match (a, b) {
+            (PathSegment::Name(a), PathSegment::Name(b)) => a.name == b.name,
+            _ => a == b,
+        })
+    {
+        return true;
+    }
+    nominal_path_name(left).is_some_and(|name| nominal_path_name(right).as_ref() == Some(&name))
+}
+
 fn format_path(path: &Path) -> Text {
     use verum_ast::ty::PathSegment;
     let parts: List<&str> = path
