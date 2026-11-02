@@ -113,11 +113,10 @@ implement<T> RwLock<T> {
             if state >= 0 && queued_writers == 0 {
                 // Try to increment reader count
                 if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
-                    let guard = RwLockReadGuard { rwlock: self };
                     if self.poisoned.load(MemoryOrdering.Acquire) {
-                        return Result.Err(PoisonError.new(guard));
+                        return Result.Err(PoisonError.new(RwLockReadGuard { rwlock: self }));
                     }
-                    return Result.Ok(guard);
+                    return Result.Ok(RwLockReadGuard { rwlock: self });
                 }
             } else {
                 // Writer present OR queued — sleep via futex until state changes.
@@ -139,11 +138,10 @@ implement<T> RwLock<T> {
         let queued_writers = self.writers_waiting.load(MemoryOrdering.Acquire);
         if state >= 0 && queued_writers == 0 {
             if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
-                let guard = RwLockReadGuard { rwlock: self };
                 if self.poisoned.load(MemoryOrdering.Acquire) {
-                    return Result.Err(TryLockError.Poisoned(PoisonError.new(guard)));
+                    return Result.Err(TryLockError.Poisoned(PoisonError.new(RwLockReadGuard { rwlock: self })));
                 }
-                return Result.Ok(guard);
+                return Result.Ok(RwLockReadGuard { rwlock: self });
             }
         }
         Result.Err(TryLockError.WouldBlock)
@@ -166,11 +164,10 @@ implement<T> RwLock<T> {
             if state == 0 {
                 if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
                     self.writers_waiting.fetch_sub(1, MemoryOrdering.Release);
-                    let guard = RwLockWriteGuard { rwlock: self };
                     if self.poisoned.load(MemoryOrdering.Acquire) {
-                        return Result.Err(PoisonError.new(guard));
+                        return Result.Err(PoisonError.new(RwLockWriteGuard { rwlock: self }));
                     }
-                    return Result.Ok(guard);
+                    return Result.Ok(RwLockWriteGuard { rwlock: self });
                 }
             } else {
                 // Readers or writer present — sleep via futex until state changes
@@ -182,11 +179,10 @@ implement<T> RwLock<T> {
     // Try to acquire write lock without blocking.
     public fn try_write(&self) -> TryLockResult<RwLockWriteGuard<T>> {
         if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
-            let guard = RwLockWriteGuard { rwlock: self };
             if self.poisoned.load(MemoryOrdering.Acquire) {
-                return Result.Err(TryLockError.Poisoned(PoisonError.new(guard)));
+                return Result.Err(TryLockError.Poisoned(PoisonError.new(RwLockWriteGuard { rwlock: self })));
             }
-            return Result.Ok(guard);
+            return Result.Ok(RwLockWriteGuard { rwlock: self });
         }
         Result.Err(TryLockError.WouldBlock)
     }
@@ -273,7 +269,7 @@ implement<T: Debug> Debug for RwLock<T> {
 // =============================================================================
 
 // RAII guard for read access.
-public type RwLockReadGuard<T> is {
+public type affine RwLockReadGuard<T> is {
     rwlock: &RwLock<T>,
 };
 
@@ -296,7 +292,7 @@ implement<T> Drop for RwLockReadGuard<T> {
 // =============================================================================
 
 // RAII guard for write access.
-public type RwLockWriteGuard<T> is {
+public type affine RwLockWriteGuard<T> is {
     rwlock: &RwLock<T>,
 };
 

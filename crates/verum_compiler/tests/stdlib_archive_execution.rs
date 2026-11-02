@@ -38,6 +38,40 @@ fn bounded_channel_preserves_payloads_and_destroys_generic_endpoints() {
 }
 
 #[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn returning_a_lock_guard_holds_and_releases_one_acquisition() {
+    let source = r#"
+        module app;
+        mount core.sync.rwlock.{RwLock, RwLockReadGuard, RwLockWriteGuard};
+        mount core.sync.mutex.{Mutex, MutexGuard, LockResult, TryLockResult};
+        mount core.base.result.Result;
+        fn main() -> Int {
+            let lock = RwLock.new(17);
+            {
+                let held = lock.read().unwrap();
+                if lock.try_write().is_ok() { return 1; }
+                if *held != 17 { return 2; }
+            }
+            {
+                let held = lock.try_write().unwrap();
+                if lock.try_read().is_ok() { return 3; }
+                if *held != 17 { return 4; }
+            }
+            let mutex = Mutex.new(25);
+            {
+                let held = mutex.lock().unwrap();
+                if mutex.try_lock().is_ok() { return 5; }
+                if *held != 25 { return 6; }
+            }
+            let read = lock.try_read().unwrap();
+            let exclusive = mutex.try_lock().unwrap();
+            *read + *exclusive
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 42);
+}
+
+#[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and loopback TCP"]
 fn weft_overload_sends_the_complete_http_response() {
     let source = r#"

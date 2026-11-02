@@ -188,7 +188,7 @@ implement<T: Debug> Debug for Mutex<T> {
 // =============================================================================
 
 // RAII guard for Mutex. Releases lock when dropped.
-public type MutexGuard<T> is {
+public type affine MutexGuard<T> is {
     mutex: &Mutex<T>,
 };
 
