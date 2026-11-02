@@ -68,7 +68,7 @@
 module core.signal;
 
 mount core.async.broadcast.{
-    BroadcastSender, BroadcastReceiver, RecvError,
+    BroadcastSender, BroadcastReceiver, BroadcastRecvError,
     broadcast_channel,
 };
 mount core.async.timer.sleep;
@@ -171,7 +171,7 @@ public fn signal_stream(sigs: &[Signal]) -> SignalStream {
 ///
 
 /// Internally backed by a `BroadcastReceiver<Signal>` subscribed to a
-/// multi-signal fan-out. Slow subscribers observe `RecvError.Lagged` on
+/// multi-signal fan-out. Slow subscribers observe `BroadcastRecvError.Lagged` on
 /// backlog overflow — the stream silently skips these and continues.
 public type SignalStream is {
     recv: Maybe<BroadcastReceiver<Signal>>,
@@ -185,14 +185,14 @@ implement SignalStream {
             Maybe.Some(r) => r,
             Maybe.None => return Maybe.None,
         };
-        // Loop over RecvError.Lagged — treat skipped signals as delivered
+        // Loop over BroadcastRecvError.Lagged — treat skipped signals as delivered
         // once already (caller can't do anything anyway, the real signal
         // fired). Terminate on Closed.
         loop {
             match r.recv().await {
                 Result.Ok(sig) => return Maybe.Some(sig),
-                Result.Err(RecvError.Lagged(_)) => continue,
-                Result.Err(RecvError.Closed) => return Maybe.None,
+                Result.Err(BroadcastRecvError.Lagged(_)) => continue,
+                Result.Err(BroadcastRecvError.Closed) => return Maybe.None,
             }
         }
     }
