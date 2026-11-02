@@ -102,7 +102,7 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
         json!({"start":{"line":line,"character":start},
                "end":{"line":line,"character":start + token.encode_utf16().count()}})
     };
-    assert_eq!(diagnostic["range"], range(8, "x"));
+    assert_eq!(diagnostic["range"], range(8, "replace"));
     let related = diagnostic["relatedInformation"].as_array().unwrap();
     assert_eq!(related.len(), 1);
     assert_eq!(related[0]["location"]["uri"], snapshot["uri"]);

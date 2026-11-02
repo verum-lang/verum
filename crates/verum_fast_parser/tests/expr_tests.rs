@@ -475,6 +475,20 @@ fn test_parse_method_call() {
 }
 
 #[test]
+fn member_names_cover_only_their_tokens() {
+    for source in ["x /* 🧮 */ .value", "x?.value", "x . inspect<Int>(1)", "x.where(1)"] {
+        let expr = parse_expr_test(source);
+        let member = match &expr.kind {
+            ExprKind::Field { field, .. } | ExprKind::OptionalChain { field, .. } => field,
+            ExprKind::MethodCall { method, .. } => method,
+            other => panic!("unexpected member expression {other:?}"),
+        };
+        assert_eq!(source.get(member.span.start as usize..member.span.end as usize), Some(member.name.as_str()));
+        assert_eq!(source.get(expr.span.start as usize..expr.span.end as usize), Some(source));
+    }
+}
+
+#[test]
 fn test_parse_chained_field_access() {
     let expr = parse_expr_test("obj.field1.field2");
     match &expr.kind {

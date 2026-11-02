@@ -2736,8 +2736,8 @@ impl<'a> RecursiveParser<'a> {
                     // position. Using the permissive variant mirrors the fix
                     // already applied to `parse_variant` (which accepts
                     // keywords such as `loop`, `merid` as variant names).
-                    let field_name = self.consume_ident_or_any_keyword()?;
                     let field_name_span = self.stream.current_span();
+                    let field_name = self.consume_ident_or_any_keyword()?;
 
                     // Check if it's a method call:
                     // - .method() - regular method call
@@ -2833,7 +2833,7 @@ impl<'a> RecursiveParser<'a> {
                             Expr::new(
                                 ExprKind::MethodCall {
                                     receiver: Box::new(lhs), // MOVE instead of clone!
-                                    method: verum_ast::ty::Ident::new(field_name, span),
+                                    method: verum_ast::ty::Ident::new(field_name, field_name_span),
                                     type_args: type_args.into_iter().collect(),
                                     args: args.into(),
                                 },
@@ -2952,7 +2952,7 @@ impl<'a> RecursiveParser<'a> {
                             Expr::new(
                                 ExprKind::Field {
                                     expr: Box::new(lhs), // MOVE instead of clone!
-                                    field: verum_ast::ty::Ident::new(field_name, span),
+                                    field: verum_ast::ty::Ident::new(field_name, field_name_span),
                                 },
                                 span,
                             ),
@@ -2965,13 +2965,14 @@ impl<'a> RecursiveParser<'a> {
             // Optional chaining: ?.field
             Some(TokenKind::QuestionDot) => {
                 self.stream.advance();
+                let field_name_span = self.stream.current_span();
                 let field_name = self.consume_ident_or_keyword()?;
                 let span = lhs_span.merge(self.stream.make_span(start_pos));
                 Ok((
                     Expr::new(
                         ExprKind::OptionalChain {
                             expr: Box::new(lhs), // MOVE instead of clone!
-                            field: verum_ast::ty::Ident::new(field_name, span),
+                            field: verum_ast::ty::Ident::new(field_name, field_name_span),
                         },
                         span,
                     ),

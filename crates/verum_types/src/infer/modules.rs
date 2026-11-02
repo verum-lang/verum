@@ -19126,7 +19126,7 @@ impl TypeChecker {
             // An erased receiver or a fallback signature supplies no read-only authority.
             match result.receiver_kind.take() {
                 Some(kind) if !kind.meta().allows_mutation => {}
-                _ => tc.check_dependent_write_access(receiver, receiver_type.as_ref())?,
+                _ => tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?,
             }
             Ok(result)
         })

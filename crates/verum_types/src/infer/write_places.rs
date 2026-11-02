@@ -71,15 +71,16 @@ impl TypeChecker {
     ) -> Result<T> {
         self.with_place_types(place, |checker| {
             let result = infer(checker)?;
-            checker.check_dependent_write_access(place, None)?;
+            checker.check_write_access(place, None, place.span)?;
             Ok(result)
         })
     }
 
-    pub(super) fn check_dependent_write_access(
+    pub(super) fn check_write_access(
         &mut self,
         place: &Expr,
         method_receiver: Option<&Type>,
+        write_site: Span,
     ) -> Result<()> {
         if let Some(ty) = method_receiver {
             self.check_write_through_reference(ty, true, place.span)?;
@@ -110,7 +111,7 @@ impl TypeChecker {
             return Err(TypeError::DependentReceiverMutation {
                 receiver: name.name.clone(),
                 projection,
-                mutation: place.span,
+                mutation: write_site,
             });
         }
         Ok(())
