@@ -174,8 +174,9 @@ impl VbcCodegen {
         }
         self.nominal_type_id(&name).is_some_and(|id| id.is_builtin()
             || (id.well_known_name() == Some(name.as_str())
-                && verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS
-                    .iter().any(|(parent, _)| *parent == name)))
+                && (self.is_builtin_ctor_collection(&name)
+                    || verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS
+                        .iter().any(|(parent, _)| *parent == name))))
     }
 
     pub(super) fn semantic_formal_type(
