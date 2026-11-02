@@ -18423,7 +18423,8 @@ impl VbcCodegen {
                         // Track for cleanup on else path
                         scrutinee_regs.push(scrutinee);
 
-                        // Test if pattern matches
+                        let bind_prev = self
+                            .enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
                         let match_reg = self.ctx.alloc_temp();
                         self.compile_pattern_test(pattern, scrutinee, match_reg)?;
 
@@ -18436,10 +18437,6 @@ impl VbcCodegen {
                         self.ctx.free_temp(match_reg);
 
                         // Bind pattern variables - available for subsequent conditions and then branch
-                        // T0147: carry the scrutinee's static type into the
-                        // bind, exactly as `compile_match` does.
-                        let bind_prev = self
-                            .enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
                         self.compile_pattern_bind_from_expr(pattern, scrutinee, scrutinee_expr)?;
                         self.exit_scrutinee_type_for_bind(bind_prev);
                         continue;
@@ -18469,7 +18466,8 @@ impl VbcCodegen {
                     // Track for cleanup on else path
                     scrutinee_regs.push(scrutinee);
 
-                    // Test if pattern matches
+                    let bind_prev =
+                        self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
                     let match_reg = self.ctx.alloc_temp();
                     self.compile_pattern_test(pattern, scrutinee, match_reg)?;
 
@@ -18483,10 +18481,6 @@ impl VbcCodegen {
 
                     // Bind pattern variables - they're available for subsequent conditions
                     // and the then branch
-                    // T0147: carry the scrutinee's static type into the bind,
-                    // exactly as `compile_match` does.
-                    let bind_prev =
-                        self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
                     self.compile_pattern_bind_from_expr(pattern, scrutinee, value)?;
                     self.exit_scrutinee_type_for_bind(bind_prev);
                 }
@@ -18842,7 +18836,8 @@ impl VbcCodegen {
             .compile_expr(scrutinee_expr)?
             .or_internal("while-let scrutinee has no value")?;
 
-        // Test if pattern matches
+        let bind_prev =
+            self.enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
         let match_reg = self.ctx.alloc_temp();
         self.compile_pattern_test(pattern, scrutinee, match_reg)?;
 
@@ -18856,10 +18851,6 @@ impl VbcCodegen {
 
         // Pattern matched - enter scope and bind variables
         self.ctx.enter_scope();
-        // T0147: carry the scrutinee's static type into the bind, exactly
-        // as `compile_match` does.
-        let bind_prev =
-            self.enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
         self.compile_pattern_bind_from_expr(pattern, scrutinee, scrutinee_expr)?;
         self.exit_scrutinee_type_for_bind(bind_prev);
 

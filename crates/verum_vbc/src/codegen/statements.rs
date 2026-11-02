@@ -2011,9 +2011,12 @@ impl VbcCodegen {
             .compile_expr(value)?
             .or_internal("let-else value has no value")?;
 
-        // Test pattern match
+        // Scope the pattern evidence to its test. The else block may
+        // contain unrelated patterns and does not inherit this declaration.
+        let previous = self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
         let match_reg = self.ctx.alloc_temp();
         self.compile_pattern_test(pattern, value_reg, match_reg)?;
+        self.exit_scrutinee_type_for_bind(previous);
 
         let bind_label = self.ctx.new_label("let_else_bind");
 

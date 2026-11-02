@@ -228,3 +228,44 @@ fn called_methods<'a>(module: &'a verum_vbc::module::VbcModule, name: &str) -> L
         })
         .collect()
 }
+
+#[test]
+fn refutable_patterns_test_the_declared_result_of_the_scrutinee() {
+    let source = r#"
+        type Event is Empty | Ready(Int);
+        type Noise is Ready(Text) | Empty;
+        fn event(full: Bool) -> Event {
+            if full { Event.Ready(7) } else { Event.Empty }
+        }
+        fn positive(full: Bool) -> Int {
+            if let Ready(n) = event(full) { return n; }
+            0
+        }
+        fn guard(full: Bool) -> Int {
+            if event(full) is Ready(n) { return n; }
+            0
+        }
+        fn required(full: Bool) -> Int {
+            let Ready(n) = event(full) else { return 0; };
+            n
+        }
+        fn looping(full: Bool) -> Int {
+            while let Ready(n) = event(full) { return n; }
+            0
+        }
+        fn main() -> Int {
+            positive(true) + guard(true) + required(true) + looping(true)
+                + positive(false) + guard(false) + required(false) + looping(false)
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("consumer")).compile_module(&ast).unwrap();
+    let entry = module.find_function_by_name("consumer.main").unwrap();
+    for name in ["positive", "guard", "required", "looping"] {
+        let id = module.find_function_by_name(&format!("consumer.{name}")).unwrap();
+        let code = module.get_function(id).unwrap().instructions.as_ref().unwrap();
+        assert!(code.iter().any(|op| matches!(op, Instruction::IsVar { tag: 1, .. })), "{name}: {code:?}");
+    }
+    let mut vm = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module));
+    assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(28));
+}
