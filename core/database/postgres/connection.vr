@@ -1464,18 +1464,13 @@ implement PgConnection {
     }
 
     /// Push a message back so the next `read_replication_message`
-    /// returns it. Used when `start_logical` consumes the first
-    /// CopyData while waiting for CopyOutResponse — the data must
-    /// not be lost.
+    /// returns it. At most one decoded message can be buffered this way.
     ///
     /// Implementation note: re-encoding a message into the recv
     /// buffer would re-invoke the decoder; instead we keep an
     /// inline single-slot stash that `read_message` checks before
     /// pulling from the wire.
     public fn push_back_replication(&mut self, msg: BackendMessage) -> Result<(), DbError> {
-        // V0 — single-slot stash. The first call after START
-        // typically observes nothing (the server emits
-        // CopyOutResponse cleanly), so the stash is rarely used.
         match self.replication_stash {
             Maybe.Some(_) => Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
@@ -2228,9 +2223,7 @@ fn make_client_nonce() -> Text {
 // -----------------------------------------------------------------------------
 
 fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
-    // Drain a stashed message first (set by
-    // `push_back_replication`). At most one slot — used to peel a
-    // CopyData out of order during START_REPLICATION.
+    // Return any decoded message pushed back by the caller before reading the socket.
     match conn.replication_stash.take() {
         Maybe.Some(m) => { return Result.Ok(m); }
         Maybe.None    => {}

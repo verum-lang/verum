@@ -76,7 +76,7 @@ mount core.database.postgres.wire.backend.{
     BackendMessage,
     BmReadyForQuery, BmCommandComplete, BmEmptyQueryResponse,
     BmError, BmNotice, BmRowDescription, BmDataRow,
-    BmCopyInResponse, BmCopyOutResponse, BmCopyData, BmCopyDone,
+    BmCopyBothResponse, BmCopyData, BmCopyDone,
     BmParameterStatus, BmAuth, BmBackendKeyData, BmUnknown,
     BmNoData, BmPortalSuspend, BmParseComplete, BmBindComplete,
     BmCloseComplete, BmNotification,
@@ -425,37 +425,7 @@ implement PgReplicationConnection {
             Maybe.None    => {}
         }
 
-        match self.conn.state() {
-            PcsReady => {}
-            _ => {
-                return Result.Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
-            }
-        }
-        let payload = fe_simple_query(&sql);
-        self.conn.write_replication_frame(payload.as_slice())?;
-
-        // Same CopyBoth-entry handshake as start_logical.
-        loop {
-            let msg = self.conn.read_replication_message()?;
-            match msg {
-                BmCopyOutResponse(_) => { break; }
-                BmCopyInResponse(_)  => { break; }
-                BmCopyData { .. } => {
-                    self.conn.push_back_replication(msg)?;
-                    break;
-                }
-                BmError(d) => { return Result.Err(dberr_from_pg(d)); }
-                BmNotice(_) => {}
-                BmParameterStatus(_) => {}
-                BmReadyForQuery(_) => {
-                    return Result.Err(bad_replication("START_REPLICATION (physical) did not enter CopyBoth"));
-                }
-                _ => {}
-            }
-        }
-
-        self.streaming = true;
-        Result.Ok(())
+        self.start_stream(&sql)
     }
 
     /// START_REPLICATION SLOT slot LOGICAL X/Y [( opt val , … )].
@@ -489,47 +459,27 @@ implement PgReplicationConnection {
             sql.push_str(")");
         }
 
-        // START_REPLICATION transitions to CopyBoth — the server
-        // does NOT send ReadyForQuery until the stream ends, so we
-        // can't use simple_query (which loops to RFQ). We push the
-        // Q frame raw and read until we observe the CopyOutResponse
-        // surrogate that PG emits for both CopyBoth flavours in V3.
+        self.start_stream(&sql)
+    }
+
+    fn start_stream(&mut self, sql: &Text) -> Result<(), DbError> {
         match self.conn.state() {
             PcsReady => {}
-            _ => {
-                return Result.Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
-            }
+            _ => { return Result.Err(bad_replication("START_REPLICATION requires a ready connection")); }
         }
-        let payload = fe_simple_query(&sql);
+        let payload = fe_simple_query(sql);
         self.conn.write_replication_frame(payload.as_slice())?;
-
-        // Read until first CopyData / CopyOutResponse arrives.
         loop {
-            let msg = self.conn.read_replication_message()?;
-            match msg {
-                BmCopyOutResponse(_) => { break; }
-                BmCopyInResponse(_) => { break; }
-                BmCopyData { .. } => {
-                    // Some servers may send the first XLogData
-                    // before / interleaved with CopyOutResponse;
-                    // stash so the next next_message() observes it.
-                    self.conn.push_back_replication(msg)?;
-                    break;
+            match self.conn.read_replication_message()? {
+                BmCopyBothResponse(_) => {
+                    self.streaming = true;
+                    return Result.Ok(());
                 }
-                BmError(d) => {
-                    return Result.Err(dberr_from_pg(d));
-                }
-                BmNotice(_) => {}
-                BmParameterStatus(_) => {}
-                BmReadyForQuery(_) => {
-                    return Result.Err(bad_replication("START_REPLICATION did not enter CopyBoth"));
-                }
-                _ => {}
+                BmNotice(_) | BmParameterStatus(_) => {}
+                BmError(d) => { return Result.Err(dberr_from_pg(d)); }
+                _ => { return Result.Err(bad_replication("START_REPLICATION expected CopyBothResponse")); }
             }
         }
-
-        self.streaming = true;
-        Result.Ok(())
     }
 
     /// Block until the next replication frame arrives. Decodes

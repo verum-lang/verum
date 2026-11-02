@@ -179,3 +179,7 @@ public type TaggedReadOutcome is {
     frame: PgFrame,
     bytes_consumed: Int,
 };
+
+implement TaggedReadOutcome {
+    public fn into_frame(self) -> PgFrame { self.frame }
+}

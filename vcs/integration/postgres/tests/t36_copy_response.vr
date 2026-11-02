@@ -1,0 +1,44 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: database, postgres
+// @description: PostgreSQL COPY responses preserve direction and reject incomplete column formats.
+module postgres_copy_response.main;
+mount core.database.common.arena.SpindleArena;
+mount core.database.postgres.wire.frame.{PgFrame, try_parse_tagged};
+mount core.database.postgres.wire.backend.{
+    parse_backend, parse_backend_arena, BmCopyInResponse,
+    BmCopyOutResponse, BmCopyBothResponse, BmaCopyBothResponse,
+};
+
+fn copy_response_frame(tag: Byte) -> PgFrame {
+    let bytes: List<Byte> = [tag, 0_u8, 0_u8, 0_u8, 9_u8, 1_u8, 0_u8, 1_u8, 0_u8, 1_u8];
+    try_parse_tagged(bytes.as_slice()).unwrap().unwrap().into_frame()
+}
+
+fn test_copy_both_preserves_direction_and_column_formats() {
+    let formats: List<Int> = [];
+    match parse_backend(copy_response_frame(0x57_u8), &formats).unwrap() {
+        BmCopyBothResponse(response) => {
+            assert(response.is_binary());
+            assert_eq(response.column_formats().len(), 1);
+            assert_eq(response.column_formats()[0], 1);
+        }
+        _ => { assert(false); }
+    }
+    assert(parse_backend(copy_response_frame(0x47_u8), &formats).unwrap() is BmCopyInResponse);
+    assert(parse_backend(copy_response_frame(0x48_u8), &formats).unwrap() is BmCopyOutResponse);
+    let mut arena = SpindleArena.new_pool();
+    assert(parse_backend_arena(copy_response_frame(0x57_u8), &formats, &mut arena).unwrap() is BmaCopyBothResponse);
+}
+
+fn test_copy_both_rejects_truncated_column_format() {
+    let formats: List<Int> = [];
+    let bytes: List<Byte> = [0x57_u8, 0_u8, 0_u8, 0_u8, 7_u8, 1_u8, 0_u8, 1_u8];
+    let frame = try_parse_tagged(bytes.as_slice()).unwrap().unwrap().into_frame();
+    assert(parse_backend(frame, &formats).is_err());
+}
+
+fn main() {
+    test_copy_both_preserves_direction_and_column_formats();
+    test_copy_both_rejects_truncated_column_format();
+}
