@@ -1,0 +1,59 @@
+mount core.base.semver.SemVer;
+mount core.base.semver_constraint.parse_extended;
+mount core.cog.resolve.{range_contains, range_from_constraint, range_is_empty, range_to_text};
+
+fn version(text: &Text) -> SemVer { SemVer.parse(text).unwrap() }
+
+@test
+fn exact_and_partial_requirements_select_only_available_versions() {
+    let exact = range_from_constraint(&parse_extended(&"=1.2.8").unwrap(), [version(&"1.2.0"), version(&"1.2.8")]);
+    let available: List<SemVer> = [version(&"1.3.0"), version(&"1.2.8"), version(&"1.2.0"), version(&"1.2.8")];
+    assert(range_contains(&exact, &version(&"1.2.8")));
+    assert(!range_contains(&exact, &version(&"1.2.0")));
+
+    let partial = parse_extended(&"1.2.*").unwrap();
+    let selected = range_from_constraint(&partial, available);
+    assert(range_contains(&selected, &version(&"1.2.0")));
+    assert(range_contains(&selected, &version(&"1.2.8")));
+    assert(!range_contains(&selected, &version(&"1.3.0")));
+    assert(!range_contains(&selected, &version(&"1.2.7")));
+    let ordered: List<SemVer> = [version(&"1.2.0"), version(&"1.2.8"), version(&"1.3.0")];
+    assert_eq(range_to_text(&selected), range_to_text(&range_from_constraint(&partial, ordered)));
+}
+
+@test
+fn alternatives_preserve_gaps_and_prerelease_admission() {
+    let available: List<SemVer> = [version(&"1.0.0-alpha"), version(&"1.0.0-beta"), version(&"1.0.0"),
+                     version(&"2.0.0"), version(&"3.0.1"), version(&"3.0.2-beta")];
+    let requirement = parse_extended(&">=1.0.0-alpha, <1.0.0-beta || =1.0.0 || ~3.0").unwrap();
+    let selected = range_from_constraint(&requirement, available);
+    assert(range_contains(&selected, &version(&"1.0.0-alpha")));
+    assert(!range_contains(&selected, &version(&"1.0.0-beta")));
+    assert(range_contains(&selected, &version(&"1.0.0")));
+    assert(!range_contains(&selected, &version(&"2.0.0")));
+    assert(range_contains(&selected, &version(&"3.0.1")));
+    assert(!range_contains(&selected, &version(&"3.0.2-beta")));
+    // The second branch covers beta by precedence but has no prerelease operand.
+    let local = parse_extended(&"=1.0.0-alpha || >=0.5, <2").unwrap();
+    let beta = version(&"1.0.0-beta");
+    let local_range = range_from_constraint(&local, [version(&"1.0.0-alpha"), version(&"1.0.0-beta")]);
+    assert(!range_contains(&local_range, &beta));
+}
+
+@test
+fn empty_catalogue_and_maximum_component_require_no_synthetic_upper_bound() {
+    let empty: List<SemVer> = List.new();
+    assert(range_is_empty(&range_from_constraint(&parse_extended(&"*").unwrap(), empty)));
+    let available: List<SemVer> = [version(&"18446744073709551615.0.1"), version(&"18446744073709551614.0.0")];
+    let maximum = parse_extended(&"^18446744073709551615").unwrap();
+    let selected = range_from_constraint(&maximum, available);
+    assert(range_contains(&selected, &version(&"18446744073709551615.0.1")));
+    assert(!range_contains(&selected, &version(&"18446744073709551614.0.0")));
+}
+
+fn main() {
+    exact_and_partial_requirements_select_only_available_versions();
+    alternatives_preserve_gaps_and_prerelease_admission();
+    empty_catalogue_and_maximum_component_require_no_synthetic_upper_bound();
+    print("constraint catalogue: ok");
+}

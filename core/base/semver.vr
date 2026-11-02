@@ -471,6 +471,18 @@ implement SemVer {
     }
 }
 
+implement Clone for SemVer {
+    fn clone(&self) -> SemVer {
+        SemVer {
+            major: self.major,
+            minor: self.minor,
+            patch: self.patch,
+            pre_release: self.pre_release.clone(),
+            build_meta: self.build_meta.clone(),
+        }
+    }
+}
+
 implement Display for SemVer {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(render(self).as_str())

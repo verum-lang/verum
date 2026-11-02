@@ -2,6 +2,14 @@
 mount core.base.semver.SemVer;
 
 @test
+fn clone_preserves_prerelease_and_build_identifiers() {
+    let original = SemVer.parse(&"1.2.3-alpha.2+build.7").unwrap();
+    let copy = original.clone();
+    assert_eq(f"{copy}", "1.2.3-alpha.2+build.7");
+    assert_eq(f"{original}", "1.2.3-alpha.2+build.7");
+}
+
+@test
 fn parsed_components_are_available_without_record_construction() {
     let value = SemVer.parse(&"18446744073709551615.42.7-beta.1+build.5").unwrap();
     assert(value.major() == 18446744073709551615_u64);
@@ -49,8 +57,9 @@ fn prerelease_comparison_deliberately_ignores_core_numbers() {
 }
 
 fn main() {
+    clone_preserves_prerelease_and_build_identifiers();
     parsed_components_are_available_without_record_construction();
     shared_prerelease_order_matches_full_comparison_for_equal_core_numbers();
     prerelease_comparison_deliberately_ignores_core_numbers();
-    print("semver-component-api: 3 passed");
+    print("semver-component-api: 4 passed");
 }

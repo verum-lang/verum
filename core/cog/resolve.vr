@@ -67,12 +67,7 @@ module core.cog.resolve;
 
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount base.semver.{SemVer};
-mount base.semver_constraint.{
-    SemVerConstraint, parse as parse_constraint,
-    matches as constraint_matches,
-    matches_default, format_constraint,
-    exact as constraint_exact,
-};
+mount base.semver_constraint.{SemVerConstraint, matches_default};
 mount collections.{List, Map, Set};
 
 // =============================================================================
@@ -173,18 +168,27 @@ public fn range_between(lo: SemVer, hi: SemVer) -> VersionRange {
     VersionRange { intervals: iv }
 }
 
-/// Build a `VersionRange` from an existing `SemVerConstraint`. Supports the
-/// full Cargo+npm constraint algebra (caret, tilde, exact, AND, OR).
-public fn range_from_constraint(c: &SemVerConstraint) -> VersionRange {
-    constraint_to_range(c)
+/// Select the versions in the provider's catalogue that satisfy a requirement.
+/// Each accepted precedence is a singleton. Keeping the catalogue explicit
+/// preserves gaps and the branch-local prerelease rules of `matches_default`.
+public fn range_from_constraint(c: &SemVerConstraint, mut available: List<SemVer>) -> VersionRange {
+    available.sort_by(|a: &SemVer, b: &SemVer| a.cmp(b));
+    available.dedup_by(|a: &SemVer, b: &SemVer| a.eq(b));
+    let mut intervals: List<Interval> = List.new();
+    for version in available {
+        if matches_default(c, &version) {
+            intervals.push(Interval { lo: Bound.Included(version.clone()), hi: Bound.Included(version) });
+        }
+    }
+    VersionRange { intervals: intervals }
 }
 
 // ----- VersionRange predicates -----
 
 fn bound_to_text(b: &Bound) -> Text {
     match b {
-        Bound.Included(v) => f"<={v.major}.{v.minor}.{v.patch}",
-        Bound.Excluded(v) => f"<{v.major}.{v.minor}.{v.patch}",
+        Bound.Included(v) => f"<={v.major()}.{v.minor()}.{v.patch()}",
+        Bound.Excluded(v) => f"<{v.major()}.{v.minor()}.{v.patch()}",
         Bound.Unbounded   => "*".to_text(),
     }
 }
@@ -493,54 +497,6 @@ fn bound_hi_max(a: &Bound, b: &Bound) -> Bound {
             }
         }
     }
-}
-
-fn constraint_to_range(c: &SemVerConstraint) -> VersionRange {
-    // SemVerConstraint is a generic constraint AST.  We convert by
-    // sampling its semantics: anything that `matches` accepts is in
-    // the range. For known tags we lower directly; for AND/OR we
-    // recurse. Since the parser produces a stable AST per
-    // semver_constraint.vr, callers can also build VersionRange directly via
-    // the constructors above.
-    match c.classify() {
-        ConstraintShape.Exact(v)            => range_exact(v),
-        ConstraintShape.Caret(v)            => caret_range(v),
-        ConstraintShape.Tilde(v)            => tilde_range(v),
-        ConstraintShape.GreaterThan(v)      => range_strictly_higher(v),
-        ConstraintShape.AtLeast(v)          => range_higher_than(v),
-        ConstraintShape.LessThan(v)         => range_lower_than(v),
-        ConstraintShape.AtMost(v)           => range_at_most(v),
-        ConstraintShape.VersionRange(lo, hi)       => range_between(lo, hi),
-        ConstraintShape.And(a, b)           => range_intersect(&constraint_to_range(&a), &constraint_to_range(&b)),
-        ConstraintShape.Or(a, b)            => range_union(&constraint_to_range(&a), &constraint_to_range(&b)),
-        ConstraintShape.Wildcard            => range_full(),
-    }
-}
-
-fn caret_range(v: SemVer) -> VersionRange {
-    // ^1.2.3 = >=1.2.3 <2.0.0  (compatibility within major)
-    // ^0.2.3 = >=0.2.3 <0.3.0
-    // ^0.0.3 = >=0.0.3 <0.0.4
-    let upper = if v.major > 0 {
-        SemVer { major: v.major + 1, minor: 0, patch: 0, pre_release: List.new(), build_meta: List.new() }
-    } else if v.minor > 0 {
-        SemVer { major: 0, minor: v.minor + 1, patch: 0, pre_release: List.new(), build_meta: List.new() }
-    } else {
-        SemVer { major: 0, minor: 0, patch: v.patch + 1, pre_release: List.new(), build_meta: List.new() }
-    };
-    range_between(v, upper)
-}
-
-fn tilde_range(v: SemVer) -> VersionRange {
-    // ~1.2.3 = >=1.2.3 <1.3.0
-    let upper = SemVer {
-        major: v.major,
-        minor: v.minor + 1,
-        patch: 0,
-        pre_release: List.new(),
-        build_meta: List.new(),
-    };
-    range_between(v, upper)
 }
 
 // =============================================================================
