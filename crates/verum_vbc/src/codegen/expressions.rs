@@ -54,6 +54,19 @@ mod method_types;
 
 type FieldWriteback = (Reg, u32, bool, verum_common::Text);
 
+/// Generic IDs in a complete source match refer to the caller. In a partial
+/// inference result the same numeric IDs can be unfilled callee slots.
+struct CallInstantiation {
+    arguments: Vec<crate::types::TypeRef>,
+    complete: bool,
+}
+
+impl CallInstantiation {
+    fn carries_evidence(&self) -> bool {
+        self.complete || self.arguments.iter().any(|ty| !matches!(ty, crate::types::TypeRef::Generic(_)))
+    }
+}
+
 /// The borrow belongs to this pattern binding, never to expressions in its body.
 /// Tuple expressions may mix owned values and references.
 #[derive(Clone, Default)]
@@ -8452,7 +8465,7 @@ impl VbcCodegen {
                 count: call_arg_count as u8,
             };
             let type_args_inferred = if final_func_id != UNRESOLVED_FN_ID {
-                self.record_generic_instantiation(final_func_id, args)
+                self.record_generic_instantiation(final_func_id, None, args).map(|call| call.arguments)
             } else {
                 None
             };
@@ -8559,20 +8572,16 @@ impl VbcCodegen {
             .then(|| self.method_expression_types(expr).callable).flatten()
     }
 
-    /// Record a generic-function instantiation discovered at a call site.
-    /// Looks up the callee's descriptor by `func_id`, and if it is generic
-    /// (any parameter or the return type mentions a type parameter), binds each
-    /// `Generic(TypeParamId)` appearing in a parameter's `TypeRef` to the
-    /// inferred concrete type of the corresponding argument, producing the
-    /// concrete type-argument list in `TypeParamId` order and queueing
-    /// `(func_id, type_args)` for `build_module`.  Returns the type args when
-    /// an instantiation was derived (so the caller emits `CallG`), else `None`.
-    /// AOT-only.
+    /// Derive descriptor-ordered witnesses for the interpreter and AOT.
+    /// Borrow receiver and operands directly from their source expressions.
     fn record_generic_instantiation(
         &mut self,
         func_id: u32,
-        args: &verum_common::List<verum_ast::Expr>,
-    ) -> Option<Vec<crate::types::TypeRef>> {
+        receiver: Option<&Expr>,
+        args: &[Expr],
+    ) -> Option<CallInstantiation> {
+        let operands = receiver.into_iter().chain(args.iter());
+        let count = args.len() + usize::from(receiver.is_some());
         // #44-B: type-arg DERIVATION always runs — the interpreter's
         // generic-witness plumbing (CallG → frame witness table →
         // LoadT(Generic) → CallM-on-TypeRef) needs the static type args
@@ -8580,6 +8589,12 @@ impl VbcCodegen {
         // devirtualize, still under reconstruction #3) stays behind
         // VERUM_ENABLE_MONO_AOT.
         let mono_seed = std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some();
+        if let Some(declared) = self.declared_argument_witnesses(func_id, count, operands.clone()) {
+            if mono_seed {
+                self.pending_specializations.push((func_id, declared.clone()));
+            }
+            return Some(CallInstantiation { arguments: declared, complete: true });
+        }
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let found = self
                 .functions
@@ -8588,8 +8603,7 @@ impl VbcCodegen {
                 .and_then(|f| self.ctx.strings.get(f.descriptor.name.0 as usize).cloned());
             // Fire for the async-repro callees + any find-miss, so we can see
             // whether record is even reached for future_poll_sync / ready.
-            let arg0 = args
-                .get(0)
+            let arg0 = operands.clone().next()
                 .and_then(|a| self.infer_expr_type_name(a))
                 .unwrap_or_default();
             if found.is_none()
@@ -8619,11 +8633,21 @@ impl VbcCodegen {
                     func_id,
                     found,
                     arg0,
-                    args.len(),
+                    count,
                     gen_info.as_ref().map(|g| g.2),
                     gen_info.as_ref().map(|g| &g.0),
                     gen_info.as_ref().map(|g| &g.1),
                 );
+            }
+        }
+        // O: fn(E) -> F contributes both the callable in O's slot and its
+        // input/output constraints. The expanded bound is part of the
+        // descriptor even though the semantic parameter itself is just O.
+        fn inference_parameter(semantic: Option<&crate::types::TypeRef>, layout: &crate::types::TypeRef) -> crate::types::TypeRef {
+            use crate::types::TypeRef;
+            match (semantic, layout) {
+                (Some(TypeRef::Generic(_)), TypeRef::Function { .. }) => layout.clone(),
+                _ => semantic.unwrap_or(layout).clone(),
             }
         }
         let param_trs: Vec<crate::types::TypeRef> = {
@@ -8668,8 +8692,8 @@ impl VbcCodegen {
                     return None;
                 }
                 d.params.iter().enumerate().map(|(index, param)| {
-                    d.semantic_parameter_types().and_then(|params| params.get(index))
-                        .and_then(Option::as_ref).unwrap_or(&param.type_ref).clone()
+                    inference_parameter(d.semantic_parameter_types().and_then(|params| params.get(index))
+                        .and_then(Option::as_ref), &param.type_ref)
                 }).collect()
             } else if let Some(trs) = self.ctx.archive_fn_param_types.get(&func_id) {
                 // Bootstrap also retains semantic inputs, but a callback's
@@ -8709,8 +8733,7 @@ impl VbcCodegen {
                 }
                 let semantic = self.ctx.semantic_fn_params.get(&crate::module::FunctionId(func_id));
                 trs.iter().enumerate().map(|(index, abi)| {
-                    semantic.and_then(|params| params.get(index)).and_then(Option::as_ref)
-                        .unwrap_or(abi).clone()
+                    inference_parameter(semantic.and_then(|params| params.get(index)).and_then(Option::as_ref), abi)
                 }).collect()
             } else if let Some(params) = self.ctx.semantic_fn_params.get(&crate::module::FunctionId(func_id)) {
                 // Deferred initializers can call a source declaration before
@@ -8757,45 +8780,43 @@ impl VbcCodegen {
         let mut bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
             std::collections::BTreeMap::new();
         let mut unresolved_callables = verum_common::Set::new();
-        for (i, ptr) in param_trs.iter().enumerate() {
-            if let Some(arg) = args.get(i) {
-                let mut unwrapped = arg;
-                while let ExprKind::Paren(inner) = &unwrapped.kind { unwrapped = inner; }
-                if matches!(&unwrapped.kind, ExprKind::Closure { .. }) {
-                    let declared = self.parameter_generic_id(func_id, i);
-                    if !self.bind_compiled_callable_argument(func_id, i, ptr, unwrapped, &mut bindings)
-                        && let Some(id) = declared {
-                        unresolved_callables.insert(u32::from(id.0));
-                    }
+        for (i, (ptr, arg)) in param_trs.iter().zip(operands.clone()).enumerate() {
+            let mut unwrapped = arg;
+            while let ExprKind::Paren(inner) = &unwrapped.kind { unwrapped = inner; }
+            if matches!(&unwrapped.kind, ExprKind::Closure { .. }) {
+                let declared = self.parameter_generic_id(func_id, i);
+                if !self.bind_compiled_callable_argument(func_id, i, ptr, unwrapped, &mut bindings)
+                    && let Some(id) = declared {
+                    unresolved_callables.insert(u32::from(id.0));
+                }
+                continue;
+            }
+            if let Some(carried) = self.callable_method_result_type(arg) {
+                bind_generic(ptr, &carried, &mut bindings);
+                continue;
+            }
+            if let Some(concrete) = self
+                .infer_expr_type_name(arg)
+                .or_else(|| Self::literal_default_type_name(arg))
+            {
+                let stripped = strip_ref(&concrete);
+                let base = stripped.split('<').next().unwrap_or(&stripped).trim();
+                // Carried fact, not name shape: a 2-char PascalCase
+                // CONCRETE type (`Pt`, `Id`, …) is a valid binding
+                // source; only names that are BOUND type params of
+                // the function being compiled are placeholders here
+                // (#44-A: `show(p)` never seeded `show<Pt>` because
+                // `looks_like_type_param("Pt")` mis-filtered it).
+                if base.is_empty() || self.ctx.generic_type_params.contains(base) {
                     continue;
                 }
-                if let Some(carried) = self.callable_method_result_type(arg) {
-                    bind_generic(ptr, &carried, &mut bindings);
-                    continue;
-                }
-                if let Some(concrete) = self
-                    .infer_expr_type_name(arg)
-                    .or_else(|| Self::literal_default_type_name(arg))
-                {
-                    let stripped = strip_ref(&concrete);
-                    let base = stripped.split('<').next().unwrap_or(&stripped).trim();
-                    // Carried fact, not name shape: a 2-char PascalCase
-                    // CONCRETE type (`Pt`, `Id`, …) is a valid binding
-                    // source; only names that are BOUND type params of
-                    // the function being compiled are placeholders here
-                    // (#44-A: `show(p)` never seeded `show<Pt>` because
-                    // `looks_like_type_param("Pt")` mis-filtered it).
-                    if base.is_empty() || self.ctx.generic_type_params.contains(base) {
-                        continue;
-                    }
-                    // Preserve the FULL instantiation (e.g. `ReadyFuture<Text>`
-                    // → Instantiated{RF,[Text]}) rather than collapsing to the
-                    // bare base id.  Monomorphization needs the args to resolve
-                    // associated types (`F.Output = Text`) and text-mark the
-                    // payload, so `print` emits the string, not the pointer-int.
-                    if let Some(tr) = self.type_name_to_type_ref_mono(&stripped) {
-                        bind_generic(ptr, &tr, &mut bindings);
-                    }
+                // Preserve the FULL instantiation (e.g. `ReadyFuture<Text>`
+                // → Instantiated{RF,[Text]}) rather than collapsing to the
+                // bare base id.  Monomorphization needs the args to resolve
+                // associated types (`F.Output = Text`) and text-mark the
+                // payload, so `print` emits the string, not the pointer-int.
+                if let Some(tr) = self.type_name_to_type_ref_mono(&stripped) {
+                    bind_generic(ptr, &tr, &mut bindings);
                 }
             }
         }
@@ -8825,8 +8846,7 @@ impl VbcCodegen {
                 .map(|t| t.type_params.len())
                 .unwrap_or(0);
             if t1228_trace {
-                let rn = args
-                    .first()
+                let rn = operands.clone().next()
                     .and_then(|r| self.infer_expr_type_name(r))
                     .unwrap_or_else(|| "<none>".into());
                 eprintln!(
@@ -8839,7 +8859,7 @@ impl VbcCodegen {
                 );
             }
             if impl_k > 0
-                && let Some(recv) = args.first()
+                && let Some(recv) = operands.clone().next()
                 && let Some(recv_name) = self
                     .infer_expr_type_name(recv)
                     .or_else(|| Self::literal_default_type_name(recv))
@@ -8909,7 +8929,7 @@ impl VbcCodegen {
             {
                 eprintln!(
                     "[mono-record] '{}' id={} param_trs={:?} nargs={} bindings={:?}",
-                    nm, func_id, param_trs, args.len(), bindings
+                    nm, func_id, param_trs, count, bindings
                 );
             }
         }
@@ -8933,7 +8953,7 @@ impl VbcCodegen {
             self.pending_specializations
                 .push((func_id, type_args.clone()));
         }
-        Some(type_args)
+        Some(CallInstantiation { arguments: type_args, complete: false })
     }
 
     /// Apply source arguments to their declaration-owned slots after inference.
@@ -13797,7 +13817,7 @@ impl VbcCodegen {
         {
             let constructor = self.ctx.lookup_function(&format!("{tn}.new"))
                 .map(|info| info.id.0);
-            let inferred = constructor.and_then(|id| self.record_generic_instantiation(id, args));
+            let inferred = constructor.and_then(|id| self.record_generic_instantiation(id, None, args)).map(|call| call.arguments);
             let inner = self
                 .compile_expr(&args[0])?
                 .or_internal("wrapper .new arg has no value")?;
@@ -16605,26 +16625,9 @@ impl VbcCodegen {
         // for CONST-GENERIC-VALUE-CARRY-1 — see the CallM-branch comment
         // below for the full derivation contract).
         let sidecar_args: Option<Vec<crate::types::TypeRef>> = resolvable_fid
-            .and_then(|fid| {
-                let mut with_recv: verum_common::List<Expr> =
-                    verum_common::List::new();
-                with_recv.push(receiver.clone());
-                for a in args.iter() {
-                    with_recv.push(a.clone());
-                }
-                self.record_generic_instantiation(fid, &with_recv)
-            })
-            // Chain honesty: an all-placeholder/empty PRIMARY derivation
-            // must not suppress the receiver-instantiation fallback below
-            // (`Some(vec![Generic..])` skipped the or_else and then died
-            // at the final filter — the exact shape that left
-            // `a.trace()` witness-less).
-            .filter(|ta| {
-                !ta.is_empty()
-                    && ta
-                        .iter()
-                        .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
-            })
+            .and_then(|fid| self.record_generic_instantiation(fid, Some(receiver), args))
+            .filter(CallInstantiation::carries_evidence)
+            .map(|call| call.arguments)
             // ARCHIVE-BLIND fallback: user-script codegen has no stdlib
             // FunctionDescriptors (self.functions is module-local), so
             // the structural binder above derives nothing for stdlib
@@ -18205,18 +18208,11 @@ impl VbcCodegen {
             start: args_start,
             count: args.len() as u8,
         };
-        let mut inferred_type_args = self
-            .record_generic_instantiation(func_info.id.0, args)
-            // Chain honesty (T0499): an all-placeholder structural
-            // derivation must not suppress the callsite-staged
-            // witnesses (annotation channel / receiver instantiation).
-            .filter(|ta| {
-                !ta.is_empty()
-                    && ta
-                        .iter()
-                        .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
-            });
-        if let Some(staged) = staged_type_args {
+        let inferred = self.record_generic_instantiation(func_info.id.0, None, args)
+            .filter(CallInstantiation::carries_evidence);
+        let complete = inferred.as_ref().is_some_and(|call| call.complete);
+        let mut inferred_type_args = inferred.map(|call| call.arguments);
+        if !complete && let Some(staged) = staged_type_args {
             let inferred = inferred_type_args.get_or_insert_with(Vec::new);
             for (index, value) in staged.into_iter().enumerate() {
                 if let Some(slot) = inferred.get_mut(index) {
@@ -44422,9 +44418,7 @@ impl VbcCodegen {
             // callees and unresolved receivers derive nothing and keep
             // the plain `Call` unchanged.
             let fmt_type_args = if type_name.contains('<') {
-                let mut recv_only: verum_common::List<Expr> = verum_common::List::new();
-                recv_only.push(expr.clone());
-                self.record_generic_instantiation(fid, &recv_only)
+                self.record_generic_instantiation(fid, Some(expr), &[]).map(|call| call.arguments)
             } else {
                 None
             };

@@ -400,3 +400,26 @@ fn probe() -> Int {
         7337,
     );
 }
+
+#[test]
+fn projected_generic_fields_forward_their_callers_binders() {
+    run(
+        r#"
+type Index is protocol { fn index() -> Int; };
+type Left is { marker: Int };
+type Right is { marker: Int };
+implement Index for Left { fn index() -> Int { 3 } }
+implement Index for Right { fn index() -> Int { 7 } }
+type Vector<A, B> is { marker: Int };
+type Carrier<P, Q> is { value: Vector<Q, P> };
+fn encode<X: Index, Y: Index>(v: Vector<X, Y>) -> Int { X.index() * 10 + Y.index() }
+fn project<P: Index, Q: Index>(c: Carrier<P, Q>) -> Int { encode(c.value) }
+fn probe() -> Int {
+    let v: Vector<Right, Left> = Vector { marker: 0 };
+    let c: Carrier<Left, Right> = Carrier { value: v };
+    project(c)
+}
+"#,
+        73,
+    );
+}
