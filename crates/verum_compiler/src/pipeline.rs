@@ -1631,7 +1631,7 @@ impl<'s> CompilationPipeline<'s> {
             let verum_ast::ItemKind::Type(declaration) = &item.kind else {
                 anyhow::bail!("cached declaration {} is not a type declaration; rebuild from source", cached_type.path);
             };
-            if verum_ast::source_signature::type_declaration_uses_universes(declaration)
+            if verum_ast::source_signature::type_declaration_needs_semantic_carrier(declaration)
                 .map_err(|error| anyhow::anyhow!("{error}"))?
             {
                 anyhow::bail!("cached declaration {} lacks a semantic universe signature; rebuild from source", cached_type.path);

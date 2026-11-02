@@ -1852,7 +1852,8 @@ pub(crate) const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v60-declaration-type-bindings";
+    // v61: retain source parameter kinds for mixed type/meta protocols.
+    "v61-protocol-parameter-kinds";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
