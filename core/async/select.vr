@@ -31,6 +31,7 @@
 module core.async.select;
 
 mount core.base.{Maybe, Result};
+mount core.base.memory.replace;
 mount core.collections.List;
 mount super.future.{Future, FutureExt};
 mount super.poll.Poll;
@@ -244,8 +245,8 @@ implement<T, F: Future<Output = T>> Future for SelectAll<T, F> {
             match self.futures[i].poll(cx) {
                 Poll.Ready(val) => {
                     // Remove the completed future
-                    let completed = self.futures.remove(i);
-                    let remaining = self.futures.clone();
+                    self.futures.remove(i);
+                    let remaining = replace(&mut self.futures, List.new());
 
                     return Poll.Ready(Result.Ok(SelectAllResult {
                         value: val,

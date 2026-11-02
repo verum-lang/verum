@@ -67,7 +67,7 @@ public async fn begin_tx_with_async(
     let mut sql: Text = opts.render_sql();
     if sql.len() > 0 { sql.push_str("; "); }
     sql.push_str("START TRANSACTION");
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(MyReqBeginTx {
         begin_sql: sql,
         reply: rs,
@@ -102,7 +102,7 @@ public async fn commit_tx_async(
     tx: AsyncMysqlTransaction,
 ) -> Result<(), DbError> {
     let _ = tx;
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(MyReqCommitTx { reply: rs }).await;
     match rr.await {
         Result.Ok(r)  => r,
@@ -115,7 +115,7 @@ public async fn rollback_tx_async(
     tx: AsyncMysqlTransaction,
 ) -> Result<(), DbError> {
     let _ = tx;
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(MyReqRollbackTx { reply: rs }).await;
     match rr.await {
         Result.Ok(r)  => r,
@@ -127,7 +127,7 @@ public async fn savepoint_async(
     conn: &AsyncMysqlConnection,
     name: &Text,
 ) -> Result<(), DbError> {
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(MyReqSavepoint {
         name: name.clone(),
         reply: rs,
@@ -142,7 +142,7 @@ public async fn release_savepoint_async(
     conn: &AsyncMysqlConnection,
     name: &Text,
 ) -> Result<(), DbError> {
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(MyReqReleaseSavepoint {
         name: name.clone(),
         reply: rs,
@@ -157,7 +157,7 @@ public async fn rollback_to_savepoint_async(
     conn: &AsyncMysqlConnection,
     name: &Text,
 ) -> Result<(), DbError> {
-    let (rs, rr) = oneshot();
+    let (rs, rr) = oneshot<Result<(), DbError>>();
     let _ = conn.tx_ref().send_async(MyReqRollbackToSavepoint {
         name: name.clone(),
         reply: rs,

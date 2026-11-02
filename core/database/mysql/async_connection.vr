@@ -276,7 +276,7 @@ implement AsyncMysqlConnection {
     public async fn simple_query(&self, sql: &Text)
         -> Result<MySimpleQueryResult, DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<MySimpleQueryResult, DbError>>();
         match self.tx.send_async(MyReqSimpleQuery {
             sql: sql.clone(),
             reply: rs,
@@ -291,7 +291,7 @@ implement AsyncMysqlConnection {
     }
 
     public async fn execute(&self, sql: &Text) -> Result<Int, DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<Int, DbError>>();
         match self.tx.send_async(MyReqExecute {
             sql: sql.clone(),
             reply: rs,
@@ -312,7 +312,7 @@ implement AsyncMysqlConnection {
     public async fn multi_query(&self, sql: &Text)
         -> Result<List<MySimpleQueryResult>, DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<List<MySimpleQueryResult>, DbError>>();
         match self.tx.send_async(MyReqMultiQuery {
             sql: sql.clone(),
             reply: rs,
@@ -327,7 +327,7 @@ implement AsyncMysqlConnection {
     }
 
     public async fn ping(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.tx.send_async(MyReqPing { reply: rs }).await {
             Result.Ok(()) => {}
             Result.Err(_) => { return Result.Err(actor_dropped("ping")); }
@@ -339,7 +339,7 @@ implement AsyncMysqlConnection {
     }
 
     public async fn close(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.tx.send_async(MyReqShutdown { reply: rs }).await {
             Result.Ok(()) => {}
             Result.Err(_) => { return Result.Err(actor_dropped("close")); }
@@ -360,7 +360,7 @@ implement AsyncMysqlConnection {
     public async fn prepare(&self, sql: &Text)
         -> Result<AsyncMysqlPreparedStatement, DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<MysqlPreparedStatement, DbError>>();
         match self.tx.send_async(MyReqPrepare {
             sql: sql.clone(),
             reply: rs,
@@ -382,7 +382,7 @@ implement AsyncMysqlConnection {
         stmt: &AsyncMysqlPreparedStatement,
         params: List<StmtParam>,
     ) -> Result<MysqlPreparedResult, DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<MysqlPreparedResult, DbError>>();
         match self.tx.send_async(MyReqExecutePrepared {
             stmt: stmt.inner.clone(),
             params: params,
@@ -401,7 +401,7 @@ implement AsyncMysqlConnection {
     public async fn close_prepared(&self, stmt: AsyncMysqlPreparedStatement)
         -> Result<(), DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.tx.send_async(MyReqClosePrepared {
             stmt: stmt.inner,
             reply: rs,

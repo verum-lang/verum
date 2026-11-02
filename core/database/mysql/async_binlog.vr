@@ -146,7 +146,7 @@ implement AsyncMysqlBinlogStream {
     /// Tear down the actor cleanly. Sends Shutdown, awaits the
     /// actor's reply, then joins the actor task.
     public async fn close(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(BcShutdown { ack: rs }).await {
             Result.Ok(())  => {}
             Result.Err(_)  => { return Result.Err(actor_dropped("close")); }

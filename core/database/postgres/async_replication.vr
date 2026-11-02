@@ -236,7 +236,7 @@ implement AsyncPgReplicationConnection {
     public async fn identify_system(&self)
         -> Result<core.database.postgres.replication.IdentifySystemRow, DbError>
     {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<core.database.postgres.replication.IdentifySystemRow, DbError>>();
         match self.cmd_tx.send_async(RrIdentifySystem { ack: rs }).await {
             Result.Ok(())  => {}
             Result.Err(_)  => { return Result.Err(actor_dropped("identify_system")); }
@@ -250,7 +250,7 @@ implement AsyncPgReplicationConnection {
     public async fn create_logical_slot(
         &self, slot: &Text, plugin: &Text, temporary: Bool,
     ) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(RrCreateLogicalSlot {
             slot: slot.clone(),
             plugin: plugin.clone(),
@@ -267,7 +267,7 @@ implement AsyncPgReplicationConnection {
     }
 
     public async fn drop_slot(&self, slot: &Text, wait: Bool) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(RrDropSlot {
             slot: slot.clone(),
             wait: wait,
@@ -290,7 +290,7 @@ implement AsyncPgReplicationConnection {
         opts: LogicalReplicationOptions,
         start_lsn: Lsn,
     ) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(RrStartLogical {
             opts: opts,
             start_lsn: start_lsn,
@@ -311,7 +311,7 @@ implement AsyncPgReplicationConnection {
         start_lsn: Lsn,
         timeline: Maybe<Int>,
     ) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(RrStartPhysical {
             slot: slot.clone(),
             start_lsn: start_lsn,
@@ -371,7 +371,7 @@ implement AsyncPgReplicationConnection {
     }
 
     public async fn close(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot();
+        let (rs, rr) = oneshot<Result<(), DbError>>();
         match self.cmd_tx.send_async(RrShutdown { ack: rs }).await {
             Result.Ok(())  => {}
             Result.Err(_)  => { return Result.Err(actor_dropped("close")); }
