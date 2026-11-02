@@ -16684,6 +16684,40 @@ impl TypeChecker {
         if depth > 10 {
             return ty.clone();
         }
+        // Imported signatures can retain the declaring name even when the
+        // archive registered only the leaf template. Patterns must select the
+        // same declaration for a dotted identifier and a segmented source path.
+        let nominal = match ty {
+            Type::Named { path, args } => Some((self.path_to_string(path), args)),
+            Type::Generic { name, args } => Some((name.clone(), args)),
+            _ => None,
+        };
+        if let Some((key, args)) = nominal.filter(|(key, _)| key.contains("."))
+            && let Some(metadata) = &self.core_metadata
+            && let Some(desc) = Self::metadata_type_with_declaring_key(metadata, &key)
+        {
+            use crate::core_metadata::TypeDescriptorKind;
+            if let Some(def @ Type::Variant(_)) = self.ctx.lookup_type(&key) {
+                return self.substitute_with_params(&key, def, args);
+            }
+            if desc.source_declaration.is_none()
+                && !self.source_type_registration.completed.contains_key(&key)
+            {
+                match &desc.kind {
+                    TypeDescriptorKind::Variant { .. } => {
+                        let parameters = desc.generic_params.iter().zip(args.iter())
+                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                            .collect();
+                        return Self::substitute_named_params_in_type(
+                            &self.type_descriptor_to_type(desc), &parameters,
+                        );
+                    }
+                    TypeDescriptorKind::Alias { .. } => {}
+                    // A record or opaque type cannot acquire another owner's cases.
+                    _ => return ty.clone(),
+                }
+            }
+        }
         match ty {
             Type::Generic { name, args } => {
                 // INSTRUMENT (VERUM_TRACE_ALIASEXP): which arm this type

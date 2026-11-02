@@ -4789,7 +4789,7 @@ impl TypeChecker {
     }
 
     /// Convert a core_metadata::TypeDescriptor to a Type.
-    fn type_descriptor_to_type(&self, desc: &crate::core_metadata::TypeDescriptor) -> Type {
+    pub(super) fn type_descriptor_to_type(&self, desc: &crate::core_metadata::TypeDescriptor) -> Type {
         use crate::core_metadata::{TypeDescriptorKind, VariantPayload};
         use crate::ty::Type;
         use verum_common::Text;

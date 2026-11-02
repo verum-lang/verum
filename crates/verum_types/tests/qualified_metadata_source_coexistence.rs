@@ -427,3 +427,86 @@ fn an_archive_glob_cannot_make_a_live_private_declaration_public() {
         assert!(errors.iter().any(|error| error.contains(expected)), "{owner_source}: {errors:?}");
     }
 }
+
+fn nested_packet_pattern(
+    owner: &str,
+    split_path: bool,
+    tag: &str,
+) -> Result<verum_types::Type, String> {
+    use verum_ast::{Ident, Path, PathSegment, Span};
+    use verum_types::Type;
+    use verum_types::context::TypeScheme;
+    use verum_types::core_metadata::{GenericParam, VariantCase, VariantPayload};
+
+    let mut data = metadata(OWNER, KEY);
+    let packet = data.types.get_mut(&Text::from(KEY)).unwrap();
+    packet.generic_params = ["Unused", "Payload"]
+        .into_iter()
+        .map(|name| GenericParam {
+            name: name.into(),
+            bounds: List::new(),
+            default: None,
+            type_bounds: List::new(),
+            pid: None,
+        })
+        .collect();
+    packet.kind = TypeDescriptorKind::Variant {
+        cases: [VariantCase {
+            name: "Reply".into(),
+            payload: Some(VariantPayload::Tuple(
+                ["Payload".into()].into_iter().collect(),
+            )),
+        }]
+        .into_iter()
+        .collect(),
+    };
+    // The flat type is a record from a different owner.
+    data.types
+        .get_mut(&Text::from("Packet"))
+        .unwrap()
+        .origin_module_path = Some("core.other".into());
+    let mut checker = TypeChecker::new_with_core(Arc::new(data));
+    checker.register_primitives();
+    let qualified = format!("{owner}.Packet");
+    let span = Span::default();
+    let path = if split_path {
+        Path::new(
+            qualified
+                .split('.')
+                .map(|part| PathSegment::Name(Ident::new(part, span)))
+                .collect(),
+            span,
+        )
+    } else {
+        Path::single(Ident::new(qualified, span))
+    };
+    let nominal = Type::Named {
+        path,
+        args: [Type::int(), Type::text()].into_iter().collect(),
+    };
+    let outer = Type::Variant([("Payload".into(), nominal)].into_iter().collect());
+    checker
+        .context_mut()
+        .env
+        .insert("value", TypeScheme::mono(outer));
+    let source = format!("match value {{ Payload(Packet.{tag}(v)) => v, _ => \"default\" }}");
+    let expr = verum_fast_parser::Parser::new(&source)
+        .parse_expr()
+        .unwrap();
+    checker
+        .synth_expr(&expr)
+        .map(|result| result.ty)
+        .map_err(|error| error.to_string())
+}
+
+#[test]
+fn nested_archived_variant_pattern_uses_its_declaring_owner_and_payload_parameter() {
+    for split in [false, true] {
+        assert_eq!(
+            nested_packet_pattern(OWNER, split, "Reply"),
+            Ok(verum_types::Type::text())
+        );
+        assert!(nested_packet_pattern(OWNER, split, "Missing").is_err());
+        assert!(nested_packet_pattern("core.other", split, "Reply").is_err());
+    }
+}
