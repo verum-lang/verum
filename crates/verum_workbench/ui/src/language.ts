@@ -1,3 +1,5 @@
+import { m } from './i18n.ts';
+
 export type Position = { line: number; character: number };
 export type Range = { start: Position; end: Position };
 export type FormattingOptions = { tabSize: number; insertSpaces: boolean };
@@ -7,6 +9,14 @@ export type RecordMember = { name: string; selection_range: Range; annotation: {
 export type Declaration = { id: string; name: string; kind: string; type_display?: string | null; record_fields?: RecordMember[]; range: Range; selection_range: Range; requirements: Array<{ source: string; range: Range }>; preconditions?: Array<{ source: string; range: Range }>; postconditions?: Array<{ source: string; range: Range }> };
 export type Binding = { name: string; type_display: string; source_module?: string; definition: { uri: string; range: Range } | null };
 export type Analysis = { library_metadata?: { sha256: string; format_version: number } | null; project_revision?: string | null; bindings?: Binding[]; source_hash: string; version: number; parsed: boolean; analysis_scope: string; diagnostics: Diagnostic[]; declarations: Declaration[]; mounts: Array<{ source: string; range: Range }> };
+export function analysisScopeLabel(scope: Analysis['analysis_scope']) {
+  switch (scope) {
+    case 'project-sources-with-library-metadata': return m('Project sources and compiled standard library');
+    case 'project-sources-with-builtins': return m('Project sources and compiler builtins');
+    case 'single-module-with-builtins': return m('Current module and compiler builtins');
+    default: return m('Analysis scope unavailable');
+  }
+}
 export type DocumentRevision = { path: string; source: string };
 export type LanguageReply<T> = { source_hash: string; version: number; result: T };
 export const sameRevision = (left: DocumentRevision, right: DocumentRevision) => left.path === right.path && left.source === right.source;

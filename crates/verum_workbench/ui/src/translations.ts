@@ -1,6 +1,11 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Project sources and compiled standard library': 'Исходники проекта и скомпилированная стандартная библиотека',
+  'Project sources and compiler builtins': 'Исходники проекта и встроенные средства компилятора',
+  'Current module and compiler builtins': 'Текущий модуль и встроенные средства компилятора',
+  'Analysis scope unavailable': 'Область анализа неизвестна',
+  'Metadata v{version} · SHA-256 {digest}': 'Метаданные v{version} · SHA-256 {digest}',
   'This Studio host does not support runtime diagnostics. Restart with the matching Studio build.': 'Сервер Studio не поддерживает диагностику выполнения. Перезапустите сервер с соответствующей сборкой Studio.',
   'CBGR checks were disabled when capture started.': 'На момент начала записи проверки CBGR были отключены.',
   'Run with CBGR diagnostics': 'Запуск с диагностикой CBGR',
@@ -77,7 +82,6 @@ export const translations = {
   'Diagnostics': 'Диагностика',
   '{count} diagnostics': 'Сообщений: {count}',
   'No module diagnostics': 'Нет замечаний к модулю',
-  'Single-module analysis with builtins. Imported modules and whole-project contracts require a project check.': 'Анализ отдельного модуля со встроенными типами. Импортированные модули и контракты проекта требуют проверки проекта.',
   'Waiting for current source analysis…': 'Ожидание анализа текущего кода…',
   'No declarations available for this revision.': 'В этой версии нет доступных объявлений.',
   'Context requirements': 'Требования контекстов',
@@ -467,7 +471,6 @@ export const translations = {
   'on line': 'в строке',
   'replaced match on line {line}': 'заменено совпадение в строке {line}',
   'replaced {count} matches': 'заменено совпадений: {count}',
-  'Project source analysis with resolved imports. Build and proof checks remain separate.': 'Анализ исходного кода проекта с разрешением импортов. Сборка и проверка доказательств выполняются отдельно.',
   'Fields ({count})': 'Поля ({count})',
   'Depends on {field}': 'Зависит от {field}',
   'Resolved imports': 'Разрешённые импорты',

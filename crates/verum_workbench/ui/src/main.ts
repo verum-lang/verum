@@ -13,7 +13,7 @@ import { icon, installIcons, type IconName } from './icons';
 import { installTooltips } from './tooltips';
 import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
-import { languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
+import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, initialToken, isConnected, connectSession, onSessionChange } from './api';
 import { SessionAccessError, SessionChangedError } from './session';
@@ -315,10 +315,11 @@ function scheduleAnalysis() {
   proofTargets.begin(languageRevision()); renderProofTargets();
   window.clearTimeout(analysisTimer);
   editor.diagnostics(editor.source(), []);
+  $('analysis-scope').replaceChildren();
   if (!currentPath.endsWith('.vr')) {
     analysisPending = false;
     setText($('language-status'), m('Plain text · no Verum analysis'));
-    setText($('diagnostics-count'), '0'); setText($('analysis-scope'), '');
+    setText($('diagnostics-count'), '0');
     $('diagnostics-list').replaceChildren(node('p', 'muted', m('Plain text · no Verum analysis')));
     $('architecture-content').replaceChildren(); closeSettings(); return;
   }
@@ -353,7 +354,15 @@ function renderAnalysis(snapshot: Analysis) {
   const count = snapshot.diagnostics.length;
   setText($('language-status'), count ? m('{count} diagnostics', { count }) : m('No module diagnostics'));
   setText($('diagnostics-count'), String(count));
-  setText($('analysis-scope'), snapshot.project_revision ? m('Project source analysis with resolved imports. Build and proof checks remain separate.') : m('Single-module analysis with builtins. Imported modules and whole-project contracts require a project check.'));
+  const scope = $('analysis-scope'), label = analysisScopeLabel(snapshot.analysis_scope);
+  if (snapshot.library_metadata && snapshot.analysis_scope === 'project-sources-with-library-metadata') {
+    const { sha256, format_version } = snapshot.library_metadata;
+    const details = node('details');
+    details.append(node('summary', '', label), node('code', '', m('Metadata v{version} · SHA-256 {digest}', { version: format_version, digest: sha256 })));
+    scope.replaceChildren(details);
+  } else {
+    scope.replaceChildren(node('span', '', label));
+  }
   const diagnostics = $('diagnostics-list'); diagnostics.replaceChildren();
   for (const diagnostic of snapshot.diagnostics) {
     const entry = button('', () => showRange(diagnostic.range), 'diagnostic-item');

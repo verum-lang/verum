@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { positionAt, offsetAt, rangeOffsets, sameRevision, textEditChanges } from '../src/language.ts';
+import { analysisScopeLabel, positionAt, offsetAt, rangeOffsets, sameRevision, textEditChanges } from '../src/language.ts';
 
 test('LSP locations round-trip UTF-16 including non-BMP characters and CRLF', () => {
   const source = '😀name\r\nsecond\n';
@@ -35,4 +35,11 @@ test('a malformed, overlapping or out-of-bounds formatting set is rejected atomi
   for (const edits of [undefined, {}, [null], [edit(2, 3), edit(1, 2)], [edit(0, 4), edit(3, 6)], [edit(0, 0), edit(0, 0)], [edit(9, 10)], [edit(4, 2)], [{ ...edit(0, 2), newText: null }], [{ ...edit(0, 2), range: {} }]]) {
     assert.equal(textEditChanges(source, edits), null, JSON.stringify(edits));
   }
+});
+
+test('diagnostic scope distinguishes release-backed analysis from builtins and unknown modes', () => {
+  assert.equal(analysisScopeLabel('project-sources-with-library-metadata').key, 'Project sources and compiled standard library');
+  assert.equal(analysisScopeLabel('project-sources-with-builtins').key, 'Project sources and compiler builtins');
+  assert.equal(analysisScopeLabel('single-module-with-builtins').key, 'Current module and compiler builtins');
+  assert.equal(analysisScopeLabel('new-compiler-mode').key, 'Analysis scope unavailable');
 });

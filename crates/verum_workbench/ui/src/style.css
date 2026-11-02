@@ -798,6 +798,8 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .result-tabs button:focus-visible { outline: none; border-bottom-width: 3px; border-bottom-color: var(--accent-text); padding-bottom: 1px; }
 .diagnostics-panel { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 #analysis-scope { margin-bottom: 10px; }
+#analysis-scope summary { cursor: pointer; }
+#analysis-scope code { display: block; overflow-wrap: anywhere; user-select: all; }
 .diagnostic-item { display: flex; align-items: baseline; gap: 10px; text-align: left; width: 100%; padding: 10px 0; border-top: 1px solid var(--subtle-border); }
 .diagnostic-item:hover { background: var(--hover); }
 .diagnostic-related { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 0 6px 18px; color: var(--accent-text); text-align: start; overflow-wrap: anywhere; }
