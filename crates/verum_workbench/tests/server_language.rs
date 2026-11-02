@@ -71,8 +71,10 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
         "    fn replace(&mut self, y: Pack) { *self = y; }\n",
         "    fn inspect(&self, y: Pack) {}\n",
         "}\n",
+        "fn forward<T>(s: &T) -> &T { s }\n",
         "fn edit(x: Pack, y: Pack) -> Pack {\n",
-        "    /* 🧮 */ let w = x.witness;\n",
+        "    let a = forward(&x); let alias = a;\n",
+        "    /* 🧮 */ let w = alias.witness;\n",
         "    /* 🔬 λ */ x.replace(y);\n",
         "    Pack { carrier: x.carrier, witness: w }\n",
         "}\n",
@@ -102,11 +104,11 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
         json!({"start":{"line":line,"character":start},
                "end":{"line":line,"character":start + token.encode_utf16().count()}})
     };
-    assert_eq!(diagnostic["range"], range(8, "replace"));
+    assert_eq!(diagnostic["range"], range(10, "replace"));
     let related = diagnostic["relatedInformation"].as_array().unwrap();
     assert_eq!(related.len(), 1);
     assert_eq!(related[0]["location"]["uri"], snapshot["uri"]);
-    assert_eq!(related[0]["location"]["range"], range(7, "x.witness"));
+    assert_eq!(related[0]["location"]["range"], range(9, "alias.witness"));
 
     let (status, repaired) = post(
         host,
