@@ -80,7 +80,7 @@ implement OSError {
 
     /// EINTR is 4 on Linux / macOS / Windows POSIX shim — uniform
     /// across the platforms Verum supports.
-    fn interrupted(&self) -> Bool {
+    public fn interrupted(&self) -> Bool {
         self.code == 4
     }
 }
@@ -194,6 +194,50 @@ public type FileDesc is (Int);
 // IntCoercible: FileDesc is `(Int)` newtype; coerce with Int in
 // comparison contexts (`fd >= 0`, `fd == STDIN`).
 implement IntCoercible for FileDesc {}
+
+/// Native POSIX pollfd layout. The kernel writes revents on every probe.
+@repr(C)
+public type PollDescriptor is {
+    fd: Int32,
+    events: Int16,
+    revents: Int16,
+};
+
+/// A single zero-time read probe, including an EOF or pending read error.
+/// The caller owns the descriptor and remains its sole reader.
+@cfg(any(target_os = "linux", target_os = "macos"))
+public fn poll_readable_now(fd: Int) -> Result<Bool, OSError> {
+    if fd < 0 || fd > 2147483647 { return Result.Err(OSError.from_code(9)); }
+    let mut descriptor = PollDescriptor { fd: fd as Int32, events: 1, revents: 0 };
+    loop {
+        match probe_descriptor(&mut descriptor) {
+            Result.Err(e) => if !e.interrupted() { return Result.Err(e); },
+            Result.Ok(0) => return Result.Ok(false),
+            Result.Ok(_) => {
+                if (descriptor.revents & 32) != 0 { return Result.Err(OSError.from_code(9)); }
+                // POLLIN | POLLERR | POLLHUP. Read reports the terminal cause.
+                return Result.Ok((descriptor.revents & 25) != 0);
+            },
+        }
+    }
+}
+
+@cfg(target_os = "linux")
+fn probe_descriptor(descriptor: &mut PollDescriptor) -> Result<Int, OSError> {
+    let timeout: [Int64; 2] = [0, 0];
+    // ppoll is available on both supported Linux architectures. nfds = 1,
+    // zero timespec, no signal mask; no libc enters the AOT call chain.
+    let result = unsafe { core.sys.linux.syscall.syscall_raw(core.sys.linux.arch.SYS_PPOLL,
+        descriptor as Int, 1, timeout.as_ptr() as Int, 0, 0, 0) };
+    if result < 0 { Result.Err(OSError.from_code(-result)) } else { Result.Ok(result) }
+}
+
+@cfg(target_os = "macos")
+fn probe_descriptor(descriptor: &mut PollDescriptor) -> Result<Int, OSError> {
+    let result = unsafe { core.sys.darwin.libsystem.poll(descriptor, 1, 0) };
+    if result < 0 { Result.Err(OSError.from_code(core.sys.darwin.libsystem.errno())) }
+    else { Result.Ok(result as Int) }
+}
 
 implement FileDesc {
     /// Invalid file descriptor constant.

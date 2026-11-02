@@ -99,6 +99,9 @@ extern {
     /// C: `int pipe(int pipefd[2])`. T0.4.2: fd-array element type is Int32.
     fn pipe(fds: &mut Int32) -> Int32;
 
+    /// Darwin nfds_t is u32; the pollfd is borrowed for the duration of poll.
+    public fn poll(fds: &mut core.sys.common.PollDescriptor, count: UInt32, timeout: Int32) -> Int32;
+
     /// File control operations.
     /// C: `int fcntl(int fd, int cmd, ...)`. T0.4.2: cmd is C `int`,
     /// arg is variadic and varies per cmd; we keep `Int` for the
@@ -1385,6 +1388,19 @@ public fn safe_waitpid(pid: Int32, options: Int32) -> Result<Int32, OSError> {
         Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(status)
+    }
+}
+
+/// Probe an unreaped child without blocking. A zero waitpid return means
+/// the child is still running; only a positive return initializes its status.
+public fn try_waitpid(pid: Int32) -> Result<Maybe<Int32>, OSError> {
+    let mut status: Int32 = 0;
+    loop {
+        let result = unsafe { waitpid(pid, &mut status, 1) }; // WNOHANG
+        if result == 0 { return Result.Ok(Maybe.None); }
+        if result > 0 { return Result.Ok(Maybe.Some(status)); }
+        let err = errno();
+        if err != 4 { return Result.Err(OSError.new(err, errno_to_message(err))); } // EINTR
     }
 }
 

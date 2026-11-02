@@ -45,7 +45,7 @@ mount sys.windows.kernel32.{
     CreatePipe,
     SetHandleInformation,
     CloseHandle,
-    ReadFile,
+    ReadFile, PeekNamedPipe, ERROR_BROKEN_PIPE, WAIT_TIMEOUT,
     WriteFile,
     TerminateProcess,
     WaitForSingleObject,
@@ -328,6 +328,30 @@ implement Child {
         wait_for_child(self.pid)
     }
 
+    /// Probe completion. A ready status reaps this child exactly once.
+    public fn try_wait(&self) -> Result<Maybe<ExitStatus>, Text> {
+        try_wait_for_child(self.pid)
+    }
+
+    /// Read one available chunk. No data yet yields None. EOF closes the
+    /// port and clears its descriptor. These methods require the sole reader.
+    public fn read_stdout_ready(&mut self, max: Int) -> Result<Maybe<List<Byte>>, Text> {
+        read_child_pipe(&mut self.stdout_fd, max)
+    }
+
+    public fn read_stderr_ready(&mut self, max: Int) -> Result<Maybe<List<Byte>>, Text> {
+        read_child_pipe(&mut self.stderr_fd, max)
+    }
+
+    public fn output_is_closed(&self) -> Bool {
+        self.stdout_fd.is_none() && self.stderr_fd.is_none()
+    }
+
+    public fn close_output(&mut self) {
+        if let Maybe.Some(fd) = self.stdout_fd { close_fd(fd); self.stdout_fd = Maybe.None; }
+        if let Maybe.Some(fd) = self.stderr_fd { close_fd(fd); self.stderr_fd = Maybe.None; }
+    }
+
     /// Writes bytes to the child's stdin. Returns the number of bytes written.
     /// Returns Err if stdin was not configured as Piped during spawn.
     public fn write_stdin(&self, data: &[Byte]) -> Result<Int, Text> {
@@ -469,7 +493,7 @@ fn write_all_to_fd(fd: Int, data: &[Byte]) -> Result<Int, Text> {
 }
 
 @cfg(target_os = "windows")
-fn write_all_to_fd(handle_raw: Int, data: &[Byte]) -> Int {
+fn write_all_to_fd(handle_raw: Int, data: &[Byte]) -> Result<Int, Text> {
     let handle = Handle.from_raw(handle_raw as UInt64);
     let mut total: Int = 0;
     let mut i = 0;
@@ -488,11 +512,11 @@ fn write_all_to_fd(handle_raw: Int, data: &[Byte]) -> Int {
             &mut bytes_written,
             0 as &unsafe Byte,
         );
-        if !ok || bytes_written == 0 { return -1; }
+        if ok == 0 || bytes_written == 0 { return Result.Err(f"WriteFile failed (error {GetLastError()})"); }
         total = total + bytes_written as Int;
         i = i + bytes_written as Int;
     }
-    total
+    Result.Ok(total)
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
@@ -508,6 +532,88 @@ fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
 
     let status = wait_for_child(r.pid)?;
     Result.Ok(Output { status, stdout_bytes, stderr_bytes })
+}
+
+/// Consume at most one chunk so that a busy stdout cannot starve stderr
+/// or delay cancellation. Only close the fd after an observed EOF.
+fn read_child_pipe(port: &mut Maybe<Int>, max: Int) -> Result<Maybe<List<Byte>>, Text> {
+    if max <= 0 { return Result.Err("pipe read size must be positive".into()); }
+    let fd = match *port { Maybe.Some(fd) => fd, Maybe.None => return Result.Ok(Maybe.None) };
+    let chunk = read_ready_chunk(fd, max)?;
+    if let Maybe.Some(bytes) = &chunk {
+        if bytes.is_empty() { close_fd(fd); *port = Maybe.None; }
+    }
+    Result.Ok(chunk)
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn read_ready_chunk(fd: Int, max: Int) -> Result<Maybe<List<Byte>>, Text> {
+    if !core.sys.common.poll_readable_now(fd).map_err(|e| f"pipe readiness probe failed: {e}")? {
+        return Result.Ok(Maybe.None);
+    }
+    Result.Ok(Maybe.Some(native_fd_read_chunk(fd, max)?))
+}
+
+@cfg(target_os = "windows")
+fn read_ready_chunk(fd: Int, max: Int) -> Result<Maybe<List<Byte>>, Text> {
+    let handle = Handle.from_raw(fd as UInt64);
+    let mut available: UInt32 = 0;
+    if PeekNamedPipe(handle, 0 as &unsafe mut Byte, 0, 0 as &unsafe mut UInt32,
+                     &mut available, 0 as &unsafe mut UInt32) == 0 {
+        let err = GetLastError();
+        if err == ERROR_BROKEN_PIPE { return Result.Ok(Maybe.Some([])); }
+        return Result.Err(f"PeekNamedPipe failed (error {err})");
+    }
+    if available == 0 { return Result.Ok(Maybe.None); }
+    let size = max.min(available as Int);
+    let mut bytes: List<Byte> = List.with_capacity(size);
+    bytes.resize(size, 0);
+    let mut count: UInt32 = 0;
+    if ReadFile(handle, bytes.as_mut_ptr() as &unsafe mut Byte, size as UInt32, &mut count,
+                0 as &unsafe mut core.sys.windows.kernel32.Overlapped) == 0 {
+        let err = GetLastError();
+        if err == ERROR_BROKEN_PIPE { return Result.Ok(Maybe.Some([])); }
+        return Result.Err(f"ReadFile failed (error {err})");
+    }
+    bytes.truncate(count as Int);
+    Result.Ok(Maybe.Some(bytes))
+}
+
+@cfg(target_os = "macos")
+fn try_wait_for_child(pid: Int) -> Result<Maybe<ExitStatus>, Text> {
+    match core.sys.darwin.libsystem.try_waitpid(pid as Int32) {
+        Result.Ok(Maybe.Some(raw)) => Result.Ok(Maybe.Some(ExitStatus { raw: raw as Int })),
+        Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+        Result.Err(_) => Result.Err("waitpid failed".into()),
+    }
+}
+
+@cfg(target_os = "linux")
+fn try_wait_for_child(pid: Int) -> Result<Maybe<ExitStatus>, Text> {
+    let mut status: Int32 = 0;
+    loop {
+        match core.sys.linux.syscall.wait4(pid, &mut status, core.sys.linux.syscall.WNOHANG) {
+            Result.Ok(0) => return Result.Ok(Maybe.None),
+            Result.Ok(_) => return Result.Ok(Maybe.Some(ExitStatus { raw: status as Int })),
+            Result.Err(e) => if !e.interrupted() { return Result.Err(f"wait4 failed: {e}"); },
+        }
+    }
+}
+
+@cfg(target_os = "windows")
+fn try_wait_for_child(pid: Int) -> Result<Maybe<ExitStatus>, Text> {
+    let handle = Handle.from_raw(pid as UInt64);
+    let ready = WaitForSingleObject(handle, 0);
+    if ready == WAIT_TIMEOUT { return Result.Ok(Maybe.None); }
+    if ready == WAIT_FAILED { return Result.Err(f"WaitForSingleObject failed (error {GetLastError()})"); }
+    let mut code: UInt32 = 0;
+    if GetExitCodeProcess(handle, &mut code) == 0 {
+        let error = GetLastError();
+        CloseHandle(handle);
+        return Result.Err(f"GetExitCodeProcess failed (error {error})");
+    }
+    CloseHandle(handle);
+    Result.Ok(Maybe.Some(ExitStatus { raw: code as Int }))
 }
 
 @cfg(target_os = "linux")
@@ -656,7 +762,7 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
     if capture_stdout { CloseHandle(stdout_write); }
     if capture_stderr { CloseHandle(stderr_write); }
 
-    if !success {
+    if success == 0 {
         if capture_stdout { CloseHandle(stdout_read); }
         if capture_stderr { CloseHandle(stderr_read); }
         return Result.Err(f"CreateProcessA failed (error {GetLastError()})");
@@ -726,7 +832,7 @@ fn wait_for_child(process_handle_raw: Int) -> Result<ExitStatus, Text> {
     }
 
     let mut exit_code: UInt32 = 0;
-    if !GetExitCodeProcess(handle, &mut exit_code) {
+    if GetExitCodeProcess(handle, &mut exit_code) == 0 {
         CloseHandle(handle);
         return Result.Err(f"GetExitCodeProcess failed (error {GetLastError()})");
     }
@@ -780,7 +886,7 @@ fn __process_kill_raw_impl(handle_raw: Int, sig: Int) -> Int {
     let handle = Handle.from_raw(handle_raw as UInt64);
     // Map signal → exit code so the target's wait() reflects the cause.
     let exit_code = (128 + sig) as UInt32;
-    if TerminateProcess(handle, exit_code) { 0 } else { 1 }
+    if TerminateProcess(handle, exit_code) != 0 { 0 } else { 1 }
 }
 
 /// Build a Windows command line string from program and arguments.

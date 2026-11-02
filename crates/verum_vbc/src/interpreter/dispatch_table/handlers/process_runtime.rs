@@ -84,6 +84,33 @@ pub(in super::super) fn try_intercept_process_runtime(
         // std::process::Child and call .wait() on it.  If the pid
         // wasn't produced here (rare — e.g. external bytecode spawn),
         // we fall back to libc::waitpid directly.
+        "try_wait_for_child" if func_name == "core.io.process.try_wait_for_child" && arg_count == 1 => {
+            let Some(pid) = unwrap_ref(state, args_start_reg, caller_base).try_as_i64() else {
+                return wrap_poll_result(state, Err("try_wait_for_child: expected an integer process id".into()));
+            };
+            let status = match try_wait_child_host(pid) {
+                Ok(Some(raw)) => {
+                    let status = alloc_record_n_fields(state, "ExitStatus", &[Value::from_i64(raw)])?;
+                    Ok(Some(status))
+                }
+                Ok(None) => Ok(None),
+                Err(error) => Err(error),
+            };
+            wrap_poll_result(state, status)
+        }
+        "read_ready_chunk" if func_name == "core.io.process.read_ready_chunk" && arg_count == 2 => {
+            let fd = unwrap_ref(state, args_start_reg, caller_base).try_as_i64();
+            let max = unwrap_ref(state, args_start_reg + 1, caller_base).try_as_i64();
+            let (Some(fd), Some(max)) = (fd, max) else {
+                return wrap_poll_result(state, Err("read_ready_chunk: expected an integer pipe id and read size".into()));
+            };
+            let result = match host_read_ready_chunk(state, fd, max) {
+                Ok(Some(bytes)) => Ok(Some(alloc_byte_list(state, &bytes)?)),
+                Ok(None) => Ok(None),
+                Err(error) => Err(error),
+            };
+            wrap_poll_result(state, result)
+        }
         "wait_for_child" if arg_count == 1 => {
             intercept_wait_for_child(state, args_start_reg, caller_base)
         }
@@ -91,6 +118,10 @@ pub(in super::super) fn try_intercept_process_runtime(
         // FFI-bypass pattern — call libc directly so the Verum-side
         // `Child.write_stdin` / `read_stdout` / `signal` end-to-end
         // works in interpreter mode.
+        #[cfg(windows)]
+        "write_all_to_fd" if func_name == "core.io.process.write_all_to_fd" && arg_count == 2 => {
+            intercept_native_fd_write_all(state, args_start_reg, caller_base)
+        }
         "native_fd_write_all" if arg_count == 2 => {
             intercept_native_fd_write_all(state, args_start_reg, caller_base)
         }
@@ -498,23 +529,31 @@ fn intercept_spawn_child(
             return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
         }
     };
-    let pid = child.id() as i64;
-
-    // Extract stdio fds via into_raw_fd — surrenders ownership to the
-    // Verum runtime so the underlying kernel fd survives even after
-    // the std::process::ChildStdin/Stdout/Stderr wrappers drop.  The
-    // script closes them via `Child.close_stdin` / `close_fd`.
-    #[cfg(unix)]
-    let (stdin_fd, stdout_fd, stderr_fd) = {
-        use std::os::fd::IntoRawFd;
-        let stdin_fd = child.stdin.take().map(|s| s.into_raw_fd() as i64);
-        let stdout_fd = child.stdout.take().map(|s| s.into_raw_fd() as i64);
-        let stderr_fd = child.stderr.take().map(|s| s.into_raw_fd() as i64);
-        (stdin_fd, stdout_fd, stderr_fd)
+    #[cfg(not(windows))]
+    let pid = i64::from(child.id());
+    #[cfg(windows)]
+    let pid = {
+        use std::os::windows::io::AsRawHandle;
+        // The Verum Child contract on Windows is a live process HANDLE.
+        child.as_raw_handle() as isize as i64
     };
-    #[cfg(not(unix))]
-    let (stdin_fd, stdout_fd, stderr_fd): (Option<i64>, Option<i64>, Option<i64>) =
-        (None, None, None);
+
+    // Both spawn APIs hand out ids from the same file table. In particular,
+    // a live host descriptor above 100 cannot alias a different managed pipe.
+    #[cfg(any(unix, windows))]
+    let (stdin_fd, stdout_fd, stderr_fd) = {
+        let mut register = |file| {
+            let id = register_child_pipe(state, file);
+            (id >= 0).then_some(id)
+        };
+        (
+            register(child.stdin.take().map(pipe_into_file)),
+            register(take_stdout_file(&mut child)),
+            register(take_stderr_file(&mut child)),
+        )
+    };
+    #[cfg(not(any(unix, windows)))]
+    let (stdin_fd, stdout_fd, stderr_fd) = (None, None, None);
 
     CHILD_REGISTRY
         .lock()
@@ -590,6 +629,25 @@ pub(super) fn wait_child_host(pid: i64) -> Result<i64, String> {
     // Cleanup: drop the registry entry now that the child is reaped.
     CHILD_REGISTRY.lock().unwrap().remove(&pid);
     Ok(raw_status)
+}
+
+/// A nonblocking wait leaves registry ownership intact until exit. Removing
+/// the entry under the same lock makes a second waiter observe consumption.
+fn try_wait_child_host(pid: i64) -> Result<Option<i64>, String> {
+    let mut children = CHILD_REGISTRY.lock().unwrap();
+    let child = children
+        .get_mut(&pid)
+        .and_then(|entry| entry.child.as_mut())
+        .ok_or_else(|| {
+            format!("child {pid} is not owned by this runtime or is already being waited for")
+        })?;
+    let status = child
+        .try_wait()
+        .map_err(|err| format!("try_wait({pid}): {err}"))?;
+    if status.is_some() {
+        children.remove(&pid);
+    }
+    Ok(status.as_ref().map(encode_exit_status))
 }
 
 fn intercept_wait_for_child(
@@ -780,6 +838,17 @@ fn intercept_native_fd_write_all(
     }
     let fd = fd_v.as_i64();
     let data = super::heap_helpers::extract_byte_slice(state, args_start_reg + 1, caller_base);
+    if let Some(file) = state.open_files.get_mut(&fd) {
+        use std::io::Write as _;
+        let result = match file.write_all(&data) {
+            Ok(()) => wrap_in_variant(state, "Result", 0, &[Value::from_i64(data.len() as i64)])?,
+            Err(error) => {
+                let text = alloc_string_value(state, &error.to_string())?;
+                wrap_in_variant(state, "Result", 1, &[text])?
+            }
+        };
+        return Ok(Some(result));
+    }
     #[cfg(unix)]
     {
         let mut written = 0_usize;
@@ -823,25 +892,83 @@ fn intercept_native_fd_write_all(
 }
 
 // ============================================================================
-// T0111 — ONE host-side fd bridge (open_files-first, raw-fd fallback)
+// Host-side fd bridge. Both process APIs register pipes in open_files.
+// The raw Unix fallback is retained for externally supplied descriptors.
 // ============================================================================
-//
-// Tier-0 has TWO fd spaces (the H3 fd-space schism, tracked under
-// T0111 residuals):
-//
-//  * synthetic `state.open_files` ids (>= 100) — file opens via
-//  `__file_open_raw` AND child pipe fds registered by the legacy
-//  `__process_spawn_raw` surface;
-//  * raw host fds — the VBC-PROC-3 `spawn_child` intercept surrenders
-//  `into_raw_fd()` values to the script.
-//
-// Every Tier-0 fd read/close funnels through these primitives so both
-// spaces resolve identically: the synthetic table is consulted FIRST
-// (`next_fd` is monotone and starts at 100, so a handed-out synthetic
-// id can never be re-keyed), then the value is treated as a raw host
-// fd.  A numeric collision (a real host fd >= 100 while the same id is
-// live in `open_files`) would misroute — that residual risk is the H3
-// schism itself and is eliminated only by unifying the two spaces.
+
+fn wrap_poll_result(
+    state: &mut InterpreterState,
+    result: Result<Option<Value>, String>,
+) -> InterpreterResult<Option<Value>> {
+    let value = match result {
+        Ok(value) => {
+            let maybe =
+                wrap_in_variant(state, "Maybe", u32::from(value.is_some()), value.as_slice())?;
+            wrap_in_variant(state, "Result", 0, &[maybe])?
+        }
+        Err(error) => {
+            let message = alloc_string_value(state, &error)?;
+            wrap_in_variant(state, "Result", 1, &[message])?
+        }
+    };
+    Ok(Some(value))
+}
+
+fn host_read_ready_chunk(
+    state: &mut InterpreterState,
+    fd: i64,
+    max: i64,
+) -> Result<Option<Vec<u8>>, String> {
+    if max <= 0 {
+        return Err("pipe read size must be positive".into());
+    }
+    let file = state
+        .open_files
+        .get(&fd)
+        .ok_or_else(|| format!("unknown child pipe {fd}"))?;
+    #[cfg(unix)]
+    let size = {
+        use std::os::fd::AsRawFd;
+        match super::net_runtime::io_wait_readable(i64::from(file.as_raw_fd()), 0) {
+            1 => max as usize,
+            0 => return Ok(None),
+            _ => return Err(format!("pipe readiness probe failed on {fd}")),
+        }
+    };
+    #[cfg(windows)]
+    let size = {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{Foundation::ERROR_BROKEN_PIPE, System::Pipes::PeekNamedPipe};
+        let mut available = 0;
+        // SAFETY: the borrowed file owns this handle. With a null buffer,
+        // PeekNamedPipe writes only the live available-count output.
+        let ok = unsafe {
+            PeekNamedPipe(
+                file.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+                return Ok(Some(Vec::new()));
+            }
+            return Err(error.to_string());
+        }
+        if available == 0 {
+            return Ok(None);
+        }
+        (i64::from(available).min(max)) as usize
+    };
+    #[cfg(not(any(unix, windows)))]
+    return Err("child pipe polling unavailable".into());
+    #[cfg(any(unix, windows))]
+    host_fd_read_chunk(state, fd, size).map(Some)
+}
 
 /// Read up to `max` bytes from `fd`.  Blocking + EINTR-safe.
 ///
@@ -1205,6 +1332,107 @@ mod tests {
         let status = c.wait().unwrap();
         assert!(status.success());
         CHILD_REGISTRY.lock().unwrap().remove(&pid);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn poll_child_and_pipe_distinguishes_pending_data_eof_and_consumption() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        // The stdin gate keeps the first poll deterministically pending.
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "read gate; printf hello; exit 7"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut gate = child.stdin.take().unwrap();
+        let mut state =
+            InterpreterState::new(Arc::new(crate::module::VbcModule::new("test".into())));
+        let pipe = register_child_pipe(&mut state, take_stdout_file(&mut child));
+        let pid = i64::from(child.id());
+        CHILD_REGISTRY
+            .lock()
+            .unwrap()
+            .insert(pid, ChildEntry { child: Some(child) });
+        assert_eq!(try_wait_child_host(pid).unwrap(), None);
+        assert_eq!(host_read_ready_chunk(&mut state, pipe, 2).unwrap(), None);
+        gate.write_all(b"go\n").unwrap();
+        drop(gate);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut bytes = Vec::new();
+        let mut status = None;
+        let mut eof = false;
+        while !eof || status.is_none() {
+            assert!(Instant::now() < deadline, "child poll did not complete");
+            if !eof && let Some(chunk) = host_read_ready_chunk(&mut state, pipe, 2).unwrap() {
+                eof = chunk.is_empty();
+                bytes.extend(chunk);
+            }
+            if status.is_none() {
+                status = try_wait_child_host(pid).unwrap();
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(bytes, b"hello");
+        assert_eq!(status, Some(7 << 8));
+        assert!(try_wait_child_host(pid).is_err());
+        assert!(!CHILD_REGISTRY.lock().unwrap().contains_key(&pid));
+        host_fd_close(&mut state, pipe);
+        assert!(!state.open_files.contains_key(&pipe));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_escalates_a_live_child_with_a_partial_line() {
+        use std::process::{Command, Stdio};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; printf partial; read gate"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _gate = child.stdin.take().unwrap();
+        let mut state =
+            InterpreterState::new(Arc::new(crate::module::VbcModule::new("test".into())));
+        let pipe = register_child_pipe(&mut state, take_stdout_file(&mut child));
+        let pid = i64::from(child.id());
+        CHILD_REGISTRY
+            .lock()
+            .unwrap()
+            .insert(pid, ChildEntry { child: Some(child) });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut output = Vec::new();
+        while output.len() < 7 {
+            assert!(Instant::now() < deadline);
+            if let Some(bytes) = host_read_ready_chunk(&mut state, pipe, 8).unwrap() {
+                output.extend(bytes);
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(output, b"partial");
+        // SAFETY: the child is registered, not yet reaped, and has acknowledged
+        // installing its SIGTERM handler by writing the marker.
+        assert_eq!(unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) }, 0);
+        assert_eq!(try_wait_child_host(pid).unwrap(), None);
+        assert_eq!(host_read_ready_chunk(&mut state, pipe, 8).unwrap(), None);
+        assert!(kill_child_host(pid));
+        assert_eq!(
+            wait_child_host(pid).unwrap() & 127,
+            i64::from(libc::SIGKILL)
+        );
+        assert!(try_wait_child_host(pid).is_err());
+        assert_eq!(
+            host_read_ready_chunk(&mut state, pipe, 8).unwrap(),
+            Some(Vec::new())
+        );
+        host_fd_close(&mut state, pipe);
     }
 
     /// `intercept_native_kill` on a non-existent pid surfaces as

@@ -345,7 +345,18 @@ public fn ReadFile(
     buffer: &unsafe mut Byte,
     number_of_bytes_to_read: UInt32,
     number_of_bytes_read: &mut UInt32,
-    overlapped: &mut Overlapped,
+    overlapped: &unsafe mut Overlapped,
+) -> Int32;
+
+/// Inspect an anonymous or named pipe without consuming data.
+@extern("kernel32.dll")
+public fn PeekNamedPipe(
+    pipe: Handle,
+    buffer: &unsafe mut Byte,
+    buffer_size: UInt32,
+    bytes_read: &unsafe mut UInt32,
+    bytes_available: &mut UInt32,
+    bytes_left_in_message: &unsafe mut UInt32,
 ) -> Int32;
 
 /// Truncate or extend a file to the current file pointer. C:
