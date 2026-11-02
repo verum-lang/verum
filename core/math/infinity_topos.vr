@@ -42,7 +42,7 @@ module core.math.infinity_topos;
 
 mount core.math.infinity_category.{
     InfinityCategory,
-    InfinityFunctor,
+    FunctorAction, compose_functors, identity_functor,
     MappingSpace,
     OppositeInfCategory,
     FunctorInfCategory,
@@ -270,10 +270,10 @@ public type InfSubobjectClassifier<X: InfinityTopos> is protocol {
 /// Geometric morphisms are the morphisms of the ∞-category Top_∞.
 public type GeometricMorphism<X: InfinityTopos, Y: InfinityTopos> is {
     /// Inverse image functor f* : Y → X (left-exact, left adjoint).
-    inverse_image: InfinityFunctor<Y, X>,
+    inverse_image: FunctorAction<Y, X>,
 
     /// Direct image functor f_* : X → Y (right adjoint).
-    direct_image: InfinityFunctor<X, Y>,
+    direct_image: FunctorAction<X, Y>,
 
     /// The adjunction f* ⊣ f_*: unit and counit satisfying triangle identities.
     @verify(formal)
@@ -285,23 +285,23 @@ public type GeometricMorphism<X: InfinityTopos, Y: InfinityTopos> is {
 };
 
 /// Compose geometric morphisms: f : X → Y, g : Y → Z gives g ∘ f : X → Z.
-public fn compose_geometric<X, Y, Z: InfinityTopos>(
+public fn compose_geometric<X: InfinityTopos, Y: InfinityTopos, Z: InfinityTopos>(
     f: GeometricMorphism<X, Y>,
     g: GeometricMorphism<Y, Z>,
 ) -> GeometricMorphism<X, Z> {
     GeometricMorphism {
         inverse_image: compose_functors(f.inverse_image, g.inverse_image),
         direct_image: compose_functors(g.direct_image, f.direct_image),
-        adjunction: true,
-        left_exact: true,
+        adjunction: f.adjunction && g.adjunction,
+        left_exact: f.left_exact && g.left_exact,
     }
 }
 
 /// Identity geometric morphism.
 public fn id_geometric<X: InfinityTopos>() -> GeometricMorphism<X, X> {
     GeometricMorphism {
-        inverse_image: identity_functor(),
-        direct_image: identity_functor(),
+        inverse_image: identity_functor<X>(),
+        direct_image: identity_functor<X>(),
         adjunction: true,
         left_exact: true,
     }

@@ -33,6 +33,8 @@
 )
 module core.math.simplicial;
 
+mount core.base.protocols.{Clone, Eq};
+
 // =============================================================================
 // 1. The simplex category Δ and standard simplices
 // =============================================================================
@@ -48,6 +50,22 @@ public type Simplex is {
     dim: Int{>= 0},
     vertices: List<Int>,
 };
+
+implement Simplex {
+    public fn dimension(&self) -> Int{>= 0} { self.dim }
+}
+
+implement Clone for Simplex {
+    fn clone(&self) -> Simplex {
+        Simplex { dim: self.dim, vertices: self.vertices.clone() }
+    }
+}
+
+implement Eq for Simplex {
+    fn eq(&self, other: &Simplex) -> Bool {
+        self.dim == other.dim && self.vertices == other.vertices
+    }
+}
 
 /// A **simplicial set** is a contravariant functor Δ^op → Set. We
 /// expose it as a protocol whose implementations provide:

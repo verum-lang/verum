@@ -88,6 +88,53 @@ public type InfinityFunctor<C, D> is protocol {
     fn preserves_degeneracies(s: &Simplex, i: Int{>= 0}) -> Bool;
 };
 
+/// The simplex map of a functor, with its source and target retained
+/// when it is stored or composed. The map can also be checked pointwise.
+public type FunctorAction<C, D> is {
+    map: fn(&Simplex) -> Simplex,
+};
+
+implement<C, D> FunctorAction<C, D> {
+    /// Store a simplex map. Its preservation laws can be tested at a given input.
+    public fn from_map(map: fn(&Simplex) -> Simplex) -> FunctorAction<C, D> {
+        FunctorAction { map: map }
+    }
+
+    public fn apply(&self, simplex: &Simplex) -> Simplex {
+        (self.map)(simplex)
+    }
+}
+
+implement<C: InfinityCategory, D: InfinityCategory> FunctorAction<C, D> {
+    public fn preserves_faces(&self, simplex: &Simplex, i: Int{>= 0}) -> Bool {
+        let lhs = self.apply(&C.face(simplex, i));
+        let rhs = D.face(&self.apply(simplex), i);
+        lhs.eq(&rhs)
+    }
+
+    public fn preserves_degeneracies(&self, simplex: &Simplex, i: Int{>= 0}) -> Bool {
+        let lhs = self.apply(&C.degeneracy(simplex, i));
+        let rhs = D.degeneracy(&self.apply(simplex), i);
+        lhs.eq(&rhs)
+    }
+}
+
+/// Lift the simplex map of a declared ∞-functor.
+public fn functor_action<C, D, F: InfinityFunctor<C, D>>() -> FunctorAction<C, D> {
+    FunctorAction { map: |simplex| F.map_simplex(simplex) }
+}
+
+public fn identity_functor<C>() -> FunctorAction<C, C> {
+    FunctorAction { map: |s: &Simplex| s.clone() }
+}
+
+/// Apply the inner map first. The intermediate category must agree.
+public fn compose_functors<C, D, E>(
+    outer: FunctorAction<D, E>, inner: FunctorAction<C, D>,
+) -> FunctorAction<C, E> {
+    FunctorAction { map: move |s| outer.apply(&inner.apply(s)) }
+}
+
 /// The **identity ∞-functor** on C.
 public type IdentityInfFunctor<C> is protocol extends InfinityFunctor<C, C> {};
 
@@ -408,22 +455,6 @@ theorem inf_equivalence_both_conditions(ff: Bool, es: Bool)
 /// Opposite is involutive: (C^op)^op = C.
 theorem opposite_is_involutive(x: Int)
     ensures x == x
-    proof by auto;
-
-/// Functor composition is associative up to handle equality:
-/// (f ∘ g) ∘ h agrees with f ∘ (g ∘ h) at the handle-encoding level.
-theorem functor_compose_associative(f: Int, g: Int, h: Int)
-    ensures (f + g) + h == f + (g + h)
-    proof by auto;
-
-/// Identity functor is a left identity under handle composition.
-theorem identity_functor_left_identity(f: Int)
-    ensures 0 + f == f
-    proof by auto;
-
-/// Identity functor is a right identity under handle composition.
-theorem identity_functor_right_identity(f: Int)
-    ensures f + 0 == f
     proof by auto;
 
 /// Walking arrow dimension plus one-object dimension equals 1.
