@@ -382,6 +382,26 @@ implement<T> Sender<T> {
         Result.Ok(())
     }
 
+    /// Remove the oldest pending message only when this bounded queue is full.
+    /// A producer can perform expensive merging after the queue lock is released.
+    /// A removed slot is also made available to other waiting senders.
+    public fn take_oldest_if_full(&self) -> Maybe<T> {
+        let cap = match self.inner.capacity { Maybe.Some(n) => n, Maybe.None => return Maybe.None };
+        let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
+        if guard.len() < cap || self.inner.closed.load(MemoryOrdering.Acquire) { return Maybe.None; }
+        let oldest = guard.pop_front();
+        drop(guard);
+        if oldest.is_some() {
+            self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
+            let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
+            let mut wakers = self.inner.sender_wakers.lock().unwrap_or_else(|p| p.into_inner());
+            let next = wakers.pop();
+            drop(wakers);
+            if let Maybe.Some(waker) = next { waker.wake(); }
+        }
+        oldest
+    }
+
     // Alias for is_closed — matches tokio naming.
     public fn is_disconnected(&self) -> Bool {
         self.is_closed()

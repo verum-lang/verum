@@ -12,30 +12,8 @@
 // the consumer.
 //
 
-// This module provides:
-//  * `stream_lines` — simple `fn*` async generator over stdout lines
-//  (suitable for moderate rates and short-lived workloads)
-//  * `stream_lines_bounded` — bounded channel + cancellation; producer
-//  applies `OverflowPolicy` when the channel is saturated
-//  * `StreamConfig` knobs for buffer size, overflow policy, read chunk size
-//  and a hard memory ceiling
-//
-
-// Producer thread / future structure:
-//
-
-//  Command spawn → BufReader on child.stdout_fd
-//  ┌─→ on each newline → enqueue token via OverflowPolicy
-//  └─→ on cancel → child.kill() and exit producer loop
-//
-
-//  Consumer awaits `Receiver.recv()`. Backpressure is implicit: if buffer
-//  is full and policy is `Block`, the producer's `send_async` future stays
-//  pending until consumer drains, naturally throttling the kernel pipe and
-//  eventually the writing process.
-//
-
-// =============================================================================
+// The line generator and bounded receiver share one producer. It polls the
+// child, buffers partial UTF-8 lines, and reaps on exit or cancellation.
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
@@ -47,16 +25,14 @@ module core.shell.stream;
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.async.channel.{
-    Sender, Receiver, bounded, channel as unbounded,
-    SendError, TrySendError,
+    Sender, Receiver, bounded,
+    TrySendError,
 };
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
 mount core.async.task.{spawn};
-mount core.io.process.{Command, Child, Stdio};
-mount core.io.buffer.{BufReader};
+mount core.io.process.{Command, Child, ExitStatus, Stdio};
 mount core.shell.context.{ShellContext};
-mount core.shell.exec.{};
-mount core.shell.jobs.{JobHandle, background};
+mount core.shell.jobs.{JobHandle};
 mount core.shell.result.{ShellResult, ShellError};
 
 // =============================================================================
@@ -72,7 +48,7 @@ public type OverflowPolicy is
     | DropNewest
     /// Sample every Nth item (drop the others).
     | Sample(Int)
-    /// Coalesce: when full, replace the oldest with `f(oldest, new)`.
+    /// When full, consume the oldest line and append `f(oldest, new)` as the newest.
     | Coalesce(fn(Text, Text) -> Text);
 
 implement Clone for OverflowPolicy {
@@ -98,7 +74,7 @@ public type StreamConfig is {
     on_overflow:   OverflowPolicy,
     /// FD read chunk size in bytes.
     read_chunk:    Int,
-    /// Hard memory ceiling (bytes) before producer aborts the stream.
+    /// Total stdout byte budget for the producer, including line delimiters.
     /// `0` = no limit. Default 16 MiB.
     max_memory:    Int,
 }
@@ -160,7 +136,7 @@ implement LineStream {
     pub async fn collect(&mut self) -> Result<List<Text>, ShellError> {
         let mut out: List<Text> = [];
         loop {
-            match self.receiver.recv().await {
+            match self.receiver.recv_fut().await {
                 Maybe.None        => return Result.Ok(out),
                 Maybe.Some(Result.Ok(s)) => out.push(s),
                 Maybe.Some(Result.Err(e)) => return Result.Err(e),
@@ -172,7 +148,7 @@ implement LineStream {
     /// receiver is exhausted or the closure returns `false`.
     pub async fn for_each(&mut self, f: fn(&Text) -> Bool) -> Result<(), ShellError> {
         loop {
-            match self.receiver.recv().await {
+            match self.receiver.recv_fut().await {
                 Maybe.None        => return Result.Ok(()),
                 Maybe.Some(Result.Ok(s)) => if !f(&s) { return Result.Ok(()); },
                 Maybe.Some(Result.Err(e)) => return Result.Err(e),
@@ -186,59 +162,17 @@ implement LineStream {
 // =============================================================================
 //
 
-// Returns an async iterator (`fn*` generator) yielding lines as they arrive.
-// Easiest API. No bounded buffer — relies on the kernel pipe for natural
-// flow control. Use `stream_lines_bounded` for fast producers.
-
-public async fn* stream_lines(cmd_text: &Text)
-    -> Result<Text, ShellError>
-
-{
-    let ctx = ShellContext.default();
-    let shell_prog = ctx.resolve_shell();
-    let flag = ctx.shell_command_flag();
-
-    let mut command = Command.new(shell_prog);
-    command.arg(flag);
-    command.arg(cmd_text.clone());
-    if let Maybe.Some(dir) = &ctx.cwd { command.current_dir(dir.clone()); }
-    for (k, v) in ctx.env_overrides.iter() { command.env(k.clone(), v.clone()); }
-    command.stdout(Stdio.Piped);
-
-    let child = match command.spawn() {
-        Result.Ok(c) => c,
-        Result.Err(reason) => {
-            yield Result.Err(ShellError.SpawnFailed { command: cmd_text.clone(), reason });
-            return;
-        }
+/// Yield stdout lines with bounded prefetch and no total output cap.
+public async fn* stream_lines(cmd_text: &Text) -> Result<Text, ShellError> {
+    let mut config = StreamConfig.default();
+    config.max_memory = 0;
+    let mut stream = match stream_lines_bounded(cmd_text, config).await {
+        Result.Ok(stream) => stream,
+        Result.Err(error) => { yield Result.Err(error); return; },
     };
-
-    let stdout_fd = match child.stdout_fd {
-        Maybe.Some(fd) => fd,
-        Maybe.None     => {
-            yield Result.Err(ShellError.SpawnFailed {
-                command: cmd_text.clone(),
-                reason:  "stdout fd not piped".into(),
-            });
-            return;
-        }
-    };
-
-    let mut reader = BufReader.from_fd(stdout_fd, 8192);
-    loop {
-        match reader.next_line_async().await {
-            Result.Ok(Maybe.None)       => break,
-            Result.Ok(Maybe.Some(line)) => yield Result.Ok(strip_trailing_newline(line)),
-            Result.Err(e)         => {
-                yield Result.Err(ShellError.SpawnFailed {
-                    command: cmd_text.clone(),
-                    reason:  f"read error: {e}",
-                });
-                break;
-            }
-        }
+    while let Maybe.Some(line) = stream.receiver.recv_fut().await {
+        yield line;
     }
-    let _ = child.wait();
 }
 
 fn strip_trailing_newline(s: Text) -> Text {
@@ -259,6 +193,18 @@ pub async fn stream_lines_bounded(
 ) -> Result<LineStream, ShellError>
 
 {
+    if config.buffer <= 0 || config.read_chunk <= 0 || config.max_memory < 0 {
+        return Result.Err(ShellError.SpawnFailed {
+            command: cmd_text.clone(), reason: "invalid stream buffer, read size, or byte limit",
+        });
+    }
+    if let OverflowPolicy.Sample(n) = &config.on_overflow {
+        if *n <= 0 {
+            return Result.Err(ShellError.SpawnFailed {
+                command: cmd_text.clone(), reason: "sample interval must be positive",
+            });
+        }
+    }
     let ctx = ShellContext.default();
     let shell_prog = ctx.resolve_shell();
     let flag = ctx.shell_command_flag();
@@ -266,18 +212,12 @@ pub async fn stream_lines_bounded(
     let mut command = Command.new(shell_prog);
     command.arg(flag);
     command.arg(cmd_text.clone());
-    if let Maybe.Some(dir) = &ctx.cwd { command.current_dir(dir.clone()); }
-    for (k, v) in ctx.env_overrides.iter() { command.env(k.clone(), v.clone()); }
+    ctx.configure_command(&mut command);
     command.stdout(Stdio.Piped);
 
     let child = command.spawn().map_err(|reason| ShellError.SpawnFailed {
         command: cmd_text.clone(),
         reason,
-    })?;
-
-    let stdout_fd = child.stdout_fd.ok_or_else(|| ShellError.SpawnFailed {
-        command: cmd_text.clone(),
-        reason:  "stdout fd not piped".into(),
     })?;
 
     let (tx, rx): (Sender<Result<Text, ShellError>>, Receiver<Result<Text, ShellError>>) = bounded(config.buffer);
@@ -290,110 +230,150 @@ pub async fn stream_lines_bounded(
 
     // Producer task — reads lines, applies overflow policy, watches cancel.
     let task = spawn(async move {
-        let mut reader = BufReader.from_fd(stdout_fd, read_chunk);
-        let mut total_buffered: Int = 0;
-        let mut sample_counter: Int = 0;
-        loop {
-            select {
-                line = reader.next_line_async().await => match line {
-                    Result.Ok(Maybe.None)       => break,
-                    Result.Ok(Maybe.Some(s))    => {
-                        let stripped = strip_trailing_newline(s);
-                        total_buffered = total_buffered + stripped.len() as Int;
-                        if mem_limit > 0 && total_buffered > mem_limit {
-                            let _ = tx.send_async(Result.Err(ShellError.SpawnFailed {
-                                command: cmd_for_producer.clone(),
-                                reason:  f"stream memory limit ({mem_limit} bytes) exceeded".into(),
-                            })).await;
-                            break;
-                        }
-                        let item: Result<Text, ShellError> = Result.Ok(stripped);
-                        let routed = route_via_policy(&tx, item, &policy, &mut sample_counter).await;
-                        if !routed { break; }
-                    },
-                    Result.Err(reason) => {
-                        let _ = tx.send_async(Result.Err(ShellError.SpawnFailed {
-                            command: cmd_for_producer.clone(),
-                            reason:  f"read error: {reason}",
-                        })).await;
-                        break;
-                    }
-                },
-                _ = token.cancelled().await => {
-                    let _ = child.kill();
-                    break;
-                },
-            }
-        }
-        let _ = child.wait();
-        // Signal end-of-stream by dropping `tx`
-        Result.Ok(ShellResult.from_error(ShellError.SpawnFailed {
-            command: cmd_for_producer,
-            reason:  "stream ended".into(),
-        }))
+        pump_lines(child, tx, &token, cmd_for_producer, read_chunk, mem_limit, &policy).await
     });
 
     Result.Ok(LineStream {
         receiver: rx,
-        job: JobHandle {
-            inner:   task,
-            cancel,
-            command: cmd_text.clone(),
-            grace:   core.time.duration.Duration.from_millis(5000),
-        },
+        job: JobHandle.from_task(task, cancel, cmd_text.clone()),
     })
 }
 
-/// Apply the overflow policy when sending into the bounded channel.
-/// Returns `true` if the producer should keep going; `false` to stop
-/// (channel closed by consumer).
-async fn route_via_policy(
-    tx: &Sender<Result<Text, ShellError>>,
-    item: Result<Text, ShellError>,
-    policy: &OverflowPolicy,
-    sample_counter: &mut Int,
-) -> Bool {
-    match policy {
-        Block => match tx.send_async(item).await {
-            Result.Ok(_)  => true,
-            Result.Err(_) => false,  // receiver dropped
-        },
-        DropNewest => match tx.try_send(item) {
-            Result.Ok(_)  => true,
-            Result.Err(_) => true,   // dropped silently
-        },
-        DropOldest => {
-            // Best-effort: drain one then send. If channel was full, we
-            // poll once via try_send first; if it fails we don't have a
-            // way to remove the head from a bounded channel without
-            // reading it. Workaround: rely on the consumer to keep up,
-            // and degrade to Block when actually full.
-            match tx.try_send(item) {
-                Result.Ok(_)  => true,
-                Result.Err(TrySendError.Full(restored)) => {
-                    // Channel is full and the consumer is the only drainer.
-                    // We can't peek-and-evict from a Sender side; the best
-                    // *correct* behaviour here is the same as Block.
-                    match tx.send_async(restored).await {
-                        Result.Ok(_)  => true,
-                        Result.Err(_) => false,
-                    }
+/// One producer owns both the read end and the unreaped child. A partial
+/// line remains buffered across polls, including across UTF-8 boundaries.
+async fn pump_lines(
+    mut child: Child, tx: Sender<Result<Text, ShellError>>, token: &CancellationToken,
+    command: Text, read_chunk: Int, mem_limit: Int, policy: &OverflowPolicy,
+) -> Result<ShellResult, ShellError> {
+    let start = core.time.instant.Instant.now();
+    let mut status: Maybe<ExitStatus> = Maybe.None;
+    let mut pending: List<Byte> = [];
+    let mut seen: Int = 0;
+    let mut sample_counter: Int = 0;
+    let mut failure: Maybe<ShellError> = Maybe.None;
+    loop {
+        if status.is_none() {
+            match child.try_wait() {
+                Result.Ok(s) => { status = s; },
+                Result.Err(reason) => {
+                    child.close_output();
+                    return finish_stream_error(&tx, ShellError.SpawnFailed { command, reason });
                 },
-                Result.Err(_) => false,
             }
-        },
-        Sample(n) => {
-            let cur = *sample_counter;
-            *sample_counter = cur + 1;
-            if cur % *n == 0 {
-                match tx.send_async(item).await { Result.Ok(_) => true, Result.Err(_) => false }
-            } else {
-                true  // dropped
+        }
+        if tx.is_closed() {
+            failure = Maybe.Some(stream_stopped(&command, token));
+            break;
+        }
+        if let Maybe.Some(reason) = token.reason() {
+            failure = Maybe.Some(ShellError.Cancelled { command: command.clone(), reason: reason.message() });
+            break;
+        }
+        let chunk: Maybe<List<Byte>> = match child.read_stdout_ready(read_chunk) {
+            Result.Ok(value) => value,
+            Result.Err(reason) => {
+                failure = Maybe.Some(ShellError.SpawnFailed { command: command.clone(), reason });
+                break;
+            },
+        };
+        if let Maybe.Some(bytes) = chunk {
+            let eof = bytes.is_empty();
+            for byte in bytes {
+                seen = seen + 1;
+                if mem_limit > 0 && seen > mem_limit {
+                    failure = Maybe.Some(ShellError.SpawnFailed { command: command.clone(),
+                        reason: f"stdout byte limit ({mem_limit} bytes) exceeded" });
+                    break;
+                }
+                pending.push(byte);
+                if byte != ('\n' as Byte) { continue; }
+                if let Result.Err(error) = publish_line(&pending, &tx, policy, &mut sample_counter, token, &command).await {
+                    failure = Maybe.Some(error);
+                    break;
+                }
+                pending.clear();
             }
-        },
-        Coalesce(_f) => {
-            // Without peek, fall back to Block.
-            match tx.send_async(item).await { Result.Ok(_) => true, Result.Err(_) => false }
-        },
+            if failure.is_some() { break; }
+            if eof && !pending.is_empty() {
+                if let Result.Err(error) = publish_line(&pending, &tx, policy, &mut sample_counter, token, &command).await {
+                    failure = Maybe.Some(error);
+                }
+                pending.clear();
+            }
+            if failure.is_some() { break; }
+            core.async.task.yield_now().await;
+        } else if child.output_is_closed() && status.is_some() {
+            return Result.Ok(ShellResult.new(status.unwrap(), [], [], command, start.elapsed()));
+        } else {
+            core.async.timer.sleep_ms(1).await;
+        }
+    }
+    child.close_output();
+    if status.is_none() { let _ = child.kill(); let _ = child.wait(); }
+    finish_stream_error(&tx, failure.unwrap())
+}
+
+fn finish_stream_error(tx: &Sender<Result<Text, ShellError>>, error: ShellError) -> Result<ShellResult, ShellError> {
+    // The stream has one producer. Reserve room for the terminal error even
+    // when the consumer has stopped reading; joining the job must still finish.
+    let _ = tx.take_oldest_if_full();
+    let _ = tx.try_send(Result.Err(error.clone()));
+    Result.Err(error)
+}
+
+async fn publish_line(
+    bytes: &List<Byte>, tx: &Sender<Result<Text, ShellError>>, policy: &OverflowPolicy,
+    sample_counter: &mut Int, token: &CancellationToken, command: &Text,
+) -> Result<(), ShellError> {
+    let line = Text.from_utf8(bytes.as_slice()).map_err(|_| ShellError.SpawnFailed {
+        command: command.clone(), reason: "invalid UTF-8 in child stdout".into(),
+    })?;
+    let sent = route_via_policy(tx, Result.Ok(strip_trailing_newline(line)), policy, sample_counter, token).await;
+    if sent { Result.Ok(()) } else { Result.Err(stream_stopped(command, token)) }
+}
+
+fn stream_stopped(command: &Text, token: &CancellationToken) -> ShellError {
+    match token.reason() {
+        Maybe.Some(r) => ShellError.Cancelled { command: command.clone(), reason: r.message() },
+        Maybe.None => ShellError.SpawnFailed { command: command.clone(), reason: "stream receiver closed" },
+    }
+}
+
+/// Return the pending item on backpressure so cancellation can be observed
+/// even while a connected consumer has stopped draining the channel.
+async fn route_via_policy(
+    tx: &Sender<Result<Text, ShellError>>, mut item: Result<Text, ShellError>,
+    policy: &OverflowPolicy, sample_counter: &mut Int, token: &CancellationToken,
+) -> Bool {
+    if let OverflowPolicy.Sample(n) = policy {
+        let index = *sample_counter;
+        *sample_counter = index + 1;
+        if index % *n != 0 { return true; }
+    }
+    loop {
+        if token.is_cancelled() { return false; }
+        match tx.try_send(item) {
+            Result.Ok(_) => return true,
+            Result.Err(TrySendError.Disconnected(_)) => return false,
+            Result.Err(TrySendError.Full(value)) => {
+                match policy {
+                    DropNewest => return true,
+                    DropOldest => {
+                        let _ = tx.take_oldest_if_full();
+                        item = value;
+                    },
+                    Coalesce(merge) => {
+                        item = match (tx.take_oldest_if_full(), value) {
+                            (Maybe.Some(Result.Ok(old)), Result.Ok(new)) => Result.Ok(merge(old, new)),
+                            (_, current) => current,
+                        };
+                    },
+                    _ => {
+                        item = value;
+                        core.async.timer.sleep_ms(1).await;
+                    },
+                }
+            },
+        }
     }
 }
