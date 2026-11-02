@@ -8,6 +8,31 @@ use verum_vbc::{
     interpreter::Interpreter,
 };
 
+#[cfg(unix)]
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and a Unix socket"]
+fn cancelled_accept_preserves_the_pending_unix_connection() {
+    let directory = tempfile::tempdir_in("/tmp").unwrap();
+    let socket = directory.path().join("server.sock");
+    let source = r#"
+        module app;
+        mount core.net.unix.{UnixListener, UnixStream};
+        mount core.async.cancellation.CancellationToken;
+        async fn main() -> Int {
+            let path: Text = "__SOCKET_PATH__".into();
+            let listener = match UnixListener.bind(&path) { Result.Ok(v) => v, Result.Err(_) => {return 1;} };
+            let client = match UnixStream.connect(&path) { Result.Ok(v) => v, Result.Err(_) => {return 2;} };
+            let token = CancellationToken.new();
+            token.cancel();
+            if listener.accept_cancellable(&token).await.is_ok() { return 3; }
+            let (server, peer) = match listener.accept_async().await { Result.Ok(v) => v, Result.Err(_) => {return 4;} };
+            if peer.is_some() || client.peer_addr().is_none() || server.peer_addr().is_some() { return 5; }
+            85
+        }
+    "#;
+    assert_eq!(execute_from_archive(&source.replace("__SOCKET_PATH__", socket.to_str().unwrap())), 85);
+}
+
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn cancellation_observers_see_publication_and_linked_children() {

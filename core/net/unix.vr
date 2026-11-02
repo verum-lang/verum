@@ -291,48 +291,33 @@ const STREAM_CHUNK_SIZE: Int = 65536;
 /// Supports:
 /// - Filesystem path: `"/tmp/spire-agent.sock"` (null-terminated in sun_path)
 /// - Linux abstract namespace: `"\0my-service"` (leading null byte)
-fn serialize_unix_addr(path: &Text) -> Result<List<Byte>, UnixError> {
-    let path_bytes = path.as_bytes();
-    if path_bytes.len() >= SUN_PATH_MAX {
-        return Result.Err(UnixError.PathTooLong {
-            limit: SUN_PATH_MAX,
-            actual: path_bytes.len(),
-        });
+fn serialize_unix_addr(path: &Text, addr: &mut [Byte; 110]) -> Result<Int, UnixError> {
+    let bytes = path.as_bytes();
+    let count = bytes.len();
+    if count == 0 { return Result.Err(UnixError.InvalidPath("empty path".into())); }
+    let abstract_name = bytes[0] == 0;
+    @cfg(any(target_os = "macos", target_os = "windows"))
+    if abstract_name { return Result.Err(UnixError.InvalidPath("abstract sockets require Linux".into())); }
+    let name_len = if abstract_name { count } else { count + 1 };
+    if name_len > SUN_PATH_MAX {
+        return Result.Err(UnixError.PathTooLong { limit: SUN_PATH_MAX, actual: count });
     }
-    if path_bytes.len() == 0 {
-        return Result.Err(UnixError.InvalidPath("empty path".into()));
-    }
-
-    // struct sockaddr_un layout, platform-specific (task #5):
-    //  Linux/Windows: { u16 sun_family_le; char sun_path[SUN_PATH_MAX]; }
-    //  macOS (BSD): { u8 sun_len; u8 sun_family; char sun_path[104]; }
-    let mut buf = List.with_capacity(2 + path_bytes.len() + 1);
-
+    let len = 2 + name_len;
     @cfg(target_os = "macos")
-    {
-        // sun_len = 2-byte header + path bytes + null terminator.
-        // The kernel's max sun_len is 255 (u8), and SUN_PATH_MAX=104
-        // on macOS so path_bytes.len() < 104 is enforced above —
-        // sun_len cannot exceed 2+104+1=107 < 255.
-        let sun_len = (2 + path_bytes.len() + 1) as Byte;
-        buf.push(sun_len);
-        buf.push(AF_UNIX as Byte);
-    }
+    { addr[0] = len as Byte; addr[1] = AF_UNIX as Byte; }
     @cfg(any(target_os = "linux", target_os = "windows"))
-    {
-        // POSIX: sun_family is u16 little-endian — AF_UNIX = 1.
-        buf.push(AF_UNIX as Byte);
-        buf.push(0);
+    { addr[0] = AF_UNIX as Byte; addr[1] = 0; }
+    let mut i = 0;
+    while i < count {
+        let byte = bytes[i];
+        if byte == 0 && !abstract_name {
+            return Result.Err(UnixError.InvalidPath("embedded NUL in socket path".into()));
+        }
+        addr[2 + i] = byte;
+        i = i + 1;
     }
-
-    for b in path_bytes {
-        buf.push(*b);
-    }
-    // Null-terminate filesystem paths. Abstract-namespace paths have
-    // leading null byte, so null-termination is still useful (kernel
-    // treats trailing null as end-of-name).
-    buf.push(0);
-    Result.Ok(buf)
+    if !abstract_name { addr[2 + count] = 0; }
+    Result.Ok(len)
 }
 
 // =============================================================================
@@ -355,13 +340,15 @@ implement UnixStream {
     /// Synchronous variant — blocks until connect completes or errors.
     /// Use `connect_async` in async contexts for non-blocking behavior.
     public fn connect(path: &Text) -> Result<UnixStream, UnixError> {
-        let fd = create_unix_socket()?;
-        let addr = serialize_unix_addr(path)?;
+        let mut addr: [Byte; 110] = [0; 110];
+        let len = serialize_unix_addr(path, &mut addr)?;
+        let fd = create_unix_socket(false)?;
+        let ptr = &addr[0] as &unsafe Byte;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = connect(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
+        let r = connect(fd, ptr, len);
         @cfg(target_os = "macos")
-        let r = sys_connect(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
+        let r = sys_connect(fd, ptr, len);
 
         match r {
             Result.Ok(()) => Result.Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) }),
@@ -374,13 +361,15 @@ implement UnixStream {
 
     /// Async connect.
     pub async fn connect_async(path: &Text) -> Result<UnixStream, UnixError> {
-        let fd = create_unix_socket_nonblocking()?;
-        let addr = serialize_unix_addr(path)?;
+        let mut addr: [Byte; 110] = [0; 110];
+        let len = serialize_unix_addr(path, &mut addr)?;
+        let fd = create_unix_socket(true)?;
+        let ptr = &addr[0] as &unsafe Byte;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = connect(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
+        let r = connect(fd, ptr, len);
         @cfg(target_os = "macos")
-        let r = sys_connect(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
+        let r = sys_connect(fd, ptr, len);
 
         // AF_UNIX connect is usually synchronous on the kernel side, but
         // on Linux EINPROGRESS is still possible under very high server
@@ -544,9 +533,10 @@ implement UnixStream {
         buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
-        select {
-            r = self.read_async(buf).await => Result.Ok(r),
+        let operation = UnixReadFut { stream: self, buf: buf };
+        select biased {
             reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
+            r = operation.await => Result.Ok(r),
         }
     }
 
@@ -556,9 +546,10 @@ implement UnixStream {
         buf: &List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
-        select {
-            r = self.write_async(buf).await => Result.Ok(r),
+        let operation = UnixWriteFut { stream: self, buf: buf };
+        select biased {
             reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
+            r = operation.await => Result.Ok(r),
         }
     }
 }
@@ -622,13 +613,15 @@ implement UnixListener {
     }
 
     public fn bind_with_backlog(path: &Text, backlog: Int) -> Result<UnixListener, UnixError> {
-        let fd = create_unix_socket()?;
-        let addr = serialize_unix_addr(path)?;
+        let mut addr: [Byte; 110] = [0; 110];
+        let len = serialize_unix_addr(path, &mut addr)?;
+        let fd = create_unix_socket(false)?;
+        let ptr = &addr[0] as &unsafe Byte;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = bind(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
+        let r = bind(fd, ptr, len);
         @cfg(target_os = "macos")
-        let r = sys_bind(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
+        let r = sys_bind(fd, ptr, len);
 
         if let Result.Err(e) = r {
             close_fd(fd);
@@ -650,13 +643,13 @@ implement UnixListener {
 
     /// Synchronous accept (blocks).
     public fn accept(&self) -> Result<(UnixStream, Maybe<Text>), UnixError> {
-        let mut addr_buf = [0_u8; SUN_PATH_MAX + 2];
-        let mut addr_len: Int = SUN_PATH_MAX + 2;
+        let mut addr_buf: [Byte; 128] = [0; 128];
+        let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = accept4(self.fd, &mut addr_buf, &mut addr_len, SOCK_CLOEXEC);
+        let r = accept4(self.fd, &mut addr_buf[..], &mut addr_len, SOCK_CLOEXEC);
         @cfg(target_os = "macos")
-        let r = sys_accept(self.fd, &mut addr_buf, &mut addr_len);
+        let r = sys_accept(self.fd, &mut addr_buf[..], &mut addr_len);
 
         match r {
             Result.Ok(client_fd) => {
@@ -667,33 +660,14 @@ implement UnixListener {
         }
     }
 
-    /// Async accept — awaits readability via I/O engine.
+    /// Poll a nonblocking accept and yield while the listener is empty.
     pub async fn accept_async(&self) -> Result<(UnixStream, Maybe<Text>), UnixError> {
-        loop {
-            let mut addr_buf = [0_u8; SUN_PATH_MAX + 2];
-            let mut addr_len: Int = SUN_PATH_MAX + 2;
+        let mut pending = self.accept_future();
+        pending.await
+    }
 
-            @cfg(any(target_os = "linux", target_os = "windows"))
-            let r = accept4(self.fd, &mut addr_buf, &mut addr_len,
-                            SOCK_CLOEXEC | SOCK_NONBLOCK);
-            @cfg(target_os = "macos")
-            let r = sys_accept(self.fd, &mut addr_buf, &mut addr_len);
-
-            match r {
-                Result.Ok(client_fd) => {
-                    @cfg(target_os = "macos")
-                    let _ = safe_set_nonblocking(client_fd, true);
-
-                    let peer = deserialize_unix_path(&addr_buf[..(addr_len as Int)]);
-                    return Result.Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer));
-                }
-                Result.Err(e) if e.would_block() => {
-                    AsyncIoReady.readable(self.fd).await;
-                    continue;
-                }
-                Result.Err(e) => return Result.Err(UnixError.from_os_error(e)),
-            }
-        }
+    fn accept_future(&self) -> UnixAcceptFut {
+        UnixAcceptFut { listener: self, configured: false }
     }
 
     public fn local_addr(&self) -> &Text {
@@ -709,15 +683,16 @@ implement UnixListener {
         &self,
         token: &CancellationToken,
     ) -> Result<Result<(UnixStream, Maybe<Text>), UnixError>, CancellationError> {
-        select {
-            r = self.accept_async().await => Result.Ok(r),
+        let pending = self.accept_future();
+        select biased {
             reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
+            r = pending.await => Result.Ok(r),
         }
     }
 
     /// Async-stream of incoming connections.
     public fn incoming_async(&self) -> UnixIncoming {
-        UnixIncoming { listener: self }
+        UnixIncoming { pending: self.accept_future() }
     }
 }
 
@@ -734,35 +709,61 @@ implement Drop for UnixListener {
 // UnixIncoming — Stream<Item = Result<UnixStream, UnixError>> + AsyncIterator
 // =============================================================================
 
-public type UnixIncoming<'a> is {
+type UnixAcceptFut<'a> is {
     listener: &'a UnixListener,
+    configured: Bool,
+};
+
+implement<'a> Future for UnixAcceptFut<'a> {
+    type Output = Result<(UnixStream, Maybe<Text>), UnixError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<(UnixStream, Maybe<Text>), UnixError>> {
+        if !self.configured {
+            @cfg(any(target_os = "linux", target_os = "windows"))
+            let setup = set_nonblocking(self.listener.fd, true).map_err(UnixError.from_os_error);
+            @cfg(target_os = "macos")
+            let setup = safe_set_nonblocking(self.listener.fd, true).map_err(UnixError.from_os_error);
+            if let Result.Err(error) = setup { return Poll.Ready(Result.Err(error)); }
+            self.configured = true;
+        }
+        let mut addr_buf: [Byte; 128] = [0; 128];
+        let mut addr_len: UInt32 = 128;
+
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let r = accept4(self.listener.fd, &mut addr_buf[..], &mut addr_len,
+                        SOCK_CLOEXEC | SOCK_NONBLOCK);
+        @cfg(target_os = "macos")
+        let r = sys_accept(self.listener.fd, &mut addr_buf[..], &mut addr_len);
+
+        match r {
+            Result.Ok(client_fd) => {
+                @cfg(target_os = "macos")
+                if let Result.Err(error) = configure_unix_socket(client_fd, true) {
+                    return Poll.Ready(Result.Err(error));
+                }
+                let peer = deserialize_unix_path(&addr_buf[..(addr_len as Int)]);
+                Poll.Ready(Result.Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer)))
+            }
+            Result.Err(e) if e.would_block() => {
+                cx.waker().wake_by_ref();
+                Poll.Pending
+            }
+            Result.Err(e) => Poll.Ready(Result.Err(UnixError.from_os_error(e))),
+        }
+    }
+}
+
+public type UnixIncoming<'a> is {
+    pending: UnixAcceptFut<'a>,
 };
 
 implement<'a> Stream for UnixIncoming<'a> {
     type Item = Result<UnixStream, UnixError>;
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<UnixStream, UnixError>>> {
-        let mut addr_buf = [0_u8; SUN_PATH_MAX + 2];
-        let mut addr_len: Int = SUN_PATH_MAX + 2;
-
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = accept4(self.listener.fd, &mut addr_buf, &mut addr_len,
-                        SOCK_CLOEXEC | SOCK_NONBLOCK);
-        @cfg(target_os = "macos")
-        let r = sys_accept(self.listener.fd, &mut addr_buf, &mut addr_len);
-
-        match r {
-            Result.Ok(client_fd) => {
-                @cfg(target_os = "macos")
-                let _ = safe_set_nonblocking(client_fd, true);
-                let peer = deserialize_unix_path(&addr_buf[..(addr_len as Int)]);
-                Poll.Ready(Maybe.Some(Result.Ok(UnixStream { fd: client_fd, peer_path: peer })))
-            }
-            Result.Err(e) if e.would_block() => {
-                cx.waker().wake_by_ref();
-                Poll.Pending
-            }
-            Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(UnixError.from_os_error(e)))),
+        match self.pending.poll(cx) {
+            Poll.Ready(result) => Poll.Ready(Maybe.Some(result.map(|(stream, _)| stream))),
+            Poll.Pending => Poll.Pending,
         }
     }
 }
@@ -780,37 +781,35 @@ implement<'a> AsyncIterator for UnixIncoming<'a> {
 // Internal helpers
 // =============================================================================
 
-fn create_unix_socket() -> Result<FileDesc, UnixError> {
+fn create_unix_socket(nonblocking: Bool) -> Result<FileDesc, UnixError> {
     @cfg(any(target_os = "linux", target_os = "windows"))
-    let fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)
-        .map_err(UnixError.from_os_error)?;
-    // Bind the macOS branch to the SAME `fd` name via a cfg'd
-    // let-with-block-initializer — the previous bare `@cfg { let fd
-    // ... }` scoped fd INSIDE the block, so `Result.Ok(fd)` below saw
-    // no binding on Darwin and the whole fn lenient-stubbed
-    // ("undefined variable: fd").
+    {
+        let flags = SOCK_STREAM | SOCK_CLOEXEC | (if nonblocking { SOCK_NONBLOCK } else { 0 });
+        return socket(AF_UNIX, flags, 0).map_err(UnixError.from_os_error);
+    }
     @cfg(target_os = "macos")
-    let fd = {
-        let raw = sys_socket(AF_UNIX, SOCK_STREAM, 0).map_err(UnixError.from_os_error)?;
-        let _ = safe_set_nosigpipe(raw, true);
-        raw
-    };
-    Result.Ok(fd)
+    {
+        let fd = sys_socket(AF_UNIX, SOCK_STREAM, 0).map_err(UnixError.from_os_error)?;
+        configure_unix_socket(fd, nonblocking)?;
+        return Result.Ok(fd);
+    }
 }
 
-fn create_unix_socket_nonblocking() -> Result<FileDesc, UnixError> {
-    @cfg(any(target_os = "linux", target_os = "windows"))
-    let fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)
-        .map_err(UnixError.from_os_error)?;
-    // Same block-scoping fix as create_unix_socket above.
-    @cfg(target_os = "macos")
-    let fd = {
-        let raw = sys_socket(AF_UNIX, SOCK_STREAM, 0).map_err(UnixError.from_os_error)?;
-        let _ = safe_set_nosigpipe(raw, true);
-        let _ = safe_set_nonblocking(raw, true).map_err(UnixError.from_os_error)?;
-        raw
-    };
-    Result.Ok(fd)
+// Darwin's socket and accept calls cannot request these flags atomically.
+// The owner of a newly created fd must also close it on configuration errors.
+@cfg(target_os = "macos")
+fn configure_unix_socket(fd: FileDesc, nonblocking: Bool) -> Result<(), UnixError> {
+    if nonblocking {
+        if let Result.Err(error) = safe_set_nonblocking(fd, true) {
+            let _ = sys_close(fd);
+            return Result.Err(UnixError.from_os_error(error));
+        }
+    }
+    if let Result.Err(error) = safe_set_nosigpipe(fd, true) {
+        let _ = sys_close(fd);
+        return Result.Err(UnixError.from_os_error(error));
+    }
+    Result.Ok(())
 }
 
 @inline
