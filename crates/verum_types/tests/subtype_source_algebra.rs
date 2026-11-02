@@ -7,6 +7,13 @@ fn strong(x: Int { (self > 10 && self < 20) || self == 100 }) {}
 fn weak(x: Int { (it > 0 || it == 100) && (it < 30 || it == 100) }) {}
 fn positive(x: Int { self > 0 }) {}
 fn impossible(x: Int { false }) {}
+fn inline(x: Int { == 1 || == 2 && > 1 }) {}
+fn bare(x: Int where == 1 || == 2 && > 1) {}
+fn mixed(x: Int { it == 1 || == 2 && it > 1 }) {}
+fn named(x: Int { alternatives: == 1 || == 2 && > 1, upper: < 3 }) {}
+fn explicit(x: Int { self == 1 || (self == 2 && self > 1) }) {}
+fn one(x: Int { self == 1 }) {}
+fn greater_than_one(x: Int { self > 1 }) {}
 "#;
 
 fn validate(module: Module) {
@@ -35,12 +42,22 @@ fn validate(module: Module) {
     let weak = resolved("weak");
     let positive = resolved("positive");
     let impossible = resolved("impossible");
+    let shorthand = [resolved("inline"), resolved("bare"), resolved("mixed"), resolved("named")];
+    let explicit = resolved("explicit");
+    let one = resolved("one");
+    let greater_than_one = resolved("greater_than_one");
     assert!(matches!(strong, Type::Refined { .. }), "{strong:?}");
     let checker = Subtyping::new();
     assert!(checker.is_subtype(&strong, &weak), "{strong:#?}\n{weak:#?}");
     assert!(!checker.is_subtype(&weak, &strong));
     assert!(!checker.is_subtype(&Type::Int, &positive));
     assert!(!checker.is_subtype(&Type::Int, &impossible));
+    for ty in shorthand {
+        assert!(checker.is_subtype(&one, &ty), "the first union arm admits 1");
+        assert!(!checker.is_subtype(&ty, &greater_than_one));
+        assert!(checker.is_subtype(&ty, &explicit));
+        assert!(checker.is_subtype(&explicit, &ty));
+    }
 }
 
 #[test]

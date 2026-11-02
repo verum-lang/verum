@@ -320,6 +320,17 @@ fn test_rule5_implicit_comparison_triple_chain() {
     assert_parses("Int where > 0 && < 50 && != 25");
 }
 
+#[test]
+fn shorthand_respects_refinement_and_type_delimiters() {
+    assert_parses("List<Int { > 0 || == -1 && != -2 }>");
+    assert_parses("List<Int where > 0 || == -1>");
+    let parser = VerumParser::new();
+    let file = FileId::new(0);
+    assert!(parser.parse_expr_str("true || > 0", file).is_err());
+    assert!(parse_type("Int where |x| x == 1 || > 2").is_err());
+    assert!(parse_type("Int { > 0 && == }").is_err());
+}
+
 // ============================================================================
 // COMBINED: LAMBDA REFINEMENTS IN VARIOUS CONTEXTS
 // ============================================================================

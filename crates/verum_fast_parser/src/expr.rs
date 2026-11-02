@@ -1485,17 +1485,37 @@ impl<'a> RecursiveParser<'a> {
     /// Uses an iterative approach with an explicit operator stack to handle
     /// deeply nested expressions without stack overflow.
     pub fn parse_expr_bp(&mut self, min_bp: u8) -> ParseResult<Expr> {
+        self.parse_expr_with_subject(min_bp, false)
+    }
+
+    pub(crate) fn parse_refinement_expr(&mut self) -> ParseResult<Expr> {
+        self.parse_expr_with_subject(0, true)
+    }
+
+    fn parse_expr_with_subject(&mut self, min_bp: u8, implicit_subject: bool) -> ParseResult<Expr> {
         self.enter_recursion()?;
-        let result = self.parse_expr_bp_inner(min_bp);
+        let result = self.parse_expr_bp_inner(min_bp, implicit_subject);
         self.exit_recursion();
         result
     }
 
-    fn parse_expr_bp_inner(&mut self, min_bp: u8) -> ParseResult<Expr> {
+    fn parse_expr_bp_inner(&mut self, min_bp: u8, implicit_subject: bool) -> ParseResult<Expr> {
         let start_pos = self.stream.position();
 
-        // Parse prefix/primary expression
-        let mut lhs = self.parse_prefix_expr()?;
+        // A leading comparison in a refinement stands for `it <op> rhs`.
+        // Only the missing operand is implicit. The ordinary Pratt table
+        // still determines the meaning of the whole predicate.
+        let mut leading_comparison = implicit_subject && matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Gt | TokenKind::Lt | TokenKind::GtEq | TokenKind::LtEq
+                | TokenKind::EqEq | TokenKind::BangEq)
+        );
+        let mut lhs = if leading_comparison {
+            let span = self.stream.current_span();
+            Expr::new(ExprKind::Path(Path::from_ident(Ident::new("it", span))), span)
+        } else {
+            self.parse_prefix_expr()?
+        };
 
         // Parse infix and postfix operators
         loop {
@@ -1506,10 +1526,14 @@ impl<'a> RecursiveParser<'a> {
 
             // Handle postfix operators first (highest precedence)
             // PERF: try_parse_postfix takes ownership and returns (expr, found)
-            let (new_lhs, found_postfix) = self.try_parse_postfix(lhs)?;
-            lhs = new_lhs;
-            if found_postfix {
-                continue;
+            // The '<' in a leading comparison is always the predicate's
+            // operator. The synthetic subject cannot start a generic call.
+            if !leading_comparison {
+                let (new_lhs, found_postfix) = self.try_parse_postfix(lhs)?;
+                lhs = new_lhs;
+                if found_postfix {
+                    continue;
+                }
             }
 
             // Check if the current expression is a block-form expression that doesn't
@@ -1527,6 +1551,15 @@ impl<'a> RecursiveParser<'a> {
                 Some(kind) => kind.clone(),
                 None => break,
             };
+            // In an unbraced `where > n` nested in generic arguments, a
+            // subsequent closing angle belongs to the enclosing type.
+            if implicit_subject && !leading_comparison && self.brace_depth == 0
+                && op_kind == TokenKind::Gt
+                && self.stream.peek_nth(1).is_none_or(|token| !token.starts_expr())
+            {
+                break;
+            }
+            leading_comparison = false;
 
             // Get binding power for this operator
             let (left_bp, right_bp) = match self.infix_binding_power(&op_kind) {
@@ -1702,7 +1735,10 @@ impl<'a> RecursiveParser<'a> {
                 }
             }
 
-            let rhs = self.parse_expr_bp(right_bp)?;
+            let rhs = self.parse_expr_with_subject(
+                right_bp,
+                implicit_subject && matches!(bin_op, BinOp::And | BinOp::Or),
+            )?;
 
             // Note: Verum DOES allow chained assignment (a = b = c = 42)
             // Assignment is right-associative, so a = b = c = 42 parses as a = (b = (c = 42))

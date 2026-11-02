@@ -2684,132 +2684,40 @@ impl<'a> RecursiveParser<'a> {
                 ));
             }
 
-            // Parse a single refinement predicate, handling:
-            // - Named predicates: `min: self >= 0` (identifier : expression)
-            // - Implicit it comparisons: `> 0` becomes `it > 0`
-            // - Regular expressions: `self.len() > 0`
-            let parse_single_predicate = |p: &mut Self| -> ParseResult<Expr> {
-                // Check for named predicate: `identifier : expression`
-                // Grammar: refinement_predicate = identifier , ':' , expression | expression ;
-                if let Some(TokenKind::Ident(_)) = p.stream.peek_kind() {
-                    if matches!(
-                        p.stream.peek_nth(1).map(|t| &t.kind),
-                        Some(TokenKind::Colon)
-                    ) {
-                        // Named predicate - skip the name and colon, use just the expression
-                        p.stream.advance(); // consume identifier
-                        p.stream.advance(); // consume ':'
-                        return p.parse_expr();
-                    }
+            // A comma conjoins complete predicates. Named predicates retain
+            // their existing descriptive label syntax.
+            let parse_clause = |parser: &mut Self| -> ParseResult<Expr> {
+                if matches!(parser.stream.peek_kind(), Some(TokenKind::Ident(_)))
+                    && parser.stream.peek_nth_kind(1) == Some(&TokenKind::Colon)
+                {
+                    parser.stream.advance();
+                    parser.stream.advance();
                 }
-                // Try implicit 'it' comparison: {> 0} becomes {it > 0}
-                if let Some(implicit_expr) = p.optional(|p| p.parse_implicit_it_comparison()) {
-                    return Ok(implicit_expr);
-                }
-                // Regular expression
-                p.parse_expr()
+                parser.parse_refinement_expr()
             };
-
-            // Parse first predicate
-            let first_expr = parse_single_predicate(self)?;
-
-            // After parsing the first expression, check for:
-            // 1. Comma-separated predicates: {> 0, < 100}
-            // 2. &&-separated predicates: {>= 0 && <= 100}
-            // 3. ||-separated predicates: {< 0 || > 100}
-            // 4. Just closing brace: {> 0}
-
-            let mut exprs = vec![first_expr];
-
-            // Parse additional predicates separated by commas
+            let mut predicate = parse_clause(self)?;
             while self.stream.consume(&TokenKind::Comma).is_some() {
-                // E053: Missing value after comma `{ x: 1, }`
                 if self.stream.check(&TokenKind::RBrace) {
                     return Err(ParseError::invalid_refinement_syntax(
                         "trailing comma in refinement without predicate",
                         self.stream.current_span(),
                     ));
                 }
-                let expr = parse_single_predicate(self)?;
-                exprs.push(expr);
-            }
-
-            // If we have comma-separated predicates, combine them with && and return
-            if exprs.len() > 1 {
-                self.stream.expect(TokenKind::RBrace)?;
-                self.brace_depth -= 1; // Decrement after closing brace
-                let span = self.stream.make_span(start_pos);
-
-                use verum_ast::{BinOp, Expr, ExprKind};
-                // SAFETY: len() > 1 check above guarantees reduce returns Some
-                let combined_expr = exprs
-                    .into_iter()
-                    .reduce(|acc, expr| {
-                        let combined_span = acc.span.merge(expr.span);
-                        Expr::new(
-                            ExprKind::Binary {
-                                op: BinOp::And,
-                                left: Box::new(acc),
-                                right: Box::new(expr),
-                            },
-                            combined_span,
-                        )
-                    })
-                    .expect("exprs.len() > 1 guarantees reduce returns Some");
-
-                return Ok(RefinementPredicate::new(combined_expr, span));
-            }
-
-            // No commas found, check for && or || operators
-            // SAFETY: exprs was initialized with first_expr, and we only reach here if len <= 1
-            // Since len >= 1 (from initialization) and len <= 1 (from not entering if branch), len == 1
-            let mut result_expr = exprs
-                .into_iter()
-                .next()
-                .expect("exprs initialized with first_expr guarantees at least one element");
-
-            // Continue parsing && or || operators with implicit it comparisons
-            while self.stream.check(&TokenKind::AmpersandAmpersand)
-                || self.stream.check(&TokenKind::PipePipe)
-            {
-                use verum_ast::{BinOp, Expr, ExprKind};
-
-                let op = if self
-                    .stream
-                    .consume(&TokenKind::AmpersandAmpersand)
-                    .is_some()
-                {
-                    BinOp::And
-                } else if self.stream.consume(&TokenKind::PipePipe).is_some() {
-                    BinOp::Or
-                } else {
-                    break;
-                };
-
-                // After && or ||, try to parse another implicit it comparison
-                let right_expr = if let Some(implicit_expr) =
-                    self.optional(|p| p.parse_implicit_it_comparison())
-                {
-                    implicit_expr
-                } else {
-                    self.parse_expr()?
-                };
-
-                let combined_span = result_expr.span.merge(right_expr.span);
-                result_expr = Expr::new(
-                    ExprKind::Binary {
-                        op,
-                        left: Box::new(result_expr),
-                        right: Box::new(right_expr),
+                let next = parse_clause(self)?;
+                let span = predicate.span.merge(next.span);
+                predicate = Expr::new(
+                    verum_ast::ExprKind::Binary {
+                        op: verum_ast::BinOp::And,
+                        left: Heap::new(predicate),
+                        right: Heap::new(next),
                     },
-                    combined_span,
+                    span,
                 );
             }
 
             self.stream.expect(TokenKind::RBrace)?;
-            self.brace_depth -= 1; // Decrement after closing brace
-            let span = self.stream.make_span(start_pos);
-            return Ok(RefinementPredicate::new(result_expr, span));
+            self.brace_depth -= 1;
+            return Ok(RefinementPredicate::new(predicate, self.stream.make_span(start_pos)));
         }
 
         // Rule 2: Lambda-style: where |x| expr
@@ -2859,15 +2767,7 @@ impl<'a> RecursiveParser<'a> {
                 // Parse the expression, then validate no trailing tokens remain
                 //
 
-                // First try implicit 'it' comparison: `where > 0` becomes `where it > 0`
-                // This handles: `Int where > 0`, `Int where >= 0 && <= 100`, etc.
-                let first_expr = if let Some(implicit_expr) =
-                    self.optional(|p| p.parse_implicit_it_where_expression())
-                {
-                    implicit_expr
-                } else {
-                    self.parse_expr()?
-                };
+                let first_expr = self.parse_refinement_expr()?;
 
                 // Check for comma-separated predicates: `where self >= 0, self < N`
                 // This is common in type definitions like:
@@ -2890,13 +2790,7 @@ impl<'a> RecursiveParser<'a> {
                     }
                     self.stream.advance(); // consume comma
                     // Parse next predicate expression
-                    let next_expr = if let Some(implicit_expr) =
-                        self.optional(|p| p.parse_implicit_it_where_expression())
-                    {
-                        implicit_expr
-                    } else {
-                        self.parse_expr()?
-                    };
+                    let next_expr = self.parse_refinement_expr()?;
                     exprs.push(next_expr);
                 }
 
@@ -2975,153 +2869,6 @@ impl<'a> RecursiveParser<'a> {
             "expected refinement predicate",
             self.stream.current_span(),
         ))
-    }
-
-    /// Parse implicit 'it' comparison: {> 0} becomes {it > 0}
-    /// Also handles: {!= ""}, {== 42}, etc.
-    fn parse_implicit_it_comparison(&mut self) -> ParseResult<verum_ast::Expr> {
-        use verum_ast::{BinOp, Expr, ExprKind};
-
-        let start_pos = self.stream.position();
-
-        // Parse comparison operator: >, <, >=, <=, ==, !=
-        let (op, op_span) = match self.stream.peek() {
-            Some(Token {
-                kind: TokenKind::Gt,
-                span,
-            }) => {
-                let span = *span;
-                self.stream.advance();
-                (BinOp::Gt, span)
-            }
-            Some(Token {
-                kind: TokenKind::Lt,
-                span,
-            }) => {
-                let span = *span;
-                self.stream.advance();
-                (BinOp::Lt, span)
-            }
-            Some(Token {
-                kind: TokenKind::GtEq,
-                span,
-            }) => {
-                let span = *span;
-                self.stream.advance();
-                (BinOp::Ge, span)
-            }
-            Some(Token {
-                kind: TokenKind::LtEq,
-                span,
-            }) => {
-                let span = *span;
-                self.stream.advance();
-                (BinOp::Le, span)
-            }
-            Some(Token {
-                kind: TokenKind::EqEq,
-                span,
-            }) => {
-                let span = *span;
-                self.stream.advance();
-                (BinOp::Eq, span)
-            }
-            Some(Token {
-                kind: TokenKind::BangEq,
-                span,
-            }) => {
-                let span = *span;
-                self.stream.advance();
-                (BinOp::Ne, span)
-            }
-            _ => {
-                return Err(ParseError::invalid_syntax(
-                    "expected comparison operator",
-                    self.stream.current_span(),
-                ));
-            }
-        };
-
-        // Parse right-hand side with binding power 7
-        // This allows arithmetic, bitwise ops, etc. but stops before && (bp=5) or || (bp=4)
-        // So {>= 0 && <= 100} will parse ">= 0" here, leaving "&& <= 100" for later
-        let right = self.parse_expr_bp(7)?;
-
-        // Create implicit 'it' identifier
-        let it_ident = Ident::new(Text::from("it"), op_span);
-        let it_path = Path::from_ident(it_ident);
-        let it_expr = Expr::new(ExprKind::Path(it_path), op_span);
-
-        // Create binary expression: it > 0
-        let span = self.stream.make_span(start_pos);
-        Ok(Expr::new(
-            ExprKind::Binary {
-                left: Heap::new(it_expr),
-                op,
-                right: Heap::new(right),
-            },
-            span,
-        ))
-    }
-
-    /// Parse implicit 'it' expression with chained && and || operators.
-    /// Handles: `where > 0`, `where >= 0 && <= 100`, `where > 0 || == -1`
-    fn parse_implicit_it_where_expression(&mut self) -> ParseResult<verum_ast::Expr> {
-        use verum_ast::{BinOp, Expr, ExprKind};
-
-        // First, try to parse an implicit it comparison
-        let mut result = self.parse_implicit_it_comparison()?;
-
-        // Continue parsing && or || operators with more implicit it comparisons
-        loop {
-            if self
-                .stream
-                .consume(&TokenKind::AmpersandAmpersand)
-                .is_some()
-            {
-                // After &&, try to parse another implicit it comparison
-                let right = if let Some(implicit_expr) =
-                    self.optional(|p| p.parse_implicit_it_comparison())
-                {
-                    implicit_expr
-                } else {
-                    self.parse_expr()?
-                };
-
-                let combined_span = result.span.merge(right.span);
-                result = Expr::new(
-                    ExprKind::Binary {
-                        op: BinOp::And,
-                        left: Heap::new(result),
-                        right: Heap::new(right),
-                    },
-                    combined_span,
-                );
-            } else if self.stream.consume(&TokenKind::PipePipe).is_some() {
-                // After ||, try to parse another implicit it comparison
-                let right = if let Some(implicit_expr) =
-                    self.optional(|p| p.parse_implicit_it_comparison())
-                {
-                    implicit_expr
-                } else {
-                    self.parse_expr()?
-                };
-
-                let combined_span = result.span.merge(right.span);
-                result = Expr::new(
-                    ExprKind::Binary {
-                        op: BinOp::Or,
-                        left: Heap::new(result),
-                        right: Heap::new(right),
-                    },
-                    combined_span,
-                );
-            } else {
-                break;
-            }
-        }
-
-        Ok(result)
     }
 
     /// Parse a path: foo.bar.baz or just foo
