@@ -1299,9 +1299,11 @@ fn type_ref_full_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
 ///    the bound is a loop guard, not a semantic limit — stdlib chains
 ///    are one or two hops.
 fn expand_prefixes_through_reexports(
+    archive: &VbcArchive,
     wanted: &std::collections::HashSet<String>,
     prefixes: &mut std::collections::HashSet<String>,
 ) {
+    if !crate::embedded_stdlib_vbc::is_embedded_runtime_archive(archive) { return; }
     let Some(graph) = crate::stdlib_dep_graph::get_dep_graph() else {
         return;
     };
@@ -1387,7 +1389,8 @@ fn expand_prefixes_through_reexports(
 /// the whole point: an earlier attempt added them to the PREFIX set and
 /// measured INERT — the modules were already decoded (`core.sys.darwin`
 /// was among the 24 entries in the failing run), only unregistered.
-fn expand_wanted_through_module_edges(wanted: &mut std::collections::HashSet<String>) {
+fn expand_wanted_through_module_edges(archive: &VbcArchive, wanted: &mut std::collections::HashSet<String>) {
+    if !crate::embedded_stdlib_vbc::is_embedded_runtime_archive(archive) { return; }
     let Some(graph) = crate::stdlib_dep_graph::get_dep_graph() else {
         return;
     };
@@ -1564,13 +1567,15 @@ impl SymbolGraph {
     /// no sidecar or the bytes are not readable by this format
     /// version — every caller then falls back to [`Self::build`], so a
     /// rejected sidecar costs start-up time, never correctness.
-    fn from_embedded() -> Option<Self> {
+    fn from_embedded(archive: &VbcArchive) -> Option<Self> {
         // A/B FROM ONE BINARY.  Comparing two BUILDS lets every
         // difference be blamed on the build; this switch makes the
         // baked and the scanned graph comparable within a single
         // binary, which is what the differential corpus run needs to
         // mean anything.
-        if std::env::var_os("VERUM_NO_BAKED_SYMBOL_GRAPH").is_some() {
+        if !crate::embedded_stdlib_vbc::is_embedded_runtime_archive(archive)
+            || std::env::var_os("VERUM_NO_BAKED_SYMBOL_GRAPH").is_some()
+        {
             return None;
         }
         let bytes = crate::embedded_symbol_graph::embedded_bytes()?;
@@ -2331,7 +2336,7 @@ impl ArchiveCtxCache {
                     // The sidecar is the fast path AND the default; the
                     // scan below is what a compiler built without a bake
                     // still has to do, so both must stay exercised.
-                    SymbolGraph::from_embedded()
+                    SymbolGraph::from_embedded(archive)
                         .unwrap_or_else(|| SymbolGraph::build(archive))
                 })
             })
@@ -2459,7 +2464,7 @@ impl ArchiveCtxCache {
         // BOUNDED to two ancestors and extended with well-known
         // stdlib type module paths — see [`build_wanted_module_prefixes`]
         // for the rationale.
-        expand_wanted_through_module_edges(&mut wanted);
+        expand_wanted_through_module_edges(archive, &mut wanted);
         // FORMAT-SITE-NAMES-FMT-1 (T1487). A format site names neither
         // `Display` nor `fmt`, so an archive `implement Display for X` is
         // rejected by every arm of the per-function filter and the
@@ -2512,7 +2517,7 @@ impl ArchiveCtxCache {
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
         // the re-export edges the dep graph already records.
-        expand_prefixes_through_reexports(&wanted, &mut wanted_module_prefixes);
+        expand_prefixes_through_reexports(archive, &wanted, &mut wanted_module_prefixes);
         for entry in &archive.index {
             // Skip decode unless this module name matches a
             // qualified-name prefix from the wanted set.  Bare
@@ -2623,7 +2628,7 @@ impl ArchiveCtxCache {
         // `module path;` and lands under archive entry `core.io`.
         // Well-known stdlib types (Text/List/Map/...) get explicit
         // module-path expansion via `build_wanted_module_prefixes`.
-        expand_wanted_through_module_edges(&mut wanted);
+        expand_wanted_through_module_edges(archive, &mut wanted);
         // FORMAT-SITE-NAMES-FMT-1 (T1487) — see `apply_lazy` for the
         // measurement; every path that builds a wanted set needs it.
         if std::env::var_os("VERUM_NO_FMT_SEED").is_none()
@@ -2635,7 +2640,7 @@ impl ArchiveCtxCache {
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
         // the re-export edges the dep graph already records.
-        expand_prefixes_through_reexports(&wanted, &mut wanted_module_prefixes);
+        expand_prefixes_through_reexports(archive, &wanted, &mut wanted_module_prefixes);
         let mut imported = 0usize;
         for entry in &archive.index {
             if !wanted_module_prefixes.contains(&entry.name) {
@@ -2853,7 +2858,9 @@ impl ArchiveCtxCache {
         // behaviours, one class of unresolvable `Byte.*` dispatch
         // names. Idempotent (import_type_aliases is first-wins) and
         // cheap (one pass over metadata.types per compilation).
-        if let Some(metadata) = crate::embedded_stdlib_metadata::get_runtime_metadata() {
+        if crate::embedded_stdlib_vbc::is_embedded_runtime_archive(archive)
+            && let Some(metadata) = crate::embedded_stdlib_metadata::get_runtime_metadata()
+        {
             crate::pipeline::vbc_codegen::seed_reexport_type_aliases(codegen, &metadata);
         }
         let mut harvest = Harvest::default();
@@ -2902,7 +2909,7 @@ impl ArchiveCtxCache {
             loadcost::report("apply_lazy_with_types (empty wanted)", t_load.elapsed());
             return (0, 0);
         }
-        expand_wanted_through_module_edges(&mut wanted);
+        expand_wanted_through_module_edges(archive, &mut wanted);
         // FORMAT-SITE-NAMES-FMT-1 (T1487) — see `apply_lazy` for the
         // measurement; every path that builds a wanted set needs it.
         if std::env::var_os("VERUM_NO_FMT_SEED").is_none()
@@ -2914,7 +2921,7 @@ impl ArchiveCtxCache {
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
         // the re-export edges the dep graph already records.
-        expand_prefixes_through_reexports(&wanted, &mut wanted_module_prefixes);
+        expand_prefixes_through_reexports(archive, &wanted, &mut wanted_module_prefixes);
 
         // **Variant-tag-collision force-load** (load-bearing for
         // bare `Some(x)` / `None` / `Ok(x)` / `Err(e)` syntax — see
@@ -3092,6 +3099,7 @@ impl ArchiveCtxCache {
         }
         let mut display_types: HashSet<String> = HashSet::new();
         if !formatted.is_empty()
+            && crate::embedded_stdlib_vbc::is_embedded_runtime_archive(archive)
             && let Some(metadata) = crate::embedded_stdlib_metadata::get_runtime_metadata()
         {
             // Scanned over the metadata rather than over

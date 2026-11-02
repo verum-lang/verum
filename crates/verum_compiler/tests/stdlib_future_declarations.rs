@@ -144,4 +144,29 @@ public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFutur
             "{name}: {panics:?}"
         );
     }
+    let app = verum_fast_parser::Parser::new(
+        "module app; mount core.network.tcp.forward; async fn main() -> Int { forward().await }",
+    )
+    .parse_module()
+    .unwrap();
+    let mut codegen =
+        verum_vbc::codegen::VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("app"));
+    verum_compiler::archive_ctx_loader::ArchiveCtxCache::new().apply_lazy_with_types(
+        &archive,
+        &mut codegen,
+        &app,
+        &[],
+    );
+    codegen.collect_unit_declarations(&[&app]).unwrap();
+    codegen.resolve_pending_imports();
+    codegen
+        .compile_unit_items(&[&app], verum_vbc::codegen::ItemFailurePolicy::Strict)
+        .unwrap();
+    let app = codegen.finalize_module_from_state().unwrap();
+    let main = app.find_function_by_name("app.main").unwrap();
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(app))
+        .execute_function(main)
+        .unwrap();
+    assert!(value.is_int());
+    assert_eq!(value.as_i64(), 37);
 }

@@ -168,6 +168,13 @@ pub fn get_runtime_archive() -> Option<&'static VbcArchive> {
         .as_ref()
 }
 
+/// Only this archive may use the symbol graph, metadata and import edges
+/// embedded beside it. Checking an independent archive needs no decoder I/O.
+pub(crate) fn is_embedded_runtime_archive(archive: &VbcArchive) -> bool {
+    RUNTIME_ARCHIVE.get().and_then(Option::as_ref)
+        .is_some_and(|embedded| std::ptr::eq(embedded, archive))
+}
+
 /// True when this compiler binary ships a precompiled stdlib
 /// archive. Used by callers that need to choose between hot-path
 /// (load embedded VBC) and slow-path (re-compile sources) at
