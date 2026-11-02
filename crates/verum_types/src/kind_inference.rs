@@ -598,6 +598,11 @@ impl KindInferer {
         self.known_kinds.insert(name.into(), kind);
     }
 
+    /// Remove the kind hidden by a nested lexical binder for later restoration.
+    pub(crate) fn remove_constructor_kind(&mut self, name: &Text) -> Option<Kind> {
+        self.known_kinds.remove(name)
+    }
+
     /// Generate a fresh kind variable
     pub fn fresh_kind_var(&mut self) -> Kind {
         let var = self.next_var;
@@ -899,7 +904,7 @@ impl KindInferer {
 
             // The universe hierarchy (Type_n : Type_{n+1}) is enforced separately
             // during type checking, not kind checking.
-            Type::Universe { .. } => Ok(Kind::Type),
+            Type::Universe { .. } | Type::RecordField { .. } => Ok(Kind::Type),
 
             // Prop universe has kind *
             Type::Prop => Ok(Kind::Type),

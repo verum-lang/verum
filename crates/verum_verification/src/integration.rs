@@ -151,7 +151,7 @@ impl TypeSystemIntegration {
 
             // Universe and Prop types are meta-level constructs
             // They don't contain runtime refinements that need verification
-            Type::Universe { .. } | Type::Prop => false,
+            Type::Universe { .. } | Type::RecordField { .. } | Type::Prop => false,
 
             // Placeholder types - should be resolved before verification
             Type::Placeholder { .. } => false,

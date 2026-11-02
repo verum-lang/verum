@@ -77,7 +77,7 @@ fn nominal_private_type_mounts_keep_their_owner_across_archive_and_sidecar() {
 }
 
 #[test]
-fn actual_ntype_unresolved_dependent_field_is_not_fabricated() {
+fn actual_ntype_construction_and_projection_specialize_the_same_receiver() {
     let mut ast = Parser::new(include_str!("../../../core/math/hott.vr")).parse_module().unwrap();
     ast.items.retain(|item| matches!(&item.kind, verum_ast::ItemKind::Module(_))
         || matches!(&item.kind, verum_ast::ItemKind::Type(decl) if ["IsTrunc", "NType"].contains(&decl.name.name.as_str())));
@@ -87,20 +87,28 @@ fn actual_ntype_unresolved_dependent_field_is_not_fabricated() {
     builder.add_module("core.math", &module, &[]).unwrap();
     let metadata = archive_to_core_metadata(&builder.finish()).unwrap();
     for eager in [false, true] {
-        let mut checker = if eager { TypeChecker::new_with_core_eager(std::sync::Arc::new(metadata.clone())) }
-            else { TypeChecker::new_with_core(std::sync::Arc::new(metadata.clone())) };
-        checker.register_primitives();
-        checker.set_current_module_path("core.math.hott");
-        let usage = Parser::new("fn carrier(x: &core.math.hott.NType<0>) -> Type { x.carrier }").parse_module().unwrap();
-        let mut failures = checker.prepare_module_declarations(&usage);
-        for item in &usage.items { if let Err(error) = checker.check_item(item) { failures.push(error); } }
-        failures.extend(checker.take_deferred_errors());
-        // Dependent record elaboration is not implemented (T2116). Until it
-        // owns the earlier field binder, rejecting this declaration is the
-        // sound result; a bare Named(carrier) or fresh inference variable is not.
-        assert!(failures.iter().any(|error| matches!(error,
-            verum_types::TypeError::TypeNotFound { name, .. } if name.as_str() == "carrier"
-        )), "eager={eager}: {failures:?}");
+        for (body, accepted) in [
+            ("fn carrier(x: &core.math.hott.NType<0>) -> Type { x.carrier }", true),
+            ("fn copy(x: &core.math.hott.NType<0>) -> core.math.hott.NType<0> { core.math.hott.NType { carrier: x.carrier, truncation: x.truncation } }", true),
+            ("fn mixed(x: &core.math.hott.NType<0>, y: &core.math.hott.NType<0>) -> core.math.hott.NType<0> { core.math.hott.NType { carrier: x.carrier, truncation: y.truncation } }", false),
+            ("fn wrong_index(x: &core.math.hott.NType<1>) -> core.math.hott.NType<0> { core.math.hott.NType { carrier: x.carrier, truncation: x.truncation } }", false),
+        ] {
+            let mut checker = if eager { TypeChecker::new_with_core_eager(std::sync::Arc::new(metadata.clone())) }
+                else { TypeChecker::new_with_core(std::sync::Arc::new(metadata.clone())) };
+            checker.register_primitives();
+            checker.set_current_module_path("core.math.hott");
+            let usage = Parser::new(body).parse_module().unwrap();
+            let mut failures = checker.prepare_module_declarations(&usage);
+            for item in &usage.items { if let Err(error) = checker.check_item(item) { failures.push(error); } }
+            failures.extend(checker.take_deferred_errors());
+            let mut messages: Vec<_> = failures.iter().map(|e| e.to_string()).collect();
+            messages.extend(checker.diagnostics().iter().filter(|d| d.is_error()).map(|d| format!("{d:?}")));
+            if accepted {
+                assert!(messages.is_empty(), "eager={eager}, {body}: {messages:?}");
+            } else {
+                assert!(messages.iter().any(|e| e.to_lowercase().contains("mismatch")), "eager={eager}, {body}: {messages:?}");
+            }
+        }
     }
 }
 
@@ -338,7 +346,7 @@ fn actual_stdlib_nominal_universes_reach_the_compiler_pipeline() {
 
 #[test]
 #[ignore = "requires the matching freshly baked stdlib embedded in this test binary"]
-fn actual_stdlib_dependent_field_is_refused_without_a_source_binder() {
+fn actual_stdlib_ntype_private_carrier_retains_module_visibility() {
     use verum_compiler::{CompilationPipeline, CompilerOptions, OutputFormat, Session, VerifyMode};
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("dependent.vr");
@@ -348,7 +356,7 @@ fn actual_stdlib_dependent_field_is_refused_without_a_source_binder() {
         check_only: true, ..Default::default()
     });
     let result = CompilationPipeline::new(&mut session).run_check_only();
-    assert!(result.is_err(), "an unresolved dependent record was silently accepted");
+    assert!(result.is_err(), "a private stdlib record field was accessible to consumers");
     let diagnostics = session.format_diagnostics();
-    assert!(diagnostics.contains("type not found: carrier"), "wrong refusal: {result:?}\n{diagnostics}");
+    assert!(diagnostics.contains("E202") && diagnostics.contains("carrier") && !diagnostics.contains("E101"), "wrong refusal: {result:?}\n{diagnostics}");
 }

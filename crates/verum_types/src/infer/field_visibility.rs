@@ -235,7 +235,7 @@ impl TypeChecker {
     /// Inspect a conversion without expanding a declared record into its field
     /// map. Only aliases, projections and reference/ownership wrappers are
     /// transparent here; declarations remain available to the policy lookup.
-    fn record_conversion_head(&self, ty: &Type) -> Type {
+    pub(super) fn record_conversion_head(&self, ty: &Type) -> Type {
         let mut current = self.unifier.apply(ty);
         let mut visited: List<Type> = List::new();
         for _ in 0..64 {
@@ -342,6 +342,9 @@ impl TypeChecker {
                     for name in fields.keys() {
                         self.check_record_field_visibility(&actual, name.as_str(), span)?;
                     }
+                    if self.is_dependent_record(&actual) {
+                        return Err(TypeError::Other("dependent record cannot be erased to an independent structural field map".into()));
+                    }
                     if let Some(from_fields) = self.resolve_to_record_type(&actual) {
                         for (name, to) in fields {
                             if let Some(from) = from_fields.get(name) {
@@ -352,6 +355,9 @@ impl TypeChecker {
                 }
                 (Type::Record(fields), Type::Named { .. } | Type::Generic { .. }) => {
                     self.check_record_construction_visibility(&expected, span)?;
+                    if self.is_dependent_record(&expected) {
+                        return Err(TypeError::Other("dependent record requires its checked nominal constructor".into()));
+                    }
                     if let Some(to_fields) = self.resolve_to_record_type(&expected) {
                         for (name, to) in &to_fields {
                             if let Some(from) = fields.get(name) {

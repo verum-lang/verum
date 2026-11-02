@@ -1227,6 +1227,7 @@ impl TypeChecker {
                 op: UnOp::RefMut,
                 expr: inner,
             } => {
+                self.check_dependent_write_place(inner)?;
                 if let Type::Reference {
                     mutable: true,
                     inner: expected_inner,
@@ -2188,7 +2189,7 @@ impl TypeChecker {
                 // CRITICAL FIX: If expected is a type variable and this is a generic type,
                 // create fresh type variables for the type parameters.
                 let type_args: List<Type> = match expected {
-                    Type::Named { args, .. } if !args.is_empty() => args.clone(),
+                    Type::Named { args, .. } | Type::Generic { args, .. } if !args.is_empty() => args.clone(),
                     Type::Named { args, .. } if args.is_empty() && !type_params.is_empty() => {
                         // Named type without args but we have type params - create fresh vars
                         type_params
@@ -2229,109 +2230,111 @@ impl TypeChecker {
                     return self.synth_and_check(expr, expected);
                 };
 
-                // Handle base record spread
-                if let Some(base_expr) = base {
-                    self.check_expr(base_expr, expected)?;
-                }
+                if !self.check_dependent_record_fields(&declaration_ty, &expected_fields, fields, base.as_deref(), expr.span)? {
+                    // Handle base record spread
+                    if let Some(base_expr) = base {
+                        self.check_expr(base_expr, expected)?;
+                    }
 
-                // Check each field against the resolved expected types
-                for field_init in fields {
-                    let field_name: Text = field_init.name.name.as_str().into();
+                    // Check each field against the resolved expected types
+                    for field_init in fields {
+                        let field_name: Text = field_init.name.name.as_str().into();
 
-                    let expected_field_ty = match expected_fields.get(&field_name) {
-                        Some(ty) => ty,
-                        None => {
-                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                "field '{}' not found in type '{}'",
-                                field_name,
-                                self.path_to_string(path)
-                            ))));
-                        }
-                    };
+                        let expected_field_ty = match expected_fields.get(&field_name) {
+                            Some(ty) => ty,
+                            None => {
+                                return Err(TypeError::Other(verum_common::Text::from(format!(
+                                    "field '{}' not found in type '{}'",
+                                    field_name,
+                                    self.path_to_string(path)
+                                ))));
+                            }
+                        };
 
-                    if let Some(ref value_expr) = field_init.value {
-                        self.check_record_field_value(
-                            field_init,
-                            value_expr,
-                            expected_field_ty,
-                            type_name.as_str(),
-                        )?;
-                    } else {
-                        // Shorthand syntax
-                        if let Some(scheme) = self.ctx.env.lookup(field_name.as_str()).cloned() {
-                            let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
-                            self.unifier
-                                .unify(&var_ty, expected_field_ty, field_init.span)?;
+                        if let Some(ref value_expr) = field_init.value {
+                            self.check_record_field_value(
+                                field_init,
+                                value_expr,
+                                expected_field_ty,
+                                type_name.as_str(),
+                            )?;
                         } else {
-                            return Err(TypeError::UnboundVariable {
-                                name: field_name,
-                                span: field_init.span,
-                            });
+                            // Shorthand syntax
+                            if let Some(scheme) = self.ctx.env.lookup(field_name.as_str()).cloned() {
+                                let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
+                                self.unifier
+                                    .unify(&var_ty, expected_field_ty, field_init.span)?;
+                            } else {
+                                return Err(TypeError::UnboundVariable {
+                                    name: field_name,
+                                    span: field_init.span,
+                                });
+                            }
                         }
                     }
-                }
 
-                // MISSING-FIELD-CHECK-PARITY-1 (T1367): every field the type
-                // DECLARES must be present, not just every field the literal
-                // NAMES.
-                //
-                // This is a PORT, not a new check. The synthesised path's
-                // "Step 5: Validate all required fields are present" already
-                // walks the expectation and refuses a missing field; the
-                // message below is copied from it verbatim so the two paths
-                // cannot drift into two spellings of one diagnostic.
-                //
-                // What the gap looked like, one variable apart on one binary:
-                //
-                //     let t      = Two { a: 1 };   rc=101, Missing required field 'b'
-                //     let t: Two = Two { a: 1 };   rc=0,   and `t.b` reads 0.0
-                //
-                // The annotation routes the literal HERE, through `check_expr`
-                // against an expected type, and this loop only ever asked the
-                // converse question. The `0.0` is not a default: a field
-                // declared `Int` renders through the integer path, and `0.0`
-                // is that path failing over on a value that is not an integer.
-                //
-                // The silent positions are not only annotated `let`s. A
-                // constructor's `Self { … }` takes its expectation from the
-                // declared RETURN type and lands here too, which is the
-                // dominant shape of a stdlib constructor — so this check
-                // reaches further than any static count of annotated bindings
-                // suggests.
-                //
-                // GATED ON `base.is_none()`: `Self { a: 1, ..other }` takes
-                // its remaining fields from the base, and 289 literals in
-                // `core/` are of that form.
-                //
-                // `VERUM_TRACE_MISSING_FIELD=1` reports and CONTINUES, which
-                // is how the population was counted: a hard error returns on
-                // the first, so one run would have shown one site per
-                // function.
-                if base.is_none() {
-                    for (expected_name, expected_ty) in expected_fields.iter() {
-                        if fields
-                            .iter()
-                            .any(|f| f.name.name.as_str() == expected_name.as_str())
-                        {
-                            continue;
+                    // MISSING-FIELD-CHECK-PARITY-1 (T1367): every field the type
+                    // DECLARES must be present, not just every field the literal
+                    // NAMES.
+                    //
+                    // This is a PORT, not a new check. The synthesised path's
+                    // "Step 5: Validate all required fields are present" already
+                    // walks the expectation and refuses a missing field; the
+                    // message below is copied from it verbatim so the two paths
+                    // cannot drift into two spellings of one diagnostic.
+                    //
+                    // What the gap looked like, one variable apart on one binary:
+                    //
+                    //     let t      = Two { a: 1 };   rc=101, Missing required field 'b'
+                    //     let t: Two = Two { a: 1 };   rc=0,   and `t.b` reads 0.0
+                    //
+                    // The annotation routes the literal HERE, through `check_expr`
+                    // against an expected type, and this loop only ever asked the
+                    // converse question. The `0.0` is not a default: a field
+                    // declared `Int` renders through the integer path, and `0.0`
+                    // is that path failing over on a value that is not an integer.
+                    //
+                    // The silent positions are not only annotated `let`s. A
+                    // constructor's `Self { … }` takes its expectation from the
+                    // declared RETURN type and lands here too, which is the
+                    // dominant shape of a stdlib constructor — so this check
+                    // reaches further than any static count of annotated bindings
+                    // suggests.
+                    //
+                    // GATED ON `base.is_none()`: `Self { a: 1, ..other }` takes
+                    // its remaining fields from the base, and 289 literals in
+                    // `core/` are of that form.
+                    //
+                    // `VERUM_TRACE_MISSING_FIELD=1` reports and CONTINUES, which
+                    // is how the population was counted: a hard error returns on
+                    // the first, so one run would have shown one site per
+                    // function.
+                    if base.is_none() {
+                        for (expected_name, expected_ty) in expected_fields.iter() {
+                            if fields
+                                .iter()
+                                .any(|f| f.name.name.as_str() == expected_name.as_str())
+                            {
+                                continue;
+                            }
+                            if std::env::var_os("VERUM_TRACE_MISSING_FIELD").is_some() {
+                                eprintln!(
+                                    "[missing-field] {}.{} ({}) omitted in {}",
+                                    type_name,
+                                    expected_name,
+                                    expected_ty,
+                                    match &self.current_function_name {
+                                        Maybe::Some(n) => n.as_str().to_string(),
+                                        Maybe::None => String::from("<no enclosing fn>"),
+                                    }
+                                );
+                                continue;
+                            }
+                            return Err(TypeError::Other(verum_common::Text::from(format!(
+                                "Missing required field '{}' of type {} in record construction",
+                                expected_name, expected_ty
+                            ))));
                         }
-                        if std::env::var_os("VERUM_TRACE_MISSING_FIELD").is_some() {
-                            eprintln!(
-                                "[missing-field] {}.{} ({}) omitted in {}",
-                                type_name,
-                                expected_name,
-                                expected_ty,
-                                match &self.current_function_name {
-                                    Maybe::Some(n) => n.as_str().to_string(),
-                                    Maybe::None => String::from("<no enclosing fn>"),
-                                }
-                            );
-                            continue;
-                        }
-                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Missing required field '{}' of type {} in record construction",
-                            expected_name, expected_ty
-                        ))));
                     }
                 }
 
@@ -9220,7 +9223,7 @@ impl TypeChecker {
     /// Resolve only declared type operands; a lexical value wins even when
     /// it shares a type's name. This is the semantic counterpart of a field
     /// expression deliberately left ambiguous by the parser.
-    fn declaration_property_operand(&mut self, expression: &Expr) -> Option<verum_ast::ty::Type> {
+    pub(super) fn declaration_property_operand(&mut self, expression: &Expr) -> Option<verum_ast::ty::Type> {
         use verum_ast::ty::{Type as AstType, TypeKind as K};
         let kind = match &expression.kind {
             ExprKind::TypeExpr(ty) => return Some(ty.clone()),
@@ -9955,6 +9958,12 @@ impl TypeChecker {
         // resolve to `Wrapper<Text>` so field access gets the correct field type.
         let resolved_ty = self.unifier.apply(&obj_result.ty);
         self.check_record_field_visibility(&resolved_ty, field.name.as_str(), expr.span)?;
+        if let Some(ty) = self.dependent_field_type(obj, &resolved_ty, &field.name, false, expr.span)? {
+            if let Some(ref var_name) = var_name_for_affine {
+                self.track_affine_field_access(var_name, &field_name_str, &ty, expr.span)?;
+            }
+            return Ok(InferResult::new(ty));
+        }
 
         // CRITICAL FIX: Unwrap reference types before field access
         // When we have `&Point`, we need to dereference to get `Point` first
@@ -11885,91 +11894,93 @@ impl TypeChecker {
             (resolved_fields, List::new())
         };
 
-        // Step 3: Handle base record spread (...base syntax)
-        let mut provided_fields = indexmap::IndexMap::new();
+        if !self.check_dependent_record_fields(&record_ty, &expected_fields, fields, base.as_deref(), expr.span)? {
+            // Step 3: Handle base record spread (...base syntax)
+            let mut provided_fields = indexmap::IndexMap::new();
 
-        if let Some(base_expr) = base {
-            // Type check base expression
-            let base_result = self.synth_expr(base_expr)?;
+            if let Some(base_expr) = base {
+                // Type check base expression
+                let base_result = self.synth_expr(base_expr)?;
 
-            // Base must be a record type (or a named type that resolves to a record)
-            // Try to extract record fields from the base type
-            let base_fields = self.extract_record_fields(&base_result.ty)?;
-            for (name, ty) in base_fields.iter() {
-                provided_fields.insert(name.clone(), ty.clone());
+                // Base must be a record type (or a named type that resolves to a record)
+                // Try to extract record fields from the base type
+                let base_fields = self.extract_record_fields(&base_result.ty)?;
+                for (name, ty) in base_fields.iter() {
+                    provided_fields.insert(name.clone(), ty.clone());
+                }
             }
-        }
 
-        // Step 4: Type check each provided field and validate against expected
-        for field_init in fields {
-            let field_name = field_init.name.name.as_str();
+            // Step 4: Type check each provided field and validate against expected
+            for field_init in fields {
+                let field_name = field_init.name.name.as_str();
 
-            // Check if field exists in expected type
-            let expected_field_ty = match expected_fields.get(field_name) {
-                Some(ty) => ty,
-                None => {
+                // Check if field exists in expected type
+                let expected_field_ty = match expected_fields.get(field_name) {
+                    Some(ty) => ty,
+                    None => {
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "field '{}' not found in type '{}'",
+                            field_name,
+                            self.path_to_string(path)
+                        ))));
+                    }
+                };
+
+                // Handle shorthand syntax: { x } means { x: x }
+                let field_ty = if let Some(ref value_expr) = field_init.value {
+                    // Explicit value provided: check against expected type
+                    self.check_record_field_value(
+                        field_init,
+                        value_expr,
+                        expected_field_ty,
+                        type_name.as_str(),
+                    )?;
+                    expected_field_ty.clone()
+                } else {
+                    // Shorthand: lookup variable in environment
+                    match self.ctx.env.lookup(field_name).cloned() {
+                        Some(scheme) => {
+                            let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
+                            // Check if variable type matches expected field type
+                            self.unifier.unify(
+                                &var_ty,
+                                expected_field_ty,
+                                field_init.span,
+                            )?;
+                            expected_field_ty.clone()
+                        }
+                        None => {
+                            return Err(TypeError::UnboundVariable {
+                                name: field_name.to_text(),
+                                span: field_init.span,
+                            });
+                        }
+                    }
+                };
+
+                // Add to provided fields (overriding base if present)
+                provided_fields.insert(field_name.into(), field_ty);
+            }
+
+            // Step 5: Validate all required fields are present
+            for (expected_name, expected_ty) in expected_fields.iter() {
+                if !provided_fields.contains_key(expected_name) {
                     return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "field '{}' not found in type '{}'",
-                        field_name,
+                        "Missing required field '{}' of type {} in record construction",
+                        expected_name, expected_ty
+                    ))));
+                }
+            }
+
+            // Step 6: Check for extra fields (not allowed in nominal records)
+            for provided_name in provided_fields.keys() {
+                if !expected_fields.contains_key(provided_name) {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Extra field '{}' not present in record type {}",
+                        provided_name,
                         self.path_to_string(path)
                     ))));
                 }
-            };
-
-            // Handle shorthand syntax: { x } means { x: x }
-            let field_ty = if let Some(ref value_expr) = field_init.value {
-                // Explicit value provided: check against expected type
-                self.check_record_field_value(
-                    field_init,
-                    value_expr,
-                    expected_field_ty,
-                    type_name.as_str(),
-                )?;
-                expected_field_ty.clone()
-            } else {
-                // Shorthand: lookup variable in environment
-                match self.ctx.env.lookup(field_name).cloned() {
-                    Some(scheme) => {
-                        let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
-                        // Check if variable type matches expected field type
-                        self.unifier.unify(
-                            &var_ty,
-                            expected_field_ty,
-                            field_init.span,
-                        )?;
-                        expected_field_ty.clone()
-                    }
-                    None => {
-                        return Err(TypeError::UnboundVariable {
-                            name: field_name.to_text(),
-                            span: field_init.span,
-                        });
-                    }
-                }
-            };
-
-            // Add to provided fields (overriding base if present)
-            provided_fields.insert(field_name.into(), field_ty);
-        }
-
-        // Step 5: Validate all required fields are present
-        for (expected_name, expected_ty) in expected_fields.iter() {
-            if !provided_fields.contains_key(expected_name) {
-                return Err(TypeError::Other(verum_common::Text::from(format!(
-                    "Missing required field '{}' of type {} in record construction",
-                    expected_name, expected_ty
-                ))));
-            }
-        }
-
-        // Step 6: Check for extra fields (not allowed in nominal records)
-        for provided_name in provided_fields.keys() {
-            if !expected_fields.contains_key(provided_name) {
-                return Err(TypeError::Other(verum_common::Text::from(format!(
-                    "Extra field '{}' not present in record type {}",
-                    provided_name,
-                    self.path_to_string(path)
-                ))));
             }
         }
 
@@ -13039,6 +13050,7 @@ impl TypeChecker {
                             field.name, dereferenced_ty
                         )))
                     })?;
+                self.require_closed_field_projection(&field_ty, expr.span)?;
                 return Ok(InferResult::new(field_ty));
             }
         }
@@ -13067,6 +13079,7 @@ impl TypeChecker {
                 )))
             })?;
 
+        self.require_closed_field_projection(&field_ty, expr.span)?;
         // Monadic flattening: if field is already Maybe, don't double-wrap
         let result_ty = if self
             .protocol_checker

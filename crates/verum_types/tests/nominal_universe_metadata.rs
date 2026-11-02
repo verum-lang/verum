@@ -15,9 +15,10 @@ fn metadata(owner: &str, source: &str) -> CoreMetadata {
     let descriptor = TypeDescriptor {
         source_declaration: verum_ast::source_signature::source_type_declaration(decl).unwrap(),
         name: decl.name.name.clone(), module_path: owner.into(), origin_module_path: None,
-        generic_params: decl.generics.iter().map(|p| {
-            let verum_ast::ty::GenericParamKind::Type { name, .. } = &p.kind else { panic!("type parameter") };
-            GenericParam { name: name.name.clone(), bounds: List::new(), default: None, type_bounds: List::new(), pid: None }
+        // VBC assigns runtime PIDs only to ordinary type parameters.
+        generic_params: decl.generics.iter().filter_map(|p| {
+            let verum_ast::ty::GenericParamKind::Type { name, .. } = &p.kind else { return None };
+            Some(GenericParam { name: name.name.clone(), bounds: List::new(), default: None, type_bounds: List::new(), pid: None })
         }).collect(),
         // Runtime field strings are erased; declaration semantics must survive.
         kind: match &decl.body {
@@ -182,6 +183,85 @@ fn imported_generic_defaults_use_the_declaration_scope() {
         missing.declaration_type_bindings.clear();
         let (_, errors) = check(missing, "fn inspect(x: api.Carrier<actual.Token, Int>) -> actual.Token { x.payload }", eager);
         assert!(!errors.is_empty(), "default with missing lexical binding accepted");
+    }
+}
+
+#[test]
+fn dependent_record_replay_preserves_the_field_binder_and_meta_index() {
+    let mut data = metadata("test.pack", "public type Pack<N: meta Int> is { public carrier: Type, public evidence: Witness<carrier, N> };");
+    let witness = metadata("test.pack", "public type Witness<A, N: meta Int> is { public level: Type, public item: A };");
+    data.type_declaration_order.extend(witness.type_declaration_order);
+    for (key, descriptor) in witness.types { data.types.insert(key, descriptor); }
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let good = "fn pack(w: test.pack.Witness<Int, 0>) -> test.pack.Pack<0> { test.pack.Pack { carrier: Int, evidence: w } }";
+        let (checker, errors) = check(decode_metadata(&bytes).unwrap(), good, eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        let Some(Type::Record(fields)) = checker.resolved_type("__struct_fields_test.pack.Pack") else {
+            panic!("missing qualified record")
+        };
+        let slots = fields[&Text::from("evidence")].record_field_slots();
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].owner.as_str(), "test.pack.Pack");
+        assert_eq!(slots[0].ordinal, 0);
+        let bad = good.replace("Witness<Int, 0>", "Witness<Int, 1>");
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(), &bad, eager);
+        assert!(errors.iter().any(|e| e.to_lowercase().contains("mismatch")), "eager={eager}: {errors:?}");
+    }
+}
+
+#[test]
+fn field_shadowing_preserves_the_declared_meta_argument_sort() {
+    let data = metadata("test.pack", "public type Shadow<N: meta Int> is { public N: Type, public payload: N };");
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn good(x: &test.pack.Shadow<0>) {}", eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn bad(x: &test.pack.Shadow<Bool>) {}", eager);
+        assert!(!errors.is_empty(), "field shadow erased meta argument sort: eager={eager}");
+    }
+}
+
+#[test]
+fn decoded_protocol_checks_the_order_and_sort_of_erased_meta_slots() {
+    let data = metadata("test.provider", "public type Predicate<A, N: meta Int> is protocol { fn index(&self) -> Int; };");
+    assert_eq!(data.types.values().next().unwrap().generic_params.len(), 1);
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        for arguments in ["Int, 0", "Bool, -1"] {
+            let source = format!("fn user(x: &test.provider.Predicate<{arguments}>) {{}}");
+            let (_, errors) = check(decode_metadata(&bytes).unwrap(), &source, eager);
+            assert!(errors.is_empty(), "eager={eager}, {arguments}: {errors:?}");
+        }
+        for arguments in ["Int", "0, Int", "Int, Bool", "Int, true", "Int, 0, 1"] {
+            let source = format!("fn user(x: &test.provider.Predicate<{arguments}>) {{}}");
+            let (_, errors) = check(decode_metadata(&bytes).unwrap(), &source, eager);
+            assert!(!errors.is_empty(), "eager={eager}: accepted Predicate<{arguments}>");
+        }
+    }
+}
+
+#[test]
+fn nested_type_binders_shadow_without_capturing_or_leaking_a_field() {
+    let good = "public type Boxed is { public carrier: Type, public callback: fn<carrier>(carrier) -> carrier, public payload: carrier };";
+    let data = CoreMetadata { version: CORE_METADATA_VERSION, ..Default::default() };
+    let (checker, errors) = check(data, good, false);
+    assert!(errors.is_empty(), "{errors:?}");
+    let Some(Type::Record(fields)) = checker.resolved_type("__struct_fields_consumer.Boxed") else {
+        panic!("missing local record")
+    };
+    assert!(fields[&Text::from("callback")].record_field_slots().is_empty());
+    assert_eq!(fields[&Text::from("payload")].record_field_slots().len(), 1);
+}
+
+#[test]
+fn declaration_replay_refuses_field_dependent_array_indices() {
+    let data = metadata("test.pack", "public type Bad is { public carrier: Type, public values: [Int; carrier] };");
+    for eager in [false, true] {
+        let (_, errors) = check(data.clone(), "fn use_bad(x: test.pack.Bad) {}", eager);
+        assert!(errors.iter().any(|e| e.contains("value-level record index")), "eager={eager}: {errors:?}");
     }
 }
 

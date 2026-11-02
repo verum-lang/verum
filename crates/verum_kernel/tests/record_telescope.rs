@@ -1,4 +1,6 @@
-use std::{fmt::Write, path::Path, process::Command};
+use std::fmt::Write;
+#[path = "../../../verification/external/lean/record_telescope_replay.rs"]
+mod replay;
 use verum_common::{
     Heap, Text,
     record_telescope::{RecordTelescope, TelescopeError},
@@ -356,91 +358,30 @@ fn observations() -> String {
 #[test]
 #[ignore = "requires pinned Lean; run explicitly with --ignored"]
 fn lean_replays_checked_sigma_fields_and_rejects_changed_observations() {
-    let semantics = include_str!(
-        "../../../verification/external/lean/VerumExternalReplay/RecordTelescope.lean"
+    replay::check(
+        &observations(),
+        &[
+            "introduced2Graph",
+            "projected0Field2Graph",
+            "projected1Field2Graph",
+        ],
+        &[
+            (
+                "construction rows 2 [some 10, some 11] = some [(0, 10), (1, 11)]",
+                "construction rows 2 [some 10, some 11] = some [(0, 11), (1, 10)]",
+            ),
+            (
+                "projection rows 2 0 = some [(0, (0, 0)), (1, (0, 1))]",
+                "projection rows 2 0 = some [(0, (1, 0)), (1, (0, 1))]",
+            ),
+            (
+                "mayMutate rows 0 = some false",
+                "mayMutate rows 0 = some true",
+            ),
+            (
+                "some (.project 0 0) := by decide",
+                "some (.project 1 0) := by decide",
+            ),
+        ],
     );
-    let observed = observations();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../verification/external/lean");
-    let scratch =
-        std::env::temp_dir().join(format!("verum-record-telescope-{}", std::process::id()));
-    std::fs::create_dir_all(&scratch).unwrap();
-    let input = scratch.join("Observed.lean");
-    let replay = |claims: &str| {
-        std::fs::write(&input, format!("{semantics}\n{claims}")).unwrap();
-        Command::new(std::env::var_os("VERUM_LEAN").unwrap_or_else(|| "lean".into()))
-            .arg(&input)
-            .current_dir(&root)
-            .output()
-            .expect("pinned Lean toolchain required")
-    };
-    let clean = replay(&observed);
-    assert!(
-        clean.status.success(),
-        "{}{}",
-        String::from_utf8_lossy(&clean.stdout),
-        String::from_utf8_lossy(&clean.stderr)
-    );
-    let report = format!(
-        "{}{}",
-        String::from_utf8_lossy(&clean.stdout),
-        String::from_utf8_lossy(&clean.stderr)
-    );
-    for name in [
-        "introduced2Graph",
-        "projected0Field2Graph",
-        "projected1Field2Graph",
-    ] {
-        assert!(
-            report.contains(name),
-            "missing audited theorem {name}: {report}"
-        );
-    }
-    for forbidden in ["sorryAx", "Lean.ofReduceBool", "warning:", "error:"] {
-        assert!(!report.contains(forbidden), "{report}");
-    }
-    for line in report
-        .lines()
-        .filter(|line| line.contains("depends on axioms:"))
-    {
-        let axioms = line.split_once('[').unwrap().1.strip_suffix(']').unwrap();
-        for axiom in axioms.split(',').map(str::trim) {
-            assert!(
-                ["propext", "Classical.choice", "Quot.sound"].contains(&axiom),
-                "unaudited axiom {axiom}"
-            );
-        }
-    }
-    for (before, after) in [
-        (
-            "construction rows 2 [some 10, some 11] = some [(0, 10), (1, 11)]",
-            "construction rows 2 [some 10, some 11] = some [(0, 11), (1, 10)]",
-        ),
-        (
-            "projection rows 2 0 = some [(0, (0, 0)), (1, (0, 1))]",
-            "projection rows 2 0 = some [(0, (1, 0)), (1, (0, 1))]",
-        ),
-        (
-            "mayMutate rows 0 = some false",
-            "mayMutate rows 0 = some true",
-        ),
-        (
-            "some (.project 0 0) := by decide",
-            "some (.project 1 0) := by decide",
-        ),
-    ] {
-        assert!(observed.contains(before), "missing observation {before}");
-        let changed = observed.replacen(before, after, 1);
-        let negative = replay(&changed);
-        let report = format!(
-            "{}{}",
-            String::from_utf8_lossy(&negative.stdout),
-            String::from_utf8_lossy(&negative.stderr)
-        );
-        assert!(
-            !negative.status.success() && report.contains("decide"),
-            "tamper result {report}"
-        );
-    }
-    std::fs::remove_file(input).unwrap();
-    std::fs::remove_dir(scratch).unwrap();
 }

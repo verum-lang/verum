@@ -542,6 +542,23 @@ impl TypeChecker {
         {
             return Ok((ty, Some(key)));
         }
+        // A metadata-only provider may have no module registry entry. Its
+        // semantic declaration must still replay before an uppercase forward
+        // reference or a cached ABI template can answer for the same name.
+        if let Some((owner, name)) = qualified.as_str().rsplit_once('.')
+            && let Some(descriptor) = self.core_metadata.as_ref().and_then(|metadata|
+                Self::metadata_type_with_declaring_key(metadata, &qualified))
+            && descriptor.source_declaration.is_some()
+        {
+            if !descriptor.is_public && owner != self.current_module_path.as_str() {
+                return Err(TypeError::VisibilityError {
+                    name: name.into(), visibility: "Private".into(), module_path: owner.into(), span,
+                });
+            }
+            return self.ensure_mounted_type_loaded_with_parameter_key(name, owner)
+                .map(|(ty, key)| (ty, Some(key)))
+                .ok_or_else(|| TypeError::TypeNotFound { name: qualified, span });
+        }
         // Published exact archive identity wins over legacy leaf fallbacks.
         if let Some(ty) = self.ctx.lookup_type(qualified.as_str()) {
             return Ok((ty.clone(), Some(qualified)));
@@ -872,97 +889,28 @@ impl TypeChecker {
     ) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
 
-        // Get the first segment (variable name)
-        let first_name = match path.segments.first() {
-            Some(PathSegment::Name(ident)) => ident.name.as_str(),
-            _ => return Err(TypeError::Other("internal error: invalid path for field access. This is a compiler bug — please report it.".into())),
+        let Some(PathSegment::Name(root)) = path.segments.first() else {
+            return Err(TypeError::Other("expected a local record receiver".into()));
         };
+        self.resolve_local_field_chain(root.clone(), path, span)
+    }
 
-        // Look up the variable
-        let scheme = self
-            .ctx
-            .env
-            .lookup(first_name).cloned()
-            .ok_or_else(|| TypeError::UnboundVariable {
-                name: first_name.to_text(),
-                span,
-            })?;
-        let mut current_ty = self.instantiate_value_scheme(&scheme, span)?;
-
-        // Process remaining segments as field accesses
+    /// Both parser representations of a local field access use ordinary
+    /// projection, including visibility, partial moves and dependent indices.
+    fn resolve_local_field_chain(
+        &mut self, root: verum_ast::Ident, path: &Path, span: Span,
+    ) -> Result<InferResult> {
+        let mut receiver = Expr::ident(root);
         for segment in path.segments.iter().skip(1) {
-            let field_name = match segment {
-                PathSegment::Name(ident) => verum_common::Text::from(ident.name.as_str()),
-                _ => {
-                    return Err(TypeError::Other(
-                        "Only simple names allowed in field access chain".into(),
-                    ));
-                }
+            let verum_ast::ty::PathSegment::Name(field) = segment else {
+                return Err(TypeError::Other("expected a field name in local projection".into()));
             };
-
-            // Unwrap reference types before field access
-            let dereferenced_ty = self.unwrap_reference_type(&current_ty);
-
-            // Look up field in current type
-            current_ty = match dereferenced_ty {
-                Type::Record(fields) => fields.get(&field_name).cloned().ok_or_else(|| {
-                    TypeError::Other(verum_common::Text::from(format!(
-                        "field '{}' not found in type 'record'",
-                        field_name
-                    )))
-                })?,
-                Type::Named {
-                    path: type_path,
-                    args: _,
-                } => {
-                    // For named types, look up struct fields
-                    let type_name = self.path_to_string(type_path);
-
-                    let struct_key = format!("__struct_fields_{}", type_name);
-
-                    // Try struct fields lookup
-                    match self.ctx.lookup_type(struct_key.as_str()) {
-                        Option::Some(Type::Record(fields)) => {
-                            fields.get(&field_name).cloned().ok_or_else(|| {
-                                TypeError::Other(verum_common::Text::from(format!(
-                                    "field '{}' not found in type '{}'",
-                                    field_name, type_name
-                                )))
-                            })?
-                        }
-                        _ => {
-                            // Try direct type lookup
-                            match self.ctx.lookup_type(type_name.as_str()) {
-                                Option::Some(Type::Record(fields)) => {
-                                    fields.get(&field_name).cloned().ok_or_else(|| {
-                                        TypeError::Other(verum_common::Text::from(format!(
-                                            "field '{}' not found in type '{}'",
-                                            field_name, type_name
-                                        )))
-                                    })?
-                                }
-                                _ => {
-                                    return Err(TypeError::Other(verum_common::Text::from(
-                                        format!(
-                                            "Cannot access field '{}' on type '{}'",
-                                            field_name, type_name
-                                        ),
-                                    )));
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Cannot access field '{}' on type '{}'",
-                        field_name, dereferenced_ty
-                    ))));
-                }
-            };
+            receiver = Expr::new(ExprKind::Field {
+                expr: Box::new(receiver),
+                field: field.clone(),
+            }, span);
         }
-
-        Ok(InferResult::new(current_ty))
+        self.synth_expr(&receiver)
     }
 
     /// Resolve a path that starts with an inline module.
@@ -1893,123 +1841,8 @@ impl TypeChecker {
     pub(crate) fn resolve_self_path(&mut self, path: &Path, span: Span) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
 
-        // CRITICAL FIX: Check if we're inside an implement block (current_self_type is set)
-        // In that case, `self` refers to the instance variable, not a module path.
-        // This handles expressions like `self.field.method()` in implement blocks.
-        if self.current_self_type.is_some() {
-            // Look up "self" in the environment (it should have been registered
-            // when processing the function's self parameter)
-            if let Some(scheme) = self.ctx.env.lookup("self").cloned() {
-                let mut current_ty = self.instantiate_value_scheme(&scheme, span)?;
-
-                // Process remaining segments (after `self`) as field accesses
-                for segment in path.segments.iter().skip(1) {
-                    let field_name = match segment {
-                        PathSegment::Name(ident) => verum_common::Text::from(ident.name.as_str()),
-                        _ => {
-                            return Err(TypeError::Other(
-                                "Only simple names allowed in self field access chain".into(),
-                            ));
-                        }
-                    };
-
-                    // Unwrap reference types before field access
-                    let dereferenced_ty = self.unwrap_reference_type(&current_ty);
-
-                    // Look up field in current type
-                    current_ty = match dereferenced_ty {
-                        Type::Record(fields) => {
-                            fields.get(&field_name).cloned().ok_or_else(|| {
-                                TypeError::Other(verum_common::Text::from(format!(
-                                    "field '{}' not found in type 'Self'",
-                                    field_name
-                                )))
-                            })?
-                        }
-                        Type::Named {
-                            path: type_path,
-                            args: _,
-                        } => {
-                            // For named types, look up struct fields
-                            let type_name = self.path_to_string(type_path);
-                            let struct_key = format!("__struct_fields_{}", type_name);
-
-                            // Try struct fields lookup
-                            match self.ctx.lookup_type(struct_key.as_str()) {
-                                Option::Some(Type::Record(fields)) => {
-                                    fields.get(&field_name).cloned().ok_or_else(|| {
-                                        TypeError::Other(verum_common::Text::from(format!(
-                                            "field '{}' not found in type '{}'",
-                                            field_name, type_name
-                                        )))
-                                    })?
-                                }
-                                _ => {
-                                    // Try direct type lookup
-                                    match self.ctx.lookup_type(type_name.as_str()) {
-                                        Option::Some(Type::Record(fields)) => {
-                                            fields.get(&field_name).cloned().ok_or_else(|| {
-                                                TypeError::Other(verum_common::Text::from(format!(
-                                                    "field '{}' not found in type '{}'",
-                                                    field_name, type_name
-                                                )))
-                                            })?
-                                        }
-                                        _ => {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot access field '{}' on type '{}'",
-                                                    field_name, type_name
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Type::Generic { name, .. } => {
-                            // For generic types (like List<T>), try struct fields lookup
-                            let struct_key = format!("__struct_fields_{}", name);
-                            match self.ctx.lookup_type(struct_key.as_str()) {
-                                Option::Some(Type::Record(fields)) => {
-                                    fields.get(&field_name).cloned().ok_or_else(|| {
-                                        TypeError::Other(verum_common::Text::from(format!(
-                                            "field '{}' not found in type '{}'",
-                                            field_name, name
-                                        )))
-                                    })?
-                                }
-                                _ => match self.ctx.lookup_type(name.as_str()) {
-                                    Option::Some(Type::Record(fields)) => {
-                                        fields.get(&field_name).cloned().ok_or_else(|| {
-                                            TypeError::Other(verum_common::Text::from(format!(
-                                                "field '{}' not found in type '{}'",
-                                                field_name, name
-                                            )))
-                                        })?
-                                    }
-                                    _ => {
-                                        return Err(TypeError::Other(verum_common::Text::from(
-                                            format!(
-                                                "Cannot access field '{}' on type '{}'",
-                                                field_name, name
-                                            ),
-                                        )));
-                                    }
-                                },
-                            }
-                        }
-                        _ => {
-                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Cannot access field '{}' on type '{}'",
-                                field_name, dereferenced_ty
-                            ))));
-                        }
-                    };
-                }
-
-                return Ok(InferResult::new(current_ty));
-            }
+        if self.current_self_type.is_some() && self.ctx.env.lookup("self").is_some() {
+            return self.resolve_local_field_chain(verum_ast::Ident::new("self", span), path, span);
         }
 
         // Fallback: treat as module path (self::module::item)

@@ -11446,6 +11446,7 @@ impl ProtocolChecker {
                 verum_common::Text::from(format!("partial:{}", self.make_type_key(element_type)))
             }
             Interval => "I".into(),
+            RecordField { slot, receiver, level } => format!("record-field:{slot:?}:{receiver:?}:{level:?}").into(),
             Universe { level } => verum_common::Text::from(format!("universe:{}", level)),
             Prop => "Prop".into(),
             Inductive { name, .. } => verum_common::Text::from(format!("inductive:{}", name)),
@@ -12602,6 +12603,7 @@ impl ProtocolChecker {
             // Interval is a primitive type — no inner types to substitute
             Type::Interval => Type::Interval,
 
+            Type::RecordField { .. } => ty.clone(),
             Type::Universe { level } => Type::Universe { level: level.clone() },
             Type::Prop => Type::Prop,
 

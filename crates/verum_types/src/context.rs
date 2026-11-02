@@ -934,6 +934,7 @@ impl UniverseContext {
         match ty {
             // Type₀ : Type₁
             Type::Universe { level } => Ok(level.succ()),
+            Type::RecordField { level, .. } => Ok(level.clone()),
 
             // Prop : Type₁, as in Type::type_of and the source grammar.
             Type::Prop => Ok(UniverseLevel::TYPE1),
@@ -1028,6 +1029,12 @@ impl Default for UniverseContext {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum RecordPlace {
+    Mutable,
+    Projected(u64),
+}
+
 /// Type environment maps variables to type schemes.
 ///
 /// This supports lexical scoping through a chain of environments.
@@ -1040,6 +1047,9 @@ impl Default for UniverseContext {
 pub struct TypeEnv {
     /// Current scope bindings
     bindings: IndexMap<Text, TypeScheme>,
+    /// Sparse lexical record places. A mutable binding cannot acquire a stable
+    /// projection identity. Immutable bindings receive one on their first use.
+    record_places: Map<Text, RecordPlace>,
     /// Declaration-owned type parameters mirrored into the value namespace.
     type_parameter_mirrors: Set<Text>,
     /// Roles supplied by the declaration that installed a binding. In
@@ -1063,6 +1073,7 @@ impl TypeEnv {
     pub fn new() -> Self {
         Self {
             bindings: IndexMap::new(),
+            record_places: Map::new(),
             type_parameter_mirrors: Set::new(),
             declared_values: Set::new(),
             parent: None,
@@ -1079,6 +1090,7 @@ impl TypeEnv {
     pub fn child(&self) -> Self {
         Self {
             bindings: IndexMap::new(),
+            record_places: Map::new(),
             type_parameter_mirrors: Set::new(),
             declared_values: Set::new(),
             parent: Some(Box::new(self.clone())),
@@ -1138,6 +1150,7 @@ impl TypeEnv {
     /// Insert a binding in the current scope
     pub fn insert(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
         let name_text: Text = name.into();
+        self.record_places.remove(&name_text);
         self.type_parameter_mirrors.remove(&name_text);
         self.declared_values.remove(&name_text);
         self.bindings.insert(name_text, scheme);
@@ -1205,6 +1218,7 @@ impl TypeEnv {
         while let Some(parent) = env.parent.as_deref_mut() {
             env = parent;
         }
+        env.record_places.remove(&name_text);
         env.type_parameter_mirrors.remove(&name_text);
         env.declared_values.remove(&name_text);
         env.bindings.insert(name_text, scheme);
@@ -1223,9 +1237,58 @@ impl TypeEnv {
     /// Returns `true` if a binding with `name` was present and removed.
     pub fn remove(&mut self, name: &str) -> bool {
         let name = Text::from(name);
+        self.record_places.remove(&name);
         self.type_parameter_mirrors.remove(&name);
         self.declared_values.remove(&name);
         self.bindings.shift_remove(&name).is_some()
+    }
+
+    pub(crate) fn mark_mutable_place(&mut self, name: &str) {
+        self.record_places.insert(name.into(), RecordPlace::Mutable);
+    }
+
+    /// A value used as a type index must remain stable for the lifetime of
+    /// any witnesses that have already escaped into the enclosing scope.
+    pub(crate) fn note_record_place_write(&mut self, name: &str) -> bool {
+        let key = Text::from(name);
+        let mut scope = self;
+        while scope.parent.is_some() {
+            if scope.bindings.contains_key(&key) {
+                if matches!(scope.record_places.get(&key), Some(RecordPlace::Projected(_))) {
+                    return false;
+                }
+                scope.record_places.insert(key, RecordPlace::Mutable);
+                break;
+            }
+            scope = scope.parent.as_deref_mut().expect("parent scope");
+        }
+        true
+    }
+
+    /// Identify the nearest lexical value binding. Shadowing and rebinding
+    /// receive distinct identities, even in different clones of the same scope.
+    pub(crate) fn receiver_id(&mut self, name: &str) -> Option<u64> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let key = Text::from(name);
+        let mut scope = self;
+        while scope.parent.is_some() {
+            if scope.bindings.contains_key(&key) {
+                if scope.type_parameter_mirrors.contains(&key) {
+                    return None;
+                }
+                match scope.record_places.get(&key) {
+                    Some(RecordPlace::Mutable) => return None,
+                    Some(RecordPlace::Projected(id)) => return Some(*id),
+                    None => {}
+                }
+                let id = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)).ok()?;
+                scope.record_places.insert(key, RecordPlace::Projected(id));
+                return Some(id);
+            }
+            scope = scope.parent.as_deref_mut()?;
+        }
+        None
     }
 
     /// Look up a variable, searching parent scopes if needed

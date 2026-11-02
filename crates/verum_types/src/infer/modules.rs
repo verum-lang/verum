@@ -12236,6 +12236,9 @@ impl TypeChecker {
                         self.ctx
                             .env
                             .insert("self", TypeScheme::mono(param_ty.clone()));
+                        if matches!(param.kind, FunctionParamKind::SelfValueMut | FunctionParamKind::SelfOwnMut) {
+                            self.ctx.env.mark_mutable_place("self");
+                        }
 
                         // Register in type registry
                         self.type_registry
@@ -16200,6 +16203,10 @@ impl TypeChecker {
         let d = depth + 1;
 
         match ty {
+            Type::Meta { name, value: None, .. } if param_subst.contains_key(name) => {
+                param_subst[name].clone()
+            }
+
             // Type variable: metadata-loaded variant payloads carry their
             // generic params as `Type::Var(tv)` (the source-driven path uses
             // `Named { "T" }`).  `expand_generic_to_variant` keys those vars into

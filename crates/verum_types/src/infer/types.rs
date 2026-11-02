@@ -553,6 +553,47 @@ impl TypeChecker {
         names
     }
 
+    /// Field-slot substitution acts on semantic types. Expression-valued
+    /// indices and predicates need term substitution of their own; treating
+    /// a declaration's field there as an ambient value would lose its owner.
+    fn check_record_index_expression(&self, expr: &Expr) -> Result<()> {
+        use verum_ast::visitor::{Visitor, walk_expr};
+        let Some(scope) = self.decl_param_frames.last() else { return Ok(()) };
+        if !scope.values().any(|ty| matches!(ty, Type::RecordField { .. })) { return Ok(()) }
+        struct Check<'a> {
+            scope: &'a indexmap::IndexMap<Text, Type>,
+            depth: usize,
+            error: Option<TypeError>,
+        }
+        impl Visitor for Check<'_> {
+            fn visit_expr(&mut self, expr: &Expr) {
+                if self.error.is_some() { return }
+                if self.depth >= 64 {
+                    self.error = Some(TypeError::UniverseBinding {
+                        message: "record field expression exceeds its nesting limit".into(), span: expr.span,
+                    });
+                    return;
+                }
+                self.depth += 1;
+                walk_expr(self, expr);
+                self.depth -= 1;
+            }
+            fn visit_path(&mut self, path: &Path) {
+                if let Some(verum_ast::ty::PathSegment::Name(head)) = path.segments.first()
+                    && matches!(self.scope.get(&head.name), Some(Type::RecordField { .. }))
+                {
+                    self.error = Some(TypeError::UniverseBinding {
+                        message: format!("type-valued field `{}` cannot occur in a value-level record index", head.name).into(),
+                        span: path.span,
+                    });
+                }
+            }
+        }
+        let mut check = Check { scope, depth: 0, error: None };
+        check.visit_expr(expr);
+        check.error.map_or(Ok(()), Err)
+    }
+
     pub fn ast_to_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         let head = match &ast_ty.kind {
             verum_ast::ty::TypeKind::Generic { base, .. } => &base.kind,
@@ -679,6 +720,7 @@ impl TypeChecker {
             }
 
             TypeKind::Array { element, size } => {
+                if let Some(size) = size { self.check_record_index_expression(size)?; }
                 let elem_ty = self.ast_to_type(element)?;
                 // Extract array size via const evaluation if size expression is present
                 let array_size = if let verum_common::Maybe::Some(size_expr) = size {
@@ -713,6 +755,8 @@ impl TypeChecker {
 
             // Path type: Path<A>(a, b) → Type::Eq { ty: A, lhs, rhs }
             TypeKind::PathType { carrier, lhs, rhs } => {
+                self.check_record_index_expression(lhs)?;
+                self.check_record_index_expression(rhs)?;
                 let carrier_ty = self.ast_to_type(carrier)?;
                 let lhs_eq = crate::expr_to_eqterm::expr_to_eq_term(lhs);
                 let rhs_eq = crate::expr_to_eqterm::expr_to_eq_term(rhs);
@@ -779,7 +823,15 @@ impl TypeChecker {
                         span: ast_ty.span,
                     });
                 }
-                self.ast_to_type(carrier)
+                for index in value_args { self.check_record_index_expression(index)?; }
+                let carrier = self.ast_to_type(carrier)?;
+                if carrier.contains_record_field() {
+                    return Err(TypeError::UniverseBinding {
+                        message: "value application of a field-dependent type requires retained term indices".into(),
+                        span: ast_ty.span,
+                    });
+                }
+                Ok(carrier)
             }
 
             TypeKind::Path(path) => {
@@ -805,6 +857,7 @@ impl TypeChecker {
             TypeKind::Generic { .. } => self.ast_to_generic_type(ast_ty),
 
             TypeKind::Refined { base, predicate } => {
+                self.check_record_index_expression(&predicate.expr)?;
                 use crate::refinement::{
                     RefinementBinding, RefinementPredicate as TyRefinementPredicate,
                 };
@@ -955,6 +1008,7 @@ impl TypeChecker {
                 use crate::const_eval::ConstEvaluator;
                 use verum_common::ConstValue;
 
+                for dimension in shape { self.check_record_index_expression(dimension)?; }
                 let element_ty = self.ast_to_type(element)?;
 
                 // Evaluate shape expressions to const values.
@@ -1245,7 +1299,14 @@ impl TypeChecker {
             TypeKind::TypeLambda { params: _, body } => {
                 // For now, evaluate the body type
                 // Full dependent type support would track the lambda structure
-                self.ast_to_type(body)
+                let ty = self.ast_to_type(body)?;
+                if ty.contains_record_field() {
+                    return Err(TypeError::UniverseBinding {
+                        message: "a field-dependent type lambda requires a retained binder".into(),
+                        span: ast_ty.span,
+                    });
+                }
+                Ok(ty)
             }
         }
     }
@@ -1288,206 +1349,80 @@ impl TypeChecker {
     }
 
     fn ast_to_rank2_function_type_in_universe_scope(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
-        use verum_ast::ty::TypeKind;
+        use verum_ast::ty::{GenericParamKind, TypeKind};
         let TypeKind::Rank2Function { type_params, params, return_type, .. } = &ast_ty.kind
             else { unreachable!() };
-                // Rank-2 polymorphic function types: fn<R>(Reducer<B, R>) -> Reducer<A, R>
-                // Spec: grammar/verum.ebnf - rank2_function_type
-                //
 
-                // Represented internally as Forall { vars, body: Function }
-                // This is the standard type-theoretic representation of rank-2 types.
-                //
+        // Unlike a lazily entered declaration, an explicit nested binder
+        // inherits the containing telescope, then shadows its own names.
+        let inherited = self.decl_param_frames.last().cloned().unwrap_or_default();
+        self.push_decl_param_frame(inherited);
+        self.ctx.env.push_scope();
+        let mut prior_meta = Vec::new();
+        let mut prior_hkt = Vec::new();
+        let mut prior_kinds = Vec::new();
+        let result = (|| {
+            let mut vars = List::new();
+            for param in type_params {
+                let (name, bounds) = match &param.kind {
+                    GenericParamKind::Type { name, bounds, .. }
+                    | GenericParamKind::HigherKinded { name, bounds, .. }
+                    | GenericParamKind::KindAnnotated { name, bounds, .. } => (name, Some(bounds)),
+                    GenericParamKind::Const { name, .. } | GenericParamKind::Meta { name, .. } =>
+                        (name, None),
+                    GenericParamKind::Lifetime { .. } | GenericParamKind::Context { .. }
+                    | GenericParamKind::Level { .. } => continue,
+                };
+                let var = TypeVar::fresh();
+                self.ctx.env.insert_mono(name.name.clone(), Type::Var(var));
+                self.decl_param_frames.last_mut().expect("rank-2 declaration frame")
+                    .insert(name.name.clone(), Type::Var(var));
+                vars.push(var);
 
-                // The universally quantified type parameters are scoped locally
-                // to this function type, meaning callers must work with all possible
-                // instantiations, not choose a specific one.
-
-                // Push a scope for the rank-2 type parameters
-                self.ctx.env.push_scope();
-
-                // Convert type parameters to TypeVars and register them in scope
-                let mut type_vars: List<TypeVar> = List::new();
-                let mut param_names: List<Text> = List::new();
-
-                for param in type_params {
-                    use verum_ast::ty::GenericParamKind;
-                    match &param.kind {
-                        GenericParamKind::Type { name, bounds, .. } => {
-                            // Create fresh type variable for this parameter
-                            let tvar = TypeVar::fresh();
-                            let type_var = Type::Var(tvar);
-                            let name_text: Text = name.name.clone();
-
-                            // Register in environment and type context so it can be resolved
-                            self.ctx
-                                .env
-                                .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
-                            self.ctx.define_type(name_text.clone(), type_var);
-
-                            // Register bounds if present
-                            if !bounds.is_empty() {
-                                if let Ok(protocol_bounds) =
-                                    self.convert_type_bounds_to_protocol_bounds(bounds)
-                                {
-                                    self.register_type_var_bounds(tvar, protocol_bounds);
-                                }
-                            }
-
-                            type_vars.push(tvar);
-                            param_names.push(name_text);
-                        }
-                        GenericParamKind::HigherKinded { name, bounds, .. } => {
-                            // Higher-kinded type parameter
-                            let tvar = TypeVar::fresh();
-                            let type_var = Type::Var(tvar);
-                            let name_text: Text = name.name.clone();
-
-                            self.ctx
-                                .env
-                                .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
-                            self.ctx.define_type(name_text.clone(), type_var);
-
-                            // Side table: only register when a protocol bound
-                            // is present — bare HKT slots can't be dispatched
-                            // through anyway (see the paired site above for
-                            // full rationale).
-                            if !bounds.is_empty() {
-                                self.hkt_type_var_by_name.insert(name_text.clone(), tvar);
-                            }
-
-                            // Register bounds if present
-                            if !bounds.is_empty() {
-                                if let Ok(protocol_bounds) =
-                                    self.convert_type_bounds_to_protocol_bounds(bounds)
-                                {
-                                    self.register_type_var_bounds(tvar, protocol_bounds);
-                                }
-                            }
-
-                            type_vars.push(tvar);
-                            param_names.push(name_text);
-                        }
-                        GenericParamKind::Const { name, .. } => {
-                            // Const generics - treat as type variable for now
-                            let tvar = TypeVar::fresh();
-                            let type_var = Type::Var(tvar);
-                            let name_text: Text = name.name.clone();
-
-                            self.ctx
-                                .env
-                                .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
-                            self.ctx.define_type(name_text.clone(), type_var);
-
-                            // Audit-A4: register the const-generic in the
-                            // const-generic environment alongside Meta-params.
-                            // See the parallel comment on the Meta arm for
-                            // the full rationale.
-                            self.ctx.meta_param_environment.insert(
-                                name_text.clone(),
-                                crate::context::MetaParamBinding::Symbolic,
-                            );
-
-                            type_vars.push(tvar);
-                            param_names.push(name_text);
-                        }
-                        GenericParamKind::Meta { name, .. } => {
-                            // Meta parameters need type variables too for use in type arguments
-                            // E.g., fn foo<N: meta USize>() -> Array<N>
-                            let tvar = TypeVar::fresh();
-                            let type_var = Type::Var(tvar);
-                            let name_text: Text = name.name.clone();
-
-                            self.ctx
-                                .env
-                                .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
-                            self.ctx.define_type(name_text.clone(), type_var);
-
-                            // Audit-A4: register the meta-param in the
-                            // const-generic environment. Until a concrete
-                            // instantiation is observed (e.g. `foo::<5>()`),
-                            // the binding stays Symbolic — refinement
-                            // predicates referencing this name will be
-                            // passed verbatim to SMT, where the solver can
-                            // reason about the bounds. When instantiation
-                            // does land in a future commit, the binding
-                            // promotes to `Bound(MetaValue::Int(5))` and
-                            // `substitute_in_refinement_predicate` inlines
-                            // the value at every reference site.
-                            self.ctx.meta_param_environment.insert(
-                                name_text.clone(),
-                                crate::context::MetaParamBinding::Symbolic,
-                            );
-
-                            type_vars.push(tvar);
-                            param_names.push(name_text);
-                        }
-                        GenericParamKind::KindAnnotated {
-                            name,
-                            kind: kind_ann,
-                            bounds,
-                        } => {
-                            // Kind-annotated HKT parameter in rank-2 function type context
-                            let tvar = TypeVar::fresh();
-                            let type_var = Type::Var(tvar);
-                            let name_text: Text = name.name.clone();
-
-                            self.ctx
-                                .env
-                                .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
-                            self.ctx.define_type(name_text.clone(), type_var);
-
-                            // Register kind with kind_inferer
-                            let infer_kind = Self::ast_kind_to_infer_kind(kind_ann);
-                            self.kind_inferer
-                                .register_type_constructor(name_text.clone(), infer_kind);
-
-                            if !bounds.is_empty() {
-                                if let Ok(protocol_bounds) =
-                                    self.convert_type_bounds_to_protocol_bounds(bounds)
-                                {
-                                    self.register_type_var_bounds(tvar, protocol_bounds);
-                                }
-                            }
-
-                            type_vars.push(tvar);
-                            param_names.push(name_text);
-                        }
-                        GenericParamKind::Lifetime { .. }
-                        | GenericParamKind::Context { .. }
-                        | GenericParamKind::Level { .. } => {
-                            // These don't introduce type variables in the same way
-                        }
+                // A lexical binder also shadows the outer parameter's
+                // metadata even when its own parameter kind is different.
+                let key = name.name.clone();
+                prior_meta.push((key.clone(), self.ctx.meta_param_environment.remove(&key)));
+                prior_hkt.push((key.clone(), self.hkt_type_var_by_name.remove(&key)));
+                prior_kinds.push((key.clone(), self.kind_inferer.remove_constructor_kind(&key)));
+                match &param.kind {
+                    GenericParamKind::Const { .. } | GenericParamKind::Meta { .. } => {
+                        self.ctx.meta_param_environment.insert(key, crate::context::MetaParamBinding::Symbolic);
                     }
+                    GenericParamKind::HigherKinded { bounds, .. } if !bounds.is_empty() => {
+                        self.hkt_type_var_by_name.insert(key, var);
+                    }
+                    GenericParamKind::KindAnnotated { kind: kind_ann, .. } => {
+                        self.kind_inferer.register_type_constructor(key, Self::ast_kind_to_infer_kind(kind_ann));
+                    }
+                    _ => {}
                 }
-
-                // Convert parameter and return types (now type params are in scope)
-                let param_types: Result<List<_>> =
-                    params.iter().map(|p| self.ast_to_type(p)).collect();
-                let param_types = param_types?;
-                let ret_type = self.ast_to_type(return_type)?;
-
-                // Pop the scope - type parameters are no longer visible
-                self.ctx.env.pop_scope();
-
-                // Clean up type definitions (they were added to the flat type map)
-                for name in &param_names {
-                    self.ctx.remove_type(name);
+                if let Some(bounds) = bounds && !bounds.is_empty()
+                    && let Ok(bounds) = self.convert_type_bounds_to_protocol_bounds(bounds)
+                {
+                    self.register_type_var_bounds(var, bounds);
                 }
-
-                // Build the inner function type
-                let fn_type = Type::function(param_types, ret_type);
-
-                // Wrap in Forall if there are quantified type parameters
-                if type_vars.is_empty() {
-                    // Degenerate case: no type parameters, just a regular function
-                    Ok(fn_type)
-                } else {
-                    Ok(Type::Forall {
-                        vars: type_vars,
-                        body: Box::new(fn_type),
-                    })
-                }
+            }
+            let inputs = params.iter().map(|p| self.ast_to_type(p)).collect::<Result<List<_>>>()?;
+            let function = Type::function(inputs, self.ast_to_type(return_type)?);
+            Ok(if vars.is_empty() { function }
+                else { Type::Forall { vars, body: Box::new(function) } })
+        })();
+        self.ctx.env.pop_scope();
+        self.pop_decl_param_frame();
+        for (key, value) in prior_meta {
+            self.ctx.meta_param_environment.remove(&key);
+            if let Some(value) = value { self.ctx.meta_param_environment.insert(key, value); }
+        }
+        for (key, value) in prior_hkt {
+            self.hkt_type_var_by_name.remove(&key);
+            if let Some(value) = value { self.hkt_type_var_by_name.insert(key, value); }
+        }
+        for (key, value) in prior_kinds {
+            self.kind_inferer.remove_constructor_kind(&key);
+            if let Some(value) = value { self.kind_inferer.register_type_constructor(key, value); }
+        }
+        result
     }
 
     /// Convert a `TypeKind::Generic` AST node (e.g. `List<T>`, `Matrix<Float,2,3>`)
@@ -1641,19 +1576,22 @@ fn substitute_refinement_binder(
                             type_args.push(arg_ty);
                         }
                         GenericArg::Const(expr) => {
+                            self.check_record_index_expression(expr)?;
                             // Const generic arguments are compile-time values.
                             // Represent them as `Type::Meta` with the concrete `value` set
                             // (see `eval_const_arg`) so dimension mismatches like
                             // `Matrix<Float, 7, 7>` vs `Matrix<Float, 5, 5>` are caught
                             // during unification instead of being collapsed to the same
                             // `Int`-typed argument list.
-                            match self.eval_const_arg(expr) {
-                                Some(ty) => type_args.push(ty),
-                                None => {
-                                    let expr_ty = self.synth_expr(expr)?;
-                                    type_args.push(expr_ty.ty);
-                                }
-                            }
+                            let symbolic = match &expr.kind {
+                                ExprKind::Path(path) => path.as_ident().and_then(|id| self.lookup_decl_param(&id.name))
+                                    .filter(|ty| matches!(ty, Type::Meta { .. })).cloned(),
+                                _ => None,
+                            };
+                            type_args.push(match symbolic.or_else(|| self.eval_const_arg(expr)) {
+                                Some(ty) => ty,
+                                None => self.synth_expr(expr)?.ty,
+                            });
                         }
                         GenericArg::Lifetime(lifetime) => {
                             // Lifetime arguments: 'a, 'b, 'static
@@ -1761,6 +1699,30 @@ fn substitute_refinement_binder(
                                 });
                             }
                         }
+                        // A carried meta slot is a value of its declared sort.
+                        // The PID vector covers only ordinary type arguments;
+                        // use the exact declaration frame for kind checking.
+                        if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key)
+                            && parameters.values().any(|p| matches!(p, Type::Meta { .. }))
+                        {
+                            for ((name, role), argument) in parameters.iter().zip(
+                                type_args.iter().filter(|ty| !matches!(ty, Type::Lifetime { .. })))
+                            {
+                                let valid = match (role, argument) {
+                                    (Type::Meta { ty: expected, .. }, Type::Meta { ty: actual, .. }) =>
+                                        self.types_equivalent(actual, expected),
+                                    (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
+                                    _ => true,
+                                };
+                                if !valid {
+                                    return Err(TypeError::OtherWithCodeSpanned {
+                                        code: "E407".into(),
+                                        msg: format!("argument for `{type_name}.{name}` has the wrong kind: expected {role}, found {argument}").into(),
+                                        span: ast_ty.span,
+                                    });
+                                }
+                            }
+                        }
                         // A refinement on a META parameter is checked
                         // HERE, where the argument is supplied — the
                         // point of a compile-time parameter being that
@@ -1810,6 +1772,12 @@ fn substitute_refinement_binder(
                 // Return the base type with arguments
                 // Lifetimes are embedded in type_args as Type::Lifetime
                 let result_type = match &base_ty {
+                    Type::RecordField { .. } => return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E407".into(),
+                        msg: format!("type-valued field `{}` takes no type arguments",
+                            verum_ast::pretty::format_type(base)).into(),
+                        span: ast_ty.span,
+                    }),
                     Type::Named { path, .. } => Type::Named {
                         path: path.clone(),
                         args: type_args.clone(),
@@ -4712,6 +4680,7 @@ fn substitute_refinement_binder(
         use Type::*;
 
         match ty {
+            RecordField { .. } => ty.clone(),
             // Resolve Named types to their underlying type definitions (type aliases)
             Named { path, args } => self.normalize_named_type(path, args, depth),
 
@@ -5611,6 +5580,7 @@ fn substitute_refinement_binder(
         let next_depth = depth + 1;
 
         match ty {
+            RecordField { .. } => ty.clone(),
             // For Named and Generic types, we need to check if they contain term-level indices
             // This is for types like `Vec n T` where `n` is a value parameter
             Named { path, args } => {

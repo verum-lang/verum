@@ -25,6 +25,10 @@ use crate::refinement::RefinementPredicate;
 
 pub use crate::universe_level::UniverseLevel;
 
+#[path = "record_field_types.rs"]
+mod record_field_types;
+pub use record_field_types::{RecordFieldSlot, RecordReceiver};
+
 /// Term representation for equality types.
 /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution
 ///
@@ -389,6 +393,14 @@ pub enum Type {
 
     /// Type variable (for inference)
     Var(TypeVar),
+
+    /// A type-valued entry in a nominal record telescope. Before introduction
+    /// it is bound by the declaration; after elimination by its actual receiver.
+    RecordField {
+        slot: Box<RecordFieldSlot>,
+        receiver: Option<Box<RecordReceiver>>,
+        level: UniverseLevel,
+    },
 
     /// Named type (user-defined or protocol)
     ///
@@ -1362,6 +1374,8 @@ impl Type {
         }
         let d = depth + 1;
         match ty {
+            Type::Meta { name, value: None, .. } if subst.contains_key(name) => subst[name].clone(),
+
             // Type variables with matching names get substituted
             Type::Var(tv) => {
                 let name = Text::from(format!("{}", tv));
@@ -2240,6 +2254,8 @@ impl Type {
                 level: level.succ(),
             },
 
+            Type::RecordField { level, .. } => Type::Universe { level: level.clone() },
+
             // Pi types: (x: A) -> B
             // The universe is the maximum of A's universe and B's universe
             // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case
@@ -2667,6 +2683,7 @@ impl Type {
             | Type::Text
             | Type::Lifetime { .. }
             | Type::Universe { .. }
+            | Type::RecordField { .. }
             | Type::Prop
             | Type::Placeholder { .. } => {}
         }
@@ -2969,6 +2986,11 @@ impl Type {
                 face: face.clone(), // CubicalTerms are value-level
             },
             Type::Interval => Type::Interval,
+            Type::RecordField { slot, receiver, level } => Type::RecordField {
+                slot: slot.clone(),
+                receiver: receiver.clone(),
+                level: subst.universes.apply(level)?,
+            },
             Type::Universe { level } => Type::Universe {
                 level: subst.universes.apply(level)?,
             },
@@ -3138,6 +3160,12 @@ impl fmt::Display for Type {
             Type::Char => write!(f, "Char"),
             Type::Text => write!(f, "Text"),
             Type::Var(v) => write!(f, "{}", v),
+            Type::RecordField { slot, receiver, .. } => {
+                if let Some(receiver) = receiver {
+                    write!(f, "{receiver}.")?;
+                }
+                write!(f, "{}[{}]", slot.owner, slot.ordinal)
+            }
             Type::Named { path, args } => {
                 write!(f, "{}", format_path(path))?;
                 if !args.is_empty() {

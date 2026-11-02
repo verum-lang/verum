@@ -301,6 +301,7 @@ pub fn collect_type_vars(ty: &InternalType) -> Set<crate::ty::TypeVar> {
         | InternalType::Lifetime { .. }
         | InternalType::TypeConstructor { .. }
         | InternalType::Interval
+        | InternalType::RecordField { .. }
         | InternalType::Universe { .. }
         | InternalType::Prop
         | InternalType::Placeholder { .. } => {}

@@ -18,6 +18,8 @@ mod source_type_registration;
 mod universe_parameters;
 mod call_obligations;
 mod preparation;
+mod dependent_records;
+mod record_kernel;
 mod field_visibility;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
 pub(crate) mod env;             // Environment management (stdlib bootstrap, pre-register, constraints)

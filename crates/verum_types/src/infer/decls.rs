@@ -136,7 +136,9 @@ impl TypeChecker {
                 _ => None,
             };
             if let Some(n) = name_opt {
-                param_record.insert(n, Type::Int);
+                let parameter = self.lookup_decl_param(n.as_str())
+                    .filter(|ty| matches!(ty, Type::Meta { .. })).cloned().unwrap_or(Type::Int);
+                param_record.insert(n, parameter);
             }
         }
 
@@ -149,6 +151,28 @@ impl TypeChecker {
             Type::Record(param_record),
         );
         arity
+    }
+
+    /// Preserve the value sort of meta/const parameters in the declaration
+    /// frame. A runtime type PID exists only for ordinary type parameters.
+    fn bind_semantic_value_parameters(&mut self, declaration: &TypeDecl) -> Result<()> {
+        use verum_ast::ty::GenericParamKind;
+        if !declaration.generics.iter().any(|parameter| matches!(parameter.kind,
+                GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }))
+            || !verum_ast::source_signature::type_declaration_needs_semantic_carrier(declaration)
+                .map_err(|message| TypeError::UniverseBinding { message, span: declaration.span })?
+        {
+            return Ok(());
+        }
+        for parameter in &declaration.generics {
+            if let GenericParamKind::Meta { name, ty, .. } | GenericParamKind::Const { name, ty } = &parameter.kind {
+                let base = self.ast_to_type(ty)?;
+                let value = Type::meta(name.name.clone(), base, None);
+                self.decl_param_frames.last_mut().expect("declaration parameter frame")
+                    .insert(name.name.clone(), value);
+            }
+        }
+        Ok(())
     }
 
     /// Record constraints independently of the representation used for
@@ -566,6 +590,7 @@ impl TypeChecker {
         let body_result: Result<()> = (|| {
         // Defaults share the declaration's lexical parameter frame and owner.
         // Imported signatures cannot postpone a missing name to the consumer.
+        self.bind_semantic_value_parameters(type_decl)?;
         self.record_type_param_defaults(type_name.as_str(), &type_decl.generics)?;
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
@@ -1628,6 +1653,72 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Form a record in declaration order. Only a preceding field whose
+    /// annotation is a universe introduces a type binder. The declaration
+    /// frame also owns its generic parameters and is popped on every exit.
+    fn elaborate_record_fields(
+        &mut self,
+        owner: &Text,
+        fields: &[RecordField],
+        allow_forward_declarations: bool,
+    ) -> Result<indexmap::IndexMap<Text, Type>> {
+        let mut entries = indexmap::IndexMap::with_capacity(fields.len());
+        for (ordinal, field) in fields.iter().enumerate() {
+            let name = &field.name.name;
+            if entries.contains_key(name) {
+                return Err(TypeError::Other(format!("duplicate field `{name}` in `{owner}`").into()));
+            }
+            let ty = match self.ast_to_type(&field.ty) {
+                Ok(ty) => ty,
+                Err(TypeError::TypeNotFound { name: missing, span })
+                    if allow_forward_declarations && !self.resolving_source_signature =>
+                {
+                    // Only a forward *declaration* may be deferred. A missing
+                    // name that designates this very record's field is already
+                    // known to be unavailable as a type in this prefix.
+                    if fields.iter().any(|field| field.name.name == missing) {
+                        return Err(TypeError::TypeNotFound { name: missing, span });
+                    }
+                    self.ast_to_type_lenient(&field.ty)
+                }
+                Err(error) => return Err(error),
+            };
+            if let Type::Universe { level } = &ty {
+                let slot = crate::ty::RecordFieldSlot { owner: owner.clone(), ordinal };
+                self.decl_param_frames.last_mut()
+                    .expect("record fields are checked inside their declaration frame")
+                    .insert(name.clone(), Type::RecordField {
+                        slot: Box::new(slot), receiver: None, level: level.clone(),
+                    });
+            }
+            entries.insert(name.clone(), ty);
+        }
+        Ok(entries)
+    }
+
+    fn publish_record_fields(
+        &mut self,
+        name: &Text,
+        fields: indexmap::IndexMap<Text, Type>,
+        span: Span,
+    ) -> Result<()> {
+        // An ordinary record cannot bind a type-valued slot. Declarations
+        // which do bind one share the projection/constructor layout validator.
+        if fields.values().any(|ty| matches!(ty, Type::Universe { .. }))
+            && let Some(owner) = super::dependent_records::dependent_record_owner(&fields, span)?
+        {
+            if owner != self.declared_type_key(name) {
+                return Err(TypeError::UniverseBinding {
+                    message: format!("dependent fields in `{name}` belong to `{owner}`").into(), span,
+                });
+            }
+            self.define_declared_type_metadata("__dependent_record_", name, Type::Unit);
+            self.ctx.define_type("__has_dependent_record_layouts", Type::Unit);
+        }
+        self.define_declared_type_metadata("__struct_fields_", name, Type::Record(fields));
+        Ok(())
+    }
+
     /// Register a record (struct-like) type declaration body.
     /// Resolves field types, registers `__type_params_*` for generic arity,
     /// emits the Record type and method-dispatch stubs.
@@ -1644,6 +1735,8 @@ impl TypeChecker {
         let TypeDeclBody::Record(fields) = &type_decl.body
             else { unreachable!() };
         self.register_record_field_visibility(type_name.as_str(), fields);
+        // Field binders may shadow declaration parameters in the field telescope.
+        self.register_declared_type_arity(type_name, &type_decl.generics);
         let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
@@ -1652,43 +1745,8 @@ impl TypeChecker {
                 let placeholder_var = TypeVar::fresh();
                 self.define_type_in_current_module(type_name.clone(), Type::Var(placeholder_var));
 
-                // Convert record declarations to Type::Record for field type info
-                // CRITICAL FIX: Use ast_to_type with fallback to ast_to_type_lenient.
-                // When a type is imported from another module (e.g., DefectInfo from core.result),
-                // its field types (e.g., Maybe<Text>) might not be available yet if their
-                // defining modules haven't been fully processed. Using lenient resolution
-                // ensures that the struct fields are always registered, even if some field
-                // types are temporarily unresolved (they become type variables that get
-                // resolved during unification).
-                //
-
-                // Example: `type DefectInfo is { location: Maybe<Text> }`
-                // If Maybe isn't registered yet, ast_to_type would fail, preventing
-                // __struct_fields_DefectInfo from being created. With lenient fallback,
-                // Maybe<Text> becomes Named{Maybe, [Text]} or a type variable, and field
-                // access will still work once Maybe is properly resolved.
-                let mut record_map: IndexMap<Text, Type> = IndexMap::new();
-                for field in fields {
-                    let field_name: Text = field.name.name.as_str().into();
-                    // Try strict resolution first, fall back to lenient
-                    let field_type = match self.ast_to_type(&field.ty) {
-                        Ok(ty) => ty,
-                        // VALIDATION errors are user defects and must
-                        // surface — the lenient fallback exists ONLY for
-                        // resolution-order gaps (forward references that a
-                        // later pass closes). Swallowing everything made
-                        // field-position defects (E408 dependent-arity,
-                        // T0266) vanish while the same annotation errored
-                        // in every other position.
-                        Err(e) if !self.resolving_source_signature && !Self::field_error_must_surface(&e) => {
-                            // Lenient resolution: unresolved types become fresh type variables
-                            // or Named types that will be resolved later
-                            self.ast_to_type_lenient(&field.ty)
-                        }
-                        Err(e) => return Err(e),
-                    };
-                    record_map.insert(field_name, field_type);
-                }
+                let owner = self.declared_type_key(type_name.as_str());
+                let record_map = self.elaborate_record_fields(&owner, fields, true)?;
 
                 // C2-WIRE V3 + #154 unified call site —
                 // strict-positivity on record-shaped types via the
@@ -1915,18 +1973,8 @@ impl TypeChecker {
 
                     // Also store the record structure under a different key for field access
                     // This allows us to validate field accesses while keeping the nominal type
-                    self.define_declared_type_metadata(
-                        "__struct_fields_",
-                        type_name.as_str(),
-                        Type::Record(record_map),
-                    );
+                    self.publish_record_fields(&type_name, record_map, type_decl.span)?;
 
-                    // Store type parameter names for bidirectional inference.
-                    // This allows us to substitute concrete types for generic parameters
-                    // when checking record literals like `Box { value: 42 }` against `Box<Int>`,
-                    // and the arity checker in `compile_type_path` uses `param_record.len()`
-                    // to validate `expected_count == provided_count`.
-                    self.register_declared_type_arity(&type_name, &type_decl.generics);
                 }
         Ok(())
     }
@@ -1946,6 +1994,7 @@ impl TypeChecker {
         use verum_common::Text;
         let TypeDeclBody::Protocol(protocol_body) = &type_decl.body
             else { unreachable!() };
+        self.register_declared_type_arity(type_name, &type_decl.generics);
         let type_name = type_name.clone();
                 // Protocol types (e.g., `type Database is protocol { ... }`)
                 // Register as Named type for type checking
@@ -2366,48 +2415,6 @@ impl TypeChecker {
     // After Pass 1: SearchRequest -> Placeholder, SortOrder -> Placeholder
     // After Pass 2: Both fully resolved
 
-    /// Pass 1: Register type name only (creates placeholder).
-    ///
-    /// This is the first pass of two-pass type resolution. It registers
-    /// the type name as a placeholder, allowing forward references to work.
-    ///
-    /// # Example
-    /// ```verum
-    /// type SearchRequest is { sort_by: SortOrder };
-    /// type SortOrder is Relevance | Downloads;
-    /// ```
-    ///
-    /// After calling `register_type_name_only` for both types, `SearchRequest`
-    /// can reference `SortOrder` even though it's defined later.
-    /// Field-type resolution runs strict-then-lenient: the lenient
-    /// fallback exists ONLY for resolution-ORDER gaps (forward
-    /// references a later pass closes). A VALIDATION defect — the
-    /// annotation is well-resolved but WRONG — must surface no matter
-    /// which syntactic position carries it; swallowing it here made
-    /// record-field positions the one place a defect silently vanished.
-    /// Extend this predicate when new validation-class TypeErrors gain
-    /// arms in `ast_to_type`.
-    fn field_error_must_surface(e: &crate::TypeError) -> bool {
-        // INVERTED (T0924). This used to be a whitelist with ONE member,
-        // so every other defect in a field's type annotation was
-        // swallowed and replaced by a lenient re-resolution — and a
-        // record field became the one position in the language where an
-        // annotation is not checked:
-        //
-        //     let p: Pair<Int, Text, Bool>            refused
-        //     fn take(p: Pair<Int, Text, Bool>)       refused
-        //     type Bad is { p: Pair<Int, Text, Bool> } ACCEPTED
-        //
-        // The comment above the call site already stated the right rule —
-        // "the lenient fallback exists ONLY for resolution-order gaps
-        // (forward references that a later pass closes)" — and the
-        // predicate implemented a list instead of the rule. Naming the
-        // gap is both shorter and total: a forward reference is
-        // `TypeNotFound`, and everything else is a defect in what the
-        // author wrote.
-        !matches!(e, crate::TypeError::TypeNotFound { .. })
-    }
-
     /// T0266 — ONE authority for recording a dependent family's declared
     /// value-parameter arity. Both registration entry points feed it:
     /// the two-pass flow (`register_type_name_only`, used by the check /
@@ -2823,7 +2830,8 @@ impl TypeChecker {
         self.push_decl_param_frame(param_frame);
 
         // Now resolve the actual type definition (similar to register_type_declaration)
-        let result = self.resolve_type_body(type_decl, &type_name);
+        let result = self.bind_semantic_value_parameters(type_decl)
+            .and_then(|_| self.resolve_type_body(type_decl, &type_name));
 
         self.pop_decl_param_frame();
         let _ = type_param_names;
@@ -3473,6 +3481,8 @@ impl TypeChecker {
         let verum_ast::decl::TypeDeclBody::Record(fields) = &type_decl.body
             else { unreachable!() };
         self.register_record_field_visibility(type_name.as_str(), fields);
+        // Field binders may shadow declaration parameters in the field telescope.
+        self.register_declared_type_arity(type_name, &type_decl.generics);
         let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
@@ -3482,16 +3492,8 @@ impl TypeChecker {
                 // each other during recursive resolution.
                 self.define_type_in_current_module(type_name.clone(), Type::Var(placeholder_var));
 
-                // This is final declaration resolution: imports and forward
-                // type names have already been registered. Only initial/import
-                // registration may defer an unavailable type; swallowing it here
-                // lets an undefined field type survive the completed module.
-                let mut record_map: IndexMap<Text, Type> = IndexMap::new();
-                for field in fields {
-                    let field_name: Text = field.name.name.as_str().into();
-                    let field_type = self.ast_to_type(&field.ty)?;
-                    record_map.insert(field_name, field_type);
-                }
+                let owner = self.declared_type_key(type_name.as_str());
+                let record_map = self.elaborate_record_fields(&owner, fields, false)?;
 
                 // C2-WIRE V3 + #154 unified call site —
                 // strict-positivity for record-form types in the
@@ -3536,11 +3538,7 @@ impl TypeChecker {
 
                     // CRITICAL: Also register empty struct fields for pattern matching
                     // Empty record allows `match e { Empty {} => ... }` patterns
-                    self.define_declared_type_metadata(
-                        "__struct_fields_",
-                        type_name.as_str(),
-                        Type::Record(record_map),
-                    );
+                    self.publish_record_fields(&type_name, record_map, type_decl.span)?;
                 } else {
                     // Non-empty record: Register as Named type with field structure
 
@@ -3706,14 +3704,8 @@ impl TypeChecker {
                     };
 
                     // Store record structure for field access
-                    self.define_declared_type_metadata(
-                        "__struct_fields_",
-                        type_name.as_str(),
-                        Type::Record(record_map),
-                    );
+                    self.publish_record_fields(&type_name, record_map, type_decl.span)?;
 
-                    // Store type parameters for bidirectional inference.
-                    self.register_declared_type_arity(&type_name, &type_decl.generics);
                 }
         Ok(())
     }
@@ -3732,6 +3724,7 @@ impl TypeChecker {
         use verum_common::Text;
         let verum_ast::decl::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
             else { unreachable!() };
+        self.register_declared_type_arity(type_name, &type_decl.generics);
         let type_name = type_name.clone();
                 // Protocol types are registered as Named types
                 let ty = Type::Named {

@@ -369,6 +369,9 @@ impl TypeChecker {
                 self.ctx
                     .env
                     .insert(name.name.as_str(), binding_scheme.clone());
+                if *mutable {
+                    self.ctx.env.mark_mutable_place(name.name.as_str());
+                }
                 // Register affine bindings for move semantics enforcement.
                 // CRITICAL: ref bindings (`ref x`, `ref mut x`) are borrows, NOT ownership
                 // transfers. They can be used multiple times without being consumed.
@@ -657,6 +660,9 @@ impl TypeChecker {
                 fields: field_patterns,
                 rest,
             } => {
+                if self.is_dependent_record(&scheme.ty) {
+                    return Err(TypeError::Other("dependent record patterns require a stable receiver; use named projections".into()));
+                }
                 for field in field_patterns {
                     self.check_record_field_visibility(&scheme.ty, field.name.name.as_str(), field.span)?;
                 }
@@ -3008,6 +3014,9 @@ impl TypeChecker {
             }
 
             PatternKind::Record { fields, .. } => {
+                if self.is_dependent_record(ty) {
+                    return Err(TypeError::Other("dependent record patterns require a stable receiver; use named projections".into()));
+                }
                 // Record pattern: collect bindings from each field pattern
                 if let Type::Record(field_types) = ty {
                     let mut all_bindings = List::new();

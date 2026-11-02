@@ -19,6 +19,7 @@ debug-output = []
 bincode = { workspace = true }
 verum_ast = { workspace = true }
 verum_common = { workspace = true }
+verum_kernel = { workspace = true }
 verum_diagnostics = { workspace = true }
 verum_error = { workspace = true }
 verum_protocol_types = { workspace = true }

@@ -117,6 +117,17 @@ impl TypeTranslator {
 
     /// Translate a verum_types::Type to Z3 Sort
     pub fn translate_type_to_sort(&mut self, ty: &Type) -> Result<Sort, TypeTranslationError> {
+        // Several encodings erase named arguments or record fields. A sort
+        // for a dependent carrier requires its receiver and field identity.
+        if ty.contains_record_field() {
+            return Err(TypeTranslationError::UnsupportedType(
+                "SMT sort translation does not support dependent record fields".into(),
+            ));
+        }
+        self.translate_independent_sort(ty)
+    }
+
+    fn translate_independent_sort(&mut self, ty: &Type) -> Result<Sort, TypeTranslationError> {
         // Check cache first
         let ty_key = format!("{:?}", ty).into();
         if let Some(sort) = self.type_cache.get(&ty_key) {
@@ -124,6 +135,7 @@ impl TypeTranslator {
         }
 
         let sort = match ty {
+            Type::RecordField { .. } => unreachable!("checked record-field support above"),
             Type::Unit => Ok(Sort::bool()),  // Model unit as singleton bool
             Type::Never => Ok(Sort::bool()), // Bottom type as bool (all proofs lead here)
             Type::Bool => Ok(Sort::bool()),
@@ -172,8 +184,8 @@ impl TypeTranslator {
                 // Function types: A -> B
                 // Encode as array (domain -> codomain) for simple cases
                 if params.len() == 1 {
-                    let param_sort = self.translate_type_to_sort(&params[0])?;
-                    let return_sort = self.translate_type_to_sort(return_type)?;
+                    let param_sort = self.translate_independent_sort(&params[0])?;
+                    let return_sort = self.translate_independent_sort(return_type)?;
                     Ok(Sort::array(&param_sort, &return_sort))
                 } else {
                     // Multiple parameters - use uninterpreted sort
@@ -193,13 +205,13 @@ impl TypeTranslator {
             }
 
             Type::Array { element, size: _ } => {
-                let elem_sort = self.translate_type_to_sort(element)?;
+                let elem_sort = self.translate_independent_sort(element)?;
                 // Array as Z3 array: Int -> Element
                 Ok(Sort::array(&Sort::int(), &elem_sort))
             }
 
             Type::Slice { element } => {
-                let elem_sort = self.translate_type_to_sort(element)?;
+                let elem_sort = self.translate_independent_sort(element)?;
                 // Slice same as array
                 Ok(Sort::array(&Sort::int(), &elem_sort))
             }
@@ -268,7 +280,7 @@ impl TypeTranslator {
                         }
                         // Non-unit → one field carrying the payload.
                         _ => {
-                            let payload_sort = self.translate_type_to_sort(payload_ty)?;
+                            let payload_sort = self.translate_independent_sort(payload_ty)?;
                             dt_builder = dt_builder.variant(
                                 variant_name.as_str(),
                                 vec![(
@@ -293,22 +305,22 @@ impl TypeTranslator {
             | Type::Ownership { inner, .. }
             | Type::Pointer { inner, .. } => {
                 // References are transparent to the type system for verification
-                self.translate_type_to_sort(inner)
+                self.translate_independent_sort(inner)
             }
 
             Type::Refined { base, predicate: _ } => {
                 // Refinement types: use base type, predicate is checked separately
-                self.translate_type_to_sort(base)
+                self.translate_independent_sort(base)
             }
 
             Type::Exists { body, .. } | Type::Forall { body, .. } => {
                 // Quantified types: extract body
-                self.translate_type_to_sort(body)
+                self.translate_independent_sort(body)
             }
 
             Type::Meta { ty, .. } => {
                 // Meta parameters: use underlying type
-                self.translate_type_to_sort(ty)
+                self.translate_independent_sort(ty)
             }
 
             Type::Future { output: _ } => {
@@ -326,7 +338,7 @@ impl TypeTranslator {
 
             Type::Tensor { element, shape, .. } => {
                 // Tensor as nested arrays
-                let elem_sort = self.translate_type_to_sort(element)?;
+                let elem_sort = self.translate_independent_sort(element)?;
                 // For multi-dimensional: build nested array sorts
                 let mut current_sort = elem_sort;
                 for _ in 0..shape.len() {
@@ -342,7 +354,7 @@ impl TypeTranslator {
 
             Type::GenRef { inner } => {
                 // GenRef wraps a CBGR reference - use inner type
-                self.translate_type_to_sort(inner)
+                self.translate_independent_sort(inner)
             }
 
             Type::TypeConstructor { name, .. } => {
@@ -411,7 +423,7 @@ impl TypeTranslator {
                 // Track quantity and use inner type
                 let key = format!("{:?}", inner).into();
                 self.quantity_map.insert(key, *quantity);
-                self.translate_type_to_sort(inner)
+                self.translate_independent_sort(inner)
             }
 
             // ===== ADDED 2026-04-24 (cycle-break rewrite) =====
@@ -434,7 +446,7 @@ impl TypeTranslator {
 
             // Volatile pointers (MMIO) are semantically transparent to the
             // type system — unwrap like other reference forms.
-            Type::VolatilePointer { inner, .. } => self.translate_type_to_sort(inner),
+            Type::VolatilePointer { inner, .. } => self.translate_independent_sort(inner),
 
             // Dynamic protocol objects. Key the uninterpreted sort by the
             // stable bounds concatenation so `dyn Eq` and `dyn Eq + Ord`
@@ -461,7 +473,7 @@ impl TypeTranslator {
             // `Partial<A>(φ)`. The SMT-relevant content is the element
             // type; the face-formula φ is handled separately as a
             // constraint on dimension variables.
-            Type::Partial { element_type, .. } => self.translate_type_to_sort(element_type),
+            Type::Partial { element_type, .. } => self.translate_independent_sort(element_type),
 
             // Placeholders should have been resolved by the second pass
             // of type checking. If one leaks through, map to a uniquely
@@ -475,7 +487,7 @@ impl TypeTranslator {
 
             // Capability-restricted `T with [...]`. Capabilities refine
             // the carrier type at compile-time; unwrap for SMT.
-            Type::CapabilityRestricted { base, .. } => self.translate_type_to_sort(base),
+            Type::CapabilityRestricted { base, .. } => self.translate_independent_sort(base),
         }?;
 
         // Cache the result
@@ -491,8 +503,8 @@ impl TypeTranslator {
         return_type: &Type,
     ) -> Result<Sort, TypeTranslationError> {
         // Pi types as function sorts
-        let param_sort = self.translate_type_to_sort(param_type)?;
-        let return_sort = self.translate_type_to_sort(return_type)?;
+        let param_sort = self.translate_independent_sort(param_type)?;
+        let return_sort = self.translate_independent_sort(return_type)?;
 
         // Use Z3 array sort to represent function: Domain -> Codomain
         Ok(Sort::array(&param_sort, &return_sort))
@@ -506,8 +518,8 @@ impl TypeTranslator {
         snd_type: &Type,
     ) -> Result<Sort, TypeTranslationError> {
         // Sigma types as Z3 datatypes with two fields
-        let fst_sort = self.translate_type_to_sort(fst_type)?;
-        let snd_sort = self.translate_type_to_sort(snd_type)?;
+        let fst_sort = self.translate_independent_sort(fst_type)?;
+        let snd_sort = self.translate_independent_sort(snd_type)?;
 
         // Create datatype for dependent pair. The sigma_name is keyed by
         // the first-component name so structurally-distinct sigmas get
@@ -586,7 +598,7 @@ impl TypeTranslator {
 
             // Add constructor arguments as fields
             for (idx, arg_ty) in ctor.args.iter().enumerate() {
-                let arg_sort = self.translate_type_to_sort(arg_ty)?;
+                let arg_sort = self.translate_independent_sort(arg_ty)?;
                 fields.push((
                     ctor_field_names[idx].as_str(),
                     z3::DatatypeAccessor::sort(arg_sort),
@@ -642,7 +654,7 @@ impl TypeTranslator {
         for (ctor, ctor_field_names) in point_constructors.iter().zip(field_names.iter()) {
             let mut fields = Vec::new();
             for (idx, arg_ty) in ctor.args.iter().enumerate() {
-                let arg_sort = self.translate_type_to_sort(arg_ty)?;
+                let arg_sort = self.translate_independent_sort(arg_ty)?;
                 fields.push((
                     ctor_field_names[idx].as_str(),
                     z3::DatatypeAccessor::sort(arg_sort),
@@ -888,6 +900,19 @@ mod tests {
         // Check quantity was tracked
         let tracked_quantity = translator.get_quantity(&Type::Int);
         assert!(tracked_quantity.is_some());
+    }
+
+    #[test]
+    fn refuses_opaque_sort_with_a_projected_record_argument() {
+        use verum_types::ty::{RecordFieldSlot, RecordReceiver};
+        let projected = Type::RecordField {
+            slot: Box::new(RecordFieldSlot { owner: "api.Pack".into(), ordinal: 0 }),
+            receiver: Some(Box::new(RecordReceiver { binding: 1, fields: List::new() })),
+            level: UniverseLevel::TYPE,
+        };
+        let witness = Type::Generic { name: "Witness".into(), args: List::from_single(projected) };
+        assert!(matches!(TypeTranslator::new().translate_type_to_sort(&witness),
+            Err(TypeTranslationError::UnsupportedType(_))));
     }
 
     /// Smoke test added 2026-04-24 as part of the cycle-break rewrite:

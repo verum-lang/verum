@@ -226,6 +226,8 @@ impl<'a> SendSyncDerivation<'a> {
 
             // 27. Universe types are Send (type-level)
             Type::Universe { .. } => true,
+            // The projected carrier may designate any type, including an unsafe one.
+            Type::RecordField { .. } => false,
 
             // 28. Prop is Send (proof-irrelevant)
             Type::Prop => true,
@@ -447,6 +449,8 @@ impl<'a> SendSyncDerivation<'a> {
 
             // 27. Universe types are Sync (type-level)
             Type::Universe { .. } => true,
+            // The projected carrier may designate any type, including an unsafe one.
+            Type::RecordField { .. } => false,
 
             // 28. Prop is Sync (proof-irrelevant)
             Type::Prop => true,

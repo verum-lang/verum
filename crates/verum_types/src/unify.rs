@@ -1872,11 +1872,29 @@ impl Unifier {
         // PROOF IRRELEVANCE (Inductive types: recursive type definitions with structural recursion, termination checking — .1)
         // If both types have type Prop, they unify regardless of their structure.
         // All proofs of a proposition are equal.
-        if self.is_type_in_prop(t1) && self.is_type_in_prop(t2) {
+        if self.is_type_in_prop(t1) && self.is_type_in_prop(t2)
+            && !t1.contains_record_field() && !t2.contains_record_field()
+        {
             return Ok(Substitution::new());
         }
 
         match (t1, t2) {
+            // A type read from a value has rigid identity. In particular the
+            // permissive bare-name and Unknown arms below cannot identify it
+            // with some other receiver's field.
+            (RecordField { slot: s1, receiver: r1, level: l1 },
+             RecordField { slot: s2, receiver: r2, level: l2 }) if s1 == s2 && r1 == r2 => {
+                let mut result = Substitution::new();
+                result.universes.unify(l1, l2).map_err(|message| TypeError::UniverseBinding { message, span })?;
+                Ok(result)
+            }
+            (Var(v), field @ RecordField { .. }) | (field @ RecordField { .. }, Var(v)) => {
+                self.bind_var(*v, field, span)
+            }
+            (RecordField { .. }, _) | (_, RecordField { .. }) => Err(TypeError::Mismatch {
+                expected: t2.to_text(), actual: t1.to_text(), span,
+            }),
+
             // Never type (bottom type) unifies with any type
             // This allows diverging control flow (return, break, continue) to work in any context
             (Never, _) | (_, Never) => Ok(Substitution::new()),
@@ -5871,6 +5889,7 @@ impl Unifier {
             | Type::Never
             | Type::Var(_)
             | Type::Universe { .. }
+            | Type::RecordField { .. }
             | Type::Prop
             | Type::Lifetime { .. }
             | Type::TypeConstructor { .. }

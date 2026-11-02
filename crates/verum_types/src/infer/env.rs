@@ -2558,6 +2558,13 @@ impl TypeChecker {
                 // Get the object type without init checking
                 let obj_result = self.synth_expr_for_field_access(obj)?;
                 self.check_record_field_visibility(&obj_result.ty, field.name.as_str(), expr.span)?;
+                if let Some(ty) = self.dependent_field_type(obj, &obj_result.ty, &field.name, true, expr.span)? {
+                    self.unifier.unify(&ty, expected, expr.span)?;
+                    if ty.contains_record_field() {
+                        self.check_record_family_agreement(expected, &ty, expr.span)?;
+                    }
+                    return Ok(InferResult::new(ty));
+                }
                 let dereferenced_ty = self.unwrap_reference_type(&obj_result.ty);
                 let mut normalized_ty = self.normalize_type(dereferenced_ty);
 
@@ -4727,8 +4734,8 @@ impl TypeChecker {
             // CapabilityRestricted - check base type
             Type::CapabilityRestricted { base, .. } => self.has_unresolved_vars(base),
 
-            // Unknown type - no type variables (it's a concrete top type)
-            Type::Unknown => false,
+            // Neither rigid field identities nor the top type are inference holes.
+            Type::RecordField { .. } | Type::Unknown => false,
 
             // DynProtocol - check bindings for unresolved vars
             Type::DynProtocol { bindings, .. } => {
@@ -12364,6 +12371,7 @@ with .to_float() or .to_int() (at {:?})",
                 self.check_assignment_aliasing(left, _span)?;
 
                 let right_result = self.synth_expr(right)?;
+                self.check_dependent_write_place(left)?;
                 // For assignment LHS, use the special method that skips init checking
                 self.check_expr_assignment_target(left, &right_result.ty)?;
 
@@ -12377,6 +12385,7 @@ with .to_float() or .to_int() (at {:?})",
             // protocol implementations registered by the stdlib.
             AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | BitAndAssign
             | BitOrAssign | BitXorAssign | ShlAssign | ShrAssign => {
+                self.check_dependent_write_place(left)?;
                 let left_result = self.synth_expr(left)?;
 
                 match &left_result.ty {
@@ -12555,6 +12564,9 @@ with .to_float() or .to_int() (at {:?})",
     }
 
     pub(super) fn infer_unop(&mut self, op: UnOp, expr: &Expr, _span: Span) -> Result<InferResult> {
+        if matches!(op, UnOp::RefMut | UnOp::RefCheckedMut | UnOp::RefUnsafeMut) {
+            self.check_dependent_write_place(expr)?;
+        }
         use UnOp::*;
 
         match op {

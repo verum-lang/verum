@@ -4937,6 +4937,7 @@ dependencies = [
  "verum_diagnostics",
  "verum_error",
  "verum_fast_parser",
+ "verum_kernel",
  "verum_modules",
  "verum_parser",
  "verum_protocol_types",
