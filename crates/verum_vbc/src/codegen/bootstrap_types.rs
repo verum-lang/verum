@@ -242,6 +242,10 @@ impl VbcCodegen {
         available: &[&VbcModule],
         resolve_export: impl Fn(&str) -> Option<Text>,
     ) -> CodegenResult<usize> {
+        // Own declarations must have their final IDs before any imported field,
+        // bound, or method signature is translated into this codegen's space.
+        // Later source prepasses reuse these exact reservations.
+        self.claim_unit_source_type_identities(sources)?;
         let mut catalog = BTreeMap::<String, (usize, usize)>::new();
         let mut functions = BTreeMap::<String, (usize, usize)>::new();
         let mut source_keys = HashMap::new();

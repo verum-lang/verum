@@ -3228,7 +3228,10 @@ impl VbcCodegen {
         }
         let semantic_completion = source.is_some() || existing_semantic;
         if semantic_completion && exact_count != 0 && (exact_count != 1 || !all_equal) {
-            let _ = self.reject_source_declaration_conflict(&qualified);
+            let _ = self.reject_source_declaration(format!(
+                "type declaration `{qualified}` has conflicting semantic source declarations: source completion found {exact_count} exact-owner descriptors; existing semantic carrier={existing_semantic}, incoming semantic carrier={}, equal typed declarations={all_equal}",
+                source.is_some(),
+            ).into());
             return;
         }
         let complete_id = (semantic_completion && exact_count == 1).then_some(exact_id).flatten();
@@ -7180,13 +7183,19 @@ impl VbcCodegen {
                     "type declaration `{owner}`: {message}",
                 ).into());
             }
-            let conflict = self.types.iter().any(|existing| {
+            let conflict = self.types.iter().find(|existing| {
                 self.type_declaration_identity(existing).as_deref() == Some(owner)
                     && existing.source_declaration.as_ref()
                         .is_some_and(|declaration| declaration != incoming)
             });
-            if conflict {
-                return self.reject_source_declaration_conflict(owner);
+            if let Some(existing) = conflict {
+                let message = format!(
+                    "type declaration `{owner}` has conflicting semantic source declarations: unequal typed ASTs for descriptor {}; existing span={:?}, incoming span={:?}",
+                    existing.id.0,
+                    existing.source_declaration.as_ref().map(|declaration| declaration.span),
+                    incoming.span,
+                );
+                return self.reject_source_declaration(message.into());
             }
         }
         Ok(())
@@ -7224,7 +7233,17 @@ impl VbcCodegen {
                     incoming_shape.protocols.clear();
                     if declared_shape != incoming_shape {
                         if let Some(owner) = incoming_owner.as_ref() {
-                            let _ = self.reject_source_declaration_conflict(owner.as_str());
+                            let field_difference = declared_shape.fields.iter().zip(&incoming_shape.fields)
+                                .enumerate().find(|(_, (left, right))| left != right)
+                                .map(|(index, (left, right))| format!("field {index}: existing={left:?}, incoming={right:?}"));
+                            let _ = self.reject_source_declaration(format!(
+                                "type declaration `{owner}` has conflicting semantic source declarations: ABI mismatch during local descriptor completion; field counts={}/{}, type parameters equal={}, kind equal={}, alias target equal={}; {}",
+                                declared_shape.fields.len(), incoming_shape.fields.len(),
+                                declared_shape.type_params == incoming_shape.type_params,
+                                declared_shape.kind == incoming_shape.kind,
+                                declared_shape.alias_target == incoming_shape.alias_target,
+                                field_difference.as_deref().unwrap_or("no unequal paired fields"),
+                            ).into());
                         }
                         return;
                     }
@@ -8284,40 +8303,10 @@ impl VbcCodegen {
     ///
     /// Items are filtered based on @cfg attributes to prevent cross-platform
     /// conflicts (e.g., Linux imports being processed when targeting macOS).
-    /// The declaration pre-passes a compilation unit needs before its
-    /// items are collected, for a unit made of MANY files.
-    ///
-    /// `collect_all_declarations` performs these for a single-file unit
-    /// and then walks that file's items. The stdlib bake compiles one
-    /// module from many files, so it drives the pre-passes over all of
-    /// them first and the item walk afterwards — but it only ever ran
-    /// SOME of them, and the gate that measures this
-    /// (`check_bake_prepass_parity`) has listed the other two as GAPs
-    /// since T0362/T0640:
-    ///
-    /// * `claim_user_type_name` — a declaration claims the simple type
-    ///   key even when an archive type already holds it, evicting the
-    ///   stale layout (OWN-DECL-LAYOUT-EVICT-1, T0125). Inert for the
-    ///   bake meant stdlib-internal record literals could read another
-    ///   module's layout.
-    /// * `pregenerate_ffi_struct_layouts` — forward-declared record
-    ///   types in extern signatures resolve to StructPtr (T0362).
-    ///
-    /// Enabling them was blocked, not by the passes, but by an
-    /// unanswered contract question: doing so shifted `Ordering`
-    /// rendering for Int8/Int64/Float/Text and NOT for Int, so one
-    /// program rendered one type two ways. That question is answered —
-    /// `{}` means Display — and Int's divergence had its own cause
-    /// (a primitive receiver had no type NAME), fixed separately.
-    pub fn run_unit_declaration_prepasses(&mut self, files: &[&Module]) {
-        // The order is the one `collect_all_declarations` established
-        // for a single file, applied ACROSS the unit: every file's
-        // types are claimed before any file's aliases are read, and
-        // every file's aliases before any file's blankets. A pre-pass
-        // that ran per-file would let file 1 be collected against a
-        // world where file 5's declarations do not exist yet — which is
-        // exactly the multi-file hazard the bake's Pass 1a.5 was added
-        // for (T0625).
+    /// Reserve source-owned IDs before imported declaration references are
+    /// remapped. Reuse the same owner and idempotence rules as source collection.
+    fn claim_unit_source_type_identities(&mut self, files: &[&Module]) -> CodegenResult<()> {
+        self.check_source_declaration_error()?;
         for module in files {
             // T1369 — THE KEY MEANT TO DISTINGUISH MODULES DID NOT.
             //
@@ -8372,6 +8361,46 @@ impl VbcCodegen {
             let module_key = declared_owner.clone()
                 .unwrap_or_else(|| format!("file:{:?}", module.file_id));
             self.claim_declared_type_items(&module.items, &module_key, declared_owner.as_deref());
+        }
+        self.check_source_declaration_error()
+    }
+
+    /// The declaration pre-passes a compilation unit needs before its
+    /// items are collected, for a unit made of MANY files.
+    ///
+    /// `collect_all_declarations` performs these for a single-file unit
+    /// and then walks that file's items. The stdlib bake compiles one
+    /// module from many files, so it drives the pre-passes over all of
+    /// them first and the item walk afterwards — but it only ever ran
+    /// SOME of them, and the gate that measures this
+    /// (`check_bake_prepass_parity`) has listed the other two as GAPs
+    /// since T0362/T0640:
+    ///
+    /// * `claim_user_type_name` — a declaration claims the simple type
+    ///   key even when an archive type already holds it, evicting the
+    ///   stale layout (OWN-DECL-LAYOUT-EVICT-1, T0125). Inert for the
+    ///   bake meant stdlib-internal record literals could read another
+    ///   module's layout.
+    /// * `pregenerate_ffi_struct_layouts` — forward-declared record
+    ///   types in extern signatures resolve to StructPtr (T0362).
+    ///
+    /// Enabling them was blocked, not by the passes, but by an
+    /// unanswered contract question: doing so shifted `Ordering`
+    /// rendering for Int8/Int64/Float/Text and NOT for Int, so one
+    /// program rendered one type two ways. That question is answered —
+    /// `{}` means Display — and Int's divergence had its own cause
+    /// (a primitive receiver had no type NAME), fixed separately.
+    pub fn run_unit_declaration_prepasses(&mut self, files: &[&Module]) {
+        // The order is the one `collect_all_declarations` established
+        // for a single file, applied ACROSS the unit: every file's
+        // types are claimed before any file's aliases are read, and
+        // every file's aliases before any file's blankets. A pre-pass
+        // that ran per-file would let file 1 be collected against a
+        // world where file 5's declarations do not exist yet — which is
+        // exactly the multi-file hazard the bake's Pass 1a.5 was added
+        // for (T0625).
+        if self.claim_unit_source_type_identities(files).is_err() {
+            return;
         }
         for module in files {
             self.register_declared_type_aliases(module);

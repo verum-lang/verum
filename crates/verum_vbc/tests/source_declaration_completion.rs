@@ -142,3 +142,78 @@ fn equal_source_ast_does_not_authorize_a_different_imported_abi() {
     descriptor.fields[0].declaration_type = Some(TypeRef::Concrete(TypeId::INT));
     assert_fatal(complete("owner", &imported, &ast).unwrap_err());
 }
+
+fn second_bootstrap_interface(owner: &str, ast: &Module) -> VbcModule {
+    let first = interface(owner, ast);
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new(owner));
+    producer
+        .import_bootstrap_nominal_dependencies(&[ast], &[&first])
+        .unwrap();
+    producer.collect_declaration_interface(&[ast]).unwrap()
+}
+
+#[test]
+fn bootstrap_reserves_local_protocol_ids_before_remapping_semantic_record_fields() {
+    let ast = parsed(
+        "owner",
+        "
+        public type Ordinary<A, N: meta Int> is protocol { fn witness(&self) -> Bool; };
+        public type Carrier<N: meta Int> is { carrier: Type, witness: Ordinary<carrier, N> };
+        public type Alias is Carrier<0>;
+    ",
+    );
+    let completed = second_bootstrap_interface("owner", &ast);
+    for name in ["Ordinary", "Carrier", "Alias"] {
+        let descriptors: Vec<_> = completed
+            .types
+            .iter()
+            .filter(|descriptor| {
+                completed
+                    .get_string(descriptor.name)
+                    .is_some_and(|actual| actual.rsplit('.').next() == Some(name))
+            })
+            .collect();
+        assert_eq!(descriptors.len(), 1, "one final identity for {name}");
+    }
+    let ordinary = completed
+        .types
+        .iter()
+        .find(|descriptor| {
+            completed
+                .get_string(descriptor.name)
+                .is_some_and(|name| name.rsplit('.').next() == Some("Ordinary"))
+        })
+        .unwrap();
+    let record = completed
+        .types
+        .iter()
+        .find(|descriptor| descriptor.source_declaration.is_some())
+        .unwrap();
+    let TypeRef::Instantiated { base, .. } = &record.fields[1].type_ref else {
+        panic!(
+            "ordinary protocol application must retain its nominal head: {:?}",
+            record.fields[1].type_ref
+        )
+    };
+    assert_eq!(*base, ordinary.id);
+}
+
+#[test]
+fn actual_ntype_references_the_completed_local_istrunc_identity() {
+    let mut ast = Parser::new(include_str!("../../../core/math/hott.vr"))
+        .parse_module()
+        .unwrap();
+    ast.items.retain(|item| {
+        matches!(&item.kind, ItemKind::Module(_))
+            || matches!(&item.kind, ItemKind::Type(declaration)
+                if ["IsTrunc", "NType", "HProp", "HSet"].contains(&declaration.name.name.as_str()))
+    });
+    let completed = second_bootstrap_interface("core.math", &ast);
+    let declarations: Vec<_> = completed
+        .types
+        .iter()
+        .filter_map(|descriptor| descriptor.source_declaration.as_ref())
+        .collect();
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0].name.name.as_str(), "NType");
+}
