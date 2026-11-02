@@ -347,6 +347,26 @@ fn imported_protocol_slots_preserve_source_visibility() {
 }
 
 #[test]
+fn a_reserved_protocol_slot_cannot_compete_with_its_final_glob_export() {
+    use verum_common::{List, Text};
+
+    let (root, mut metadata) = mixed_protocol_with_import_shell("public");
+    let mut slot = metadata.types.get(&Text::from("core.importer.Contract")).unwrap().clone();
+    slot.name = "Parent".into();
+    slot.origin_module_path = Some("core".into());
+    let slot_key = Text::from("core.importer.Parent");
+    metadata.types.insert(slot_key.clone(), slot);
+    super::bind_source_declarations(&mut metadata, root.path(), &[], false);
+    // Public glob expansion follows binding during the actual sidecar build.
+    metadata.module_reexports.insert("core".into(), List::from_iter([
+        ("Parent".into(), "Parent".into(), "core.indexed".into()),
+    ]));
+    let registry = verum_modules::ModuleRegistry::new();
+    verum_types::module_projection::project_modules(&metadata, None, |_| registry.allocate_id()).unwrap();
+    assert_eq!(metadata.types.get(&slot_key).unwrap().origin_module_path.as_deref(), Some("core.indexed"));
+}
+
+#[test]
 fn source_binding_cannot_repair_an_abi_claim_that_already_names_the_semantic_owner() {
     let (root, mut metadata) = mixed_protocol_with_import_shell("public");
     metadata.types.get_mut(&"core.importer.Contract".into()).unwrap().origin_module_path = Some("core.indexed".into());

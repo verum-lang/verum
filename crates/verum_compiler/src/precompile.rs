@@ -346,6 +346,11 @@ fn write_core_metadata_alongside_archive(
         // declaration on PartialEq.
         scan_protocol_supers(&mut metadata, root, verbose);
     }
+    // Re-export expansion and source signature injection both change the published
+    // surface. Validate the finished table with the compiler's actual module loader.
+    let registry = verum_modules::ModuleRegistry::new();
+    verum_types::module_projection::project_modules(&metadata, None, |_| registry.allocate_id())
+        .context("validate final module exports before publishing stdlib metadata")?;
     let bytes = crate::embedded_stdlib_metadata::encode_metadata(&metadata)
         .map_err(|error| anyhow::anyhow!("encode CoreMetadata sidecar: {error}"))?;
 
@@ -2404,7 +2409,7 @@ fn bind_source_declarations(
     }
     let reexports = &metadata.module_reexports;
     let declaration =
-        |name: &str, declared: &str, entry: &str, kind: DeclarationKind| -> Option<(Text, bool)> {
+        |name: &str, declared: &str, entry: &str, kind: DeclarationKind, abi_nominal: bool| -> Option<(Text, bool)> {
             // Descriptors may store either a local name or a name qualified by
             // their recorded owner/entry. Do not strip an arbitrary dotted prefix:
             // method names and unrelated modules are not top-level declarations.
@@ -2443,10 +2448,11 @@ fn bind_source_declarations(
                 }))
             };
             let has_glob_owner = source_owner.is_none() && candidates.iter().filter(matches_kind).any(|c| through_glob(&c));
-            // A recorded origin can be refined through its own exports. A unique
-            // leaf in an unrelated file is evidence only for an unowned archive shell.
+            // Callable and semantic descriptors retain their recorded origin.
+            // ABI-only nominal copies may instead name the archive unit that
+            // imported them. Recover those only from one file declaration.
             let has_source_route = source_owner.is_some() || has_glob_owner;
-            if !has_source_route && declared != entry {
+            if !has_source_route && declared != entry && !abi_nominal {
                 return None;
             }
             let mut declarations = candidates
@@ -2468,9 +2474,8 @@ fn bind_source_declarations(
     // Such a binding can select a semantic protocol already validated at its
     // exact declaring key; an independently claimed ABI cannot be repaired.
     use verum_types::core_metadata::{TypeDescriptor, TypeDescriptorKind};
-    fn is_unowned_protocol_slot(ty: &TypeDescriptor) -> bool {
-        ty.origin_module_path.is_none()
-            && ty.source_declaration.is_none()
+    fn is_empty_protocol_slot(ty: &TypeDescriptor) -> bool {
+        ty.source_declaration.is_none()
             && !ty.name.as_str().contains('.')
             && ty.generic_params.is_empty()
             && ty.methods.is_empty()
@@ -2502,8 +2507,12 @@ fn bind_source_declarations(
             declared,
             &descriptor.module_path,
             DeclarationKind::Nominal,
+            descriptor.source_declaration.is_none(),
         ) {
-            if owner != descriptor.module_path && is_unowned_protocol_slot(descriptor) {
+            if owner != descriptor.module_path
+                && descriptor.origin_module_path.is_none()
+                && is_empty_protocol_slot(descriptor)
+            {
                 let key = verum_common::qualified_name::qualify_module_name(&owner, &descriptor.name);
                 if let Some(canonical) = semantic_protocols.get(&key) {
                     descriptor.clone_from(canonical);
@@ -2525,6 +2534,7 @@ fn bind_source_declarations(
             declared,
             &descriptor.module_path,
             DeclarationKind::Nominal,
+            true,
         ) {
             descriptor.origin_module_path = (owner != descriptor.module_path).then_some(owner);
         }
@@ -2544,7 +2554,7 @@ fn bind_source_declarations(
             DeclarationKind::Function
         };
         if let Some((owner, public)) =
-            declaration(&descriptor.name, declared, &descriptor.module_path, kind)
+            declaration(&descriptor.name, declared, &descriptor.module_path, kind, false)
         {
             descriptor.origin_module_path = (owner != descriptor.module_path).then_some(owner);
             descriptor.is_public = public;
