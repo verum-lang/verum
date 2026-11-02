@@ -225,6 +225,12 @@ public type AdapterSpecific is {
     retryable: Bool,
 };
 
+implement AdapterSpecific {
+    public fn new(adapter: AdapterId, code: Text, message: Text, retryable: Bool) -> AdapterSpecific {
+        AdapterSpecific { adapter: adapter, code: code, message: message, retryable: retryable }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // DbError — the surface every adapter speaks.
 // -----------------------------------------------------------------------------

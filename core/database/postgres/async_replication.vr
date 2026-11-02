@@ -1,58 +1,5 @@
-// =============================================================================
-// core/database/postgres/async_replication.vr — async replication V0
-// =============================================================================
-// Layer: 3 (Database — postgres adapter)
-// Spec: database spec §6.1.7 (streaming replication),
-//       §6.1.8 (async surface).
-// =============================================================================
-//
-// Async wrapper over `replication.vr`'s sync `PgReplicationConnection`.
-// CDC consumers (logical-replication / pgoutput) running on the async
-// runtime currently can't get XLogData without dropping into
-// `spawn_blocking` by hand.
-//
-// Architecture — single actor with timeout-bounded reads:
-//
-//   The replication wire is push-based (server streams XLogData
-//   between Sync rounds; client periodically replies with `'r'`
-//   Standby Status Update). One physical connection cannot have
-//   concurrent reads and writes from different threads without
-//   tearing the wire framing, so we keep a single actor that owns
-//   the connection.
-//
-//   The actor alternates:
-//     1. Drain pending standby-status updates from `status_rx`.
-//     2. Call `try_next_message` with a short TCP recv timeout.
-//        On Result.Ok(Maybe.Some(msg)) push to `msg_tx`; on Result.Ok(Maybe.None) (timeout)
-//        loop back to step 1. On Err propagate via the message
-//        channel and exit.
-//
-//   The default recv timeout is 1s — small enough that pending
-//   status updates surface within ~1s of arrival even when the
-//   wire is quiet (default `wal_sender_timeout` is 60s, so 1s
-//   leaves plenty of headroom).
-//
-// V0 surface:
-//   * `connect_replication_async(cfg) → AsyncPgReplicationConnection`
-//   * `.start_logical(opts, start_lsn).await`
-//   * `.start_physical(slot, start_lsn, timeline).await`
-//   * `.next_message().await → Option<ReplicationMessage>`
-//   * `.send_standby_status(write, flush, apply, client_time, reply).await`
-//   * `.close().await`
-//
-// Sync replication.vr canonical / unchanged. Pure layered wrapper.
-//
-// V1 surface:
-//   * `attach_cancellation_token` — token.cancel() unwinds the
-//     replication actor automatically.
-//   * Per-slot RTT estimator — `rtt_estimate_us()` /
-//     `rtt_samples()`. Pairs every `send_standby_status` write
-//     with the next observed `RmKeepalive`; EWMA-smoothed
-//     (α = 1/8 per RFC 6298 §2). Adaptive heartbeat is the
-//     caller's policy decision (e.g. interval = max(1s,
-//     min(30s, rtt * 3))) — V0 surfaces the raw estimate.
-// =============================================================================
-
+// Demand-driven PostgreSQL replication. Each clone serializes protocol
+// operations on the same wire. Reads consume frames only when requested.
 @arch_module(
     exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
     requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
@@ -62,50 +9,39 @@
 )
 module core.database.postgres.async_replication;
 
-mount core.sync.mutex.{Mutex};
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount core.sync.mutex.{Mutex, MutexGuard};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
 };
 mount core.database.postgres.replication.{
     PgReplicationConfig, PgReplicationConnection,
-    LogicalReplicationOptions,
-    Lsn, ReplicationMessage,
+    LogicalReplicationOptions, IdentifySystemRow,
+    Lsn, ReplicationMessage, RmKeepalive,
     connect_replication,
 };
-mount core.async.channel.{
-    Sender, Receiver, OneshotSender,
-    bounded_channel, oneshot,
-};
-mount core.async.task.{spawn_blocking, JoinHandle};
-// Mounted rather than inherited: §4ter — the prelude carries only what
-// the LANGUAGE requires, and this is library API.
-mount core.sync.{AtomicInt};
+mount core.async.channel.OneshotSender;
+mount core.async.cancellation.{CancellationToken, Registration};
+mount core.time.instant.Instant;
 
 // =============================================================================
 // Tunables
 // =============================================================================
 
-/// TCP recv timeout for the actor's read loop. Small enough to
-/// surface pending standby-status updates within bounded latency,
-/// big enough that a quiet wire doesn't burn CPU on tight retries.
+/// Maximum duration of an idle socket read while holding the session lock.
 public const DEFAULT_RECV_TIMEOUT_MS: Int = 1_000;
 
-/// Capacity of the actor → caller message channel. Bounds buffered
-/// XLogData chunks; backpressures the wire (TCP advertised window
-/// shrinks naturally if caller is slow to drain).
+/// Historical event buffer capacity, retained for callers sizing their own queues.
 public const DEFAULT_MSG_CAPACITY: Int = 256;
 
-/// Capacity of the caller → actor status-update channel.
+/// Historical command buffer capacity.
 public const DEFAULT_STATUS_CAPACITY: Int = 16;
 
 // =============================================================================
 // Actor protocol
 // =============================================================================
 
-/// One unit of work the actor runs synchronously between read
-/// attempts. New variants are additive.
+/// Request envelopes retained for callers building a channel-based adapter.
 public type ReplRequest is
       RrStartLogical {
         opts: LogicalReplicationOptions,
@@ -145,526 +81,271 @@ public type StandbyStatusUpdate is {
     reply_requested: Bool,
 };
 
-/// Actor → caller message. `Event(msg)` per replication frame;
-/// `Terminated(err)` when the wire dies; `Closed` once `close()`
-/// completes.
+/// Replication frames followed by one terminal event on close or wire failure.
 public type ReplActorEvent is
       ReaEvent(ReplicationMessage)
     | ReaTerminated(DbError)
     | ReaClosed;
 
-// =============================================================================
-// Public handle
-// =============================================================================
+// A clone shares the session lock. The PostgreSQL protocol and its framing
+// buffer always have a single owner, including while writing standby feedback.
+type ReplicationSession is {
+    wire: Maybe<PgReplicationConnection>,
+    terminal: Maybe<ReplActorEvent>,
+    registrations: List<Registration>,
+    sent_at: Maybe<Instant>,
+    estimate_us: Int,
+    samples: Int,
+};
+
+type ReadStep is RsWaitForStart | RsRetry | RsEnd | RsEvent(ReplActorEvent);
+
+implement ReplicationSession {
+    fn active(&mut self) -> Result<&mut PgReplicationConnection, DbError> {
+        match self.wire.as_mut() {
+            Maybe.Some(wire) => Result.Ok(wire),
+            Maybe.None => Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres, "REPL_ACTOR_CLOSED".clone(), "replication session is closed".clone(), false,
+            ))),
+        }
+    }
+
+    fn close_wire(&mut self) -> Result<(), DbError> {
+        self.registrations.clear();
+        match self.wire.take() {
+            Maybe.Some(wire) => {
+                let result = wire.close();
+                self.terminal = match &result {
+                    Result.Ok(()) => Maybe.Some(ReaClosed),
+                    Result.Err(e) => Maybe.Some(ReaTerminated(e.clone())),
+                };
+                result
+            }
+            Maybe.None => Result.Ok(()),
+        }
+    }
+
+    fn identify_system_sync(&mut self) -> Result<IdentifySystemRow, DbError> {
+        let wire = self.active()?;
+        wire.identify_system()
+    }
+
+    fn create_logical_slot_sync(
+        &mut self, slot: &Text, plugin: &Text, temporary: Bool,
+    ) -> Result<(), DbError> {
+        let wire = self.active()?;
+        wire.create_logical_slot(slot, plugin, temporary)
+    }
+
+    fn drop_slot_sync(&mut self, slot: &Text, wait: Bool) -> Result<(), DbError> {
+        let wire = self.active()?;
+        wire.drop_slot(slot, wait)
+    }
+
+    fn start_logical_sync(
+        &mut self, opts: LogicalReplicationOptions, start_lsn: Lsn,
+    ) -> Result<(), DbError> {
+        let wire = self.active()?;
+        wire.start_logical(&opts, start_lsn)?;
+        match wire.set_recv_timeout_ms(Maybe.Some(DEFAULT_RECV_TIMEOUT_MS)) {
+            Result.Ok(()) => Result.Ok(()),
+            Result.Err(e) => { let _ = self.close_wire(); Result.Err(e) }
+        }
+    }
+
+    fn start_physical_sync(
+        &mut self, slot: &Text, start_lsn: Lsn, timeline: Maybe<Int>,
+    ) -> Result<(), DbError> {
+        let wire = self.active()?;
+        wire.start_physical(slot, start_lsn, timeline)?;
+        match wire.set_recv_timeout_ms(Maybe.Some(DEFAULT_RECV_TIMEOUT_MS)) {
+            Result.Ok(()) => Result.Ok(()),
+            Result.Err(e) => { let _ = self.close_wire(); Result.Err(e) }
+        }
+    }
+
+    fn send_standby_status_sync(
+        &mut self, write: Lsn, flush: Lsn, apply: Lsn,
+        client_time_us: Int, reply_requested: Bool,
+    ) -> Result<(), DbError> {
+        let wire = self.active()?;
+        let streaming = wire.is_streaming();
+        let result = wire.send_standby_status(write, flush, apply, client_time_us, reply_requested);
+        match result {
+            Result.Ok(()) => {
+                self.sent_at = Maybe.Some(Instant.now());
+                Result.Ok(())
+            }
+            Result.Err(e) => {
+                if streaming {
+                    let _ = self.close_wire();
+                    self.terminal = Maybe.Some(ReaTerminated(e.clone()));
+                }
+                Result.Err(e)
+            }
+        }
+    }
+
+    fn step(&mut self) -> ReadStep {
+        match self.terminal.take() {
+            Maybe.Some(event) => { return RsEvent(event); }
+            Maybe.None => {}
+        }
+        let result = match self.wire.as_mut() {
+            Maybe.None => { return RsEnd; }
+            Maybe.Some(wire) => {
+                if !wire.is_streaming() { return RsWaitForStart; }
+                wire.try_next_message()
+            }
+        };
+        match result {
+            Result.Ok(Maybe.Some(msg)) => {
+                match &msg {
+                    RmKeepalive(_) => {
+                        if let Maybe.Some(sent) = self.sent_at.take() {
+                            let sample = sent.elapsed().as_micros();
+                            self.estimate_us = if self.samples == 0 {
+                                sample
+                            } else { self.estimate_us + (sample - self.estimate_us) / 8 };
+                            self.samples = self.samples + 1;
+                        }
+                    }
+                    _ => {}
+                }
+                RsEvent(ReaEvent(msg))
+            }
+            Result.Ok(Maybe.None) => RsRetry,
+            Result.Err(e) => {
+                let _ = self.close_wire();
+                self.terminal = Maybe.None;
+                RsEvent(ReaTerminated(e))
+            }
+        }
+    }
+}
 
 public type AsyncPgReplicationConnection is {
-    cmd_tx: Sender<ReplRequest>,
-    status_tx: Sender<StandbyStatusUpdate>,
-    msg_rx: Shared<sync.mutex.Mutex<Receiver<ReplActorEvent>>>,
-    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
-    /// EWMA-smoothed wire round-trip time in microseconds.
-    /// Sampled by pairing every `send_standby_status` write with
-    /// the next observed `RmKeepalive` recv. `0` until the first
-    /// sample lands. See `rtt_estimate_us()` for the public read.
-    /// (P-PROD-PG-REPL-RTT-V0).
-    rtt_estimate_us: Shared<AtomicInt>,
-    /// Total RTT samples observed since the actor started. Lets
-    /// observability detect a wedged stream: if `rtt_samples`
-    /// stops advancing while `wal_sender_timeout` looms, the
-    /// keepalive flow is stuck.
-    rtt_samples: Shared<AtomicInt>,
+    session: Shared<Mutex<ReplicationSession>>,
 };
 
 implement AsyncPgReplicationConnection {
+    fn lock_session(&self) -> MutexGuard<ReplicationSession> {
+        match self.session.lock() {
+            Result.Ok(guard) => guard,
+            Result.Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
     public fn clone(&self) -> AsyncPgReplicationConnection {
-        AsyncPgReplicationConnection {
-            cmd_tx: self.cmd_tx.clone(),
-            status_tx: self.status_tx.clone(),
-            msg_rx: self.msg_rx.clone(),
-            join: self.join.clone(),
-            rtt_estimate_us: self.rtt_estimate_us.clone(),
-            rtt_samples: self.rtt_samples.clone(),
-        }
+        AsyncPgReplicationConnection { session: self.session.clone() }
     }
 
-    /// Current EWMA-smoothed wire RTT estimate in microseconds.
-    /// Returns `Maybe.None` until the first sample lands;
-    /// otherwise `Maybe.Some(estimate)`. The estimate updates
-    /// on every PrimaryKeepalive received from the server, paired
-    /// against the most recent `send_standby_status` send. Caller
-    /// can use this to drive adaptive heartbeat intervals (e.g.
-    /// `interval = max(1s, min(30s, rtt * 3))`) — V0 surfaces
-    /// the raw estimate; the policy decision is the caller's.
     public fn rtt_estimate_us(&self) -> Maybe<Int> {
-        if self.rtt_samples.load(MemoryOrdering.Acquire) == 0 {
-            Maybe.None
-        } else {
-            Maybe.Some(self.rtt_estimate_us.load(MemoryOrdering.Acquire))
-        }
+        let state = self.lock_session();
+        if state.samples == 0 { Maybe.None } else { Maybe.Some(state.estimate_us) }
     }
 
-    /// Total RTT samples observed since the actor started.
-    /// Diagnostic; non-monotonic-progress signals a wedged
-    /// keepalive flow.
     public fn rtt_samples(&self) -> Int {
-        self.rtt_samples.load(MemoryOrdering.Acquire)
+        self.lock_session().samples
     }
 
-    /// Wire a CancellationToken — when it flips, automatically
-    /// fire `close()` so the replication actor unwinds without
-    /// caller intervention. Spawns a one-shot background watcher
-    /// task that awaits `token.cancelled().await`.
-    ///
-    /// The watcher exits naturally when the token fires; if the
-    /// connection closes first (caller-driven shutdown), the
-    /// close becomes a no-op (the actor's command channel is
-    /// already drained).
-    ///
-    /// Multiple tokens may be attached — each spawns its own
-    /// watcher; ANY one firing triggers shutdown.
-    public fn attach_cancellation_token(
-        &self,
-        token: core.async.cancellation.CancellationToken,
-    ) {
-        let conn_clone = self.clone();
-        let _ = core.async.task.spawn(async move {
-            let _ = token.cancelled().await;
-            let _ = conn_clone.close().await;
+    /// Closing the last handle releases the registration. The weak session
+    /// reference lets a token outlive the connection.
+    public fn attach_cancellation_token(&self, token: CancellationToken) {
+        let weak: Weak<Mutex<ReplicationSession>> = self.session.downgrade();
+        let registration = token.register(move || {
+            let live: Maybe<Shared<Mutex<ReplicationSession>>> = weak.upgrade();
+            if let Maybe.Some(session) = live {
+                let connection = AsyncPgReplicationConnection { session: session };
+                let _ = connection.close_sync();
+            }
         });
+        let mut state = self.lock_session();
+        if state.wire.is_some() { state.registrations.push(registration); }
     }
 
-    public async fn identify_system(&self)
-        -> Result<core.database.postgres.replication.IdentifySystemRow, DbError>
-    {
-        let (rs, rr) = oneshot<Result<core.database.postgres.replication.IdentifySystemRow, DbError>>();
-        match self.cmd_tx.send_async(RrIdentifySystem { ack: rs }).await {
-            Result.Ok(())  => {}
-            Result.Err(_)  => { return Result.Err(actor_dropped("identify_system")); }
-        }
-        match rr.await {
-            Result.Ok(r)  => r,
-            Result.Err(_) => Result.Err(actor_dropped("identify_system reply")),
-        }
+    public async fn identify_system(&self) -> Result<IdentifySystemRow, DbError> {
+        let mut state = self.lock_session();
+        state.identify_system_sync()
     }
 
     public async fn create_logical_slot(
         &self, slot: &Text, plugin: &Text, temporary: Bool,
     ) -> Result<(), DbError> {
-        let (rs, rr) = oneshot<Result<(), DbError>>();
-        match self.cmd_tx.send_async(RrCreateLogicalSlot {
-            slot: slot.clone(),
-            plugin: plugin.clone(),
-            temporary: temporary,
-            ack: rs,
-        }).await {
-            Result.Ok(())  => {}
-            Result.Err(_)  => { return Result.Err(actor_dropped("create_logical_slot")); }
-        }
-        match rr.await {
-            Result.Ok(r)  => r,
-            Result.Err(_) => Result.Err(actor_dropped("create_logical_slot reply")),
-        }
+        let mut state = self.lock_session();
+        state.create_logical_slot_sync(slot, plugin, temporary)
     }
 
     public async fn drop_slot(&self, slot: &Text, wait: Bool) -> Result<(), DbError> {
-        let (rs, rr) = oneshot<Result<(), DbError>>();
-        match self.cmd_tx.send_async(RrDropSlot {
-            slot: slot.clone(),
-            wait: wait,
-            ack: rs,
-        }).await {
-            Result.Ok(())  => {}
-            Result.Err(_)  => { return Result.Err(actor_dropped("drop_slot")); }
-        }
-        match rr.await {
-            Result.Ok(r)  => r,
-            Result.Err(_) => Result.Err(actor_dropped("drop_slot reply")),
-        }
+        let mut state = self.lock_session();
+        state.drop_slot_sync(slot, wait)
     }
 
-    /// Issue START_REPLICATION SLOT … LOGICAL. After Ok return the
-    /// actor enters streaming mode; subsequent `next_message`
-    /// awaits push events.
     public async fn start_logical(
-        &self,
-        opts: LogicalReplicationOptions,
-        start_lsn: Lsn,
+        &self, opts: LogicalReplicationOptions, start_lsn: Lsn,
     ) -> Result<(), DbError> {
-        let (rs, rr) = oneshot<Result<(), DbError>>();
-        match self.cmd_tx.send_async(RrStartLogical {
-            opts: opts,
-            start_lsn: start_lsn,
-            ack: rs,
-        }).await {
-            Result.Ok(())  => {}
-            Result.Err(_)  => { return Result.Err(actor_dropped("start_logical")); }
-        }
-        match rr.await {
-            Result.Ok(r)  => r,
-            Result.Err(_) => Result.Err(actor_dropped("start_logical reply")),
-        }
+        let mut state = self.lock_session();
+        state.start_logical_sync(opts, start_lsn)
     }
 
     public async fn start_physical(
-        &self,
-        slot: &Text,
-        start_lsn: Lsn,
-        timeline: Maybe<Int>,
+        &self, slot: &Text, start_lsn: Lsn, timeline: Maybe<Int>,
     ) -> Result<(), DbError> {
-        let (rs, rr) = oneshot<Result<(), DbError>>();
-        match self.cmd_tx.send_async(RrStartPhysical {
-            slot: slot.clone(),
-            start_lsn: start_lsn,
-            timeline: timeline,
-            ack: rs,
-        }).await {
-            Result.Ok(())  => {}
-            Result.Err(_)  => { return Result.Err(actor_dropped("start_physical")); }
-        }
-        match rr.await {
-            Result.Ok(r)  => r,
-            Result.Err(_) => Result.Err(actor_dropped("start_physical reply")),
-        }
+        let mut state = self.lock_session();
+        state.start_physical_sync(slot, start_lsn, timeline)
     }
 
-    /// Pull the next replication event. Returns:
-    ///   * `Result.Ok(Maybe.Some(ReaEvent(msg)))` — a real ReplicationMessage.
-    ///   * `Result.Ok(Maybe.Some(ReaTerminated(err)))` — wire died; subsequent
-    ///     calls return Maybe.None.
-    ///   * `Result.Ok(Maybe.Some(ReaClosed))` — clean shutdown observed.
-    ///   * `Result.Ok(Maybe.None)` — channel closed unexpectedly.
+    /// Pull on demand. No socket guard crosses a suspension point. Once
+    /// the terminal event has been delivered, subsequent reads return None.
     public async fn next_event(&self) -> Maybe<ReplActorEvent> {
-        let mut g = self.msg_rx.lock().unwrap_or_else(|p| p.into_inner());
-        let fut = g.recv_fut();
-        drop(g);
-        fut.await
+        loop {
+            let step = { let mut state = self.lock_session(); state.step() };
+            match step {
+                RsEnd => { return Maybe.None; }
+                RsEvent(event) => { return Maybe.Some(event); }
+                RsWaitForStart => {
+                    core.sys.time_ops.sleep_ms(10);
+                    core.async.select.yield_now().await;
+                }
+                RsRetry => { core.async.select.yield_now().await; }
+            }
+        }
     }
 
-    /// Convenience — returns the next ReplicationMessage or
-    /// terminates on Err. Callers wanting fine-grained Closed /
-    /// Terminated distinction use `next_event` directly.
     public async fn next_message(&self) -> Result<Maybe<ReplicationMessage>, DbError> {
         match self.next_event().await {
-            Maybe.Some(ReaEvent(m))      => Result.Ok(Maybe.Some(m)),
+            Maybe.Some(ReaEvent(msg)) => Result.Ok(Maybe.Some(msg)),
             Maybe.Some(ReaTerminated(e)) => Result.Err(e),
-            Maybe.Some(ReaClosed)        => Result.Ok(Maybe.None),
-            Maybe.None                   => Result.Ok(Maybe.None),
+            Maybe.Some(ReaClosed) | Maybe.None => Result.Ok(Maybe.None),
         }
     }
 
-    /// Queue a Standby Status Update. The actor drains the queue
-    /// between read attempts (timeout window default 1s).
     public async fn send_standby_status(
-        &self,
-        write: Lsn, flush: Lsn, apply: Lsn,
-        client_time_us: Int,
-        reply_requested: Bool,
+        &self, write: Lsn, flush: Lsn, apply: Lsn,
+        client_time_us: Int, reply_requested: Bool,
     ) -> Result<(), DbError> {
-        match self.status_tx.send_async(StandbyStatusUpdate {
-            write: write, flush: flush, apply: apply,
-            client_time_us: client_time_us,
-            reply_requested: reply_requested,
-        }).await {
-            Result.Ok(())  => Result.Ok(()),
-            Result.Err(_)  => Result.Err(actor_dropped("send_standby_status")),
-        }
+        let mut state = self.lock_session();
+        state.send_standby_status_sync(write, flush, apply, client_time_us, reply_requested)
     }
 
-    public async fn close(&self) -> Result<(), DbError> {
-        let (rs, rr) = oneshot<Result<(), DbError>>();
-        match self.cmd_tx.send_async(RrShutdown { ack: rs }).await {
-            Result.Ok(())  => {}
-            Result.Err(_)  => { return Result.Err(actor_dropped("close")); }
-        }
-        let _ = rr.await;
-        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
-        match guard.take() {
-            Maybe.Some(jh) => { let _ = jh.join().await; }
-            Maybe.None     => {}
-        }
-        Result.Ok(())
+    fn close_sync(&self) -> Result<(), DbError> {
+        let mut state = self.lock_session();
+        state.close_wire()
     }
+
+    public async fn close(&self) -> Result<(), DbError> { self.close_sync() }
 }
 
-// =============================================================================
-// Constructor
-// =============================================================================
-
-/// Open a sync replication connection (offloaded to spawn_blocking
-/// since SCRAM + TLS is sync), then launch the actor.
+/// The handshake and command I/O use the synchronous PostgreSQL transport.
+/// Streaming configures an idle read timeout. The caller yields
+/// between idle reads while other handles can send feedback or close.
 public async fn connect_replication_async(
     cfg: PgReplicationConfig,
 ) -> Result<AsyncPgReplicationConnection, DbError> {
-    let cfg_owned = cfg.clone();
-    let conn_jh = spawn_blocking(move || -> Result<PgReplicationConnection, DbError> {
-        core.database.postgres.replication.connect_replication(&cfg_owned)
-    });
-    let conn = match conn_jh.join().await {
-        Result.Ok(r)  => r?,
-        Result.Err(_) => { return Result.Err(actor_dropped("connect: blocking-pool join")); }
+    let wire = connect_replication(&cfg)?;
+    let state = ReplicationSession {
+        wire: Maybe.Some(wire), terminal: Maybe.None, registrations: List.new(),
+        sent_at: Maybe.None, estimate_us: 0, samples: 0,
     };
-
-    let (cmd_tx, cmd_rx) = bounded_channel<ReplRequest>(8);
-    let (status_tx, status_rx) = bounded_channel<StandbyStatusUpdate>(DEFAULT_STATUS_CAPACITY);
-    let (msg_tx, msg_rx) = bounded_channel<ReplActorEvent>(DEFAULT_MSG_CAPACITY);
-
-    // RTT atoms — shared across actor + caller. Actor writes;
-    // callers read via `rtt_estimate_us()` / `rtt_samples()`.
-    let rtt_estimate = Shared.new(AtomicInt.new(0));
-    let rtt_samples = Shared.new(AtomicInt.new(0));
-    let rtt_estimate_for_actor = rtt_estimate.clone();
-    let rtt_samples_for_actor = rtt_samples.clone();
-
-    let join = spawn_blocking(move || -> () {
-        // Fully-qualified — bare `run_actor` collides with 2-arg
-        // sibling in async_connection.vr (task #11 defect class).
-        core.database.postgres.async_replication.run_actor(
-            conn, cmd_rx, status_rx, msg_tx,
-            rtt_estimate_for_actor, rtt_samples_for_actor,
-        );
-    });
-
-    Result.Ok(AsyncPgReplicationConnection {
-        cmd_tx: cmd_tx,
-        status_tx: status_tx,
-        msg_rx: Shared.new(Mutex.new(msg_rx)),
-        join: Shared.new(Mutex.new(Maybe.Some(join))),
-        rtt_estimate_us: rtt_estimate,
-        rtt_samples: rtt_samples,
-    })
-}
-
-// =============================================================================
-// Actor body
-// =============================================================================
-
-fn run_actor(
-    mut conn: PgReplicationConnection,
-    mut cmd_rx: Receiver<ReplRequest>,
-    mut status_rx: Receiver<StandbyStatusUpdate>,
-    msg_tx: Sender<ReplActorEvent>,
-    rtt_estimate_us: Shared<AtomicInt>,
-    rtt_samples: Shared<AtomicInt>,
-) {
-    // Wall-clock time of the most recent `send_standby_status`
-    // write — paired against the next observed RmKeepalive to
-    // produce one RTT sample. `Maybe.None` until the first
-    // status write lands.
-    let mut last_status_send_us: Maybe<Int> = Maybe.None;
-    // Setup phase — process commands until START arrives. The
-    // wire is in regular sync mode (no streaming), so we use
-    // blocking recv on cmd_rx.
-    let mut streaming: Bool = false;
-    while !streaming {
-        let req = match cmd_rx.recv() {
-            Maybe.Some(r) => r,
-            Maybe.None    => {
-                let _ = msg_tx.send(ReaClosed);
-                return;
-            }
-        };
-        match req {
-            RrIdentifySystem { ack } => {
-                let _ = ack.send(conn.identify_system());
-            }
-            RrCreateLogicalSlot { slot, plugin, temporary, ack } => {
-                let _ = ack.send(conn.create_logical_slot(&slot, &plugin, temporary));
-            }
-            RrDropSlot { slot, wait, ack } => {
-                let _ = ack.send(conn.drop_slot(&slot, wait));
-            }
-            RrStartLogical { opts, start_lsn, ack } => {
-                let r = conn.start_logical(&opts, start_lsn);
-                match &r {
-                    Result.Ok(()) => { streaming = true; }
-                    _      => {}
-                }
-                let _ = ack.send(r);
-            }
-            RrStartPhysical { slot, start_lsn, timeline, ack } => {
-                let r = conn.start_physical(&slot, start_lsn, timeline);
-                match &r {
-                    Result.Ok(()) => { streaming = true; }
-                    _      => {}
-                }
-                let _ = ack.send(r);
-            }
-            RrShutdown { ack } => {
-                let _ = ack.send(conn.close());
-                let _ = msg_tx.send(ReaClosed);
-                return;
-            }
-        }
-    }
-
-    // Streaming phase — use timeout-bounded reads so we can
-    // alternate with status-update writes on a quiet wire.
-    let _ = conn.set_recv_timeout_ms(Maybe.Some(DEFAULT_RECV_TIMEOUT_MS));
-
-    loop {
-        // Drain any pending standby-status writes first.
-        loop {
-            match status_rx.try_recv() {
-                Result.Ok(s) => {
-                    let r = conn.send_standby_status(
-                        s.write, s.flush, s.apply,
-                        s.client_time_us, s.reply_requested,
-                    );
-                    match r {
-                        Result.Ok(()) => {
-                            // Stamp the send time for RTT pairing.
-                            // Latest write wins — if the consumer
-                            // bursts multiple statuses without a
-                            // keepalive arriving in between, only
-                            // the most recent send is paired
-                            // (correct: RTT measures the freshest
-                            // round-trip, not stale ones).
-                            last_status_send_us = Maybe.Some(wall_clock_us());
-                        }
-                        Result.Err(e) => {
-                            let _ = msg_tx.send(ReaTerminated(e));
-                            return;
-                        }
-                    }
-                }
-                Result.Err(_) => { break; }
-            }
-        }
-
-        // Drain any non-streaming control commands (currently only
-        // shutdown is meaningful mid-stream).
-        match cmd_rx.try_recv() {
-            Result.Ok(req) => {
-                match req {
-                    RrShutdown { ack } => {
-                        let _ = ack.send(conn.close());
-                        let _ = msg_tx.send(ReaClosed);
-                        return;
-                    }
-                    RrStartLogical { ack, .. }
-                    | RrStartPhysical { ack, .. } => {
-                        let _ = ack.send(Result.Err(bad_state("already streaming")));
-                    }
-                    RrIdentifySystem { ack } => {
-                        let _ = ack.send(Result.Err(bad_state("identify_system mid-stream")));
-                    }
-                    RrCreateLogicalSlot { ack, .. }
-                    | RrDropSlot { ack, .. } => {
-                        let _ = ack.send(Result.Err(bad_state("slot ops mid-stream")));
-                    }
-                }
-            }
-            Result.Err(_) => {}
-        }
-
-        // Try to read a frame within the timeout.
-        match conn.try_next_message() {
-            Result.Ok(Maybe.Some(msg)) => {
-                // RTT sampling — pair the keepalive with the
-                // last outgoing standby-status. Other message
-                // shapes (XLogData, etc.) don't carry RTT
-                // information; only PrimaryKeepalive is the
-                // server's "I heard you" round-trip closer.
-                match &msg {
-                    RmKeepalive(_) => {
-                        match last_status_send_us {
-                            Maybe.Some(send_us) => {
-                                let now_us = wall_clock_us();
-                                let sample = now_us - send_us;
-                                if sample >= 0 {
-                                    update_rtt_ewma(
-                                        &rtt_estimate_us,
-                                        &rtt_samples,
-                                        sample,
-                                    );
-                                }
-                                // Consume the pairing — next
-                                // sample needs a fresh send.
-                                last_status_send_us = Maybe.None;
-                            }
-                            Maybe.None => {}
-                        }
-                    }
-                    _ => {}
-                }
-                match msg_tx.send(ReaEvent(msg)) {
-                    Result.Ok(())  => {}
-                    Result.Err(_)  => {
-                        // Caller dropped the receiver — clean up.
-                        let _ = conn.close();
-                        return;
-                    }
-                }
-            }
-            Result.Ok(Maybe.None) => {
-                // Timeout — loop back to drain queues.
-            }
-            Result.Err(e) => {
-                let _ = msg_tx.send(ReaTerminated(e));
-                return;
-            }
-        }
-    }
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "REPL_ACTOR_CLOSED".clone(),
-        message: f"async replication actor unavailable during {what}",
-        retryable: false,
-    })
-}
-
-fn bad_state(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "REPL_BAD_STATE".clone(),
-        message: f"async replication actor: {what}",
-        retryable: false,
-    })
-}
-
-// =============================================================================
-// RTT estimation helpers (P-PROD-PG-REPL-RTT-V0)
-// =============================================================================
-
-/// Wall-clock micros since the unix epoch. Routes through the
-/// canonical `core.time.system_time.SystemTime.now()` accessor
-/// (clock_gettime(CLOCK_REALTIME) on Linux/macOS).
-fn wall_clock_us() -> Int {
-    core.time.system_time.SystemTime.now().timestamp_micros()
-}
-
-/// EWMA update for the RTT estimate. Standard exponential
-/// smoothing with α = 1/8 (matches TCP's SRTT smoothing
-/// constant per RFC 6298 §2). On the FIRST sample (samples ==
-/// 0) we seed the estimate with the raw value so callers don't
-/// see a transient zero estimate before the smoothing warms
-/// up. Increments `rtt_samples` after every update.
-///
-/// Formula:
-///   * First sample : `rtt = sample`
-///   * Subsequent   : `rtt = (7 * rtt + sample) / 8`
-///
-/// Integer arithmetic only — no floats. Sample is in
-/// microseconds (always non-negative when called).
-fn update_rtt_ewma(
-    rtt_estimate: &Shared<AtomicInt>,
-    rtt_samples: &Shared<AtomicInt>,
-    sample_us: Int,
-) {
-    let prior_samples = rtt_samples.load(MemoryOrdering.Acquire);
-    let next_estimate = if prior_samples == 0 {
-        sample_us
-    } else {
-        let prior = rtt_estimate.load(MemoryOrdering.Acquire);
-        (prior * 7 + sample_us) / 8
-    };
-    rtt_estimate.store(next_estimate, MemoryOrdering.Release);
-    let _ = rtt_samples.fetch_add(1, MemoryOrdering.AcqRel);
+    Result.Ok(AsyncPgReplicationConnection { session: Shared.new(Mutex.new(state)) })
 }
