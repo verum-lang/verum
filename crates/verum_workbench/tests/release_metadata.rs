@@ -4,9 +4,7 @@ use verum_common::List;
 use verum_lsp::library_metadata::LibraryMetadata;
 use verum_workbench::{Config, Studio};
 
-#[tokio::test]
-#[ignore = "requires VERUM_TEST_LIBRARY_METADATA from the matching release build"]
-async fn release_library_imports_keep_their_declared_owners() {
+fn release_studio() -> (tempfile::TempDir, Studio) {
     let artifact = std::env::var_os("VERUM_TEST_LIBRARY_METADATA").expect("release metadata path");
     let library = LibraryMetadata::load(std::path::Path::new(&artifact)).unwrap();
     eprintln!("library {}", library.identity.sha256);
@@ -22,6 +20,13 @@ async fn release_library_imports_keep_their_declared_owners() {
         Some(library),
     )
     .unwrap();
+    (root, studio)
+}
+
+#[tokio::test]
+#[ignore = "requires VERUM_TEST_LIBRARY_METADATA from the matching release build"]
+async fn release_library_imports_keep_their_declared_owners() {
+    let (_workspace, studio) = release_studio();
     for mount in [
         "core.base.protocols.{Display}",
         "core.base.{Display}",
@@ -80,5 +85,35 @@ async fn release_library_imports_keep_their_declared_owners() {
         let diagnostics = analysis["result"]["diagnostics"].as_array().unwrap();
         assert_eq!(diagnostics.iter().all(|d| d["severity"] != 1), valid,
             "{source}: {diagnostics:?}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires VERUM_TEST_LIBRARY_METADATA with compiled scalar declarations"]
+async fn compiled_scalar_methods_keep_their_array_extents() {
+    let (_workspace, studio) = release_studio();
+    for (source, expected_error) in [
+        ("fn bytes(n: UInt64) -> [Byte; 8] { let bits = n * 8_u64; bits.to_be_bytes() }", None),
+        ("fn wrong(n: UInt16) -> Bool { n.to_le_bytes() }", Some("[UInt8; 2]")),
+        ("fn wrong(n: UInt64) -> [Byte; 7] { n.to_be_bytes() }", Some("expected 7, found 8")),
+    ] {
+        let analysis = studio
+            .call("language.request", json!({"path":"main.vr", "source":source}))
+            .await
+            .unwrap();
+        assert_eq!(analysis["result"]["parsed"], true, "{source}");
+        let errors: Vec<_> = analysis["result"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["severity"] == 1)
+            .collect();
+        match expected_error {
+            None => assert!(errors.is_empty(), "{source}: {errors:?}"),
+            Some(message) => assert!(
+                errors.iter().any(|d| d["message"].as_str().is_some_and(|m| m.contains(message))),
+                "{source}: {errors:?}"
+            ),
+        }
     }
 }

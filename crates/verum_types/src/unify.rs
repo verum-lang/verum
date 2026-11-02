@@ -2216,8 +2216,8 @@ impl Unifier {
                 // 3. If neither has size, they unify (both unknown)
                 match (s1, s2) {
                     (Some(n1), Some(n2)) if n1 != n2 => Err(TypeError::ConstMismatch {
-                        expected: format!("Some({})", n2).into(),
-                        actual: format!("Some({})", n1).into(),
+                        expected: n2.to_string().into(),
+                        actual: n1.to_string().into(),
                         span,
                     }),
                     _ => {
