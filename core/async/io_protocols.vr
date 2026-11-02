@@ -199,8 +199,14 @@ implement<W: AsyncWrite> Future for WriteFuture<W> {
         let slice = self.buf.slice(self.written, self.buf.len());
         match self.writer.poll_write(cx, &slice) {
             Poll.Ready(Result.Ok(n)) => {
+                if n == 0 {
+                    return Poll.Ready(Result.Err(StreamError.new(IoErrorKind.WriteZero)));
+                }
+                if n < 0 || n > remaining {
+                    return Poll.Ready(Result.Err(StreamError.new(IoErrorKind.InvalidData)));
+                }
                 self.written = self.written + n;
-                if self.written >= self.buf.len() {
+                if self.written == self.buf.len() {
                     Poll.Ready(Result.Ok(self.written))
                 } else {
                     // Re-register waker and return pending to write more
