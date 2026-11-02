@@ -231,3 +231,15 @@ fn callable_bounds_do_not_hide_free_level_names() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn callable_constraints_survive_record_shorthand() {
+    for level in [1, 2] {
+        let source = format!("fn apply<universe u, F: fn() -> Type(u)>(f: F) -> Type(u) {{ f() }}
+            type Holder is {{ apply: fn(fn() -> Type({level})) -> Type(1) }};
+            fn use_it(f: fn() -> Type({level})) -> Type(1) {{ let holder = Holder {{ apply }}; (holder.apply)(f) }}");
+        let errors = complaints(&source);
+        if level == 1 { assert!(errors.is_empty(), "{errors:?}"); }
+        else { assert!(!errors.is_empty(), "record shorthand erased the callable bound"); }
+    }
+}

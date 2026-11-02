@@ -16470,8 +16470,8 @@ impl TypeChecker {
                 result.ty
             } else {
                 // Shorthand: lookup variable type
-                match self.ctx.env.lookup(field_name.as_str()) {
-                    Some(scheme) => scheme.instantiate(),
+                match self.ctx.env.lookup(field_name.as_str()).cloned() {
+                    Some(scheme) => self.instantiate_value_scheme(&scheme, field_init.span)?,
                     None => {
                         return Err(TypeError::UnboundVariable {
                             name: field_name.clone(),

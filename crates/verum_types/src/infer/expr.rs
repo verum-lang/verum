@@ -2249,8 +2249,8 @@ impl TypeChecker {
                         )?;
                     } else {
                         // Shorthand syntax
-                        if let Some(scheme) = self.ctx.env.lookup(field_name.as_str()) {
-                            let var_ty = scheme.instantiate();
+                        if let Some(scheme) = self.ctx.env.lookup(field_name.as_str()).cloned() {
+                            let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
                             self.unifier
                                 .unify(&var_ty, expected_field_ty, field_init.span)?;
                         } else {
@@ -7794,7 +7794,7 @@ impl TypeChecker {
                 if let Some(scheme) =
                     self.ctx.env.lookup(new_func_name.as_str()).cloned()
                 {
-                    let func_ty = scheme.instantiate();
+                    let func_ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                     if let Type::Function {
                         params,
                         return_type,
@@ -11344,9 +11344,9 @@ impl TypeChecker {
                                     )?;
                                     expected_field_ty.clone()
                                 } else {
-                                    match self.ctx.env.lookup(field_name) {
+                                    match self.ctx.env.lookup(field_name).cloned() {
                                         Some(scheme) => {
-                                            let var_ty = scheme.instantiate();
+                                            let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
                                             self.unifier.unify(
                                                 &var_ty,
                                                 expected_field_ty,
@@ -11628,9 +11628,9 @@ impl TypeChecker {
                                         )?;
                                         expected_field_ty.clone()
                                     } else {
-                                        match self.ctx.env.lookup(field_name) {
+                                        match self.ctx.env.lookup(field_name).cloned() {
                                             Some(var_scheme) => {
-                                                let var_ty = var_scheme.instantiate();
+                                                let var_ty = self.instantiate_value_scheme(&var_scheme, field_init.span)?;
                                                 self.unifier.unify(
                                                     &var_ty,
                                                     expected_field_ty,
@@ -11921,9 +11921,9 @@ impl TypeChecker {
                 expected_field_ty.clone()
             } else {
                 // Shorthand: lookup variable in environment
-                match self.ctx.env.lookup(field_name) {
+                match self.ctx.env.lookup(field_name).cloned() {
                     Some(scheme) => {
-                        let var_ty = scheme.instantiate();
+                        let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
                         // Check if variable type matches expected field type
                         self.unifier.unify(
                             &var_ty,
