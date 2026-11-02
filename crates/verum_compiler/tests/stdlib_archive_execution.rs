@@ -9,6 +9,44 @@ use verum_vbc::{
 };
 
 #[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive and loopback TCP"]
+fn weft_overload_sends_the_complete_http_response() {
+    let source = r#"
+        module app;
+        mount core.net.weft.listener.{PlainHttp1Runner, ConnectionRunner};
+        mount core.net.weft.router.Router;
+        mount core.net.weft.connection.ConnectionConfig;
+        mount core.net.tcp.{TcpStream, TcpListener};
+        mount core.net.addr.{Ipv4Addr, SocketAddrV4, SocketAddr};
+        mount core.async.cancellation.CancellationToken;
+        mount core.sync.atomic.AtomicBool;
+        async fn main() -> Int {
+            let listener = TcpListener.bind(SocketAddr.V4(SocketAddrV4.new(Ipv4Addr.localhost(), 0))).unwrap();
+            let mut client = TcpStream.connect(listener.local_addr().unwrap()).unwrap();
+            let (server, _) = listener.accept_async().await.unwrap();
+            let runner = PlainHttp1Runner.new(
+                Heap.new(Router.new()), CancellationToken.new(),
+                Shared.new(AtomicBool.new(false)), ConnectionConfig.default(),
+            );
+            runner.refuse_overloaded(server).await;
+            let expected = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 11\r\n\r\noverloaded\n".as_bytes();
+            let mut size = 0;
+            while size < expected.len() {
+                let mut bytes: List<Byte> = List.with_capacity(256);
+                let count = client.read_async(&mut bytes).await.unwrap();
+                if count <= 0 { return -1; }
+                for byte in bytes {
+                    if size >= expected.len() || byte != expected[size] { return -2; }
+                    size = size + 1;
+                }
+            }
+            size
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 86);
+}
+
+#[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
 fn rwlock_methods_preserve_the_declared_lock_result() {
     let source = r#"

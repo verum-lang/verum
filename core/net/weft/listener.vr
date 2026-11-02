@@ -49,9 +49,8 @@ module core.net.weft.listener;
 mount core.net.tcp.{TcpListener, TcpStream};
 mount core.net.addr.{SocketAddr, IpAddr};
 mount core.async.cancellation.{CancellationToken};
-mount core.async.task;
+mount core.async.io_protocols.{WriteFuture};
 mount core.async.timer;
-mount core.async.timer.{timeout_ms as future_timeout_ms};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.net.weft.handler.{Handler};
 mount core.net.weft.connection.{serve_http1, ConnectionConfig};
@@ -206,37 +205,17 @@ implement<H: Handler + Send + Sync + 'static> ConnectionRunner for PlainHttp1Run
         ).await;
     }
 
-    async fn refuse_overloaded(&self, mut stream: TcpStream) {
-        // Best-effort minimal 503 before drop. We do NOT go through
-        // the full response pipeline — the peer didn't yet finish a
-        // request that Weft could parse.
-        //
-
-        // Pre-fix the write went through `await` directly on the
-        // accept-loop's task — a slow attacker (TCP-handshake-then-stall)
-        // could stall the loop on its 503 response, blocking new
-        // accepts. Redteam §6.
-        //
-
-        // Post-fix the write is fire-and-forget under a 1-second
-        // deadline: spawn the write into its own task so the
-        // accept-loop returns immediately; the deadline ensures the
-        // spawned write doesn't dangle if the peer never reads.
-        let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 11\r\n\r\noverloaded\n";
-        // Post-#316: emit bytes straight into the byte buffer.
-        let mut buf: List<Byte> = List.with_capacity(msg.len());
-        for b in msg.as_bytes().iter() {
-            buf.push(*b);
-        }
-        // Fire-and-forget — accept loop continues immediately.
-        // 1-second write deadline bounds the slow-consumer attack
-        // surface on the 503 path itself.
-        let _ = task.spawn(async move {
-            let _ = future_timeout_ms(
-                1_000,
-                stream.write_async(&buf),
-            ).await;
-        });
+    async fn refuse_overloaded(&self, stream: TcpStream) {
+        // A stalled peer must not delay new accepts. The detached operation
+        // owns both the socket and bytes until the write completes or expires.
+        let _ = spawn {
+            let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 11\r\n\r\noverloaded\n";
+            let write: WriteFuture<TcpStream> = WriteFuture.new(stream, msg.into_bytes());
+            select {
+                _ = write.await => {},
+                _ = timer.sleep_ms(1_000).await => {},
+            }
+        };
     }
 }
 
@@ -315,7 +294,7 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
                 };
 
                 let runner_c = runner.clone();
-                let _ = task.spawn(async move {
+                let _ = spawn {
                     // `_ticket` outlives `runner_c.run` and is dropped
                     // here — even if `run` panics, even if the task is
                     // cancelled, even if a host shutdown unwinds the
@@ -323,7 +302,7 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
                     // responsibility, not the developer's.
                     let _ticket = global_slot;
                     runner_c.run(stream, peer).await;
-                });
+                };
             }
         }
     }
