@@ -28,6 +28,7 @@ public type Result<T, E> is Ok(T) | Err(E);
 public type Maybe<T> is None | Some(T);
 public type StreamError is { code: Int };
 public type IoError is StreamError;
+public type IoResult<T> is Result<T, StreamError>;
 "#,
     )
     .unwrap();
@@ -64,6 +65,14 @@ public fn complete<T>(value: T) -> Complete<T> { Complete { value: value } }
 module core.scheduler.select;
 mount core.scheduler.future.{Future, Poll, Context, Waker, Thread, noop_waker};
 mount core.Maybe;
+mount core.values.{IoResult, Result};
+public type WriteValue<T> is { payload: T, count: Int };
+implement<T> Future for WriteValue<T> {
+    type Output = IoResult<Int>;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<IoResult<Int>> {
+        Poll.Ready(Result.Ok(self.count))
+    }
+}
 public type Tagged<P, T> is { value: Maybe<T> };
 implement<P, T> Future for Tagged<P, T> {
     type Output = Maybe<P>;
@@ -80,6 +89,7 @@ public async fn choose<X, P, T>(x: X, value: T) -> Maybe<P> { Tagged { value: Ma
 module core.network.tcp;
 mount core.scheduler.future.{Future, Poll, Context, Waker, Thread, noop_waker};
 mount core.values.{Result, IoError};
+mount core.scheduler.select.WriteValue;
 public type AcceptFuture<'a> is { value: &'a Int };
 implement<'a> Future for AcceptFuture<'a> {
     type Output = Result<(Int, Int), IoError>;
@@ -87,7 +97,11 @@ implement<'a> Future for AcceptFuture<'a> {
         Poll.Ready(Result.Ok((*self.value, 9)))
     }
 }
-public async fn forward() -> Int { core.scheduler.future.complete(37).await }
+public async fn forward() -> Int {
+    let value = core.scheduler.future.complete(37).await;
+    let write: WriteValue<Int> = WriteValue { payload: value, count: value };
+    select { result = write.await => { match result { Result.Ok(count) => count, _ => 0 } } }
+}
 public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFuture { value: value }.await }
 "#).unwrap();
     if glob {

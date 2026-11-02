@@ -56,6 +56,29 @@ impl VbcCodegen {
                     })
             })
     }
+    /// Forward interfaces and compiled declarations can both describe one
+    /// implementation. Only a declared, unambiguous member is evidence.
+    fn associated_binding<'a>(
+        &'a self,
+        implementations: impl Iterator<Item = &'a crate::types::ProtocolImpl>,
+        member: &str,
+    ) -> Option<&'a TypeRef> {
+        let mut bindings = implementations.flat_map(|implementation| &implementation.associated_types)
+            .filter(|(name, _)| self.ctx.strings.get(name.0 as usize)
+                .is_some_and(|name| name == member))
+            .map(|(_, ty)| ty);
+        let first = bindings.next()?;
+        bindings.all(|other| other == first).then_some(first)
+    }
+
+    fn future_output_declaration(&self, owner: crate::types::TypeId) -> Option<&TypeRef> {
+        let protocol = self.future_implementation_for_type(owner)?.protocol;
+        self.associated_binding(
+            self.type_by_id(owner)?.protocols.iter().filter(|implementation| implementation.protocol == protocol),
+            "Output",
+        )
+    }
+
     pub(super) fn declared_type_in_scope(&self, ty: &TypeRef) -> bool {
         let ids: verum_common::List<_> = self
             .ctx
@@ -195,17 +218,8 @@ impl VbcCodegen {
             }
         }
         if let Some(expected_output) = output {
-            let associated = self
-                .future_implementation_for_type(owner)?
-                .associated_types
-                .iter()
-                .find(|(name, _)| {
-                    self.ctx
-                        .strings
-                        .get(name.0 as usize)
-                        .is_some_and(|name| name == "Output")
-                })?;
-            if !self.bind_source_declaration(&associated.1, expected_output, &mut bindings) {
+            let associated = self.future_output_declaration(owner)?;
+            if !self.bind_source_declaration(associated, expected_output, &mut bindings) {
                 return None;
             }
         }
@@ -424,16 +438,7 @@ impl VbcCodegen {
         if declaration.type_params.len() != args.len() {
             return None;
         }
-        let (_, output) = self
-            .future_implementation_for_type(owner)?
-            .associated_types
-            .iter()
-            .find(|(name, _)| {
-                self.ctx
-                    .strings
-                    .get(name.0 as usize)
-                    .is_some_and(|name| name == "Output")
-            })?;
+        let output = self.future_output_declaration(owner)?;
         let output = TypeSubstitution::new(&declaration.type_params, args).apply(output);
         self.resolve_declared_projections(&output, depth + 1)
     }
@@ -454,17 +459,7 @@ impl VbcCodegen {
                 if declaration.type_params.len() != args.len() {
                     return None;
                 }
-                let mut bindings = declaration.protocols.iter()
-                    .flat_map(|implementation| &implementation.associated_types)
-                    .filter(|(name, _)| self.ctx.strings.get(name.0 as usize)
-                        .is_some_and(|name| name == assoc));
-                let (_, binding) = bindings.next()?;
-                // An unqualified projection is known when every applicable
-                // declaration agrees in this exact owner's binder scope.
-                // Conflicting members require protocol-qualified evidence.
-                if bindings.any(|(_, other)| other != binding) {
-                    return None;
-                }
+                let binding = self.associated_binding(declaration.protocols.iter(), assoc)?;
                 let declared = TypeSubstitution::new(&declaration.type_params, args).apply(binding);
                 self.resolve_declared_projections(&declared, depth + 1)?
             }
