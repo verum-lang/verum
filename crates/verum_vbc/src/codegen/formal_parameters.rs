@@ -247,6 +247,9 @@ impl VbcCodegen {
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. }
                 | TypeKind::Slice(inner) => supported(inner, depth + 1, budget, cg, scope),
+                TypeKind::Array { element, size } => {
+                    size.is_some() && supported(element, depth + 1, budget, cg, scope)
+                }
                 TypeKind::Tuple(parts) => parts
                     .iter()
                     .all(|p| supported(p, depth + 1, budget, cg, scope)),
@@ -275,8 +278,8 @@ impl VbcCodegen {
                             .all(|p| supported(p, depth + 1, budget, cg, scope))
                         && supported(return_type, depth + 1, budget, cg, scope)
                 }
-                // The existing resolver has recovery encodings for array
-                // counts, rank-2 binders, raw pointers and unresolved forms.
+                // The existing resolver has recovery encodings for rank-2
+                // binders, raw pointers and unresolved forms.
                 // These encodings cannot establish this declaration fact.
                 _ => false,
             }
@@ -289,9 +292,20 @@ impl VbcCodegen {
             .current_source_module
             .as_deref()
             .unwrap_or(&self.config.module_name);
-        let ty =
-            self.resolve_type_ref_scoped_with_count(ast, scope, true, Some(owner), &mut |_| None);
-        resolved(&ty, declared_ids, 0).then_some(ty)
+        // A runtime array carrier uses zero for both an empty array and an
+        // unresolved extent. Publish a semantic type only when every count
+        // was evaluated from its declaration. Free names need lexical evidence.
+        let mut complete = true;
+        let mut array_count = |count: &verum_ast::Expr| {
+            let extent = verum_ast::checked_const::evaluate(count, 0, &mut |_, _| Ok::<_, ()>(None))
+                .ok()
+                .and_then(|value| value.as_i64())
+                .and_then(|value| u64::try_from(value).ok());
+            complete &= extent.is_some();
+            extent
+        };
+        let ty = self.resolve_type_ref_scoped_with_count(ast, scope, true, Some(owner), &mut array_count);
+        (complete && resolved(&ty, declared_ids, 0)).then_some(ty)
     }
 }
 
@@ -374,9 +388,8 @@ pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize)
         TypeRef::ConstValue(_) => true,
         TypeRef::AssociatedProjection { base, assoc } => !assoc.is_empty()
             && resolved(base, declared_ids, depth + 1),
-        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => {
-            resolved(inner, declared_ids, depth + 1)
-        }
+        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner)
+        | TypeRef::Array { element: inner, .. } => resolved(inner, declared_ids, depth + 1),
         TypeRef::Tuple(parts) => parts.iter().all(|p| resolved(p, declared_ids, depth + 1)),
         TypeRef::Instantiated { base, args } => {
             concrete(*base) && args.iter().all(|p| resolved(p, declared_ids, depth + 1))

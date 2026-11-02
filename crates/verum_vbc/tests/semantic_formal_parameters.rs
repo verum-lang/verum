@@ -72,6 +72,23 @@ fn source_managed_checked_and_unsafe_record_borrows_are_not_the_abi_carriers() {
 }
 
 #[test]
+fn fixed_array_formals_keep_closed_extents_and_distinguish_zero_from_unknown() {
+    let module = compile(
+        "fn consume(a: [Int; 0], b: [Int; 1 + 2]) -> [Int; 3] { b }
+         fn unknown<N>(a: [Int; N]) -> [Int; N] { a }",
+    );
+    for m in [&module, &roundtrip(&module)] {
+        let fixed = function(m, "consume");
+        let array = |length| T::Array { element: Box::new(T::Concrete(TypeId::INT)), length };
+        assert_eq!(fixed.semantic_parameter_types().unwrap(), &[Some(array(0)), Some(array(3))]);
+        assert_eq!(fixed.semantic_return, Some(array(3)));
+        let unknown = function(m, "unknown");
+        assert_eq!(unknown.semantic_parameter_types().unwrap(), &[None]);
+        assert!(unknown.semantic_return.is_none());
+    }
+}
+
+#[test]
 fn unsupported_positions_remain_unknown_without_shifting_following_formals() {
     let m = compile(
         "fn inspect<N>(a: fn<R>(R) -> R, b: [Int; N], c: Missing, d: &Int) -> Int { 7 } fn empty() -> Int { 0 }",
