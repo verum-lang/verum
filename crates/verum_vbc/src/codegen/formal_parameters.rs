@@ -53,7 +53,7 @@ impl VbcCodegen {
             verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
         };
         let names = self.ctx.generic_type_params_ordered.clone();
-        let (dense, _) = self.function_generic_param_maps(function, name.map(String::as_str), &names);
+        let (dense, _) = self.declared_impl_generic_param_maps(function, implementation, &names);
         let receiver = self.resolve_impl_receiver(target, &dense, &names)?;
         let saved = self.current_impl_receiver.replace(receiver);
         let result = self.compile_function(function, name);
@@ -104,7 +104,7 @@ impl VbcCodegen {
             verum_ast::decl::ImplKind::Inherent(target) => target,
             verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
         };
-        let (dense, _) = self.function_generic_param_maps(function, Some(name), generics);
+        let (dense, _) = self.declared_impl_generic_param_maps(function, implementation, generics);
         let receiver = self.resolve_impl_receiver(target, &dense, generics)?;
         let saved = self.current_impl_receiver.replace(receiver);
         let result = self.register_impl_function(function, name, generics);

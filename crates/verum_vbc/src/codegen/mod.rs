@@ -69,6 +69,8 @@ mod place_copies;
 mod formal_parameters;
 mod source_substitution;
 mod protocol_applications;
+mod impl_generic_rosters;
+mod protocol_attachments;
 mod blanket_impls;
 mod protocol_results;
 mod constructor_types;
@@ -1029,6 +1031,11 @@ pub struct VbcCodegen {
     /// bodies (each module's literals resolve against its own types;
     /// already-compiled bodies keep their baked indices).
     source_type_visibility: std::collections::HashMap<String, verum_ast::Visibility>,
+    /// Source binder headers, keyed by the declaration's final nominal identity.
+    /// None is a known unsupported header; an empty roster is a nongeneric type.
+    source_generic_rosters: HashMap<TypeId, Option<impl_generic_rosters::GenericRoster>>,
+    /// Complete implementation facts awaiting their already claimed source target.
+    pending_protocol_attachments: HashMap<TypeId, Vec<crate::types::ProtocolImpl>>,
     /// Exact local declarations reached through a cyclic bootstrap dependency.
     /// Their IDs are final, but their imported field types are provisional.
     bootstrap_local_forwards: std::collections::HashSet<Text>,
@@ -2413,6 +2420,8 @@ impl VbcCodegen {
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
             source_type_visibility: Default::default(),
+            source_generic_rosters: Default::default(),
+            pending_protocol_attachments: Default::default(),
             bootstrap_local_forwards: Default::default(),
             type_name_claim_owner: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
@@ -3385,6 +3394,9 @@ impl VbcCodegen {
         if let std::collections::hash_map::Entry::Vacant(claim) = claim {
             claim.insert(declaration.visibility.clone());
         } else {
+            if let Some(id) = self.type_name_to_id.get(&qualified).copied() {
+                self.claim_generic_roster(id, declaration);
+            }
             if trace_type_binding(type_name) {
                 eprintln!(
                     "[type-claim] SKIP   name={} module={} (pair already claimed) holds={:?}",
@@ -3421,6 +3433,7 @@ impl VbcCodegen {
         // entry). Lexical scoping: the declaring module owns its simple
         // key; the foreign layout stays reachable via its qualified key.
         let type_id = complete_id.or(canonical_id).unwrap_or_else(|| self.alloc_user_type_id());
+        self.claim_generic_roster(type_id, declaration);
         // The qualified entry belongs to this declaration, independently of
         // whichever sibling currently occupies the convenience bare key.
         self.type_name_to_id.insert(format!("{module_name}.{type_name}"), type_id);
@@ -3682,8 +3695,8 @@ impl VbcCodegen {
         lexical_owner: Option<String>,
         constraints: Option<DefaultConstraintScope>,
     ) -> CodegenResult<DeferredDefaultMethod> {
-        let (dense, shadow) = self.function_generic_param_maps(
-            function, Some(receiver_name), &declaration.ordered_generics,
+        let (dense, shadow) = self.declared_impl_generic_param_maps(
+            function, &implementation.kind, &declaration.ordered_generics,
         );
         let target = match &implementation.kind {
             verum_ast::decl::ImplKind::Inherent(target) => target,
@@ -7215,7 +7228,8 @@ impl VbcCodegen {
         self.push_type_with_carrier_eligibility(ty, eligible, false);
     }
 
-    fn push_declared_type(&mut self, ty: TypeDescriptor) {
+    fn push_declared_type(&mut self, mut ty: TypeDescriptor) {
+        self.take_pending_protocol_attachments(&mut ty);
         let complete_forward = self.type_declaration_identity(&ty).is_some_and(|owner| {
             self.type_by_id(ty.id)
                 .is_some_and(|prior| self.type_declaration_identity(prior).as_ref() == Some(&owner))
@@ -9674,6 +9688,8 @@ impl VbcCodegen {
         self.functions.clear();
         self.types.clear();
         self.type_index.clear();
+        self.source_generic_rosters.clear();
+        self.pending_protocol_attachments.clear();
         self.source_declaration_slots.clear();
         self.archive_data_sources.clear();
         self.ineligible_record_carriers.clear();
@@ -10653,35 +10669,9 @@ impl VbcCodegen {
                             // good id with NO descriptor behind it in this
                             // module.  Ask for the DESCRIPTOR, which is what
                             // actually carries the impl.
-                            let local_slot = self
-                                .type_name_to_id
-                                .get(ty_name.as_str())
-                                .copied()
-                                .and_then(|id| {
-                                    // Scalar aliases share an ID, but source
-                                    // impl ownership retains their spelling.
-                                    // A nominal Bool has its own resolved ID.
-                                    let scalar = TypeId::from_well_known_scalar_name(&ty_name)
-                                        == Some(id);
-                                    self.types.iter().position(|ty| {
-                                        ty.id == id
-                                            && (!scalar
-                                                || ((ty.canonical_scalar_type_id(&ty_name) == Some(id)
-                                                    || self.canonical_runtime_record_id(ty) == Some(id))
-                                                    && self.ctx.strings.get(ty.name.0 as usize)
-                                                        .map(String::as_str)
-                                                        == Some(ty_name.as_str())))
-                                    })
-                                });
-                            match local_slot {
-                                Some(idx) => self.types[idx].register_implementation(impl_record),
-                                None => {
-                                    self.attach_impl_to_undeclared_target(
-                                        ty_name.as_str(),
-                                        impl_record,
-                                    )?;
-                                }
-                            }
+                            self.attach_declared_protocol_impl(
+                                &impl_decl.kind, ty_name, impl_record,
+                            )?;
                         }
                     }
                 }
@@ -13743,27 +13733,22 @@ impl VbcCodegen {
         // by the target's generic ARG names.  Only symbolic identifiers that
         // NAME a declared param bind (a concrete `MyAlloc<17>` arg binds
         // nothing).
-        let Some(base) = self.extract_impl_type_name(&impl_decl.kind) else {
+        let Some(id) = self.implementation_nominal_id(&impl_decl.kind) else {
+            return (Vec::new(), Vec::new(), Vec::new());
+        };
+        let Some(roster) = self.declaration_generic_roster(id) else {
             return (Vec::new(), Vec::new(), Vec::new());
         };
         let arg_names = Self::impl_target_arg_names(&impl_decl.kind);
-        if arg_names.is_empty() {
-            return (Vec::new(), Vec::new(), Vec::new());
-        }
-        let declared = self.ctx.type_generic_params.get(&base);
-        let const_set = self.ctx.type_const_param_names.get(&base);
         let mut type_g = Vec::new();
         let mut const_g = Vec::new();
         let mut ordered = Vec::new();
         for arg in arg_names {
-            let is_declared = declared
-                .map(|d| d.iter().any(|p| p == &arg))
-                .unwrap_or(false);
-            if !is_declared {
+            let Some(parameter) = roster.iter().find(|parameter| parameter.name == arg) else {
                 continue;
-            }
+            };
             ordered.push(arg.clone());
-            if const_set.map(|s| s.contains(&arg)).unwrap_or(false) {
+            if parameter.is_value {
                 const_g.push(arg);
             } else {
                 type_g.push(arg);
@@ -13931,12 +13916,8 @@ impl VbcCodegen {
         {
             return (scope.dense.clone(), scope.shadow.clone());
         }
-        let parent_names: Vec<String> = impl_type_name.and_then(|name| {
-            self.ctx.type_generic_params.get(name).cloned().or_else(|| {
-                let descriptor = self.type_by_id(*self.type_name_to_id.get(name)?)?;
-                Some(descriptor.type_params.iter().filter_map(|p| self.ctx.strings.get(p.name.0 as usize).cloned()).collect())
-            })
-        }).unwrap_or_default();
+        let parent_names = impl_type_name.and_then(|name| self.method_parent_generic_names(name))
+            .unwrap_or_default();
         Self::declaration_generic_param_maps(func, &parent_names, fallback_generics)
     }
 
@@ -25046,6 +25027,7 @@ impl VbcCodegen {
     /// Builds the final VBC module.
     fn build_module(&mut self) -> CodegenResult<VbcModule> {
         self.check_source_declaration_error()?;
+        self.check_pending_protocol_attachments()?;
         let mut declaration_owners: Map<TypeId, (Maybe<Text>, bool, bool)> = Map::new();
         for ty in &self.types {
             let identity = self.type_declaration_identity(ty);

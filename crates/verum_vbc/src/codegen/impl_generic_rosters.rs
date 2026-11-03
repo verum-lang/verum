@@ -1,0 +1,135 @@
+//! Source declaration headers available before layout and method collection.
+//! A binder roster is a fact about one selected nominal declaration. It neither
+//! invents a record layout nor imports a same-spelled foreign type's parameters.
+use std::borrow::Cow;
+
+use super::VbcCodegen;
+use crate::types::{TypeId, TypeRef};
+use verum_ast::{FunctionDecl, Type, TypeDecl, TypeKind, decl::ImplKind, ty::GenericParamKind};
+
+#[derive(Debug, Clone)]
+pub(super) struct DeclaredGenericParameter {
+    pub(super) name: String,
+    pub(super) is_value: bool,
+}
+
+pub(super) type GenericRoster = Vec<DeclaredGenericParameter>;
+
+impl VbcCodegen {
+    pub(super) fn claim_generic_roster(&mut self, id: TypeId, declaration: &TypeDecl) {
+        let roster = declaration
+            .generics
+            .iter()
+            .filter(|parameter| !matches!(parameter.kind, GenericParamKind::Lifetime { .. }))
+            .map(|parameter| {
+                let (name, is_value) = match &parameter.kind {
+                    GenericParamKind::Type { name, .. }
+                    | GenericParamKind::HigherKinded { name, .. } => (name, false),
+                    GenericParamKind::Const { name, .. } | GenericParamKind::Meta { name, .. } => {
+                        (name, true)
+                    }
+                    _ => return None,
+                };
+                Some(DeclaredGenericParameter {
+                    name: name.name.to_string(),
+                    is_value,
+                })
+            })
+            .collect();
+        self.source_generic_rosters.insert(id, roster);
+    }
+
+    /// A known unsupported source header remains unknown. It cannot fall back
+    /// to an erased descriptor and accidentally reinterpret value/level kinds.
+    pub(super) fn declaration_generic_roster(
+        &self,
+        id: TypeId,
+    ) -> Option<Cow<'_, [DeclaredGenericParameter]>> {
+        if let Some(roster) = self.source_generic_rosters.get(&id) {
+            return roster
+                .as_ref()
+                .map(|roster| Cow::Borrowed(roster.as_slice()));
+        }
+        // Imported executable descriptors declare only their actual type slots.
+        // No absent source value parameter is reconstructed from a name.
+        self.type_by_id(id)?
+            .type_params
+            .iter()
+            .map(|parameter| {
+                Some(DeclaredGenericParameter {
+                    name: self.ctx.strings.get(parameter.name.0 as usize)?.clone(),
+                    is_value: false,
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(Cow::Owned)
+    }
+
+    pub(super) fn implementation_nominal_id(&self, implementation: &ImplKind) -> Option<TypeId> {
+        let target = match implementation {
+            ImplKind::Inherent(target)
+            | ImplKind::Protocol {
+                for_type: target, ..
+            } => target,
+        };
+        self.implementation_type_nominal_id(target)
+    }
+
+    fn implementation_type_nominal_id(&self, target: &Type) -> Option<TypeId> {
+        match &target.kind {
+            TypeKind::Generic { base, .. }
+            | TypeKind::Reference { inner: base, .. }
+            | TypeKind::CheckedReference { inner: base, .. }
+            | TypeKind::UnsafeReference { inner: base, .. }
+            | TypeKind::Pointer { inner: base, .. } => self.implementation_type_nominal_id(base),
+            TypeKind::Path(path) => self.nominal_type_id(&Self::format_type_path(path)),
+            _ => self
+                .extract_impl_type_name_from_type(target)
+                .and_then(|name| self.nominal_type_id(&name)),
+        }
+    }
+
+    /// Entering an implementation selects its own declaration before any Self
+    /// witness is installed. An enclosing method's carried receiver cannot
+    /// supply the new implementation's parameter order.
+    pub(super) fn declared_impl_generic_param_maps(
+        &self,
+        function: &FunctionDecl,
+        implementation: &ImplKind,
+        generics: &[String],
+    ) -> (
+        std::collections::HashMap<String, u16>,
+        std::collections::HashMap<String, u16>,
+    ) {
+        let parent_names = self
+            .implementation_nominal_id(implementation)
+            .and_then(|id| self.declaration_generic_roster(id))
+            .map(|roster| {
+                roster
+                    .iter()
+                    .map(|parameter| parameter.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Self::declaration_generic_param_maps(function, &parent_names, generics)
+    }
+
+    /// Exact carried Self takes precedence; otherwise source lexical lookup
+    /// selects the declaration. A missing binding never consults a global leaf.
+    pub(super) fn method_parent_generic_names(&self, name: &str) -> Option<Vec<String>> {
+        let id = self
+            .current_impl_receiver
+            .as_ref()
+            .and_then(|receiver| match &receiver.ty {
+                TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => Some(*id),
+                _ => None,
+            })
+            .or_else(|| self.nominal_type_id(name))?;
+        Some(
+            self.declaration_generic_roster(id)?
+                .iter()
+                .map(|parameter| parameter.name.clone())
+                .collect(),
+        )
+    }
+}
