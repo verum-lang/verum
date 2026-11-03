@@ -4809,29 +4809,19 @@ fn substitute_refinement_binder(
                 // Format 2: ::AssocName with base_ty in args[0] (new Verum format)
 
                 // Format 1: <T as Protocol>::AssocName
-                if name.starts_with("<") && name.contains(" as ") && name.contains(">::") {
+                let resolved = if name.starts_with("<") && name.contains(" as ") && name.contains(">::") {
                     // Try to resolve the projection now that args are normalized
-                    if let Some(resolved) =
-                        self.try_resolve_deferred_projection(name, &normalized_args)
-                    {
-                        return self.normalize_type_impl(&resolved, depth + 1);
-                    }
+                    self.try_resolve_deferred_projection(name, &normalized_args)
                 }
-
                 // Format 2: ::AssocName with base_ty in args[0]
                 // This format is used for T.Item, C.Iter.Item etc.
-                if name.starts_with("::") && !normalized_args.is_empty() {
+                else if name.starts_with("::") && !normalized_args.is_empty() {
                     let assoc_name = &name[2..]; // Strip "::" prefix
                     let base_ty = &normalized_args[0];
 
                     // Try to resolve projection from base type's protocol implementations
-                    if let Some(resolved) =
-                        self.try_resolve_associated_type_projection(base_ty, assoc_name)
-                    {
-                        return self.normalize_type_impl(&resolved, depth + 1);
-                    }
+                    self.try_resolve_associated_type_projection(base_ty, assoc_name)
                 }
-
                 // Format 3 (T0707): BARE projection head — `Item<It>` with
                 // no `::` sigil.  Descriptor strings and several inference
                 // paths spell projections this way; pre-consolidation only
@@ -4843,26 +4833,36 @@ fn substitute_refinement_binder(
                 // the Add protocol's associated Output (mount/decl
                 // authority over ambient interpretation, same discipline
                 // as T0525).
-                if !name.starts_with("::")
+                else if !name.starts_with("::")
                     && normalized_args.len() == 1
                     && name
                         .chars()
                         .next()
                         .is_some_and(|c| c.is_ascii_uppercase())
                     && matches!(self.ctx.lookup_type(name.as_str()), Option::None)
-                    && let Some(resolved) = self
-                        .try_resolve_associated_type_projection(
-                            &normalized_args[0],
-                            name.as_str(),
-                        )
-                    && resolved != *ty
                 {
-                    return self.normalize_type_impl(&resolved, depth + 1);
-                }
+                    self.try_resolve_associated_type_projection(
+                        &normalized_args[0],
+                        name.as_str(),
+                    )
+                } else {
+                    None
+                };
 
-                Generic {
+                let normalized = Generic {
                     name: name.clone(),
                     args: normalized_args,
+                };
+                // An associated equality can preserve its own projection.
+                // It supplies no reduction step; retrying the same state only
+                // repeats resolution until the depth limit. Compare the complete
+                // normalized type, retaining its owner and arguments, and leave
+                // the projection deferred rather than inventing a concrete type.
+                match resolved {
+                    Some(resolved) if resolved != normalized => {
+                        self.normalize_type_impl(&resolved, depth + 1)
+                    }
+                    _ => normalized,
                 }
             }
 
