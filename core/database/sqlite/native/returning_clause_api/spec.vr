@@ -53,14 +53,11 @@ public fn push_expression(s: &mut ReturningSpec, sql: Text) {
 /// other kinds contribute 1 each.
 public fn projected_columns(s: &ReturningSpec, table_columns: Int) -> Int {
     let mut total: Int = 0;
-    let mut i: Int = 0;
-    while i < s.exprs.len() {
-        let e = s.exprs.get(i);
-        match e {
+    for expr in s.exprs.iter() {
+        match expr {
             RekStar => total = total + table_columns,
             _       => total = total + 1,
         }
-        i = i + 1;
     }
     total
 }

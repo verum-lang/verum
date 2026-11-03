@@ -48,6 +48,15 @@ fn test_raw_expression_counts_one() {
     assert_eq(projected_columns(&s, 10), 1);
 }
 
+fn test_each_star_expands_to_the_current_table_width() {
+    let mut s = empty_spec();
+    push_star(&mut s);
+    push_rowid(&mut s);
+    push_star(&mut s);
+    assert_eq(projected_columns(&s, 0), 1);
+    assert_eq(projected_columns(&s, 3), 7);
+}
+
 fn test_row_push_and_lookup() {
     let mut r = new_row();
     push_cell(&mut r, new_cell("id".clone(), 42 as Int64));
@@ -55,6 +64,7 @@ fn test_row_push_and_lookup() {
     assert_eq(row_byte_count(&r), 2);
     assert(column_name(&r, 0) == "id".clone());
     assert(column_name(&r, 1) == "name".clone());
+    assert(column_name(&r, -1).len() == 0);
     assert(column_name(&r, 9).len() == 0);
 }
 
@@ -93,6 +103,7 @@ fn main() {
     test_star_expands_to_table_columns();
     test_mixed_star_and_column();
     test_raw_expression_counts_one();
+    test_each_star_expands_to_the_current_table_width();
     test_row_push_and_lookup();
     test_engine_emit_matches_projected_columns();
     test_engine_rejects_wrong_column_count();

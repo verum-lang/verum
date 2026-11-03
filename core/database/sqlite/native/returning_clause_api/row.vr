@@ -11,7 +11,7 @@
 )
 module core.database.sqlite.native.returning_clause_api.row;
 
-mount base.{Bool, Text};
+mount base.{Maybe, Text};
 mount collections.List;
 
 public type ReturningCell is {
@@ -40,6 +40,8 @@ public fn push_cell(r: &mut ReturningRow, cell: ReturningCell) {
 public fn row_byte_count(r: &ReturningRow) -> Int { r.cells.len() }
 
 public fn column_name(r: &ReturningRow, index: Int) -> Text {
-    if index < 0 || index >= r.cells.len() { return "".clone(); }
-    r.cells.get(index).column_name.clone()
+    match r.cells.as_slice().get(index) {
+        Maybe.Some(cell) => cell.column_name.clone(),
+        Maybe.None => Text.new(),
+    }
 }
