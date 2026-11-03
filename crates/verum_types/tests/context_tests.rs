@@ -70,6 +70,27 @@ fn test_generalize() {
 }
 
 #[test]
+fn generalization_quantifies_only_free_variables_outside_the_environment() {
+    let captured = TypeVar::fresh();
+    let fresh = TypeVar::fresh();
+    let absent = TypeVar::fresh();
+    let mut env = TypeEnv::new();
+    env.insert_mono("outer", Type::Var(captured));
+    env.push_scope();
+
+    let implicit = [captured, fresh, absent].into_iter().collect();
+    let closed = Type::function(vec![Type::int()].into(), Type::bool());
+    let mono = TypeScheme::mono(closed.clone());
+    assert_eq!(env.generalize(closed.clone()), mono);
+    assert_eq!(env.generalize_with_implicit(closed, &implicit), mono);
+
+    let open = Type::function(vec![Type::Var(captured)].into(), Type::Var(fresh));
+    let scheme = env.generalize_with_implicit(open, &implicit);
+    assert_eq!(scheme.vars.as_slice(), &[fresh]);
+    assert_eq!(scheme.implicit_vars, [fresh].into_iter().collect());
+}
+
+#[test]
 fn test_context_protocols() {
     let ctx = TypeContext::new();
 

@@ -1550,8 +1550,11 @@ impl TypeEnv {
     /// This creates a type scheme by quantifying over free variables
     /// that don't appear in the environment (let-polymorphism).
     pub fn generalize(&self, ty: Type) -> TypeScheme {
-        let env_vars = self.free_vars();
         let ty_vars = ty.free_vars();
+        if ty_vars.is_empty() {
+            return TypeScheme::mono(ty);
+        }
+        let env_vars = self.free_vars();
 
         // Only quantify over vars not in the environment, in a DETERMINISTIC
         // order: free_vars() returns a hash Set, so iterating it directly makes
@@ -1583,8 +1586,11 @@ impl TypeEnv {
         ty: Type,
         implicit_var_names: &Set<TypeVar>,
     ) -> TypeScheme {
-        let env_vars = self.free_vars();
         let ty_vars = ty.free_vars();
+        if ty_vars.is_empty() {
+            return TypeScheme::mono(ty);
+        }
+        let env_vars = self.free_vars();
 
         // Only quantify over vars not in environment
         let mut quantified = List::new();
