@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.page_count_pragma.reading;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type PageCountReading is {
     total_pages: Int64,

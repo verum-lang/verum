@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.sqlite_version_fmt.version;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type SqliteVersion is {
     major: Int,

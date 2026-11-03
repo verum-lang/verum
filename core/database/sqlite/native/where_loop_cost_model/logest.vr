@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.where_loop_cost_model.logest;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 // The sentinel "log(0)" value — SQLite uses 0 to mean "unknown" for rRun.
 public fn logest_zero() -> Int { 0 }

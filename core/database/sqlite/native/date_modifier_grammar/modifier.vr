@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.date_modifier_grammar.modifier;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type DateUnit is
     | UDays

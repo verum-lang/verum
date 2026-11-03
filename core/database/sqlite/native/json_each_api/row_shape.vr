@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.json_each_api.row_shape;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 // JSON element types as named constants (mirror json_type string values).
 public type JsonTypeName is

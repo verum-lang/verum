@@ -11,7 +11,7 @@ mount core.database.sqlite.native.schema_migration_state.phase.{
     Phase, PhInit, PhCopyRows, PhReindex, PhDone, PhFailed,
     next_phase, is_terminal, requires_write_lock,
 };
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type MigrationSession is {
     table_name: Text,

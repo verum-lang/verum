@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.online_backup_rate.pacing;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type Pacing is {
     pages_per_step: Int,       // argument to sqlite3_backup_step

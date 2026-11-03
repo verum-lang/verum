@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.busy_retry_policy.schedule;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 mount core.collections.list.{List};
 
 public fn delay_table() -> List<Int> {

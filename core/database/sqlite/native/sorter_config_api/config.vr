@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.sorter_config_api.config;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type SorterConfig is {
     pma_size_bytes: Int64,       // in-memory PMA budget (default SQLITE_DEFAULT_PAGE_SIZE * cache pages)

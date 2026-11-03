@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.total_changes64_api.counters;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 mount core.collections.list.{List};
 
 // Per-connection counters. `last_stmt` resets each statement; `total`

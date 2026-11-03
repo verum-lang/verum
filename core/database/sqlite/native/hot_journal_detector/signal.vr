@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.hot_journal_detector.signal;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type HotJournalSignal is {
     journal_exists: Bool,

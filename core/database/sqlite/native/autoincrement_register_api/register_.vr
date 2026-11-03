@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.autoincrement_register_api.register_;
 
-mount base.{Bool, Int64, Text, Maybe};
+mount base.{Bool, Text, Maybe};
 mount core.collections.list.{List};
 
 // Max rowid allowed (Int64 max).

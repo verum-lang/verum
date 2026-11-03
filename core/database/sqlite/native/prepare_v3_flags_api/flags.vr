@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.prepare_v3_flags_api.flags;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public fn f_persistent() -> Int64 { 0x01 as Int64 }
 public fn f_normalize()  -> Int64 { 0x02 as Int64 }    // deprecated; engine ignores

@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.checkpoint_frame_range.range;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type FrameRange is {
     first_frame: Int64,     // 1-based frame number

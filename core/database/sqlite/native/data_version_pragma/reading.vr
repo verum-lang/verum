@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.data_version_pragma.reading;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type DataVersionReading is {
     counter: Int64,

@@ -12,7 +12,7 @@ mount core.database.sqlite.native.omit_join_ordering.reason.{
     ReVtabBestIndex, ReSubqueryMaterialized, RePragmaNoReorder, ReUsedByAggregateOrder,
     is_hard_barrier, is_semantic_barrier,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public fn bit_for(r: &Reason) -> Int64 {
     match r {

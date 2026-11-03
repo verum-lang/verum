@@ -17,7 +17,7 @@
 )
 module core.database.sqlite.native.dbpage_writeguard_api.guard;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type DbpageWriteguardOutcome is
     | Allow

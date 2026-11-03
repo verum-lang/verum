@@ -43,7 +43,7 @@ module core.database.sqlite.native.vtabs.json_each;
 // follows the shadow. Use targeted mounts instead.
 mount base.{Text, Maybe, Result, Ok, Err};
 mount collections.List;
-mount base.{Bool, Int, Int64, Float64, Byte};
+mount base.{Bool, Int, Byte};
 mount base.assert;
 mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull, RInt, RReal, RText,

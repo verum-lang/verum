@@ -11,7 +11,7 @@ mount core.database.sqlite.native.pcache_dirty_list.state.{
     DirtyState, DsClean, DsDirty, DsWriting, DsPinned,
     is_dirty, is_evictable, needs_flush,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 mount core.collections.list.{List};
 
 public type PageEntry is {

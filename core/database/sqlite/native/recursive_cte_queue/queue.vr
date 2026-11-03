@@ -10,7 +10,7 @@ module core.database.sqlite.native.recursive_cte_queue.queue;
 mount core.database.sqlite.native.recursive_cte_queue.mode.{
     TraversalMode, TmBreadthFirst, TmDepthFirst,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 mount core.collections.list.{List};
 
 public type WorkQueue is {

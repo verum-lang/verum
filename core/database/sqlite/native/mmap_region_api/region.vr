@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.mmap_region_api.region;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type MmapRegion is {
     file_offset: Int64,    // byte offset in DB file

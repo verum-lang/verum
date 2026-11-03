@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.page_cache_sizing_api.cache_size;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Default cache_size per §18.4: -2000 = 2000 KiB.
 public fn default_value() -> Int { -2000 }

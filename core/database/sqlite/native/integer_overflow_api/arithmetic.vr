@@ -10,7 +10,7 @@ module core.database.sqlite.native.integer_overflow_api.arithmetic;
 mount core.database.sqlite.native.integer_overflow_api.policy.{
     int64_max, int64_min,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 // Return true iff a + b would overflow Int64.
 public fn add_overflows(a: Int64, b: Int64) -> Bool {

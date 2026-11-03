@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.vdbe_register_model.flags;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 // Flag bit constants mirroring sqliteInt.h MEM_* — only the commonly-needed
 // ones; internal bits like MEM_AffMask are opaque.

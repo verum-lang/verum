@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.master_btree_meta.meta;
 
-mount base.{Bool, Text, Int64, Maybe};
+mount base.{Bool, Text, Maybe};
 
 public type MetaSlot is
     | MsSchemaCookie           //  0

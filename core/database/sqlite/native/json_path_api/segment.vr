@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.json_path_api.segment;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type PathSegment is
     | PsRoot                    // '$' prefix

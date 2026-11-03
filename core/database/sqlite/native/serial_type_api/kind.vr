@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.serial_type_api.kind;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type SerialKind is
     | SkNull               //  0

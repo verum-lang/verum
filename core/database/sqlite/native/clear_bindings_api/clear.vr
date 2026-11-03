@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.clear_bindings_api.clear;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Per-call statistics — used by audit-style tooling.
 public type ClearStats is {

@@ -10,7 +10,7 @@ module core.database.sqlite.native.query_invariant_hoist.plan;
 mount core.database.sqlite.native.query_invariant_hoist.dependency.{
     DepSet, is_constant, is_invariant_at_loop, depends_only_outside,
 };
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type HoistPlan is
     | HpHoistToStmtSetup      // compute once at stmt prepare

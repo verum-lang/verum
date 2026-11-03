@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.db_release_memory_per_conn_api.release;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Subsystems whose caches the call walks.
 public type Subsystem is

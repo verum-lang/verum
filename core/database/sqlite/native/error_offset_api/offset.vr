@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.error_offset_api.offset;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Sentinel for "no offset available".
 public fn unavailable() -> Int { -1 }

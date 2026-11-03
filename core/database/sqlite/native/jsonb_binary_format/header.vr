@@ -10,7 +10,7 @@ module core.database.sqlite.native.jsonb_binary_format.header;
 mount core.database.sqlite.native.jsonb_binary_format.element.{
     JsonbElementType, from_nibble, tag_nibble, is_empty_payload,
 };
-mount base.{Bool, Int64, Maybe};
+mount base.{Bool, Maybe};
 
 public type Header is {
     element: JsonbElementType,

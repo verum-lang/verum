@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.window_frame_api.frame_bound;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type FrameBound is
     | FbUnboundedPreceding

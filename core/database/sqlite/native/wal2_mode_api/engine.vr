@@ -12,7 +12,7 @@ mount core.database.sqlite.native.wal2_mode_api.slot.{
     SlotRole, SrActive, SrCheckpointing, SrIdle,
     writers_allowed, readers_allowed,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type Wal2Engine is {
     slot_zero_role: SlotRole,

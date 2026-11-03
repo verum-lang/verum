@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.zeroblob_fill_api.region;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type ZeroblobRegion is {
     logical_size: Int64,         // reported size to the SQL layer

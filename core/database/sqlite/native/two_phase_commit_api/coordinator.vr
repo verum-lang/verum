@@ -12,7 +12,7 @@ mount core.database.sqlite.native.two_phase_commit_api.phase.{
     PhCommitEachDb, PhDropMasterJournal, PhCompleted, PhAborted,
     is_phase_one, is_phase_two, is_terminal, abort_requires_recovery,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type TpcCoordinator is {
     phase: TpcPhase,

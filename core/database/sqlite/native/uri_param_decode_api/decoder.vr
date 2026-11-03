@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.uri_param_decode_api.decoder;
 
-mount base.{Bool, Int64, Text, Maybe};
+mount base.{Bool, Text, Maybe};
 
 // ASCII upper-case fold.
 fn to_upper(b: u8) -> u8 {

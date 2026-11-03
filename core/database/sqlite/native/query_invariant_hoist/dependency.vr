@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.query_invariant_hoist.dependency;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type DepSet is {
     cursor_bits: Int64,   // bitset of referenced cursors

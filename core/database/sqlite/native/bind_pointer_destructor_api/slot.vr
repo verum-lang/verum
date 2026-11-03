@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.bind_pointer_destructor_api.slot;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // SQLite uses three "well-known" destructor sentinel values:
 //  SQLITE_STATIC ((destructor*)0) — caller manages, no callback

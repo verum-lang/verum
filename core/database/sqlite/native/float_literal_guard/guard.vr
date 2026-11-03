@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.float_literal_guard.guard;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // SQLite stores a REAL literal whose fractional part is 0 and whose value
 // fits in Int64 as an INTEGER (to save bytes).

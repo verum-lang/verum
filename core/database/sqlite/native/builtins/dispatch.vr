@@ -43,7 +43,7 @@
 )
 module core.database.sqlite.native.builtins.dispatch;
 
-mount base.{Int, Int64};
+mount base.{Int};
 mount collections.List;
 
 // Register value type + the constructors this file names directly. The

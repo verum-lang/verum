@@ -10,7 +10,7 @@ module core.database.sqlite.native.where_loop_cost_model.loop_;
 mount core.database.sqlite.native.where_loop_cost_model.logest.{
     from_int, mul, add, is_cheaper_than,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type WhereLoop is {
     r_setup: Int,    // one-time setup cost (log-est)

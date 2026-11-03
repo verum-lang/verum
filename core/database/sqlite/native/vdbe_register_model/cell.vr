@@ -14,7 +14,7 @@ mount core.database.sqlite.native.vdbe_register_model.kind.{
 mount core.database.sqlite.native.vdbe_register_model.flags.{
     f_null, f_int, f_real, f_str, f_blob, ownership_bits_valid,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type MemCell is {
     kind: MemKind,

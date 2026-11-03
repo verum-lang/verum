@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.pragma_analysis_limit_api.limit;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type AnalysisLimit is {
     sample_cap: Int64,       // 0 = no cap

@@ -11,7 +11,7 @@ mount core.database.sqlite.native.bitvec_api.node.{
     NodeKind, NkLeaf, NkInternal, NkHash,
     bits_per_leaf, hash_linear_capacity, choose_kind,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type Bitvec is {
     universe_size: Int64,    // largest rowid + 1

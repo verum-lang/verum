@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.bloom_filter_api.spec;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type FilterSpec is {
     bit_count: Int64,       // total bits allocated

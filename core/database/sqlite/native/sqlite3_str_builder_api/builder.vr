@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.sqlite3_str_builder_api.builder;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Hard cap (SQLITE_MAX_LENGTH) — bytes the builder will accept before TOOBIG.
 public fn default_max_length() -> Int { 1_000_000_000 }

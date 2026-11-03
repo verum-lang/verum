@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.tokenizer_interface_api.token;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 mount core.collections.list.{List};
 
 // xTokenize reason flags (SQLite 3.45+).

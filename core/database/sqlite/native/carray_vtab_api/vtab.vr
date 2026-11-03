@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.carray_vtab_api.vtab;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Element types accepted by carray().
 public type ElemType is

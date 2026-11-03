@@ -10,7 +10,7 @@ module core.database.sqlite.native.checkpoint_frame_range.session;
 mount core.database.sqlite.native.checkpoint_frame_range.range.{
     FrameRange, new, empty_range, is_empty, length, consume,
 };
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type CkptState is
     | CsIdle

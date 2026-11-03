@@ -8,7 +8,7 @@
 )
 module core.database.sqlite.native.subjournal_api.mark;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type SubjMark is {
     savepoint_name: Text,

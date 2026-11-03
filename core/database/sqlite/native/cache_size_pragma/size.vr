@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.cache_size_pragma.size;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type CacheSize is
     | CsPages(Int64)        // explicit page count (>= 0)

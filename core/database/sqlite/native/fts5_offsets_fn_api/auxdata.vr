@@ -11,7 +11,7 @@
 )
 module core.database.sqlite.native.fts5_offsets_fn_api.auxdata;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 mount core.collections.list.{List};
 
 public type MatchHit is {

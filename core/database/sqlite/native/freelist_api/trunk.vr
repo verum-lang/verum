@@ -10,7 +10,7 @@ module core.database.sqlite.native.freelist_api.trunk;
 mount core.database.sqlite.native.freelist_api.kind.{
     trunk_header_size, trunk_leaf_slot_size, max_leaves_in_trunk,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type TrunkHeader is {
     page_number: u32,

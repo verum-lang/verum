@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.master_btree_meta.row;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type SchemaKind is
     | SkTable

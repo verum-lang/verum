@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.freelist_count_pragma.reading;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 mount core.collections.list.{List};
 
 // One observation: total free pages and the database's page total.

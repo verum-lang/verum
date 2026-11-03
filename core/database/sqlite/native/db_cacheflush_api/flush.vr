@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.db_cacheflush_api.flush;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type CacheflushOutcome is
     | OkFlushed(Int64)         // pages written to disk

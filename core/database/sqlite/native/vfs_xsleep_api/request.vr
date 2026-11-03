@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.vfs_xsleep_api.request;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 // Clock resolution classes (VFS-specific).
 public type ClockResolution is

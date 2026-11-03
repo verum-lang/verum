@@ -13,7 +13,7 @@
 )
 module core.database.sqlite.native.iif_three_arg_fn.fn_;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type IifThreeArgValue is
     | VNull

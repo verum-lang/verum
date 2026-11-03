@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.vfs_xcurrenttime_api.clock;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type VfsCurrentTimeMethod is
     | MFloatJulian       // xCurrentTime — deprecated double Julian

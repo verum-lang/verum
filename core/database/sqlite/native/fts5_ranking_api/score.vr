@@ -8,7 +8,7 @@
 module core.database.sqlite.native.fts5_ranking_api.score;
 
 mount core.database.sqlite.native.fts5_ranking_api.params.{Bm25Params};
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 // IDF(term) = log((N - df + 0.5) / (df + 0.5) + 1)
 // where N = total docs and df = doc frequency of the term.

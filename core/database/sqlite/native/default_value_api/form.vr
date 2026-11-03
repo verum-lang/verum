@@ -10,7 +10,7 @@ module core.database.sqlite.native.default_value_api.form;
 mount core.database.sqlite.native.default_value_api.current_marker.{
     CurrentMarker, CmDate, CmTime, CmTimestamp,
 };
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type DefaultForm is
     | DfNull

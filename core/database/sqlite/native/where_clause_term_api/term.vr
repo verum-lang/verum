@@ -11,7 +11,7 @@ mount core.database.sqlite.native.where_clause_term_api.operator.{
     TermOp, ToEquality, ToInList, ToRangeLT, ToRangeGT, ToOther,
     is_sargable, is_equality, is_range,
 };
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type WhereTerm is {
     op: TermOp,

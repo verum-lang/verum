@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.integer_overflow_api.policy;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 // SQLite Int64 range.
 public fn int64_max() -> Int64 { 0x7FFFFFFFFFFFFFFF as Int64 }

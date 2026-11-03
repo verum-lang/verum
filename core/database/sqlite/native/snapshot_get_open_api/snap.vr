@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.snapshot_get_open_api.snap;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Opaque snapshot handle. In the C library this is `sqlite3_snapshot*`;
 // here we represent the on-disk identifier (mxFrame + saltBytes).

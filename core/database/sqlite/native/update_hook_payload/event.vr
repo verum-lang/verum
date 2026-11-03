@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.update_hook_payload.event;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 // The op taxonomy is owned by `hooks_api.op` (UpdateOp, sqlite3.h numeric
 // codes via op_numeric/op_name/is_write). This module used to declare a
 // THIRD public enum with the same variant spellings (`UpdateHookOp` —

@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.subquery_coroutine_api.coroutine;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type CoroutineState is
     | CsNotStarted

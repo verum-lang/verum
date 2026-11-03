@@ -11,7 +11,7 @@ mount core.database.sqlite.native.btree_cell_parse_api.cell_kind.{
     CellKind, CkTableLeaf, CkTableInterior, CkIndexLeaf, CkIndexInterior,
     is_leaf, is_interior, has_rowid, has_left_child_pointer, has_payload,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type ParsedCell is {
     kind: CellKind,

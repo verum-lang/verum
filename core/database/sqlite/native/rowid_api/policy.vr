@@ -11,7 +11,7 @@ mount core.database.sqlite.native.rowid_api.kind.{
     RowidKind, RkClassic, RkIntPkAlias, RkAutoincrement, RkWithoutRowid,
     has_rowid, uses_sqlite_sequence,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 // Max signed 64-bit positive value.
 public fn rowid_max() -> Int64 { 0x7FFFFFFFFFFFFFFF as Int64 }

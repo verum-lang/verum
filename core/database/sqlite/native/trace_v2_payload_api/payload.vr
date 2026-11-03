@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.trace_v2_payload_api.payload;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // SQLITE_TRACE_* mask bit constants.
 public fn f_stmt()    -> Int64 { 0x01 as Int64 }

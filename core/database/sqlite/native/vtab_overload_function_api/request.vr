@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.vtab_overload_function_api.request;
 
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 
 public type OverloadRequest is {
     function_name: Text,

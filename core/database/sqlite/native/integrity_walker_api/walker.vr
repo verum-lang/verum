@@ -14,7 +14,7 @@ mount core.database.sqlite.native.integrity_walker_api.finding.{
     is_ok, severity_rank,
     ok_sentinel,
 };
-mount base.{Bool, Int64};
+mount base.{Bool};
 mount core.collections.list.{List};
 
 public type WalkerIntegrityReport is {

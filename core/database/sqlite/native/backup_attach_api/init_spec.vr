@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.backup_attach_api.init_spec;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type BackupSpec is {
     source_handle: Int64,        // opaque sqlite3* id

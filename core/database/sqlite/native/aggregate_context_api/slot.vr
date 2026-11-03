@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.aggregate_context_api.slot;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // Per-aggregate slot. In SQLite this is opaque; here we model the user-
 // visible state.

@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.pragma_mmap_size_api.setting;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public fn max_mmap_ceiling() -> Int64 { 0x7FFF0000 as Int64 }
 

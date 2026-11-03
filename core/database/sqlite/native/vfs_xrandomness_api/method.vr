@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.vfs_xrandomness_api.method;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 // RandomnessSource classes a VFS may implement.
 public type RandomnessSource is

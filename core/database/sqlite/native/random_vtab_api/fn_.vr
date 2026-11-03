@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.random_vtab_api.fn_;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type RandomFn is
     | RfInt              // random()

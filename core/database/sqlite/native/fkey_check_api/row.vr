@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.fkey_check_api.row;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type FkeyCheckRow is {
     table: Text,

@@ -10,7 +10,7 @@ module core.database.sqlite.native.collation_policy_api.compare;
 mount core.database.sqlite.native.collation_policy_api.policy.{
     CollationPolicy, CpBinary, CpNoCase, CpRtrim,
 };
-mount base.{Bool, Text, Int64};
+mount base.{Bool, Text};
 mount core.collections.list.{List};
 
 fn fold_nocase(b: u8) -> u8 {

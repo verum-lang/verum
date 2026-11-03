@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.page_write_back_budget_api.budget;
 
-mount base.{Bool, Int64};
+mount base.{Bool};
 
 public type WriteBackBudget is {
     pages_per_tick: Int,        // tokens added per tick

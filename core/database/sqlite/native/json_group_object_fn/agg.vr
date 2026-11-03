@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.json_group_object_fn.agg;
 
-mount base.{Bool, Int64, Text};
+mount base.{Bool, Text};
 
 public type Key is
     | KText(Text)
