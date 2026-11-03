@@ -56,3 +56,11 @@ export class NavigationHistory {
   }
   clear() { this.entries = []; this.index = -1; this.generation++; }
 }
+
+/** Only accepted requests supersede navigation already in flight. */
+export class NavigationRequests {
+  private generation = 0;
+  begin(blocked: boolean): number | null { return blocked ? null : ++this.generation; }
+  current(ticket: number): boolean { return ticket === this.generation; }
+  invalidate() { this.generation++; }
+}

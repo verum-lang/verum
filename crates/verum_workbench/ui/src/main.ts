@@ -7,7 +7,7 @@ import { ProofTargets, declarationProfile, type ProofProfile } from './proof-tar
 import { sourceHash as sha256, sourceRevision } from './source';
 import { runtimeView } from './runtime-view';
 import { makeEditor } from './editor';
-import { NavigationHistory, type SourceBookmark } from './navigation';
+import { NavigationHistory, NavigationRequests, type SourceBookmark } from './navigation';
 import { CommandRegistry, type CommandContext, type StudioCommand } from './commands';
 import { installCommands } from './command-surface';
 import { installPanels } from './panels';
@@ -96,7 +96,8 @@ let switching = false;
 let editVersion = 0;
 const navigation = new NavigationHistory();
 let currentSourceRevision = sourceRevision(STARTER);
-let navigationGeneration = 0, navigatingHistory = false;
+const navigationRequests = new NavigationRequests();
+let navigatingHistory = false;
 const proofTargets = new ProofTargets();
 const documentRevision = () => ({ path: currentPath, editVersion });
 const editor = makeEditor($('editor'), STARTER, (source, mapPosition) => {
@@ -224,18 +225,19 @@ function updateNavigation() {
   $<HTMLButtonElement>('navigate-forward').disabled = navigatingHistory || switching || !navigation.forward;
 }
 function rememberNavigation(origin: SourceBookmark) { navigation.record(origin, sourceBookmark()); updateNavigation(); }
-async function openFile(path: string, track = true, generation = ++navigationGeneration): Promise<boolean> {
-  if (generation !== navigationGeneration) return false;
+async function openFile(path: string, track = true, ticket?: number): Promise<boolean> {
+  const generation = ticket ?? navigationRequests.begin(switching || navigatingHistory);
+  if (generation === null || !navigationRequests.current(generation)) return false;
   if (path === currentPath && savedHash !== null) { setPane('editor'); return true; }
   if (switching) return false;
   const origin = sourceBookmark(); switching = true; updateNavigation();
   try {
     const result = await replaceDocument(async () => {
-      if (!(await mayReplace()) || generation !== navigationGeneration) return null;
+      if (!(await mayReplace()) || !navigationRequests.current(generation)) return null;
       const file = await api<SourceFile>('document.read', { path });
-      return generation === navigationGeneration ? file : null;
+      return navigationRequests.current(generation) ? file : null;
     });
-    if (result !== 'applied' || generation !== navigationGeneration) return false;
+    if (result !== 'applied' || !navigationRequests.current(generation)) return false;
     if (track) rememberNavigation(origin);
     return true;
   } finally { switching = false; updateNavigation(); }
@@ -244,13 +246,13 @@ async function traverseNavigation(direction: -1 | 1) {
   if (navigatingHistory || switching) return;
   const step = navigation.plan(direction, sourceBookmark());
   if (!step) return;
-  const generation = ++navigationGeneration; navigatingHistory = true; updateNavigation();
+  const generation = navigationRequests.begin(false)!; navigatingHistory = true; updateNavigation();
   try {
     if (step.target.path !== currentPath && !(await openFile(step.target.path, false, generation))) return;
-    if (generation !== navigationGeneration) return;
+    if (!navigationRequests.current(generation)) return;
     const revision = currentSourceRevision, selection = editor.selection();
     const [expected, actual] = await Promise.all([step.target.revision.digest(), revision.digest()]);
-    if (generation !== navigationGeneration || revision !== currentSourceRevision
+    if (!navigationRequests.current(generation) || revision !== currentSourceRevision
       || selection.anchor !== editor.selection().anchor || selection.head !== editor.selection().head) return;
     sourceView(); setPane('editor');
     if (expected !== actual) {
@@ -323,30 +325,32 @@ function sourceView() {
   editor.view.requestMeasure();
 }
 function navigateEditor(action: () => unknown) {
-  const origin = sourceBookmark(); navigationGeneration++; action(); rememberNavigation(origin);
+  const origin = sourceBookmark(); navigationRequests.invalidate(); action(); rememberNavigation(origin);
 }
 function showRange(range: Range, origin = sourceBookmark()) {
-  navigationGeneration++; sourceView(); setPane('editor'); editor.select(range); rememberNavigation(origin);
+  navigationRequests.invalidate(); sourceView(); setPane('editor'); editor.select(range); rememberNavigation(origin);
 }
 async function navigateDefinition(location: { uri: string; range: Range }, expectedProject?: string) {
   const relative = workspaceFilePath(location.uri, $('workspace-root').dataset.root || '');
   if (relative === null) throw new Error(t(m('Definition is outside this workspace.')));
-  const generation = ++navigationGeneration, origin = sourceBookmark(), crossedFile = relative !== currentPath;
+  const generation = navigationRequests.begin(switching || navigatingHistory);
+  if (generation === null) return;
+  const origin = sourceBookmark(), crossedFile = relative !== currentPath;
   if (crossedFile && !(await openFile(relative, false, generation))) return;
-  if (generation !== navigationGeneration || relative !== currentPath) return;
+  if (!navigationRequests.current(generation) || relative !== currentPath) return;
   const arrival = sourceBookmark();
   if (crossedFile) rememberNavigation(origin);
   if (expectedProject) {
     const revision = languageRevision();
     const reply = await languageRequest<Analysis>(revision);
-    if (generation !== navigationGeneration || !sameRevision(revision, languageRevision())
+    if (!navigationRequests.current(generation) || !sameRevision(revision, languageRevision())
       || arrival.anchor !== editor.selection().anchor || arrival.head !== editor.selection().head) return;
     if (reply.result.project_revision !== expectedProject) {
       throw new Error(t(m('The project changed. Refresh the topology before navigating.')));
     }
   }
   if (crossedFile) {
-    navigationGeneration++; sourceView(); setPane('editor'); editor.select(location.range);
+    navigationRequests.invalidate(); sourceView(); setPane('editor'); editor.select(location.range);
     navigation.reviseCurrent(arrival, sourceBookmark()); updateNavigation();
   } else showRange(location.range, origin);
 }
@@ -1310,7 +1314,7 @@ onSessionChange(state => {
     updateDocumentState();
   }
   if (!unlocked) {
-    navigationGeneration++; navigation.clear(); updateNavigation();
+    navigationRequests.invalidate(); navigation.clear(); updateNavigation();
     projectRequest++; lastProject = null; currentAnalysis = null; $('module-topology').replaceChildren();
     proofTargets.clear(); renderProofTargets();
     document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach(dialog => dialog.close('session-locked'));

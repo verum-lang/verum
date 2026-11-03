@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChangeSet } from '@codemirror/state';
-import { NavigationHistory, type SourceBookmark } from '../src/navigation.ts';
+import { NavigationHistory, NavigationRequests, type SourceBookmark } from '../src/navigation.ts';
 import { sourceRevision } from '../src/source.ts';
 import { replaceDocumentRevision } from '../src/model.ts';
 const bookmark = (path: string, anchor = 0, head = anchor): SourceBookmark => ({ path, anchor, head, revision: sourceRevision('first\nsecond\nthird\n') });
@@ -88,4 +88,18 @@ test('a semantic location refines one file arrival and cannot overwrite a newer 
   history.complete(back, a);
   assert.equal(history.reviseCurrent(b, refined), false);
   assert.equal(history.plan(1, a)!.target.head, 9);
+});
+
+test('a rejected busy click preserves the accepted request and its explicit continuation ticket', () => {
+  const requests = new NavigationRequests();
+  const accepted = requests.begin(false)!;
+  assert.equal(requests.begin(true), null);
+  assert.equal(requests.current(accepted), true);
+  assert.equal(requests.begin(true), null);
+  assert.equal(requests.current(accepted), true, 'history continuation still belongs to the accepted request');
+  const replacement = requests.begin(false)!;
+  assert.equal(requests.current(accepted), false);
+  assert.equal(requests.current(replacement), true);
+  requests.invalidate();
+  assert.equal(requests.current(replacement), false, 'a real synchronous jump or session reset revokes pending selection');
 });
