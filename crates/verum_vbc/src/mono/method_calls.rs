@@ -29,6 +29,9 @@ fn match_types(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitut
             }
             _ => false,
         },
+        (T::Instantiated { base, args }, T::Array { element, .. }) if *base == TypeId::ARRAY => {
+            matches!(args.as_slice(), [expected] if match_types(expected, element, bindings, concrete_only))
+        }
         (T::Instantiated { base: p, args: pa }, T::Instantiated { base: a, args: aa }) => {
             p == a && pa.len() == aa.len() && pa.iter().zip(aa).all(|(p, a)| match_types(p, a, bindings, concrete_only))
         }
@@ -105,7 +108,7 @@ fn field_type(module: &VbcModule, mut receiver: &TypeRef, index: u32) -> Option<
         TypeRef::Concrete(_) if owner.type_params.is_empty() => TypeSubstitution::empty(),
         _ => return None,
     };
-    let result = bindings.apply(&field.type_ref);
+    let result = bindings.apply(&field.type_ref).ok()?;
     usable(&result).then_some(result)
 }
 
@@ -165,7 +168,7 @@ fn static_call(
     if !type_args.iter().all(discovery::concrete) {
         return None;
     }
-    Some((id.0, type_args, bindings.apply(&target.return_type)))
+    Some((id.0, type_args, bindings.apply(&target.return_type).ok()?))
 }
 
 /// Straight-line facts are sufficient for `C.construct(self)` in a generic
@@ -176,7 +179,7 @@ pub(super) fn resolve_type_methods(
     function: &FunctionDescriptor,
     substitution: &TypeSubstitution,
     instructions: &mut [I],
-) {
+) -> Result<(), super::SubstitutionError> {
     // Each branch target starts a fresh straight-line proof. In particular,
     // facts from the physically preceding arm are not facts at a CFG join.
     let mut leaders = std::collections::HashSet::new();
@@ -190,7 +193,7 @@ pub(super) fn resolve_type_methods(
             I::TryBegin { handler_offset } => Some(*handler_offset),
             // Switch tables are not currently relocated by the canonical
             // fixup API. Do not introduce width-changing rewrites here.
-            I::Switch { .. } => return,
+            I::Switch { .. } => return Ok(()),
             _ => None,
         };
         if let Some(offset) = offset {
@@ -201,9 +204,9 @@ pub(super) fn resolve_type_methods(
         .params
         .iter()
         .enumerate()
-        .map(|(i, p)| (i as u16, substitution.apply(&p.type_ref)))
-        .filter(|(_, ty)| usable(ty))
-        .collect();
+        .map(|(i, p)| substitution.apply(&p.type_ref).map(|ty| (i as u16, ty)))
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    values.retain(|_, ty| usable(ty));
     let mut tokens = HashMap::new();
     let mut pending: Option<Vec<TypeRef>> = None;
     let mut pending_index = None;
@@ -337,7 +340,7 @@ pub(super) fn resolve_type_methods(
                 tokens.remove(&dst.0);
                 if let Some(target) = module.get_function(module.resolved_function_id(*func_id)) {
                     let result = TypeSubstitution::from_function(target, type_args)
-                        .apply(&target.return_type);
+                        .apply(&target.return_type)?;
                     if usable(&result) {
                         values.insert(dst.0, result);
                     }
@@ -351,7 +354,7 @@ pub(super) fn resolve_type_methods(
                 if let Some(target) = module.get_function(module.resolved_function_id(*func_id)) {
                     let result =
                         TypeSubstitution::from_function(target, witness.as_deref().unwrap_or(&[]))
-                            .apply(&target.return_type);
+                            .apply(&target.return_type)?;
                     if usable(&result) {
                         values.insert(dst.0, result);
                     }
@@ -374,4 +377,9 @@ pub(super) fn resolve_type_methods(
     for index in consumed_sidecars {
         instructions[index] = I::Nop;
     }
+    Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/wildcard_array_family.rs"]
+mod array_family_tests;

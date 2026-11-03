@@ -207,7 +207,9 @@ fn build_inner(
                 let declared = field.declaration_type.as_ref().ok_or_else(|| {
                     Text::from("typed destruction field lacks declaration evidence")
                 })?;
-                build_inner(module, &substitution.apply(declared), active, budget)
+                let declared = substitution.apply(declared)
+                    .map_err(|error| Text::from(error.to_string()))?;
+                build_inner(module, &declared, active, budget)
             })
             .collect()
     };
@@ -225,7 +227,9 @@ fn build_inner(
                     return Err("typed destruction alias target lacks scalar declaration evidence".into());
                 }
             }
-            build_inner(module, &substitution.apply(target), active, budget)
+            let target = substitution.apply(target)
+                .map_err(|error| Text::from(error.to_string()))?;
+            build_inner(module, &target, active, budget)
         }
         TypeKind::Record => fields(&declaration.fields).map(|fields| DropPlan::Record {
             owner,

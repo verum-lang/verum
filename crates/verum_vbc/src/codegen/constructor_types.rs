@@ -74,7 +74,7 @@ impl VbcCodegen {
         if !super::formal_parameters::resolved(member, &ids, 0) {
             return None;
         }
-        let result = TypeSubstitution::new(&owner.type_params, args).apply(member);
+        let result = TypeSubstitution::new(&owner.type_params, args).apply(member).ok()?;
         self.declared_type_in_scope(&result).then_some(result)
     }
 
@@ -131,7 +131,7 @@ impl VbcCodegen {
                 && module.is_some_and(|module| protocol.canonical_archive_modules().contains(&module.as_str()))
         });
         let target = self.associated_binding(implementations, member)?;
-        Some(TypeSubstitution::new(&owner.type_params, args).apply(target))
+        TypeSubstitution::new(&owner.type_params, args).apply(target).ok()
     }
 
     fn future_output_declaration(&self, owner: crate::types::TypeId) -> Option<&TypeRef> {
@@ -292,7 +292,7 @@ impl VbcCodegen {
             if !super::formal_parameters::resolved(field, &owner_ids, 0) {
                 return None;
             }
-            let contextual = bindings.apply(field);
+            let contextual = bindings.apply(field).ok()?;
             // An unbound owner parameter is not a caller parameter, even when
             // its numeric ID coincides. Context only travels after all free
             // owner parameters of the field have acquired actual bindings.
@@ -389,8 +389,13 @@ impl VbcCodegen {
         {
             return None;
         }
-        Some(params.iter().map(|formal| fully_bound(formal, &bindings)
-            .then(|| bindings.apply(formal))).collect())
+        params.iter().map(|formal| {
+            if fully_bound(formal, &bindings) {
+                Some(Some(bindings.apply(formal).ok()?))
+            } else {
+                Some(None)
+            }
+        }).collect()
     }
 
     /// A projected field belongs to its instantiated record, so its free
@@ -428,7 +433,7 @@ impl VbcCodegen {
             let actual = if fully_bound(formal, &bindings) && matches!(
                 Self::normalized_place(arg).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }
             ) {
-                self.source_expression_declaration(arg, Some(&bindings.apply(formal)), 0)?
+                self.source_expression_declaration(arg, Some(&bindings.apply(formal).ok()?), 0)?
             } else {
                 self.declared_expression_result(arg, None, 0, 0)?
             };
@@ -552,7 +557,7 @@ impl VbcCodegen {
             }
         }
         for (formal, argument) in params.iter().zip(args) {
-            let contextual = bindings.apply(formal);
+            let contextual = bindings.apply(formal).ok()?;
             let actual = self.source_expression_declaration(
                 argument,
                 fully_bound(formal, &bindings).then_some(&contextual),
@@ -562,7 +567,7 @@ impl VbcCodegen {
                 return None;
             }
         }
-        fully_bound(return_type, &bindings).then(|| bindings.apply(return_type))
+        fully_bound(return_type, &bindings).then(|| bindings.apply(return_type).ok()).flatten()
     }
 
     pub(super) fn associated_future_output(&self, ty: &TypeRef, depth: usize) -> Option<TypeRef> {
@@ -579,7 +584,7 @@ impl VbcCodegen {
             return None;
         }
         let output = self.future_output_declaration(owner)?;
-        let output = TypeSubstitution::new(&declaration.type_params, args).apply(output);
+        let output = TypeSubstitution::new(&declaration.type_params, args).apply(output).ok()?;
         self.resolve_declared_projections(&output, depth + 1)
     }
 
@@ -600,7 +605,7 @@ impl VbcCodegen {
                     return None;
                 }
                 let binding = self.associated_binding(declaration.protocols.iter(), assoc)?;
-                let declared = TypeSubstitution::new(&declaration.type_params, args).apply(binding);
+                let declared = TypeSubstitution::new(&declaration.type_params, args).apply(binding).ok()?;
                 self.resolve_declared_projections(&declared, depth + 1)?
             }
             TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
@@ -622,26 +627,64 @@ impl VbcCodegen {
 }
 
 pub(super) fn fully_bound(ty: &TypeRef, bindings: &TypeSubstitution) -> bool {
+    fully_bound_at(ty, bindings, 0)
+}
+
+/// Locally quantified parameters are bound by the enclosing function type.
+/// Only free parameters, lowered back into the caller's scope, need witnesses.
+fn fully_bound_at(ty: &TypeRef, bindings: &TypeSubstitution, depth: u32) -> bool {
     match ty {
-        TypeRef::Generic(id) => bindings.get(*id).is_some(),
-        TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
-            args.iter().all(|ty| fully_bound(ty, bindings))
+        TypeRef::Generic(id) => {
+            let index = u32::from(id.0);
+            index < depth || bindings.get(crate::types::TypeParamId((index - depth) as u16)).is_some()
         }
-        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => fully_bound(inner, bindings),
-        TypeRef::Array { element, .. } => fully_bound(element, bindings),
+        TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
+            args.iter().all(|ty| fully_bound_at(ty, bindings, depth))
+        }
+        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => fully_bound_at(inner, bindings, depth),
+        TypeRef::Array { element, .. } => fully_bound_at(element, bindings, depth),
         TypeRef::Function {
             params,
             return_type,
             ..
+        } => {
+            params.iter().all(|ty| fully_bound_at(ty, bindings, depth))
+                && fully_bound_at(return_type, bindings, depth)
         }
-        | TypeRef::Rank2Function {
+        TypeRef::Rank2Function {
+            type_param_count,
             params,
             return_type,
             ..
         } => {
-            params.iter().all(|ty| fully_bound(ty, bindings)) && fully_bound(return_type, bindings)
+            let Some(depth) = depth.checked_add(u32::from(*type_param_count)) else { return false; };
+            params.iter().all(|ty| fully_bound_at(ty, bindings, depth))
+                && fully_bound_at(return_type, bindings, depth)
         }
-        TypeRef::AssociatedProjection { base, .. } => fully_bound(base, bindings),
+        TypeRef::AssociatedProjection { base, .. } => fully_bound_at(base, bindings, depth),
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod binder_tests {
+    use super::*;
+    use crate::types::TypeParamId;
+
+    #[test]
+    fn quantified_local_is_bound_but_free_slot_requires_its_outer_witness() {
+        let quantified = |index| TypeRef::Rank2Function {
+            type_param_count: 1,
+            params: vec![TypeRef::Generic(TypeParamId(0))],
+            return_type: Box::new(TypeRef::Generic(TypeParamId(index))),
+            contexts: Default::default(),
+        };
+        let mut bindings = TypeSubstitution::empty();
+        assert!(fully_bound(&quantified(0), &bindings));
+        assert!(!fully_bound(&quantified(1), &bindings));
+        bindings.bind(TypeParamId(1), TypeRef::Concrete(TypeId::BOOL));
+        assert!(!fully_bound(&quantified(1), &bindings));
+        bindings.bind(TypeParamId(0), TypeRef::Concrete(TypeId::INT));
+        assert!(fully_bound(&quantified(1), &bindings));
     }
 }

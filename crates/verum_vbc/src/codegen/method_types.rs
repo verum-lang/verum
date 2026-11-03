@@ -80,7 +80,7 @@ impl VbcCodegen {
                 return None;
             }
             witness = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
-                .apply(descriptor.alias_target.as_ref()?);
+                .apply(descriptor.alias_target.as_ref()?).ok()?;
         }
     }
 
@@ -358,7 +358,7 @@ impl VbcCodegen {
         // The callee and caller have distinct binder scopes, even when their
         // numerical slot IDs coincide. Only a bound result can enter the caller.
         crate::codegen::constructor_types::fully_bound(result, &substitution)
-            .then(|| substitution.apply(result))
+            .then(|| substitution.apply(result).ok()).flatten()
     }
 
     fn method_result_name_fallback(

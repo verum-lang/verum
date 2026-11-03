@@ -126,11 +126,41 @@ fn destruction_specialization_substitutes_sparse_witnesses_without_erasing_borro
         [
             Instruction::DropTyped {
                 src: Reg(301),
-                type_ref: substitution.apply(&original)
+                type_ref: substitution.apply(&original).unwrap()
             },
             Instruction::RetV,
         ]
     );
+}
+
+#[test]
+fn specialization_refuses_a_witness_that_would_overflow_its_scope() {
+    let module = module(
+        &[
+            Instruction::DropTyped {
+                src: Reg(0),
+                type_ref: TypeRef::Rank2Function {
+                    type_param_count: 1,
+                    params: vec![TypeRef::Generic(TypeParamId(0))],
+                    return_type: Box::new(TypeRef::Generic(TypeParamId(1))),
+                    contexts: Default::default(),
+                },
+            },
+            Instruction::RetV,
+        ],
+        1,
+    );
+    let mut substitution = TypeSubstitution::empty();
+    substitution.bind(TypeParamId(0), TypeRef::Generic(TypeParamId(u16::MAX)));
+    let graph = InstantiationGraph::new();
+    let result = BytecodeSpecializer::new(&module, &substitution, &graph)
+        .specialize(&module.functions[0], &[]);
+    assert!(matches!(
+        result,
+        Err(verum_vbc::mono::SpecializationError::TypeSubstitution(
+            verum_vbc::mono::SubstitutionError::GenericIndexOverflow { index: u16::MAX, shift: 1 }
+        ))
+    ));
 }
 
 #[test]

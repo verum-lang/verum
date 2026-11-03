@@ -125,52 +125,24 @@ fn resource_discipline_inner<'a>(
     }
     active.push(ty.clone());
     let substitution = TypeSubstitution::new(&descriptor.type_params, args);
+    let mut component = |part: &TypeRef| match substitution.apply(part) {
+        Ok(part) => resource_discipline_inner(
+            &part, resolve, active, memo, remaining, depth + 1,
+        ),
+        Err(_) => Unknown,
+    };
     if descriptor.kind == TypeKind::Alias {
-        mode = descriptor.alias_target.as_ref().map_or(Unknown, |target| {
-            mode.with_component(resource_discipline_inner(
-                &substitution.apply(target),
-                resolve,
-                active,
-                memo,
-                remaining,
-                depth + 1,
-            ))
-        });
+        mode = mode.with_component(descriptor.alias_target.as_ref().map_or(Unknown, &mut component));
     } else {
         for field in &descriptor.fields {
-            mode = mode.with_component(field.declaration_type.as_ref().map_or(Unknown, |ty| {
-                resource_discipline_inner(
-                    &substitution.apply(ty),
-                    resolve,
-                    active,
-                    memo,
-                    remaining,
-                    depth + 1,
-                )
-            }));
+            mode = mode.with_component(field.declaration_type.as_ref().map_or(Unknown, &mut component));
         }
         for variant in &descriptor.variants {
             if let Some(payload) = &variant.payload {
-                mode = mode.with_component(resource_discipline_inner(
-                    &substitution.apply(payload),
-                    resolve,
-                    active,
-                    memo,
-                    remaining,
-                    depth + 1,
-                ));
+                mode = mode.with_component(component(payload));
             }
             for field in &variant.fields {
-                mode = mode.with_component(field.declaration_type.as_ref().map_or(Unknown, |ty| {
-                    resource_discipline_inner(
-                        &substitution.apply(ty),
-                        resolve,
-                        active,
-                        memo,
-                        remaining,
-                        depth + 1,
-                    )
-                }));
+                mode = mode.with_component(field.declaration_type.as_ref().map_or(Unknown, &mut component));
             }
         }
     }

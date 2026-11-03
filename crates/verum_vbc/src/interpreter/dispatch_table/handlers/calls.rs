@@ -721,7 +721,7 @@ pub(in super::super) fn handle_call_generic(
         Vec::with_capacity(type_args_count);
     for _ in 0..type_args_count {
         let tr = super::bytecode_io::read_type_ref(state)?;
-        type_args.push(state.resolve_generic_witness(&tr));
+        type_args.push(state.resolve_generic_witness(&tr)?);
     }
     let args = read_reg_range(state)?;
 
@@ -1322,15 +1322,18 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
         lexical_payload.extend_from_slice(&(count as u16).to_le_bytes());
         for _ in 0..count {
             let ty = super::bytecode_io::read_type_ref(state)?;
-            let ty = state.resolve_generic_witness(&ty);
+            let ty = state.resolve_generic_witness(&ty)?;
             if !crate::mono::is_concrete_type(&ty) {
                 return Err(InterpreterError::Panic { message: "unresolved closure lexical witness".into() });
             }
             crate::bytecode::encode_type_ref(&ty, &mut lexical_payload);
         }
     }
-    state.module.validate_closure_captures(types.as_deref(), capture_count,
-        |ty| state.resolve_generic_witness(ty))
+    let resolved_types = types.as_ref().map(|types| types.iter()
+        .map(|ty| ty.as_ref().map(|ty| state.resolve_generic_witness(ty)).transpose())
+        .collect::<InterpreterResult<Vec<_>>>()).transpose()?;
+    state.module.validate_closure_captures(resolved_types.as_deref(), capture_count,
+        |ty| ty.clone())
         .map_err(|message| InterpreterError::Panic { message })?;
     // Formation admits the environment, just as LoadFn forms a reference
     // without executing its target. Resolve available names now, but require

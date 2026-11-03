@@ -765,40 +765,57 @@ impl VbcCodegen {
         Ok(selected.len())
     }
 
-    pub(super) fn nominal_type_id(&self, name: &str) -> Option<TypeId> {
-        let lookup = |name: &str| {
-            self.type_name_to_id.get(name).copied().or_else(|| {
-                // Bootstrap can compile an intrinsic before core.base. Its
-                // explicit mount still denotes the reserved canonical sum;
-                // an unrelated same-leaf mount has no such authority.
-                let (owner, leaf) = name.rsplit_once('.')?;
-                Self::canonical_sum_type_id(owner, leaf)
-            })
-        };
-        let owner = self.lexical_type_scope();
-        // A declaration in this file shadows its imports. A same-named type in
-        // a different file of the bootstrap unit owns only its qualified name.
-        if !name.contains('.')
-            && let Some(local) = self.type_name_to_id.get(&format!("{owner}.{name}"))
-        {
-            return Some(*local);
-        }
-        let owner_key = Text::from(owner);
+    /// A selected source binding is authoritative even when it cannot resolve.
+    /// Walk actual lexical parents, never namespace prefixes or sibling aliases.
+    pub(super) fn source_nominal_type_id(&self, name: &str) -> Option<Option<TypeId>> {
+        if name.contains('.') { return None; }
+        let mut owner = self.lexical_type_scope();
         let name_key = Text::from(name);
-        let binding = match self.source_type_mounts.get(&owner_key) {
-            Some(scope) => scope.get(&name_key),
-            None => self.imported_declaration_type_bindings.get(&owner_key)
-                .and_then(Option::as_ref).and_then(|scope| scope.get(&name_key)),
-        };
-        if binding == Some(&None) { return None; }
+        loop {
+            if let Some(local) = self.type_name_to_id.get(&format!("{owner}.{name}")) {
+                return Some(Some(*local));
+            }
+            let owner_key = Text::from(owner);
+            let binding = match self.source_type_mounts.get(&owner_key) {
+                Some(scope) => scope.get(&name_key),
+                None => self.imported_declaration_type_bindings.get(&owner_key)
+                    .and_then(Option::as_ref).and_then(|scope| scope.get(&name_key)),
+            };
+            if let Some(binding) = binding {
+                return Some(binding.as_deref().and_then(|mounted|
+                    self.exact_nominal_type_id(mounted)
+                        .or_else(|| self.exact_nominal_type_id(&format!("core.{mounted}")))
+                        .or_else(|| self.source_export_type_id(mounted, owner))));
+            }
+            if let Some(selected) = self.source_glob_type_id(name, owner) { return Some(selected); }
+            owner = match self.lexical_type_parent(owner)? {
+                Some(parent) => parent,
+                None => return Some(None),
+            };
+        }
+    }
+
+    fn exact_nominal_type_id(&self, name: &str) -> Option<TypeId> {
+        self.type_name_to_id.get(name).copied().or_else(|| {
+            // Bootstrap can compile an intrinsic before core.base. Its
+            // explicit mount still denotes the reserved canonical sum;
+            // an unrelated same-leaf mount has no such authority.
+            let (owner, leaf) = name.rsplit_once('.')?;
+            Self::canonical_sum_type_id(owner, leaf)
+        })
+    }
+
+    pub(super) fn nominal_type_id(&self, name: &str) -> Option<TypeId> {
+        if let Some(selected) = self.source_nominal_type_id(name) { return selected; }
+        let owner = self.lexical_type_scope();
         if let Some(mounted) = self.mounted_type_path(name) {
-            return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")))
+            return self.exact_nominal_type_id(mounted).or_else(|| self.exact_nominal_type_id(&format!("core.{mounted}")))
                 .or_else(|| self.source_export_type_id(mounted, owner));
         }
         if let Some(selected) = self.source_glob_type_id(name, owner) { return selected; }
         // A language scalar spelling has declaration authority in every scope.
         // An unrelated module's bare compatibility entry cannot shadow it.
-        TypeId::from_well_known_scalar_name(name).or_else(|| lookup(name))
+        TypeId::from_well_known_scalar_name(name).or_else(|| self.exact_nominal_type_id(name))
     }
 
     fn bootstrap_function(&self, module: &VbcModule, id: u32) -> Option<&FunctionInfo> {

@@ -49,25 +49,32 @@ impl ValueUsePlan {
         descriptor: &crate::module::FunctionDescriptor,
         uses: &[ValueUseReceipt],
     ) -> Maybe<[u8; 32]> {
-        let params: List<_> = descriptor
-            .params
-            .iter()
-            .map(|p| (&p.type_ref, p.is_mut))
-            .collect();
+        let param_mutability: List<_> = descriptor.params.iter().map(|p| p.is_mut).collect();
         let type_ids: List<_> = descriptor.type_params.iter().map(|p| p.id).collect();
-        // Confine the existing serializer's Vec output to this encoding boundary.
-        let mut encoded = bincode::serialize(&(
-            params,
-            type_ids,
-            &descriptor.return_type,
-            &descriptor.yield_type,
-            &descriptor.semantic_params,
-            &descriptor.semantic_return,
-            descriptor.register_count,
-            uses,
-        ))
-        .ok()?;
+        let use_sites: List<_> = uses.iter().map(|u| (&u.event, u.instruction, u.operand)).collect();
+        // Type identity belongs to the versioned VBC codec, not serde's enum
+        // ordinals. This domain change deliberately invalidates old seals.
+        let mut encoded = b"verum.value-use.signature/2\0".to_vec();
+        encoded.extend(bincode::serialize(&(param_mutability, type_ids, descriptor.register_count, use_sites)).ok()?);
+        for param in &descriptor.params {
+            crate::bytecode::encode_type_ref(&param.type_ref, &mut encoded);
+        }
+        crate::bytecode::encode_type_ref(&descriptor.return_type, &mut encoded);
+        fn optional_type(ty: Option<&TypeRef>, encoded: &mut Vec<u8>) {
+            encoded.push(u8::from(ty.is_some()));
+            if let Some(ty) = ty { crate::bytecode::encode_type_ref(ty, encoded); }
+        }
+        optional_type(descriptor.yield_type.as_ref(), &mut encoded);
+        encoded.push(u8::from(descriptor.semantic_params.is_some()));
+        if let Some(params) = &descriptor.semantic_params {
+            crate::encoding::encode_varint(params.len() as u64, &mut encoded);
+            for param in params { optional_type(param.as_ref(), &mut encoded); }
+        }
+        optional_type(descriptor.semantic_return.as_ref(), &mut encoded);
+        for receipt in uses { optional_type(receipt.declaration_type.as_ref(), &mut encoded); }
+        encoded.push(u8::from(descriptor.source_signature.is_some()));
         if let Some(signature) = &descriptor.source_signature {
+            // Declaration ASTs carry lexical names, not VBC TypeParam IDs.
             encoded.extend(bincode::serialize(signature).ok()?);
         }
         Some(*blake3::hash(&encoded).as_bytes())

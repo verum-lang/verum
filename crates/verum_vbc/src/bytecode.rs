@@ -3061,7 +3061,8 @@ fn encode_optional_reg(reg: Option<Reg>, output: &mut Vec<u8>) {
 /// - 0x05: Tuple(elems)
 /// - 0x06: Array { element, length }
 /// - 0x07: Slice(inner)
-/// - 0x08: Rank2Function { type_param_count, params, return_type, contexts }
+/// - 0x08: rejected legacy unscoped rank-2 function
+/// - 0x0C: scoped Rank2Function { type_param_count, params, return_type, contexts }
 /// - 0x09: AssociatedProjection { base, assoc }
 /// - 0x0A: ConstValue(i64) — const-generic value argument
 #[inline]
@@ -3131,7 +3132,7 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             return_type,
             contexts,
         } => {
-            output.push(0x08);
+            output.push(0x0C);
             encode_varint(*type_param_count as u64, output);
             encode_varint(params.len() as u64, output);
             for p in params {
@@ -6022,7 +6023,8 @@ fn decode_extended_reg_operands(
 /// - 0x05: Tuple(elems)
 /// - 0x06: Array { element, length }
 /// - 0x07: Slice(inner)
-/// - 0x08: Rank2Function { type_param_count, params, return_type, contexts }
+/// - 0x08: rejected legacy unscoped rank-2 function
+/// - 0x0C: scoped Rank2Function { type_param_count, params, return_type, contexts }
 /// - 0x09: AssociatedProjection { base, assoc }
 /// - 0x0A: ConstValue(i64) — const-generic value argument
 pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
@@ -6038,7 +6040,9 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
         }
         0x01 => {
             // Generic(TypeParamId)
-            let id = decode_varint(data, offset)? as u16;
+            let id = u16::try_from(decode_varint(data, offset)?).map_err(|_| VbcError::InvalidTypeRef {
+                offset: (*offset - 1) as u32, discriminant,
+            })?;
             Ok(TypeRef::Generic(TypeParamId(id)))
         }
         0x02 => {
@@ -6113,21 +6117,11 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             let inner = Box::new(decode_type_ref(data, offset)?);
             Ok(TypeRef::Slice(inner))
         }
-        0x08 => {
-            // Rank2Function { type_param_count, params, return_type, contexts }
-            //
-            // Pre-fix this discriminant was MISSING from the decoder
-            // — `encode_type_ref` writes it (bytecode.rs:2985) for
-            // every rank-2 polymorphic function type signature
-            // (`fn<R>(Reducer<B,R>) -> Reducer<A,R>` and friends),
-            // but the linker / interpreter / analyser would surface
-            // the resulting bytes as `InvalidTypeRef { discriminant:
-            // 8 }` when re-decoded.  In practice this hit the
-            // VBC linker's `rewrite_function_bytecode` pass on
-            // any stdlib body referencing a Transducer-shaped
-            // TypeRef — `linker_round_trip_through_embedded_archive`
-            // failed on the first such function.
-            let type_param_count = decode_varint(data, offset)? as u16;
+        0x0C => {
+            // Explicit scoped binders. Legacy 0x08 must never be reinterpreted.
+            let type_param_count = u16::try_from(decode_varint(data, offset)?).map_err(|_| VbcError::InvalidTypeRef {
+                offset: (*offset - 1) as u32, discriminant,
+            })?;
             let param_count = decode_varint(data, offset)? as usize;
             let mut params = decode_vec_with_capacity(param_count, data, *offset);
             for _ in 0..param_count {
@@ -6135,7 +6129,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             }
             let return_type = Box::new(decode_type_ref(data, offset)?);
             let ctx_count = decode_varint(data, offset)? as usize;
-            let mut contexts = SmallVec::with_capacity(ctx_count);
+            let mut contexts = SmallVec::new();
             for _ in 0..ctx_count {
                 contexts.push(ContextRef(decode_varint(data, offset)? as u32));
             }

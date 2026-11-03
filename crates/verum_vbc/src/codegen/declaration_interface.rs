@@ -15,8 +15,20 @@ impl VbcCodegen {
         &mut self,
         sources: &[&Module],
     ) -> CodegenResult<VbcModule> {
+        let parent = self.config.module_name.clone();
+        let owned: Vec<_> = sources.iter().map(|module| (parent.as_str(), *module)).collect();
+        self.collect_owned_declaration_interface(&owned)
+    }
+
+    /// Elaborate a whole declaration graph after claiming all source-owned
+    /// nominal identities. A parent supplies context for short or absent module
+    /// headers; it is never substituted for an explicit qualified source owner.
+    pub fn collect_owned_declaration_interface(
+        &mut self,
+        sources: &[(&str, &Module)],
+    ) -> CodegenResult<VbcModule> {
         self.collecting_declaration_interface = true;
-        let collected = self.collect_unit_declarations(sources);
+        let collected = self.collect_owned_unit_declarations(sources);
         self.collecting_declaration_interface = false;
         collected?;
         let mut module = self.build_module()?;
@@ -39,9 +51,9 @@ impl VbcCodegen {
         parent: Option<&str>,
         dense: &std::collections::HashMap<String, u16>,
         shadow: &std::collections::HashMap<String, u16>,
-    ) {
+    ) -> CodegenResult<()> {
         if !self.collecting_declaration_interface {
-            return;
+            return Ok(());
         }
         let mut scope = dense.clone();
         scope.extend(shadow.clone());
@@ -83,13 +95,15 @@ impl VbcCodegen {
                 FunctionParamKind::Regular { ty, .. } => Some(ty),
                 _ => None,
             };
-            let resolved = semantic[index].clone()
-                .or_else(|| declared.map(|ty| self.resolve_field_type_ref(ty, &scope)))
-                .unwrap_or(TypeRef::Concrete(TypeId::UNIT));
+            let resolved = match semantic[index].clone() {
+                Some(ty) => ty,
+                None => declared.map(|ty| self.resolve_field_type_ref(ty, &scope)).transpose()?
+                    .unwrap_or(TypeRef::Concrete(TypeId::UNIT)),
+            };
             // The declaration interface carries the same callable bound as
             // ordinary body compilation; the semantic slot still names O.
             let type_ref = match declared {
-                Some(ty) => self.substitute_fn_bound_for_generic(resolved, ty, source, &scope),
+                Some(ty) => self.substitute_fn_bound_for_generic(resolved, ty, source, &scope)?,
                 None => resolved,
             };
             descriptor.params.push(ParamDescriptor {
@@ -122,5 +136,6 @@ impl VbcCodegen {
             });
         }
         self.push_function_dedup(VbcFunction::new(descriptor, List::new().into()));
+        Ok(())
     }
 }

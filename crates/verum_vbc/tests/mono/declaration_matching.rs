@@ -13,7 +13,7 @@ fn sparse_actual_generics_preserve_their_caller_scope() {
     assert!(match_declared_types(&pattern, &actual, &mut bindings));
     assert_eq!(bindings.get(TypeParamId(0)), Some(&generic(0x8000)));
     assert_eq!(bindings.get(TypeParamId(7)), Some(&generic(2)));
-    assert_eq!(bindings.apply(&pattern), actual);
+    assert_eq!(bindings.apply(&pattern).unwrap(), actual);
     assert!(!match_declared_types(
         &generic(0),
         &generic(2),

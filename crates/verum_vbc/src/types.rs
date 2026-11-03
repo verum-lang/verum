@@ -583,9 +583,13 @@ pub enum TypeRef {
     /// This enables patterns like transducers: fn<R>(Reducer<B, R>) -> Reducer<A, R>
     ///
     /// Spec: grammar/verum.ebnf - rank2_function_type
+    #[serde(rename = "ScopedRank2Function")]
     Rank2Function {
         /// Number of universally quantified type parameters (local to this function type).
-        /// These are indexed starting from 0 within this type's scope.
+        /// Local IDs occupy 0..count. IDs >= count refer to the enclosing
+        /// scope at index ID-count, recursively under nested binders.
+        /// Substitution lifts free parameters instead of capturing local IDs.
+        #[serde(with = "scoped_rank2_binder")]
         type_param_count: u16,
         /// Parameter types (may reference the local type params via TypeParamId).
         params: Vec<TypeRef>,
@@ -651,6 +655,27 @@ pub enum TypeRef {
     /// Wire format: bytecode-stream tag 0x0A, archive tag 0x0B (both
     /// additive — VBC format 2.8).
     ConstValue(i64),
+}
+
+// Non-self-describing serializers identify variants by their ordinal, ignoring
+// serde's variant rename. Their old rank-2 payload has no scope/version marker.
+// Binary carriers must use the explicit versioned VBC type codec instead.
+mod scoped_rank2_binder {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(count: &u16, serializer: S) -> Result<S::Ok, S::Error> {
+        if !serializer.is_human_readable() {
+            return Err(serde::ser::Error::custom("scoped rank-2 types require the versioned VBC binary codec"));
+        }
+        count.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u16, D::Error> {
+        if !deserializer.is_human_readable() {
+            return Err(serde::de::Error::custom("unversioned binary rank-2 types are ambiguous; rebuild with the VBC codec"));
+        }
+        u16::deserialize(deserializer)
+    }
 }
 
 impl Default for TypeRef {

@@ -63,7 +63,7 @@ fn layout<'a>(
                     return None;
                 }
                 let target =
-                    crate::mono::TypeSubstitution::new(&descriptor.type_params, args).apply(target);
+                    crate::mono::TypeSubstitution::new(&descriptor.type_params, args).apply(target).ok()?;
                 return layout(&target, lookup, depth + 1);
             }
             descriptor
@@ -129,7 +129,7 @@ fn unsized_pointee<'a>(
                     return None;
                 }
                 let target = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
-                    .apply(descriptor.alias_target.as_ref()?);
+                    .apply(descriptor.alias_target.as_ref()?).ok()?;
                 return unsized_pointee(&target, lookup, depth + 1);
             }
             Some(descriptor.kind == TypeKind::Protocol)

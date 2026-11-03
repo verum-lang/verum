@@ -1209,9 +1209,9 @@ one module and therefore never seeded",
         Ok(())
     }
 
-    /// Collect nominal identities first, then resolve foreign declaration
-    /// types through those identities. This metadata pass supports cycles;
-    /// executable bodies are still compiled exactly once.
+    /// Elaborate one source-owned declaration graph. The shared unit collector
+    /// claims every nominal identity before resolving signatures, so cyclic
+    /// references never require provisional ABI descriptors or unknown types.
     fn collect_core_declaration_interfaces(
         &mut self,
         all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
@@ -1226,92 +1226,64 @@ one module and therefore never seeded",
             .map(|info| info.id.0)
             .filter(|id| verum_vbc::stub_ranges::in_stage1(*id))
             .min().map_or(verum_vbc::stub_ranges::STAGE1_BASE, |id| id - 1);
-        let mut collect = |available: &[&verum_vbc::VbcModule]| -> Result<Vec<verum_vbc::VbcModule>> {
-            let mut resolved = Vec::with_capacity(all_modules.len());
-            for (name, files) in all_modules {
-                let mut declarations = VbcCodegen::with_config(
-                    verum_vbc::codegen::CodegenConfig::new(name)
-                        .with_optimization_level(config.optimization_level)
-                        .with_target(target.clone()),
-                );
-                let sources: Vec<_> = files.iter().map(|(_, ast)| ast).collect();
-                if !available.is_empty() {
-                    // This unit owns its declarations. Its preliminary header has
-                    // unelaborated scopes and field types, so feeding it back as
-                    // a foreign archive would turn provisional guesses into ABI.
-                    let dependencies: Vec<_> = available.iter().copied()
-                        .filter(|header| header.name.as_str() != name)
-                        .collect();
-                    self.import_core_nominal_dependencies(&mut declarations, &sources, &dependencies)
-                        .map_err(|error| anyhow::anyhow!("interface for {name}: {error}"))?;
-                }
-                let interface = declarations.collect_declaration_interface(&sources)
-                    .map_err(|error| anyhow::anyhow!("collecting interface for {name}: {error}"))?;
-                if !available.is_empty() {
-                    declarations.export_foreign_interfaces(&interface, &mut foreign);
-                    // The declaring compiler selects the method (including protocol
-                    // implementations). Publish that identity before any body is
-                    // compiled. Consumer-pool signatures come from the interface
-                    // importer, never the declaring compiler's numeric type IDs.
-                    let exports = declarations.export_function_view();
-                    for (name, info) in &exports {
-                        if info.foreign_declaration.as_deref().and_then(|key| key.rsplit_once('#'))
-                            .is_some_and(|(path, _)| path == name.as_str())
-                        {
-                            self.global_function_registry.insert(name.to_string(), (*info).clone());
-                        }
-                    }
-                    for method in &interface.functions {
-                        if method.parent_type.is_none() || !method.has_source_body { continue; }
-                        let Some(owner) = method.origin_module.and_then(|id| interface.strings.get(id)) else { continue };
-                        let Some(leaf) = interface.strings.get(method.name) else { continue };
-                        let key = verum_vbc::module::qualify_module_name(owner, leaf);
-                        let Some(&source) = exports.get(&Text::from(key.as_str())) else { continue };
-                        // Finalizing the interface renumbers its functions. The
-                        // canonical export selects the source declaration across pools.
-                        if !source.has_source_body || self.global_function_registry.contains_key(&key) { continue; }
-                        anyhow::ensure!(verum_vbc::stub_ranges::in_stage1(next_method), "forward method ID range exhausted");
-                        let mut forward = source.clone();
-                        forward.id = verum_vbc::module::FunctionId(next_method);
-                        forward.callable_signature = None;
-                        forward.return_type = None;
-                        forward.yield_type = None;
-                        self.global_function_registry.insert(key, forward);
-                        next_method -= 1;
-                    }
-                    // A constructor's tag and payload belong to its declaring
-                    // sum, including when a cyclic consumer compiles first.
-                    // Assign a forward ID per declaration, not per tag or leaf.
-                    for (canonical, declaration) in declarations.declared_variant_constructors() {
-                        let (owner, variant) = canonical.rsplit_once('.').expect("qualified constructor");
-                        if !declared_variants.insert(variant.to_owned()) {
-                            source_exports.mark_ambiguous_variant(variant);
-                        }
-                        let parent = owner.rsplit('.').next().unwrap_or(owner);
-                        anyhow::ensure!(verum_vbc::stub_ranges::in_stage2(next_variant), "forward constructor ID range exhausted");
-                        let mut forward = declaration.clone();
-                        forward.id = verum_vbc::module::FunctionId(next_variant);
-                        next_variant -= 1;
-                        self.global_function_registry.insert(canonical.to_owned(), forward.clone());
-                        // Legacy unqualified lookup uses local names. Explicit
-                        // mounts always use the qualified owner above.
-                        forward.parent_type_name = Some(parent.to_owned());
-                        forward.return_type_name = Some(parent.to_owned());
-                        self.global_function_registry.entry(format!("{parent}.{variant}"))
-                            .or_insert_with(|| forward.clone());
-                        self.global_function_registry.entry(variant.to_owned()).or_insert(forward);
-                    }
-                    declarations.publish_source_exports(&mut source_exports);
-                }
-                resolved.push(interface);
+        let mut declarations = VbcCodegen::with_config(
+            verum_vbc::codegen::CodegenConfig::new("core")
+                .with_optimization_level(config.optimization_level)
+                .with_target(target.clone()),
+        );
+        let sources: Vec<_> = all_modules.iter().flat_map(|(owner, files)|
+            files.iter().map(move |(_, ast)| (owner.as_str(), ast))).collect();
+        let interface = declarations.collect_owned_declaration_interface(&sources)
+            .map_err(|error| anyhow::anyhow!("collecting stdlib declaration graph: {error}"))?;
+        declarations.export_foreign_interfaces(&interface, &mut foreign);
+        // The declaring compiler selects the method (including protocol
+        // implementations). Consumer-pool signatures come from the interface
+        // importer, never the declaring compiler's numeric type IDs.
+        let exports = declarations.export_function_view();
+        for (name, info) in &exports {
+            if info.foreign_declaration.as_deref().and_then(|key| key.rsplit_once('#'))
+                .is_some_and(|(path, _)| path == name.as_str())
+            {
+                self.global_function_registry.insert(name.to_string(), (*info).clone());
             }
-            Ok(resolved)
-        };
-        let nominal_interfaces = collect(&[])?;
-        let resolved = collect(&nominal_interfaces.iter().collect::<Vec<_>>())?;
+        }
+        for method in &interface.functions {
+            if method.parent_type.is_none() || !method.has_source_body { continue; }
+            let Some(owner) = method.origin_module.and_then(|id| interface.strings.get(id)) else { continue };
+            let Some(leaf) = interface.strings.get(method.name) else { continue };
+            let key = verum_vbc::module::qualify_module_name(owner, leaf);
+            let Some(&source) = exports.get(&Text::from(key.as_str())) else { continue };
+            if !source.has_source_body || self.global_function_registry.contains_key(&key) { continue; }
+            anyhow::ensure!(verum_vbc::stub_ranges::in_stage1(next_method), "forward method ID range exhausted");
+            let mut forward = source.clone();
+            forward.id = verum_vbc::module::FunctionId(next_method);
+            forward.callable_signature = None;
+            forward.return_type = None;
+            forward.yield_type = None;
+            self.global_function_registry.insert(key, forward);
+            next_method -= 1;
+        }
+        for (canonical, declaration) in declarations.declared_variant_constructors() {
+            let (owner, variant) = canonical.rsplit_once('.').expect("qualified constructor");
+            if !declared_variants.insert(variant.to_owned()) {
+                source_exports.mark_ambiguous_variant(variant);
+            }
+            let parent = owner.rsplit('.').next().unwrap_or(owner);
+            anyhow::ensure!(verum_vbc::stub_ranges::in_stage2(next_variant), "forward constructor ID range exhausted");
+            let mut forward = declaration.clone();
+            forward.id = verum_vbc::module::FunctionId(next_variant);
+            next_variant -= 1;
+            self.global_function_registry.insert(canonical.to_owned(), forward.clone());
+            forward.parent_type_name = Some(parent.to_owned());
+            forward.return_type_name = Some(parent.to_owned());
+            self.global_function_registry.entry(format!("{parent}.{variant}"))
+                .or_insert_with(|| forward.clone());
+            self.global_function_registry.entry(variant.to_owned()).or_insert(forward);
+        }
+        declarations.publish_source_exports(&mut source_exports);
         self.global_foreign_interfaces = Arc::new(foreign);
         self.global_source_exports = Arc::new(source_exports);
-        Ok(resolved)
+        Ok(vec![interface])
     }
 
     fn import_core_nominal_dependencies(

@@ -194,10 +194,15 @@ impl VbcCodegen {
                 if !super::formal_parameters::resolved(return_type, &ids, 0) {
                     return None;
                 }
+                let instantiated = match crate::mono::TypeSubstitution::new(&declaration.type_params, arguments)
+                    .apply(return_type)
+                {
+                    Ok(output) => output,
+                    Err(error) => return Some(Err(CodegenError::internal(error.to_string()))),
+                };
                 output = Some(ProtocolMethod {
                     owner,
-                    output: crate::mono::TypeSubstitution::new(&declaration.type_params, arguments)
-                        .apply(return_type),
+                    output: instantiated,
                     is_async: dispatch.is_async,
                 });
             }

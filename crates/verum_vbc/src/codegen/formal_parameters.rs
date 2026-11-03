@@ -7,6 +7,21 @@ use verum_ast::{FunctionDecl, FunctionParamKind};
 use verum_common::List;
 
 impl VbcCodegen {
+    /// Registration must reject unresolved annotations even for declarations
+    /// with no body, before any executable or interface metadata is emitted.
+    pub(super) fn validate_source_parameter_types(
+        &self,
+        function: &FunctionDecl,
+        scope: &std::collections::HashMap<String, u16>,
+    ) -> super::CodegenResult<()> {
+        for parameter in &function.params {
+            if let FunctionParamKind::Regular { ty, .. } = &parameter.kind {
+                self.resolve_signature_type_ref(ty, scope)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Keep the exact target only while compiling that source method. The
     /// normal ABI resolver cannot reconstruct `Container<Int>` from its name.
     pub(super) fn compile_declared_impl_function(
@@ -53,7 +68,8 @@ impl VbcCodegen {
         if function.is_async || function.is_generator || !function.contexts.is_empty() {
             return None;
         }
-        self.semantic_formal_type(function.return_type.as_ref()?, scope, declared_ids)
+        self.semantic_formal_type_with_values(function.return_type.as_ref()?, scope, declared_ids,
+            &Self::source_value_binders(function))
     }
 
     pub(super) fn register_declared_impl_function(
@@ -79,18 +95,19 @@ impl VbcCodegen {
         function: &FunctionDecl,
         scope: &std::collections::HashMap<String, u16>,
         parameters: &[Option<TypeRef>],
-    ) {
+    ) -> super::CodegenResult<()> {
         for (slot, (parameter, semantic)) in function.params.iter().zip(parameters).enumerate() {
             let (FunctionParamKind::Regular { ty, .. }, Some(generic @ TypeRef::Generic(_))) =
                 (&parameter.kind, semantic)
             else {
                 continue;
             };
-            let bound = self.substitute_fn_bound_for_generic(generic.clone(), ty, function, scope);
+            let bound = self.substitute_fn_bound_for_generic(generic.clone(), ty, function, scope)?;
             if matches!(bound, TypeRef::Function { .. }) {
                 self.ctx.source_callable_bounds.insert((id, slot), bound);
             }
         }
+        Ok(())
     }
 
     pub(super) fn source_semantic_parameters(
@@ -100,6 +117,7 @@ impl VbcCodegen {
         receiver_scope: &std::collections::HashMap<String, u16>,
         declared_ids: &[TypeParamId],
     ) -> List<Option<TypeRef>> {
+        let values = Self::source_value_binders(function);
         let receiver = self
             .current_impl_semantic_target
             .as_ref()
@@ -115,7 +133,7 @@ impl VbcCodegen {
             .map(|param| {
                 let (mutable, tier) = match &param.kind {
                     FunctionParamKind::Regular { ty, .. } => {
-                        return self.semantic_formal_type(ty, scope, declared_ids);
+                        return self.semantic_formal_type_with_values(ty, scope, declared_ids, &values);
                     }
                     FunctionParamKind::SelfValue
                     | FunctionParamKind::SelfValueMut
@@ -141,12 +159,11 @@ impl VbcCodegen {
             .collect()
     }
 
-    /// The general ABI resolver retains bare-name recovery for bootstrap.
-    /// A semantic signature may only use a generic slot, an exact owner key,
+    /// Source type lowering may only use a generic slot, an exact owner key,
     /// an explicit mount, a primitive, or a canonical prelude variant carrier.
     /// A sibling's convenient bare alias
     /// is not evidence that this declaration can name that sibling's type.
-    fn semantic_formal_path_is_declared(
+    pub(super) fn semantic_formal_path_is_declared(
         &self,
         ast: &verum_ast::Type,
         scope: &std::collections::HashMap<String, u16>,
@@ -168,12 +185,7 @@ impl VbcCodegen {
             return self.nominal_type_id(&name).is_some();
         }
         let owner = self.lexical_type_scope();
-        if self
-            .type_name_to_id
-            .contains_key(&format!("{owner}.{name}"))
-        {
-            return true;
-        }
+        if let Some(selected) = self.source_nominal_type_id(&name) { return selected.is_some(); }
         if self.mounted_type_path(&name).is_some() {
             return self.nominal_type_id(&name).is_some();
         }
@@ -198,11 +210,62 @@ impl VbcCodegen {
                         .iter().any(|(parent, _)| *parent == name))))
     }
 
+    /// The grammar's explicit existential array extent, distinct from an
+    /// unresolved named constant or a fixed zero-length array.
+    pub(super) fn inferred_array_extent(expr: &verum_ast::Expr) -> bool {
+        matches!(&Self::normalized_place(expr).kind, verum_ast::ExprKind::Path(path)
+            if path.as_ident().is_some_and(|name| name.name.as_str() == "_"))
+    }
+
+    fn source_value_binders(function: &FunctionDecl) -> std::collections::HashSet<String> {
+        use verum_ast::{visitor::{Visitor, walk_pattern}, Pattern, PatternKind, VariantPatternData};
+        #[derive(Default)]
+        struct Bindings(std::collections::HashSet<String>);
+        impl Visitor for Bindings {
+            fn visit_pattern(&mut self, pattern: &Pattern) {
+                match &pattern.kind {
+                    PatternKind::Ident { name, .. } => { self.0.insert(name.name.to_string()); }
+                    PatternKind::Record { fields, .. }
+                    | PatternKind::Variant { data: Some(VariantPatternData::Record { fields, .. }), .. } => {
+                        for field in fields {
+                            if field.pattern.is_none() { self.0.insert(field.name.name.to_string()); }
+                        }
+                    }
+                    _ => {}
+                }
+                walk_pattern(self, pattern);
+            }
+        }
+        let mut names = Bindings::default();
+        for parameter in &function.params {
+            if let FunctionParamKind::Regular { pattern, .. } = &parameter.kind {
+                names.visit_pattern(pattern);
+            }
+        }
+        for parameter in &function.generics {
+            use verum_ast::ty::GenericParamKind;
+            if let GenericParamKind::Const { name, .. } | GenericParamKind::Meta { name, .. } = &parameter.kind {
+                names.0.insert(name.name.to_string());
+            }
+        }
+        names.0
+    }
+
     pub(super) fn semantic_formal_type(
         &self,
         ast: &verum_ast::Type,
         scope: &std::collections::HashMap<String, u16>,
         declared_ids: &[TypeParamId],
+    ) -> Option<TypeRef> {
+        self.semantic_formal_type_with_values(ast, scope, declared_ids, &Default::default())
+    }
+
+    fn semantic_formal_type_with_values(
+        &self,
+        ast: &verum_ast::Type,
+        scope: &std::collections::HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+        values: &std::collections::HashSet<String>,
     ) -> Option<TypeRef> {
         use verum_ast::ty::{GenericArg, TypeKind};
         fn generic_projection_base(
@@ -254,7 +317,7 @@ impl VbcCodegen {
                     .all(|p| supported(p, depth + 1, budget, cg, scope)),
                 TypeKind::Generic { base, args } => {
                     supported(base, depth + 1, budget, cg, scope)
-                        && matches!(cg.resolve_signature_type_ref(base, scope), TypeRef::Concrete(id)
+                        && matches!(cg.resolve_signature_type_ref(base, scope), Ok(TypeRef::Concrete(id))
                         if id != TypeId::PTR && id != TypeId::RESERVED)
                         && args.iter().all(|arg| {
                             match arg {
@@ -277,9 +340,20 @@ impl VbcCodegen {
                             .all(|p| supported(p, depth + 1, budget, cg, scope))
                         && supported(return_type, depth + 1, budget, cg, scope)
                 }
-                // The existing resolver has recovery encodings for rank-2
-                // binders, raw pointers and unresolved forms.
-                // These encodings cannot establish this declaration fact.
+                TypeKind::Rank2Function {
+                    type_params, params, return_type, contexts, calling_convention, where_clause,
+                } => {
+                    let Ok((_, inner)) = VbcCodegen::rank2_type_scope(type_params, scope, ty.span) else {
+                        return false;
+                    };
+                    calling_convention.is_none()
+                        && contexts.requirements.is_empty()
+                        && where_clause.as_ref().is_none_or(|clause| clause.predicates.is_empty())
+                        && params.iter().all(|p| supported(p, depth + 1, budget, cg, &inner))
+                        && supported(return_type, depth + 1, budget, cg, &inner)
+                }
+                // Raw pointers and unsupported forms do not establish an
+                // exact declaration-owned semantic type.
                 _ => false,
             }
         }
@@ -287,19 +361,24 @@ impl VbcCodegen {
             return None;
         }
         let owner = self.lexical_type_scope();
-        // A runtime array carrier uses zero for both an empty array and an
-        // unresolved extent. Publish a semantic type only when every count
-        // was evaluated from its declaration. Free names need lexical evidence.
+        // A fixed extent requires its exact declaring scope. The wildcard
+        // family bypasses this evaluator and never claims a numeric extent.
         let mut complete = true;
+        let mut active = verum_common::Set::new();
+        let mut cached = verum_common::Map::new();
         let mut array_count = |count: &verum_ast::Expr| {
-            let extent = verum_ast::checked_const::evaluate(count, 0, &mut |_, _| Ok::<_, ()>(None))
-                .ok()
-                .and_then(|value| value.as_i64())
-                .and_then(|value| u64::try_from(value).ok());
+            let shadowed = Self::constant_integer_dependencies(count).iter()
+                .any(|name| {
+                    let root = name.as_str().split('.').next().unwrap_or(name.as_str());
+                    scope.contains_key(root) || values.contains(root)
+                });
+            let extent = (!shadowed).then(|| self.const_eval_i64_in_scope(
+                count, Some(owner), None, true, &mut active, &mut cached, 0,
+            ).ok().flatten()).flatten().and_then(|value| u64::try_from(value).ok());
             complete &= extent.is_some();
             extent
         };
-        let ty = self.resolve_type_ref_scoped_with_count(ast, scope, true, Some(owner), &mut array_count);
+        let ty = self.resolve_type_ref_scoped_with_count(ast, scope, true, Some(owner), &mut array_count).ok()?;
         (complete && resolved(&ty, declared_ids, 0)).then_some(ty)
     }
 }
@@ -373,21 +452,28 @@ fn remapped_declaration_type(
 }
 
 pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize) -> bool {
+    resolved_in_scope(ty, declared_ids, depth, 0)
+}
+
+fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, binders: u32) -> bool {
     if depth > 64 {
         return false;
     }
     let concrete = |id: TypeId| id != TypeId::PTR && id != TypeId::RESERVED;
     match ty {
         TypeRef::Concrete(id) => concrete(*id),
-        TypeRef::Generic(id) => declared_ids.contains(id),
+        TypeRef::Generic(id) => {
+            let index = u32::from(id.0);
+            index < binders || declared_ids.contains(&TypeParamId((index - binders) as u16))
+        }
         TypeRef::ConstValue(_) => true,
         TypeRef::AssociatedProjection { base, assoc } => !assoc.is_empty()
-            && resolved(base, declared_ids, depth + 1),
+            && resolved_in_scope(base, declared_ids, depth + 1, binders),
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner)
-        | TypeRef::Array { element: inner, .. } => resolved(inner, declared_ids, depth + 1),
-        TypeRef::Tuple(parts) => parts.iter().all(|p| resolved(p, declared_ids, depth + 1)),
+        | TypeRef::Array { element: inner, .. } => resolved_in_scope(inner, declared_ids, depth + 1, binders),
+        TypeRef::Tuple(parts) => parts.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders)),
         TypeRef::Instantiated { base, args } => {
-            concrete(*base) && args.iter().all(|p| resolved(p, declared_ids, depth + 1))
+            concrete(*base) && args.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
         }
         TypeRef::Function {
             params,
@@ -395,9 +481,14 @@ pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize)
             contexts,
         } => {
             contexts.is_empty()
-                && params.iter().all(|p| resolved(p, declared_ids, depth + 1))
-                && resolved(return_type, declared_ids, depth + 1)
+                && params.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
+                && resolved_in_scope(return_type, declared_ids, depth + 1, binders)
         }
-        _ => false,
+        TypeRef::Rank2Function { type_param_count, params, return_type, contexts } => {
+            let Some(binders) = binders.checked_add(u32::from(*type_param_count)) else { return false; };
+            contexts.is_empty()
+                && params.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
+                && resolved_in_scope(return_type, declared_ids, depth + 1, binders)
+        }
     }
 }

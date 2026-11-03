@@ -529,7 +529,12 @@ impl VbcCodegen {
             while let verum_ast::ExprKind::Paren(inner) = &value.kind { value = inner; }
             value.span
         });
+        // A local initializer and its binding are independent of an enclosing
+        // match's scrutinee. Inheriting that hint could grant a payload's local
+        // field reference the ownership type of the entire surrounding sum.
+        let saved_scrutinee = self.ctx.match_scrutinee_type.take();
         let result = self.compile_let_inner(pattern, ty, value);
+        self.ctx.match_scrutinee_type = saved_scrutinee;
         self.ctx.expected_value_span = saved_expected_span;
         if result.is_ok()
             && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind

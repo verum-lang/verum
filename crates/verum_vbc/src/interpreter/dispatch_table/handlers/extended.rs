@@ -158,14 +158,14 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::TypeResource) => {
             let dst = read_reg(state)?;
             let ty = super::bytecode_io::read_type_ref(state)?;
-            let ty = state.resolve_generic_witness(&ty);
+            let ty = state.resolve_generic_witness(&ty)?;
             let mode = state.module.resource_discipline(&ty);
             state.set_reg(dst, crate::value::Value::from_i64(mode as u8 as i64));
             Ok(DispatchResult::Continue)
         }
         Some(ExtendedSubOpcode::BindMethodReceiver) => {
             let ty = super::bytecode_io::read_type_ref(state)?;
-            let receiver = state.resolve_generic_witness(&ty);
+            let receiver = state.resolve_generic_witness(&ty)?;
             if read_u8(state)? != Opcode::CallM.to_byte() {
                 return Err(InterpreterError::Panic { message: "receiver declaration must immediately precede a method call".into() });
             }
@@ -179,7 +179,7 @@ pub(in super::super) fn handle_extended(
                 message: format!("invalid type layout property {raw}"),
             })?;
             let ty = super::bytecode_io::read_type_ref(state)?;
-            let ty = state.resolve_generic_witness(&ty);
+            let ty = state.resolve_generic_witness(&ty)?;
             let value = crate::type_layout::query(&state.module, &ty, property).ok_or_else(|| InterpreterError::Panic {
                 message: format!("unresolved declared type layout: {ty:?}"),
             })?;
@@ -196,7 +196,7 @@ pub(in super::super) fn handle_extended(
                 Vec::with_capacity(count.min(16));
             for _ in 0..count {
                 let tr = super::bytecode_io::read_type_ref(state)?;
-                type_args.push(state.resolve_generic_witness(&tr));
+                type_args.push(state.resolve_generic_witness(&tr)?);
             }
             state.pending_call_witness = Some(type_args.into_boxed_slice());
             Ok(DispatchResult::Continue)

@@ -51,6 +51,8 @@ use verum_ast::{
 mod selection;
 #[path = "method_types.rs"]
 mod method_types;
+#[path = "index_projection.rs"]
+mod index_projection;
 
 type FieldWriteback = (Reg, u32, bool, verum_common::Text);
 
@@ -763,7 +765,7 @@ impl VbcCodegen {
                 }
             }
         }
-        let payload = substitution.apply(payload);
+        let Ok(payload) = substitution.apply(payload) else { return Some(None); };
         Some(self.scoped_callable_type_name(&payload, Some(&self.ctx.current_generic_param_ids))
             .map(|name| name.to_string()))
     }
@@ -1952,7 +1954,7 @@ impl VbcCodegen {
         for (&id, ty) in info.type_param_ids.iter().zip(&args) { substitution.bind(id, ty.clone()); }
         // The shared binder collects candidates; exact equality rules out
         // inconsistent repeated parameters and erased reference qualifiers.
-        if substitution.apply(declared) == expected { args } else { Vec::new() }
+        if substitution.apply(declared).is_ok_and(|actual| actual == expected) { args } else { Vec::new() }
     }
 
     /// Compiles a simple (single-segment) path.
@@ -4032,6 +4034,7 @@ impl VbcCodegen {
             }
 
             ExprKind::Index { expr: base, index } => {
+                self.require_mutable_index_projection(base, index)?;
                 // PACKED-BYTE-INDEX-ASSIGN-AOT (T0172): `buf[i] = v` on a
                 // tracked packed `[Byte; N]` (TypeId::U8) local must lower to
                 // the dedicated byte-strided `ByteArrayStore`, NOT the generic
@@ -4134,18 +4137,15 @@ impl VbcCodegen {
                     return Ok(None);
                 }
 
-                let base_reg = self
-                    .compile_expr(base)?
-                    .or_internal("index base has no value")?;
-                let index_reg = self
-                    .compile_expr(index)?
-                    .or_internal("index has no value")?;
-
-                self.ctx.emit(Instruction::SetE {
-                    arr: base_reg,
-                    idx: index_reg,
-                    value: value_reg,
-                });
+                let (base_reg, projection) = self.compile_index_receiver(base, index, true)?;
+                let index_reg = self.compile_expr(index)?.or_internal("index has no value")?;
+                if let Some(method) = projection {
+                    let reference = self.emit_projection_method(base_reg, method, Some(index_reg));
+                    self.ctx.emit(Instruction::DerefMut { ref_reg: reference, value: value_reg });
+                    self.ctx.free_temp(reference);
+                } else {
+                    self.ctx.emit(Instruction::SetE { arr: base_reg, idx: index_reg, value: value_reg });
+                }
 
                 self.ctx.free_temp(base_reg);
                 self.ctx.free_temp(index_reg);
@@ -4698,19 +4698,19 @@ impl VbcCodegen {
                         (false, None)
                     };
 
-                // Load array
-                let arr_reg = self
-                    .compile_expr(arr)?
-                    .or_internal("index target has no value")?;
+                let (arr_reg, projection) = self.compile_index_receiver(arr, index, true)?;
 
                 // Evaluate index
                 let idx_reg = self
                     .compile_expr(index)?
                     .or_internal("index expression has no value")?;
 
-                // Get current element value
+                let reference = projection.map(|method| self.emit_projection_method(arr_reg, method, Some(idx_reg)));
+                // Read and write the same place; neither receiver nor index is reevaluated.
                 let current_val = self.ctx.alloc_temp();
-                if is_byte_arr {
+                if let Some(reference) = reference {
+                    self.ctx.emit(Instruction::Deref { dst: current_val, ref_reg: reference });
+                } else if is_byte_arr {
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, current_val.0);
                     Self::write_reg(&mut operands, arr_reg.0);
@@ -4767,7 +4767,10 @@ impl VbcCodegen {
                 }
 
                 // Store back to array element
-                if is_byte_arr {
+                if let Some(reference) = reference {
+                    self.ctx.emit(Instruction::DerefMut { ref_reg: reference, value: result });
+                    self.ctx.free_temp(reference);
+                } else if is_byte_arr {
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, arr_reg.0);
                     Self::write_reg(&mut operands, idx_reg.0);
@@ -4980,6 +4983,10 @@ impl VbcCodegen {
     }
 
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        if matches!(op, UnOp::RefMut | UnOp::RefCheckedMut | UnOp::RefUnsafeMut)
+            && let ExprKind::Index { expr: base, index } = &Self::normalized_place(inner).kind {
+            self.require_mutable_index_projection(base, index)?;
+        }
         // A transparent projection denotes the same storage as its wrapper.
         // Borrow the original place so replacing a scalar/Text value reaches
         // the containing record or collection, rather than a temporary Mov.
@@ -5277,9 +5284,14 @@ impl VbcCodegen {
                 inclusive,
             } = &idx_expr.kind
         {
-            let arr_reg = self
-                .compile_expr(arr_expr)?
-                .or_internal("slice base has no value")?;
+            let (arr_reg, projection) = self.compile_index_receiver(arr_expr, idx_expr, op == UnOp::RefMut)?;
+            if let Some(method) = projection {
+                let index_reg = self.compile_expr(idx_expr)?.or_internal("slice index has no value")?;
+                let reference = self.emit_projection_method(arr_reg, method, Some(index_reg));
+                self.ctx.free_temp(arr_reg);
+                self.ctx.free_temp(index_reg);
+                return Ok(Some(reference));
+            }
 
             // start defaults to 0 when omitted (`&b[..end]`, `&b[..]`).
             let start_reg = self.ctx.alloc_temp();
@@ -5534,12 +5546,14 @@ impl VbcCodegen {
                 index: idx_expr,
             } = &inner.kind
         {
-            let list_reg = self
-                .compile_expr(arr_expr)?
-                .or_internal("index base has no value")?;
-            let index_reg = self
-                .compile_expr(idx_expr)?
-                .or_internal("index has no value")?;
+            let (list_reg, projection) = self.compile_index_receiver(arr_expr, idx_expr, op == UnOp::RefMut)?;
+            let index_reg = self.compile_expr(idx_expr)?.or_internal("index has no value")?;
+            if let Some(method) = projection {
+                let reference = self.emit_projection_method(list_reg, method, Some(index_reg));
+                self.ctx.free_temp(list_reg);
+                self.ctx.free_temp(index_reg);
+                return Ok(Some(reference));
+            }
             let dest = self.ctx.alloc_temp();
 
             let mut operands = Vec::<u8>::with_capacity(6);
@@ -17437,7 +17451,7 @@ impl VbcCodegen {
             let ty = arg.type_for_declared_slot()?;
             substitution.bind((*id)?, self.explicit_type_witness(&ty, None)?);
         }
-        Some(substitution.apply(return_type))
+        substitution.apply(return_type).ok()
     }
 
     fn resolved_method_return_type_name(
@@ -17504,7 +17518,7 @@ impl VbcCodegen {
                     substitution.bind(*id, witness);
                 }
             }
-            return self.type_ref_to_field_name(&substitution.apply(ret));
+            return self.type_ref_to_field_name(&substitution.apply(ret).ok()?);
         }
         let mut result = info.return_type_name.clone()?;
         if !result.contains('<') {
@@ -23688,7 +23702,8 @@ impl VbcCodegen {
         let mut current_type = chain.first().cloned().unwrap_or(base_type);
         for target in chain.iter().skip(1) {
             let base = Self::strip_generic_args(&current_type);
-            let method = if base == verum_common::well_known_types::WellKnownType::Heap.as_str() {
+            let method = if self.nominal_type_id(base).and_then(|id| self.declared_runtime_carrier(id))
+                .is_some_and(|kind| kind.is_smart_pointer()) {
                 None
             } else {
                 self.registered_receiver_method(&current_type, "deref")
@@ -24935,7 +24950,7 @@ impl VbcCodegen {
         let signed_bits = if matches!(index.kind, ExprKind::Range { .. }) {
             None // A slice result is a container, never a scalar to normalize.
         } else {
-            self.indexed_element_signed_bits(base)
+            self.indexed_element_signed_bits(base, index)
         };
         let result = self.compile_index_storage(base, index)?;
         if let Some(value) = result {
@@ -24944,9 +24959,9 @@ impl VbcCodegen {
         Ok(result)
     }
 
-    fn indexed_element_signed_bits(&self, base: &Expr) -> Option<u8> {
+    fn indexed_element_signed_bits(&self, base: &Expr, index: &Expr) -> Option<u8> {
         if let ExprKind::Paren(inner) = &base.kind {
-            return self.indexed_element_signed_bits(inner);
+            return self.indexed_element_signed_bits(inner, index);
         }
         if let ExprKind::Field { expr: receiver, field } = &base.kind
             && let Some(owner) = self.packed_field_receiver_type(receiver)
@@ -24957,9 +24972,8 @@ impl VbcCodegen {
         }
         let element = Self::expr_ident_name(base)
             .and_then(|name| self.ctx.array_element_type_name(&name).cloned())
-            .or_else(|| self.extract_expr_type_name(base)
-                .and_then(|name| Self::element_type_name(&name)))?;
-        let element = self.type_name_to_type_ref_mono(&element)?;
+            .and_then(|name| self.type_name_to_type_ref_mono(&name))
+            .or_else(|| self.indexed_element_declaration(base, index))?;
         self.array_element_signed_bits(&element)
     }
 
@@ -24978,9 +24992,17 @@ impl VbcCodegen {
             inclusive,
         } = &index.kind
         {
-            let arr_reg = self
-                .compile_expr(base)?
-                .or_internal("slice base has no value")?;
+            let (arr_reg, projection) = self.compile_index_receiver(base, index, false)?;
+            if let Some(method) = projection {
+                let index_reg = self.compile_expr(index)?.or_internal("slice index has no value")?;
+                let reference = self.emit_projection_method(arr_reg, method, Some(index_reg));
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Deref { dst: result, ref_reg: reference });
+                self.ctx.free_temp(reference);
+                self.ctx.free_temp(arr_reg);
+                self.ctx.free_temp(index_reg);
+                return Ok(Some(result));
+            }
 
             let start_reg = self.ctx.alloc_temp();
             if let verum_common::Maybe::Some(s) = start {
@@ -25187,19 +25209,16 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        let base_reg = self
-            .compile_expr(base)?
-            .or_internal("index base has no value")?;
-        let idx_reg = self
-            .compile_expr(index)?
-            .or_internal("index has no value")?;
-
+        let (base_reg, projection) = self.compile_index_receiver(base, index, false)?;
+        let idx_reg = self.compile_expr(index)?.or_internal("index has no value")?;
         let result = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::GetE {
-            dst: result,
-            arr: base_reg,
-            idx: idx_reg,
-        });
+        if let Some(method) = projection {
+            let reference = self.emit_projection_method(base_reg, method, Some(idx_reg));
+            self.ctx.emit(Instruction::Deref { dst: result, ref_reg: reference });
+            self.ctx.free_temp(reference);
+        } else {
+            self.ctx.emit(Instruction::GetE { dst: result, arr: base_reg, idx: idx_reg });
+        }
 
         self.ctx.free_temp(base_reg);
         self.ctx.free_temp(idx_reg);
@@ -25237,7 +25256,7 @@ impl VbcCodegen {
             })?;
             let ty = field.declaration_type.as_ref()?;
             let ty = if ty.is_generic() {
-                self.callable_owner_substitution(parent)?.apply(ty)
+                self.callable_owner_substitution(parent)?.apply(ty).ok()?
             } else {
                 ty.clone()
             };
@@ -29616,15 +29635,8 @@ impl VbcCodegen {
             }
             // Index expression: tokens[i] → element type of the collection
             ExprKind::Index { expr: base, index } => {
-                let base_type = self.extract_expr_type_name(base)?;
-                // RANGE-INDEX-SLICE-TYPE-1 (#40): range index = slice of
-                // the base's elements — see the infer_expr_type_name arm.
-                if matches!(index.kind, ExprKind::Range { .. }) {
-                    let elem = Self::extract_element_type(&base_type)?;
-                    Some(format!("&[{}]", elem))
-                } else {
-                    Self::extract_element_type(&base_type)
-                }
+                self.indexed_element_declaration(base, index)
+                    .and_then(|ty| self.declaration_type_name(&ty, 0))
             }
             // Try (?) expression: unwrap Result<T, E> → T or Maybe<T> → T
             ExprKind::Try(inner) => {
@@ -30903,21 +30915,8 @@ impl VbcCodegen {
             }
             // Index expression: tokens[i] → element type of the collection
             ExprKind::Index { expr: base, index } => {
-                let base_type = self.infer_expr_type_name(base)?;
-                // RANGE-INDEX-SLICE-TYPE-1 (#40): `xs[..]` / `xs[a..b]`
-                // yields a SLICE of the base's elements, NOT an element.
-                // Pre-fix this arm returned "Int" for `&xs[..]`, the
-                // for-in classifier saw a non-slice non-builtin name and
-                // desugared to the custom-iterator `CallM "next"` form —
-                // against a bare FatRef receiver (no cursor state) —
-                // which dereferenced the FAT_REF_MARKER bits (SIGSEGV).
-                // Mirrored in `extract_expr_type_name`.
-                if matches!(index.kind, ExprKind::Range { .. }) {
-                    let elem = Self::extract_element_type(&base_type)?;
-                    Some(format!("&[{}]", elem))
-                } else {
-                    Self::extract_element_type(&base_type)
-                }
+                self.indexed_element_declaration(base, index)
+                    .and_then(|ty| self.declaration_type_name(&ty, 0))
             }
             // Try (?) expression: unwrap Result<T, E> → T or Maybe<T> → T
             ExprKind::Try(inner) => {
@@ -31876,7 +31875,7 @@ impl VbcCodegen {
             }
         }
         let hints: verum_common::List<_> = params.iter().map(|ty| {
-            let ty = self.resolve_declared_associated_types(&substitution.apply(ty))?;
+            let ty = self.resolve_declared_associated_types(&substitution.apply(ty).ok()?)?;
             (!ty.is_generic() && self.callable_type_name(&ty).is_some()).then_some(ty)
         }).collect();
         hints.iter().any(Option::is_some).then_some(hints)
@@ -32083,9 +32082,9 @@ impl VbcCodegen {
         // classified as neither Result nor Maybe and fell into the
         // from_residual name-dice (task #50, `Err("error")` → `Err(0)`).
         let param_type_refs: verum_common::List<Option<crate::types::TypeRef>> = params.iter().enumerate()
-            .map(|(index, p)| p.ty.as_ref().map(|ty| self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids))
-                .or_else(|| elem_hints.as_ref().and_then(|hints| hints.get(index)).cloned().flatten()))
-            .collect();
+            .map(|(index, p)| Ok(p.ty.as_ref().map(|ty| self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids)).transpose()?
+                .or_else(|| elem_hints.as_ref().and_then(|hints| hints.get(index)).cloned().flatten())))
+            .collect::<CodegenResult<_>>()?;
         let param_type_names: Vec<Option<String>> = params.iter().enumerate()
             .map(|(index, p)| p.ty.as_ref().map(|ty| self.type_to_simple_name(ty))
                 .or_else(|| param_type_refs[index].as_ref().and_then(|ty| self.callable_type_name(ty)).map(|name| name.to_string())))
@@ -32248,7 +32247,7 @@ impl VbcCodegen {
         let signature_is_plain = signature_is_plain
             && return_type_ast.is_none_or(|ty| self.explicit_type_witness(ty, None).is_some());
         let closure_return_type_ref = return_type_ast.map(|ty|
-            self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids));
+            self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids)).transpose()?;
 
         // Compute the return type name string for type tracking.
         let closure_return_type_name = return_type_ast.map(|ty| self.type_to_simple_name(ty));
@@ -44467,6 +44466,7 @@ impl VbcCodegen {
                 },
             );
             if let Some(error) = count_error { return Err(error); }
+            let type_ref = type_ref?;
             // A concrete impl's associated binding already has one resolver;
             // generic projections retain their exact base for later consumers.
             let type_ref = self.resolve_declared_associated_types(&type_ref).unwrap_or(type_ref);
@@ -45019,6 +45019,7 @@ impl VbcCodegen {
                 },
             );
             if let Some(error) = failure { return Err(error); }
+            let ty = ty?;
             if missing { return Ok(None); }
             let ty = self.resolve_declared_associated_types(&ty).unwrap_or(ty);
             return Ok(crate::type_layout::query_with(&ty, query, |id| {

@@ -316,7 +316,7 @@ impl VbcCodegen {
                                 {
                                     continue;
                                 }
-                                let target = substitution.apply(target);
+                                let target = substitution.apply(target).ok()?;
                                 if binding.as_ref().is_some_and(|previous| previous != &target) {
                                     return None;
                                 }

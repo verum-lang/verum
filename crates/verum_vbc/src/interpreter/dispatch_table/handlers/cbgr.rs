@@ -1333,7 +1333,7 @@ pub(in super::super) fn handle_ref_unsafe(
 pub(in super::super) fn handle_drop_typed(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let src = read_reg(state)?;
     let ty = read_type_ref(state)?;
-    let ty = state.resolve_generic_witness(&ty);
+    let ty = state.resolve_generic_witness(&ty)?;
     let plan = crate::drop_plan::build(&state.module, &ty).map_err(|message| {
         InterpreterError::Panic {
             message: format!(

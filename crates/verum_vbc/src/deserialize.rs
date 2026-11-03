@@ -1416,15 +1416,31 @@ impl<'a> Deserializer<'a> {
  let inner = Box::new(self.parse_type_ref()?);
  Ok(TypeRef::Slice(inner))
  }
- 0x09 => {
+ // 0x09 represented ambiguous unscoped rank-2 parameter IDs. It must not
+ // acquire the new meaning merely because a newer reader loads the file.
+ 0x0C if tag == 0x0C => {
  let type_param_count = decode_u16(self.data, &mut self.offset)?;
  let params_count = decode_varint(self.data, &mut self.offset)? as usize;
+ if params_count > MAX_FN_TYPE_REF_PARAMS {
+ return Err(VbcError::TableTooLarge {
+ field: "rank2_type_ref_params",
+ count: params_count.min(u32::MAX as usize) as u32,
+ max: MAX_FN_TYPE_REF_PARAMS as u32,
+ });
+ }
  let mut params = Vec::with_capacity(params_count);
  for _ in 0..params_count {
  params.push(self.parse_type_ref()?);
  }
  let return_type = Box::new(self.parse_type_ref()?);
  let ctx_count = decode_varint(self.data, &mut self.offset)? as usize;
+ if ctx_count > MAX_FN_TYPE_REF_CONTEXTS {
+ return Err(VbcError::TableTooLarge {
+ field: "rank2_type_ref_contexts",
+ count: ctx_count.min(u32::MAX as usize) as u32,
+ max: MAX_FN_TYPE_REF_CONTEXTS as u32,
+ });
+ }
  let mut contexts = SmallVec::with_capacity(ctx_count);
  for _ in 0..ctx_count {
  contexts.push(ContextRef(decode_u32(self.data, &mut self.offset)?));

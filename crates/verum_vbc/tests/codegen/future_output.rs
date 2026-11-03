@@ -34,7 +34,7 @@ implement<F: Future, E> Future for Wrapper<F, E> {
 fn substitutes_projection_base_and_its_own_generic_arguments() {
     assert_eq!(
         output_type(WRAPPERS, "Wrapper<Ready<Int>, Bool>"),
-        Maybe::Some(Text::from("Result<Record<Int>, Bool>")),
+        Maybe::Some(Text::from("future_output.Result<future_output.Record<Int>, Bool>")),
     );
 }
 
@@ -42,7 +42,7 @@ fn substitutes_projection_base_and_its_own_generic_arguments() {
 fn follows_multiple_output_projections_without_losing_argument_order() {
     assert_eq!(
         output_type(WRAPPERS, "Wrapper<Wrapper<Ready<Int>, Bool>, Text>"),
-        Maybe::Some(Text::from("Result<Result<Record<Int>, Bool>, Text>")),
+        Maybe::Some(Text::from("future_output.Result<future_output.Result<future_output.Record<Int>, Bool>, Text>")),
     );
 }
 

@@ -485,7 +485,7 @@ impl super::VbcCodegen {
         let declared = self
             .current_return_ast_type
             .as_ref()
-            .map(|ast| self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids));
+            .map(|ast| self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids)).transpose()?;
         let declared_discipline = declared.as_ref().map(|ty| {
             crate::resource_discipline::resource_discipline_with(
                 ty,
@@ -604,7 +604,7 @@ impl super::VbcCodegen {
         if !supported(ast, 0) {
             return;
         }
-        let ty = self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids);
+        let Ok(ty) = self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids) else { return };
         fn resolved(ty: &TypeRef, depth: usize) -> bool {
             if depth > 64 {
                 return false;

@@ -637,7 +637,7 @@ impl Serializer {
                 return_type,
                 contexts,
             } => {
-                self.output.push(0x09);
+                self.output.push(0x0C);
                 encode_u16(*type_param_count, &mut self.output);
                 encode_varint(params.len() as u64, &mut self.output);
                 for param in params {

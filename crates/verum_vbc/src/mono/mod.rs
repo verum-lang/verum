@@ -70,7 +70,7 @@ pub use resolver::{
 pub use specializer::{
     BytecodeSpecializer, SpecializationError, SpecializedFunction, SpecializerStats, TypeLayout,
 };
-pub use substitution::TypeSubstitution;
+pub use substitution::{SubstitutionError, TypeSubstitution, lift_free_parameters};
 
 /// Metrics for monomorphization.
 #[derive(Debug, Clone, Default)]

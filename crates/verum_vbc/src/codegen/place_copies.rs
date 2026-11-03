@@ -89,9 +89,13 @@ impl VbcCodegen {
                     _ => return None,
                 };
                 let binding = self.ctx.lookup_var(name)?;
-                if binding.is_cell || binding.is_pattern_alias { return None; }
+                if binding.is_cell { return None; }
                 let fact = self.ctx.registers.value_uses.active.get(&binding.reg)?;
-                (fact.id == binding.binding_id).then(|| fact.declaration_type.clone()).flatten()
+                let ty = fact.declaration_type.as_ref()?;
+                // A borrowed pattern carries a reference declaration, never
+                // ownership of the payload. Retain that borrow for projections.
+                if binding.is_pattern_alias && !matches!(ty, TypeRef::Reference { .. }) { return None; }
+                (fact.id == binding.binding_id).then(|| ty.clone())
             }
             ExprKind::Record { path, .. } => {
                 if let Some(declared) = self.constructor_declaration(expr, None, None, depth + 1) {
@@ -120,8 +124,9 @@ impl VbcCodegen {
                 let ty = member.declaration_type.as_ref()?;
                 let ids: verum_common::List<_> = declaration.type_params.iter().map(|p| p.id).collect();
                 if !super::formal_parameters::resolved(ty, &ids, 0) { return None; }
-                Some(crate::mono::TypeSubstitution::new(&declaration.type_params, &arguments).apply(ty))
+                crate::mono::TypeSubstitution::new(&declaration.type_params, &arguments).apply(ty).ok()
             }
+            ExprKind::Index { expr: base, index } => self.indexed_element_declaration(base, index),
             ExprKind::Unary { op: UnOp::Deref, expr: inner } => {
                 let input = emitted.and_then(|(reg, start, end)| {
                     let (index, op) = self.copy_result_producer(reg, start, end)?;
@@ -136,6 +141,9 @@ impl VbcCodegen {
                     ),
                 }
             }
+            ExprKind::Unary { op, expr: inner } if matches!(op, UnOp::Ref | UnOp::RefMut)
+                && let ExprKind::Index { expr: base, index } = &inner.kind =>
+                self.indexed_borrow_declaration(base, index, *op == UnOp::RefMut),
             ExprKind::Unary { op, expr: inner } if matches!(op,
                 UnOp::Ref | UnOp::RefMut | UnOp::RefChecked | UnOp::RefCheckedMut
                     | UnOp::RefUnsafe | UnOp::RefUnsafeMut) => Some(TypeRef::Reference {
@@ -249,7 +257,7 @@ impl VbcCodegen {
         // Layout-only archive returns and unbound slots remain unknown. In
         // particular, CallG's ABI witnesses cannot reconstruct reference layers.
         if super::constructor_types::fully_bound(return_type, &substitution) {
-            return Some(substitution.apply(return_type));
+            return substitution.apply(return_type).ok();
         }
         // Temporaries such as literal arguments have no lexical binding. For a
         // direct call, independently instantiate the selected source signature
@@ -267,7 +275,7 @@ impl VbcCodegen {
             }
         }
         (super::constructor_types::fully_bound(return_type, &substitution)
-            && result == substitution.apply(return_type)).then_some(result)
+            && result == substitution.apply(return_type).ok()?).then_some(result)
     }
 
     pub(super) fn copy_type_is_value(&self, ty: &TypeRef) -> bool {

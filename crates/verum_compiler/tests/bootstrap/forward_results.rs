@@ -70,11 +70,10 @@ fn forward_result_case(serialized: bool, relative: bool) {
         .pre_register_canonical_static_methods(&parsed)
         .unwrap();
     pipeline
-        .pre_register_canonical_variant_constructors(&parsed)
-        .unwrap();
-    pipeline
         .pre_register_public_free_functions(&parsed)
         .unwrap();
+    // The declaring interfaces now publish constructor identities. Follow the
+    // production bootstrap path instead of the removed spelling-based pass.
     let interfaces = pipeline
         .collect_core_declaration_interfaces(&parsed, &config, &target)
         .unwrap();
@@ -177,7 +176,7 @@ fn protocol_method_forward_ids_belong_to_the_selected_declarations() {
     pipeline
         .pre_register_canonical_static_methods(&parsed)
         .unwrap();
-    let interfaces = pipeline
+    let _interfaces = pipeline
         .collect_core_declaration_interfaces(
             &parsed,
             &config,
@@ -185,9 +184,14 @@ fn protocol_method_forward_ids_belong_to_the_selected_declarations() {
         )
         .unwrap();
     let mut ids = std::collections::HashSet::new();
-    for module in interfaces {
-        let key = format!("{}.Handle.read", module.name);
-        let forward = &pipeline.global_function_registry[&key];
+    // Source owners, not the interface bundle partition, define identity.
+    for (owner, _) in &parsed {
+        let key = format!("{owner}.Handle.read");
+        let forward = pipeline.global_function_registry.get(&key).unwrap_or_else(|| {
+            let mut keys: Vec<_> = pipeline.global_function_registry.keys().collect();
+            keys.sort();
+            panic!("missing declaration {key}; registered: {keys:?}");
+        });
         assert!(verum_vbc::stub_ranges::in_stage1(forward.id.0));
         assert!(ids.insert(forward.id));
         assert!(forward.has_source_body);

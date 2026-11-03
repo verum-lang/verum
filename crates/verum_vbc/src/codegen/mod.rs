@@ -537,17 +537,18 @@ struct MountedSourceFiles {
     modules: Vec<Module>,
     parents: std::collections::HashMap<verum_ast::FileId, String>,
     root: Option<(std::path::PathBuf, String)>,
+    entry_id: verum_ast::FileId,
     next_id: u32,
 }
 
 impl MountedSourceFiles {
-    fn new(root: &str) -> Self {
+    fn new(root: &str, entry_id: verum_ast::FileId) -> Self {
         let root = std::fs::canonicalize(root).ok().and_then(|path| {
             let source = std::fs::read_to_string(path.join("mod.vr")).ok()?;
             let module = verum_fast_parser::Parser::new(&source).parse_module().ok()?;
             VbcCodegen::extract_source_module_name(&module).map(|name| (path, name))
         });
-        Self { filesystem: Default::default(), modules: Vec::new(), parents: Default::default(), root, next_id: 0 }
+        Self { filesystem: Default::default(), modules: Vec::new(), parents: Default::default(), root, entry_id, next_id: 0 }
     }
 
     fn parent_for(&mut self, file: &str) -> Option<String> {
@@ -563,6 +564,12 @@ impl MountedSourceFiles {
     }
 
     fn register(&mut self, file: &str) -> CodegenResult<verum_ast::FileId> {
+        // The caller's AST already owns its ID, including a nonzero ID supplied
+        // by a project source map. An imported parent must never replace it.
+        if self.next_id == self.entry_id.raw() {
+            self.next_id = self.next_id.checked_add(1)
+                .ok_or_else(|| CodegenError::internal("too many mounted source files"))?;
+        }
         let id = verum_ast::FileId::new(self.next_id);
         self.next_id = self.next_id.checked_add(1)
             .ok_or_else(|| CodegenError::internal("too many mounted source files"))?;
@@ -1708,7 +1715,8 @@ impl VbcCodegen {
         // qualified spelling keeps that identity; a user type with the same
         // leaf name does not inherit the runtime's smart-pointer behaviour.
         self.nominal_type_id(Self::strip_generic_args(name))
-            .is_some_and(crate::types::TypeId::is_smart_pointer)
+            .and_then(|id| self.declared_runtime_carrier(id))
+            .is_some_and(|kind| kind.is_smart_pointer())
     }
 
     /// Returns `true` if `name` is a collection type whose `.new()` constructor
@@ -3257,7 +3265,11 @@ impl VbcCodegen {
 
     fn source_file_owner(&self, module: &Module, fallback: &str) -> Option<String> {
         let parent = self.mounted_file_parents.get(&module.file_id).map(String::as_str).unwrap_or(fallback);
-        Self::resolve_full_module_path(module, parent)
+        Self::resolve_full_module_path(module, parent).or_else(|| {
+            // An explicit source parent owns headerless files too. Only the
+            // anonymous default compilation unit has no namespace to publish.
+            (!parent.is_empty() && parent != "main").then(|| parent.to_owned())
+        })
     }
 
     /// Marks all type names in a module as user-defined.
@@ -5777,7 +5789,7 @@ impl VbcCodegen {
         };
         let class = error.skip_class();
         tracing::warn!("[lenient] SKIP {name} ({}): {error}", class.label());
-        self.emit_lenient_panic_stub(func, owner, &error.to_string());
+        self.emit_lenient_panic_stub(func, owner, &error.to_string())?;
         if class == SkipClass::Fatal || (self.config.strict_codegen && class == SkipClass::BugClass) {
             first.get_or_insert(error);
         }
@@ -8501,7 +8513,15 @@ impl VbcCodegen {
     /// program rendered one type two ways. That question is answered —
     /// `{}` means Display — and Int's divergence had its own cause
     /// (a primitive receiver had no type NAME), fixed separately.
-    pub fn run_unit_declaration_prepasses(&mut self, files: &[&Module]) {
+    pub fn run_unit_declaration_prepasses(&mut self, files: &[&Module]) -> CodegenResult<()> {
+        let parent = self.config.module_name.clone();
+        let owned: Vec<_> = files.iter().map(|module| (parent.as_str(), *module)).collect();
+        let result = self.run_owned_declaration_prepasses(&owned);
+        self.config.module_name = parent;
+        result
+    }
+
+    fn run_owned_declaration_prepasses(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
         // The order is the one `collect_all_declarations` established
         // for a single file, applied ACROSS the unit: every file's
         // types are claimed before any file's aliases are read, and
@@ -8510,18 +8530,23 @@ impl VbcCodegen {
         // world where file 5's declarations do not exist yet — which is
         // exactly the multi-file hazard the bake's Pass 1a.5 was added
         // for (T0625).
-        if self.claim_unit_source_type_identities(files).is_err() {
-            return;
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
+            self.claim_unit_source_type_identities(&[module])?;
         }
-        for module in files {
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
             self.register_declared_type_aliases(module);
         }
-        for module in files {
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
             self.collect_blanket_impls(module);
         }
-        for module in files {
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
             self.pregenerate_ffi_struct_layouts(module);
         }
+        Ok(())
     }
 
     /// Inline declarations participate in the same unit prepass as file types.
@@ -8542,6 +8567,7 @@ impl VbcCodegen {
                         let child = source_owner.filter(|owner| !owner.is_empty())
                             .map(|owner| format!("{owner}.{}", module.name.name))
                             .unwrap_or_else(|| module.name.name.to_string());
+                        self.record_inline_type_parent(&child, owner);
                         self.claim_declared_type_items(items, &child, Some(&child));
                     }
                 }
@@ -8706,6 +8732,25 @@ impl VbcCodegen {
     /// Items are filtered by `@cfg` throughout, so a `mount` for the
     /// wrong target never pulls its file's declarations into the build.
     pub fn collect_unit_declarations(&mut self, files: &[&Module]) -> CodegenResult<()> {
+        let parent = self.config.module_name.clone();
+        let owned: Vec<_> = files.iter().map(|module| (parent.as_str(), *module)).collect();
+        self.collect_owned_unit_declarations(&owned)
+    }
+
+    /// A compilation unit can contain files from distinct source parents.
+    /// Parent paths are resolver input, separate from the source AST and from
+    /// the output archive's name. Every declaration phase keeps this ownership.
+    fn collect_owned_unit_declarations(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
+        let previous = self.config.module_name.clone();
+        let active: Vec<_> = files.iter().copied().filter(|(_, module)|
+            self.cfg_evaluator.should_include(&module.attributes)).collect();
+        let result = self.prepare_owned_unit_declarations(&active)
+            .and_then(|()| self.collect_prepared_owned_declarations(&active));
+        self.config.module_name = previous;
+        result
+    }
+
+    fn prepare_owned_unit_declarations(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
         // Which module paths this unit will register, known BEFORE any
         // file is walked. A mount naming one of them must not be
         // resolved by guessing while the naming file is still ahead in
@@ -8713,7 +8758,8 @@ impl VbcCodegen {
         // (T0882). Additive across calls: a project's entry file and its
         // siblings arrive as separate units today, and the guard needs
         // to know about a sibling collected in an earlier call.
-        for module in files {
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
             let owner = self.source_file_owner(module, &self.config.module_name);
             self.source_type_mounts
                 .entry(owner.as_deref().unwrap_or(&self.config.module_name).into())
@@ -8741,11 +8787,18 @@ impl VbcCodegen {
         // Protocols first: a blanket impl monomorphises onto a concrete
         // implementor at the moment that implementor is collected, so
         // the protocol has to exist by then.
-        for module in files {
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
             self.collect_protocol_definitions(module);
         }
-        self.run_unit_declaration_prepasses(files);
-        for module in files {
+        self.run_owned_declaration_prepasses(files)
+    }
+
+    /// Signatures can resolve only after the entire reachable source graph has
+    /// published its exact namespaces and nominal declarations.
+    fn collect_prepared_owned_declarations(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
             // Each file is collected under ITS OWN module path, taken
             // from its `module X.Y.Z;` declaration. Without this, a
             // stdlib file's functions register under the enclosing
@@ -8777,7 +8830,10 @@ impl VbcCodegen {
             self.type_field_type_names.extend(fields.into_iter()
                 .filter(|((owner, _), _)| owner.starts_with(&prefix)));
         }
-        self.retain_default_method_types(files);
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
+            self.retain_default_method_types(&[module]);
+        }
         Ok(())
     }
 
@@ -8817,12 +8873,23 @@ impl VbcCodegen {
         mount_cost::reset();
         let t0 = std::time::Instant::now();
         // Claim identities across the reachable graph before collecting any declaration.
-        let mut imported = MountedSourceFiles::new(core_root);
+        let mut imported = MountedSourceFiles::new(core_root, module.file_id);
         self.resolve_mounts_recursive(module, source_path, core_root, &mut resolved_files, &mut imported)?;
-        let files: Vec<_> = imported.modules.iter().collect();
+        let parent = self.config.module_name.clone();
+        let files: Vec<_> = imported.modules.iter()
+            .filter(|module| self.cfg_evaluator.should_include(&module.attributes))
+            .map(|module| (parent.as_str(), module)).collect();
+        let graph: Vec<_> = std::iter::once((parent.as_str(), module))
+            .filter(|(_, module)| self.cfg_evaluator.should_include(&module.attributes))
+            .chain(files.iter().copied()).collect();
         let collect = std::time::Instant::now();
         let previous = std::mem::replace(&mut self.mounted_file_parents, imported.parents);
-        let result = self.collect_unit_declarations(&files);
+        // A mounted source can refer back to the entry file. Publish that
+        // source's real declarations before resolving any imported signatures,
+        // but leave its registration/body pass to the caller exactly once.
+        let result = self.prepare_owned_unit_declarations(&graph)
+            .and_then(|()| self.collect_prepared_owned_declarations(&files));
+        self.config.module_name = parent;
         self.mounted_file_parents = previous;
         mount_cost::add_collect(collect.elapsed());
         mount_cost::report(source_path, t0.elapsed());
@@ -10307,7 +10374,7 @@ impl VbcCodegen {
                             let method_fn_ids: Vec<u32> = method_names
                                 .iter()
                                 .map(|method_name| {
-                                    let qualified = format!("{}.{}", ty_name, method_name);
+                                    let qualified = self.source_impl_method_key(ty_name, method_name);
                                     // SIBLING-IMPL-MATERIALIZATION-1: when
                                     // sibling impls exist for this
                                     // (type, method), THIS impl block's
@@ -10459,7 +10526,7 @@ impl VbcCodegen {
                                             return None;
                                         };
                                         let declared = self.semantic_formal_type(ty, &param_map, &declared_ids)?;
-                                        let normalized = substitution.apply(&declared);
+                                        let normalized = substitution.apply(&declared).ok()?;
                                         formal_parameters::resolved(&normalized, &owner_ids, 0)
                                             .then(|| (name.name.to_string(), normalized))
                                     }).collect())
@@ -11058,17 +11125,17 @@ impl VbcCodegen {
                     let count_scope = self.child_count_module_scope(&module_name);
                     let previous_count_scope = self.count_module_scope.replace(count_scope);
                     let prev_source = self.scope_to_inline_module(&module_name);
-                    // LENIENT — see parallel arm in compile_item for rationale.
-                    for item in items.iter() {
-                        if let Err(e) = self.collect_declarations(item) {
-                            tracing::warn!(
-                                "[lenient inline-module decl-collect] failed: {}",
-                                e
-                            );
+                    let result = (|| -> CodegenResult<()> {
+                        for item in items.iter() {
+                            if self.should_compile_item(item) {
+                                self.collect_declarations(item)?;
+                            }
                         }
-                    }
+                        Ok(())
+                    })();
                     self.ctx.current_source_module = prev_source;
                     self.count_module_scope = previous_count_scope;
+                    result?;
                 }
             }
             // Import declarations register aliased function names
@@ -11442,8 +11509,9 @@ impl VbcCodegen {
         let (dense, shadow) = self.function_generic_param_maps(func, None, &[]);
         let mut signature_scope = dense.clone();
         signature_scope.extend(shadow.clone());
+        self.validate_source_parameter_types(func, &signature_scope)?;
         let return_type = func.return_type.as_ref()
-            .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
+            .map(|ty| self.resolve_field_type_ref(ty, &signature_scope)).transpose()?;
         let semantic_params = self.source_semantic_parameters(
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
@@ -11514,7 +11582,7 @@ impl VbcCodegen {
         if !self.ctx.prefer_existing_functions && !name.contains('.') && !name.contains("::") {
             self.ctx.unit_declared_fns.insert(name.clone());
         }
-        self.capture_declaration_interface(func, source_signature, &info, &name, None, &dense, &shadow);
+        self.capture_declaration_interface(func, source_signature, &info, &name, None, &dense, &shadow)?;
         self.ctx.register_function(name.clone(), info.clone());
         if self.nested_function_scope.is_empty() {
             self.ctx.register_source_function(&name, &info);
@@ -13951,6 +14019,15 @@ impl VbcCodegen {
         }).collect()
     }
 
+    /// The source declaration owns an impl, even when another module declares
+    /// the same type/method spelling or extends the same nominal type.
+    fn source_impl_method_key(&self, type_name: &str, method: &str) -> String {
+        let local = format!("{type_name}.{method}");
+        self.ctx.current_source_module.as_deref()
+            .filter(|owner| !owner.is_empty() && *owner != "main")
+            .map_or_else(|| local.clone(), |owner| crate::module::qualify_module_name(owner, &local))
+    }
+
     /// Registers an impl function with a qualified name (e.g., "List.new").
     ///
     /// This allows static method calls like `List.new()` to be resolved.
@@ -13965,6 +14042,7 @@ impl VbcCodegen {
         let self_type_name = self.declared_impl_type_name(type_name);
         let func_name = func.name.name.to_string();
         let qualified_name = format!("{}.{}", type_name, func_name);
+        let declaration_key = self.source_impl_method_key(type_name, &func_name);
 
         let id = FunctionId(self.next_func_id);
         self.next_func_id = self.next_func_id.saturating_add(1);
@@ -14090,17 +14168,21 @@ impl VbcCodegen {
         let mut signature_scope = dense.clone();
         signature_scope.extend(shadow.clone());
         let saved_impl = self.ctx.current_impl_type_name.replace(type_name.to_owned());
+        let parameter_types = self.validate_source_parameter_types(func, &signature_scope);
         let return_type = func.return_type.as_ref()
-            .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
+            .map(|ty| self.resolve_field_type_ref(ty, &signature_scope)).transpose();
         let semantic_params = self.source_semantic_parameters(
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
-        self.record_source_callable_bounds(id, func, &signature_scope, &semantic_params);
+        let bounds = self.record_source_callable_bounds(id, func, &signature_scope, &semantic_params);
         self.ctx.semantic_fn_params.insert(id, semantic_params);
         let callable_signature = self.source_callable_signature(
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
         self.ctx.current_impl_type_name = saved_impl;
+        parameter_types?;
+        let return_type = return_type?;
+        bounds?;
         let info = FunctionInfo {
             has_source_body: func.body.is_some(),
             foreign_declaration: None,
@@ -14138,7 +14220,7 @@ impl VbcCodegen {
         let ordinal = {
             let c = self
                 .sibling_impl_counters
-                .entry(qualified_name.clone())
+                .entry(declaration_key.clone())
                 .or_insert(0);
             *c += 1;
             *c
@@ -14148,7 +14230,13 @@ impl VbcCodegen {
         } else {
             format!("{}#impl{}", qualified_name, ordinal)
         };
-        self.capture_declaration_interface(func, source_signature, &info, &registration_key, Some(type_name), &dense, &shadow);
+        self.capture_declaration_interface(func, source_signature, &info, &registration_key, Some(type_name), &dense, &shadow)?;
+        let owned_key = if ordinal == 1 { declaration_key } else { format!("{declaration_key}#impl{ordinal}") };
+        if owned_key != registration_key {
+            // Only the source declaration producer may assert this ownership.
+            // Generic registry aliases/imports do not acquire the caller's owner.
+            self.ctx.register_function(owned_key, info.clone());
+        }
         self.ctx.register_function(registration_key, info);
 
         Ok(())
@@ -16353,24 +16441,24 @@ impl VbcCodegen {
                                         .enumerate()
                                         .map(|(i, ty)| {
                                             let pos_name = format!("_{}", i);
-                                            crate::types::FieldDescriptor {
+                                            Ok(crate::types::FieldDescriptor {
                                                 name: StringId(
                                                     self.ctx.intern_string_raw(&pos_name),
                                                 ),
-                                                declaration_type: Some(self.resolve_signature_type_ref(ty, &sum_generic_param_map)),
+                                                declaration_type: Some(self.resolve_signature_type_ref(ty, &sum_generic_param_map)?),
                                                 type_ref: self.resolve_field_type_ref(
                                                     ty,
                                                     &sum_generic_param_map,
-                                                ),
+                                                )?,
                                                 // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry
                                                 // the variant payload's declared type name.
                                                 type_name: StringId(self.ctx.intern_string_raw(
                                                     &Self::extract_type_name_from_ast(ty),
                                                 )),
                                                 ..Default::default()
-                                            }
+                                            })
                                         })
-                                        .collect();
+                                        .collect::<CodegenResult<_>>()?;
                                 (
                                     crate::types::VariantKind::Tuple,
                                     types.len() as u8,
@@ -16397,11 +16485,11 @@ impl VbcCodegen {
                                             name: StringId(
                                                 self.ctx.intern_string_raw(f.name.name.as_str()),
                                             ),
-                                            declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)),
+                                            declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)?),
                                             type_ref: self.resolve_field_type_ref(
                                                 &f.ty,
                                                 &sum_generic_param_map,
-                                            ),
+                                            )?,
                                             // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry the
                                             // record-variant field's declared type name.
                                             type_name: StringId(self.ctx.intern_string_raw(
@@ -16569,7 +16657,7 @@ impl VbcCodegen {
                             })
                             .collect();
                         let default_ref = match default {
-                            verum_common::Maybe::Some(ty) => Some(self.ast_type_to_type_ref(ty)),
+                            verum_common::Maybe::Some(ty) => Some(self.resolve_signature_type_ref(ty, &generic_param_map)?),
                             verum_common::Maybe::None => None,
                         };
                         let param_desc = crate::types::TypeParamDescriptor {
@@ -16590,7 +16678,7 @@ impl VbcCodegen {
                     let field_name = field.name.name.to_string();
                     // Use full type resolution to preserve generic parameters.
                     // Check if field type is a generic type parameter (e.g., `first: A`).
-                    let field_type_ref = self.resolve_field_type_ref(&field.ty, &generic_param_map);
+                    let field_type_ref = self.resolve_field_type_ref(&field.ty, &generic_param_map)?;
 
                     // Use the same global field index that SetF/GetF use
                     let field_idx = self.intern_field_name(&field_name);
@@ -16650,7 +16738,7 @@ impl VbcCodegen {
                         declared_visibility: Some(declared_visibility),
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
-                        declaration_type: Some(self.resolve_signature_type_ref(&field.ty, &generic_param_map)),
+                        declaration_type: Some(self.resolve_signature_type_ref(&field.ty, &generic_param_map)?),
                         offset: field_idx * 8, // Use global field index * sizeof(Value)
                         visibility,
                         refinement_src,
@@ -16852,11 +16940,11 @@ impl VbcCodegen {
                                     None // Skip self params
                                 }
                             })
-                            .collect();
+                            .collect::<CodegenResult<_>>()?;
 
                         let ret_ref = match &decl.return_type {
                             verum_common::Maybe::Some(ty) => {
-                                self.resolve_signature_type_ref(ty, &combined_map)
+                                self.resolve_signature_type_ref(ty, &combined_map)?
                             }
                             verum_common::Maybe::None => {
                                 TypeRef::Concrete(crate::types::TypeId::UNIT)
@@ -16907,7 +16995,7 @@ impl VbcCodegen {
                             .collect();
 
                         let default_ref = match default {
-                            verum_common::Maybe::Some(ty) => Some(self.ast_type_to_type_ref(ty)),
+                            verum_common::Maybe::Some(ty) => Some(self.resolve_signature_type_ref(ty, &proto_param_map)?),
                             verum_common::Maybe::None => None,
                         };
 
@@ -16994,6 +17082,7 @@ impl VbcCodegen {
                 }
                 // Alias targets are declaration witnesses. The ABI pointer used for
                 // an unresolved type cannot establish ownership at a destructor.
+                self.resolve_signature_type_ref(target_type, &generic_param_map)?;
                 let ids: Vec<_> = alias_type_params.iter().map(|parameter| parameter.id).collect();
                 let target_ref = self.semantic_formal_type(target_type, &generic_param_map, &ids);
                 let origin_module = self.current_origin_module_sid();
@@ -17062,7 +17151,7 @@ impl VbcCodegen {
                         generic_param_map.insert(gname.name.to_string(), idx as u16);
                     }
                 }
-                let inner_type_ref = self.resolve_field_type_ref(_inner_type, &generic_param_map);
+                let inner_type_ref = self.resolve_field_type_ref(_inner_type, &generic_param_map)?;
                 let inner_field_idx = self.intern_field_name("_0");
 
                 // Canonical (serialisable) marker on the type
@@ -17101,7 +17190,7 @@ impl VbcCodegen {
                     declared_visibility: None,
                     name: StringId(self.ctx.intern_string_raw("_0")),
                     type_ref: inner_type_ref,
-                    declaration_type: Some(self.resolve_signature_type_ref(_inner_type, &generic_param_map)),
+                    declaration_type: Some(self.resolve_signature_type_ref(_inner_type, &generic_param_map)?),
                     offset: inner_field_idx * 8,
                     visibility: crate::types::Visibility::Public,
                     refinement_src: StringId::EMPTY,
@@ -17210,13 +17299,13 @@ impl VbcCodegen {
                 // types correctly.
                 for (i, inner_ty) in types.iter().enumerate() {
                     let field_name = format!("_{}", i);
-                    let inner_type_ref = self.resolve_field_type_ref(inner_ty, &generic_param_map);
+                    let inner_type_ref = self.resolve_field_type_ref(inner_ty, &generic_param_map)?;
                     let field_idx = self.intern_field_name(&field_name);
                     type_desc.fields.push(crate::types::FieldDescriptor {
                     declared_visibility: None,
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: inner_type_ref,
-                        declaration_type: Some(self.resolve_signature_type_ref(inner_ty, &generic_param_map)),
+                        declaration_type: Some(self.resolve_signature_type_ref(inner_ty, &generic_param_map)?),
                         offset: field_idx * 8,
                         visibility: crate::types::Visibility::Public,
                         refinement_src: StringId::EMPTY,
@@ -17592,7 +17681,7 @@ impl VbcCodegen {
         self.constant_initializers.insert(id, (expr.clone(),
             self.current_count_module_scope().map(Into::into), bindings));
         let intrinsic_name = Self::extract_const_literal_value(expr).map(|v| format!("__const_val_{v}"));
-        let result_type = self.ast_type_to_type_ref(ty);
+        let result_type = self.ast_type_to_type_ref(ty)?;
         let return_type_name = self.extract_type_name(ty);
         let info = FunctionInfo {
             has_source_body: false,
@@ -18351,7 +18440,7 @@ impl VbcCodegen {
         ast_ty: &verum_ast::Type,
         function: &verum_ast::FunctionDecl,
         generic_param_map: &std::collections::HashMap<String, u16>,
-    ) -> TypeRef {
+    ) -> CodegenResult<TypeRef> {
         use verum_ast::ty::TypeKind;
 
         if let TypeRef::Generic(_) = &resolved
@@ -18362,7 +18451,7 @@ impl VbcCodegen {
         {
             return self.resolve_signature_type_ref(bound, generic_param_map);
         }
-        resolved
+        Ok(resolved)
     }
 
     fn generic_callable_bounds(
@@ -18400,7 +18489,7 @@ impl VbcCodegen {
         &self,
         ty: &verum_ast::ty::Type,
         generic_param_map: &std::collections::HashMap<String, u16>,
-    ) -> TypeRef {
+    ) -> CodegenResult<TypeRef> {
         self.resolve_type_ref_scoped(ty, generic_param_map, false)
     }
 
@@ -18411,7 +18500,7 @@ impl VbcCodegen {
         &self,
         ty: &verum_ast::ty::Type,
         generic_param_map: &std::collections::HashMap<String, u16>,
-    ) -> TypeRef {
+    ) -> CodegenResult<TypeRef> {
         self.resolve_type_ref_scoped(ty, generic_param_map, true)
     }
 
@@ -18420,10 +18509,42 @@ impl VbcCodegen {
         ty: &verum_ast::ty::Type,
         generic_param_map: &std::collections::HashMap<String, u16>,
         preserve_refs: bool,
-    ) -> TypeRef {
+    ) -> CodegenResult<TypeRef> {
         self.resolve_type_ref_scoped_with_count(ty, generic_param_map, preserve_refs, None, &mut |count| {
             self.const_eval_i64(count).ok().flatten().and_then(|value| u64::try_from(value).ok())
         })
+    }
+
+    /// Introduce one locally quantified scope without capturing outer slots.
+    fn rank2_type_scope(
+        parameters: &[verum_ast::ty::GenericParam],
+        outer: &std::collections::HashMap<String, u16>,
+        span: verum_ast::Span,
+    ) -> CodegenResult<(u16, std::collections::HashMap<String, u16>)> {
+        let invalid = |message: &str, span| CodegenError::with_span(
+            CodegenErrorKind::InvalidSourceSignature(message.into()), span);
+        let count = u16::try_from(parameters.len())
+            .map_err(|_| invalid("too many locally quantified type parameters", span))?;
+        let mut scope = std::collections::HashMap::new();
+        for (name, id) in outer {
+            let lifted = id.checked_add(count).ok_or_else(|| invalid(
+                "locally quantified type parameter scope exceeds the VBC index space", span))?;
+            scope.insert(name.clone(), lifted);
+        }
+        let mut locals = std::collections::HashSet::new();
+        for (index, parameter) in parameters.iter().enumerate() {
+            let name = match &parameter.kind {
+                verum_ast::ty::GenericParamKind::Type { name, bounds, default }
+                    if bounds.is_empty() && default.is_none() && !parameter.is_implicit => name,
+                _ => return Err(invalid(
+                    "this locally quantified parameter has no VBC type-binder representation", parameter.span)),
+            };
+            if !locals.insert(name.name.as_str()) {
+                return Err(invalid("duplicate locally quantified type parameter", parameter.span));
+            }
+            scope.insert(name.name.to_string(), index as u16);
+        }
+        Ok((count, scope))
     }
 
     fn resolve_type_ref_scoped_with_count(
@@ -18433,7 +18554,20 @@ impl VbcCodegen {
         preserve_refs: bool,
         declaration_scope: Option<&str>,
         array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
-    ) -> TypeRef {
+    ) -> CodegenResult<TypeRef> {
+        let self_type = self.impl_self_type_ref(generic_param_map);
+        self.resolve_type_ref_in_scope(ty, generic_param_map, preserve_refs, declaration_scope, array_count, self_type.as_ref())
+    }
+
+    fn resolve_type_ref_in_scope(
+        &self,
+        ty: &verum_ast::ty::Type,
+        generic_param_map: &std::collections::HashMap<String, u16>,
+        preserve_refs: bool,
+        declaration_scope: Option<&str>,
+        array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
+        self_type: Option<&TypeRef>,
+    ) -> CodegenResult<TypeRef> {
         use verum_ast::ty::{PathSegment, TypeKind};
         // Generic instantiation: recurse into args with the same map
         // so nested type-param references (`Result<T, E>` from
@@ -18441,7 +18575,7 @@ impl VbcCodegen {
         // T → TypeRef::Generic(0) instead of degrading to
         // TypeRef::Concrete(PTR) via the un-aware fallback.
         if let TypeKind::Generic { base, args } = &ty.kind {
-            let base_ref = self.resolve_type_ref_scoped_with_count(base, generic_param_map, preserve_refs, declaration_scope, array_count);
+            let base_ref = self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?;
             if let TypeRef::Concrete(base_id) = base_ref {
                 // T1228 — same arity rule as `type_name_to_type_ref_mono`:
                 // an argument that cannot be resolved HOLDS ITS POSITION
@@ -18458,12 +18592,12 @@ impl VbcCodegen {
                     .filter(|arg| !matches!(arg, verum_ast::ty::GenericArg::Lifetime(_)))
                     .enumerate()
                     .map(|(i, arg)| {
-                        Self::position_or_generic(i, match arg {
+                        Ok(Self::position_or_generic(i, match arg {
                         verum_ast::ty::GenericArg::Type(inner_ty) => {
-                            Some(self.resolve_type_ref_scoped_with_count(
+                            Some(self.resolve_type_ref_in_scope(
                                 inner_ty,
                                 generic_param_map,
-                                preserve_refs, declaration_scope, array_count))
+                                preserve_refs, declaration_scope, array_count, self_type)?)
                         }
                         // CONST-GENERIC-VALUE-CARRY-1: a LITERAL const arg
                         // carries its value (`StackAllocator<1024>` →
@@ -18478,16 +18612,16 @@ impl VbcCodegen {
                                 .map(TypeRef::ConstValue)
                         }
                         _ => None,
-                        })
+                        }))
                     })
-                    .collect();
-                if arg_refs.is_empty() { return TypeRef::Concrete(base_id); }
-                return TypeRef::Instantiated {
+                    .collect::<CodegenResult<_>>()?;
+                if arg_refs.is_empty() { return Ok(TypeRef::Concrete(base_id)); }
+                return Ok(TypeRef::Instantiated {
                     base: base_id,
                     args: arg_refs,
-                };
+                });
             }
-            return base_ref;
+            return Ok(base_ref);
         }
         // T1033 (ARCHIVE-DROPS-REFERENCE-QUALIFIERS-1) — the SIGNATURE
         // question, asked before the layout one below.  A protocol
@@ -18519,18 +18653,18 @@ impl VbcCodegen {
                 _ => None,
             };
             if let Some((inner, mutable, tier)) = reference {
-                return TypeRef::Reference {
-                    inner: Box::new(self.resolve_type_ref_scoped_with_count(
+                return Ok(TypeRef::Reference {
+                    inner: Box::new(self.resolve_type_ref_in_scope(
                         inner,
                         generic_param_map,
-                        preserve_refs, declaration_scope, array_count)),
+                        preserve_refs, declaration_scope, array_count, self_type)?),
                     mutability: if mutable {
                         crate::types::Mutability::Mutable
                     } else {
                         crate::types::Mutability::Immutable
                     },
                     tier,
-                };
+                });
             }
         }
         // A Tier-2 raw reference IS a machine word — descriptor says
@@ -18540,12 +18674,12 @@ impl VbcCodegen {
         // made the AOT parameter i8-wide and the caller truncated the
         // pointer to its low byte.
         if matches!(&ty.kind, TypeKind::UnsafeReference { .. }) {
-            return TypeRef::Concrete(TypeId::PTR);
+            return Ok(TypeRef::Concrete(TypeId::PTR));
         }
         if let TypeKind::Reference { inner, .. }
         | TypeKind::CheckedReference { inner, .. } = &ty.kind
         {
-            return self.resolve_type_ref_scoped_with_count(inner, generic_param_map, preserve_refs, declaration_scope, array_count);
+            return self.resolve_type_ref_in_scope(inner, generic_param_map, preserve_refs, declaration_scope, array_count, self_type);
         }
         // Refinement types erase to their base at the descriptor layer
         // — the runtime representation of `Float{>= 0.0, <= 1.0}` IS a
@@ -18559,7 +18693,7 @@ impl VbcCodegen {
         // compared 0.4 < 0.7 → false). The refinement PREDICATE is not
         // lost — assert emission reads the AST, never descriptors.
         if let TypeKind::Refined { base, .. } = &ty.kind {
-            return self.resolve_type_ref_scoped_with_count(base, generic_param_map, preserve_refs, declaration_scope, array_count);
+            return self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type);
         }
         // #131 Layer E — nested function types must preserve the
         // map through recursion.  The standard `ast_type_to_type_ref`
@@ -18581,9 +18715,9 @@ impl VbcCodegen {
         {
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_type_ref_scoped_with_count(p, generic_param_map, preserve_refs, declaration_scope, array_count))
-                .collect();
-            let ret_ref = self.resolve_type_ref_scoped_with_count(return_type, generic_param_map, preserve_refs, declaration_scope, array_count);
+                .map(|p| self.resolve_type_ref_in_scope(p, generic_param_map, preserve_refs, declaration_scope, array_count, self_type))
+                .collect::<CodegenResult<_>>()?;
+            let ret_ref = self.resolve_type_ref_in_scope(return_type, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?;
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
@@ -18595,74 +18729,78 @@ impl VbcCodegen {
                         .map(crate::types::ContextRef)
                 })
                 .collect();
-            return TypeRef::Function {
+            return Ok(TypeRef::Function {
                 params: param_refs,
                 return_type: Box::new(ret_ref),
                 contexts: ctx_refs,
-            };
+            });
         }
-        // Rank-2 function type. Without this arm it fell through to the
-        // map-unaware `ast_type_to_type_ref`, whose catch-all is
-        // `TypeRef::Concrete(TypeId::UNIT)` — so `transform: fn<R>(…)`
-        // was baked as the field type `Unit` (archive-proven), and the
-        // record's own params `A`/`B` were then mentioned by NO field at
-        // all. A collapse to a plausible concrete type is worse than an
-        // opaque one: nothing downstream can tell it from a real `Unit`
-        // (T0997).
-        //
-        // The quantified params are deliberately NOT added to the map.
-        // Their indices would share the enclosing type's index space,
-        // where `Generic(0)` for a local `R` and `Generic(0)` for the
-        // outer `A` are the same value — the name channel for this shape
-        // is the source-verbatim spelling carried alongside
-        // (`extract_type_name_from_ast`), which keeps them apart.
+        // Quantified parameters own the leading slots of their lexical scope.
+        // Lift enclosing IDs before introducing these binders so local R and
+        // an outer A cannot both denote Generic(0). Nested binders repeat the
+        // same operation; substitution must respect this scope boundary.
         if let TypeKind::Rank2Function {
             type_params,
             params,
             return_type,
             contexts,
-            ..
+            calling_convention,
+            where_clause,
         } = &ty.kind
         {
+            if calling_convention.is_some() || where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty()) {
+                return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                    "locally quantified calling conventions and where constraints have no VBC representation".into()), ty.span));
+            }
+            let (count, inner_scope) = Self::rank2_type_scope(type_params, generic_param_map, ty.span)?;
+            let inner_self = self_type.map(|owner| crate::mono::lift_free_parameters(owner, u32::from(count)))
+                .transpose().map_err(|error| CodegenError::with_span(
+                    CodegenErrorKind::InvalidSourceSignature(error.to_string()), ty.span))?;
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_type_ref_scoped_with_count(p, generic_param_map, preserve_refs, declaration_scope, array_count))
-                .collect();
-            let ret_ref = self.resolve_type_ref_scoped_with_count(return_type, generic_param_map, preserve_refs, declaration_scope, array_count);
+                .map(|p| self.resolve_type_ref_in_scope(p, &inner_scope, preserve_refs, declaration_scope, array_count, inner_self.as_ref()))
+                .collect::<CodegenResult<_>>()?;
+            let ret_ref = self.resolve_type_ref_in_scope(return_type, &inner_scope, preserve_refs, declaration_scope, array_count, inner_self.as_ref())?;
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
-                .filter_map(|req| {
+                .map(|req| {
                     let ctx_name = format!("{}", req.path);
                     self.context_name_to_id
                         .get(&ctx_name)
                         .copied()
                         .map(crate::types::ContextRef)
+                        .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                            format!("unresolved context '{ctx_name}' in locally quantified function type")), ty.span))
                 })
-                .collect();
-            return TypeRef::Rank2Function {
-                type_param_count: type_params.len() as u16,
+                .collect::<CodegenResult<_>>()?;
+            return Ok(TypeRef::Rank2Function {
+                type_param_count: count,
                 params: param_refs,
                 return_type: Box::new(ret_ref),
                 contexts: ctx_refs,
-            };
+            });
         }
         // Structural sequence operands retain the same declaration-owned map.
         // A concrete array count uses the common constant evaluator; symbolic
         // counts retain the existing numeric-zero fallback; that representation
         // does not distinguish an unresolved count from an empty array.
         if let TypeKind::Slice(element) = &ty.kind {
-            return TypeRef::Slice(Box::new(self.resolve_type_ref_scoped_with_count(
-                element, generic_param_map, preserve_refs, declaration_scope, array_count)));
+            return Ok(TypeRef::Slice(Box::new(self.resolve_type_ref_in_scope(
+                element, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?)));
         }
         if let TypeKind::Array { element, size } = &ty.kind {
+            let element = self.resolve_type_ref_in_scope(
+                element, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?;
+            if size.as_deref().is_some_and(Self::inferred_array_extent) {
+                // Existing Array<T> represents the runtime-extent family. It
+                // carries an element declaration but no fixed-length claim.
+                return Ok(TypeRef::Instantiated { base: TypeId::ARRAY, args: vec![element] });
+            }
             let length = size.as_ref()
                 .and_then(|count| array_count(count))
                 .unwrap_or(0);
-            return TypeRef::Array {
-                element: Box::new(self.resolve_type_ref_scoped_with_count(element, generic_param_map, preserve_refs, declaration_scope, array_count)),
-                length,
-            };
+            return Ok(TypeRef::Array { element: Box::new(element), length });
         }
         // Tuple: recurse elements with the SAME map. `type Item =
         // (Int, I.Item)` (EnumerateIter) and `(A.Item, B.Item)`
@@ -18674,13 +18812,13 @@ impl VbcCodegen {
         // typed `a: Unit` (base/env `expected Unit, found Text`).
         if let TypeKind::Tuple(elements) = &ty.kind {
             if elements.is_empty() {
-                return TypeRef::Concrete(TypeId::UNIT);
+                return Ok(TypeRef::Concrete(TypeId::UNIT));
             }
             let elem_refs: Vec<TypeRef> = elements
                 .iter()
-                .map(|e| self.resolve_type_ref_scoped_with_count(e, generic_param_map, preserve_refs, declaration_scope, array_count))
-                .collect();
-            return TypeRef::Tuple(elem_refs);
+                .map(|e| self.resolve_type_ref_in_scope(e, generic_param_map, preserve_refs, declaration_scope, array_count, self_type))
+                .collect::<CodegenResult<_>>()?;
+            return Ok(TypeRef::Tuple(elem_refs));
         }
         // #131 Layer E — associated-type projection.  In Verum the
         // parser produces `TypeKind::Qualified { self_ty, trait_ref,
@@ -18772,52 +18910,17 @@ impl VbcCodegen {
             // function's parameter binds — the link the fix depends on.
             let base_ref = match &ty.kind {
                 TypeKind::AssociatedType { base, .. } => {
-                    self.resolve_type_ref_scoped_with_count(base, generic_param_map, preserve_refs, declaration_scope, array_count)
+                    self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?
                 }
                 TypeKind::Qualified { self_ty, .. } => {
-                    self.resolve_type_ref_scoped_with_count(self_ty, generic_param_map, preserve_refs, declaration_scope, array_count)
+                    self.resolve_type_ref_in_scope(self_ty, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?
                 }
                 _ => TypeRef::Concrete(crate::types::TypeId::UNIT),
             };
-            // ARRAY-ITER-CONCRETIZE-1 / Pillar-3 increment 1 — bare-`Self`
-            // projection-base fidelity.  `Self.Item` in a materialised
-            // protocol-default method (`fn any(&self, f: fn(Self.Item) ->
-            // Bool)` from the Iterator protocol) has no `Self` entry in
-            // `generic_param_map`, so the base degraded to the
-            // `TypeId::PTR` unknown-carrier and serialised as
-            // `::Item<__opaque_type_14>` — an ORPHAN quantified var on the
-            // typechecker side (nothing binds it: the receiver's type args
-            // bind impl-level generics, not Self) → iterator-closure
-            // params stayed `Item<_>` → E103 on field access even with
-            // the impl-generics carry live.  Substitute the CONTEXTUAL
-            // fact codegen already holds: `Self` = the impl target
-            // applied to its own generic params, resolved through the
-            // SAME `generic_param_map` ids the rest of the signature
-            // uses — so `::Item<SliceIter<__generic_0>>` round-trips
-            // with its `T` unified with the carried impl var and the
-            // receiver bind concretises the whole projection.  Narrow
-            // by construction: only fires for a degraded (PTR/UNIT)
-            // resolution of a literally-bare `Self` base; protocol-side
-            // synthetic Self mappings (#131 Layer E, 0x4000+N) and
-            // genuine param-mapped bases keep their resolution.
-            let base_is_bare_self = match &ty.kind {
-                TypeKind::AssociatedType { base, .. } => Self::ast_type_is_bare_self(base),
-                TypeKind::Qualified { self_ty, .. } => Self::ast_type_is_bare_self(self_ty),
-                _ => false,
-            };
-            let base_ref = if base_is_bare_self
-                && matches!(
-                    &base_ref,
-                    TypeRef::Concrete(tid) if *tid == TypeId::PTR || *tid == TypeId::UNIT
-                ) {
-                self.impl_self_type_ref(generic_param_map).unwrap_or(base_ref)
-            } else {
-                base_ref
-            };
-            return TypeRef::AssociatedProjection {
+            return Ok(TypeRef::AssociatedProjection {
                 base: Box::new(base_ref),
                 assoc: assoc_str,
-            };
+            });
         }
         // Check if the type is a simple path that matches a generic param.
         //
@@ -18844,13 +18947,13 @@ impl VbcCodegen {
                 })
                 .unwrap_or_default();
             if let Some(&param_idx) = generic_param_map.get(&type_name) {
-                return TypeRef::Generic(crate::types::TypeParamId(param_idx));
+                return Ok(TypeRef::Generic(crate::types::TypeParamId(param_idx)));
             }
         }
         if Self::ast_type_is_bare_self(ty)
-            && let Some(owner) = self.impl_self_type_ref(generic_param_map)
+            && let Some(owner) = self_type
         {
-            return owner;
+            return Ok(owner.clone());
         }
         // The constant evaluator may be executing a foreign initializer.
         // Its exact declared owner wins over the consumer's bare-name slot.
@@ -18859,7 +18962,7 @@ impl VbcCodegen {
             && let Some(scope) = declaration_scope
             && let Some(id) = self.type_name_to_id.get(&format!("{scope}.{}", path))
         {
-            return TypeRef::Concrete(*id);
+            return Ok(TypeRef::Concrete(*id));
         }
         // Fall back to standard resolution
         self.ast_type_to_type_ref(ty)
@@ -18889,11 +18992,10 @@ impl VbcCodegen {
     /// other references to the impl generics carry — positional fallback
     /// mirrors `method_generic_param_map`'s declaration-order numbering).
     ///
-    /// `None` when codegen lacks the context (no current impl, or the
-    /// target type is not in the local table) — callers keep their
-    /// degraded fallback, preserving pre-fix behaviour.  See the
-    /// bare-`Self` projection-base fidelity block in
-    /// [`Self::resolve_field_type_ref`] for the consumer and rationale.
+    /// `None` when codegen lacks the declaration context. The source resolver
+    /// then requires a real Self binder or rejects the unresolved annotation.
+    /// Recursive quantified scopes inherit and lift this witness; they never
+    /// reconstruct the impl target from their own shadowing parameter names.
     fn impl_self_type_ref(
         &self,
         generic_param_map: &std::collections::HashMap<String, u16>,
@@ -18936,10 +19038,10 @@ impl VbcCodegen {
     }
 
     /// This enables storing return type information for method dispatch prefixing.
-    fn ast_type_to_type_ref(&self, ty: &verum_ast::ty::Type) -> TypeRef {
+    fn ast_type_to_type_ref(&self, ty: &verum_ast::ty::Type) -> CodegenResult<TypeRef> {
         use verum_ast::ty::TypeKind;
 
-        match &ty.kind {
+        Ok(match &ty.kind {
             TypeKind::Int => TypeRef::Concrete(TypeId::INT),
             TypeKind::Float => TypeRef::Concrete(TypeId::FLOAT),
             TypeKind::Bool => TypeRef::Concrete(TypeId::BOOL),
@@ -18950,41 +19052,17 @@ impl VbcCodegen {
                 let type_name = path.to_string().replace("::", ".");
 
                 // Map Verum type names to TypeId via the consolidated registry
-                match self.nominal_type_id(&type_name) {
+                match self.nominal_type_id(&type_name)
+                    .filter(|_| self.semantic_formal_path_is_declared(ty, &Default::default())) {
                     Some(type_id) => TypeRef::Concrete(type_id),
-                    None => {
-                        // Truly unknown type — use PTR as generic carrier.
-                        //
-                        // AND SAY WHICH NAME. `TypeId::PTR` is three facts at
-                        // once — a raw pointer, `USize` (it aliases PTR), and
-                        // "this name did not resolve" — so a descriptor
-                        // carrying it cannot be read backwards to the miss.
-                        // Measured (T1263): `safe_write(fd: FileDesc, …)`
-                        // records `Concrete(TypeId(14))` for a concrete,
-                        // named, non-generic parameter, and `fd.0` then
-                        // lowers as an object field read at +24 — address 25
-                        // for `FileDesc(1)`, a guaranteed SIGSEGV, which is
-                        // the root under T1192.
-                        //
-                        // Two indirect attempts to count the misses both
-                        // measured something else (a PTR census counts the
-                        // legitimate ones too; a `[typebind]` census reads 2
-                        // of the 9 sites that write the table). The name is
-                        // known HERE and nowhere else.
-                        if std::env::var("VERUM_TRACE_PTRFALL").is_ok() {
-                            eprintln!(
-                                "[ptrfall] name={type_name} module={} impl={}",
-                                self.config.module_name,
-                                self.ctx.current_impl_type_name.as_deref().unwrap_or("-")
-                            );
-                        }
-                        TypeRef::Concrete(TypeId::PTR)
-                    }
+                    None => return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        format!("unresolved nominal type '{type_name}' in declaration scope '{}'", self.lexical_type_scope()),
+                    ), ty.span)),
                 }
             }
             TypeKind::Generic { base, args } => {
                 // Generic types like Maybe<T>, List<T>, etc.
-                let base_ref = self.ast_type_to_type_ref(base);
+                let base_ref = self.ast_type_to_type_ref(base)?;
                 if let TypeRef::Concrete(base_id) = base_ref {
                     let arg_refs: Vec<TypeRef> = args
                         .iter()
@@ -18998,11 +19076,11 @@ impl VbcCodegen {
                             verum_ast::ty::GenericArg::Const(expr) => {
                                 Self::render_const_generic_arg(expr)
                                     .and_then(|s| s.parse::<i64>().ok())
-                                    .map(TypeRef::ConstValue)
+                                    .map(|value| Ok(TypeRef::ConstValue(value)))
                             }
                             _ => None,
                         })
-                        .collect();
+                        .collect::<CodegenResult<_>>()?;
                     TypeRef::Instantiated {
                         base: base_id,
                         args: arg_refs,
@@ -19028,7 +19106,7 @@ impl VbcCodegen {
                 // Managed/checked references — resolve to the inner type's
                 // TypeRef (the NaN-box world carries them as values; the
                 // T0332 slot-shape machinery keys off these).
-                self.ast_type_to_type_ref(inner)
+                self.ast_type_to_type_ref(inner)?
             }
             TypeKind::Tuple(elements) => {
                 if elements.is_empty() {
@@ -19039,7 +19117,7 @@ impl VbcCodegen {
                     let elem_refs: Vec<TypeRef> = elements
                         .iter()
                         .map(|e| self.ast_type_to_type_ref(e))
-                        .collect();
+                        .collect::<CodegenResult<_>>()?;
                     TypeRef::Tuple(elem_refs)
                 }
             }
@@ -19052,8 +19130,8 @@ impl VbcCodegen {
                 let param_refs: Vec<TypeRef> = params
                     .iter()
                     .map(|p| self.ast_type_to_type_ref(p))
-                    .collect();
-                let ret_ref = self.ast_type_to_type_ref(return_type);
+                    .collect::<CodegenResult<_>>()?;
+                let ret_ref = self.ast_type_to_type_ref(return_type)?;
                 let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                     .requirements
                     .iter()
@@ -19072,7 +19150,7 @@ impl VbcCodegen {
             }
             TypeKind::CapabilityRestricted { base, .. } => {
                 // Capability restrictions are compile-time only; unwrap to base type
-                self.ast_type_to_type_ref(base)
+                self.ast_type_to_type_ref(base)?
             }
             TypeKind::Char => TypeRef::Concrete(TypeId::CHAR),
             // PARAM-REF-SLICE-UNMARKED-1: lower slices/arrays HONESTLY.
@@ -19086,10 +19164,10 @@ impl VbcCodegen {
             // string at Tier-1.  Structure consumers dispatch on must
             // survive lowering — same rule as the RETNAME render.
             TypeKind::Slice(element) => {
-                TypeRef::Slice(Box::new(self.ast_type_to_type_ref(element)))
+                TypeRef::Slice(Box::new(self.ast_type_to_type_ref(element)?))
             }
             TypeKind::Array { element, size } => {
-                let elem_ref = self.ast_type_to_type_ref(element);
+                let elem_ref = self.ast_type_to_type_ref(element)?;
                 // Length only when it is a plain integer literal; 0 is the
                 // established "statically unknown" carrier (const-generic
                 // sizes resolve at monomorphization, not here).
@@ -19117,11 +19195,11 @@ impl VbcCodegen {
             // re-generalized, to an independent generic param that defaulted
             // to Int at call sites (async future_poll_sync suite).
             TypeKind::AssociatedType { base, assoc } => TypeRef::AssociatedProjection {
-                base: Box::new(self.ast_type_to_type_ref(base)),
+                base: Box::new(self.ast_type_to_type_ref(base)?),
                 assoc: assoc.name.to_string(),
             },
             _ => TypeRef::Concrete(TypeId::UNIT),
-        }
+        })
     }
 
     /// Returns true when `ty` is a bare `Self` type — a single-segment
@@ -19583,8 +19661,12 @@ impl VbcCodegen {
         } else {
             None
         };
-        let declared_lookup = if impl_type_name.is_none() && self.nested_function_scope.is_empty() {
-            self.ctx.lookup_declared_function_with_arity(&base_name, param_count).cloned()
+        let declared_lookup = if self.nested_function_scope.is_empty() {
+            if let Some(type_name) = impl_type_name {
+                self.ctx.lookup_function_with_arity(&self.source_impl_method_key(type_name, &base_name), param_count).cloned()
+            } else {
+                self.ctx.lookup_declared_function_with_arity(&base_name, param_count).cloned()
+            }
         } else { None };
         // Diagnostic (VERUM_TRACE_FNPICK, T0670): WHICH branch supplied the
         // id this body will be emitted under, and what the qualified key
@@ -19634,7 +19716,7 @@ impl VbcCodegen {
         // plain + ordinal candidates recovers OUR registration without
         // replaying walk order.  No siblings → zero extra work.
         let mut func_info = if let Some(type_name) = impl_type_name {
-            let qualified = format!("{}.{}", type_name, base_name);
+            let qualified = self.source_impl_method_key(type_name, &base_name);
             if self.ctx.lookup_function(&format!("{}#impl2", qualified)).is_some() {
                 let decl_param_types: Vec<String> = func
                     .params
@@ -20706,7 +20788,7 @@ impl VbcCodegen {
             let fn_bound_for = |gname: &str,
                                 is_method_level: bool,
                                 name_is_banded: bool|
-             -> Option<TypeRef> {
+             -> CodegenResult<Option<TypeRef>> {
                 use verum_ast::ty::{GenericParamKind, TypeBoundKind, TypeKind};
                 let probe = |gps: &verum_common::List<verum_ast::ty::GenericParam>|
                  -> Option<verum_ast::ty::Type> {
@@ -20760,7 +20842,7 @@ impl VbcCodegen {
                         &method_generic_param_map
                     };
                     self.resolve_signature_type_ref(&ty, map)
-                })
+                }).transpose()
             };
             let fn_own_names: std::collections::HashSet<String> = func
                 .generics
@@ -20793,10 +20875,10 @@ impl VbcCodegen {
                     let name_is_banded = banded_names.contains(gname.as_str());
                     let is_method_level = pid >= 0x8000
                         || (fn_own_names.contains(&gname) && !name_is_banded);
-                    let tb = fn_bound_for(&gname, is_method_level, name_is_banded);
-                    (gname, pid, tb)
+                    let tb = fn_bound_for(&gname, is_method_level, name_is_banded)?;
+                    Ok((gname, pid, tb))
                 })
-                .collect();
+                .collect::<CodegenResult<_>>()?;
             for (gname, pid, tb) in rendered {
                 let mut type_bounds: smallvec::SmallVec<[TypeRef; 1]> =
                     smallvec::SmallVec::new();
@@ -20858,7 +20940,7 @@ impl VbcCodegen {
             use crate::types::{CbgrTier, Mutability};
             let type_ref = match &param.kind {
                 FunctionParamKind::Regular { ty, .. } => {
-                    let resolved = self.resolve_field_type_ref(ty, &render_generic_param_map);
+                    let resolved = self.resolve_field_type_ref(ty, &render_generic_param_map)?;
                     // **Closure expected-return-type plumbing (#26 residual).**
                     // When the user wrote `f: F` and the function declares
                     // `F: fn(...) -> X`, the resolved TypeRef is
@@ -20871,7 +20953,7 @@ impl VbcCodegen {
                     // and drive the call-site disambig push for closure
                     // arguments.  No-op when the param isn't a generic-param
                     // path or when the generic carries no fn bound.
-                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, func, &render_generic_param_map);
+                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, func, &render_generic_param_map)?;
                     // task #41: a scalar `&T` param keeps TypeRef::Reference so the
                     // AOT can deref a lone `&scalar` comparison operand (the
                     // interpreter auto-derefs the CBGR-ref at CmpI/CmpG runtime; the
@@ -20974,7 +21056,7 @@ impl VbcCodegen {
         // TypeRef::Generic(idx) instead of degrading to
         // TypeRef::Concrete(PTR).
         if let verum_common::Maybe::Some(ref ret_ty_ast) = func.return_type {
-            let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &render_generic_param_map);
+            let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &render_generic_param_map)?;
             descriptor.return_type = resolved_return;
         }
 
@@ -21212,16 +21294,14 @@ impl VbcCodegen {
     /// * Only an actual call panics — and with the original codegen
     ///   error message inline, not `FunctionNotFound`.
     ///
-    /// Any failure inside the stub emitter degrades to a no-op return:
-    /// the function stays dropped, matching the prior behaviour.
-    /// This must NOT make the build worse for anything that compiled
-    /// before.
+    /// A diagnostic body may replace failed executable code, but it must not
+    /// invent a valid declaration when its signature cannot be resolved.
     fn emit_lenient_panic_stub(
         &mut self,
         func: &FunctionDecl,
         impl_type_name: Option<&str>,
         error_message: &str,
-    ) {
+    ) -> CodegenResult<()> {
         let base_name = func.name.name.to_string();
         let lookup_name = if let Some(t) = impl_type_name {
             format!("{}.{}", t, base_name)
@@ -21240,7 +21320,7 @@ impl VbcCodegen {
             .cloned()
         {
             Some(info) => info,
-            None => return,
+            None => return Ok(()),
         };
 
         let params_with_mutability: Vec<(String, bool)> = func
@@ -21253,6 +21333,7 @@ impl VbcCodegen {
             })
             .collect();
 
+        let generic_scope = self.ctx.current_generic_param_ids.clone();
         // Fresh function block — `begin_function` clears every
         // function-scoped buffer (instructions, registers, labels,
         // type-tracking, etc.) so leftover state from the failed
@@ -21330,7 +21411,7 @@ impl VbcCodegen {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
             let type_ref = match &param.kind {
-                FunctionParamKind::Regular { ty, .. } => self.ast_type_to_type_ref(ty),
+                FunctionParamKind::Regular { ty, .. } => self.resolve_field_type_ref(ty, &generic_scope)?,
                 FunctionParamKind::SelfRefMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(TypeId::UNIT)),
                     mutability: Mutability::Mutable,
@@ -21396,6 +21477,7 @@ impl VbcCodegen {
 
         let vbc_func = VbcFunction::new(descriptor, instructions);
         self.push_function_dedup(vbc_func);
+        Ok(())
     }
 
     /// Compiles a block.

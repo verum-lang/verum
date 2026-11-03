@@ -59,6 +59,9 @@ pub struct SourceExports {
 
 #[derive(Default)]
 struct ModuleExports {
+    // Only inline AST nesting establishes lexical ancestry. A file's dotted
+    // namespace does not grant access to declarations in another file.
+    lexical_parents: BTreeSet<String>,
     declarations: HashMap<String, BTreeSet<String>>,
     non_functions: HashSet<String>,
     visibility: HashMap<String, verum_ast::Visibility>,
@@ -99,6 +102,7 @@ impl SourceExports {
         scope.lexical_globs.extend(exports.lexical_globs);
         scope.public_children.extend(exports.public_children);
         scope.namespaces.extend(exports.namespaces);
+        scope.lexical_parents.extend(exports.lexical_parents);
     }
 }
 
@@ -140,6 +144,19 @@ impl VbcCodegen {
         self.source_exports.modules.get(owner).or_else(|| {
             self.dependency_source_exports.as_ref()?.modules.get(owner)
         })
+    }
+
+    pub(super) fn record_inline_type_parent(&mut self, child: &str, parent: &str) {
+        self.source_exports.modules.entry(child.to_owned()).or_default()
+            .lexical_parents.insert(parent.to_owned());
+    }
+
+    /// `Some(None)` refuses conflicting lexical ownership; it never selects an
+    /// arbitrary parent from a merged declaration graph.
+    pub(super) fn lexical_type_parent(&self, owner: &str) -> Option<Option<&str>> {
+        let parents = &self.source_export_scope(owner)?.lexical_parents;
+        if parents.is_empty() { return None; }
+        Some((parents.len() == 1).then(|| parents.first().unwrap().as_str()))
     }
 
     /// A namespace binding requires its declaration in the parent and the loaded child scope.

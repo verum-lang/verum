@@ -29,7 +29,7 @@ module core.intrinsics.runtime.text;
 /// Requires: Text type (allocation)
 @intrinsic("text_from_static")
 @inline(always)
-public fn text_from_static(s: &'static str) -> Text;
+public fn text_from_static(s: &Text) -> Text;
 
 /// Get byte length of Text.
 ///

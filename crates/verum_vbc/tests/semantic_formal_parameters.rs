@@ -91,10 +91,15 @@ fn fixed_array_formals_keep_closed_extents_and_distinguish_zero_from_unknown() {
 #[test]
 fn unsupported_positions_remain_unknown_without_shifting_following_formals() {
     let m = compile(
-        "fn inspect<N>(a: fn<R>(R) -> R, b: [Int; N], c: Missing, d: &Int) -> Int { 7 } fn empty() -> Int { 0 }",
+        "fn inspect<N>(a: fn<R>(R) -> R, b: [Int; N], c: *const Int, d: &Int) -> Int { 7 } fn empty() -> Int { 0 }",
     );
     let expected = [
-        None,
+        Some(T::Rank2Function {
+            type_param_count: 1,
+            params: vec![T::Generic(TypeParamId(0))],
+            return_type: Box::new(T::Generic(TypeParamId(0))),
+            contexts: Default::default(),
+        }),
         None,
         None,
         Some(reference(T::Concrete(TypeId::INT), CbgrTier::Tier0, false)),
@@ -430,18 +435,12 @@ fn semantic_result_roundtrips_and_legacy_abi_cannot_replace_it() {
 
 #[test]
 fn higher_kinded_application_is_not_recovered_as_its_bare_generic_head() {
-    let m = compile("fn receive<F<_>>(value: F<Int>, callback: fn(&Int) -> Int) -> Int { 1 }");
-    assert_eq!(
-        function(&m, "receive").semantic_parameter_types().unwrap(),
-        &[
-            None,
-            Some(T::Function {
-                params: vec![reference(T::Concrete(TypeId::INT), CbgrTier::Tier0, false)],
-                return_type: Box::new(T::Concrete(TypeId::INT)),
-                contexts: Default::default()
-            }),
-        ]
-    );
+    let ast = Parser::new("fn receive<F<_>>(value: F<Int>, callback: fn(&Int) -> Int) -> Int { 1 }")
+        .parse_module().unwrap();
+    let error = VbcCodegen::new().compile_module(&ast).expect_err("missing constructor representation is explicit");
+    assert!(matches!(&error.kind, verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(message)
+        if message == "unresolved nominal type 'F' in declaration scope 'main'"), "{error}");
+    assert!(error.span.is_some());
 }
 
 #[test]
@@ -465,11 +464,11 @@ fn an_unmounted_sibling_type_is_not_a_declaration_formal() {
         format!("{sibling} {consumer}"),
         format!("{consumer} {sibling}"),
     ] {
-        let m = compile(&source);
-        assert_eq!(
-            function(&m, "beta.receive").semantic_parameter_types(),
-            Some([None].as_slice())
-        );
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let error = VbcCodegen::new().compile_module(&ast).expect_err("foreign sibling is not mounted");
+        assert!(matches!(&error.kind, verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(message)
+            if message == "unresolved nominal type 'Token' in declaration scope 'beta'"), "{error}");
+        assert!(error.span.is_some());
     }
 }
 

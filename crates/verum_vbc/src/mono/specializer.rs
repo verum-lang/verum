@@ -64,6 +64,7 @@ pub struct SpecializedFunction {
 /// Error during specialization.
 #[derive(Debug, Clone)]
 pub enum SpecializationError {
+    TypeSubstitution(super::SubstitutionError),
     /// Function not found.
     FunctionNotFound(FunctionId),
     /// Type not found.
@@ -86,9 +87,16 @@ pub enum SpecializationError {
     },
 }
 
+impl From<super::SubstitutionError> for SpecializationError {
+    fn from(error: super::SubstitutionError) -> Self {
+        Self::TypeSubstitution(error)
+    }
+}
+
 impl std::fmt::Display for SpecializationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            SpecializationError::TypeSubstitution(error) => write!(f, "{error}"),
             SpecializationError::FunctionNotFound(id) => {
                 write!(f, "Function not found: {:?}", id)
             }
@@ -404,14 +412,14 @@ impl<'a> BytecodeSpecializer<'a> {
         for instr in instrs.iter_mut() {
             crate::bytecode_remap::rewrite_instruction_ids(instr, &calls);
             self.stats.total_instructions += 1;
-            self.specialize_instr_value(instr);
+            self.specialize_instr_value(instr)?;
         }
         super::method_calls::resolve_type_methods(
             self.module,
             func,
             self.substitution,
             &mut instrs,
-        );
+        )?;
         // **L2 (task #44): ToString → Display expansion.**  With T
         // substituted concrete, a `f"{x}"` in the generic body should
         // route through the type's own `fmt` exactly like a
@@ -421,7 +429,7 @@ impl<'a> BytecodeSpecializer<'a> {
         // descriptors (sound without flow analysis) finds the sites;
         // the structural pipeline makes the 1→7 instruction expansion
         // legal (jump index offsets are remapped around insertions).
-        let extra_regs = self.expand_display_tostrings(&mut instrs, func);
+        let extra_regs = self.expand_display_tostrings(&mut instrs, func)?;
         crate::bytecode::fixup_jump_offsets(&mut instrs);
         let mut output: Vec<u8> = Vec::with_capacity(bytecode.len() + 16);
         for instr in instrs.iter() {
@@ -447,13 +455,13 @@ impl<'a> BytecodeSpecializer<'a> {
             .iter()
             .map(|p| {
                 let mut np = p.clone();
-                np.type_ref = self.substitution.apply(&p.type_ref);
-                np
+                np.type_ref = self.substitution.apply(&p.type_ref)?;
+                Ok::<_, super::SubstitutionError>(np)
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         // task #39/#35: substitute the return type so the merged descriptor lets
         // the AOT float-mark the call result of a generic fn returning T.
-        let return_type = self.substitution.apply(&func.return_type);
+        let return_type = self.substitution.apply(&func.return_type)?;
 
         Ok(SpecializedFunction {
             bytecode: output,
@@ -462,9 +470,24 @@ impl<'a> BytecodeSpecializer<'a> {
             max_stack: func.max_stack,
             new_constants: std::mem::take(&mut self.new_constants),
             params,
-            semantic_params: func.semantic_parameter_types().map(|params| params.iter()
-                .map(|ty| ty.as_ref().map(|ty| self.substitution.apply(ty))).collect()),
-            semantic_return: func.semantic_return.as_ref().map(|ty| self.substitution.apply(ty)),
+            semantic_params: func
+                .semantic_parameter_types()
+                .map(|params| {
+                    params
+                        .iter()
+                        .map(|ty| {
+                            ty.as_ref()
+                                .map(|ty| self.substitution.apply(ty))
+                                .transpose()
+                        })
+                        .collect::<Result<_, _>>()
+                })
+                .transpose()?,
+            semantic_return: func
+                .semantic_return
+                .as_ref()
+                .map(|ty| self.substitution.apply(ty))
+                .transpose()?,
             return_type,
         })
     }
@@ -473,14 +496,23 @@ impl<'a> BytecodeSpecializer<'a> {
     /// (task #44 L2/L3 structural discipline — see `specialize`).
     /// Mutates in place; instructions with no generic content pass
     /// through untouched.
-    fn specialize_instr_value(&mut self, instr: &mut crate::instruction::Instruction) {
+    fn specialize_instr_value(
+        &mut self,
+        instr: &mut crate::instruction::Instruction,
+    ) -> Result<(), SpecializationError> {
         use crate::instruction::Instruction as I;
         match instr {
-            I::NewClosure { capture_types, lexical_types, .. } => {
+            I::NewClosure {
+                capture_types,
+                lexical_types,
+                ..
+            } => {
                 for ty in capture_types.iter_mut().flatten().flatten() {
-                    *ty = self.substitution.apply(ty);
+                    *ty = self.substitution.apply(ty)?;
                 }
-                for ty in lexical_types { *ty = self.substitution.apply(ty); }
+                for ty in lexical_types {
+                    *ty = self.substitution.apply(ty)?;
+                }
             }
             I::CallG {
                 dst,
@@ -491,7 +523,7 @@ impl<'a> BytecodeSpecializer<'a> {
                 let substituted: Vec<TypeRef> = type_args
                     .iter()
                     .map(|t| self.substitution.apply(t))
-                    .collect();
+                    .collect::<Result<_, _>>()?;
                 let key = InstantiationKey::new(FunctionId(*func_id), substituted.clone());
                 // This lookup ALWAYS misses — nothing outside a unit test
                 // ever calls `record_specialization*`, so the graph's
@@ -525,7 +557,7 @@ impl<'a> BytecodeSpecializer<'a> {
             }
             I::SetCallWitness { type_args } => {
                 for ty in type_args {
-                    *ty = self.substitution.apply(ty);
+                    *ty = self.substitution.apply(ty)?;
                 }
             }
             I::BinaryG {
@@ -609,7 +641,7 @@ impl<'a> BytecodeSpecializer<'a> {
             | I::TypeResource { type_ref, .. }
             | I::LoadT { type_ref, .. }
             | I::TypeLayout { type_ref, .. } => {
-                *type_ref = self.substitution.apply(type_ref);
+                *type_ref = self.substitution.apply(type_ref)?;
             }
             // NewG carries RUNTIME type-argument REGISTERS on the wire
             // (the old byte arm misread them as static TypeRefs and
@@ -621,6 +653,7 @@ impl<'a> BytecodeSpecializer<'a> {
             // passthrough keeps runtime dispatch correct.
             _ => {}
         }
+        Ok(())
     }
 
     /// **L2 (task #44)**: expand builtin `ToString` sites whose source
@@ -647,7 +680,7 @@ impl<'a> BytecodeSpecializer<'a> {
         &mut self,
         instrs: &mut Vec<crate::instruction::Instruction>,
         func: &FunctionDescriptor,
-    ) -> u16 {
+    ) -> Result<u16, SpecializationError> {
         use crate::instruction::Instruction as I;
         use crate::instruction::Reg;
 
@@ -662,7 +695,7 @@ impl<'a> BytecodeSpecializer<'a> {
         let mut reg_types: std::collections::HashMap<u16, TypeRef> =
             std::collections::HashMap::new();
         for (i, p) in func.params.iter().enumerate() {
-            let substituted = self.substitution.apply(&p.type_ref);
+            let substituted = self.substitution.apply(&p.type_ref)?;
             // Param registers are written by the CALL frame, not the
             // body; a body write means reuse — drop the fact.
             if write_counts.get(&(i as u16)).copied().unwrap_or(0) == 0 {
@@ -707,13 +740,13 @@ impl<'a> BytecodeSpecializer<'a> {
             sites.push((idx, src.0, fmt_fid.0));
         }
         if sites.is_empty() {
-            return 0;
+            return Ok(0);
         }
         let (Some(text_new), Some(formatter_new)) = (
             self.module.find_function_by_name("Text.new"),
             self.module.find_function_by_name("Formatter.new"),
         ) else {
-            return 0;
+            return Ok(0);
         };
 
         // ---- jump bookkeeping: absolute targets before insertion ----
@@ -804,7 +837,7 @@ impl<'a> BytecodeSpecializer<'a> {
             }
         }
 
-        expansions * 6
+        Ok(expansions * 6)
     }
 
     /// Register written by an instruction, for the write-once census.
@@ -973,17 +1006,21 @@ impl<'a> BytecodeSpecializer<'a> {
     /// This is a CRITICAL operation for monomorphization correctness.
     /// Creates a new concrete type for a generic type instantiated with specific type arguments.
     #[allow(dead_code)] // parked, T0134
-    fn get_or_create_instantiated_type(&mut self, base: TypeId, args: &[TypeRef]) -> TypeId {
+    fn get_or_create_instantiated_type(
+        &mut self,
+        base: TypeId,
+        args: &[TypeRef],
+    ) -> Result<TypeId, SpecializationError> {
         // Check cache first
         let key = (base, args.to_vec());
         if let Some(&id) = self.instantiated_types.get(&key) {
-            return id;
+            return Ok(id);
         }
 
         // If no type args, just return base type
         if args.is_empty() {
             self.instantiated_types.insert(key, base);
-            return base;
+            return Ok(base);
         }
 
         // Check if all args are concrete - if any are generic, we can't fully instantiate
@@ -994,7 +1031,7 @@ impl<'a> BytecodeSpecializer<'a> {
         if !all_concrete {
             // Can't fully instantiate - return base type
             self.instantiated_types.insert(key, base);
-            return base;
+            return Ok(base);
         }
 
         // Create new instantiated type descriptor
@@ -1006,15 +1043,46 @@ impl<'a> BytecodeSpecializer<'a> {
 
         // Parameters belong to the type declaration, not the enclosing function.
         // Concrete descriptors must retain substituted component identities.
-        let type_substitution = base_desc.map(|desc| TypeSubstitution::new(&desc.type_params, args));
+        let type_substitution =
+            base_desc.map(|desc| TypeSubstitution::new(&desc.type_params, args));
 
         // Compute size and alignment based on type args
-        let (size, alignment) = self.compute_instantiated_layout(base, args);
+        let (size, alignment) = self.compute_instantiated_layout(base, args)?;
+
+        let mut fields = base_desc.map(|d| d.fields.clone()).unwrap_or_default();
+        let mut variants = base_desc.map(|d| d.variants.clone()).unwrap_or_default();
+        let mut alias_target = base_desc.and_then(|d| d.alias_target.clone());
+        if let Some(substitution) = &type_substitution {
+            for field in fields
+                .iter_mut()
+                .chain(variants.iter_mut().flat_map(|v| &mut v.fields))
+            {
+                field.type_ref = substitution.apply(&field.type_ref)?;
+                field.declaration_type = field
+                    .declaration_type
+                    .as_ref()
+                    .map(|ty| substitution.apply(ty))
+                    .transpose()?;
+            }
+            for variant in &mut variants {
+                variant.payload = variant
+                    .payload
+                    .as_ref()
+                    .map(|ty| substitution.apply(ty))
+                    .transpose()?;
+            }
+            alias_target = alias_target
+                .as_ref()
+                .map(|ty| substitution.apply(ty))
+                .transpose()?;
+        }
 
         // Create new type descriptor (note: TypeDescriptor doesn't have type_args/generic_base)
         // The instantiation relationship is tracked in our instantiated_types cache instead
         let new_type_desc = TypeDescriptor {
-            resource_discipline: base_desc.map(|desc| desc.resource_discipline).unwrap_or_default(),
+            resource_discipline: base_desc
+                .map(|desc| desc.resource_discipline)
+                .unwrap_or_default(),
             // A monomorphized instantiation is synthesized here, not
             // declared in any source file — same rationale as the
             // cleared alias_target_name below (v2.12).
@@ -1024,33 +1092,14 @@ impl<'a> BytecodeSpecializer<'a> {
             kind: base_desc.map(|d| d.kind).unwrap_or_default(),
             size,
             alignment,
-            fields: base_desc.map(|desc| desc.fields.iter().map(|field| {
-                let mut field = field.clone();
-                if let Some(substitution) = &type_substitution {
-                    field.type_ref = substitution.apply(&field.type_ref);
-                    field.declaration_type = field.declaration_type.as_ref().map(|ty| substitution.apply(ty));
-                }
-                field
-            }).collect()).unwrap_or_default(),
-            variants: base_desc.map(|desc| desc.variants.iter().map(|variant| {
-                let mut variant = variant.clone();
-                if let Some(substitution) = &type_substitution {
-                    variant.payload = variant.payload.as_ref().map(|ty| substitution.apply(ty));
-                    for field in &mut variant.fields {
-                        field.type_ref = substitution.apply(&field.type_ref);
-                    field.declaration_type = field.declaration_type.as_ref().map(|ty| substitution.apply(ty));
-                    }
-                }
-                variant
-            }).collect()).unwrap_or_default(),
+            fields,
+            variants,
             type_params: smallvec::smallvec![], // No params - fully instantiated
             drop_fn: base_desc.and_then(|d| d.drop_fn),
             clone_fn: base_desc.and_then(|d| d.clone_fn),
             protocols: base_desc.map(|d| d.protocols.clone()).unwrap_or_default(),
             visibility: base_desc.map(|d| d.visibility).unwrap_or_default(),
-            alias_target: base_desc.and_then(|desc| desc.alias_target.as_ref()).map(|target| {
-                type_substitution.as_ref().map_or_else(|| target.clone(), |substitution| substitution.apply(target))
-            }),
+            alias_target,
             // T0533 — the base's `alias_target_name` StringId is interned in
             // the BASE module's string table; re-interning it into this
             // specialised descriptor is a follow-up. `None` keeps the legacy
@@ -1077,12 +1126,16 @@ impl<'a> BytecodeSpecializer<'a> {
         // Cache the result
         self.instantiated_types.insert(key, new_id);
 
-        new_id
+        Ok(new_id)
     }
 
     /// Computes size and alignment for an instantiated generic type.
     #[allow(dead_code)] // parked, T0134
-    fn compute_instantiated_layout(&self, base: TypeId, args: &[TypeRef]) -> (u32, u32) {
+    fn compute_instantiated_layout(
+        &self,
+        base: TypeId,
+        args: &[TypeRef],
+    ) -> Result<(u32, u32), SpecializationError> {
         // Get base type layout
         let base_layout = self.type_layouts.get(&base).copied().unwrap_or(TypeLayout {
             size: 8,
@@ -1105,7 +1158,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
                 for field in &base_desc.fields {
                     // Substitute type params
-                    let field_type = self.substitution.apply(&field.type_ref);
+                    let field_type = self.substitution.apply(&field.type_ref)?;
                     let field_size = self.get_type_size(&field_type);
                     let field_align = self.get_type_alignment(&field_type);
 
@@ -1118,12 +1171,12 @@ impl<'a> BytecodeSpecializer<'a> {
                 // Final alignment padding
                 total_size = (total_size + max_alignment - 1) & !(max_alignment - 1);
 
-                return (total_size, max_alignment);
+                return Ok((total_size, max_alignment));
             }
         }
 
         // Fallback: use base type's layout
-        (base_layout.size, base_layout.alignment)
+        Ok((base_layout.size, base_layout.alignment))
     }
 
     /// Infers operand type from substitution context.
@@ -1162,314 +1215,6 @@ impl<'a> BytecodeSpecializer<'a> {
     /// allows us to resolve virtual calls statically.
     fn _track_register_type(&mut self, dst: u16, type_ref: TypeRef) {
         self.register_types.insert(dst, type_ref);
-    }
-
-    // ========================================================================
-    // Bytecode Reading Helpers
-    // ========================================================================
-
-    /// Reads a register from bytecode.
-    #[allow(dead_code)] // parked, T0134
-    fn read_reg(&self, bytecode: &[u8], pc: &mut usize) -> Result<u16, SpecializationError> {
-        if *pc >= bytecode.len() {
-            return Err(SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: "Unexpected end of bytecode reading register".to_string(),
-            });
-        }
-
-        let byte = bytecode[*pc];
-        *pc += 1;
-
-        if byte < 128 {
-            Ok(byte as u16)
-        } else {
-            if *pc >= bytecode.len() {
-                return Err(SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Unexpected end of bytecode reading extended register".to_string(),
-                });
-            }
-            let high = (byte & 0x7F) as u16;
-            let low = bytecode[*pc] as u16;
-            *pc += 1;
-            Ok((high << 8) | low)
-        }
-    }
-
-    /// Delegates to the crate's decoding authority.  This carried a private
-    /// LEB128 reader mirroring the private writers retired in 076db4d70 — a
-    /// matched pair of re-implementations is how a wire-format divergence
-    /// stays invisible to a round-trip test (T0132).
-    #[allow(dead_code)] // parked, T0134
-    fn read_varint(&self, bytecode: &[u8], pc: &mut usize) -> Result<u64, SpecializationError> {
-        crate::encoding::decode_varint(bytecode, pc).map_err(|e| {
-            SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: e.to_string(),
-            }
-        })
-    }
-
-    /// Reads a TypeRef from bytecode.
-    #[allow(dead_code)] // parked, T0134
-    fn read_type_ref(
-        &self,
-        bytecode: &[u8],
-        pc: &mut usize,
-    ) -> Result<TypeRef, SpecializationError> {
-        if *pc >= bytecode.len() {
-            return Err(SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: "Unexpected end of bytecode reading type tag".to_string(),
-            });
-        }
-
-        let tag = bytecode[*pc];
-        *pc += 1;
-
-        match tag {
-            0 => {
-                // Concrete
-                let type_id = self.read_varint(bytecode, pc)? as u32;
-                Ok(TypeRef::Concrete(TypeId(type_id)))
-            }
-            1 => {
-                // Generic
-                if *pc + 1 >= bytecode.len() {
-                    return Err(SpecializationError::InvalidBytecode {
-                        offset: *pc,
-                        message: "Unexpected end reading generic type param".to_string(),
-                    });
-                }
-                let param_id = bytecode[*pc] as u16 | ((bytecode[*pc + 1] as u16) << 8);
-                *pc += 2;
-                Ok(TypeRef::Generic(TypeParamId(param_id)))
-            }
-            2 => {
-                // Instantiated
-                let base = self.read_varint(bytecode, pc)? as u32;
-                if *pc >= bytecode.len() {
-                    return Err(SpecializationError::InvalidBytecode {
-                        offset: *pc,
-                        message: "Unexpected end reading instantiated arg count".to_string(),
-                    });
-                }
-                let arg_count = bytecode[*pc] as usize;
-                *pc += 1;
-                let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count {
-                    args.push(self.read_type_ref(bytecode, pc)?);
-                }
-                Ok(TypeRef::Instantiated {
-                    base: TypeId(base),
-                    args,
-                })
-            }
-            3 => {
-                // Function
-                if *pc >= bytecode.len() {
-                    return Err(SpecializationError::InvalidBytecode {
-                        offset: *pc,
-                        message: "Unexpected end reading function param count".to_string(),
-                    });
-                }
-                let param_count = bytecode[*pc] as usize;
-                *pc += 1;
-                let mut params = Vec::with_capacity(param_count);
-                for _ in 0..param_count {
-                    params.push(self.read_type_ref(bytecode, pc)?);
-                }
-                let return_type = Box::new(self.read_type_ref(bytecode, pc)?);
-                Ok(TypeRef::Function {
-                    params,
-                    return_type,
-                    contexts: smallvec::smallvec![],
-                })
-            }
-            4 => {
-                // Reference
-                let inner = Box::new(self.read_type_ref(bytecode, pc)?);
-                if *pc + 1 >= bytecode.len() {
-                    return Err(SpecializationError::InvalidBytecode {
-                        offset: *pc,
-                        message: "Unexpected end reading reference flags".to_string(),
-                    });
-                }
-                let mutability = if bytecode[*pc] == 0 {
-                    crate::types::Mutability::Immutable
-                } else {
-                    crate::types::Mutability::Mutable
-                };
-                *pc += 1;
-                let tier = match bytecode[*pc] {
-                    0 => crate::types::CbgrTier::Tier0,
-                    1 => crate::types::CbgrTier::Tier1,
-                    _ => crate::types::CbgrTier::Tier2,
-                };
-                *pc += 1;
-                Ok(TypeRef::Reference {
-                    inner,
-                    mutability,
-                    tier,
-                })
-            }
-            5 => {
-                // Tuple
-                if *pc >= bytecode.len() {
-                    return Err(SpecializationError::InvalidBytecode {
-                        offset: *pc,
-                        message: "Unexpected end reading tuple element count".to_string(),
-                    });
-                }
-                let elem_count = bytecode[*pc] as usize;
-                *pc += 1;
-                let mut elements = Vec::with_capacity(elem_count);
-                for _ in 0..elem_count {
-                    elements.push(self.read_type_ref(bytecode, pc)?);
-                }
-                Ok(TypeRef::Tuple(elements))
-            }
-            6 => {
-                // Array
-                let element = Box::new(self.read_type_ref(bytecode, pc)?);
-                let length = self.read_varint(bytecode, pc)?;
-                Ok(TypeRef::Array { element, length })
-            }
-            7 => {
-                // Slice
-                let element = Box::new(self.read_type_ref(bytecode, pc)?);
-                Ok(TypeRef::Slice(element))
-            }
-            10 => {
-                // ConstValue — CONST-GENERIC-VALUE-CARRY-1
-                let v = self.read_varint(bytecode, pc)? as i64;
-                Ok(TypeRef::ConstValue(v))
-            }
-            _ => {
-                // Unknown tag - default to unit
-                Ok(TypeRef::Concrete(TypeId::UNIT))
-            }
-        }
-    }
-
-    // ========================================================================
-    // Bytecode Writing Helpers
-    // ========================================================================
-
-    /// Writes a register to bytecode.
-    #[allow(dead_code)] // parked, T0134
-    fn write_reg(&self, output: &mut Vec<u8>, reg: u16) {
-        if reg < 128 {
-            output.push(reg as u8);
-        } else {
-            output.push(0x80 | ((reg >> 8) as u8));
-            output.push((reg & 0xFF) as u8);
-        }
-    }
-
-    /// Writes a varint to bytecode.
-    /// Delegates to the crate's encoding authority.  This carried its own
-    /// copy of the LEB128 loop; the two agreed byte for byte, but a private
-    /// re-implementation of a wire format is a divergence waiting to happen
-    /// — the bytes it writes are read by `decode_varint` (T0132).
-    #[allow(dead_code)] // parked, T0134
-    fn write_varint(&self, output: &mut Vec<u8>, value: u64) {
-        crate::encoding::encode_varint(value, output);
-    }
-
-    /// Writes a signed varint (ZigZag encoded).
-    #[allow(dead_code)] // parked, T0134
-    fn write_signed_varint(&self, output: &mut Vec<u8>, value: i64) {
-        crate::encoding::encode_signed_varint(value, output);
-    }
-
-    /// Writes a TypeRef to bytecode.
-    #[allow(dead_code)] // parked, T0134
-    fn write_type_ref(&self, output: &mut Vec<u8>, type_ref: &TypeRef) {
-        match type_ref {
-            TypeRef::Concrete(id) => {
-                output.push(0); // tag
-                self.write_varint(output, id.0 as u64);
-            }
-            TypeRef::Generic(param) => {
-                output.push(1); // tag
-                output.push((param.0 & 0xFF) as u8);
-                output.push(((param.0 >> 8) & 0xFF) as u8);
-            }
-            TypeRef::Instantiated { base, args } => {
-                output.push(2); // tag
-                self.write_varint(output, base.0 as u64);
-                output.push(args.len() as u8);
-                for arg in args {
-                    self.write_type_ref(output, arg);
-                }
-            }
-            TypeRef::Function {
-                params,
-                return_type,
-                ..
-            } => {
-                output.push(3); // tag
-                output.push(params.len() as u8);
-                for param in params {
-                    self.write_type_ref(output, param);
-                }
-                self.write_type_ref(output, return_type);
-            }
-            TypeRef::Reference {
-                inner,
-                mutability,
-                tier,
-            } => {
-                output.push(4); // tag
-                self.write_type_ref(output, inner);
-                output.push(*mutability as u8);
-                output.push(*tier as u8);
-            }
-            TypeRef::Tuple(elements) => {
-                output.push(5); // tag
-                output.push(elements.len() as u8);
-                for elem in elements {
-                    self.write_type_ref(output, elem);
-                }
-            }
-            TypeRef::Array { element, length } => {
-                output.push(6); // tag
-                self.write_type_ref(output, element);
-                self.write_varint(output, *length);
-            }
-            TypeRef::Slice(element) => {
-                output.push(7); // tag
-                self.write_type_ref(output, element);
-            }
-            TypeRef::Rank2Function {
-                type_param_count,
-                params,
-                return_type,
-                ..
-            } => {
-                output.push(8); // tag for Rank2Function
-                self.write_varint(output, *type_param_count as u64);
-                output.push(params.len() as u8);
-                for param in params {
-                    self.write_type_ref(output, param);
-                }
-                self.write_type_ref(output, return_type);
-            }
-            TypeRef::AssociatedProjection { base, assoc } => {
-                output.push(9); // tag for AssociatedProjection
-                self.write_type_ref(output, base);
-                let bytes = assoc.as_bytes();
-                self.write_varint(output, bytes.len() as u64);
-                output.extend_from_slice(bytes);
-            }
-            TypeRef::ConstValue(v) => {
-                // CONST-GENERIC-VALUE-CARRY-1: const-generic value argument.
-                output.push(10); // tag for ConstValue
-                self.write_varint(output, *v as u64);
-            }
-        }
     }
 
     /// Returns statistics from specialization.

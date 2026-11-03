@@ -3062,21 +3062,22 @@ impl InterpreterState {
     /// Resolve a call-site type in the current caller's generic scope.
     /// The descriptor owns parameter IDs; frame vectors carry only arguments.
     /// Shared substitution also carries arguments nested inside other types.
-    pub(crate) fn resolve_generic_witness(&self, ty: &crate::types::TypeRef) -> crate::types::TypeRef {
+    pub(crate) fn resolve_generic_witness(&self, ty: &crate::types::TypeRef) -> InterpreterResult<crate::types::TypeRef> {
         if !ty.is_generic() {
-            return ty.clone();
+            return Ok(ty.clone());
         }
         let Some(args) = self.call_stack.current_generic_witnesses() else {
-            return ty.clone();
+            return Ok(ty.clone());
         };
         let Some(function) = self
             .call_stack
             .current()
             .and_then(|frame| self.get_function(frame.function))
         else {
-            return ty.clone();
+            return Ok(ty.clone());
         };
         crate::mono::TypeSubstitution::from_function(function, args).apply(ty)
+            .map_err(|error| InterpreterError::Panic { message: format!("invalid generic witness substitution: {error}") })
     }
 
     /// Install only an environment's own concrete witnesses, in the target

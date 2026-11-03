@@ -110,7 +110,7 @@ pub(in super::super) fn handle_loadt(
     // Generic (no witness) loads nil — callers keep their legacy
     // erased-T fallbacks.
     let tr = super::bytecode_io::read_type_ref(state)?;
-    let tr = state.resolve_generic_witness(&tr);
+    let tr = state.resolve_generic_witness(&tr)?;
     // CONST-GENERIC-VALUE-CARRY-1 (task #19): a const-generic witness is a
     // VALUE, not a type.  `LoadT { Generic(idx) }` in a const-param body
     // (`fn capacity(&self) -> Int { SIZE }`) resolves through the SAME
