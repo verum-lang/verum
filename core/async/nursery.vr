@@ -56,10 +56,12 @@ mount time.Duration;
 mount text.Text;
 mount core.base.maybe.Maybe;
 mount core.base.result.{Result, Error};
+mount core.base.protocols.{Describable, ErrorSource};
+mount core.base.error.ErrorProtocol;
 mount collections.List;
 mount sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount sync.Mutex;
-mount super.task.JoinHandle;
+mount super.task.{JoinError, JoinHandle};
 mount super.Future;
 
 // =============================================================================
@@ -171,10 +173,10 @@ public type NurseryError is
         attempted: Int,
     };
 
-implement Error for NurseryError {
-    fn message(&self) -> Text {
+implement Describable for NurseryError {
+    fn description(&self) -> Text {
         match self {
-            NurseryError.Single(e) => f"nursery task error: {e.message()}",
+            NurseryError.Single(e) => f"nursery task error: {e.description()}",
             NurseryError.Multiple(errors) => {
                 let count = errors.len();
                 f"nursery multiple errors ({count} total)"
@@ -187,8 +189,10 @@ implement Error for NurseryError {
                 f"nursery task limit exceeded: limit {limit}, attempted {attempted}",
         }
     }
+}
 
-    fn source(&self) -> Maybe<&Error> {
+implement ErrorSource for NurseryError {
+    fn source(&self) -> Maybe<&dyn ErrorSource> {
         match self {
             NurseryError.Single(e) => Maybe.Some(e.as_ref()),
             _ => Maybe.None,
@@ -196,9 +200,11 @@ implement Error for NurseryError {
     }
 }
 
+implement ErrorProtocol for NurseryError {}
+
 implement Display for NurseryError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.message())
+        f.write_str(&self.description())
     }
 }
 
@@ -206,7 +212,7 @@ implement Debug for NurseryError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             NurseryError.Single(e) =>
-                f.write_str(f"NurseryError.Single({e.message()})".as_str()),
+                f.write_str(f"NurseryError.Single({e.description()})".as_str()),
             NurseryError.Multiple(errors) =>
                 f.write_str(f"NurseryError.Multiple(len={errors.len()})".as_str()),
             NurseryError.Timeout { pending_count, completed_count } =>
@@ -219,14 +225,6 @@ implement Debug for NurseryError {
         }
     }
 }
-
-// Eq is intentionally NOT defined: NurseryError carries `Heap<Error>`
-// (a trait-object payload) for `Single` / `Multiple`, and the `Error`
-// protocol does not extend Eq. Comparing two trait-object errors via
-// `message()` text would be an oracle leak masquerading as structural
-// equality. Use pattern-test (`x is NurseryError.Cancelled`) for
-// taxonomy queries; reach for `.message()` only when text comparison
-// is the explicit contract.
 
 // =============================================================================
 // Task Handle
@@ -296,25 +294,20 @@ implement<T> TaskHandle<T> {
 implement<T> Future for TaskHandle<T> {
     type Output = Result<T, NurseryError>;
 
-    async fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
         match self.inner.poll(cx) {
             Poll.Ready(Result.Ok(value)) => {
                 self.record_completion(Maybe.None);
                 Poll.Ready(Result.Ok(value))
             },
-            Poll.Ready(Result.Err(e)) if e.is_panic() => {
-                let msg = f"{e}";
-                self.record_completion(Maybe.Some(Heap.new(e)));
-                Poll.Ready(Result.Err(NurseryError.Panic(msg)))
-            },
-            Poll.Ready(Result.Err(e)) if e.is_cancelled() => {
-                self.record_completion(Maybe.Some(Heap.new(e)));
-                Poll.Ready(Result.Err(NurseryError.Cancelled))
-            },
-            Poll.Ready(Result.Err(e)) => {
-                let h = Heap.new(e);
-                self.record_completion(Maybe.Some(h.clone()));
-                Poll.Ready(Result.Err(NurseryError.Single(h)))
+            Poll.Ready(Result.Err(error)) => {
+                let message = f"{error}";
+                self.record_completion(Maybe.Some(Heap.new(Error.new(message.clone()))));
+                let failure = match error {
+                    JoinError.Cancelled => NurseryError.Cancelled,
+                    JoinError.Panicked => NurseryError.Panic(message),
+                };
+                Poll.Ready(Result.Err(failure))
             },
             Poll.Pending => Poll.Pending,
         }

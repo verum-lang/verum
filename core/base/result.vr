@@ -20,7 +20,7 @@ mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.base.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
 mount core.base.protocols.{
     Eq, Ord, PartialEq, Clone, Copy, Default, Debug, Display, Hash, Hasher, From, Into,
-    Formatter, FormatError,
+    Formatter, FormatError, Describable, ErrorSource,
 };
 mount core.base.iterator.Iterator;
 
@@ -500,6 +500,8 @@ implement Describable for Error {
         self.message.clone()
     }
 }
+
+implement ErrorSource for Error {}
 
 implement Eq for Error {
     fn eq(&self, other: &Error) -> Bool {

@@ -48,6 +48,8 @@ mount core.math.nn.{Module, Linear};
 mount core.io.path.{Path};
 // Prelude is curated (core/mod.vr): serde is mounted explicitly.
 mount core.base.serde.{Serialize, Deserialize};
+mount core.base.protocols.{Describable, ErrorSource};
+mount core.base.error.ErrorProtocol;
 mount core.math.internal.{Value};
 
 // =============================================================================
@@ -1910,8 +1912,8 @@ implement AgentParseError {
     }
 }
 
-implement Error for AgentParseError {
-    fn message(&self) -> Text {
+implement Describable for AgentParseError {
+    fn description(&self) -> Text {
         if let Maybe.Some(pos) = self.position {
             f"{self.message} at position {pos}"
         } else {
@@ -1919,6 +1921,9 @@ implement Error for AgentParseError {
         }
     }
 }
+
+implement ErrorSource for AgentParseError {}
+implement ErrorProtocol for AgentParseError {}
 
 implement Display for AgentParseError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
