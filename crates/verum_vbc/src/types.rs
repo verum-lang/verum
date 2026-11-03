@@ -1066,6 +1066,15 @@ pub struct TypeDescriptor {
 }
 
 impl TypeDescriptor {
+    /// Completion may revisit an imported implementation. Only an identical
+    /// row represents the same evidence after local ID remapping.
+    #[cfg(feature = "codegen")]
+    pub(crate) fn register_implementation(&mut self, implementation: ProtocolImpl) {
+        if !self.protocols.contains(&implementation) {
+            self.protocols.push(implementation);
+        }
+    }
+
     /// A scalar impl carrier describes a built-in, not a nominal declaration.
     /// Its kind, declared spelling, and original ID must all agree.
     pub fn canonical_scalar_type_id(&self, declared_name: &str) -> Option<TypeId> {

@@ -10009,7 +10009,7 @@ impl VbcCodegen {
                 .iter_mut()
                 .find(|t| t.name == name_sid && t.kind == crate::types::TypeKind::Primitive)
             {
-                carrier.protocols.push(impl_record);
+                carrier.register_implementation(impl_record);
                 return Ok(());
             }
             let mut carrier = crate::types::TypeDescriptor {
@@ -10706,7 +10706,7 @@ impl VbcCodegen {
                                     })
                                 });
                             match local_slot {
-                                Some(idx) => self.types[idx].protocols.push(impl_record),
+                                Some(idx) => self.types[idx].register_implementation(impl_record),
                                 None => {
                                     self.attach_impl_to_undeclared_target(
                                         ty_name.as_str(),

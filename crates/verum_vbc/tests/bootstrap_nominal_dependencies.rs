@@ -856,3 +856,24 @@ fn a_mounted_record_cannot_supply_a_protocol_implementation_row() {
     let error = codegen.collect_declaration_interface(&[&ast]).unwrap_err();
     assert!(error.to_string().contains("source.schema.Marker` is not a protocol"), "{error}");
 }
+
+#[test]
+fn completing_a_carrier_preserves_distinct_protocol_instantiations_once() {
+    let ast = source("module packet.wire;
+        public type Codec<T> is protocol {};
+        implement Codec<Int> for Int {}
+        implement Codec<Float> for Int {}");
+    let mut first = VbcCodegen::with_config(CodegenConfig::new("packet.wire"));
+    let prior = first.collect_declaration_interface(&[&ast]).unwrap();
+    // Model a prior interface's transitive dependency on this scalar carrier.
+    let root = source("module consumer; mount packet.wire.Int as Wire; fn use_wire(x: Wire) -> Int { x }");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("packet.wire"));
+    codegen.import_bootstrap_nominal_dependencies(&[&ast, &root], &[&prior]).unwrap();
+    let module = codegen.collect_declaration_interface(&[&ast]).unwrap();
+    let rows = &module.get_type(TypeId::INT).unwrap().protocols;
+    let arguments: Vec<_> = rows.iter().map(|row| {
+        assert_eq!(row.protocol_args_text.len(), 1);
+        module.get_string(row.protocol_args_text[0]).unwrap()
+    }).collect();
+    assert_eq!(arguments, ["Int", "Float"]);
+}
