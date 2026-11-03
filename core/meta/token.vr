@@ -51,6 +51,7 @@
 module core.meta.token;
 
 mount core.{Result, Maybe, Text, List, Iterator};
+mount core.base.Bytes;
 mount meta.span.{MetaSpan};
 
 // =============================================================================

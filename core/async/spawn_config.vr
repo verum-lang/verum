@@ -20,6 +20,8 @@
 )
 module core.async.spawn_config;
 
+mount super.future.Future;
+mount super.task.{JoinHandle, spawn};
 
 // =============================================================================
 // Recovery Strategies
