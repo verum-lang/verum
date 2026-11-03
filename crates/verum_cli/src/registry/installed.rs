@@ -1,11 +1,11 @@
 //! Bind an ordinary project's registry dependencies to its installed, locked source.
+use super::cache_manager::SourceSnapshot;
 use super::{CacheManager, CogSource, Lockfile};
 use crate::config::{Dependency, Manifest, is_valid_cog_name};
 use crate::error::{CliError, Result};
 use semver::{Version, VersionReq};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use tempfile::TempDir;
 use verum_compiler::session::Session;
 use verum_modules::cog_resolver::CogResolver;
 
@@ -34,13 +34,13 @@ fn requirements(manifest: &Manifest) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Retain the returned private directory until compilation finishes. Every run
+/// Retain the returned private snapshots until compilation finishes. Every run
 /// reads and verifies the locked archive again, including when fully offline.
 pub(crate) fn register(
     session: &mut Session,
     project: &Path,
     manifest: &Manifest,
-) -> Result<Option<TempDir>> {
+) -> Result<Option<Vec<SourceSnapshot>>> {
     let mut pending = requirements(manifest);
     if pending.is_empty() {
         return Ok(None);
@@ -66,11 +66,7 @@ pub(crate) fn register(
         }
     }
     let cache = CacheManager::new(CacheManager::default_cache_dir()?)?;
-    let mut staging = tempfile::Builder::new();
-    staging.prefix("verum-installed-");
-    #[cfg(unix)]
-    staging.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700));
-    let sources = staging.tempdir()?;
+    let mut sources = Vec::new();
     let mut resolver = CogResolver::new();
     let mut loaded = HashSet::new();
     while let Some((name, requirement)) = pending.pop() {
@@ -92,26 +88,9 @@ pub(crate) fn register(
         if !loaded.insert(name.clone()) {
             continue;
         }
-        let root = sources.path().join(&name);
-        std::fs::create_dir(&root)?;
-        cache.extract_locked_source(
-            &name,
-            package.version.as_str(),
-            package.checksum.as_str(),
-            &root,
-        )?;
-        // Parse only as data: a dependency must not install its own global solver configuration.
-        let dependency: Manifest =
-            toml::from_str(&std::fs::read_to_string(Manifest::manifest_path(&root))?)?;
-        if dependency.cog.name != package.name
-            || dependency.cog.version != package.version
-            || !root.join("src").is_dir()
-        {
-            return Err(CliError::Registry(format!(
-                "Installed source does not match locked cog {name} {version}"
-            )));
-        }
-        pending.extend(requirements(&dependency));
+        let source =
+            cache.materialize_source(&name, package.version.as_str(), package.checksum.as_str())?;
+        pending.extend(requirements(&source.manifest));
         let module = name.replace('-', "_");
         if resolver.is_external_cog(&module)
             || module == manifest.cog.name.as_str().replace('-', "_")
@@ -120,7 +99,8 @@ pub(crate) fn register(
                 "Conflicting installed module name {module}"
             )));
         }
-        resolver.register_cog(module, package.version.clone(), root);
+        resolver.register_cog(module, package.version.clone(), source.path().to_path_buf());
+        sources.push(source);
     }
     session.set_cog_resolver(resolver);
     Ok(Some(sources))

@@ -739,6 +739,9 @@ fn run_script_interpreted(
     //  diagnostic instead of producing a confusing parse error
     //  half a megabyte deeper into the pipeline.
     let mut script_cog_resolver: Option<verum_modules::cog_resolver::CogResolver> = None;
+    // Keep verified private package files alive through compilation, cached
+    // execution, diagnostics, and all error exits.
+    let mut _source_snapshots = Vec::new();
     if let Some(fm) = ctx.frontmatter.as_ref() {
         check_frontmatter_version(fm)?;
         if !fm.dependencies.is_empty() {
@@ -755,6 +758,7 @@ fn run_script_interpreted(
                 persist_script_lockfile(&ctx, input, &resolved.locked)?;
             }
             script_cog_resolver = Some(resolved.resolver);
+            _source_snapshots = resolved.sources;
         }
     }
 
@@ -804,7 +808,12 @@ fn run_script_interpreted(
     }
     if let Some(entry) = cached {
         ui::status("Running", &format!("{} (cached VBC)", input.display()));
-        return execute_cached_vbc(session, args, &entry.vbc, timings, runtime_report);
+        let exit_code = execute_cached_vbc(session, args, &entry.vbc, timings, runtime_report)?;
+        drop(_source_snapshots);
+        if let Some(code) = exit_code {
+            std::process::exit(code);
+        }
+        return Ok(());
     }
     ui::status("Running", &format!("{} (interpreter)", input.display()));
     let result = {
@@ -887,6 +896,7 @@ fn run_script_interpreted(
     //  of calling `process::exit` directly, so the cache-store step
     //  above runs first. `None` here means the script returned `()`
     //  or a non-numeric value — exit 0 by convention.
+    drop(_source_snapshots);
     if let Some(code) = session.take_exit_code() {
         std::process::exit(code);
     }
@@ -905,7 +915,7 @@ fn execute_cached_vbc(
     vbc_bytes: &[u8],
     timings: bool,
     mut runtime_report: Option<crate::runtime_diagnostics::ReportFile>,
-) -> Result<(), CliError> {
+) -> Result<Option<i32>, CliError> {
     let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes)
         .map_err(|e| CliError::Custom(format!("cached VBC deserialise failed: {e}")))?;
 
@@ -942,10 +952,7 @@ fn execute_cached_vbc(
     if timings {
         print_phase_timings(&session);
     }
-    if let Some(code) = session.take_exit_code() {
-        std::process::exit(code);
-    }
-    Ok(())
+    Ok(session.take_exit_code())
 }
 
 /// Resolve a script's frontmatter dependencies into a populated
@@ -963,11 +970,10 @@ fn execute_cached_vbc(
 ///  registry HTTP client (`get_metadata` for exact versions,
 ///  `get_latest_version` for bare names / range constraints
 ///  since the registry doesn't yet expose `list_versions`),
-///  tarball downloaded into the cog cache (`<cache>/verum/cogs/
-///  <name>/<version>/<name>-<version>.tar.gz`), extracted into
-///  a sibling directory, registered with the resolver. Cache
-///  hits (extracted dir already present) skip both download and
-///  extract.
+///  tarball retained in the cog cache (`<cache>/verum/cogs/
+///  <name>/<version>/<name>-<version>.tar.gz`), verified and
+///  materialized into an owned private snapshot. A cached archive
+///  avoids downloading; stale or partial extracted trees are never used.
 ///  3. **Git-form** (`{ name = "x", git = "https://...", rev = "..." }`):
 ///  cloned into `<cache>/verum/git/<name>-<rev>/`, checked out
 ///  to the requested rev/branch/tag, registered with the
@@ -986,6 +992,7 @@ fn execute_cached_vbc(
 struct ResolvedDeps {
     resolver: verum_modules::cog_resolver::CogResolver,
     locked: Vec<crate::script::lockfile::LockedDep>,
+    sources: Vec<crate::registry::cache_manager::SourceSnapshot>,
 }
 
 fn resolve_script_dependencies(
@@ -996,6 +1003,7 @@ fn resolve_script_dependencies(
     use crate::script::lockfile::LockedDep;
     let mut resolver = verum_modules::cog_resolver::CogResolver::new();
     let mut locked: Vec<LockedDep> = Vec::new();
+    let mut sources = Vec::new();
     let script_dir = script_path
         .parent()
         .map(|p| p.to_path_buf())
@@ -1050,6 +1058,7 @@ fn resolve_script_dependencies(
                     &entry,
                 );
                 locked.push(entry.locked);
+                sources.extend(entry.source);
                 registry_count += 1;
             }
             DepSpec::Short(spec) => {
@@ -1066,6 +1075,7 @@ fn resolve_script_dependencies(
                     &entry,
                 );
                 locked.push(entry.locked);
+                sources.extend(entry.source);
                 registry_count += 1;
             }
         }
@@ -1089,7 +1099,7 @@ fn resolve_script_dependencies(
             &format!("{git_count} git-cog(s) registered"),
         );
     }
-    Ok(ResolvedDeps { resolver, locked })
+    Ok(ResolvedDeps { resolver, locked, sources })
 }
 
 /// Resolved registry/git dependency: extracted root + lockfile entry.
@@ -1097,6 +1107,7 @@ struct ResolvedDepEntry {
     root: std::path::PathBuf,
     version: String,
     locked: crate::script::lockfile::LockedDep,
+    source: Option<crate::registry::cache_manager::SourceSnapshot>,
 }
 
 /// Parse a short-form dep spec `"name@version"` or `"name"` into
@@ -1121,18 +1132,28 @@ fn parse_short_dep(spec: &str) -> Option<(String, Option<String>)> {
 }
 
 /// Resolve a registry-form dependency: pick the concrete version,
-/// download into the cog cache (skip if already cached + extracted),
-/// extract the tarball, return the extracted-source root + lockfile
-/// entry.
+/// verify the cached archive and own its complete private source snapshot.
 fn resolve_registry_dep(
     name: &str,
     version_req: Option<&str>,
 ) -> Result<ResolvedDepEntry, CliError> {
-    use crate::registry::{cache_manager::CacheManager, client::RegistryClient, vbca_fetcher};
-
-    let client = RegistryClient::from_manifest()?;
+    let client = crate::registry::RegistryClient::from_manifest()?;
     let cache_dir = crate::registry::cache_dir()?;
-    let cache_manager = CacheManager::new(cache_dir.clone())?;
+    resolve_registry_dep_with(name, version_req, &client, &cache_dir)
+}
+
+fn resolve_registry_dep_with(
+    name: &str,
+    version_req: Option<&str>,
+    client: &crate::registry::RegistryClient,
+    cache_dir: &std::path::Path,
+) -> Result<ResolvedDepEntry, CliError> {
+    use crate::registry::{cache_manager::CacheManager, vbca_fetcher};
+    if !crate::config::is_valid_cog_name(name) {
+        return Err(CliError::Registry("Invalid registry dependency name".into()));
+    }
+    let requirement = version_req.map(semver::VersionReq::parse).transpose()?;
+    let cache_manager = CacheManager::new(cache_dir.to_owned())?;
 
     // Version resolution. The registry doesn't expose a
     // `list_versions` endpoint yet, so:
@@ -1151,6 +1172,12 @@ fn resolve_registry_dep(
             }
         }
     };
+    let parsed_version = semver::Version::parse(&version)?;
+    if requirement.is_some_and(|req| !req.matches(&parsed_version)) {
+        return Err(CliError::Registry(format!(
+            "Registry version {version} does not satisfy the requirement for {name}"
+        )));
+    }
 
     // Phase 14: VBCA fast-path. When the registry exposes a
     // precompiled `.vbca` for `(name, version, compiler-version)`,
@@ -1182,23 +1209,21 @@ fn resolve_registry_dep(
             root: vbca_path,
             version,
             locked,
+            source: None,
         });
     }
 
-    let extracted_root = cache_dir.join(name).join(&version);
-    let archive_path = extracted_root.join(format!("{}-{}.tar.gz", name, version));
-    let needs_install = !looks_extracted(&extracted_root);
-
-    if needs_install {
-        let metadata = client.get_metadata(name, &version)?;
-        let url = client.download_url(name, &version);
-        let _archive =
-            cache_manager.download_cog(name, &version, url.as_str(), metadata.checksum.as_str())?;
-        cache_manager.extract(&archive_path, &extracted_root)?;
+    let metadata = client.get_metadata(name, &version)?;
+    if metadata.name.as_str() != name || metadata.version.as_str() != version {
+        return Err(CliError::Registry(format!(
+            "Registry metadata does not match {name} {version}"
+        )));
     }
-
-    let root = extracted_root.clone();
-    let integrity = compute_path_cog_integrity(&root);
+    let url = client.download_url(name, &version);
+    cache_manager.get_or_download(name, &version, url.as_str(), metadata.checksum.as_str())?;
+    let source = cache_manager.materialize_source(name, &version, metadata.checksum.as_str())?;
+    let root = source.path().to_path_buf();
+    let integrity = format!("sha256-source-{}", source.checksum());
     let locked = crate::script::lockfile::LockedDep {
         name: name.to_string(),
         version: version.clone(),
@@ -1209,6 +1234,7 @@ fn resolve_registry_dep(
         root,
         version,
         locked,
+        source: Some(source),
     })
 }
 
@@ -1349,14 +1375,8 @@ fn resolve_git_dep(
         root: dest,
         version,
         locked,
+        source: None,
     })
-}
-
-/// Check if the extracted directory looks like a populated cog
-/// (contains either a `verum.toml` manifest or a `src/` directory).
-/// Used to short-circuit the download+extract path on cache hits.
-fn looks_extracted(dir: &std::path::Path) -> bool {
-    dir.join("verum.toml").is_file() || dir.join("src").is_dir()
 }
 
 /// Heuristic: a version string is "exact" when it parses as a bare
@@ -2041,3 +2061,7 @@ mod script_dep_tests {
 #[cfg(test)]
 #[path = "../../tests/file/script_permission_policy.rs"]
 mod script_permission_policy_tests;
+
+#[cfg(test)]
+#[path = "../../tests/file/registry_materialization.rs"]
+mod registry_materialization_tests;

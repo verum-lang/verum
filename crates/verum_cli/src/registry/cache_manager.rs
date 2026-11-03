@@ -9,6 +9,24 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use verum_common::{List, Map, Text};
 
+/// A complete, digest-verified source archive held for one compilation/run.
+/// Dropping the owner removes its private files, including on any later error.
+pub(crate) struct SourceSnapshot {
+    directory: tempfile::TempDir,
+    pub(crate) manifest: crate::config::Manifest,
+    checksum: String,
+}
+
+impl SourceSnapshot {
+    pub(crate) fn path(&self) -> &Path {
+        self.directory.path()
+    }
+
+    pub(crate) fn checksum(&self) -> &str {
+        &self.checksum
+    }
+}
+
 /// Global package cache manager
 pub struct CacheManager {
     cache_dir: PathBuf,
@@ -428,6 +446,43 @@ impl CacheManager {
         }
 
         Ok(removed)
+    }
+
+    /// Materialize a complete source cog from its verified cached archive.
+    /// Shared extracted directories are never evidence of a successful install.
+    pub(crate) fn materialize_source(
+        &self,
+        name: &str,
+        version: &str,
+        checksum: &str,
+    ) -> Result<SourceSnapshot> {
+        if !crate::config::is_valid_cog_name(name) || semver::Version::parse(version).is_err() {
+            return Err(CliError::Registry("Invalid source cog coordinate".into()));
+        }
+        let mut staging = tempfile::Builder::new();
+        staging.prefix("verum-source-");
+        #[cfg(unix)]
+        staging.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700));
+        let directory = staging.tempdir()?;
+        self.extract_locked_source(name, version, checksum, directory.path())?;
+        // Parse dependency configuration as data, without installing global
+        // solver or project settings supplied by the package.
+        let manifest: crate::config::Manifest = toml::from_str(&std::fs::read_to_string(
+            crate::config::Manifest::manifest_path(directory.path()),
+        )?)?;
+        if manifest.cog.name.as_str() != name
+            || manifest.cog.version.as_str() != version
+            || !directory.path().join("src").is_dir()
+        {
+            return Err(CliError::Registry(format!(
+                "Installed source does not match cog {name} {version}"
+            )));
+        }
+        Ok(SourceSnapshot {
+            directory,
+            manifest,
+            checksum: checksum.to_owned(),
+        })
     }
 
     /// Materialize exactly the bytes pinned by the project's lock. The caller
