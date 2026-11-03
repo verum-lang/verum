@@ -17783,10 +17783,10 @@ impl VbcCodegen {
     ///
     /// These init functions are registered as global constructors.
     fn compile_pending_tls_inits(&mut self) -> CodegenResult<()> {
-        let tls_inits = std::mem::take(&mut self.pending_tls_inits);
+        let mut tls_inits = std::mem::take(&mut self.pending_tls_inits).into_iter();
 
-        for (name, init_expr, slot, declared_type, source_module) in tls_inits {
-            let saved_source_module = std::mem::replace(&mut self.ctx.current_source_module, source_module);
+        while let Some((name, init_expr, slot, declared_type, source_module)) = tls_inits.next() {
+            let saved_source_module = std::mem::replace(&mut self.ctx.current_source_module, source_module.clone());
             let init_name = format!("__tls_init_{}", name);
             let func_id = FunctionId(self.next_func_id);
             self.next_func_id = self.next_func_id.saturating_add(1);
@@ -17803,7 +17803,27 @@ impl VbcCodegen {
             let initialized = self.compile_expr(&init_expr);
             self.ctx.pop_disambig_context(saved_disambig);
             self.ctx.current_return_type_full = None;
-            if let Ok(Some(result_reg)) = initialized {
+            let initialized = match initialized {
+                Ok(result) => result,
+                Err(mut error) => {
+                    // A failed initializer cannot publish a successful nil
+                    // constructor. Discard its partial body and restore the
+                    // declaration scope before propagating the original error.
+                    self.ctx.end_function();
+                    self.ctx.current_source_module = saved_source_module;
+                    error.span.get_or_insert(init_expr.span);
+                    error.context.get_or_insert(init_name);
+                    // Finalization retries must observe the same failure;
+                    // keep the failed declaration, unvisited tail and any
+                    // newly queued initializers in their original order.
+                    let added = std::mem::take(&mut self.pending_tls_inits);
+                    self.pending_tls_inits.push((name, init_expr, slot, declared_type, source_module));
+                    self.pending_tls_inits.extend(tls_inits);
+                    self.pending_tls_inits.extend(added);
+                    return Err(error);
+                }
+            };
+            if let Some(result_reg) = initialized {
                 // Store result in TLS slot
                 let slot_reg = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadI {
