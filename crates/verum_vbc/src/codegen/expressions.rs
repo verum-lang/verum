@@ -12407,16 +12407,9 @@ impl VbcCodegen {
         None
     }
 
-    /// **T0106** — extract the protocol name from a receiver type-name
-    /// that carries a `dyn` fact, or `None` when it is a plain type.
-    /// Handles the shapes `extract_type_name_from_ast` produces for
-    /// dyn-carrying types: bare `"dyn:Debug"`, carrier-wrapped
-    /// `"Heap<dyn:Debug>"` / `"Shared<dyn:Debug>"`, and multi-bound
-    /// `"dyn:Debug+Clone"` (the FIRST bound wins — the runtime resolves
-    /// the concrete implementor from the receiver's TypeId regardless of
-    /// which protocol names the vtable slot). Returns the substring so
-    /// the caller can build `dyn:<proto>.<method>` without allocating.
-    fn dyn_protocol_of(type_name: &str) -> Option<&str> {
+    /// Recover the declared protocol bounds of a dynamic receiver or its
+    /// transparent carrier. A collection containing dynamic elements is distinct.
+    pub(super) fn dyn_receiver_bounds(type_name: &str) -> Option<&str> {
         // T0277/T0378 leg: a `dyn:` ANYWHERE in the spelling used to
         // match — so a method on a CONTAINER of protocol objects
         // (`List<dyn:Shape>.push`) was rerouted into protocol dispatch
@@ -12448,11 +12441,9 @@ impl VbcCodegen {
         } else {
             return None;
         };
-        let end = inner
-            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
-            .unwrap_or(inner.len());
-        let proto = &inner[..end];
-        (!proto.is_empty()).then_some(proto)
+        let bounds = inner.strip_suffix('>').unwrap_or(inner);
+        bounds.split('+').all(|name| !name.is_empty() && name.chars().all(|c|
+            c.is_alphanumeric() || matches!(c, '_' | '.'))).then_some(bounds)
     }
 
     /// Method owners are pointee types; reference qualifiers describe how the
@@ -13131,11 +13122,12 @@ impl VbcCodegen {
 
         // Resolve the complete receiver chain before lowering it. Own
         // methods win at each hop and cycles cannot recursively expand calls.
-        if let Some(receiver_type) = self.extract_expr_type_name(receiver) {
-            let depth = self.method_receiver_deref_count(&receiver_type, method.name.as_str());
+        let receiver_declaration = self.extract_expr_type_name(receiver);
+        if let Some(receiver_type) = receiver_declaration.as_deref() {
+            let depth = self.method_receiver_deref_count(receiver_type, method.name.as_str());
             if depth > 0 {
                 return self.compile_adjusted_method_receiver(
-                    receiver, &receiver_type, depth, method, args, resolved_target, type_args,
+                    receiver, receiver_type, depth, method, args, resolved_target, type_args,
                 );
             }
         }
@@ -15474,7 +15466,13 @@ impl VbcCodegen {
         // Check receiver type to prefix method name for correct dispatch.
         // For primitive types (Byte, Int32, UInt64), use type$ prefix.
         // For named struct types (MapFlags, MemProt, etc.), use Type:: prefix.
-        let effective_method_name = if let Some(declared) = self.declared_numeric_receiver_method(
+        let dynamic = receiver_declaration.as_deref().and_then(|name|
+            self.dynamic_method(name, method.name.as_str(), args.len())).transpose()?;
+        let effective_method_name = if let Some(member) = dynamic
+            && let Some(identity) = self.type_by_id(member.owner).and_then(|ty| self.type_declaration_identity(ty))
+        {
+            format!("dyn:{identity}.{}", method.name)
+        } else if let Some(declared) = self.declared_numeric_receiver_method(
             receiver, method.name.as_str(), args.len(),
         ) {
             declared
@@ -15567,7 +15565,7 @@ impl VbcCodegen {
                                 // instead of eroding to `Heap.method` at the
                                 // strip_generic_args branch below (T0106 dyn-carrier
                                 // dispatch erasure).
-                                if let Some(proto) = Self::dyn_protocol_of(type_name) {
+                                if let Some(proto) = Self::dyn_receiver_bounds(type_name).and_then(|bounds| bounds.split('+').next()) {
                                     format!("dyn:{}.{}", proto, method.name)
                                 } else if self.ctx.generic_type_params.contains(type_name) {
                                     // Generic type parameter — runtime

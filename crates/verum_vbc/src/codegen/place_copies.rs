@@ -151,6 +151,9 @@ impl VbcCodegen {
                     self.copy_selected_call_result(reg, start, end, type_args, args, depth));
                 if selected.is_some() { return selected; }
                 let owner = self.extract_expr_type_name(receiver)?;
+                if let Some(result) = self.dynamic_call_result(&owner, method.name.as_str(), args.len(), type_args) {
+                    return result;
+                }
                 self.declared_method_result_type(&owner, method.name.as_str(), type_args)
             }
             ExprKind::Call { type_args, args, .. } => {

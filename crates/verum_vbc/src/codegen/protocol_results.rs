@@ -1,8 +1,14 @@
-//! Return declarations of async methods on constrained receiver parameters.
+//! Method declarations selected through protocol objects and constrained type parameters.
 use super::{CodegenError, CodegenResult, VbcCodegen};
 use crate::types::TypeRef;
 use verum_ast::{Expr, ExprKind};
 use verum_common::Maybe;
+
+pub(super) struct ProtocolMethod {
+    pub owner: crate::types::TypeId,
+    pub output: TypeRef,
+    is_async: bool,
+}
 
 impl VbcCodegen {
     /// Retain only positive, nominal constraints on this scope's type binders.
@@ -71,13 +77,69 @@ impl VbcCodegen {
         else {
             return None;
         };
-        if self.current_protocol_bounds.is_empty() || !type_args.is_empty() {
+        if !type_args.is_empty() {
             return None;
         }
-        let TypeRef::Generic(id) = self.bound_receiver_declaration(receiver)? else {
-            return None;
+        let selected = if let Some(name) = self.extract_expr_type_name(receiver)
+            && Self::dyn_receiver_bounds(&name).is_some()
+        {
+            self.dynamic_method(&name, method.as_str(), args.len())?
+        } else {
+            let TypeRef::Generic(id) = self.bound_receiver_declaration(receiver)? else {
+                return None;
+            };
+            let protocols = self.current_protocol_bounds.get(&id)?.clone();
+            self.protocol_method(protocols, method.as_str(), args.len())?
         };
-        let mut protocols = self.current_protocol_bounds.get(&id)?.clone();
+        match selected {
+            Ok(member) if member.is_async => Some(Ok(member.output)),
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        }
+    }
+
+    /// A dynamic receiver with no usable source declaration has no known
+    /// result. Other receiver families retain their own method-resolution path.
+    pub(super) fn dynamic_call_result(
+        &self,
+        receiver: &str,
+        method: &str,
+        arity: usize,
+        type_args: &[verum_ast::ty::GenericArg],
+    ) -> Option<Option<TypeRef>> {
+        Self::dyn_receiver_bounds(receiver)?;
+        let result = if type_args.is_empty() {
+            self.dynamic_method(receiver, method, arity)
+                .and_then(Result::ok)
+                .filter(|member| !member.is_async)
+                .map(|member| member.output)
+        } else {
+            None
+        };
+        Some(result)
+    }
+
+    /// Look up a dynamic call in the receiver's declared protocol hierarchy.
+    /// The selected owner also supplies the runtime dispatch key.
+    pub(super) fn dynamic_method(
+        &self,
+        receiver: &str,
+        method: &str,
+        arity: usize,
+    ) -> Maybe<CodegenResult<ProtocolMethod>> {
+        let protocols = Self::dyn_receiver_bounds(receiver)?
+            .split('+')
+            .map(|name| self.nominal_type_id(name).map(TypeRef::Concrete))
+            .collect::<Option<Vec<_>>>()?;
+        self.protocol_method(protocols, method, arity)
+    }
+
+    fn protocol_method(
+        &self,
+        mut protocols: Vec<TypeRef>,
+        method: &str,
+        arity: usize,
+    ) -> Maybe<CodegenResult<ProtocolMethod>> {
         let mut visited = Vec::new();
         let mut output = None;
         while let Some(protocol) = protocols.pop() {
@@ -100,7 +162,7 @@ impl VbcCodegen {
                 self.ctx
                     .strings
                     .get(member.name.0 as usize)
-                    .is_some_and(|name| name == method.as_str())
+                    .is_some_and(|name| name == method)
             }) {
                 let dispatch = member.method_dispatch?;
                 let TypeRef::Function {
@@ -111,17 +173,15 @@ impl VbcCodegen {
                 else {
                     return None;
                 };
-                if params.len() != args.len() {
+                if params.len() != arity {
                     continue;
                 }
                 if output.is_some() {
                     return Some(Err(CodegenError::internal(format!(
-                        "ambiguous protocol method `{}` on the awaited receiver",
-                        method.as_str()
+                        "ambiguous protocol method `{method}` on the receiver"
                     ))));
                 }
-                if !dispatch.is_async
-                    || dispatch.has_generics
+                if dispatch.has_generics
                     || dispatch.receiver == verum_ast::method_dispatch::ReceiverKind::None
                 {
                     return None;
@@ -134,10 +194,12 @@ impl VbcCodegen {
                 if !super::formal_parameters::resolved(return_type, &ids, 0) {
                     return None;
                 }
-                output = Some(
-                    crate::mono::TypeSubstitution::new(&declaration.type_params, arguments)
+                output = Some(ProtocolMethod {
+                    owner,
+                    output: crate::mono::TypeSubstitution::new(&declaration.type_params, arguments)
                         .apply(return_type),
-                );
+                    is_async: dispatch.is_async,
+                });
             }
             for parent in &declaration.protocols {
                 protocols.push(TypeRef::Concrete(crate::types::TypeId(parent.protocol.0)));

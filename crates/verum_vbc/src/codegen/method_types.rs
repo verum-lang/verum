@@ -141,7 +141,7 @@ impl VbcCodegen {
                 receiver,
                 method,
                 type_args,
-                ..
+                args,
             } = &expr.kind
             else {
                 unreachable!("collected receiver edge");
@@ -156,6 +156,16 @@ impl VbcCodegen {
                     name: name.clone(),
                     chain: name.clone(),
                     declared: name,
+                };
+                continue;
+            }
+            if let Some(result) = types.declared.as_deref().and_then(|owner|
+                self.dynamic_call_result(owner, method.name.as_str(), args.len(), type_args))
+            {
+                let name: Option<Text> = result.as_ref()
+                    .and_then(|ty| self.render_field_type_ref(ty, true)).map(Into::into);
+                types = ExpressionTypes {
+                    callable: result, name: name.clone(), chain: name.clone(), declared: name,
                 };
                 continue;
             }
