@@ -8863,9 +8863,6 @@ impl VbcCodegen {
                 self.source_module_owners.declare(path);
             }
             let owner = owner.unwrap_or_else(|| self.source_module_root().to_owned());
-            // Headerless units still own their inline modules and visibility
-            // declarations. Publish the same graph before resolving signatures.
-            self.collect_callable_exports(&owner, &module.items);
             // The first named bodiless declaration is the file header selected
             // by extract_source_module_name, already published above. Later or
             // nested forward declarations still introduce child owners.
@@ -8879,6 +8876,14 @@ impl VbcCodegen {
                 }
                 self.collect_source_module_owners(std::slice::from_ref(item), &owner);
             }
+        }
+        // Select imports only after every namespace is known. A late inline
+        // declaration must shadow the same head regardless of file order.
+        for (parent, module) in files {
+            self.config.module_name = (*parent).to_owned();
+            let owner = self.source_file_owner(module, &self.config.module_name)
+                .unwrap_or_else(|| self.source_module_root().to_owned());
+            self.collect_callable_exports(&owner, &module.items);
         }
         // Protocols first: a blanket impl monomorphises onto a concrete
         // implementor at the moment that implementor is collected, so
@@ -12542,9 +12547,10 @@ impl VbcCodegen {
                     return Ok(());
                 }
 
-                if let Some(resolved) = self.resolve_module_path_head(&full_path) {
-                    full_path = resolved;
-                }
+                let source_owner = self.ctx.current_source_module.as_deref()
+                    .unwrap_or(&self.config.module_name).to_owned();
+                full_path = self.select_source_mount_path(&full_path.join("."), &source_owner)
+                    .as_str().split('.').map(str::to_owned).collect();
 
                 // The last segment is the function/item name
                 let func_name = match full_path.last() {
@@ -12567,8 +12573,6 @@ impl VbcCodegen {
                 // A lexical path remains authoritative even when it is a
                 // private rename or a lowercase namespace prefix. Capture it
                 // before namespace/function lowering takes an early return.
-                let source_owner = self.ctx.current_source_module.as_deref()
-                    .unwrap_or(&self.config.module_name).to_owned();
                 self.record_source_type_mount(&source_owner, &alias_name, &full_path.join("."));
 
                 // An exact declared module is a namespace even when it has
@@ -12700,7 +12704,7 @@ impl VbcCodegen {
                 // The files of this unit can arrive in any order. Resolve a
                 // source callable only after all declarations and export edges
                 // exist. No bare or shortened spelling establishes its owner.
-                if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name, self.lexical_type_scope()) {
+                if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name) {
                     match self.resolve_source_callable_export(&target) {
                         Ok(Some((key, info))) => self.bind_mounted_function(&alias_name, &func_name, &key, info),
                         Ok(None) => {}
@@ -13145,16 +13149,9 @@ impl VbcCodegen {
                     return Ok(());
                 }
 
-                // Build dot-separated prefix for matching (e.g., "io." or "core.")
-                let prefix_dot = format!("{}.", module_prefix.join("."));
-                // Also try with "core." prepended (modules registered as core.io.* but imported as io.*)
-                let core_prefix_dot = if module_prefix.first().map(|s| s.as_str()) != Some("core") {
-                    let mut cp = vec!["core".to_string()];
-                    cp.extend(module_prefix.iter().filter(|s| s.as_str() != ".").cloned());
-                    Some(format!("{}.", cp.join(".")))
-                } else {
-                    None
-                };
+                let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+                let selected = self.select_source_mount_path(&module_prefix.join("."), owner);
+                let prefix_dot = format!("{selected}.");
 
                 // Collect matching functions to avoid borrow conflict.
                 // Iterate by sorted qualified name so that when two
@@ -13167,11 +13164,7 @@ impl VbcCodegen {
                 let mut to_register: Vec<(String, FunctionInfo)> = Vec::new();
                 for name in sorted_names {
                     let info = &self.ctx.functions[name];
-                    // Match qualified names like "core.io.protocols.StreamError" for prefix "io."
-                    let matches = name.starts_with(&prefix_dot)
-                        || core_prefix_dot
-                            .as_ref()
-                            .is_some_and(|cp| name.starts_with(cp));
+                    let matches = name.starts_with(&prefix_dot);
                     if matches {
                         // Extract bare name (last segment after the last dot)
                         if let Some(bare) = name.rsplit('.').next() {
@@ -13275,16 +13268,6 @@ impl VbcCodegen {
             let qualified_alias = format!("{}.{}", owner, alias_name);
             let written = full_path.join(".");
             let placeholder = crate::module::FunctionId(u32::MAX);
-            if full_path.first().map(|s| s.as_str()) != Some("core") {
-                let anchored =
-                    format!("{}.{}", owner, Self::mount_relative_tail(&full_path));
-                self.mount_aliases_buffer.push((
-                    qualified_alias.clone(),
-                    placeholder,
-                    anchored,
-                    qualified_alias.clone(),
-                ));
-            }
             if qualified_alias != written {
                 self.mount_aliases_buffer.push((
                     qualified_alias.clone(),
@@ -13377,7 +13360,7 @@ impl VbcCodegen {
                 );
             }
 
-            if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name, owning_module.as_deref().unwrap_or_default()) {
+            if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name) {
                 match self.resolve_source_callable_export(&target) {
                     Ok(Some((key, info))) => self.bind_deferred_mounted_function(
                         &alias_name, &func_name, &key, info, owning_module.as_deref(),

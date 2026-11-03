@@ -65,11 +65,23 @@ struct ModuleExports {
     declarations: HashMap<String, BTreeSet<String>>,
     non_functions: HashSet<String>,
     visibility: HashMap<String, verum_ast::Visibility>,
-    named: HashMap<String, BTreeSet<String>>,
-    globs: BTreeSet<String>,
-    lexical_globs: BTreeSet<String>,
+    named: HashMap<String, BTreeSet<WrittenMountPath>>,
+    globs: BTreeSet<WrittenMountPath>,
+    lexical_globs: BTreeSet<WrittenMountPath>,
     public_children: BTreeSet<String>,
     namespaces: HashSet<String>,
+}
+
+/// Export discovery can precede namespace discovery. Keep the written edge
+/// distinct from the canonical path queued by export traversal; selecting an
+/// early partial roster would make merge order change the declaration owner.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct WrittenMountPath(verum_common::Text);
+
+impl WrittenMountPath {
+    fn select(&self, codegen: &VbcCodegen, owner: &str) -> verum_common::Text {
+        codegen.select_source_mount_path(&self.0, owner)
+    }
 }
 
 #[derive(Default)]
@@ -114,6 +126,23 @@ impl ExportCandidates {
 }
 
 impl VbcCodegen {
+    /// Select a written import once. Explicit relative/cog paths and the
+    /// source's root-qualified paths already identify their namespace; only
+    /// an unqualified module head participates in lexical namespace lookup.
+    pub(super) fn select_source_mount_path(&self, written: &str, owner: &str) -> verum_common::Text {
+        let parts = mount_path_parts(written);
+        if let Some(selected) = Self::resolve_module_path_head_in_scope(&parts, owner) {
+            return selected.join(".").into();
+        }
+        let root = owner.split('.').next().unwrap_or_default();
+        if !root.is_empty() && parts.first().is_some_and(|head| head == root) {
+            return written.into();
+        }
+        self.source_module_owners.namespace(written, owner, root)
+            .or_else(|| self.source_module_owners.member(written, owner, root))
+            .unwrap_or_else(|| written.into())
+    }
+
     /// Import intent belongs to the declaring source, independently of item
     /// order. Capture paths before signatures, without binding callable IDs or
     /// requiring the imported descriptors to have been collected yet.
@@ -123,14 +152,12 @@ impl VbcCodegen {
         mount: &verum_ast::MountDecl,
     ) {
         visit_named_mounts(&mount.tree, "", mount.alias.as_ref(), &mut |alias, written| {
-            let parts = mount_path_parts(&written);
-            let target = Self::resolve_module_path_head_in_scope(&parts, owner)
-                .map(|parts| parts.join("."))
-                .unwrap_or(written);
+            let target = self.select_source_mount_path(&written, owner);
             self.record_source_type_mount(owner, alias, &target);
         });
     }
 
+    /// Record a selected canonical path, never an unresolved source spelling.
     /// Repeated declaration passes are idempotent. Distinct explicit targets
     /// remain ambiguous; a later item cannot silently replace their evidence.
     pub(super) fn record_source_type_mount(&mut self, owner: &str, alias: &str, target: &str) {
@@ -168,6 +195,9 @@ impl VbcCodegen {
 
     /// Resolve external facades through their original source declarations.
     pub fn set_source_exports(&mut self, index: std::sync::Arc<SourceExports>) {
+        for owner in index.modules.keys() {
+            self.source_module_owners.declare(owner);
+        }
         self.dependency_source_exports = Some(index);
     }
 
@@ -256,9 +286,7 @@ impl VbcCodegen {
                 ItemKind::Axiom(d) => non_function(&d.name, &d.visibility),
                 ItemKind::Mount(mount) => {
                     for parts in Self::extract_glob_mount_paths(&mount.tree, &[]) {
-                        let path = Self::resolve_module_path_head_in_scope(&parts, owner)
-                            .unwrap_or(parts)
-                            .join(".");
+                        let path = WrittenMountPath(parts.join(".").into());
                         if mount.visibility.is_public() {
                             exports.globs.insert(path.clone());
                         }
@@ -272,10 +300,7 @@ impl VbcCodegen {
                         "",
                         mount.alias.as_ref(),
                         &mut |alias, target| {
-                            let parts = mount_path_parts(&target);
-                            let target = Self::resolve_module_path_head_in_scope(&parts, owner)
-                                .map(|parts| parts.join("."))
-                                .unwrap_or(target);
+                            let target = WrittenMountPath(target.into());
                             exports
                                 .named
                                 .entry(alias.to_owned())
@@ -382,19 +407,15 @@ impl VbcCodegen {
 
     pub(super) fn source_callable_mount(
         &self,
-        written: &str,
+        path: &str,
         alias: &str,
-        scope: &str,
     ) -> Option<String> {
-        let path = self
-            .source_module_owners
-            .member(written, scope, self.source_module_root())?;
         let (owner, name) = path.rsplit_once('.')?;
         let Some(source) = self.source_export_scope(owner) else {
             return self
                 .type_name_to_id
-                .contains_key(path.as_str())
-                .then(|| path.into_string());
+                .contains_key(path)
+                .then(|| path.to_owned());
         };
         let named_callable = source.declarations.contains_key(name) || source.named.contains_key(name)
             || [name, alias].into_iter().any(|leaf| {
@@ -407,7 +428,7 @@ impl VbcCodegen {
                                 && info.param_names.first().is_none_or(|first| first != "self")
                     })
             });
-        named_callable.then(|| path.into_string())
+        named_callable.then(|| path.to_owned())
     }
 
     /// Follow public export edges once for both nominal IDs and callable bindings.
@@ -463,12 +484,6 @@ impl VbcCodegen {
                 }
                 continue;
             };
-            let anchored = |written: &str| {
-                self.source_module_owners
-                    .member(written, owner, self.source_module_root())
-                    .map(|key| key.into_string())
-                    .unwrap_or_else(|| written.to_owned())
-            };
             if includes_declarations && let Some(visibility) = source.visibility.get(name) {
                 // A direct wildcard uses the importer's visibility. Every
                 // public re-export edge preserves the declaration's access.
@@ -501,13 +516,13 @@ impl VbcCodegen {
                 found.non_functions.insert(path.clone());
                 found.declarations.insert(path);
             } else if let Some(targets) = source.named.get(name) {
-                pending.extend(targets.iter().map(|target| (anchored(target), true)));
+                pending.extend(targets.iter().map(|target| (target.select(self, owner).into_string(), true)));
             } else {
                 pending.extend(
                     source
                         .globs
                         .iter()
-                        .map(|module| (anchored(&format!("{module}.{name}")), true)),
+                        .map(|module| (format!("{}.{name}", module.select(self, owner)), true)),
                 );
                 // Public inline modules expose their re-exports to the
                 // enclosing facade. Their own declarations stay qualified.
@@ -540,13 +555,7 @@ impl VbcCodegen {
         let mut found = None;
         let mut inaccessible = false;
         for root in roots {
-            let Some(path) = self.source_module_owners.member(
-                &format!("{root}.{name}"),
-                scope,
-                self.source_module_root(),
-            ) else {
-                continue;
-            };
+            let path = format!("{}.{name}", root.select(self, scope));
             let candidates = self.source_export_candidates(&path, Some(scope));
             inaccessible |= candidates.inaccessible;
             if candidates.declarations.is_empty() {
@@ -571,10 +580,8 @@ impl VbcCodegen {
         path: &str,
         scope: &str,
     ) -> Option<crate::types::TypeId> {
-        let resolved = self
-            .source_module_owners
-            .member(path, scope, self.source_module_root());
-        self.canonical_source_export_type_id(resolved.as_deref().unwrap_or(path), scope)
+        let selected = self.select_source_mount_path(path, scope);
+        self.canonical_source_export_type_id(&selected, scope)
     }
 
     /// Resolve an already selected canonical path without rewriting its owner.

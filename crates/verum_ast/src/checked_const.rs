@@ -47,9 +47,14 @@ impl ModuleOwners {
     /// A type member inside a module remains a type, not a module itself.
     pub fn is_module(&self, name: &str, scope: &str, root: &str) -> bool {
         name == "cog"
-            || self
-                .select_path(name, scope, root)
-                .is_some_and(|path| self.paths.contains(&path))
+            || self.namespace(name, scope, root).is_some()
+    }
+
+    /// Select a declared namespace, including a single module head. A module
+    /// operand has no member suffix and cannot use `member`'s dotted contract.
+    pub fn namespace(&self, name: &str, scope: &str, root: &str) -> Option<Text> {
+        self.select_path(name, scope, root)
+            .filter(|path| self.paths.contains(path))
     }
 
     fn select_path(&self, name: &str, scope: &str, root: &str) -> Option<Text> {

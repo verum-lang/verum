@@ -779,7 +779,7 @@ impl VbcCodegen {
             let binding = self.source_type_binding(owner, name);
             if let Some(binding) = binding {
                 return Some(binding.as_deref().and_then(|mounted|
-                    self.source_export_type_id(mounted, owner)));
+                    self.canonical_source_export_type_id(mounted, owner)));
             }
             if let Some(selected) = self.source_glob_type_id(name, owner) { return Some(selected); }
             owner = match self.lexical_type_parent(owner)? {
@@ -808,11 +808,11 @@ impl VbcCodegen {
         loop {
             if let Some(binding) = self.source_type_binding(owner, head) {
                 return binding.as_deref().and_then(|mounted|
-                    self.source_export_type_id(&format!("{mounted}.{tail}"), scope));
+                    self.canonical_source_export_type_id(&format!("{mounted}.{tail}"), scope));
             }
             let namespace = crate::module::qualify_module_name(owner, head);
             match self.declared_namespace_mount(&namespace, owner) {
-                Ok(true) => return self.source_export_type_id(&format!("{namespace}.{tail}"), scope),
+                Ok(true) => return self.canonical_source_export_type_id(&format!("{namespace}.{tail}"), scope),
                 Err(_) => return None,
                 Ok(false) => {}
             }
