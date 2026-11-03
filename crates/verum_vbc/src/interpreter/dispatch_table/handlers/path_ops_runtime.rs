@@ -128,7 +128,7 @@ pub(in super::super) fn try_intercept_path_method(
             let other_raw = state
                 .registers
                 .get(caller_base, crate::instruction::Reg(args_start_reg));
-            let other_val = deref_cbgr(state, other_raw);
+            let other_val = super::heap_helpers::unwrap_ref(state, other_raw)?;
             let other_text = match extract_path_inner_text(state, &other_val) {
                 Some(t) => t,
                 None => match extract_string_if_text(state, &other_val) {
@@ -149,7 +149,7 @@ pub(in super::super) fn try_intercept_path_method(
             let other_raw = state
                 .registers
                 .get(caller_base, crate::instruction::Reg(args_start_reg));
-            let other_val = deref_cbgr(state, other_raw);
+            let other_val = super::heap_helpers::unwrap_ref(state, other_raw)?;
             let other_text = match extract_string_if_text(state, &other_val) {
                 Some(t) => t,
                 None => return Ok(None),
@@ -188,37 +188,7 @@ pub(in super::super) fn try_intercept_path_method(
     }
 }
 
-/// Unwrap any of the three reference encodings that the interpreter
-/// uses when passing `&T` arguments across a function boundary:
-///
-///   * CBGR-ref (negative inline-int with generation>=1) — register
-///     handle into the caller's absolute register file.  Used for
-///     refs to in-scope locals.
-///   * ThinRef (TAG_POINTER + bits 47, 45 set) — heap-side pointer
-///     to a stored Value cell.  Used when the referent lives in a
-///     different stack frame than the caller.
-///   * Plain Value — already unwrapped.
-///
-/// Pre-fix this only handled CBGR-ref → user code like
-/// `paper_dir.join_str(&"paper.tex")` where the `&Text` argument
-/// arrived as a ThinRef silently fell out of the intercept (string
-/// extraction failed → join_str returned `None` → method dispatch
-/// fell through to the `RetV` stub which returns `()`), and
-/// downstream `path_exists(&path.as_path())` saw a corrupted small-
-/// string-like value rendered as `<value:N>`.
-fn deref_cbgr(state: &InterpreterState, v: Value) -> Value {
-    if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
-        return state.registers.get_absolute(abs_index);
-    }
-    if v.is_thin_ref() {
-        let tr = v.as_thin_ref();
-        if !tr.ptr.is_null() {
-            return unsafe { *(tr.ptr as *const Value) };
-        }
-    }
-    v
-}
+
 
 fn read_field0(receiver: &Value) -> Option<Value> {
     if !receiver.is_ptr() || receiver.is_nil() {
@@ -319,7 +289,7 @@ pub(in super::super) fn try_intercept_path_constructor(
         ("Path.new", _, 1)
         | ("Path.from_str", _, 1)
         | ("Path.from", _, 1) => {
-            let s = match read_text_arg(state, args_start_reg, caller_base) {
+            let s = match read_text_arg(state, args_start_reg, caller_base)? {
                 Some(s) => s,
                 None => return Ok(None),
             };
@@ -341,7 +311,7 @@ pub(in super::super) fn try_intercept_path_constructor(
         }
         ("PathBuf.from", _, 1)
         | ("PathBuf.from_str", _, 1) => {
-            let s = match read_text_arg(state, args_start_reg, caller_base) {
+            let s = match read_text_arg(state, args_start_reg, caller_base)? {
                 Some(s) => s,
                 None => return Ok(None),
             };
@@ -354,8 +324,8 @@ pub(in super::super) fn try_intercept_path_constructor(
             // Stdlib free helper `core.io.path.join(base, other)`.
             // Bare-name match avoids requiring the qualified prefix.
             if bare == "join" && arg_count == 2 {
-                let base = read_path_arg(state, args_start_reg, caller_base);
-                let other = read_path_arg(state, args_start_reg + 1, caller_base);
+                let base = read_path_arg(state, args_start_reg, caller_base)?;
+                let other = read_path_arg(state, args_start_reg + 1, caller_base)?;
                 if let (Some(b), Some(o)) = (base, other) {
                     let joined = join_paths(&b, &o);
                     let text = alloc_string_value(state, &joined)?;
@@ -429,7 +399,7 @@ pub(in super::super) fn try_intercept_path_inherent_call(
     let recv_raw = state
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
-    let receiver = deref_cbgr(state, recv_raw);
+    let receiver = super::heap_helpers::unwrap_ref(state, recv_raw)?;
     try_intercept_path_method(
         state,
         bare,
@@ -440,21 +410,21 @@ pub(in super::super) fn try_intercept_path_inherent_call(
     )
 }
 
-fn read_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Option<String> {
+fn read_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<Option<String>> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
-    let v = deref_cbgr(state, v);
-    extract_string_if_text(state, &v)
+    let v = super::heap_helpers::unwrap_ref(state, v)?;
+    Ok(extract_string_if_text(state, &v))
 }
 
-fn read_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Option<String> {
+fn read_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<Option<String>> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
-    let v = deref_cbgr(state, v);
+    let v = super::heap_helpers::unwrap_ref(state, v)?;
     if let Some(s) = extract_string_if_text(state, &v) {
-        return Some(s);
+        return Ok(Some(s));
     }
-    extract_path_inner_text(state, &v)
+    Ok(extract_path_inner_text(state, &v))
 }

@@ -194,11 +194,11 @@ fn record_type_identity_and_declared_fields_are_shared_with_equality() {
     );
     assert_ne!(first.to_bits(), equal.to_bits(), "separate allocations");
     assert!(
-        deep_value_eq(&first, &equal, &state),
+        deep_value_eq(&first, &equal, &state).unwrap(),
         "padding is not a declared field"
     );
     assert!(
-        !deep_value_eq(&first, &other_type, &state),
+        !deep_value_eq(&first, &other_type, &state).unwrap(),
         "nominal record identity"
     );
     assert!(value_eq(first, equal, &state));
@@ -271,7 +271,7 @@ fn record_text_fields_are_equal_across_inline_and_heap_storage() {
     let heap = Value::from_ptr(text.as_ptr() as *mut u8);
     let first = record(&mut state, TypeId(9001), &[inline]);
     let equal = record(&mut state, TypeId(9001), &[heap]);
-    assert!(deep_value_eq(&first, &equal, &state));
+    assert!(deep_value_eq(&first, &equal, &state).unwrap());
     assert_eq!(value_hash(first, &state), value_hash(equal, &state));
     assert!(value_eq(first, equal, &state));
     assert!(value_eq(equal, first, &state));

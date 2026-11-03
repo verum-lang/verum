@@ -118,7 +118,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 let (abs_index, _) = decode_cbgr_ref(raw);
                 state.registers.get_absolute(abs_index)
             } else if raw.is_thin_ref() {
-                let tr = raw.as_thin_ref();
+                let tr = state.heap.thin_ref(raw)?;
                 if !tr.ptr.is_null() {
                     unsafe { *(tr.ptr as *const Value) }
                 } else {
@@ -201,7 +201,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // UTF-8 with Rust's std::str::from_utf8, allocate a real Text
             // from the validated bytes, and wrap in `Result.Ok`. Invalid
             // UTF-8 → `Result.Err(Utf8Error { valid_up_to })`.
-            let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+            let bytes = extract_byte_slice(state, args_start_reg, caller_base)?;
             match std::str::from_utf8(&bytes) {
                 Ok(s) => {
                     let text = alloc_string_value(state, s)?;
@@ -220,7 +220,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // Returns a Text where invalid UTF-8 sequences are replaced
             // with U+FFFD. Pre-fix this returned the raw bytes value; now
             // properly converts via `String::from_utf8_lossy`.
-            let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+            let bytes = extract_byte_slice(state, args_start_reg, caller_base)?;
             let lossy = String::from_utf8_lossy(&bytes);
             Ok(Some(alloc_string_value(state, &lossy)?))
         }
@@ -233,7 +233,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // pre-fix behaviour). Use lossy decoding at runtime to
             // maintain memory-safety even when the caller contract is
             // violated.
-            let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+            let bytes = extract_byte_slice(state, args_start_reg, caller_base)?;
             let s = String::from_utf8_lossy(&bytes);
             Ok(Some(alloc_string_value(state, &s)?))
         }
@@ -303,7 +303,6 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // collect into a Rust Vec<String>, run `Vec.join(&sep)`,
             // alloc the result.
             use super::super::super::heap;
-            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
 
             let parts_val_raw = read_arg(state, args_start_reg, 0, caller_base)
                 .unwrap_or_else(empty_text);
@@ -312,21 +311,9 @@ pub(in super::super) fn try_intercept_text_static_runtime(
 
             // Auto-deref CBGR-ref / ThinRef (parts is `&[Text]` /
             // `&List<Text>`; sep is `&Text`).
-            let unwrap = |mut v: Value| -> Value {
-                if is_cbgr_ref(&v) {
-                    let (abs_index, _) = decode_cbgr_ref(v);
-                    v = state.registers.get_absolute(abs_index);
-                }
-                if v.is_thin_ref() {
-                    let tr = v.as_thin_ref();
-                    if !tr.ptr.is_null() {
-                        v = unsafe { *(tr.ptr as *const Value) };
-                    }
-                }
-                v
-            };
-            let parts_val = unwrap(parts_val_raw);
-            let sep_val = unwrap(sep_val_raw);
+
+            let parts_val = super::heap_helpers::unwrap_ref(state, parts_val_raw)?;
+            let sep_val = super::heap_helpers::unwrap_ref(state, sep_val_raw)?;
 
             let sep_str = super::string_helpers::extract_string(&sep_val, state);
 
@@ -440,7 +427,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 .registers
                 .get(caller_base, Reg(args_start_reg + 1));
             let (self_val, target) = resolve_receiver_place(state, self_raw)?;
-            let arg_val = resolve_arg_value(state, arg_raw);
+            let arg_val = resolve_arg_value(state, arg_raw)?;
             // BYTE-domain round trip (SSO-UTF8-SPLIT-1): `push_byte`
             // builds multi-byte UTF-8 sequences one byte at a time
             // (stdlib `to_lowercase` / `to_uppercase` / `slice` /

@@ -386,6 +386,6 @@ pub(super) fn saturating_mul(a: i64, b: i64, width: u8, signed: bool) -> i64 {
 pub(super) fn arith_operand(
     state: &super::super::super::state::InterpreterState,
     reg: crate::instruction::Reg,
-) -> crate::value::Value {
+) -> crate::interpreter::InterpreterResult<crate::value::Value> {
     super::cbgr_helpers::resolve_arg_value(state, state.get_reg(reg))
 }

@@ -28,7 +28,7 @@ pub(in super::super) fn handle_eqi(
             va.is_ptr(), vb.is_ptr(), va.to_bits(), vb.to_bits(),
         );
     }
-    let result = deep_value_eq(&va, &vb, state);
+    let result = deep_value_eq(&va, &vb, state)?;
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -41,7 +41,7 @@ pub(in super::super) fn handle_nei(
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
-    let result = !deep_value_eq(&va, &vb, state);
+    let result = !deep_value_eq(&va, &vb, state)?;
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -55,7 +55,7 @@ pub(in super::super) fn handle_nei(
 /// predicate receives `&T` (from `Some(ref v)`), and `x > 10` compared the
 /// reference value instead of the pointee — deciding by address, not value.
 #[inline]
-fn ord_operand(state: &InterpreterState, reg: crate::instruction::Reg) -> Value {
+fn ord_operand(state: &InterpreterState, reg: crate::instruction::Reg) -> crate::interpreter::InterpreterResult<Value> {
     super::cbgr_helpers::resolve_arg_value(state, state.get_reg(reg))
 }
 
@@ -95,8 +95,8 @@ pub(in super::super) fn handle_lti(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = ord_operand(state, a);
-    let vb = ord_operand(state, b);
+    let va = ord_operand(state, a)?;
+    let vb = ord_operand(state, b)?;
     let result = if is_i128_cmp(va, vb) {
         i128_ordering(va, vb) == std::cmp::Ordering::Less
     } else {
@@ -112,8 +112,8 @@ pub(in super::super) fn handle_lei(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = ord_operand(state, a);
-    let vb = ord_operand(state, b);
+    let va = ord_operand(state, a)?;
+    let vb = ord_operand(state, b)?;
     let result = if is_i128_cmp(va, vb) {
         i128_ordering(va, vb) != std::cmp::Ordering::Greater
     } else {
@@ -129,8 +129,8 @@ pub(in super::super) fn handle_gti(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = ord_operand(state, a);
-    let vb = ord_operand(state, b);
+    let va = ord_operand(state, a)?;
+    let vb = ord_operand(state, b)?;
     let result = if is_i128_cmp(va, vb) {
         i128_ordering(va, vb) == std::cmp::Ordering::Greater
     } else {
@@ -146,8 +146,8 @@ pub(in super::super) fn handle_gei(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = ord_operand(state, a);
-    let vb = ord_operand(state, b);
+    let va = ord_operand(state, a)?;
+    let vb = ord_operand(state, b)?;
     let result = if is_i128_cmp(va, vb) {
         i128_ordering(va, vb) != std::cmp::Ordering::Less
     } else {
@@ -185,7 +185,7 @@ pub(in super::super) fn handle_ltf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = ord_operand(state, a).as_f64() < ord_operand(state, b).as_f64();
+    let result = ord_operand(state, a)?.as_f64() < ord_operand(state, b)?.as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -196,7 +196,7 @@ pub(in super::super) fn handle_lef(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = ord_operand(state, a).as_f64() <= ord_operand(state, b).as_f64();
+    let result = ord_operand(state, a)?.as_f64() <= ord_operand(state, b)?.as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -207,7 +207,7 @@ pub(in super::super) fn handle_gtf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = ord_operand(state, a).as_f64() > ord_operand(state, b).as_f64();
+    let result = ord_operand(state, a)?.as_f64() > ord_operand(state, b)?.as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -218,7 +218,7 @@ pub(in super::super) fn handle_gef(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = ord_operand(state, a).as_f64() >= ord_operand(state, b).as_f64();
+    let result = ord_operand(state, a)?.as_f64() >= ord_operand(state, b)?.as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -279,7 +279,7 @@ pub(in super::super) fn handle_eqg(
         || (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
         || (vb.is_fat_ref() && vb.as_fat_ref().reserved != 0)
     {
-        let result = deep_value_eq(&va, &vb, state);
+        let result = deep_value_eq(&va, &vb, state)?;
         state.set_reg(dst, Value::from_bool(result));
         return Ok(DispatchResult::Continue);
     }
@@ -365,7 +365,7 @@ pub(in super::super) fn handle_eqg(
     }
 
     // Default: use recursive deep structural equality comparison
-    let result = deep_value_eq(&va, &vb, state);
+    let result = deep_value_eq(&va, &vb, state)?;
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }

@@ -5,7 +5,7 @@
 //! so collection helpers execute the real Clone implementations. The mount
 //! loader supplies other dependency declarations. Callers use real map literals (NewMap) to select the runtime
 //! carrier; source-only Map.new takes a different route from the ordinary
-//! archive compiler. No production body is filtered or replaced. Each executed
+//! archive compiler. The adversarial bytecode test replaces only its own caller helper. Each executed
 //! case must reach its own scalar oracle. This is a
 //! source/wire interpreter gate, not a type-checker, AOT or lifetime-verifier gate.
 #![cfg(feature = "codegen")]
@@ -66,6 +66,15 @@ fn read_control() -> Int {
     let mut values: Map<Text, Int> = { "codec": 7 };
     values.insert("other", 19);
     read_int(&values, "codec") * 100 + read_int(&values, "other")
+}
+
+fn inspect_slot(value: &Int) -> Int { *value }
+fn pass_slot() -> Int {
+    let values: Map<Int, Int> = { 7: 41 };
+    match values.get_key_value(&7) {
+        Maybe.Some(pair) => inspect_slot(pair.1),
+        Maybe.None => 0,
+    }
 }
 
 fn borrowed_entry() -> Int {
@@ -293,6 +302,51 @@ fn owned_key_dropped_once() -> Int {
     let mut count = 0;
     destroy_owned_key(&mut count);
     count
+}
+
+
+fn escape_local_entry() -> Maybe<(&Int, &Int)> {
+    let values: Map<Int, Int> = { 7: 41 };
+    values.get_key_value(&7)
+}
+
+fn read_after_drop() -> Int {
+    match escape_local_entry() { Maybe.Some(pair) => *pair.1, Maybe.None => 0 }
+}
+
+fn read_after_remove_reinsert() -> Int {
+    let mut values: Map<Int, Int> = { 7: 41 };
+    match values.get_key_value(&7) {
+        Maybe.Some(pair) => {
+            values.remove(7);
+            values.insert(7, 99);
+            *pair.1
+        },
+        Maybe.None => 0,
+    }
+}
+
+fn read_after_growth() -> Int {
+    let mut values: Map<Int, Int> = { 7: 41 };
+    match values.get_key_value(&7) {
+        Maybe.Some(pair) => {
+            values.reserve(2048);
+            *pair.0
+        },
+        Maybe.None => 0,
+    }
+}
+
+fn write_after_clear() -> Int {
+    let mut values: Map<Int, Int> = { 7: 41 };
+    match values.get_mut(&7) {
+        Maybe.Some(value) => {
+            values.clear();
+            *value = 42;
+            42
+        },
+        Maybe.None => 0,
+    }
 }
 
 fn owned_entries_dropped_once() -> Int {
@@ -525,4 +579,74 @@ fn flat_map_runs_owned_key_destructor_once() {
 #[test]
 fn flat_map_leaves_borrowed_values_alive() {
     check("borrowed_entry_survives", 0);
+}
+
+#[test]
+fn managed_map_slots_reject_reads_and_writes_after_ownership_ends() {
+    use verum_vbc::interpreter::{CbgrViolationKind, InterpreterError};
+    for (route, module) in [("source", source()), ("wire", wire())] {
+        for name in [
+            "read_after_drop",
+            "read_after_remove_reinsert",
+            "read_after_growth",
+            "write_after_clear",
+        ] {
+            let entry = module
+                .find_function_by_name(&format!("mutable_map_values.{name}"))
+                .unwrap();
+            let error = Interpreter::new(module.clone())
+                .execute_function(entry)
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    InterpreterError::CbgrViolation {
+                        kind: CbgrViolationKind::UseAfterFree,
+                        ..
+                    }
+                ),
+                "{route}/{name}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn raw_bytecode_cannot_export_a_live_managed_slot() {
+    use verum_vbc::bytecode::encode_instruction;
+    use verum_vbc::instruction::CbgrSubOpcode;
+    use verum_vbc::interpreter::InterpreterError;
+
+    let mut module = (*source()).clone();
+    let caller = module
+        .find_function_by_name("mutable_map_values.pass_slot")
+        .unwrap();
+    let callee = module
+        .find_function_by_name("mutable_map_values.inspect_slot")
+        .unwrap();
+    let start = module.bytecode.len() as u32;
+    encode_instruction(
+        &Instruction::CbgrExtended {
+            sub_op: CbgrSubOpcode::RefRawAddr as u8,
+            operands: vec![1, 0],
+        },
+        &mut module.bytecode,
+    );
+    encode_instruction(&Instruction::RetV, &mut module.bytecode);
+    let body = &mut module.functions[callee.0 as usize];
+    body.bytecode_offset = start;
+    body.bytecode_length = module.bytecode.len() as u32 - start;
+    body.register_count = body.register_count.max(2);
+    body.instructions = None;
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    for module in [module, wire] {
+        let error = Interpreter::new(Arc::new(module))
+            .execute_function(caller)
+            .unwrap_err();
+        assert!(
+            matches!(error, InterpreterError::InvalidOperand { ref message } if message.contains("managed slot")),
+            "{error}"
+        );
+    }
 }

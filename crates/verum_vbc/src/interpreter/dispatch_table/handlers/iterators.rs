@@ -102,7 +102,7 @@ pub(in super::super) fn handle_iter_new(
     // pointer from `CbgrExtended RefField`) fell through unchanged,
     // and the slot ADDRESS was then read as a List header → SIGSEGV.
     // `resolve_arg_value` handles all three reference shapes.
-    let source = super::cbgr_helpers::resolve_arg_value(state, source);
+    let source = super::cbgr_helpers::resolve_arg_value(state, source)?;
 
     // Check for generator values first (NaN-boxed generator tag, not pointer)
     if source.is_generator() {

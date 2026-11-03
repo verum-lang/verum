@@ -470,7 +470,7 @@ fn returned_numeric_reference_is_a_retained_thinref() {
         let mut interpreter = Interpreter::new(Shared::new(module).into_arc());
         let value = interpreter.execute_function(entry).expect("returned numeric reference");
         assert!(value.is_thin_ref(), "{phase}: {value:?}");
-        let reference = value.as_thin_ref();
+        let reference = value.try_as_thin_ref().expect("retained numeric cell is a direct ThinRef");
         assert!(interpreter.state.escape_cells.iter()
             .any(|cell| cell.get().cast::<u8>() == reference.ptr),
             "{phase}: returned reference must be owned by the escape-cell roster");

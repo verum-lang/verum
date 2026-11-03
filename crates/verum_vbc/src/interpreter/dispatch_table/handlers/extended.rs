@@ -213,7 +213,7 @@ pub(in super::super) fn handle_extended(
             let dst = read_reg(state)?;
             let obj = read_reg(state)?;
             let name_sid = read_varint(state)? as u32;
-            let obj_val = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(obj));
+            let obj_val = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(obj))?;
             let (tid, base_ptr) = field_named_object(state, obj_val, "GetFieldNamed")?;
             let idx = field_named_index(&state.module, tid, name_sid, "GetFieldNamed")?;
             let value = unsafe {
@@ -230,7 +230,7 @@ pub(in super::super) fn handle_extended(
             let obj = read_reg(state)?;
             let name_sid = read_varint(state)? as u32;
             let value_reg = read_reg(state)?;
-            let obj_val = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(obj));
+            let obj_val = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(obj))?;
             let (tid, base_ptr) = field_named_object(state, obj_val, "SetFieldNamed")?;
             let idx = field_named_index(&state.module, tid, name_sid, "SetFieldNamed")?;
             let value = state.get_reg(value_reg);
@@ -552,7 +552,7 @@ pub(in super::super) fn field_named_object(
     // the class is "a handler that derefs a `&T` must handle every
     // encoding of one", and its instances are found by grepping for
     // the ones that do not.
-    let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val);
+    let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val)?;
     if !obj_val.is_ptr() || obj_val.is_nil() {
         return Err(InterpreterError::Panic {
             message: format!(

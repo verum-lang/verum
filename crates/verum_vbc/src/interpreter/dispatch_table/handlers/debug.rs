@@ -174,7 +174,7 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
     // iterator slots are stored. This covers the common case of
     // `List<Int>` / `List<Float>` / `List<Text>` / `List<Bool>` etc.
     if value.is_thin_ref() {
-        let tr = value.as_thin_ref();
+        let Ok(tr) = state.heap.thin_ref(value) else { return "<expired reference>".into(); };
         if !tr.ptr.is_null() {
             let derefed = unsafe { *(tr.ptr as *const Value) };
             return format_value_for_print_depth(state, derefed, depth + 1);

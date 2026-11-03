@@ -123,7 +123,7 @@ pub(in super::super) fn try_intercept_file_runtime(
     // free function being intercepted — decline, and let the real callee
     // run. Declining is also the safe direction: the worst case is that a
     // genuine file call is executed by the stdlib instead of by the host.
-    if try_extract_path_arg(state, args_start_reg, caller_base).is_none() {
+    if try_extract_path_arg(state, args_start_reg, caller_base)?.is_none() {
         return Ok(None);
     }
     match bare {
@@ -257,7 +257,7 @@ fn intercept_read_to_string(
     if arg_count == 0 {
         return Ok(None);
     }
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "read", &path) {
         return Ok(Some(denied));
     }
@@ -276,7 +276,7 @@ fn intercept_read_bytes(
     _arg_count: u8,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     // T1134 — DECLINE RATHER THAN FAIL when the argument is not a path.
     //
     // `extract_path_arg` answers the empty string when the value is not
@@ -318,8 +318,8 @@ fn intercept_write_text(
     _arg_count: u8,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
-    let contents = extract_text_arg(state, args_start_reg + 1, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
+    let contents = extract_text_arg(state, args_start_reg + 1, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
@@ -338,8 +338,8 @@ fn intercept_write_bytes(
     _arg_count: u8,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
-    let bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
+    let bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
@@ -358,7 +358,7 @@ fn intercept_exists(
     _arg_count: u8,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     let exists = std::path::Path::new(&path).exists();
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::DebugFs) {
         eprintln!("[path_exists] path='{}' exists={}", path, exists);
@@ -372,7 +372,7 @@ fn intercept_metadata_pred(
     caller_base: u32,
     which: MetaPred,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     let p = std::path::Path::new(&path);
     let result = match which {
         MetaPred::File => p.is_file(),
@@ -390,7 +390,7 @@ fn intercept_unit_op(
     caller_base: u32,
     op: FsUnitOp,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
@@ -413,8 +413,8 @@ fn intercept_rename(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let from = extract_path_arg(state, args_start_reg, caller_base);
-    let to = extract_path_arg(state, args_start_reg + 1, caller_base);
+    let from = extract_path_arg(state, args_start_reg, caller_base)?;
+    let to = extract_path_arg(state, args_start_reg + 1, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "write", &from) {
         return Ok(Some(denied));
     }
@@ -432,8 +432,8 @@ fn intercept_copy(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let from = extract_path_arg(state, args_start_reg, caller_base);
-    let to = extract_path_arg(state, args_start_reg + 1, caller_base);
+    let from = extract_path_arg(state, args_start_reg, caller_base)?;
+    let to = extract_path_arg(state, args_start_reg + 1, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "read", &from) {
         return Ok(Some(denied));
     }
@@ -479,7 +479,7 @@ fn intercept_metadata(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     match std::fs::symlink_metadata(&path) {
         Ok(m) => {
             let ft = m.file_type();
@@ -538,7 +538,7 @@ fn intercept_file_size(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     match std::fs::metadata(&path) {
         Ok(m) => Ok(Some(wrap_in_variant(
             state,
@@ -560,7 +560,7 @@ fn intercept_rm_smart(
     caller_base: u32,
     recursive: bool,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
@@ -588,7 +588,7 @@ fn intercept_which(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let name = extract_text_arg(state, args_start_reg, caller_base);
+    let name = extract_text_arg(state, args_start_reg, caller_base)?;
     match resolve_in_path(&name) {
         Some(p) => {
             let text = alloc_string_value(state, &p)?;
@@ -606,7 +606,7 @@ fn intercept_command_exists(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let name = extract_text_arg(state, args_start_reg, caller_base);
+    let name = extract_text_arg(state, args_start_reg, caller_base)?;
     Ok(Some(Value::from_bool(resolve_in_path(&name).is_some())))
 }
 
@@ -657,7 +657,7 @@ fn intercept_write_dispatch(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_path_arg(state, args_start_reg, caller_base);
+    let path = extract_path_arg(state, args_start_reg, caller_base)?;
     if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
@@ -667,12 +667,12 @@ fn intercept_write_dispatch(
     // Same authority as the path argument — the CONTENTS of a write can
     // just as easily be `&record.field`, and a private one-hop peel
     // would silently write the debug rendering of a slot address.
-    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, contents_v);
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, contents_v)?;
     let result = if value_is_text(&unwrapped) {
         let text = extract_string(&unwrapped, state);
         std::fs::write(&path, text.as_bytes())
     } else {
-        let bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base);
+        let bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base)?;
         std::fs::write(&path, &bytes)
     };
     match result {
@@ -726,7 +726,7 @@ fn try_extract_path_arg(
     state: &InterpreterState,
     reg: u16,
     caller_base: u32,
-) -> Option<String> {
+) -> InterpreterResult<Option<String>> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
@@ -748,7 +748,11 @@ fn try_extract_path_arg(
     // `<ptr@0x9d4831cf8>` in the working directory and returned `Ok(())`
     // (T0899). A store that keeps its own path in a field — which is
     // where any store keeps it — lost every byte and reported success.
-    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v)?;
+    Ok(path_from_resolved_value(state, unwrapped))
+}
+
+fn path_from_resolved_value(state: &InterpreterState, unwrapped: Value) -> Option<String> {
     // Fast path: it's already a Text.
     if value_is_text(&unwrapped) {
         return Some(extract_string(&unwrapped, state));
@@ -814,26 +818,26 @@ fn try_extract_path_arg(
 /// DECIDING use `try_extract_path_arg` and decline instead (T1437): a
 /// method that merely shares a name with an intercepted free function must
 /// run, not fail with an empty path.
-fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
-    if let Some(p) = try_extract_path_arg(state, reg, caller_base) {
-        return p;
+fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<String> {
+    if let Some(p) = try_extract_path_arg(state, reg, caller_base)? {
+        return Ok(p);
     }
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
-    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v)?;
     tracing::warn!(
         "file intercept: argument is not a path in any known shape \
          (received {}); refusing to treat its rendering as a filename",
         extract_string(&unwrapped, state),
     );
-    String::new()
+    Ok(String::new())
 }
 
 /// Extract a `&[Byte]` (or `List<Byte>`) argument from a register
 /// into an owned `Vec<u8>`. Reads the List header `[len, cap,
 /// backing_ptr]` and copies the byte payload.
-pub(super) fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
+pub(super) fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<Vec<u8>> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
@@ -843,10 +847,14 @@ pub(super) fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_b
 /// Value-form twin of [`extract_byte_list_arg`] for handlers that read
 /// registers from the CURRENT frame (`state.get_reg`) rather than a
 /// caller frame — the FfiExtended System sub-ops (ENV-IMPL-TRIO-1).
-pub(super) fn extract_byte_list_from_value(state: &InterpreterState, v: Value) -> Vec<u8> {
+pub(super) fn extract_byte_list_from_value(state: &InterpreterState, v: Value) -> InterpreterResult<Vec<u8>> {
     // A `&[Byte]` argument reaches here through the same three
     // encodings a `&Text` does; one authority peels all of them.
-    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v)?;
+    Ok(bytes_from_resolved_list(unwrapped))
+}
+
+fn bytes_from_resolved_list(unwrapped: Value) -> Vec<u8> {
     // A BYTE_SLICE (528) is the representation-tagged borrowed byte view
     // that `Text.as_bytes()` (TextExtended::AsBytes) and slice ops produce
     // — NOT a heap List<Byte>. `core/base/env.vr`'s `var()` passes

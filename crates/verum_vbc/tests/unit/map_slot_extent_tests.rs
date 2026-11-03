@@ -333,3 +333,67 @@ fn a_full_table_missing_key_terminates_without_mutation() {
     assert_eq!(unsafe { *first }.as_i64(), 7);
     assert_eq!(unsafe { *second }.as_i64(), 19);
 }
+
+#[test]
+fn slot_handles_are_heap_local_and_can_never_be_extracted_as_raw_pointers() {
+    use crate::value::Capabilities;
+
+    let other = state();
+    let mut state = state();
+    let entries = buckets(&mut state, 2);
+    let slot = pair(entries, 0, 4, 42);
+    let map = header(
+        &mut state,
+        3,
+        Value::from_i64(1),
+        Value::from_i64(2),
+        entries,
+    );
+    let reference =
+        super::super::flat_map::borrow_slot(&mut state, map, slot, Capabilities::READ_ONLY)
+            .unwrap();
+    let repeated =
+        super::super::flat_map::borrow_slot(&mut state, map, slot, Capabilities::READ_ONLY)
+            .unwrap();
+    assert_eq!(
+        reference.bits(),
+        repeated.bits(),
+        "repeated shared lookups reuse the live witness"
+    );
+    assert!(!reference.is_ptr());
+    assert!(reference.try_as_thin_ref().is_none());
+    assert!(reference.raw_thin_ref().is_err());
+    assert!(other.heap.thin_ref(reference).is_err());
+    assert_eq!(
+        state.heap.thin_ref(reference).unwrap().ptr.cast::<Value>(),
+        slot
+    );
+    state.heap.revoke_projections(map.as_ptr::<u8>() as usize);
+    let replacement =
+        super::super::flat_map::borrow_slot(&mut state, map, slot, Capabilities::READ_ONLY)
+            .unwrap();
+    assert_ne!(
+        reference.bits(),
+        replacement.bits(),
+        "reuse of the exact slot address cannot revive the original handle"
+    );
+    assert!(state.heap.thin_ref(reference).is_err());
+    let exclusive = super::super::flat_map::borrow_slot(
+        &mut state,
+        map,
+        slot,
+        Capabilities(Capabilities::READ | Capabilities::WRITE),
+    )
+    .unwrap();
+    assert!(state.heap.thin_ref(replacement).is_err());
+    assert!(
+        state
+            .heap
+            .thin_ref(exclusive)
+            .unwrap()
+            .capabilities()
+            .has(Capabilities::WRITE)
+    );
+    super::super::flat_map::borrow_slot(&mut state, map, slot, Capabilities::READ_ONLY).unwrap();
+    assert!(state.heap.thin_ref(exclusive).is_err());
+}

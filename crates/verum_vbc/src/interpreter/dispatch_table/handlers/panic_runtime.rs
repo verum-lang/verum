@@ -233,8 +233,8 @@ pub(in super::super) fn try_intercept_panic_impl(
         return Ok(None);
     }
 
-    let msg = extract_text_arg(state, args_start_reg, caller_base);
-    let file = extract_text_arg(state, args_start_reg + 1, caller_base);
+    let msg = extract_text_arg(state, args_start_reg, caller_base)?;
+    let file = extract_text_arg(state, args_start_reg + 1, caller_base)?;
     let line = state
         .registers
         .get(caller_base, Reg(args_start_reg + 2))

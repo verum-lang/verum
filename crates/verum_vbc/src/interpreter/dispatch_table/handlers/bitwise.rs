@@ -20,8 +20,8 @@ pub(in super::super) fn handle_addg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let val_a = arith_operand(state, a);
-    let val_b = arith_operand(state, b);
+    let val_a = arith_operand(state, a)?;
+    let val_b = arith_operand(state, b)?;
 
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() + val_b.as_f64())
@@ -71,8 +71,8 @@ pub(in super::super) fn handle_subg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let val_a = arith_operand(state, a);
-    let val_b = arith_operand(state, b);
+    let val_a = arith_operand(state, a)?;
+    let val_b = arith_operand(state, b)?;
 
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() - val_b.as_f64())
@@ -98,8 +98,8 @@ pub(in super::super) fn handle_mulg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let val_a = arith_operand(state, a);
-    let val_b = arith_operand(state, b);
+    let val_a = arith_operand(state, a)?;
+    let val_b = arith_operand(state, b)?;
 
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() * val_b.as_f64())
@@ -125,8 +125,8 @@ pub(in super::super) fn handle_divg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let val_a = arith_operand(state, a);
-    let val_b = arith_operand(state, b);
+    let val_a = arith_operand(state, a)?;
+    let val_b = arith_operand(state, b)?;
 
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() / val_b.as_f64())
@@ -161,8 +161,8 @@ pub(in super::super) fn handle_band(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     if is_i128_op(va, vb) {
         let result = va.as_i128_raw() & vb.as_i128_raw();
         state.set_reg(
@@ -182,8 +182,8 @@ pub(in super::super) fn handle_bor(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     if is_i128_op(va, vb) {
         let result = va.as_i128_raw() | vb.as_i128_raw();
         state.set_reg(
@@ -203,8 +203,8 @@ pub(in super::super) fn handle_bxor(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     if is_i128_op(va, vb) {
         let result = va.as_i128_raw() ^ vb.as_i128_raw();
         state.set_reg(
@@ -224,8 +224,8 @@ pub(in super::super) fn handle_shl(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     // 128-bit arm (T0272): shift the full 128-bit value; the shift amount is
     // masked mod 128 (vs mod 64 for the i64 path).
     if va.is_boxed_i128() {
@@ -251,8 +251,8 @@ pub(in super::super) fn handle_shr(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     // 128-bit arm (T0272): arithmetic (sign-preserving) shift of the full
     // 128-bit value, amount masked mod 128.
     if va.is_boxed_i128() {
@@ -278,8 +278,8 @@ pub(in super::super) fn handle_ushr(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     // 128-bit arm (T0272): logical (zero-fill) shift of the full 128-bit
     // value, amount masked mod 128. Result is unsigned.
     if va.is_boxed_i128() {
@@ -302,7 +302,7 @@ pub(in super::super) fn handle_bnot(
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let _ignored = read_reg(state)?; // b register is ignored for NOT
-    let sv = arith_operand(state, src);
+    let sv = arith_operand(state, src)?;
     // 128-bit arm (T0272): complement the full 128 bits.
     if sv.is_boxed_i128() {
         let result = !sv.as_i128_raw();

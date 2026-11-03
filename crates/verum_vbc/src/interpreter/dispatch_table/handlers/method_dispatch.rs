@@ -913,7 +913,7 @@ pub(super) fn handle_bound_method(
             slot_val
         }
     } else if receiver.is_thin_ref() {
-        let tr = receiver.as_thin_ref();
+        let tr = state.heap.thin_ref(receiver)?;
         if !tr.ptr.is_null() {
             // SAFETY: non-null ThinRef points at a Value slot.
             unsafe { *(tr.ptr as *const Value) }
@@ -2729,10 +2729,10 @@ pub(super) fn handle_bound_method(
             let caller_base = state.reg_base();
             let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-            let other = resolve_arg_value(state, other_val);
-            let recv = resolve_arg_value(state, receiver);
+            let other = resolve_arg_value(state, other_val)?;
+            let recv = resolve_arg_value(state, receiver)?;
 
-            let result = deep_value_eq(&recv, &other, state);
+            let result = deep_value_eq(&recv, &other, state)?;
             let final_result = if bare_method_name == "eq" {
                 result
             } else {
@@ -4292,10 +4292,10 @@ pub(super) fn handle_bound_method(
         let caller_base = state.reg_base();
         let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-        let other = resolve_arg_value(state, other_val);
-        let recv = resolve_arg_value(state, receiver);
+        let other = resolve_arg_value(state, other_val)?;
+        let recv = resolve_arg_value(state, receiver)?;
 
-        let result = deep_value_eq(&recv, &other, state);
+        let result = deep_value_eq(&recv, &other, state)?;
         state.set_reg(dst, Value::from_bool(result));
         return Ok(DispatchResult::Continue);
     }
@@ -4306,11 +4306,11 @@ pub(super) fn handle_bound_method(
         let caller_base = state.reg_base();
         let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-        let other = resolve_arg_value(state, other_val);
-        let recv = resolve_arg_value(state, receiver);
+        let other = resolve_arg_value(state, other_val)?;
+        let recv = resolve_arg_value(state, receiver)?;
 
         // ne is the inverse of eq
-        let result = !deep_value_eq(&recv, &other, state);
+        let result = !deep_value_eq(&recv, &other, state)?;
         state.set_reg(dst, Value::from_bool(result));
         return Ok(DispatchResult::Continue);
     }
@@ -6721,7 +6721,7 @@ pub(super) fn dispatch_primitive_method(
             | "uint64$gt" | "uint64$ge" => {
                 let cb = state.reg_base();
                 let raw = state.registers.get(cb, Reg(args.start.0));
-                let rhs = resolve_arg_value(state, raw).as_i64() as u64;
+                let rhs = resolve_arg_value(state, raw)?.as_i64() as u64;
                 let lhs = v as u64;
                 let result = match method {
                     "uint64$eq" => lhs == rhs,
@@ -6822,7 +6822,7 @@ pub(super) fn dispatch_primitive_method(
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle reference: the argument might be &Int (CBGR ref), need to deref
                 // Check CBGR ref FIRST since CBGR refs also pass is_int()
-                let other = resolve_arg_value(state, other_val).as_i64();
+                let other = resolve_arg_value(state, other_val)?.as_i64();
                 return Ok(Some(make_ordering(state, v.cmp(&other))?));
             }
 
@@ -6831,34 +6831,34 @@ pub(super) fn dispatch_primitive_method(
             "eq" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Int, need to deref
-                let other = resolve_arg_value(state, other_val).as_i64();
+                let other = resolve_arg_value(state, other_val)?.as_i64();
                 Value::from_bool(v == other)
             }
             "ne" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Int, need to deref
-                let other = resolve_arg_value(state, other_val).as_i64();
+                let other = resolve_arg_value(state, other_val)?.as_i64();
                 Value::from_bool(v != other)
             }
             // Ord protocol comparison methods - handle directly to avoid incorrect dispatch
             "lt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_i64();
+                let other = resolve_arg_value(state, other_val)?.as_i64();
                 Value::from_bool(v < other)
             }
             "le" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_i64();
+                let other = resolve_arg_value(state, other_val)?.as_i64();
                 Value::from_bool(v <= other)
             }
             "gt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_i64();
+                let other = resolve_arg_value(state, other_val)?.as_i64();
                 Value::from_bool(v > other)
             }
             "ge" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_i64();
+                let other = resolve_arg_value(state, other_val)?.as_i64();
                 Value::from_bool(v >= other)
             }
 
@@ -7012,14 +7012,14 @@ pub(super) fn dispatch_primitive_method(
             "eq" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Float, need to deref
-                let other = resolve_arg_value(state, other_val).as_f64();
+                let other = resolve_arg_value(state, other_val)?.as_f64();
                 // Use partial equality for floats (NaN != NaN)
                 Value::from_bool(v == other)
             }
             "ne" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Float, need to deref
-                let other = resolve_arg_value(state, other_val).as_f64();
+                let other = resolve_arg_value(state, other_val)?.as_f64();
                 Value::from_bool(v != other)
             }
             // Ordering comparisons: lt/le/gt/ge/cmp/partial_cmp.
@@ -7030,22 +7030,22 @@ pub(super) fn dispatch_primitive_method(
             // documented in core/base/ordering tests).
             "lt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_f64();
+                let other = resolve_arg_value(state, other_val)?.as_f64();
                 Value::from_bool(v < other)
             }
             "le" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_f64();
+                let other = resolve_arg_value(state, other_val)?.as_f64();
                 Value::from_bool(v <= other)
             }
             "gt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_f64();
+                let other = resolve_arg_value(state, other_val)?.as_f64();
                 Value::from_bool(v > other)
             }
             "ge" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_f64();
+                let other = resolve_arg_value(state, other_val)?.as_f64();
                 Value::from_bool(v >= other)
             }
             // FLOAT HAS NO TOTAL ORDER (T0833).
@@ -7177,7 +7177,7 @@ pub(super) fn dispatch_primitive_method(
                     // contract Map/Set keys already rely on.
                     let caller_base = state.reg_base();
                     let needle_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let needle = resolve_arg_value(state, needle_raw);
+                    let needle = resolve_arg_value(state, needle_raw)?;
                     let len = get_array_length(ptr, header)?;
                     let mut found = false;
                     for i in 0..len {
@@ -7782,7 +7782,7 @@ pub(super) fn dispatch_primitive_method(
                     // for the explanation of the defect class.
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let key = resolve_arg_value(state, key_raw);
+                    let key = resolve_arg_value(state, key_raw)?;
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     // Empty-map / cap=0 guard — return false instead of
@@ -7930,7 +7930,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR-ref auto-deref — same defect class as Map.get.
                     let caller_base = state.reg_base();
                     let val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let val = resolve_arg_value(state, val_raw);
+                    let val = resolve_arg_value(state, val_raw)?;
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     // Empty-set guard.
@@ -7959,6 +7959,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(found)));
                 }
                 "resize" if is_map => {
+                    state.heap.revoke_projections(ptr as usize);
                     // Map.resize(new_cap). The stdlib `resize` body installs a
                     // RAW `alloc_zeroed` Slot buffer (no ObjectHeader), which is
                     // incompatible with the layout every Map intercept
@@ -8028,6 +8029,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::unit()));
                 }
                 "insert" if is_map => {
+                    state.heap.revoke_projections(ptr as usize);
                     // Map.insert(key, value) -> Maybe<V>
                     // Returns Some(old_value) if key existed, None otherwise
                     let caller_base = state.reg_base();
@@ -8154,26 +8156,20 @@ pub(super) fn dispatch_primitive_method(
                 "get" | "get_mut" | "get_key_value" if is_map => {
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let key = resolve_arg_value(state, key_raw);
+                    let key = resolve_arg_value(state, key_raw)?;
                     let result = match map_entry_slots(state, *receiver, key)? {
                         None => make_none_value(state)?,
                         Some(slots) if method == "get_key_value" => {
-                            let refs = slots.map(|slot| Value::from_thin_ref(ThinRef::new(
-                                slot.cast(),
-                                state.cbgr_epoch as u32,
-                                state.cbgr_epoch as u16,
-                                Capabilities::READ_ONLY,
-                            )));
+                            let refs = [
+                                super::flat_map::borrow_slot(state, *receiver, slots[0], Capabilities::READ_ONLY)?,
+                                super::flat_map::borrow_slot(state, *receiver, slots[1], Capabilities::READ_ONLY)?,
+                            ];
                             let pair = state.alloc_tuple(&refs)?;
                             make_some_value(state, pair)?
                         }
                         Some([_, slot]) if method == "get_mut" => {
-                            // Existing returned-reference convention shared by
-                            // RefField/RefListElement. The map borrow forbids
-                            // shape changes; address membership does not enforce
-                            // stale-borrow invalidation after a resize/removal.
-                            state.cbgr_mutable_ptrs.insert(slot as usize);
-                            make_some_value(state, Value::from_ptr(slot))?
+                            let value = super::flat_map::borrow_slot(state, *receiver, slot, Capabilities(Capabilities::READ | Capabilities::WRITE))?;
+                            make_some_value(state, value)?
                         }
                         Some([_, slot]) => {
                             // SAFETY: map_entry_slots checked the owned extent.
@@ -8183,6 +8179,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(result));
                 }
                 "ensure_capacity" if is_map => {
+                    state.heap.revoke_projections(ptr as usize);
                     // Map.ensure_capacity() - resize if load factor is too high
                     // This is called by user-defined Map.insert from core/collections
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -8258,13 +8255,14 @@ pub(super) fn dispatch_primitive_method(
                     // Fall through.
                 }
                 "remove" if is_map => {
+                    state.heap.revoke_projections(ptr as usize);
                     // Map.remove(key) -> Maybe<V>
                     // Returns Some(old_value) if key existed, None otherwise
                     //
                     // CBGR-ref auto-deref — see Map.get intercept above.
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let key = resolve_arg_value(state, key_raw);
+                    let key = resolve_arg_value(state, key_raw)?;
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
@@ -8375,6 +8373,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(result));
                 }
                 "clear" if is_map => {
+                    state.heap.revoke_projections(ptr as usize);
                     // Map.clear() - remove all entries
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
@@ -8398,6 +8397,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(count == 0)));
                 }
                 "get_or_insert" if is_map => {
+                    state.heap.revoke_projections(ptr as usize);
                     // Map.get_or_insert(key, default_value) -> V
                     // Returns existing value if key present, else inserts default and returns it
                     let caller_base = state.reg_base();
@@ -8490,7 +8490,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR-ref auto-deref — same defect class as Map.get.
                     let caller_base = state.reg_base();
                     let val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let val = resolve_arg_value(state, val_raw);
+                    let val = resolve_arg_value(state, val_raw)?;
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
@@ -8584,7 +8584,7 @@ pub(super) fn dispatch_primitive_method(
                     // shared rationale.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let other_val = resolve_arg_value(state, other_val_raw);
+                    let other_val = resolve_arg_value(state, other_val_raw)?;
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -8679,7 +8679,7 @@ pub(super) fn dispatch_primitive_method(
                     // Same CBGR-ref auto-deref as `union` above.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let other_val = resolve_arg_value(state, other_val_raw);
+                    let other_val = resolve_arg_value(state, other_val_raw)?;
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -8775,7 +8775,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR ref auto-deref via canonical helper.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let other_val = resolve_arg_value(state, other_val_raw);
+                    let other_val = resolve_arg_value(state, other_val_raw)?;
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -8877,7 +8877,7 @@ pub(super) fn dispatch_primitive_method(
                     // the next dereference.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let other_val = resolve_arg_value(state, other_val_raw);
+                    let other_val = resolve_arg_value(state, other_val_raw)?;
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -8928,7 +8928,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR ref auto-deref — same as is_subset above.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let other_val = resolve_arg_value(state, other_val_raw);
+                    let other_val = resolve_arg_value(state, other_val_raw)?;
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -8980,7 +8980,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR ref auto-deref via canonical helper.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let other_val = resolve_arg_value(state, other_val_raw);
+                    let other_val = resolve_arg_value(state, other_val_raw)?;
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -9099,7 +9099,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR ref auto-deref via canonical helper.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let other_val = resolve_arg_value(state, other_val_raw);
+                    let other_val = resolve_arg_value(state, other_val_raw)?;
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -10794,40 +10794,40 @@ pub(super) fn dispatch_primitive_method(
             "eq" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Bool, need to deref
-                let other = resolve_arg_value(state, other_val).as_bool();
+                let other = resolve_arg_value(state, other_val)?.as_bool();
                 Value::from_bool(v == other)
             }
             "ne" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Bool, need to deref
-                let other = resolve_arg_value(state, other_val).as_bool();
+                let other = resolve_arg_value(state, other_val)?.as_bool();
                 Value::from_bool(v != other)
             }
             // Ord protocol comparison methods — convention: false < true.
             // Mirrors `core/base/primitives.vr::implement Ord for Bool`.
             "lt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_bool();
+                let other = resolve_arg_value(state, other_val)?.as_bool();
                 Value::from_bool(!v && other)
             }
             "le" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_bool();
+                let other = resolve_arg_value(state, other_val)?.as_bool();
                 Value::from_bool(!v || other)
             }
             "gt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_bool();
+                let other = resolve_arg_value(state, other_val)?.as_bool();
                 Value::from_bool(v && !other)
             }
             "ge" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_bool();
+                let other = resolve_arg_value(state, other_val)?.as_bool();
                 Value::from_bool(v || !other)
             }
             "cmp" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = resolve_arg_value(state, other_val).as_bool();
+                let other = resolve_arg_value(state, other_val)?.as_bool();
                 let ord = match (v, other) {
                     (false, true) => std::cmp::Ordering::Less,
                     (true, false) => std::cmp::Ordering::Greater,
@@ -11633,7 +11633,7 @@ pub(super) fn dispatch_array_method(
             // arrive as plain Values because ref-of-immediate elides;
             // heap values arrive as ThinRef/FatRef).
             let needle_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let needle = resolve_arg_value(state, needle_raw);
+            let needle = resolve_arg_value(state, needle_raw)?;
             let mut found = false;
             for i in 0..len {
                 let elem = get_array_element(state, ptr, header, i)?;
@@ -11749,9 +11749,9 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let idx = resolve_arg_value(state, idx_raw).as_i64() as usize;
+            let idx = resolve_arg_value(state, idx_raw)?.as_i64() as usize;
             let value_raw = state.registers.get(caller_base, Reg(args.start.0 + 1));
-            let value = resolve_arg_value(state, value_raw);
+            let value = resolve_arg_value(state, value_raw)?;
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let current_len = unsafe { (*data_ptr).as_i64() } as usize;
             if idx >= current_len {
@@ -11780,7 +11780,7 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let new_len_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let new_len = resolve_arg_value(state, new_len_raw).as_i64();
+            let new_len = resolve_arg_value(state, new_len_raw)?.as_i64();
             let clamped = new_len.max(0);
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let current_len = unsafe { (*data_ptr).as_i64() };
@@ -11803,7 +11803,7 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let idx = resolve_arg_value(state, idx_raw).as_i64() as usize;
+            let idx = resolve_arg_value(state, idx_raw)?.as_i64() as usize;
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let current_len = unsafe { (*data_ptr).as_i64() } as usize;
             if idx >= current_len {
@@ -11840,9 +11840,9 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let idx = resolve_arg_value(state, idx_raw).as_i64();
+            let idx = resolve_arg_value(state, idx_raw)?.as_i64();
             let default_raw = state.registers.get(caller_base, Reg(args.start.0 + 1));
-            let default = resolve_arg_value(state, default_raw);
+            let default = resolve_arg_value(state, default_raw)?;
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let current_len = unsafe { (*data_ptr).as_i64() };
             if idx < 0 || idx >= current_len {
@@ -12128,7 +12128,7 @@ pub(super) fn dispatch_array_method(
                 // CBGR-ref needle (mirrors the `contains` intercept at
                 // line 4386–4409); without the deref the bitwise compare
                 // never matches NaN-boxed primitives in the list.
-                let needle = resolve_arg_value(state, arg0);
+                let needle = resolve_arg_value(state, arg0)?;
                 for i in 0..len {
                     let elem = get_array_element(state, ptr, header, i)?;
                     if value_eq(elem, needle, state) {

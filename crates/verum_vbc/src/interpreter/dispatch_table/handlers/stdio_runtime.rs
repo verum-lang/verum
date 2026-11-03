@@ -168,7 +168,7 @@ fn intercept_write(
     with_newline: bool,
 ) -> InterpreterResult<Option<Value>> {
     use std::io::Write;
-    let s = extract_text_arg(state, args_start_reg, caller_base);
+    let s = extract_text_arg(state, args_start_reg, caller_base)?;
     match stream {
         Stream::Stdout => {
             let mut out = std::io::stdout().lock();

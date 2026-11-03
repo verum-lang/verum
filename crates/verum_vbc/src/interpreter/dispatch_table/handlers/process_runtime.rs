@@ -85,7 +85,7 @@ pub(in super::super) fn try_intercept_process_runtime(
         // wasn't produced here (rare — e.g. external bytecode spawn),
         // we fall back to libc::waitpid directly.
         "try_wait_for_child" if func_name == "core.io.process.try_wait_for_child" && arg_count == 1 => {
-            let Some(pid) = unwrap_ref(state, args_start_reg, caller_base).try_as_i64() else {
+            let Some(pid) = unwrap_ref(state, args_start_reg, caller_base)?.try_as_i64() else {
                 return wrap_poll_result(state, Err("try_wait_for_child: expected an integer process id".into()));
             };
             let status = match try_wait_child_host(pid) {
@@ -99,8 +99,8 @@ pub(in super::super) fn try_intercept_process_runtime(
             wrap_poll_result(state, status)
         }
         "read_ready_chunk" if func_name == "core.io.process.read_ready_chunk" && arg_count == 2 => {
-            let fd = unwrap_ref(state, args_start_reg, caller_base).try_as_i64();
-            let max = unwrap_ref(state, args_start_reg + 1, caller_base).try_as_i64();
+            let fd = unwrap_ref(state, args_start_reg, caller_base)?.try_as_i64();
+            let max = unwrap_ref(state, args_start_reg + 1, caller_base)?.try_as_i64();
             let (Some(fd), Some(max)) = (fd, max) else {
                 return wrap_poll_result(state, Err("read_ready_chunk: expected an integer pipe id and read size".into()));
             };
@@ -166,7 +166,7 @@ fn intercept_spawn_with_output(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let cmd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let cmd_v = unwrap_ref(state, args_start_reg, caller_base)?;
     let cmd = match read_command_record(state, cmd_v) {
         Some(c) => c,
         None => {
@@ -368,16 +368,9 @@ fn read_variant_payload(v: Value) -> Option<(u32, *const Value)> {
     Some((tag, payload_base))
 }
 
-fn unwrap_ref(state: &InterpreterState, reg: u16, caller_base: u32) -> Value {
-    let v = state
-        .registers
-        .get(caller_base, crate::instruction::Reg(reg));
-    if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    }
+fn unwrap_ref(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<Value> {
+    let value = state.registers.get(caller_base, crate::instruction::Reg(reg));
+    super::heap_helpers::unwrap_ref(state, value)
 }
 
 fn stdio_from_cfg(tag: u32) -> std::process::Stdio {
@@ -502,7 +495,7 @@ fn intercept_spawn_child(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let cmd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let cmd_v = unwrap_ref(state, args_start_reg, caller_base)?;
     let cmd = match read_command_record(state, cmd_v) {
         Some(c) => c,
         None => {
@@ -518,8 +511,8 @@ fn intercept_spawn_child(
     // Honour the caller's stdio config — unlike spawn_child_with_output
     // which forces Piped, spawn_child preserves the original intent.
     std_cmd.stdin(stdio_from_cfg(cmd.stdin_cfg));
-    let stdout_tag = read_stdio_tag(state, args_start_reg, caller_base, 5);
-    let stderr_tag = read_stdio_tag(state, args_start_reg, caller_base, 6);
+    let stdout_tag = read_stdio_tag(state, args_start_reg, caller_base, 5)?;
+    let stderr_tag = read_stdio_tag(state, args_start_reg, caller_base, 6)?;
     std_cmd.stdout(stdio_from_cfg(stdout_tag));
     std_cmd.stderr(stdio_from_cfg(stderr_tag));
     let mut child = match std_cmd.spawn() {
@@ -655,7 +648,7 @@ fn intercept_wait_for_child(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let pid_v = unwrap_ref(state, args_start_reg, caller_base);
+    let pid_v = unwrap_ref(state, args_start_reg, caller_base)?;
     if !pid_v.is_int() {
         let msg = alloc_string_value(state, "wait_for_child: pid must be Int")?;
         return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
@@ -830,14 +823,14 @@ fn intercept_native_fd_write_all(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
-    let _data_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base)?;
+    let _data_v = unwrap_ref(state, args_start_reg + 1, caller_base)?;
     if !fd_v.is_int() {
         let msg = alloc_string_value(state, "fd_write_all: fd must be Int")?;
         return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
     }
     let fd = fd_v.as_i64();
-    let data = super::heap_helpers::extract_byte_slice(state, args_start_reg + 1, caller_base);
+    let data = super::heap_helpers::extract_byte_slice(state, args_start_reg + 1, caller_base)?;
     if let Some(file) = state.open_files.get_mut(&fd) {
         use std::io::Write as _;
         let result = match file.write_all(&data) {
@@ -1080,8 +1073,8 @@ fn intercept_native_fd_read_chunk(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
-    let max_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base)?;
+    let max_v = unwrap_ref(state, args_start_reg + 1, caller_base)?;
     if !fd_v.is_int() || !max_v.is_int() {
         let msg = alloc_string_value(state, "fd_read_chunk: args must be Int")?;
         return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
@@ -1112,8 +1105,8 @@ fn intercept_fd_read_chunk_bare(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
-    let max_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base)?;
+    let max_v = unwrap_ref(state, args_start_reg + 1, caller_base)?;
     if !fd_v.is_int() || !max_v.is_int() {
         return Ok(Some(alloc_byte_list(state, &[])?));
     }
@@ -1130,7 +1123,7 @@ fn intercept_fd_close_bare(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base)?;
     if fd_v.is_int() {
         host_fd_close(state, fd_v.as_i64());
     }
@@ -1142,7 +1135,7 @@ fn intercept_close_fd(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base)?;
     if !fd_v.is_int() {
         return Ok(Some(Value::unit()));
     }
@@ -1155,8 +1148,8 @@ fn intercept_native_kill(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let pid_v = unwrap_ref(state, args_start_reg, caller_base);
-    let sig_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    let pid_v = unwrap_ref(state, args_start_reg, caller_base)?;
+    let sig_v = unwrap_ref(state, args_start_reg + 1, caller_base)?;
     if !pid_v.is_int() || !sig_v.is_int() {
         let msg = alloc_string_value(state, "native_kill: args must be Int")?;
         return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
@@ -1266,25 +1259,25 @@ fn read_stdio_tag(
     args_start_reg: u16,
     caller_base: u32,
     _field_idx: usize,
-) -> u32 {
+) -> InterpreterResult<u32> {
     // Reach back into the Command record from arg 0 (it's a &Command
     // ref).  Field i lives at OBJECT_HEADER_SIZE + i * sizeof(Value).
-    let cmd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let cmd_v = unwrap_ref(state, args_start_reg, caller_base)?;
     if !cmd_v.is_ptr() || cmd_v.is_nil() {
-        return 0;
+        return Ok(0);
     }
     let ptr = cmd_v.as_ptr::<u8>();
     if ptr.is_null() {
-        return 0;
+        return Ok(0);
     }
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let needed = (_field_idx + 1) * std::mem::size_of::<Value>();
     if (header.size as usize) < needed {
-        return 0;
+        return Ok(0);
     }
     let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
     let v = unsafe { *base.add(_field_idx) };
-    read_variant_tag(v).unwrap_or(0)
+    Ok(read_variant_tag(v).unwrap_or(0))
 }
 
 /// Build a Maybe<Int> Verum value: None (tag=0, no payload) or

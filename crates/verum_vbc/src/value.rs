@@ -236,6 +236,10 @@ const FAT_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER | FAT_RE
 
 /// Mask for reference index (bits 0-44, 45 bits total).
 const REF_INDEX_MASK: u64 = (1u64 << 45) - 1;
+// As for boxed numeric widths, distinguish projected slots within the thin
+// reference family so they are never classified as host pointers.
+const SLOT_REF_BIT: u64 = 1u64 << 44;
+const THIN_INDEX_MASK: u64 = SLOT_REF_BIT - 1;
 
 // ============================================================================
 // CBGR register-reference encoding (T0367 / CBGR-REGREF-TAG-1)
@@ -910,12 +914,24 @@ impl Value {
     pub fn from_thin_ref(thin_ref: ThinRef) -> Self {
         let mut table = THIN_REFS.lock().unwrap();
         let index = table.len() as u64;
-        if index > REF_INDEX_MASK {
-            // Prevent OOM: return nil to signal overflow (safe fallback)
-            return Value::nil();
-        }
+        if index > THIN_INDEX_MASK { return Value::nil(); }
         table.push(thin_ref);
         Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | THIN_REF_MARKER | index)
+    }
+
+    pub(crate) fn projected_slot(id: u64) -> Option<Self> {
+        (id <= THIN_INDEX_MASK).then(|| Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | THIN_REF_MARKER | SLOT_REF_BIT | id))
+    }
+
+    pub(crate) fn projection_id(self) -> Option<u64> {
+        self.is_projected_slot().then_some(self.0 & THIN_INDEX_MASK)
+    }
+
+    /// A managed projection cannot be exported as an unchecked address or slice.
+    pub(crate) fn raw_thin_ref(&self) -> crate::interpreter::InterpreterResult<ThinRef> {
+        self.try_as_thin_ref().ok_or_else(|| crate::interpreter::InterpreterError::InvalidOperand {
+            message: "managed slot requires a checked Value access".into()
+        })
     }
 
     /// Creates a FatRef value (stored in global table).
@@ -1116,7 +1132,7 @@ impl Value {
     /// deref guards downstream inherit the correct answer automatically.
     #[inline]
     pub fn is_ptr(&self) -> bool {
-        self.tag() == Some(TAG_POINTER as u8) && !self.is_boxed_int() && !self.is_boxed_i128()
+        self.tag() == Some(TAG_POINTER as u8) && !self.is_boxed_int() && !self.is_boxed_i128() && !self.is_projected_slot()
     }
 
     /// Returns true if this is a small string.
@@ -1167,6 +1183,11 @@ impl Value {
         self.tag() == Some(TAG_POINTER as u8)
             && (self.0 & THIN_REF_MARKER) == THIN_REF_MARKER  // bits 47 and 45 set
             && (self.0 & BOXED_INT_SUB_MARKER) == 0 // bit 46 clear
+    }
+
+    /// A protected slot handle can only be dereferenced by its issuing heap.
+    pub(crate) fn is_projected_slot(&self) -> bool {
+        self.is_thin_ref() && self.0 & SLOT_REF_BIT != 0
     }
 
     /// Returns true if this is a FatRef (CBGR managed reference with metadata).
@@ -1488,19 +1509,6 @@ impl Value {
         self.0 & GENERATOR_ID_MASK
     }
 
-    /// Extracts the ThinRef from a ThinRef value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this is not a ThinRef value.
-    #[inline]
-    pub fn as_thin_ref(&self) -> ThinRef {
-        debug_assert!(self.is_thin_ref(), "Expected ThinRef, got {:?}", self.tag());
-        let index = (self.0 & REF_INDEX_MASK) as usize;
-        let table = THIN_REFS.lock().unwrap();
-        table[index]
-    }
-
     /// Extracts the FatRef from a FatRef value.
     ///
     /// # Panics
@@ -1563,11 +1571,8 @@ impl Value {
     /// Tries to extract as ThinRef.
     #[inline]
     pub fn try_as_thin_ref(&self) -> Option<ThinRef> {
-        if self.is_thin_ref() {
-            Some(self.as_thin_ref())
-        } else {
-            None
-        }
+        if !self.is_thin_ref() || self.is_projected_slot() { return None; }
+        THIN_REFS.lock().unwrap().get((self.0 & THIN_INDEX_MASK) as usize).copied()
     }
 
     /// Tries to extract as FatRef.
@@ -1627,7 +1632,9 @@ impl fmt::Debug for Value {
             write!(f, "Value::Generator({})", self.as_generator_id())
         } else if self.is_thin_ref() {
             // Check ThinRef before generic pointer (uses TAG_POINTER)
-            let thin_ref = self.as_thin_ref();
+            let Some(thin_ref) = self.try_as_thin_ref() else {
+                return f.write_str("Value::ManagedSlotRef");
+            };
             write!(
                 f,
                 "Value::ThinRef({:p}, gen={}, epoch={}, caps={:#x})",

@@ -653,7 +653,7 @@ pub(super) fn load_referent_into(
 
     // Handle ThinRef values (CBGR references stored in global table)
     if ref_val.is_thin_ref() {
-        let thin_ref = ref_val.as_thin_ref();
+        let thin_ref = state.heap.thin_ref(ref_val)?;
         if !thin_ref.is_null() {
             // Read Value from the memory location
             let value = unsafe { *(thin_ref.ptr as *const Value) };
@@ -1006,7 +1006,7 @@ pub(super) fn store_referent(
     ref_val: Value,
     value: Value,
 ) -> InterpreterResult<DispatchResult> {
-    super::cbgr_helpers::require_reference_write(ref_val)?;
+    super::cbgr_helpers::require_reference_write(state, ref_val)?;
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePtrwrite) {
         let addr = if ref_val.is_ptr() {
             ref_val.as_ptr::<u8>() as usize
@@ -1036,7 +1036,7 @@ pub(super) fn store_referent(
 
     // Handle ThinRef values (CBGR references stored in global table)
     if ref_val.is_thin_ref() {
-        let thin_ref = ref_val.as_thin_ref();
+        let thin_ref = state.heap.thin_ref(ref_val)?;
         if !thin_ref.is_null() {
             // Write Value to the memory location
             unsafe {
@@ -2124,10 +2124,10 @@ fn cbgr_extended_body(
             // register/thin-only peel made len() and &values[index] disagree.
             // The shared authority follows register chains, then one value-cell
             // or ThinRef hop, and preserves bridge-allocation provenance.
-            let list_val = super::cbgr_helpers::resolve_receiver(state, list_val);
+            let list_val = super::cbgr_helpers::resolve_receiver(state, list_val)?;
             // The shared resolver preserves a null ThinRef; this operation has
             // always refused it before attempting any container header read.
-            if list_val.is_thin_ref() && list_val.as_thin_ref().ptr.is_null() {
+            if list_val.is_thin_ref() && state.heap.thin_ref(list_val)?.ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
             }
 
@@ -2296,6 +2296,11 @@ fn cbgr_extended_body(
             let dst = read_reg(state)?;
             let addr_reg = read_reg(state)?;
             let addr_val = state.get_reg(addr_reg);
+            if addr_val.is_projected_slot() {
+                return Err(InterpreterError::InvalidOperand {
+                    message: "managed slot cannot be exported as a raw address".into(),
+                });
+            }
             let addr: usize = if addr_val.is_int() {
                 addr_val.as_i64() as usize
             } else if addr_val.is_ptr() && !addr_val.is_nil() {
@@ -2342,7 +2347,7 @@ fn cbgr_extended_body(
             let base_val = if base_val.is_fat_ref() {
                 Value::from_ptr(base_val.as_fat_ref().ptr())
             } else {
-                super::cbgr_helpers::resolve_receiver(state, base_val)
+                super::cbgr_helpers::resolve_receiver(state, base_val)?
             };
 
             if !base_val.is_ptr() || base_val.is_nil() {
@@ -2489,7 +2494,7 @@ fn cbgr_extended_body(
             let name_sid = read_varint(state)? as u32;
 
             let base_val =
-                super::cbgr_helpers::resolve_arg_value(state, state.get_reg(base_reg));
+                super::cbgr_helpers::resolve_arg_value(state, state.get_reg(base_reg))?;
             let (tid, base_ptr) =
                 super::extended::field_named_object(state, base_val, "RefFieldNamed")?;
             let field_idx =
@@ -2548,10 +2553,10 @@ fn cbgr_extended_body(
             let ptr_val = state.get_reg(ptr_reg);
             let len = state.get_reg(len_reg).as_i64() as u64;
 
-            let raw_ptr = if ptr_val.is_ptr() {
+            let raw_ptr = if ptr_val.is_thin_ref() {
+                ptr_val.raw_thin_ref()?.ptr
+            } else if ptr_val.is_regular_ptr() {
                 ptr_val.as_ptr::<u8>()
-            } else if ptr_val.is_thin_ref() {
-                ptr_val.as_thin_ref().ptr
             } else if ptr_val.is_fat_ref() {
                 ptr_val.as_fat_ref().ptr()
             } else if ptr_val.is_int() {
@@ -2695,7 +2700,7 @@ fn cbgr_extended_body(
                 // eprintln!("[DEBUG RefSlice] src is pointer: {:p}", src.as_ptr::<u8>());
                 src.as_ptr::<u8>()
             } else if src.is_thin_ref() {
-                let tr = src.as_thin_ref();
+                let tr = src.raw_thin_ref()?;
                 // eprintln!("[DEBUG RefSlice] src is thin_ref: {:p}", tr.ptr);
                 tr.ptr
             } else if src.is_fat_ref() {
@@ -2854,7 +2859,7 @@ fn cbgr_extended_body(
                 Value::from_ptr(fat_ref.ptr())
             } else if slice.is_thin_ref() {
                 // For ThinRef, extract the pointer directly
-                let thin_ref = slice.as_thin_ref();
+                let thin_ref = slice.raw_thin_ref()?;
                 Value::from_ptr(thin_ref.ptr)
             } else if let Some((p, _len)) = heap::value_as_byte_slice(&slice) {
                 // BYTE_SLICE byte view (ARCH-P5): the underlying data
@@ -3001,7 +3006,7 @@ fn cbgr_extended_body(
             // Pre-fix the unresolved ref fell through the FatRef and
             // byte-slice arms into a SILENT `src` passthrough:
             // `s.slice(1,5)` returned the WHOLE slice.
-            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg));
+            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))?;
             let start = state.get_reg(start_reg).as_i64() as u64;
             let end = state.get_reg(end_reg).as_i64() as u64;
 
@@ -3081,7 +3086,7 @@ fn cbgr_extended_body(
 
             // SLICE-SUBSLICE-RESOLVE-1: same ref-resolution contract as
             // SliceSubslice above.
-            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg));
+            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))?;
             let mid = state.get_reg(mid_reg).as_i64() as u64;
 
             if src.is_fat_ref() {
@@ -4036,7 +4041,7 @@ fn cbgr_extended_body(
             let size_reg = read_reg(state)?;
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above).
-            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))?) as *mut u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: same bounds discipline as `CMemset`.

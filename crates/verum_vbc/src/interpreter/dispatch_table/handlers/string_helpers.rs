@@ -16,7 +16,7 @@ use crate::value::Value;
 /// The shared resolver preserves bridge-memory precedence and peels a tracked
 /// value slot once, so a field address cannot be mistaken for a Text object.
 pub(super) fn extract_string(value: &Value, state: &InterpreterState) -> String {
-    let v = resolve_receiver(state, *value);
+    let Ok(v) = resolve_receiver(state, *value) else { return "<expired reference>".into(); };
     let value = &v;
 
     if value.is_small_string() {
@@ -106,7 +106,7 @@ pub(super) fn alloc_string_value(
 /// branch; non-Text-shaped values delegate to `extract_string`'s debug
 /// formats so behavior is identical outside the byte-transparent shapes.
 pub(super) fn extract_text_bytes(value: &Value, state: &InterpreterState) -> Vec<u8> {
-    let v = resolve_receiver(state, *value);
+    let Ok(v) = resolve_receiver(state, *value) else { return Vec::new(); };
 
     if v.is_small_string() {
         // `as_bytes` (NOT `as_str`) — must tolerate a partial code point.
@@ -348,7 +348,7 @@ pub(crate) fn deep_value_eq(
     va: &Value,
     vb: &Value,
     state: &InterpreterState,
-) -> bool {
+) -> InterpreterResult<bool> {
     deep_value_eq_depth(va, vb, state, 0)
 }
 
@@ -394,10 +394,14 @@ pub(super) fn record_field_count(
     matches!(descriptor.kind, TypeKind::Record).then(|| descriptor.fields.len().min(slots))
 }
 
-fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: usize) -> bool {
+fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: usize) -> InterpreterResult<bool> {
+    // Even an identity comparison must not treat a revoked lease as a value.
+    for value in [va, vb] {
+        if value.is_projected_slot() { state.heap.thin_ref(*value)?; }
+    }
     if depth >= MAX_EQ_DEPTH {
         // At max depth, fall back to bit-level comparison
-        return va.to_bits() == vb.to_bits();
+        return Ok(va.to_bits() == vb.to_bits());
     }
     use heap::OBJECT_HEADER_SIZE;
 
@@ -406,19 +410,19 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     // NaN values have TAG_NAN (0x7), so check for that tag.
     const TAG_NAN: u8 = 0x7;
     if va.tag() == Some(TAG_NAN) || vb.tag() == Some(TAG_NAN) {
-        return false;
+        return Ok(false);
     }
     // Also check for unboxed NaN floats (values that are_float() but have NaN bit patterns)
     if va.is_float() && va.as_f64().is_nan() {
-        return false;
+        return Ok(false);
     }
     if vb.is_float() && vb.as_f64().is_nan() {
-        return false;
+        return Ok(false);
     }
 
     // Fast path: identical bit patterns (safe now that NaN is handled)
     if va.to_bits() == vb.to_bits() {
-        return true;
+        return Ok(true);
     }
 
     // 128-bit integers (T0272): two boxed Int128/UInt128 are equal iff their
@@ -429,7 +433,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     // one side an int) falls through to the reference-unwrap logic below, which
     // derefs and re-enters this function on the pointee.
     if (va.is_boxed_i128() || vb.is_boxed_i128()) && va.is_int() && vb.is_int() {
-        return va.as_i128_raw() == vb.as_i128_raw();
+        return Ok(va.as_i128_raw() == vb.as_i128_raw());
     }
 
     // Single-side reference unwrap.  The mixed (ThinRef vs CBGR-ref)
@@ -477,7 +481,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let (abs_idx, _gen) = decode_cbgr_ref(*va);
         Some(state.registers.get_absolute(abs_idx))
     } else if va.is_thin_ref() {
-        let tr = va.as_thin_ref();
+        let tr = state.heap.thin_ref(*va)?;
         if !tr.ptr.is_null() {
             Some(unsafe { *(tr.ptr as *const Value) })
         } else {
@@ -492,7 +496,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let (abs_idx, _gen) = decode_cbgr_ref(*vb);
         Some(state.registers.get_absolute(abs_idx))
     } else if vb.is_thin_ref() {
-        let tr = vb.as_thin_ref();
+        let tr = state.heap.thin_ref(*vb)?;
         if !tr.ptr.is_null() {
             Some(unsafe { *(tr.ptr as *const Value) })
         } else {
@@ -545,10 +549,10 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         if let (Some((pa, la)), Some((pb, lb))) =
             (byte_slice_of(va, state), byte_slice_of(vb, state))
         {
-            return la == lb
+            return Ok(la == lb
                 && unsafe {
                     std::slice::from_raw_parts(pa, la) == std::slice::from_raw_parts(pb, lb)
-                };
+                });
         }
         // One side isn't byte-addressable (e.g. FatRef vs a value-ref) —
         // fall through to the type-specific branches below.
@@ -556,13 +560,13 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
 
     // Handle ThinRef values - compare dereferenced values
     if va.is_thin_ref() && vb.is_thin_ref() {
-        let thin_a = va.as_thin_ref();
-        let thin_b = vb.as_thin_ref();
+        let thin_a = state.heap.thin_ref(*va)?;
+        let thin_b = state.heap.thin_ref(*vb)?;
         if thin_a.is_null() && thin_b.is_null() {
-            return true;
+            return Ok(true);
         }
         if thin_a.is_null() || thin_b.is_null() {
-            return false;
+            return Ok(false);
         }
         // Dereference and compare the pointed-to values
         let deref_a = unsafe { *(thin_a.ptr as *const Value) };
@@ -575,10 +579,10 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let fat_a = va.as_fat_ref();
         let fat_b = vb.as_fat_ref();
         if fat_a.is_null() && fat_b.is_null() {
-            return true;
+            return Ok(true);
         }
         if fat_a.is_null() || fat_b.is_null() {
-            return false;
+            return Ok(false);
         }
         // Byte-slice FatRefs (`reserved == 1` — generic raw slices from
         // `slice_from_raw_parts` / RefSliceRaw; `Text.as_bytes()` now
@@ -589,12 +593,12 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         // directly.
         if fat_a.reserved == 1 || fat_b.reserved == 1 {
             if fat_a.len() != fat_b.len() {
-                return false;
+                return Ok(false);
             }
             let n = fat_a.len() as usize;
             let sa = unsafe { std::slice::from_raw_parts(fat_a.ptr(), n) };
             let sb = unsafe { std::slice::from_raw_parts(fat_b.ptr(), n) };
-            return sa == sb;
+            return Ok(sa == sb);
         }
         // Value-ref FatRefs: dereference and compare the pointed-to values.
         let deref_a = unsafe { *(fat_a.ptr() as *const Value) };
@@ -605,9 +609,9 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     // Handle mixed reference types (ThinRef vs CBGR register ref)
     // ThinRef points to heap memory, CBGR register ref points to a register
     if va.is_thin_ref() && is_cbgr_ref(vb) {
-        let thin_a = va.as_thin_ref();
+        let thin_a = state.heap.thin_ref(*va)?;
         if thin_a.is_null() {
-            return false;
+            return Ok(false);
         }
         let deref_a = unsafe { *(thin_a.ptr as *const Value) };
         let (abs_idx, _gen) = decode_cbgr_ref(*vb);
@@ -616,9 +620,9 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     }
 
     if is_cbgr_ref(va) && vb.is_thin_ref() {
-        let thin_b = vb.as_thin_ref();
+        let thin_b = state.heap.thin_ref(*vb)?;
         if thin_b.is_null() {
-            return false;
+            return Ok(false);
         }
         let (abs_idx, _gen) = decode_cbgr_ref(*va);
         let deref_a = state.registers.get_absolute(abs_idx);
@@ -637,10 +641,10 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
 
     // Handle primitives first
     if va.is_float() && vb.is_float() {
-        return va.as_f64() == vb.as_f64();
+        return Ok(va.as_f64() == vb.as_f64());
     }
     if va.is_bool() && vb.is_bool() {
-        return va.as_bool() == vb.as_bool();
+        return Ok(va.as_bool() == vb.as_bool());
     }
     // Bool ↔ Int cross-type comparison: Bool is a 1-bit integer (false=0, true=1)
     if (va.is_bool() && vb.is_int()) || (va.is_int() && vb.is_bool()) {
@@ -654,13 +658,13 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         } else {
             vb.as_i64()
         };
-        return ia == ib;
+        return Ok(ia == ib);
     }
     if va.is_unit() && vb.is_unit() {
-        return true;
+        return Ok(true);
     }
     if va.is_nil() && vb.is_nil() {
-        return true;
+        return Ok(true);
     }
 
     // Check if either value could be a string representation.
@@ -672,17 +676,17 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     if a_is_string_like && b_is_string_like {
         let str_a = resolve_string_value(va, state);
         let str_b = resolve_string_value(vb, state);
-        return str_a == str_b;
+        return Ok(str_a == str_b);
     }
 
     // Pure integer comparison (only when neither is a string ID)
     if va.is_int() && vb.is_int() {
-        return va.as_i64() == vb.as_i64();
+        return Ok(va.as_i64() == vb.as_i64());
     }
 
     // Handle small strings (one side is small_string, other is non-string)
     if va.is_small_string() || vb.is_small_string() {
-        return false; // Type mismatch: one is string, other is not
+        return Ok(false); // Type mismatch: one is string, other is not
     }
 
     // Handle heap pointers (strings, variants, objects)
@@ -691,10 +695,10 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let ptr_b = vb.as_ptr::<u8>();
 
         if ptr_a.is_null() && ptr_b.is_null() {
-            return true;
+            return Ok(true);
         }
         if ptr_a.is_null() || ptr_b.is_null() {
-            return false;
+            return Ok(false);
         }
 
         // Read type_id from object header (first u32 field)
@@ -747,7 +751,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             let tag_b = unsafe { heap::variant_tag(ptr_b) };
 
             if tag_a != tag_b {
-                return false; // Different variant tags
+                return Ok(false); // Different variant tags
             }
 
             // Same tag - compare all payload fields
@@ -756,7 +760,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             let size_a = header_a.size as usize;
             let size_b = header_b.size as usize;
             if size_a != size_b {
-                return false;
+                return Ok(false);
             }
             let field_count = size_a.saturating_sub(8) / std::mem::size_of::<Value>();
             let payload_offset = OBJECT_HEADER_SIZE + 8;
@@ -767,11 +771,11 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
                 let fb = unsafe {
                     &*(ptr_b.add(payload_offset + i * std::mem::size_of::<Value>()) as *const Value)
                 };
-                if !deep_value_eq_depth(fa, fb, state, depth + 1) {
-                    return false;
+                if !deep_value_eq_depth(fa, fb, state, depth + 1)? {
+                    return Ok(false);
                 }
             }
-            return true;
+            return Ok(true);
         } else if (type_id_a == 0 || type_id_a == TypeId::TUPLE.0)
             && (type_id_b == 0 || type_id_b == TypeId::TUPLE.0)
         {
@@ -781,7 +785,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             let size_a = header_a.size as usize;
             let size_b = header_b.size as usize;
             if size_a != size_b {
-                return false;
+                return Ok(false);
             }
             let field_count = size_a / std::mem::size_of::<Value>();
             let data_offset = OBJECT_HEADER_SIZE;
@@ -792,11 +796,11 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
                 let fb = unsafe {
                     &*(ptr_b.add(data_offset + i * std::mem::size_of::<Value>()) as *const Value)
                 };
-                if !deep_value_eq_depth(fa, fb, state, depth + 1) {
-                    return false;
+                if !deep_value_eq_depth(fa, fb, state, depth + 1)? {
+                    return Ok(false);
                 }
             }
-            return true;
+            return Ok(true);
         } else if is_array_type_id(type_id_a) && is_array_type_id(type_id_b) {
             // Array/List structural comparison
             let header_a = unsafe { heap::ObjectHeader::ref_or_stub(ptr_a) };
@@ -804,18 +808,18 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             let len_a = super::super::get_array_length(ptr_a, header_a).unwrap_or(0);
             let len_b = super::super::get_array_length(ptr_b, header_b).unwrap_or(0);
             if len_a != len_b {
-                return false;
+                return Ok(false);
             }
             for i in 0..len_a {
                 let ea =
                     super::super::get_array_element(state, ptr_a, header_a, i).unwrap_or(Value::nil());
                 let eb =
                     super::super::get_array_element(state, ptr_b, header_b, i).unwrap_or(Value::nil());
-                if !deep_value_eq_depth(&ea, &eb, state, depth + 1) {
-                    return false;
+                if !deep_value_eq_depth(&ea, &eb, state, depth + 1)? {
+                    return Ok(false);
                 }
             }
-            return true;
+            return Ok(true);
         } else if type_id_a == type_id_b {
             // Defensive TEXT arm: real heap Text is intercepted by the
             // string-likeness path above (`is_heap_string`); keep the
@@ -823,7 +827,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             if type_id_a == TypeId::TEXT.0 {
                 let str_a = extract_string(va, state);
                 let str_b = extract_string(vb, state);
-                return str_a == str_b;
+                return Ok(str_a == str_b);
             }
 
             // T0273 / RECORD-EQ-STRCMP-LATENT-1: same-type RECORD objects
@@ -840,7 +844,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             let header_b = unsafe { heap::ObjectHeader::ref_or_stub(ptr_b) };
             if let Some(field_count) = record_field_count(state, header_a) {
                 if header_a.size != header_b.size {
-                    return false;
+                    return Ok(false);
                 }
                 for i in 0..field_count {
                     let fa = unsafe {
@@ -851,11 +855,11 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
                         &*(ptr_b.add(OBJECT_HEADER_SIZE + i * std::mem::size_of::<Value>())
                             as *const Value)
                     };
-                    if !deep_value_eq_depth(fa, fb, state, depth + 1) {
-                        return false;
+                    if !deep_value_eq_depth(fa, fb, state, depth + 1)? {
+                        return Ok(false);
                     }
                 }
-                return true;
+                return Ok(true);
             }
 
             // Same-type heap object that is neither Text, variant, tuple,
@@ -864,13 +868,13 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             // carriers). Identity already failed (the bits-equal fast
             // path), and a rendering-based compare was exactly the
             // address-string defect — report not-equal rather than guess.
-            return false;
+            return Ok(false);
         } else {
             // Different types -> not equal
-            return false;
+            return Ok(false);
         }
     }
 
     // Type mismatch
-    false
+    Ok(false)
 }

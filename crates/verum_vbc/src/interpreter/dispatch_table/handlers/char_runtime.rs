@@ -180,7 +180,7 @@ pub(in super::super) fn try_intercept_char_encode(
     // also reaches us — same pattern as the existing intercept
     // siblings.  `resolve_arg_value` collapses all three reference
     // shapes; for a non-reference value it's a no-op.
-    let receiver_resolved = super::cbgr_helpers::resolve_arg_value(state, receiver);
+    let receiver_resolved = super::cbgr_helpers::resolve_arg_value(state, receiver)?;
     let codepoint = if receiver_resolved.is_int() {
         receiver_resolved.as_i64()
     } else if is_cbgr_ref(&receiver_resolved) {
@@ -203,7 +203,7 @@ pub(in super::super) fn try_intercept_char_encode(
     // three Verum reference shapes (CBGR register-ref, heap-interior
     // pointer, ThinRef) collapse to the underlying heap value first.
     let buf_val_raw = state.registers.get(caller_base, buf_reg);
-    let buf_val = super::cbgr_helpers::resolve_arg_value(state, buf_val_raw);
+    let buf_val = super::cbgr_helpers::resolve_arg_value(state, buf_val_raw)?;
 
     // SLICE-ELEM-WRITE-1 (scope narrowing): this intercept only
     // understands FatRef slices and ThinRef byte windows.  A buf that
@@ -225,7 +225,7 @@ pub(in super::super) fn try_intercept_char_encode(
             let mut tmp = [0u8; 4];
             let encoded = c.encode_utf8(&mut tmp);
             let n_bytes = encoded.len();
-            write_utf8_bytes_to_buf(buf_val, &tmp, n_bytes);
+            write_utf8_bytes_to_buf(buf_val, &tmp, n_bytes)?;
             state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
             Ok(Some(Value::from_i64(n_bytes as i64)))
         }
@@ -233,7 +233,7 @@ pub(in super::super) fn try_intercept_char_encode(
             let mut tmp = [0u16; 2];
             let encoded = c.encode_utf16(&mut tmp);
             let n_units = encoded.len();
-            write_utf16_units_to_buf(buf_val, &tmp, n_units);
+            write_utf16_units_to_buf(buf_val, &tmp, n_units)?;
             state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
             Ok(Some(Value::from_i64(n_units as i64)))
         }
@@ -284,7 +284,7 @@ fn write_fat_ref_int_element(fat: &crate::value::FatRef, index: usize, v: i64) {
     }
 }
 
-fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
+fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) -> InterpreterResult<()> {
     // FatRef slices FIRST — they also pass `is_ptr()`, so this check
     // must precede the header-probing pointer branch (same ordering
     // rule as `handle_get_index`).
@@ -293,11 +293,11 @@ fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
         for (i, b) in src.iter().enumerate().take(n_bytes) {
             write_fat_ref_int_element(&fat, i, *b as i64);
         }
-        return;
+        return Ok(());
     }
     if !buf_val.is_ptr() || buf_val.is_nil() {
         if buf_val.is_thin_ref() {
-            let thin = buf_val.as_thin_ref();
+            let thin = buf_val.raw_thin_ref()?;
             if !thin.ptr.is_null() {
                 for (i, b) in src.iter().enumerate().take(n_bytes) {
                     unsafe {
@@ -306,7 +306,7 @@ fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
                 }
             }
         }
-        return;
+        return Ok(());
     }
 
     let buf_ptr = buf_val.as_ptr::<u8>();
@@ -346,9 +346,10 @@ fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
             }
         }
     }
+    Ok(())
 }
 
-fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) {
+fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) -> InterpreterResult<()> {
     // SLICE-ELEM-WRITE-1 oracle: classify the buffer value on demand.
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceEncbuf) {
         eprintln!(
@@ -369,11 +370,11 @@ fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) {
         for (i, u) in src.iter().enumerate().take(n_units) {
             write_fat_ref_int_element(&fat, i, *u as i64);
         }
-        return;
+        return Ok(());
     }
     if !buf_val.is_ptr() || buf_val.is_nil() {
         if buf_val.is_thin_ref() {
-            let thin = buf_val.as_thin_ref();
+            let thin = buf_val.raw_thin_ref()?;
             if !thin.ptr.is_null() {
                 for (i, u) in src.iter().enumerate().take(n_units) {
                     unsafe {
@@ -382,7 +383,7 @@ fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) {
                 }
             }
         }
-        return;
+        return Ok(());
     }
 
     let buf_ptr = buf_val.as_ptr::<u8>();
@@ -414,4 +415,5 @@ fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) {
             }
         }
     }
+    Ok(())
 }

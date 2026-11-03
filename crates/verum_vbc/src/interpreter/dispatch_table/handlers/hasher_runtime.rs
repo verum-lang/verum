@@ -25,7 +25,7 @@
 use super::super::super::error::InterpreterResult;
 use super::super::super::heap;
 use super::super::super::state::InterpreterState;
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+use super::cbgr_helpers::is_cbgr_ref;
 use super::method_dispatch::fxhash_bytes;
 use crate::instruction::Reg;
 use crate::value::Value;
@@ -62,7 +62,7 @@ pub(in super::super) fn try_intercept_default_hasher(
     // arg[0] is `self` (or `&self` / `&mut self`).  Deref CBGR refs +
     // ThinRefs so we land on the heap-record Value.
     let self_raw = state.registers.get(caller_base, Reg(args_start_reg));
-    let self_val = deref_self(state, self_raw);
+    let self_val = super::heap_helpers::unwrap_ref(state, self_raw)?;
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceHasher) {
         let k = |v: &Value| -> &'static str {
             if is_cbgr_ref(v) { "cbgr-ref" }
@@ -105,7 +105,7 @@ pub(in super::super) fn try_intercept_default_hasher(
             // FatRef (`slice_from_raw_parts`), or a heap-string Text
             // view.  Auto-deref CBGR-ref / ThinRef first.
             let raw = state.registers.get(caller_base, Reg(args_start_reg + 1));
-            let bytes_val = deref_self(state, raw);
+            let bytes_val = super::heap_helpers::unwrap_ref(state, raw)?;
             let bytes: Vec<u8> = if let Some((p, n)) = heap::value_as_byte_slice(&bytes_val) {
                 // Typed BYTE_SLICE arm — replaces the retired
                 // `len <= 1M` heuristic for `as_bytes()` inputs
@@ -178,20 +178,4 @@ pub(in super::super) fn try_intercept_default_hasher(
         "finish" if arg_count == 1 => Ok(Some(Value::from_i64(state_i64))),
         _ => Ok(None),
     }
-}
-
-/// Auto-deref CBGR ref / ThinRef.  Used for both `self` and slice args.
-#[inline]
-fn deref_self(state: &InterpreterState, v: Value) -> Value {
-    if is_cbgr_ref(&v) {
-        let (abs, _) = decode_cbgr_ref(v);
-        return state.registers.get_absolute(abs);
-    }
-    if v.is_thin_ref() {
-        let tr = v.as_thin_ref();
-        if !tr.ptr.is_null() {
-            return unsafe { *(tr.ptr as *const Value) };
-        }
-    }
-    v
 }

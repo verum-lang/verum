@@ -73,20 +73,20 @@ pub(in super::super) fn try_intercept_env_runtime(
         // unique — no qualifier needed — and catching them closes EVERY
         // path (`var`/`var_opt`/`set_var`/`remove_var` all funnel here).
         "get_env_impl" if arg_count == 1 => {
-            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
+            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base)?;
             let key = String::from_utf8_lossy(&name_bytes).into_owned();
             env_get_maybe(state, &key)
         }
         "set_env_impl" if arg_count == 2 => {
-            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
-            let value_bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base);
+            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base)?;
+            let value_bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base)?;
             let key = String::from_utf8_lossy(&name_bytes).into_owned();
             let value = String::from_utf8_lossy(&value_bytes).into_owned();
             env_set_raw(state, &key, &value);
             Ok(Some(env_unit_ok(state)?))
         }
         "unset_env_impl" if arg_count == 1 => {
-            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
+            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base)?;
             let key = String::from_utf8_lossy(&name_bytes).into_owned();
             env_unset_raw(state, &key);
             Ok(Some(env_unit_ok(state)?))
@@ -337,7 +337,7 @@ fn intercept_var_opt(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let key = extract_text_arg(state, args_start_reg, caller_base);
+    let key = extract_text_arg(state, args_start_reg, caller_base)?;
     match env_get_raw(&key) {
         Ok(value) => {
             let text = alloc_string_value(state, &value)?;
@@ -352,7 +352,7 @@ fn intercept_var(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let key = extract_text_arg(state, args_start_reg, caller_base);
+    let key = extract_text_arg(state, args_start_reg, caller_base)?;
     match env_get_raw(&key) {
         Ok(value) => {
             let text = alloc_string_value(state, &value)?;
@@ -380,8 +380,8 @@ fn intercept_set_var(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let key = extract_text_arg(state, args_start_reg, caller_base);
-    let value = extract_text_arg(state, args_start_reg + 1, caller_base);
+    let key = extract_text_arg(state, args_start_reg, caller_base)?;
+    let value = extract_text_arg(state, args_start_reg + 1, caller_base)?;
     // `env.set_var` is declared to return unit, so a permission denial is
     // silent here — the gate itself lives in `env_set_raw`.
     env_set_raw(state, &key, &value);
@@ -393,7 +393,7 @@ fn intercept_remove_var(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let key = extract_text_arg(state, args_start_reg, caller_base);
+    let key = extract_text_arg(state, args_start_reg, caller_base)?;
     // `env.remove_var` returns unit; the gate lives in `env_unset_raw`.
     env_unset_raw(state, &key);
     Ok(Some(Value::unit()))
@@ -440,7 +440,7 @@ fn intercept_set_current_dir(
     // small/heap strings — it returns "" for record pointers,
     // making chdir a silent no-op. Drill through Path/PathBuf
     // shapes the same way file_runtime does.
-    let path = extract_path_or_text(state, args_start_reg, caller_base);
+    let path = extract_path_or_text(state, args_start_reg, caller_base)?;
     // VBC-PERM-1 — granular target_id: hash the directory path so a
     // script frontmatter `permissions = ["run=/var/jobs"]` grants
     // chdir only into that directory.  Falls through to WILDCARD
@@ -615,41 +615,41 @@ fn alloc_text_list(state: &mut InterpreterState, items: &[Value]) -> Interpreter
 /// taking a cross-module dependency on file_runtime internals.
 /// Used by `set_current_dir(&Path)` so chdir actually targets the
 /// caller's intended directory.
-fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
+fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<String> {
     use super::heap_helpers::unwrap_ref;
     use crate::interpreter::heap;
     use super::string_helpers::extract_string;
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
-    let unwrapped = unwrap_ref(state, v);
+    let unwrapped = unwrap_ref(state, v)?;
     if unwrapped.is_small_string() {
-        return extract_string(&unwrapped, state);
+        return Ok(extract_string(&unwrapped, state));
     }
     if !unwrapped.is_ptr() || unwrapped.is_nil() {
-        return extract_string(&unwrapped, state);
+        return Ok(extract_string(&unwrapped, state));
     }
     let ptr = unwrapped.as_ptr::<u8>();
     if ptr.is_null() {
-        return String::new();
+        return Ok(String::new());
     }
     if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
-        return extract_string(&unwrapped, state);
+        return Ok(extract_string(&unwrapped, state));
     }
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < std::mem::size_of::<Value>() {
-        return extract_string(&unwrapped, state);
+        return Ok(extract_string(&unwrapped, state));
     }
     // Heap-string TEXT shape: route to extract_string directly.
     if header.type_id == TypeId::TEXT {
-        return extract_string(&unwrapped, state);
+        return Ok(extract_string(&unwrapped, state));
     }
     // Try Path { inner: Text } — read field 0.
     let field0 = unsafe {
         *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
     };
     if field0.is_small_string() {
-        return extract_string(&field0, state);
+        return Ok(extract_string(&field0, state));
     }
     if field0.is_ptr() && !field0.is_nil() {
         let inner_ptr = field0.as_ptr::<u8>();
@@ -659,7 +659,7 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
         {
             let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
             if inner_header.type_id == TypeId::TEXT {
-                return extract_string(&field0, state);
+                return Ok(extract_string(&field0, state));
             }
             // PathBuf { path: Path { inner: Text } } — drill once more.
             if (inner_header.size as usize) >= std::mem::size_of::<Value>() {
@@ -667,18 +667,18 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
                     *(inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
                 };
                 if inner_field0.is_small_string() {
-                    return extract_string(&inner_field0, state);
+                    return Ok(extract_string(&inner_field0, state));
                 }
                 if inner_field0.is_ptr() && !inner_field0.is_nil() {
                     let deeper_ptr = inner_field0.as_ptr::<u8>();
                     let deeper_header = unsafe { heap::ObjectHeader::ref_or_stub(deeper_ptr) };
                     if deeper_header.type_id == TypeId::TEXT {
-                        return extract_string(&inner_field0, state);
+                        return Ok(extract_string(&inner_field0, state));
                     }
                 }
             }
         }
     }
     // Last-resort: render whatever the value looks like.
-    extract_string(&unwrapped, state)
+    Ok(extract_string(&unwrapped, state))
 }

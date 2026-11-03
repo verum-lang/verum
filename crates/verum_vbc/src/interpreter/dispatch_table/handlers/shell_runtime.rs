@@ -256,13 +256,13 @@ fn intercept_run_argv(
     let prog_raw = state
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
-    let prog_unwrapped = unwrap_ref_value(state, prog_raw);
+    let prog_unwrapped = super::heap_helpers::unwrap_ref(state, prog_raw)?;
     let program = extract_string(&prog_unwrapped, state);
 
     let args_raw = state
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg + 1));
-    let args_unwrapped = unwrap_ref_value(state, args_raw);
+    let args_unwrapped = super::heap_helpers::unwrap_ref(state, args_raw)?;
     let argv = read_text_list(state, args_unwrapped);
 
     let display = render_argv(&program, &argv);
@@ -314,20 +314,7 @@ fn intercept_run_argv(
     )?))
 }
 
-/// Unwrap CBGR-ref / ThinRef encodings down to the underlying Value.
-fn unwrap_ref_value(state: &InterpreterState, v: Value) -> Value {
-    if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
-        return state.registers.get_absolute(abs_index);
-    }
-    if v.is_thin_ref() {
-        let tr = v.as_thin_ref();
-        if !tr.ptr.is_null() {
-            return unsafe { *(tr.ptr as *const Value) };
-        }
-    }
-    v
-}
+
 
 /// Walk a `List<Text>` heap record (`[len, cap, backing_ptr]`
 /// header followed by `[Value; cap]` of Texts) into an owned
@@ -479,7 +466,7 @@ pub(in super::super) fn try_intercept_shell_result_inherent_call(
     let recv_raw = state
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
-    let receiver = unwrap_ref_value(state, recv_raw);
+    let receiver = super::heap_helpers::unwrap_ref(state, recv_raw)?;
     if !receiver.is_ptr() || receiver.is_nil() {
         return Ok(None);
     }

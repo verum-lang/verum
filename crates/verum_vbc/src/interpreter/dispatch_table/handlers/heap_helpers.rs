@@ -231,7 +231,7 @@ pub(super) fn alloc_byte_list_packed(
 /// either a FatRef-shaped slice (elem_size 0 = NaN-boxed Values, 1
 /// = packed bytes) or a `List<Byte>` Value-per-element backing.
 /// Empty Vec when the value isn't a byte container.
-pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
+pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<Vec<u8>> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
@@ -258,7 +258,11 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
     // is the fourth instance of the class recorded at T0403 / T0899 /
     // T0911: a deref helper that knows register-refs and not interior
     // pointers is a latent `&field`-argument corruptor.
-    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v)?;
+    Ok(bytes_from_resolved_slice(unwrapped))
+}
+
+fn bytes_from_resolved_slice(unwrapped: Value) -> Vec<u8> {
     // BYTE_SLICE byte view (`Text.as_bytes()`, ARCH-P5): raw
     // `{ptr, len}` payload — the canonical typed `&[Byte]` shape.
     if let Some((p, len)) = heap::value_as_byte_slice(&unwrapped) {
@@ -327,7 +331,6 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
             }
         }
     }
-    _ = state; // suppress unused warning when no extract paths fire.
     Vec::new()
 }
 
@@ -446,7 +449,7 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
 /// handling CBGR-style register references (negative-int encoding
 /// of `&self`/`&mut self`) and thin-ref auto-deref (heap-pointer-
 /// to-Value).
-pub(super) fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
+pub(super) fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> InterpreterResult<String> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
@@ -457,17 +460,17 @@ pub(super) fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: 
         v
     };
     if unwrapped.is_thin_ref() {
-        let tr = unwrapped.as_thin_ref();
+        let tr = state.heap.thin_ref(unwrapped)?;
         if !tr.ptr.is_null() {
             unwrapped = unsafe { *(tr.ptr as *const Value) };
         }
     }
-    extract_string(&unwrapped, state)
+    Ok(extract_string(&unwrapped, state))
 }
 
 /// CBGR-or-thin-ref unwrap of a Value — the canonical first step
 /// before any heap-shape probe of an `&self`/`&mut self` receiver.
-pub(super) fn unwrap_ref(state: &InterpreterState, v: Value) -> Value {
+pub(super) fn unwrap_ref(state: &InterpreterState, v: Value) -> InterpreterResult<Value> {
     let mut cur = if is_cbgr_ref(&v) {
         let (abs_index, _) = decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
@@ -475,12 +478,12 @@ pub(super) fn unwrap_ref(state: &InterpreterState, v: Value) -> Value {
         v
     };
     if cur.is_thin_ref() {
-        let tr = cur.as_thin_ref();
+        let tr = state.heap.thin_ref(cur)?;
         if !tr.ptr.is_null() {
             cur = unsafe { *(tr.ptr as *const Value) };
         }
     }
-    cur
+    Ok(cur)
 }
 
 // ============================================================================

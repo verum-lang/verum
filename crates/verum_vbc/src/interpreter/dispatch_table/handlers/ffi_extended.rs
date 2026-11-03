@@ -277,8 +277,8 @@ fn ffi_extended_body(
             let dst_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
-            let src_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))) as *const u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))?) as *mut u8;
+            let src_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))?) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values and
@@ -312,7 +312,7 @@ fn ffi_extended_body(
             let size_reg = read_reg(state)?;
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above) — bare `as_ptr()` no-op'd int-tagged buffers.
-            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))?) as *mut u8;
             let value = state.get_reg(value_reg).as_i64() as u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
@@ -347,8 +347,8 @@ fn ffi_extended_body(
             let size_reg = read_reg(state)?;
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above).
-            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
-            let src_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))) as *const u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))?) as *mut u8;
+            let src_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))?) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values
@@ -383,8 +383,8 @@ fn ffi_extended_body(
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above) — bare `as_ptr()` compared garbage for
             // int-tagged buffers (two equal bridge buffers ranked -1).
-            let ptr1 = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(ptr1_reg))) as *const u8;
-            let ptr2 = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(ptr2_reg))) as *const u8;
+            let ptr1 = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(ptr1_reg))?) as *const u8;
+            let ptr2 = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(ptr2_reg))?) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values
@@ -520,7 +520,7 @@ fn ffi_extended_body(
             // `handlers/cbgr.rs` already had to mirror it by hand
             // ("Mirror the GetF auto-deref chain") — a third private copy
             // would guarantee the next divergence.
-            let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val);
+            let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val)?;
             // The struct receiver lives in the register either as an
             // Object/Pointer Value (heap-allocated struct) or — for
             // some single-field receivers — as the inline payload
@@ -1014,7 +1014,7 @@ fn ffi_extended_body(
                 &arg_regs,
                 &mut args,
                 &mut source_reg_map,
-            );
+            )?;
 
             // Permission gate. Closes the macOS / Windows hole
             // where FFI primitives (`_exit`, `open`, `connect`)
@@ -1531,7 +1531,7 @@ fn ffi_extended_body(
                 &arg_regs,
                 &mut args,
                 &mut source_reg_map,
-            );
+            )?;
 
             // Permission gate — see CallFfiC arm for the rationale.
             // Same boundary regardless of calling convention.
@@ -1712,7 +1712,7 @@ fn ffi_extended_body(
                 &arg_regs,
                 &mut args,
                 &mut source_reg_map,
-            );
+            )?;
 
             // Permission gate — see CallFfiC arm for the rationale.
             // Same boundary regardless of calling convention.

@@ -135,7 +135,7 @@ pub(in super::super) fn handle_jump_eq(
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
     // Use deep equality for proper type handling
-    if deep_value_eq(&va, &vb, state) {
+    if deep_value_eq(&va, &vb, state)? {
         let new_pc = (state.pc() as i64 + offset as i64) as u32;
         state.set_pc(new_pc);
     }
@@ -152,7 +152,7 @@ pub(in super::super) fn handle_jump_ne(
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
     // Use deep equality for proper type handling
-    if !deep_value_eq(&va, &vb, state) {
+    if !deep_value_eq(&va, &vb, state)? {
         let new_pc = (state.pc() as i64 + offset as i64) as u32;
         state.set_pc(new_pc);
     }

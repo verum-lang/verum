@@ -215,7 +215,7 @@ fn text_extended_body(
                 text = state.registers.get_absolute(abs_index);
             }
             if text.is_thin_ref() {
-                let tr = text.as_thin_ref();
+                let tr = state.heap.thin_ref(text)?;
                 if !tr.ptr.is_null() {
                     text = unsafe { *(tr.ptr as *const Value) };
                 }

@@ -100,7 +100,9 @@ impl<'heap> FlatMap<'heap> {
         // ordinary records and arrays.
         let backing_header = unsafe { &*backing.as_ptr::<heap::ObjectHeader>() };
         if backing == receiver
-            || !backing_header.flags.contains(heap::ObjectFlags::HASH_BUCKETS)
+            || !backing_header
+                .flags
+                .contains(heap::ObjectFlags::HASH_BUCKETS)
             || !backing_header.is_valid()
             || backing_header.flags.contains(heap::ObjectFlags::VARIANT)
             || backing_header.size as usize != bytes
@@ -185,6 +187,30 @@ pub(super) fn entry_plans(
     Ok(Some([plan(key)?, plan(value)?]))
 }
 
+/// Issue a slot witness only after establishing the actual owner/backing
+/// path and deriving a full Value-sized offset inside that allocation.
+pub(super) fn borrow_slot(
+    state: &mut InterpreterState,
+    receiver: Value,
+    slot: *mut Value,
+    caps: crate::value::Capabilities,
+) -> InterpreterResult<Value> {
+    let table = FlatMap::checked(state, receiver)?;
+    let backing = table.backing.ok_or(InterpreterError::NullPointer)?;
+    let offset = (slot as usize)
+        .checked_sub(table.entries as usize)
+        .ok_or_else(|| InterpreterError::InvalidOperand {
+            message: "slot precedes its backing".into(),
+        })?;
+    state.heap.project_slot(
+        receiver.as_ptr::<u8>() as usize,
+        2,
+        backing.as_ptr::<u8>() as usize,
+        offset,
+        caps,
+    )
+}
+
 /// Move the entries out of an exclusively borrowed map. No raw pointer crosses
 /// a destructor callback. Trivial keys and values require no staging allocation.
 pub(super) fn take_entries(
@@ -192,6 +218,7 @@ pub(super) fn take_entries(
     value: Value,
     retain: bool,
 ) -> InterpreterResult<Vec<[Value; 2]>> {
+    state.heap.revoke_projections(value.as_ptr::<u8>() as usize);
     let table = FlatMap::checked(state, value)?;
     let mut entries = Vec::new();
     if retain {

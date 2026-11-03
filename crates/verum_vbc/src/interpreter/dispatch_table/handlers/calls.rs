@@ -968,7 +968,7 @@ fn resolve_vtable_method(
     } else if recv_val.is_type_ref() {
         recv_val.as_type_id()
     } else if recv_val.is_thin_ref() {
-        let thin_ref = recv_val.as_thin_ref();
+        let thin_ref = state.heap.thin_ref(recv_val)?;
         let data_ptr = thin_ref.ptr;
         if data_ptr.is_null() {
             return Err(InterpreterError::NullPointer);

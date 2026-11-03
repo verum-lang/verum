@@ -2860,7 +2860,7 @@ impl InterpreterState {
     /// encoded CBGR register-ref, a `ThinRef`, and a tracked mutable pointer —
     /// to the underlying heap object (mirrors the `handle_array_len` preamble).
     /// Shared by the structural collection readers below.
-    fn normalize_collection_value(&self, mut val: Value) -> Value {
+    fn normalize_collection_value(&self, mut val: Value) -> Option<Value> {
         // CBGR register-ref (T0367 / CBGR-REGREF-TAG-1): resolve through the SOLE
         // cbgr_helpers authority. The pre-T0367 inlined negative-int decoder that
         // lived here — with its own `abs_index <= 1<<24` range guess — is deleted:
@@ -2874,9 +2874,9 @@ impl InterpreterState {
             val = self.registers.get_absolute(abs_index);
         }
         if val.is_thin_ref() {
-            let tr = val.as_thin_ref();
+            let tr = self.heap.thin_ref(val).ok()?;
             if tr.ptr.is_null() {
-                return Value::unit();
+                return None;
             }
             // SAFETY: a ThinRef addresses a `Value` in memory.
             val = unsafe { *(tr.ptr as *const Value) };
@@ -2888,13 +2888,13 @@ impl InterpreterState {
                 val = unsafe { *(addr as *const Value) };
             }
         }
-        val
+        Some(val)
     }
 
     /// Elements of `val` when it is a list value, else `None`.
     pub fn list_elements(&self, val: Value) -> Option<Vec<Value>> {
         use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-        let val = self.normalize_collection_value(val);
+        let val = self.normalize_collection_value(val)?;
         if val.is_nil() || !val.is_ptr() {
             return None;
         }
@@ -2952,7 +2952,7 @@ impl InterpreterState {
     /// marshal a script's `Map` result structurally.
     pub fn map_entries(&self, val: Value) -> Option<Vec<(Value, Value)>> {
         use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-        let val = self.normalize_collection_value(val);
+        let val = self.normalize_collection_value(val)?;
         if val.is_nil() || !val.is_ptr() {
             return None;
         }
@@ -3013,7 +3013,7 @@ impl InterpreterState {
     /// engine (ARCH-P4) to marshal record results structurally.
     pub fn record_named_fields(&self, val: Value) -> Option<Vec<(String, Value)>> {
         use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-        let val = self.normalize_collection_value(val);
+        let val = self.normalize_collection_value(val)?;
         if val.is_nil() || !val.is_ptr() || val.is_boxed_int() {
             return None;
         }

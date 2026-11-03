@@ -354,7 +354,7 @@ fn sys_extended_body(
             let dst = read_reg(state)?;
             let name_reg = read_reg(state)?;
             let base = state.reg_base();
-            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
+            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base)?;
             let key = String::from_utf8_lossy(&name).into_owned();
             let value = super::env_runtime::env_get_maybe(state, &key)?
                 .expect("env_get_maybe always yields a Maybe value");
@@ -367,8 +367,8 @@ fn sys_extended_body(
             let name_reg = read_reg(state)?;
             let value_reg = read_reg(state)?;
             let base = state.reg_base();
-            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
-            let val = super::file_runtime::extract_byte_list_arg(state, value_reg.0, base);
+            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base)?;
+            let val = super::file_runtime::extract_byte_list_arg(state, value_reg.0, base)?;
             let key = String::from_utf8_lossy(&name).into_owned();
             let value = String::from_utf8_lossy(&val).into_owned();
             super::env_runtime::env_set_raw(state, &key, &value);
@@ -381,7 +381,7 @@ fn sys_extended_body(
             let dst = read_reg(state)?;
             let name_reg = read_reg(state)?;
             let base = state.reg_base();
-            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
+            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base)?;
             let key = String::from_utf8_lossy(&name).into_owned();
             super::env_runtime::env_unset_raw(state, &key);
             let ok = super::env_runtime::env_unit_ok(state)?;

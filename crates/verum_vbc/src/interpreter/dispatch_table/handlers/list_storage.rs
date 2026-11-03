@@ -21,7 +21,7 @@ struct Storage {
 }
 impl Storage {
     fn resolve(state: &InterpreterState, value: Value) -> InterpreterResult<Self> {
-        let value = resolve_receiver(state, value);
+        let value = resolve_receiver(state, value)?;
         if !value.is_regular_ptr() {
             return Err(invalid("List storage requires a live List object"));
         }
@@ -205,7 +205,7 @@ pub(super) fn resize(state: &mut InterpreterState) -> InterpreterResult<Dispatch
     let dst = read_reg(state)?;
     let list = read_reg(state)?;
     let requested = read_reg(state)?;
-    let value = resolve_receiver(state, state.get_reg(list));
+    let value = resolve_receiver(state, state.get_reg(list))?;
     let storage = Storage::resolve(state, value)?;
     let owner = value.as_ptr::<heap::ObjectHeader>();
     // SAFETY: Storage::resolve proved the exact live owner and field extent.

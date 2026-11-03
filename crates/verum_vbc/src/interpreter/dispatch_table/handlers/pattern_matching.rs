@@ -16,8 +16,8 @@ use crate::value::Value;
 
 /// Tag and payload readers share the receiver contract with field access.
 /// In particular, iterator ThinRefs name Value slots, not object addresses.
-fn variant_value(state: &InterpreterState, value: Value) -> Value {
-    peel_heap_cell(state, resolve_receiver(state, value))
+fn variant_value(state: &InterpreterState, value: Value) -> InterpreterResult<Value> {
+    Ok(peel_heap_cell(state, resolve_receiver(state, value)?))
 }
 
 /// AsVar (0x91) - Extract variant payload by field index.
@@ -30,7 +30,7 @@ pub(in super::super) fn handle_as_var(
     let variant_reg = read_reg(state)?;
     let field_idx = read_varint(state)? as usize;
 
-    let variant = variant_value(state, state.get_reg(variant_reg));
+    let variant = variant_value(state, state.get_reg(variant_reg))?;
 
     // #54: marker-tagged (FatRef/ThinRef) values are NOT payload-readable
     // heap objects — reading at marker+offset SIGSEGVs; nil-result mirrors
@@ -350,7 +350,7 @@ pub(in super::super) fn handle_get_variant_data(
     let variant_reg = read_reg(state)?;
     let field = read_varint(state)? as usize;
 
-    let variant = variant_value(state, state.get_reg(variant_reg));
+    let variant = variant_value(state, state.get_reg(variant_reg))?;
 
     if variant.is_regular_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
@@ -394,7 +394,7 @@ pub(in super::super) fn handle_get_variant_data_ref(
     let variant_reg = read_reg(state)?;
     let field = read_varint(state)? as usize;
 
-    let variant = variant_value(state, state.get_reg(variant_reg));
+    let variant = variant_value(state, state.get_reg(variant_reg))?;
 
     if variant.is_regular_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
@@ -502,7 +502,7 @@ pub(in super::super) fn handle_match_tag(
     let value_reg = read_reg(state)?;
     let expected_tag = read_varint(state)? as u32;
 
-    let value = variant_value(state, state.get_reg(value_reg));
+    let value = variant_value(state, state.get_reg(value_reg))?;
 
     // Check if value is a pointer to a variant object
     let matches = if value.is_regular_ptr() && !value.is_nil() {
@@ -556,7 +556,7 @@ pub(in super::super) fn handle_get_tag(
     let dst = read_reg(state)?;
     let value_reg = read_reg(state)?;
 
-    let value = variant_value(state, state.get_reg(value_reg));
+    let value = variant_value(state, state.get_reg(value_reg))?;
 
     // Extract tag from variant object
     // Variant layout: ObjectHeader + [tag:u32][padding:u32][payload:Value]
@@ -607,7 +607,7 @@ pub(in super::super) fn handle_unpack(
     // the pointee tuple value and passes a direct tuple pointer through
     // unchanged, so both `let (a,b) = tup` and `let (a,b) = &xs[i]`
     // unpack correctly. Closes TUPLE-DESTRUCTURE-INDEXED.
-    let tuple_value = resolve_arg_value(state, state.get_reg(tuple_reg));
+    let tuple_value = resolve_arg_value(state, state.get_reg(tuple_reg))?;
 
     // Tuples in VBC are heap-allocated objects with layout:
     // [ObjectHeader][Value0][Value1]...[ValueN]

@@ -204,26 +204,22 @@ pub(in crate::interpreter) fn is_cbgr_ref(val: &Value) -> bool {
 /// element or a field, producing nonsense comparisons (e.g. for
 /// `xs[0].cmp(&xs[1])` the bubble-sort decision flips).
 ///
-/// The helper deliberately does NOT validate generation/epoch — it
-/// preserves whatever the caller's CBGR-validation policy is (see
-/// `state.config.cbgr_enabled`). Callers that need validation should
-/// invoke [`validate_cbgr_generation`] on the decoded `(abs_index, gen)`
-/// pair separately; matches the pre-existing behaviour of the 24 sites
-/// this helper replaces.
+/// Register references follow the caller's CBGR generation-check policy.
+/// Heap slot projections always validate their current owner and storage.
 #[inline]
 pub(super) fn resolve_arg_value(
     state: &super::super::super::state::InterpreterState,
     val: Value,
-) -> Value {
+) -> InterpreterResult<Value> {
     if is_cbgr_ref(&val) {
         let (abs_index, _gen) = decode_cbgr_ref(val);
-        return state.registers.get_absolute(abs_index);
+        return Ok(state.registers.get_absolute(abs_index));
     }
-    if let Some(slot) = reference_value_slot(state, val) {
+    if let Some(slot) = reference_value_slot(state, val)? {
         // SAFETY: the reference carrier establishes an initialized Value slot.
-        return unsafe { *slot };
+        return Ok(unsafe { *slot });
     }
-    val
+    Ok(val)
 }
 
 /// Pointer references to one Value slot. Bridge allocations carry flat data,
@@ -232,31 +228,31 @@ pub(super) fn resolve_arg_value(
 fn reference_value_slot(
     state: &super::super::super::state::InterpreterState,
     value: Value,
-) -> Option<*mut Value> {
+) -> InterpreterResult<Option<*mut Value>> {
     if value.is_regular_ptr() && !value.is_nil() {
         let address = value.as_ptr::<u8>() as usize;
         if address % std::mem::align_of::<Value>() == 0
             && super::cbgr::bridge_extent_room(state, address).is_none()
             && state.cbgr_mutable_ptrs.contains(&address)
         {
-            return Some(address as *mut Value);
+            return Ok(Some(address as *mut Value));
         }
     }
     if value.is_thin_ref() {
-        let reference = value.as_thin_ref();
+        let reference = state.heap.thin_ref(value)?;
         if !reference.ptr.is_null()
             && reference.ptr as usize % std::mem::align_of::<Value>() == 0
         {
-            return Some(reference.ptr.cast::<Value>());
+            return Ok(Some(reference.ptr.cast::<Value>()));
         }
     }
-    None
+    Ok(None)
 }
 
 /// Check the capability carried by a heap reference before a store or writeback.
-pub(super) fn require_reference_write(reference: Value) -> InterpreterResult<()> {
+pub(super) fn require_reference_write(state: &super::super::super::state::InterpreterState, reference: Value) -> InterpreterResult<()> {
     let actual = if reference.is_thin_ref() {
-        reference.as_thin_ref().capabilities()
+        state.heap.thin_ref(reference)?.capabilities()
     } else if reference.is_fat_ref() {
         reference.as_fat_ref().capabilities()
     } else {
@@ -284,7 +280,7 @@ pub(super) fn resolve_receiver_place(
     let mut place = receiver;
     for _ in 0..8 {
         if !is_cbgr_ref(&place) {
-            return Ok((resolve_arg_value(state, place), place));
+            return Ok((resolve_arg_value(state, place)?, place));
         }
         let (absolute, _) = decode_cbgr_ref(place);
         if absolute as usize >= state.registers.top() {
@@ -293,7 +289,7 @@ pub(super) fn resolve_receiver_place(
             });
         }
         let next = state.registers.get_absolute(absolute);
-        if !is_cbgr_ref(&next) && reference_value_slot(state, next).is_none() {
+        if !is_cbgr_ref(&next) && reference_value_slot(state, next)?.is_none() {
             return Ok((next, place));
         }
         place = next;
@@ -416,7 +412,7 @@ pub(in crate::interpreter) fn resolve_comparison_operand(
 pub(in crate::interpreter) fn resolve_receiver(
     state: &super::super::super::state::InterpreterState,
     val: Value,
-) -> Value {
+) -> InterpreterResult<Value> {
     // REGISTER-REF chains peel to a fixpoint; the value-cell / thin-ref
     // peel then happens EXACTLY ONCE. The asymmetry is the contract, not
     // an accident: a register-ref forwarded through nested frames can
@@ -569,13 +565,13 @@ pub(in super::super) fn write_through_ref(
     slot_val: Value,
     value: Value,
 ) -> InterpreterResult<bool> {
-    require_reference_write(slot_val)?;
+    require_reference_write(state, slot_val)?;
     if is_cbgr_ref(&slot_val) {
         let (abs_index, _gen) = decode_cbgr_ref(slot_val);
         state.registers.set_absolute(abs_index, value);
         return Ok(true);
     }
-    if let Some(slot) = reference_value_slot(state, slot_val) {
+    if let Some(slot) = reference_value_slot(state, slot_val)? {
         // SAFETY: the reference carrier establishes a writable Value slot;
         // bridge data was excluded before considering interior-slot tracking.
         unsafe { *slot = value };
@@ -608,7 +604,7 @@ pub(in super::super) fn normalize_ffi_ref_args(
     arg_regs: &[crate::instruction::Reg],
     args: &mut [Value],
     source_reg_map: &mut std::collections::HashMap<u8, u16>,
-) {
+) -> InterpreterResult<()> {
     for (i, arg_reg) in arg_regs.iter().enumerate() {
         if i >= args.len() {
             break;
@@ -624,10 +620,11 @@ pub(in super::super) fn normalize_ffi_ref_args(
             v.is_thin_ref()
         };
         if is_mut_ref {
-            args[i] = resolve_arg_value(state, v);
+            args[i] = resolve_arg_value(state, v)?;
             source_reg_map.entry(i as u8).or_insert(arg_reg.0);
         }
     }
+    Ok(())
 }
 
 /// True iff a decoded register-ref generation matches the live slot generation.

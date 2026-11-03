@@ -272,7 +272,7 @@ fn mem_extended_body(
         0x07 => {
             let dst = read_reg(state)?;
             let list_reg = read_reg(state)?;
-            let value = super::cbgr_helpers::resolve_receiver(state, state.get_reg(list_reg));
+            let value = super::cbgr_helpers::resolve_receiver(state, state.get_reg(list_reg))?;
             let ptr = value.as_ptr::<heap::ObjectHeader>();
             if ptr.is_null() || !state.heap.contains(ptr) {
                 return Err(InterpreterError::Panic {
@@ -401,7 +401,7 @@ fn mem_extended_body(
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
-                val.as_thin_ref().ptr
+                val.raw_thin_ref()?.ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else if val.is_int() {
@@ -525,7 +525,7 @@ fn mem_extended_body(
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
-                val.as_thin_ref().ptr
+                val.raw_thin_ref()?.ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else if val.is_int() {
@@ -764,7 +764,7 @@ fn mem_extended_body(
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
-                val.as_thin_ref().ptr
+                val.raw_thin_ref()?.ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else if val.is_int() {
@@ -819,7 +819,7 @@ fn mem_extended_body(
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
-                val.as_thin_ref().ptr
+                val.raw_thin_ref()?.ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else if val.is_int() {
@@ -871,7 +871,7 @@ fn mem_extended_body(
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
-                val.as_thin_ref().ptr
+                val.raw_thin_ref()?.ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else if val.is_int() {
@@ -936,7 +936,7 @@ fn mem_extended_body(
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
-                val.as_thin_ref().ptr
+                val.raw_thin_ref()?.ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else if val.is_int() {
@@ -1048,7 +1048,7 @@ fn mem_extended_body(
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
-                val.as_thin_ref().ptr
+                val.raw_thin_ref()?.ptr
             } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else if val.is_int() {

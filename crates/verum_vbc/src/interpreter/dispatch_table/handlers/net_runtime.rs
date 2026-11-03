@@ -1614,7 +1614,7 @@ fn intercept_connect_text(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base)?;
     // Granular permission check uses the host:port endpoint as the
     // target_id; falls through to WILDCARD for `permissions = ["net"]`.
     if let Some(denied) = check_net_permission_for(state, Some(&addr_text)) {
@@ -1681,7 +1681,7 @@ fn intercept_listener_bind_text(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base)?;
     // Granular permission: hash the bind endpoint so
     // `permissions = ["net=127.0.0.1:8080"]` grants only that bind.
     if let Some(denied) = check_net_permission_for(state, Some(&addr_text)) {
@@ -1739,7 +1739,7 @@ fn intercept_udp_bind_text(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base)?;
     if let Some(denied) = check_net_permission_for(state, Some(&addr_text)) {
         return Ok(Some(denied));
     }
@@ -2011,7 +2011,7 @@ pub(in super::super) fn try_intercept_tcp_method(
     {
         return Ok(None);
     }
-    let fd = match read_tcpstream_fd(receiver) {
+    let fd = match read_tcpstream_fd(state, receiver) {
         Some(fd) => fd,
         None => return Ok(None),
     };
@@ -2120,7 +2120,7 @@ fn intercept_udp_send_to(
     if let Some(denied) = check_net_permission(state) {
         return Ok(Some(denied));
     }
-    let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+    let bytes = extract_byte_slice(state, args_start_reg, caller_base)?;
     let addr_v = state
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg + 1));
@@ -2328,11 +2328,11 @@ fn decode_socket_addr_v6_record(payload: Value) -> Option<(String, i64)> {
 /// `[ObjectHeader][fd: Value][peer_addr: Value]`. fd may be either
 /// a transparent-newtype Int (Verum's `is (Int)` newtype lowering)
 /// or a 1-field wrapper record — handle both.
-fn read_tcpstream_fd(v: Value) -> Option<i64> {
+fn read_tcpstream_fd(state: &InterpreterState, v: Value) -> Option<i64> {
     // Thin-ref (heap-pointer-to-Value) auto-deref. CBGR-ref unwrap
     // is the caller's responsibility (needs `state.registers`).
     let v = if v.is_thin_ref() {
-        let tr = v.as_thin_ref();
+        let tr = state.heap.thin_ref(v).ok()?;
         if tr.ptr.is_null() {
             v
         } else {
@@ -2378,7 +2378,7 @@ fn intercept_tcp_write(
     if let Some(denied) = check_net_permission(state) {
         return Ok(Some(denied));
     }
-    let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+    let bytes = extract_byte_slice(state, args_start_reg, caller_base)?;
     let n = tcp_send(fd, &bytes);
     if n < 0 {
         return Ok(Some(build_io_err(

@@ -353,7 +353,7 @@ fn char_extended_body(
             // heap value first.
             let buf_val_raw = state.get_reg(src_buf);
             let buf_val =
-                super::cbgr_helpers::resolve_arg_value(state, buf_val_raw);
+                super::cbgr_helpers::resolve_arg_value(state, buf_val_raw)?;
 
             if buf_val.is_fat_ref() {
                 // #53 IS-REGULAR-PTR-CONTRACT leg: the encode scratch is
@@ -419,7 +419,7 @@ fn char_extended_body(
                     }
                 }
             } else if buf_val.is_thin_ref() {
-                let thin_ref = buf_val.as_thin_ref();
+                let thin_ref = buf_val.raw_thin_ref()?;
                 if !thin_ref.ptr.is_null() {
                     for (i, b) in tmp.iter().enumerate().take(n_bytes) {
                         unsafe {

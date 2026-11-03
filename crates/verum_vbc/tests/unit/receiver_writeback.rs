@@ -89,7 +89,7 @@ fn receiver_register_chain_keeps_pointer_target_and_alias() {
         assert!(write_through_ref(&mut state, target, Value::from_i64(23)).unwrap());
         assert_eq!(slot.as_i64(), 23);
         assert_eq!(state.registers.get_absolute(0).bits(), reference.bits());
-        assert_eq!(resolve_arg_value(&state, reference).as_i64(), 23);
+        assert_eq!(resolve_arg_value(&state, reference).unwrap().as_i64(), 23);
     }
 }
 
@@ -103,7 +103,7 @@ fn bridge_extent_wins_over_interior_slot_tracking() {
     unsafe { slot.write(Value::from_i64(17)) };
     state.cbgr_mutable_ptrs.insert(address as usize);
     let reference = Value::from_ptr(slot);
-    let observed = resolve_arg_value(&state, reference);
+    let observed = resolve_arg_value(&state, reference).unwrap();
     let written = write_through_ref(&mut state, reference, Value::from_i64(23)).unwrap();
     // SAFETY: same live allocation; deallocate only after taking the snapshot.
     let contents = unsafe { slot.read() };
@@ -119,7 +119,7 @@ fn untracked_and_unaligned_addresses_do_not_authorize_slot_access() {
     let mut state = state();
     let mut slot = Value::from_i64(17);
     let pointer = Value::from_ptr(&mut slot as *mut Value);
-    assert_eq!(resolve_arg_value(&state, pointer).bits(), pointer.bits());
+    assert_eq!(resolve_arg_value(&state, pointer).unwrap().bits(), pointer.bits());
     assert!(!write_through_ref(&mut state, pointer, Value::from_i64(23)).unwrap());
     let misaligned = (&mut slot as *mut Value).cast::<u8>().wrapping_add(1);
     state.cbgr_mutable_ptrs.insert(misaligned as usize);
@@ -128,7 +128,7 @@ fn untracked_and_unaligned_addresses_do_not_authorize_slot_access() {
         Value::from_thin_ref(ThinRef::new(misaligned, 1, 0, Capabilities::MUT_EXCLUSIVE)),
     ] {
         assert_eq!(
-            resolve_arg_value(&state, reference).bits(),
+            resolve_arg_value(&state, reference).unwrap().bits(),
             reference.bits()
         );
         assert!(!write_through_ref(

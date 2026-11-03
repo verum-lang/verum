@@ -186,7 +186,7 @@ pub(in super::super) fn handle_get_field(
             crate::interpreter::dispatch_table::handlers::cbgr_helpers::decode_cbgr_ref(obj_val);
         super::cbgr_helpers::validate_cbgr_generation(state, abs_index, generation)?;
     }
-    let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val);
+    let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val)?;
 
     // TEMP ground-truth oracle (#48): VERUM_TRACE_LISTREPR=1 dumps the
     // List object's field words and peeks the buffer candidates, so the
@@ -1095,7 +1095,7 @@ pub(in super::super) fn handle_get_index(
         let (abs_index, _gen) = decode_cbgr_ref(arr_val);
         state.registers.get_absolute(abs_index)
     } else if arr_val.is_thin_ref() {
-        let thin_ref = arr_val.as_thin_ref();
+        let thin_ref = state.heap.thin_ref(arr_val)?;
         if thin_ref.ptr.is_null() {
             return Err(InterpreterError::NullPointer);
         }
@@ -1588,7 +1588,7 @@ pub(in super::super) fn handle_set_index(
         let (abs_index, _gen) = decode_cbgr_ref2(arr_val);
         state.registers.get_absolute(abs_index)
     } else if arr_val.is_thin_ref() {
-        let thin_ref = arr_val.as_thin_ref();
+        let thin_ref = state.heap.thin_ref(arr_val)?;
         if thin_ref.ptr.is_null() {
             return Err(InterpreterError::NullPointer);
         }
@@ -1624,6 +1624,7 @@ pub(in super::super) fn handle_set_index(
     if header.type_id == TypeId::MAP {
         let key = state.get_reg(idx);
         // Reuse map set logic inline
+        state.heap.revoke_projections(ptr as usize);
         let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         let mut count = unsafe { (*header_ptr).as_i64() } as usize;
         let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
@@ -1851,7 +1852,7 @@ pub(in super::super) fn handle_array_len(
 
         // ThinRef points to a Value in memory (e.g. a variant field).
         if val.is_thin_ref() {
-            let thin_ref = val.as_thin_ref();
+            let thin_ref = state.heap.thin_ref(val)?;
             if thin_ref.ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
             }
@@ -2722,6 +2723,7 @@ pub(in super::super) fn handle_map_set(
         return Err(InterpreterError::NullPointer);
     }
 
+    state.heap.revoke_projections(map_ptr as usize);
     let key = state.get_reg(key_reg);
     let val = state.get_reg(val_reg);
 

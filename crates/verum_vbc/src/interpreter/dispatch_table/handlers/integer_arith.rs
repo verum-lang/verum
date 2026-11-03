@@ -63,8 +63,8 @@ pub(in super::super) fn handle_addi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let val_a = arith_operand(state, a);
-    let val_b = arith_operand(state, b);
+    let val_a = arith_operand(state, a)?;
+    let val_b = arith_operand(state, b)?;
 
     // Fast path: both are inline integers (most common case)
     // Check tag bits directly via is_inline_int() to skip the string check entirely
@@ -163,8 +163,8 @@ pub(in super::super) fn handle_subi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     // FLOAT arm (T0497): generic `a - b` on `Float` type-params erases to
     // SubI; without this the integer path truncates the operands. See
     // `handle_addi` for the full rationale.
@@ -214,8 +214,8 @@ pub(in super::super) fn handle_muli(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     // FLOAT arm (T0497): generic `a * b` on `Float` type-params erases to
     // MulI; see `handle_addi`.
     if va.is_float() || vb.is_float() {
@@ -261,8 +261,8 @@ pub(in super::super) fn handle_divi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     // FLOAT arm (T0497): generic `a / b` on `Float` type-params erases to
     // DivI; see `handle_addi`. Divide-by-zero is guarded consistently with
     // the integer path below.
@@ -318,8 +318,8 @@ pub(in super::super) fn handle_modi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     // FLOAT arm (T0497): generic `a % b` on `Float` type-params erases to
     // ModI; see `handle_addi`. Divide-by-zero is guarded consistently with
     // the integer path below.
@@ -381,8 +381,8 @@ pub(in super::super) fn handle_udivi(
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     // 128-bit arm (T0272): unsigned full-width division for UInt128 operands.
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     if is_i128_op(va, vb) {
         let divisor = vb.as_i128_raw();
         if divisor == 0 {
@@ -411,8 +411,8 @@ pub(in super::super) fn handle_umodi(
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     // 128-bit arm (T0272): unsigned full-width remainder for UInt128 operands.
-    let va = arith_operand(state, a);
-    let vb = arith_operand(state, b);
+    let va = arith_operand(state, a)?;
+    let vb = arith_operand(state, b)?;
     if is_i128_op(va, vb) {
         let divisor = vb.as_i128_raw();
         if divisor == 0 {
@@ -441,7 +441,7 @@ pub(in super::super) fn handle_negi(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let sv = arith_operand(state, src);
+    let sv = arith_operand(state, src)?;
     // FLOAT arm (T0497): generic unary `-x` on a `Float` type-param erases
     // to NegI; see `handle_addi`.
     if sv.is_float() {
@@ -482,8 +482,8 @@ pub(in super::super) fn handle_powi(
     let dst = read_reg(state)?;
     let base = read_reg(state)?;
     let exp = read_reg(state)?;
-    let base_v = arith_operand(state, base);
-    let exp_v = arith_operand(state, exp);
+    let base_v = arith_operand(state, base)?;
+    let exp_v = arith_operand(state, exp)?;
     // FLOAT arm (T0497): generic `a ** b` on `Float` type-params erases to
     // PowI; compute via `f64::powf`. See `handle_addi`.
     if base_v.is_float() || exp_v.is_float() {
@@ -525,7 +525,7 @@ pub(in super::super) fn handle_absi(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let src_val = arith_operand(state, src);
+    let src_val = arith_operand(state, src)?;
     // FLOAT arm (T0497): generic `|x|` on a `Float` type-param erases to
     // AbsI; see `handle_addi`.
     if src_val.is_float() {
@@ -556,7 +556,7 @@ pub(in super::super) fn handle_inc(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let sv = arith_operand(state, src);
+    let sv = arith_operand(state, src)?;
     // 128-bit arm (T0272): keep a boxed Int128 at full width across `+ 1`.
     if sv.is_boxed_i128() {
         let result = sv.as_i128_raw().wrapping_add(1);
@@ -577,7 +577,7 @@ pub(in super::super) fn handle_dec(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let sv = arith_operand(state, src);
+    let sv = arith_operand(state, src)?;
     // 128-bit arm (T0272): keep a boxed Int128 at full width across `- 1`.
     if sv.is_boxed_i128() {
         let result = sv.as_i128_raw().wrapping_sub(1);
