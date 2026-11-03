@@ -91,4 +91,4 @@ public mount .der.DerErrorKind;
 public mount .der.Tag;
 public mount .der.TagClass;
 public mount .der.BitString;
-public mount .der.Time;
+public mount .der.DerTime as Time;
