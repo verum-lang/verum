@@ -7326,6 +7326,22 @@ impl TypeChecker {
             {
                 return None;
             }
+            // Resolved glob reexports may reach a parent from a public inline
+            // module. The parent has no corresponding mount in its own AST.
+            if export.source_module != module.id
+                && let Some(origin) = registry.get(export.source_module)
+                && let Some(resolved) = self.find_type_declaration_with_source_module_inner(
+                    &origin.ast,
+                    export.original_name.as_deref().unwrap_or(type_name),
+                    &Text::from(origin.path.to_string()),
+                    registry,
+                    visited,
+                    true,
+                    false,
+                )
+            {
+                return Some(resolved);
+            }
         }
 
         // First, try to find the type declaration directly in this module

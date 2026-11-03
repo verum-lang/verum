@@ -178,3 +178,41 @@ fn private_missing_and_cyclic_globs_do_not_borrow_a_homonym() {
         );
     }
 }
+
+#[test]
+fn a_lifted_inline_export_resolves_only_to_its_public_source_declaration() {
+    let mut registry = registry(&[
+        (
+            "lib",
+            "public module surface { public mount lib.types.*; public mount bridge.*; }",
+        ),
+        (
+            "lib.surface",
+            "public mount lib.types.*; public mount bridge.*; public type ChildOnly is { n: Int };",
+        ),
+        ("bridge", "public mount lib.types.{Value as Alias};"),
+        (
+            "lib.types",
+            "public type Value<T> is Known(T) | Empty; type Hidden is { n: Int };",
+        ),
+        ("other", "public type Value<T> is Wrong(T);"),
+    ]);
+    resolve_specific_reexport_kinds(&mut registry).unwrap();
+    while resolve_glob_reexports(&mut registry).unwrap() != 0 {}
+    let checker = TypeChecker::new();
+    for name in ["Value", "Alias"] {
+        let (decl, owner) = checker
+            .resolve_public_source_type("lib", name, &registry)
+            .unwrap_or_else(|| panic!("missing lifted public type {name}"));
+        assert_eq!(decl.name.name.as_str(), "Value");
+        assert_eq!(owner.as_str(), "lib.types");
+    }
+    for absent in ["ChildOnly", "Hidden"] {
+        assert!(
+            checker
+                .resolve_public_source_type("lib", absent, &registry)
+                .is_none(),
+            "{absent}"
+        );
+    }
+}

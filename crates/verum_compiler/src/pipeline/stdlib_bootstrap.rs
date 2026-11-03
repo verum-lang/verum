@@ -221,6 +221,13 @@ impl<'s> CompilationPipeline<'s> {
                         self.modules.insert(path_text, Arc::new(ast_module.clone()));
                     }
 
+                    // Inline modules belong to the declaring file, just as in
+                    // ordinary project loading. Register them before computing
+                    // the public reexport closure for bootstrap dependencies.
+                    let source_owner = VbcCodegen::resolve_full_module_path(ast_module, module_name)
+                        .map_or_else(|| module_path.clone(), |owner| ModulePath::from_str(&owner));
+                    self.register_inline_modules(ast_module, &source_owner, file_id);
+
                     // ALSO register a per-file sub-module path for non-mod.vr files.
                     // E.g., core/async/poll.vr -> register as "core.async.poll"
                     // This enables relative imports like `mount .poll.*` to resolve

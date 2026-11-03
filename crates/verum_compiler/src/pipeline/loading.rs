@@ -1489,7 +1489,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// This is needed for modules like `std.prelude` which are defined inline
     /// in `core/mod.vr` rather than in their own file.
-    fn register_inline_modules(
+    pub(super) fn register_inline_modules(
         &self,
         parent_module: &Module,
         parent_path: &ModulePath,

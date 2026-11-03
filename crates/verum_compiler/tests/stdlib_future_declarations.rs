@@ -13,6 +13,40 @@ fn glob_imported_future_output_keeps_declaration_authority() {
     check_bootstrap(true);
 }
 
+#[test]
+fn inline_reexport_matches_the_declaring_generic_sum_after_bootstrap() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        (
+            "mod.vr",
+            "module core; public module values; public module reader;
+             public module surface { public mount super.values.*; }",
+        ),
+        (
+            "values/mod.vr",
+            "module core.values; public type Choice<T> is Missing | Found(T);",
+        ),
+        (
+            "reader/mod.vr",
+            "module core.reader; mount core.{Choice};
+             fn read(value: core.values.Choice<Int>) -> Int {
+                 match value { Choice.Missing => 3, Choice.Found(n) => n }
+             }
+             public fn check_both() -> Int { read(Choice.Missing) + read(Choice.Found(8)) }",
+        ),
+    ] {
+        let path = core.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    let archive = bootstrap(&core);
+    assert_eq!(
+        execute(&archive, "module app; mount core.reader.check_both; fn main() -> Int { check_both() }"),
+        11
+    );
+}
+
 fn check_bootstrap(glob: bool) {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
