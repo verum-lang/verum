@@ -31,7 +31,7 @@ module core.sys.darwin.io;
 
 mount sys.common.{OSError, FileDesc};
 mount sys.io_engine.{
-    IOEngine, CompletionOp, CompletionResult, Duration,
+    IOEngine, CompletionOp, CompletionResult, EngineDuration,
     ValidFd, Fd, RawSocketAddr, TimeSpec as EngineTimeSpec, MsgHdr,
     EngineIoError,
 };
@@ -821,7 +821,7 @@ implement IOEngine for KqueueDriver {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         let timeout_ms = match timeout {
             Maybe.Some(d) => d.as_millis() as Int,
@@ -919,7 +919,7 @@ implement IOEngine for DarwinIoDriver {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         self.kqueue.wait(results, min_complete, timeout)
     }
