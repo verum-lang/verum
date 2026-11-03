@@ -12,6 +12,7 @@ import VerumExternalReplay.IntegerBoundEntailment
 import VerumExternalReplay.CapabilityAttenuation
 import VerumExternalReplay.UniverseLevels
 import VerumExternalReplay.UniverseInstantiation
+import VerumExternalReplay.QuantifiedTypeSubstitution
 import VerumExternalReplay.RecordTelescope
 import VerumExternalReplay.StructuredElimination
 import VerumExternalReplay.ReferenceChecker
