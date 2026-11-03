@@ -22,3 +22,12 @@ export function sourceByteRange(source: string, start: unknown, end: unknown): {
       text: source.slice(before.length, through.length) };
   } catch { return null; }
 }
+
+/** Hash once per editor revision; release captured text as soon as hashing starts. */
+export function sourceRevision(source: string): { digest: () => Promise<string> } {
+  let text: string | null = source, pending: Promise<string> | null = null;
+  return { digest() {
+    if (!pending) { pending = sourceHash(text!); text = null; }
+    return pending;
+  } };
+}

@@ -82,7 +82,7 @@ function editorTheme(dark: boolean) {
   ]))];
 }
 
-export function makeEditor(parent: HTMLElement, source: string, onChange: (source: string) => void, onSelection: (line: number, column: number) => void) {
+export function makeEditor(parent: HTMLElement, source: string, onChange: (source: string, mapPosition: (position: number, association: -1 | 1) => number) => void, onSelection: (line: number, column: number) => void) {
   let hooks: LanguageHooks | null = null;
   let verumEnabled = true;
   const syntax = new Compartment();
@@ -92,9 +92,9 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
   const editingKeys = [...completionKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap].filter(binding => !binding.run || !managed.has(binding.run));
   async function definition() {
     if (!hooks || !verumEnabled) return;
-    const revision = hooks.revision();
-    const reply = await languageRequest<Location | Location[] | null>(revision, 'textDocument/definition', positionAt(revision.source, view.state.selection.main.head));
-    if (!sameRevision(revision, hooks.revision())) return;
+    const revision = hooks.revision(), selection = view.state.selection;
+    const reply = await languageRequest<Location | Location[] | null>(revision, 'textDocument/definition', positionAt(revision.source, selection.main.head));
+    if (!sameRevision(revision, hooks.revision()) || !selection.eq(view.state.selection)) return;
     const location = Array.isArray(reply.result) ? reply.result[0] : reply.result;
     if (location) await hooks.navigate(location);
   }
@@ -152,7 +152,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
       language.of(editorLanguage(verumEnabled)),
       theme.of(editorTheme(document.documentElement.dataset.theme === 'dark')),
       EditorView.updateListener.of(update => {
-        if (update.docChanged) onChange(update.state.doc.toString());
+        if (update.docChanged) onChange(update.state.doc.toString(), (position, association) => update.changes.mapPos(position, association));
         if (update.selectionSet || update.docChanged) {
           const offset = update.state.selection.main.head;
           const line = update.state.doc.lineAt(offset);
@@ -168,6 +168,12 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
     document(path: string) { verumEnabled = path.endsWith('.vr'); view.dispatch({ effects: [syntax.reconfigure(verumEnabled ? verum : []), language.reconfigure(editorLanguage(verumEnabled))] }); },
     definition,
     format,
+    selection: () => ({ anchor: view.state.selection.main.anchor, head: view.state.selection.main.head }),
+    restoreSelection(anchor: number, head: number) {
+      const end = view.state.doc.length;
+      if (![anchor, head].every(position => Number.isInteger(position) && position >= 0 && position <= end)) return false;
+      view.dispatch({ selection: { anchor, head }, scrollIntoView: true }); view.focus(); return true;
+    },
     actions: Object.fromEntries(Object.entries(actions).map(([id, action]) => [id, () => { view.focus(); return action(view); }])) as Record<keyof typeof actions, () => boolean>,
     hasDiagnostics: () => diagnosticCount(view.state) > 0,
     diagnostics(source: string, diagnostics: Diagnostic[]) {

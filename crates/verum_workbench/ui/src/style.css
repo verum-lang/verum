@@ -584,7 +584,9 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   background: var(--surface);
   gap: 5px;
 }
+.source-navigation { display: flex; align-items: center; gap: 0; flex: 0 0 auto; }
 .file-tab {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;

@@ -4,9 +4,10 @@ import './style.css';
 import { runtimeSourceRange } from './runtime';
 import { proofSourceRange } from './proof';
 import { ProofTargets, declarationProfile, type ProofProfile } from './proof-targets';
-import { sourceHash as sha256 } from './source';
+import { sourceHash as sha256, sourceRevision } from './source';
 import { runtimeView } from './runtime-view';
 import { makeEditor } from './editor';
+import { NavigationHistory, type SourceBookmark } from './navigation';
 import { CommandRegistry, type CommandContext, type StudioCommand } from './commands';
 import { installCommands } from './command-surface';
 import { installPanels } from './panels';
@@ -93,13 +94,20 @@ let isSaving = false;
 let starting = false;
 let switching = false;
 let editVersion = 0;
+const navigation = new NavigationHistory();
+let currentSourceRevision = sourceRevision(STARTER);
+let navigationGeneration = 0, navigatingHistory = false;
 const proofTargets = new ProofTargets();
 const documentRevision = () => ({ path: currentPath, editVersion });
-const editor = makeEditor($('editor'), STARTER, () => { editVersion++; updateDocumentState(); scheduleHash(); scheduleAnalysis(); }, (line, column) => {
+const editor = makeEditor($('editor'), STARTER, (source, mapPosition) => {
+  const previous = currentSourceRevision; currentSourceRevision = sourceRevision(source);
+  navigation.mapEdits(currentPath, previous, currentSourceRevision, mapPosition);
+  editVersion++; updateDocumentState(); scheduleHash(); scheduleAnalysis();
+}, (line, column) => {
   setText($('cursor-position'), m('Ln {line}, Col {column}', { line, column }));
 });
 const panels = installPanels(() => editor.view.requestMeasure());
-explorer = installExplorer({ open: openFile, review: reviewChanges, failure: fail, listed: (root, entries, directory) => {
+explorer = installExplorer({ open: async path => { await openFile(path); }, review: reviewChanges, failure: fail, listed: (root, entries, directory) => {
   files = [...files.filter(file => parentPath(file.path) !== directory), ...entries.filter(entry => entry.kind === 'file')];
   setText($('workspace-root'), root); $('workspace-root').dataset.root = root;
 } });
@@ -124,6 +132,7 @@ function updateDocumentState() {
   setAttribute($('source-status'), 'title', currentHash ? m('SHA-256 {hash}', { hash: currentHash }) : m('Source hashing in progress'));
   document.title = isConnected() ? `${dirty() ? '• ' : ''}${currentPath.split('/').pop()} · Verum Studio` : 'Verum Studio';
   explorer?.current(currentPath, dirty());
+  updateNavigation();
   const verum = currentPath.endsWith('.vr');
   for (const id of ['run', 'check', 'prove']) $<HTMLButtonElement>(id).disabled = !verum || starting;
   for (const id of ['run-settings', 'architecture-toggle']) $<HTMLButtonElement>(id).disabled = !verum;
@@ -134,8 +143,7 @@ function scheduleHash() {
   const generation = ++hashGeneration;
   currentHash = null; updateDocumentState(); renderResults(); window.clearTimeout(hashTimer);
   hashTimer = window.setTimeout(() => {
-    const source = editor.source();
-    sha256(source).then(hash => {
+    currentSourceRevision.digest().then(hash => {
       if (generation !== hashGeneration) return;
       currentHash = hash; updateDocumentState(); renderResults();
     }).catch(fail);
@@ -143,7 +151,7 @@ function scheduleHash() {
 }
 function loadDocument(path: string, source: string, hash: string | null) {
   editVersion++;
-  currentPath = path; savedSource = hash === null ? null : source; savedHash = hash;
+  currentPath = path; currentSourceRevision = sourceRevision(source); savedSource = hash === null ? null : source; savedHash = hash;
   $<HTMLSelectElement>('source-mode').value = sourceMode();
   editor.document(path); editor.replace(source); scheduleHash(); scheduleAnalysis(); updateDocumentState();
   explorer?.reveal(path).catch(fail); setPane('editor'); sourceView(); editor.view.focus();
@@ -206,12 +214,53 @@ async function mayReplace() {
   if (choice === 'save') { await save(); return !dirty(); }
   return choice === 'discard';
 }
-async function openFile(path: string) {
-  if (path === currentPath && savedHash !== null) { setPane('editor'); return; }
-  if (switching) return; switching = true;
-  try { await replaceDocument(async () => await mayReplace() ? api<SourceFile>('document.read', { path }) : null); }
-  finally { switching = false; }
+function sourceBookmark(): SourceBookmark {
+  // Background hashing releases captured source while preserving failures for awaiters.
+  void currentSourceRevision.digest().catch(fail);
+  return { path: currentPath, revision: currentSourceRevision, ...editor.selection() };
 }
+function updateNavigation() {
+  $<HTMLButtonElement>('navigate-back').disabled = navigatingHistory || switching || !navigation.back;
+  $<HTMLButtonElement>('navigate-forward').disabled = navigatingHistory || switching || !navigation.forward;
+}
+function rememberNavigation(origin: SourceBookmark) { navigation.record(origin, sourceBookmark()); updateNavigation(); }
+async function openFile(path: string, track = true, generation = ++navigationGeneration): Promise<boolean> {
+  if (generation !== navigationGeneration) return false;
+  if (path === currentPath && savedHash !== null) { setPane('editor'); return true; }
+  if (switching) return false;
+  const origin = sourceBookmark(); switching = true; updateNavigation();
+  try {
+    const result = await replaceDocument(async () => {
+      if (!(await mayReplace()) || generation !== navigationGeneration) return null;
+      const file = await api<SourceFile>('document.read', { path });
+      return generation === navigationGeneration ? file : null;
+    });
+    if (result !== 'applied' || generation !== navigationGeneration) return false;
+    if (track) rememberNavigation(origin);
+    return true;
+  } finally { switching = false; updateNavigation(); }
+}
+async function traverseNavigation(direction: -1 | 1) {
+  if (navigatingHistory || switching) return;
+  const step = navigation.plan(direction, sourceBookmark());
+  if (!step) return;
+  const generation = ++navigationGeneration; navigatingHistory = true; updateNavigation();
+  try {
+    if (step.target.path !== currentPath && !(await openFile(step.target.path, false, generation))) return;
+    if (generation !== navigationGeneration) return;
+    const revision = currentSourceRevision, selection = editor.selection();
+    const [expected, actual] = await Promise.all([step.target.revision.digest(), revision.digest()]);
+    if (generation !== navigationGeneration || revision !== currentSourceRevision
+      || selection.anchor !== editor.selection().anchor || selection.head !== editor.selection().head) return;
+    sourceView(); setPane('editor');
+    if (expected !== actual) {
+      notice(m('The file changed since this location was recorded. Its current source is open; the old selection was not applied.'));
+    } else editor.restoreSelection(step.target.anchor, step.target.head);
+    navigation.complete(step, sourceBookmark());
+  } finally { navigatingHistory = false; updateNavigation(); }
+}
+bind('navigate-back', () => traverseNavigation(-1));
+bind('navigate-forward', () => traverseNavigation(1));
 async function replaceDocument(prepare: () => Promise<{ path: string; source: string; hash: string | null } | null>) {
   const result = await replaceDocumentRevision(documentRevision(), documentRevision, prepare,
     file => loadDocument(file.path, file.source, file.hash));
@@ -273,20 +322,33 @@ function sourceView() {
   setAttribute($('architecture-toggle'), 'data-tooltip', m('Source architecture'));
   editor.view.requestMeasure();
 }
-function showRange(range: Range) { sourceView(); setPane('editor'); editor.select(range); }
+function navigateEditor(action: () => unknown) {
+  const origin = sourceBookmark(); navigationGeneration++; action(); rememberNavigation(origin);
+}
+function showRange(range: Range, origin = sourceBookmark()) {
+  navigationGeneration++; sourceView(); setPane('editor'); editor.select(range); rememberNavigation(origin);
+}
 async function navigateDefinition(location: { uri: string; range: Range }, expectedProject?: string) {
   const relative = workspaceFilePath(location.uri, $('workspace-root').dataset.root || '');
   if (relative === null) throw new Error(t(m('Definition is outside this workspace.')));
-  if (relative !== currentPath) await openFile(relative);
-  if (relative !== currentPath) return;
+  const generation = ++navigationGeneration, origin = sourceBookmark(), crossedFile = relative !== currentPath;
+  if (crossedFile && !(await openFile(relative, false, generation))) return;
+  if (generation !== navigationGeneration || relative !== currentPath) return;
+  const arrival = sourceBookmark();
+  if (crossedFile) rememberNavigation(origin);
   if (expectedProject) {
     const revision = languageRevision();
     const reply = await languageRequest<Analysis>(revision);
-    if (!sameRevision(revision, languageRevision()) || reply.result.project_revision !== expectedProject) {
+    if (generation !== navigationGeneration || !sameRevision(revision, languageRevision())
+      || arrival.anchor !== editor.selection().anchor || arrival.head !== editor.selection().head) return;
+    if (reply.result.project_revision !== expectedProject) {
       throw new Error(t(m('The project changed. Refresh the topology before navigating.')));
     }
   }
-  showRange(location.range);
+  if (crossedFile) {
+    navigationGeneration++; sourceView(); setPane('editor'); editor.select(location.range);
+    navigation.reviseCurrent(arrival, sourceBookmark()); updateNavigation();
+  } else showRange(location.range, origin);
 }
 editor.connectLanguage({ revision: languageRevision, failure: fail, navigate: navigateDefinition });
 bind('architecture-toggle', async () => {
@@ -511,6 +573,10 @@ function renderAnalysis(snapshot: Analysis) {
     if (snapshot.project_revision && !selectedProjectDocument(snapshot)) void inspectProject().catch(fail);
   }
   const revision = languageRevision();
+  const reveal = (range: Range) => {
+    if (!sameRevision(revision, languageRevision())) throw new Error(t(m('Source changed. Select a declaration from the current analysis.')));
+    showRange(range);
+  };
   proofTargets.accept(revision, snapshot); renderProofTargets();
   editor.diagnostics(editor.source(), snapshot.diagnostics);
   const count = snapshot.diagnostics.length;
@@ -527,7 +593,7 @@ function renderAnalysis(snapshot: Analysis) {
   }
   const diagnostics = $('diagnostics-list'); diagnostics.replaceChildren();
   for (const diagnostic of snapshot.diagnostics) {
-    const entry = button('', () => showRange(diagnostic.range), 'diagnostic-item');
+    const entry = button('', () => reveal(diagnostic.range), 'diagnostic-item');
     entry.append(node('span', `diagnostic-marker severity-${diagnostic.severity}`, diagnostic.severity === 1 ? '●' : '◇'), node('span', 'diagnostic-message', diagnostic.message), node('span', 'muted', `${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}`));
     diagnostics.append(entry);
     for (const related of diagnostic.relatedInformation ?? []) {
@@ -547,7 +613,7 @@ function renderAnalysis(snapshot: Analysis) {
   if (!snapshot.declarations.length) structure.append(node('p', 'muted', m('No declarations available for this revision.')));
   for (const declaration of snapshot.declarations) {
     const card = node('article', 'declaration-card');
-    const heading = button(declaration.name, () => showRange(declaration.selection_range), 'declaration-name');
+    const heading = button(declaration.name, () => reveal(declaration.selection_range), 'declaration-name');
     const bar = node('header', 'declaration-heading');
     bar.append(node('span', 'badge', declaration.kind), heading,
       iconButton('source', m('Inspect evidence for {name}', { name: declaration.name }), () =>
@@ -560,12 +626,12 @@ function renderAnalysis(snapshot: Analysis) {
       group.append(node('summary', '', m('Fields ({count})', { count: fields.length })));
       for (const field of fields) {
         const row = node('div', 'record-member');
-        row.append(button(field.name, () => showRange(field.selection_range), 'declaration-name'),
-          button(field.annotation.source, () => showRange(field.annotation.range), 'record-annotation'));
+        row.append(button(field.name, () => reveal(field.selection_range), 'declaration-name'),
+          button(field.annotation.source, () => reveal(field.annotation.range), 'record-annotation'));
         for (const index of field.depends_on ?? []) {
           const carrier = fields[index];
           if (carrier) row.append(button(m('Depends on {field}', { field: carrier.name }),
-            () => showRange(carrier.selection_range), 'record-dependency'));
+            () => reveal(carrier.selection_range), 'record-dependency'));
         }
         group.append(row);
       }
@@ -573,12 +639,12 @@ function renderAnalysis(snapshot: Analysis) {
     }
     if (declaration.requirements.length) {
       card.append(node('p', 'muted', m('Context requirements')));
-      for (const requirement of declaration.requirements) card.append(button(requirement.source, () => showRange(requirement.range), 'context-requirement'));
+      for (const requirement of declaration.requirements) card.append(button(requirement.source, () => reveal(requirement.range), 'context-requirement'));
     }
     for (const [label, clauses] of [[m('Preconditions'), declaration.preconditions], [m('Postconditions'), declaration.postconditions]] as const) {
       if (!clauses?.length) continue;
       card.append(node('p', 'muted', label));
-      for (const clause of clauses) card.append(button(clause.source, () => showRange(clause.range), 'context-requirement'));
+      for (const clause of clauses) card.append(button(clause.source, () => reveal(clause.range), 'context-requirement'));
     }
     const profile = declarationProfile(declaration);
     if (profile) bar.append(iconButton('proof', m(profile === 'verum-source-finite/1' ? 'Check finite function contract' : 'Check logical theorem'), () => {
@@ -601,7 +667,7 @@ function renderAnalysis(snapshot: Analysis) {
   }
   if (snapshot.mounts.length) {
     structure.append(node('h3', '', m('Mounts')));
-    for (const mount of snapshot.mounts) structure.append(button(mount.source, () => showRange(mount.range), 'context-requirement'));
+    for (const mount of snapshot.mounts) structure.append(button(mount.source, () => reveal(mount.range), 'context-requirement'));
   }
 }
 bind('reload-source', reloadSource);
@@ -718,7 +784,7 @@ function appendProofLocation(parent: HTMLElement, receipt: Receipt, span: unknow
     const revision = documentRevision();
     const range = await proofSourceRange(receipt, span, currentPath, currentHash, editor.source());
     if (range && sameDocumentRevision(revision, documentRevision())) {
-      setPane('editor'); sourceView(); editor.select(range);
+      showRange(range);
     } else announce(m('Proof location is unavailable for the current source.'));
   });
   reveal.dataset.focusKey = key;
@@ -823,7 +889,7 @@ function renderResults() {
     event => runtimeSourceRange(receipt, event, currentPath, currentHash, editor.source()) !== null,
     event => {
       const range = runtimeSourceRange(receipt, event, currentPath, currentHash, editor.source());
-      if (range) { setPane('editor'); sourceView(); editor.select(range); }
+      if (range) { showRange(range); }
     });
   if (runtime) detail.append(runtime);
   detail.append(context); appendDetails(detail, m('Full operation receipt'), receipt, 'receipt');
@@ -1177,6 +1243,8 @@ const commandRegistry = new CommandRegistry([
   control('help', m('Keyboard shortcuts'), 'F1'), control('settings', m('Settings'), 'Mod+Comma'),
   command('project-search', m('Find a project file'), 'Mod+P', findProjectFile),
   control('save', m('Save source'), 'Mod+S'), control('new-file', m('New Verum file')),
+  control('navigate-back', m('Navigate back'), 'Ctrl+F12'),
+  control('navigate-forward', m('Navigate forward'), 'Ctrl+Shift+F12'),
   control('reload-source', m('Review the saved file before reloading')), control('refresh-files', m('Refresh files')),
   control('run', m('Run source'), 'Mod+Enter', ['editor']), control('check', m('Check source'), 'Mod+Shift+Enter', ['editor']),
   control('prove', m('Check a declaration'), 'Alt+Shift+Enter', ['editor']),
@@ -1196,8 +1264,8 @@ const commandRegistry = new CommandRegistry([
   command('focus.editor', m('Focus editor'), 'Alt+1', () => { setPane('editor'); sourceView(); editor.view.focus(); }),
   command('focus.agent', m('Focus collaborator'), 'Alt+2', () => { setPane('agent'); $(input('agent-input').disabled ? 'agent-connect' : 'agent-input').focus(); }),
   command('focus.results', m('Focus results'), 'Alt+3', () => { setPane('results'); $( $('diagnostics-panel').hidden ? 'operations-tab' : 'diagnostics-tab').focus(); }),
-  command('editor.nextDiagnostic', m('Next diagnostic'), 'F8', editorAction(editor.actions.nextDiagnostic), ['editor'], editor.hasDiagnostics),
-  command('editor.previousDiagnostic', m('Previous diagnostic'), 'Shift+F8', editorAction(editor.actions.previousDiagnostic), ['editor'], editor.hasDiagnostics),
+  command('editor.nextDiagnostic', m('Next diagnostic'), 'F8', editorAction(() => navigateEditor(editor.actions.nextDiagnostic)), ['editor'], editor.hasDiagnostics),
+  command('editor.previousDiagnostic', m('Previous diagnostic'), 'Shift+F8', editorAction(() => navigateEditor(editor.actions.previousDiagnostic)), ['editor'], editor.hasDiagnostics),
   command('editor.definition', m('Go to definition'), 'F12', editorAction(editor.definition), ['editor'], () => currentPath.endsWith('.vr')),
   command('editor.format', m('Format document'), 'Alt+Shift+F', editorAction(editor.format), ['editor'], () => currentPath.endsWith('.vr')),
   command('editor.find', m('Find in source'), 'Mod+F', editorAction(editor.actions.find), ['editor']),
@@ -1242,6 +1310,7 @@ onSessionChange(state => {
     updateDocumentState();
   }
   if (!unlocked) {
+    navigationGeneration++; navigation.clear(); updateNavigation();
     projectRequest++; lastProject = null; currentAnalysis = null; $('module-topology').replaceChildren();
     proofTargets.clear(); renderProofTargets();
     document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach(dialog => dialog.close('session-locked'));

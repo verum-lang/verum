@@ -1,6 +1,10 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Source navigation': 'Навигация по исходникам',
+  'Navigate back': 'Назад по исходникам',
+  'Navigate forward': 'Вперёд по исходникам',
+  'The file changed since this location was recorded. Its current source is open; the old selection was not applied.': 'Файл изменился после сохранения этой позиции. Открыт текущий исходник; прежнее выделение не восстановлено.',
   'Source mode': 'Режим исходного кода',
   'Proof replay requires source-declared parsing.': 'Проверка доказательства требует режима, заданного исходником.',
   'This Studio host did not preserve the requested source mode.': 'Сервер Studio не подтвердил запрошенный режим исходного кода.',
