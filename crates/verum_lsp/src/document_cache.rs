@@ -402,6 +402,7 @@ impl DocumentCache {
                 text: doc.source.clone(),
                 analysis_revision: None,
                 project_bindings: verum_common::List::new(),
+                mount_resolutions: Default::default(),
                 module: doc.ast.clone(),
                 diagnostics: doc.parse_errors.clone(),
                 version: doc.version,

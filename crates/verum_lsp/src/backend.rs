@@ -103,6 +103,7 @@ impl Backend {
                     doc.analysis_revision = None;
                     doc.library_metadata = None;
                     doc.project_bindings.clear();
+                    doc.mount_resolutions.clear();
                     doc.type_info.clear();
                     for symbol in doc.symbols.values_mut() {
                         symbol.ty = None;

@@ -69,6 +69,40 @@ const MAIN: &str =
     "mount dependency.{Token, answer};\nfn read(value: Token) -> Int { value.id + answer() }";
 
 #[tokio::test]
+async fn project_mount_failure_carries_its_source_range_and_clears_after_repair() {
+    let project = Project::new();
+    let dependency = project.file("dependency.vr", DEP);
+    let uri = project.open("main.vr", "mount dependency.missing;");
+    let before = project.snapshot(&uri).await;
+    let mount = &before["mounts"][0];
+    assert_eq!(mount["resolution"]["state"], "unresolved", "{before:#}");
+    assert!(mount["resolution"]["reason"].as_str().is_some_and(|s| !s.is_empty()));
+    assert_eq!(mount["range"]["start"]["line"], 0);
+    std::fs::write(dependency.to_file_path().unwrap(), "public fn missing() -> Int { 1 }").unwrap();
+    let after = project.snapshot(&uri).await;
+    assert_eq!(after["mounts"][0]["resolution"]["state"], "resolved", "{after:#}");
+    assert_ne!(before["project_revision"], after["project_revision"]);
+}
+
+#[tokio::test]
+async fn project_topology_resolves_consumers_in_closed_sources() {
+    let project = Project::new();
+    let dep = project.open("dependency.vr", DEP);
+    let consumer = project.file("consumer.vr", MAIN);
+    project.file("broken.vr", "@cfg(feature = \"disabled_in_test\") mount dependency.*;\nmount dependency.missing;");
+    let _ = project.snapshot(&dep).await;
+    let snapshot = project.service.inner().handle_project_snapshot(Value::Null).await.unwrap();
+    let graph = &snapshot["import_topology"];
+    assert_eq!(graph["inspected_modules"], 3, "{snapshot:#}");
+    assert_eq!(graph["unresolved_mounts"], 1);
+    assert_eq!(graph["edges"].as_array().unwrap().len(), 1);
+    let edge = &graph["edges"][0];
+    assert_eq!(edge["location"]["uri"], consumer.to_string());
+    assert_eq!(edge["names"], json!(["Token", "answer"]));
+    assert_eq!(snapshot["documents"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn imports_supply_real_types_completion_hover_and_definition() {
     let project = Project::new();
     let dep = project.file("dependency.vr", DEP);
@@ -85,6 +119,7 @@ async fn imports_supply_real_types_completion_hover_and_definition() {
             .all(|binding| !binding["type_display"].as_str().unwrap().is_empty()),
         "{snapshot:#}"
     );
+    assert_eq!(snapshot["mounts"][0]["resolution"], json!({"state":"resolved","bindings":{"start":0,"end":2}}));
     let backend = project.service.inner();
     let result = backend
         .completion(

@@ -49,6 +49,12 @@ pub struct Requirement {
     pub range: Range,
 }
 #[derive(Debug, Serialize)]
+pub struct MountSnapshot {
+    #[serde(flatten)]
+    pub declaration: Requirement,
+    pub resolution: Option<crate::project_context::MountResolution>,
+}
+#[derive(Debug, Serialize)]
 pub struct DocumentSnapshot {
     pub schema: &'static str,
     pub uri: Url,
@@ -61,7 +67,7 @@ pub struct DocumentSnapshot {
     pub analysis_scope: &'static str,
     pub diagnostics: List<Diagnostic>,
     pub declarations: List<Declaration>,
-    pub mounts: List<Requirement>,
+    pub mounts: List<MountSnapshot>,
 }
 
 fn requirement(doc: &DocumentState, span: Span) -> Requirement {
@@ -219,7 +225,10 @@ impl DocumentSnapshot {
                         semantic_fields_available,
                     ));
                 } else if matches!(item.kind, ItemKind::Mount(_)) {
-                    mounts.push(requirement(doc, item.span));
+                    mounts.push(MountSnapshot {
+                        declaration: requirement(doc, item.span),
+                        resolution: doc.mount_resolutions.get(&item.span.start).cloned(),
+                    });
                 }
             }
         }
@@ -310,14 +319,25 @@ impl Backend {
     ) -> jsonrpc::Result<serde_json::Value> {
         let _guard = self.project_gate.lock().await;
         self.refresh_project();
-        let project = self.project.lock();
+        let mut project = self.project.lock();
         let mut documents = self.documents.flat_collect_from_documents(|uri, doc| {
             vec![DocumentSnapshot::from_document(uri, doc)]
         });
         documents.sort_by(|left, right| left.uri.cmp(&right.uri));
-        serde_json::to_value(serde_json::json!({
-            "schema":"verum-project-analysis/1", "coverage":"open-documents-and-source-dependencies", "project_revision":project.revision(), "library_metadata":project.library_identity(), "sources":project.identities, "issues":project.issues, "documents":documents
-        })).map_err(|_| jsonrpc::Error::internal_error())
+        let topology = serde_json::to_value(project.import_topology()
+            .map_err(|error| jsonrpc::Error::invalid_params(error.to_string()))?)
+            .map_err(|_| jsonrpc::Error::internal_error())?;
+        let mut snapshot = serde_json::json!({
+            "schema": "verum-project-analysis/1",
+            "coverage": "open-documents-and-source-dependencies",
+            "project_revision": project.revision(),
+            "library_metadata": project.library_identity(),
+            "sources": project.identities,
+            "issues": project.issues,
+            "documents": documents,
+        });
+        snapshot["import_topology"] = topology;
+        Ok(snapshot)
     }
     pub async fn handle_document_snapshot(
         &self,

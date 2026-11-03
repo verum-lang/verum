@@ -21,8 +21,17 @@ pub struct ProjectBinding {
     pub source_module: Text,
     pub definition: Option<Location>,
 }
+/// Outcome of resolving this specific mount in the document's project generation.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum MountResolution {
+    Resolved { bindings: std::ops::Range<usize> },
+    Unresolved { reason: Text },
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SourceIdentity {
+    pub module: Text,
     pub uri: Url,
     pub source_hash: Text,
     pub version: Option<i32>,
@@ -43,6 +52,22 @@ struct AnalysisReceipt {
     revision: Text,
     reads: verum_modules::ModuleObservations,
 }
+#[derive(Default, Serialize)]
+pub struct ImportTopology {
+    inspected_modules: usize,
+    unresolved_mounts: usize,
+    edges: Vec<ImportEdge>,
+}
+
+#[derive(Serialize)]
+struct ImportEdge {
+    importer: Text,
+    provider: Text,
+    location: Location,
+    source: Text,
+    names: Vec<Text>,
+}
+
 #[derive(Default)]
 pub struct ProjectContext {
     control: Option<crate::AnalysisControl>,
@@ -54,6 +79,10 @@ pub struct ProjectContext {
     analyses: Map<PathBuf, AnalysisReceipt>,
     sources: Map<PathBuf, Source>,
     pub identities: List<SourceIdentity>,
+    exports: Map<ModuleId, ExportTable>,
+    module_paths: Map<ModuleId, ModulePath>,
+    cfg: verum_ast::cfg::CfgEvaluator,
+    topology: Option<ImportTopology>,
     pub issues: List<Text>,
 }
 impl ProjectContext {
@@ -75,6 +104,9 @@ impl ProjectContext {
         self.root = Some(root);
         self.library_roots.clear();
         self.revision = Text::new();
+        self.topology = None;
+        self.exports.clear();
+        self.module_paths.clear();
         self.analyses.clear();
         if let Some(roots) = options
             .and_then(|o| o.get("libraryRoots"))
@@ -90,17 +122,70 @@ impl ProjectContext {
     }
     pub fn invalidate(&mut self, reason: &str) {
         self.revision = Text::new();
+        self.topology = None;
+        self.exports.clear();
+        self.module_paths.clear();
         self.analyses.clear();
         self.identities.clear();
         self.issues = List::from_iter([Text::from(reason)]);
     }
+    /// Resolve the indexed sources on the first graph request for this generation.
+    /// Inspecting closed files does not open them or type-check their bodies.
+    pub fn import_topology(&mut self) -> Result<&ImportTopology> {
+        if self.topology.is_none() {
+            let control = self.analysis_control();
+            let mut graph = ImportTopology::default();
+            for source in self.sources.values() {
+                control.check()?;
+                let (Some(ast), Some(id)) = (&source.ast, source.module_id) else { continue };
+                if !self.module_paths.contains_key(&id) { continue; }
+                let uri = Url::from_file_path(&source.path).map_err(|_| anyhow::anyhow!("Source URI"))?;
+                graph.inspected_modules += 1;
+                let mut resolver = ImportResolver::new();
+                for item in &ast.items {
+                    let ItemKind::Mount(decl) = &item.kind else { continue };
+                    if !self.cfg.should_include_item(item) { continue; }
+                    control.check()?;
+                    let Ok(import) = resolver.resolve_import(decl, id, &self.exports, &self.module_paths) else {
+                        graph.unresolved_mounts += 1;
+                        continue;
+                    };
+                    let mut providers = std::collections::BTreeMap::<Text, Vec<Text>>::new();
+                    for binding in import.items {
+                        let provider = self.module_paths.get(&binding.source_module)
+                            .context("Resolved binding has no registered module")?;
+                        providers.entry(provider.to_string().into()).or_default().push(binding.name);
+                    }
+                    let span = item.span.start as usize..item.span.end as usize;
+                    let spelling = source.text.get(span).context("Import span outside captured source")?;
+                    for (provider, mut names) in providers {
+                        names.sort();
+                        graph.edges.push(ImportEdge {
+                            importer: source.owner.to_string().into(), provider, names,
+                            location: Location::new(uri.clone(), ast_span_to_range(&item.span, &source.text)),
+                            source: spelling.into(),
+                        });
+                    }
+                }
+            }
+            graph.edges.sort_by(|a, b| a.importer.cmp(&b.importer)
+                .then_with(|| a.location.range.start.cmp(&b.location.range.start))
+                .then_with(|| a.provider.cmp(&b.provider)));
+            control.check()?;
+            self.topology = Some(graph);
+        }
+        Ok(self.topology.as_ref().expect("topology set after complete traversal"))
+    }
     pub fn revision(&self) -> &str {
         &self.revision
     }
-    pub fn refresh(&mut self, documents: &DocumentStore) -> Result<bool> {
-        let control = self.control.clone().unwrap_or_else(|| {
+    fn analysis_control(&self) -> crate::AnalysisControl {
+        self.control.clone().unwrap_or_else(|| {
             crate::AnalysisControl::with_deadline(std::time::Instant::now() + crate::ANALYSIS_TIMEOUT)
-        });
+        })
+    }
+    pub fn refresh(&mut self, documents: &DocumentStore) -> Result<bool> {
+        let control = self.analysis_control();
         control.check()?;
         let Some(root) = self.root.clone() else {
             return Ok(false);
@@ -406,6 +491,7 @@ impl ProjectContext {
                     doc.analysis_revision = Some(revision.clone());
                     doc.library_metadata = self.library_identity().cloned();
                     doc.project_bindings.clear();
+                    doc.mount_resolutions.clear();
                     if doc.module.is_some() {
                         doc.diagnostics =
                             List::from_iter([verum_diagnostics::DiagnosticBuilder::error()
@@ -448,43 +534,52 @@ impl ProjectContext {
                 {
                     for item in &info.ast.items {
                         if let ItemKind::Mount(decl) = &item.kind {
-                            if let Ok(import) =
-                                imports.resolve_import(decl, info.id, &exports, &module_paths)
-                            {
-                                for binding in import.items {
-                                    // Navigation and type displays share the same dependency receipt.
-                                    registry.read().get(binding.source_module);
-                                    let definition = definition_location(
-                                        &registry,
-                                        &module_sources,
-                                        &exports,
-                                        &module_paths,
-                                        binding.source_module,
-                                        binding.original_name,
-                                    );
-                                    let ty = if binding.kind == verum_modules::ExportKind::Type {
-                                        checker.resolved_type(binding.name.as_str()).cloned()
-                                    } else {
-                                        None
-                                    }
-                                    .or_else(|| {
-                                        checker
-                                            .ctx_env_lookup(binding.name.as_str())
-                                            .map(|scheme| scheme.ty.clone())
+                            let import = match imports.resolve_import(decl, info.id, &exports, &module_paths) {
+                                Ok(import) => import,
+                                Err(error) => {
+                                    doc.mount_resolutions.insert(item.span.start, MountResolution::Unresolved {
+                                        reason: error.to_string().into(),
                                     });
-                                    let type_display =
-                                        ty.map(|ty| ty.to_string()).unwrap_or_default().into();
-                                    doc.project_bindings.push(ProjectBinding {
-                                        name: binding.name,
-                                        type_display,
-                                        source_module: module_paths
-                                            .get(&binding.source_module)
-                                            .map(|path| path.to_string().into())
-                                            .unwrap_or_default(),
-                                        definition,
-                                    });
+                                    continue;
                                 }
+                            };
+                            let start = doc.project_bindings.len();
+                            for binding in import.items {
+                                // Navigation and type displays share the same dependency receipt.
+                                registry.read().get(binding.source_module);
+                                let definition = definition_location(
+                                    &registry,
+                                    &module_sources,
+                                    &exports,
+                                    &module_paths,
+                                    binding.source_module,
+                                    binding.original_name,
+                                );
+                                let ty = if binding.kind == verum_modules::ExportKind::Type {
+                                    checker.resolved_type(binding.name.as_str()).cloned()
+                                } else {
+                                    None
+                                }
+                                .or_else(|| {
+                                    checker
+                                        .ctx_env_lookup(binding.name.as_str())
+                                        .map(|scheme| scheme.ty.clone())
+                                });
+                                let type_display =
+                                    ty.map(|ty| ty.to_string()).unwrap_or_default().into();
+                                doc.project_bindings.push(ProjectBinding {
+                                    name: binding.name,
+                                    type_display,
+                                    source_module: module_paths
+                                        .get(&binding.source_module)
+                                        .map(|path| path.to_string().into())
+                                        .unwrap_or_default(),
+                                    definition,
+                                });
                             }
+                            doc.mount_resolutions.insert(item.span.start, MountResolution::Resolved {
+                                bindings: start..doc.project_bindings.len(),
+                            });
                         }
                     }
                 }
@@ -498,6 +593,7 @@ impl ProjectContext {
         self.identities = sources
             .values()
             .map(|source| SourceIdentity {
+                module: source.owner.to_string().into(),
                 uri: Url::from_file_path(&source.path).unwrap(),
                 source_hash: hex::encode(Sha256::digest(source.text.as_bytes())).into(),
                 version: source.version,
@@ -508,6 +604,10 @@ impl ProjectContext {
         self.analyses.retain(|path, _| open.iter().any(|(p, ..)| p == path));
         self.configuration = configuration;
         self.sources = sources;
+        self.cfg = loader.cfg_evaluator().clone();
+        self.exports = exports;
+        self.module_paths = module_paths;
+        self.topology = None;
         self.issues = issues;
         self.revision = revision;
         Ok(true)

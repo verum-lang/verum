@@ -278,6 +278,7 @@ pub struct DocumentState {
     pub analysis_revision: Option<Text>,
     pub library_metadata: Option<crate::library_metadata::LibraryIdentity>,
     pub project_bindings: List<crate::project_context::ProjectBinding>,
+    pub mount_resolutions: std::collections::BTreeMap<u32, crate::project_context::MountResolution>,
     /// The full text content of the document
     pub text: String,
     /// The parsed AST (if parsing succeeded)
@@ -330,6 +331,7 @@ impl DocumentState {
             analysis_revision: None,
             library_metadata: None,
             project_bindings: List::new(),
+            mount_resolutions: Default::default(),
             text,
             module: None,
             diagnostics: List::new(),
@@ -422,6 +424,7 @@ impl DocumentState {
         self.analysis_revision = None;
         self.library_metadata = None;
         self.project_bindings.clear();
+        self.mount_resolutions.clear();
         self.diagnostics.clear();
         self.symbols.clear();
         self.type_info.clear();
@@ -707,6 +710,7 @@ impl DocumentState {
     ) -> verum_types::Result<()> {
         self.analysis_revision = None;
         self.project_bindings.clear();
+        self.mount_resolutions.clear();
         self.diagnostics.clear();
         let started = std::time::Instant::now();
         self.check_module_types(module, checker);
