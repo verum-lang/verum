@@ -76,9 +76,10 @@ impl PrecompileConfig {
 ///      `framework_provenance`, and multi-variant `function_variants`
 ///      tables on every contained `VbcModule`, re-serialise.
 ///
-/// Returns the [`StdlibCompilationResult`] from `compile_core` plus
-/// the absolute output path.
+/// Returns the archive result with timing for the complete production call,
+/// including its source snapshot, metadata, publication and receipt validation.
 pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResult> {
+    let started = std::time::Instant::now();
     if cfg.verbose {
         eprintln!(
             "verum stdlib precompile: stdlib={}, output={}, target={}",
@@ -125,6 +126,8 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         .unwrap_or(Path::new("."));
     let stage = tempfile::tempdir_in(parent)?;
     let source = stage.path().join("core");
+    let mut session = Session::new(CompilerOptions::default());
+    let phase = session.measure_phase("Stdlib source snapshot");
     let inputs = snapshot_bake_inputs(&cfg.stdlib_path, &source)?;
     let staged_archive = stage.path().join("runtime.vbca");
     let core_config = CoreConfig::new(source.clone()).with_output(staged_archive.clone());
@@ -138,7 +141,7 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
 
     // Stdlib bootstrap doesn't read any user input; the empty
     // `CompilerOptions` defaults are sufficient.
-    let mut session = Session::new(CompilerOptions::default());
+    drop(phase);
     let mut pipeline = CompilationPipeline::new_core(&mut session, core_config);
     let mut result = pipeline
         .compile_core()
@@ -177,8 +180,10 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
             result.errors.len()
         );
     }
+    let mut phase = session.measure_phase("Stdlib archive readback");
     let archive_bytes = std::fs::read(&staged_archive)?;
     let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(&archive_bytes))?;
+    phase.next("Stdlib core metadata");
     write_core_metadata_alongside_archive(
         &staged_archive,
         &archive,
@@ -186,7 +191,9 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         inputs.source.sdk,
         cfg.verbose,
     )?;
+    phase.next("Stdlib symbol graph");
     write_symbol_graph_alongside_archive(&staged_archive, &archive, cfg.verbose)?;
+    phase.next("Stdlib publication and verification");
     inputs.record(&staged_archive, blake3::hash(&archive_bytes))?;
     for ext in ["core_metadata", "symbol_graph"] {
         std::fs::rename(
@@ -201,6 +208,17 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
     )?;
     inputs.verify_file(&cfg.output_path)?;
     result.output_path = cfg.output_path.clone();
+    drop(phase);
+    result.total_time = started.elapsed();
+    result.profile = session.current_metrics();
+    result.profile.total_duration = result.total_time;
+    result.profile.finalize();
+    if cfg.verbose {
+        eprintln!("verum stdlib precompile: complete production in {:?}", result.total_time);
+        for phase in &result.profile.phase_metrics {
+            eprintln!("  {}: {:?}", phase.phase_name, phase.duration);
+        }
+    }
     Ok(result)
 }
 

@@ -22,6 +22,36 @@ use crate::options::{CompilerOptions, OutputFormat};
 use verum_cbgr::tier_analysis::TierAnalysisResult;
 use verum_cbgr::tier_types::TierStatistics;
 
+/// Records consecutive, non-overlapping phase intervals, including early exits.
+/// Owns the shared metrics handle so it does not borrow the running pipeline.
+pub(crate) struct PhaseTimer {
+    metrics: Shared<RwLock<CompilationProfileReport>>,
+    name: Text,
+    since: Instant,
+}
+
+impl PhaseTimer {
+    fn record_until(&self, now: Instant) {
+        let duration = now.duration_since(self.since);
+        self.metrics.write().record_phase(self.name.clone(), duration, 0);
+        tracing::info!(target: "verum_compiler::profile", phase = %self.name,
+            elapsed_seconds = duration.as_secs_f64(), "compilation phase interval");
+    }
+
+    pub(crate) fn next(&mut self, name: &str) {
+        let now = Instant::now();
+        self.record_until(now);
+        self.name = Text::from(name);
+        self.since = now;
+    }
+}
+
+impl Drop for PhaseTimer {
+    fn drop(&mut self) {
+        self.record_until(Instant::now());
+    }
+}
+
 /// Function identifier for tier analysis caching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionId(pub u64);
@@ -1729,6 +1759,14 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         self.metrics
             .write()
             .record_phase(Text::from(phase_name), duration, memory_allocated);
+    }
+
+    pub(crate) fn measure_phase(&self, name: &str) -> PhaseTimer {
+        PhaseTimer {
+            metrics: self.metrics.clone(),
+            name: Text::from(name),
+            since: Instant::now(),
+        }
     }
 
     /// Record one completed interval and start the next at the same instant.

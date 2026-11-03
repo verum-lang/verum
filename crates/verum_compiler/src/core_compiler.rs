@@ -115,8 +115,11 @@ pub struct StdlibCompilationResult {
     pub modules_compiled: usize,
     /// Number of functions compiled
     pub functions_compiled: usize,
-    /// Total compilation time
+    /// Wall time of the producing entry point. `precompile_stdlib` includes
+    /// source snapshot, sidecars, publication and receipt verification.
     pub total_time: Duration,
+    /// Shared compiler profile for the same producing entry point.
+    pub profile: crate::compilation_metrics::CompilationProfileReport,
     /// Time per module (module name -> duration)
     pub module_times: HashMap<String, Duration>,
     /// Output archive path

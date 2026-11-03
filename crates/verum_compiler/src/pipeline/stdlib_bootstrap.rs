@@ -97,6 +97,7 @@ impl<'s> CompilationPipeline<'s> {
         };
 
         let start = std::time::Instant::now();
+        let mut phase = self.session.measure_phase("Stdlib discovery");
         let mut module_times = std::collections::HashMap::new();
 
         // ====================================================================
@@ -125,6 +126,7 @@ impl<'s> CompilationPipeline<'s> {
         // Get modules in dependency order
         let modules_to_compile: Vec<StdlibModule> =
             resolver.modules_in_order().into_iter().cloned().collect();
+        phase.next("Stdlib parsing");
 
         // ====================================================================
         // STEP 2: Parse ALL modules
@@ -147,6 +149,7 @@ impl<'s> CompilationPipeline<'s> {
         //
 
         let seeds = all_parsed_modules.iter().flat_map(|(_, files)| files);
+        phase.next("Stdlib file mounts");
         let resolved = verum_modules::file_mount::resolve_file_mounts(
             &mut self.module_loader,
             seeds,
@@ -167,6 +170,7 @@ impl<'s> CompilationPipeline<'s> {
         for entry in resolved {
             all_parsed_modules.push((entry.synthetic_name, vec![(entry.absolute_path, entry.module)]));
         }
+        phase.next("Stdlib module registration");
 
         // ====================================================================
         // STEP 2.5: Register ALL parsed modules in the ModuleRegistry
@@ -303,6 +307,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Create TypeChecker with minimal context for stdlib compilation
         // (types are registered dynamically as stdlib .vr files are parsed)
+        phase.next("Stdlib type registration");
         let mut type_checker = verum_types::infer::TypeChecker::with_minimal_context();
         type_checker.register_primitives();
 
@@ -311,6 +316,7 @@ impl<'s> CompilationPipeline<'s> {
         type_checker.set_module_registry(registry.clone());
 
         self.register_stdlib_types_globally(&all_parsed_modules, &mut type_checker, &config)?;
+        phase.next("Stdlib declaration preparation");
 
         // ====================================================================
         // STEP 3.5: Pre-register canonical-type inherent methods globally
@@ -663,10 +669,12 @@ one module and therefore never seeded",
         // Cyclic core dependencies need declaration-owned signatures before a
         // provider's body exists. These modules are metadata only: scoped type
         // IDs pass through the normal importer, never into executable archives.
+        phase.next("Stdlib declaration interfaces");
         let declaration_interfaces = self.collect_core_declaration_interfaces(
             &all_parsed_modules, &config, &target,
         )?;
 
+        phase.next("Stdlib body compilation");
         for (module_name, ast_modules_with_paths) in &all_parsed_modules {
             let module_start = std::time::Instant::now();
             let module = modules_to_compile
@@ -722,7 +730,9 @@ one module and therefore never seeded",
                 }
             }
 
-            module_times.insert(module.name.clone(), module_start.elapsed());
+            let duration = module_start.elapsed();
+            module_times.insert(module.name.clone(), duration);
+            self.session.record_module_metrics(&module.name, duration, funcs);
             self.compiled_stdlib_modules
                 .insert(module.name.clone(), vbc_module);
         }
@@ -734,7 +744,9 @@ one module and therefore never seeded",
             eprintln!("Building archive...");
         }
 
+        phase.next("Stdlib archive assembly");
         let archive = self.build_stdlib_archive(&config)?;
+        phase.next("Stdlib archive serialization");
 
         // ====================================================================
         // STEP 6: Write archive
@@ -751,10 +763,16 @@ one module and therefore never seeded",
             .map(|m| m.len())
             .unwrap_or(0);
 
+        drop(phase);
+        let total_time = start.elapsed();
+        let mut profile = self.session.current_metrics();
+        profile.total_duration = total_time;
+        profile.finalize();
         Ok(StdlibCompilationResult {
             modules_compiled: self.compiled_stdlib_modules.len(),
             functions_compiled,
-            total_time: start.elapsed(),
+            total_time,
+            profile,
             module_times,
             output_path: config.output_path.clone(),
             output_size,
