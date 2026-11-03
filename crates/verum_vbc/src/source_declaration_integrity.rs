@@ -116,7 +116,17 @@ pub fn validate_type_descriptor(
             "runtime kind or representation differs from declaration",
         ));
     }
-    if (kind == TypeKind::Alias) != descriptor.alias_target.is_some() {
+    if let TypeDeclBody::Alias(target) = &declaration.body
+        && let verum_ast::ty::TypeKind::Path(path) = &target.kind
+        && let Some(marker) = path.as_ident()
+        && verum_ast::ty::CubicalTypePrimitive::from_marker(marker.name.as_str()).is_some()
+    {
+        if descriptor.alias_target.is_some()
+            || descriptor.alias_target_name.and_then(|name| strings.get(name)) != Some(marker.name.as_str())
+        {
+            return Err(fail("cubical type marker requires its exact source spelling and no runtime target"));
+        }
+    } else if (kind == TypeKind::Alias) != descriptor.alias_target.is_some() {
         return Err(fail("runtime alias target does not match declaration kind"));
     }
     if !matches!(kind, TypeKind::Sum | TypeKind::Protocol) && !descriptor.variants.is_empty() {

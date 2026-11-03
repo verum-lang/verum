@@ -552,3 +552,68 @@ fn source_producer_attaches_declaring_type_and_keeps_ordinary_types_empty() {
             .any(|ty| ty.source_declaration.is_some())
     );
 }
+
+#[test]
+fn cubical_alias_preserves_the_kernel_marker_without_inventing_storage() {
+    for marker in ["@builtin_glue", "@builtin_path", "@builtin_interval"] {
+        let source = format!("public type Carrier<A>(a: A) is {marker};");
+        let declaration = declaration(&source);
+        let mut alias = module(declaration.clone());
+        alias.types[0].alias_target = None;
+        alias.types[0].alias_target_name = Some(alias.intern_string(marker));
+        let loaded = deserialize_module(&serialize_module(&alias).unwrap()).unwrap();
+        assert_eq!(
+            loaded.types[0].source_declaration.as_ref(),
+            Some(&declaration)
+        );
+        assert!(loaded.types[0].alias_target.is_none());
+
+        let mut forged = alias.clone();
+        forged.types[0].alias_target = Some(TypeRef::Concrete(TypeId::PTR));
+        assert!(serialize_module(&forged).is_err());
+        let mut mismatch = alias.clone();
+        mismatch.types[0].alias_target_name = Some(mismatch.intern_string("@different"));
+        assert!(serialize_module(&mismatch).is_err());
+        alias.types[0].alias_target_name = None;
+        assert!(serialize_module(&alias).is_err());
+    }
+    let mut unknown = module(declaration(
+        "public type Carrier<A>(a: A) is @unregistered;",
+    ));
+    unknown.types[0].alias_target = None;
+    unknown.types[0].alias_target_name = Some(unknown.intern_string("@unregistered"));
+    assert!(serialize_module(&unknown).is_err());
+}
+
+#[cfg(feature = "codegen")]
+#[test]
+fn real_cubical_glue_interface_keeps_its_dependent_telescope_on_wire() {
+    let source = include_str!("../../../core/math/cubical.vr");
+    let mut ast = Parser::new(source).parse_module().unwrap();
+    ast.items
+        .retain(|item| matches!(&item.kind, ItemKind::Type(decl) if decl.name.name == "Glue"));
+    assert_eq!(ast.items.len(), 1);
+    let mut codegen = verum_vbc::codegen::VbcCodegen::new();
+    let interface = codegen.collect_declaration_interface(&[&ast]).unwrap();
+    let loaded = deserialize_module(&serialize_module(&interface).unwrap()).unwrap();
+    let glue = loaded
+        .types
+        .iter()
+        .find(|ty| loaded.get_string(ty.name) == Some("Glue"))
+        .unwrap();
+    assert!(glue.alias_target.is_none());
+    assert_eq!(
+        glue.alias_target_name.and_then(|id| loaded.get_string(id)),
+        Some("@builtin_glue")
+    );
+    let instantiated = TypeRef::Instantiated {
+        base: glue.id,
+        args: vec![TypeRef::Concrete(TypeId::INT)],
+    };
+    let error = verum_vbc::drop_plan::build(&loaded, &instantiated).unwrap_err();
+    assert!(error.contains("no resolved declaration target"), "{error}");
+    let ItemKind::Type(source) = &ast.items[0].kind else {
+        unreachable!()
+    };
+    assert_eq!(glue.source_declaration.as_ref(), Some(source));
+}

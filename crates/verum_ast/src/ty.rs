@@ -15,6 +15,26 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use verum_common::{Heap, List, Maybe, Text};
 
+/// Primitive type markers interpreted by the cubical kernel. Their source
+/// spellings denote type formers and do not designate VBC storage types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CubicalTypePrimitive {
+    Interval,
+    Path,
+    Glue,
+}
+
+impl CubicalTypePrimitive {
+    pub fn from_marker(name: &str) -> Option<Self> {
+        match name {
+            "@builtin_interval" => Some(Self::Interval),
+            "@builtin_path" => Some(Self::Path),
+            "@builtin_glue" => Some(Self::Glue),
+            _ => None,
+        }
+    }
+}
+
 /// A type in the Verum type system.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Type {
