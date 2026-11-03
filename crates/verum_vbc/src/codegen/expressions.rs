@@ -29126,35 +29126,10 @@ impl VbcCodegen {
                         && let PathSegment::Name(ident) = &path.segments[0]
                     {
                         let name = &ident.name;
-                        // FUNDAMENTAL #5 — arity-aware function lookup.
-                        //
-                        // When a user-defined fn shares its simple name
-                        // with a stdlib intrinsic of different arity
-                        // (canonical case: user `fn safe_open(raw: Int)
-                        // -> Maybe<FileDesc>` vs POSIX `safe_open(path,
-                        // flags, mode) -> Fd`), the bare-name slot in
-                        // `ctx.functions` is owned by whichever
-                        // registration ran first.  `register_function`'s
-                        // arity-conflict branch shoves the second
-                        // registration to `<name>#<arity>` (alt-arity
-                        // key) and leaves the bare key alone — so a
-                        // bare `lookup_function("safe_open")` returns
-                        // the FIRST registration (often a stub from
-                        // pre-registration with `return_type_name = None`),
-                        // and every downstream type inference for the
-                        // user-side call site loses the wrapper type.
-                        //
-                        // Use the call-site arity to consult the right
-                        // entry: bare key when arity matches, otherwise
-                        // `<name>#<arity>` alt-key.  Same dispatch
-                        // discipline that `compile_call` /
-                        // `compile_method_call` already use.  Closes the
-                        // entire `Maybe<TupleNewtype>` destructure-loses-
-                        // wrapper-identity class, plus every other
-                        // user-fn/stdlib-fn arity collision that
-                        // misroutes type inference at the call site.
+                        // A call's result belongs to its declaration in the caller's
+                        // source module, including when a sibling has the same arity.
                         if let Some(func_info) =
-                            self.ctx.lookup_function_with_arity(name, args.len())
+                            self.ctx.lookup_function_with_arity_in_scope(name, args.len())
                         {
                             // For variant constructors (Some, Ok, Err), try to infer
                             // generic args from constructor arguments BEFORE falling back

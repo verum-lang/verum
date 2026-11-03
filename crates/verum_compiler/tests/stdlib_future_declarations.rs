@@ -47,6 +47,39 @@ fn inline_reexport_matches_the_declaring_generic_sum_after_bootstrap() {
     );
 }
 
+#[test]
+fn sibling_private_functions_keep_their_call_and_result_owners() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    let codecs = core.join("codecs");
+    fs::create_dir_all(&codecs).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module codecs;").unwrap();
+    fs::write(codecs.join("mod.vr"), "module core.codecs; public module left; public module right;").unwrap();
+    for (file, sum, first, second, value) in [
+        ("left", "Amber", "Kept", "Gone", 3),
+        ("right", "Blue", "Seen", "Absent", 4),
+    ] {
+        fs::write(codecs.join(format!("{file}.vr")), format!(
+            "module core.codecs.{file};
+             public type {sum} is {first}(Int) | {second};
+             fn decode_item() -> {sum} {{ {sum}.{first}({value}) }}
+             public fn read_{file}() -> Int {{
+                 let item = decode_item();
+                 match item {{ {sum}.{first}(x) => x, {sum}.{second} => 0 }}
+             }}"
+        )).unwrap();
+    }
+    let archive = bootstrap(&core);
+    assert_eq!(
+        execute(
+            &archive,
+            "module app; mount core.codecs.left.read_left; mount core.codecs.right.read_right;
+             fn main() -> Int { read_left() * 10 + read_right() }",
+        ),
+        34
+    );
+}
+
 fn check_bootstrap(glob: bool) {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
