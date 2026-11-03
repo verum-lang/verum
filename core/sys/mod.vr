@@ -714,10 +714,8 @@ public mount .windows.{
     Mutex,
     Condvar,
     SpinLock,
-    RwLock,
     Semaphore,
     Once,
-    Barrier,
     // Thread Functions
     // T1320 — this block carried a `thread_` prefix the module never
     // adopted. Of the six names, FIVE were declared nowhere in the tree:
@@ -735,6 +733,7 @@ public mount .windows.{
     yield_now,
     current_thread_id,
     // Once Constants
+    ONCE_INIT,
     ONCE_RUNNING,
     ONCE_COMPLETE,
 };

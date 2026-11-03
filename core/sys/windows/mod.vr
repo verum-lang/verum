@@ -390,25 +390,22 @@ public mount io.{
 // =============================================================================
 
 public mount thread.{
-    // Error types
-    ThreadError,
-
-    // Types
-    Thread,
-    ThreadId,
+    WindowsThreadError as ThreadError,
+    WindowsThread as Thread,
+    WindowsThreadId as ThreadId,
     ThreadFunc,
     ThreadHandle,
-    Mutex,
-    Condvar,
-    SpinLock,
-    RwLock,
-    Semaphore,
-    Once,
-    OnceState,
-    Barrier,
+    WindowsMutex as Mutex,
+    WindowsCondvar as Condvar,
+    WindowsSpinLock as SpinLock,
+    Win32Semaphore as Semaphore,
+    WindowsOnce as Once,
 
     // Constants
     DEFAULT_THREAD_STACK_SIZE,
+    ONCE_INIT,
+    ONCE_RUNNING,
+    ONCE_COMPLETE,
 
     // Thread operations
     // T1320 — this block carried a `thread_` prefix the module never
@@ -463,10 +460,23 @@ public mount time.{
 
 public mount winsock2.{
     // Socket operations (POSIX-compatible names)
-    socket, connect, bind, listen, accept, accept4,
-    send, recv, sendto, recvfrom,
-    shutdown, close, read, write,
-    getsockname, getpeername, fcntl,
+    winsock_socket as socket,
+    winsock_connect as connect,
+    winsock_bind as bind,
+    winsock_listen as listen,
+    winsock_accept as accept,
+    winsock_accept4 as accept4,
+    winsock_send as send,
+    winsock_recv as recv,
+    winsock_sendto as sendto,
+    winsock_recvfrom as recvfrom,
+    winsock_shutdown as shutdown,
+    winsock_close as close,
+    winsock_read as read,
+    winsock_write as write,
+    winsock_getsockname as getsockname,
+    winsock_getpeername as getpeername,
+    fcntl,
 
     // Socket options
     setsockopt_int, getsockopt_error,
