@@ -72,6 +72,7 @@ mod protocol_applications;
 mod impl_generic_rosters;
 mod protocol_attachments;
 mod blanket_impls;
+mod cfg_selection;
 mod protocol_results;
 mod constructor_types;
 mod declaration_interface;
@@ -3555,7 +3556,12 @@ impl VbcCodegen {
                 // Emitting through the same register + pending-queue path as a
                 // default method binds `Self`/the type param to `type_name`,
                 // so the body's `self.cmp(other)` dispatches to `Int.cmp`.
-                for body_func in blanket.declaration.items.iter().filter_map(|item| match &item.kind {
+                let selected_items = self.selected_impl_items(&blanket.declaration)?;
+                let selected_overrides = selected_items.iter().filter_map(|item| match &item.kind {
+                    verum_ast::decl::ImplItemKind::Function(function) => Some(function.name.name.to_string()),
+                    _ => None,
+                }).collect();
+                for body_func in selected_items.iter().filter_map(|item| match &item.kind {
                     verum_ast::decl::ImplItemKind::Function(function) => Some(function),
                     _ => None,
                 }) {
@@ -3577,7 +3583,7 @@ impl VbcCodegen {
                 }
                 per_proto_overrides
                     .entry(derived.key.clone())
-                    .or_insert(blanket.explicit_methods.clone());
+                    .or_insert(selected_overrides);
                 protocols_to_check.push(derived);
             }
 
@@ -5162,15 +5168,16 @@ impl VbcCodegen {
     /// `core/base/protocols.vr` (`implement<T: Ord> PartialOrd for T`) — so
     /// without a pre-pass `Int` never receives `partial_cmp` and the method
     /// panics "not found" at runtime.
-    pub fn collect_blanket_impls(&mut self, module: &Module) {
+    pub fn collect_blanket_impls(&mut self, module: &Module) -> CodegenResult<()> {
         let owner = self.source_file_owner(module, &self.config.module_name);
         for item in &module.items {
             if self.should_compile_item(item)
                 && let ItemKind::Impl(declaration) = &item.kind
             {
-                self.record_blanket_impl(declaration, owner.clone());
+                self.record_blanket_impl(declaration, owner.clone())?;
             }
         }
+        Ok(())
     }
 
     /// The blanket impls recorded so far — harvested by the stdlib bootstrap
@@ -5866,6 +5873,7 @@ impl VbcCodegen {
                 }
             }
             ItemKind::Impl(impl_decl) => {
+                let selected_items = self.selected_impl_items(impl_decl)?;
                 // Compile each function individually, skipping those that fail
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
 
@@ -5881,50 +5889,8 @@ impl VbcCodegen {
                 let previous_generics = self.current_impl_ast_generics.replace(impl_decl.generics.clone());
                 let previous_where = std::mem::replace(&mut self.current_impl_where_clause, impl_decl.generic_where_clause.clone());
 
-                for impl_item in impl_decl.items.iter() {
-                    // Honour `@cfg` gates on impl items. ImplItem and
-                    // its inner FunctionDecl both carry attributes;
-                    // walk both so `@cfg(target_os = "linux") fn foo(…)`
-                    // inside a cross-platform `implement Bar { … }`
-                    // block is filtered correctly.
-                    if !impl_item.attributes.is_empty() {
-                        let (include, failures) = self
-                            .cfg_evaluator
-                            .should_include_with_failures(&impl_item.attributes);
-                        if !failures.is_empty() {
-                            for attr in &failures {
-                                tracing::warn!(
-                                    "[cfg] @{}(...) on impl item could not be \
-                                     parsed; the item is included by fall-through.",
-                                    attr.name.as_str(),
-                                );
-                            }
-                        }
-                        if !include {
-                            continue;
-                        }
-                    }
+                for impl_item in selected_items {
                     if let verum_ast::decl::ImplItemKind::Function(func) = &impl_item.kind {
-                        if !func.attributes.is_empty() {
-                            let (include, failures) = self
-                                .cfg_evaluator
-                                .should_include_with_failures(&func.attributes);
-                            if !failures.is_empty() {
-                                let fname = func.name.name.as_str();
-                                for attr in &failures {
-                                    tracing::warn!(
-                                        "[cfg] @{}(...) on impl-method `{}` \
-                                         could not be parsed; included by \
-                                         fall-through.",
-                                        attr.name.as_str(),
-                                        fname,
-                                    );
-                                }
-                            }
-                            if !include {
-                                continue;
-                            }
-                        }
                         self.ctx.generic_type_params.clear();
                         self.ctx.generic_type_params_ordered.clear();
                         self.ctx.current_generic_param_ids.clear();
@@ -8567,7 +8533,7 @@ impl VbcCodegen {
         }
         for (parent, module) in files {
             self.config.module_name = (*parent).to_owned();
-            self.collect_blanket_impls(module);
+            self.collect_blanket_impls(module)?;
         }
         for (parent, module) in files {
             self.config.module_name = (*parent).to_owned();
@@ -10025,6 +9991,7 @@ impl VbcCodegen {
                 }
             }
             ItemKind::Impl(impl_decl) => {
+                let selected_items = self.selected_impl_items(impl_decl)?;
                 // Get the type name for qualified method registration
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
 
@@ -10048,7 +10015,7 @@ impl VbcCodegen {
                     self.ensure_structural_impl_target_type(impl_decl, tn);
                 }
 
-                self.record_blanket_impl(impl_decl, self.ctx.current_source_module.clone());
+                self.record_blanket_impl(impl_decl, self.ctx.current_source_module.clone())?;
 
                 // For protocol impls, inherent methods take priority.
                 // If "AppConfig.new" already exists from inherent impl,
@@ -10090,7 +10057,7 @@ impl VbcCodegen {
                     false
                 };
 
-                for impl_item in impl_decl.items.iter() {
+                for impl_item in selected_items.iter() {
                     match &impl_item.kind {
                         verum_ast::decl::ImplItemKind::Function(func) => {
                             // Register function by qualified name (e.g., "List::new") for static calls
@@ -10209,8 +10176,7 @@ impl VbcCodegen {
                     });
                     if let Some(pn) = protocol_name {
                         // Get methods explicitly implemented
-                        let implemented_methods: std::collections::HashSet<String> = impl_decl
-                            .items
+                        let implemented_methods: std::collections::HashSet<String> = selected_items
                             .iter()
                             .filter_map(|item| {
                                 if let verum_ast::decl::ImplItemKind::Function(func) = &item.kind {
@@ -10222,7 +10188,7 @@ impl VbcCodegen {
                             .collect();
 
                         // Generate default methods from protocol
-                        let instance = self.record_concrete_impl_bindings(impl_decl);
+                        let instance = self.record_concrete_impl_bindings(impl_decl, &selected_items);
                         self.generate_default_protocol_methods(
                             ty_name, impl_decl, instance.as_ref(), &implemented_methods,
                         )?;
@@ -10285,7 +10251,7 @@ impl VbcCodegen {
                                 // the impl block's ordered AST items —
                                 // the same source the HashSet was built
                                 // from — so the union is canonical.
-                                for item in impl_decl.items.iter() {
+                                for item in selected_items.iter() {
                                     if let verum_ast::decl::ImplItemKind::Function(func) =
                                         &item.kind
                                     {
@@ -10311,8 +10277,7 @@ impl VbcCodegen {
                                     // same vector register_impl_function
                                     // stored), mirroring
                                     // compile_function's self-pairing.
-                                    let own_decl_types: Option<Vec<String>> = impl_decl
-                                        .items
+                                    let own_decl_types: Option<Vec<String>> = selected_items
                                         .iter()
                                         .find_map(|item| {
                                             if let verum_ast::decl::ImplItemKind::Function(f) =
@@ -10447,7 +10412,7 @@ impl VbcCodegen {
                                         // evidence, not an invented free generic parameter.
                                         return None;
                                     }
-                                    Some(impl_decl.items.iter().filter_map(|item| {
+                                    Some(selected_items.iter().filter_map(|item| {
                                         let verum_ast::decl::ImplItemKind::Type { name, ty, .. } = &item.kind else {
                                             return None;
                                         };
@@ -10459,7 +10424,7 @@ impl VbcCodegen {
                                 })().unwrap_or_default();
                                 if std::env::var("VERUM_TRACE_ASSOC_ATTACH").is_ok() {
                                     eprintln!("[assoc-attach] ty={} proto={} items={} resolved={:?}",
-                                        ty_name, pn, impl_decl.items.len(), resolved);
+                                        ty_name, pn, selected_items.len(), resolved);
                                 }
                                 resolved.into_iter().map(|(name, ty)|
                                     (StringId(self.ctx.intern_string_raw(&name)), ty)).collect()

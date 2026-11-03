@@ -1,5 +1,5 @@
 //! Source declarations retained for blanket implementation specialization.
-use super::{BlanketImpl, VbcCodegen};
+use super::{BlanketImpl, CodegenResult, VbcCodegen};
 use verum_ast::{
     decl::{ImplDecl, ImplItemKind, ImplKind},
     ty::{GenericParamKind, PathSegment},
@@ -11,19 +11,20 @@ impl VbcCodegen {
         &mut self,
         declaration: &ImplDecl,
         source_module: Option<String>,
-    ) {
+    ) -> CodegenResult<()> {
         let ImplKind::Protocol {
             protocol, for_type, ..
         } = &declaration.kind
         else {
-            return;
+            return Ok(());
         };
         let Some(PathSegment::Name(derived)) = protocol.segments.last() else {
-            return;
+            return Ok(());
         };
         let Some(receiver_parameter) = Self::for_type_generic_param_name(for_type) else {
-            return;
+            return Ok(());
         };
+        let selected_items = self.selected_impl_items(declaration)?;
         for parameter in &declaration.generics {
             let GenericParamKind::Type { name, bounds, .. } = &parameter.kind else {
                 continue;
@@ -42,8 +43,7 @@ impl VbcCodegen {
                 }) {
                     continue;
                 }
-                let explicit_methods = declaration
-                    .items
+                let explicit_methods = selected_items
                     .iter()
                     .filter_map(|item| match &item.kind {
                         ImplItemKind::Function(function) => Some(function.name.name.to_string()),
@@ -60,5 +60,6 @@ impl VbcCodegen {
                 });
             }
         }
+        Ok(())
     }
 }

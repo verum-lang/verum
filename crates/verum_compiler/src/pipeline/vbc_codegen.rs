@@ -227,7 +227,8 @@ impl<'s> CompilationPipeline<'s> {
         };
 
         let mut codegen = VbcCodegen::with_config(config);
-        seed_stdlib_blanket_impls(&mut codegen);
+        seed_stdlib_blanket_impls(&mut codegen)
+            .map_err(|error| anyhow::anyhow!("invalid embedded blanket declaration: {error}"))?;
 
         // #122 — bridge stdlib-prep registry into the user-side codegen.
         //
@@ -1228,9 +1229,9 @@ pub(crate) fn trace_module_fingerprint(vbc_module: &VbcModule, site: &str) {
 /// stdlib source, through `collect_blanket_impls` — the one definition
 /// of what a blanket is, so the two sides cannot drift.
 ///
-/// Failure is silent by design: without the blankets a user compile
-/// behaves exactly as before, which is the safe direction.
-fn seed_stdlib_blanket_impls(codegen: &mut VbcCodegen) {
+/// Missing embedded inputs remain optional; invalid selected blanket
+/// declarations propagate to the ordinary compilation error boundary.
+fn seed_stdlib_blanket_impls(codegen: &mut VbcCodegen) -> verum_vbc::codegen::CodegenResult<()> {
     // UNCONDITIONAL entry line.  Instrument silence has at least five
     // causes — never called, wrong site of several, behind an early
     // exit, not rebuilt, or skipped by a cache — and only a line
@@ -1245,7 +1246,7 @@ fn seed_stdlib_blanket_impls(codegen: &mut VbcCodegen) {
         if trace {
             eprintln!("[blankets] seed: NO embedded metadata");
         }
-        return;
+        return Ok(());
     };
     if trace {
         eprintln!(
@@ -1257,7 +1258,7 @@ fn seed_stdlib_blanket_impls(codegen: &mut VbcCodegen) {
         if trace {
             eprintln!("[blankets] seed: NO embedded stdlib source");
         }
-        return;
+        return Ok(());
     };
 
     // One parse per DECLARING FILE, not per blanket: several live in one
@@ -1278,7 +1279,7 @@ fn seed_stdlib_blanket_impls(codegen: &mut VbcCodegen) {
             continue;
         };
         parsed += 1;
-        codegen.collect_blanket_impls(&module);
+        codegen.collect_blanket_impls(&module)?;
     }
 
     if trace {
@@ -1289,4 +1290,5 @@ fn seed_stdlib_blanket_impls(codegen: &mut VbcCodegen) {
             codegen.blanket_impls().len()
         );
     }
+    Ok(())
 }

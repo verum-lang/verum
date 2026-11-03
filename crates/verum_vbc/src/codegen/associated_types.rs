@@ -143,6 +143,7 @@ impl VbcCodegen {
     pub(super) fn record_concrete_impl_bindings(
         &mut self,
         implementation: &verum_ast::decl::ImplDecl,
+        selected_items: &[&verum_ast::decl::ImplItem],
     ) -> Option<ConcreteImplType> {
         use verum_ast::decl::{ImplItemKind, ImplKind};
         let ImplKind::Protocol {
@@ -160,8 +161,7 @@ impl VbcCodegen {
         let receiver = self.concrete_impl_type(for_type, 0)?;
         let protocol_name = protocol.to_string().replace("::", ".");
         let protocol = crate::types::ProtocolId(self.nominal_type_id(&protocol_name)?.0);
-        let facts: std::collections::HashMap<_, _> = implementation
-            .items
+        let facts: std::collections::HashMap<_, _> = selected_items
             .iter()
             .filter_map(|item| {
                 let ImplItemKind::Type { name, ty, .. } = &item.kind else {
