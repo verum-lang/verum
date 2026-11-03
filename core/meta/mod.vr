@@ -252,7 +252,7 @@ public module tactic;
 public mount .contexts.ParseResult;
 
 /// Parse error information
-public mount .contexts.ParseError;
+public mount .contexts.{MetaParseError as ParseError};
 
 /// Formatting options for pretty printing
 public mount .contexts.FormatOptions;
