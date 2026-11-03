@@ -55,7 +55,8 @@
 module core.security.x509.spki;
 
 mount core.collections.list.{List};
-mount core.encoding.der.{DerReader, DerError, DerErrorKind};
+mount core.encoding.der.{DerReader, DerError, DerErrorKind, encode_oid, encode_sequence, encode_bit_octets};
+mount core.security.x509.oid.Oid;
 mount core.security.x509.algorithm.{
     PublicKeyAlg, EcNamedCurve, parse_public_key_alg,
 };
@@ -276,4 +277,18 @@ fn copy_fixed_57(bytes: &List<Byte>) -> Result<[Byte; 57], DerError> {
     let mut i: Int = 0;
     while i < 57 { out[i] = bytes[i]; i = i + 1; }
     Result.Ok(out)
+}
+
+/// Encode SubjectPublicKeyInfo for algorithms with absent or named-curve
+/// parameters. The bit string holds the algorithm's external key encoding.
+public fn encode_spki_key(algorithm: &Oid, curve: Maybe<&Oid>, key: &[Byte]) -> Result<List<Byte>, DerError> {
+    let mut id = encode_oid(algorithm.arcs.as_slice())?;
+    if let Maybe.Some(named) = curve {
+        let parameter = encode_oid(named.arcs.as_slice())?;
+        id.extend_from_slice(parameter.as_slice());
+    }
+    let mut sequence = encode_sequence(id.as_slice());
+    let bits = encode_bit_octets(key);
+    sequence.extend_from_slice(bits.as_slice());
+    Result.Ok(encode_sequence(sequence.as_slice()))
 }
