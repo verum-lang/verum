@@ -82,6 +82,36 @@ fn cyclic_mounts_bind_the_exact_declared_sum_constructor_before_its_body() {
 }
 
 #[test]
+fn a_protocol_default_resolves_bare_constructors_in_its_declaration() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        ("mod.vr", "module core; public module api; public module consumer; public module decoy;"),
+        ("api/mod.vr", "module core.api;
+             public type Position is End | Start(Int);
+             public type Seek is protocol {
+                 fn seek(&mut self, p: Position) -> Int;
+                 fn rewind(&mut self) -> Int { self.seek(Start(41)) }
+             }"),
+        ("decoy/mod.vr", "module core.decoy; public type Noise is Start(Int) | End;"),
+        ("consumer/mod.vr", "module core.consumer; mount core.api.{Seek, Position};
+             public type Cursor is { value: Int };
+             implement Seek for Cursor {
+                 fn seek(&mut self, p: Position) -> Int {
+                     match p { Position.End => 99, Position.Start(n) => n }
+                 }
+             }
+             public fn run_cursor() -> Int { let mut c = Cursor { value: 0 }; c.rewind() }"),
+    ] {
+        let path = core.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    assert_eq!(execute(&bootstrap(&core),
+        "module app; mount core.consumer.run_cursor; fn main() -> Int { run_cursor() }"), 41);
+}
+
+#[test]
 fn transitive_callable_facades_cross_units_without_losing_the_declaring_body() {
     for (public_mount, public_function) in [(true, true), (false, true), (true, false)] {
         let root = tempfile::tempdir().unwrap();

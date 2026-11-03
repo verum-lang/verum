@@ -11827,8 +11827,7 @@ impl VbcCodegen {
         };
         if let Some(owner) = expected.map(Self::strip_generic_args) {
             if !owner.contains('.') {
-                if let Some(module) = self.ctx.current_source_module.as_deref()
-                    && let Some(info) = candidate(&format!("{module}.{owner}"))
+                if let Some(info) = candidate(&format!("{}.{owner}", self.lexical_type_scope()))
                 {
                     return Ok(Some(info));
                 }
@@ -11858,7 +11857,7 @@ impl VbcCodegen {
                 continue;
             }
             if let Some((module, _)) = owner.rsplit_once('.')
-                && self.ctx.current_source_module.as_deref() == Some(module)
+                && self.lexical_type_scope() == module
             {
                 local.push(info);
             }
