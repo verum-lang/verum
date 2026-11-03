@@ -435,6 +435,7 @@ public mount .constants.{
 public mount .ieee754.{
 
     FpCategory,
+    trunc,
     is_nan,
     is_infinite,
     is_finite,
@@ -476,7 +477,6 @@ public mount .elementary.{
     ceil,
     round,
     rint,
-    trunc,
     fract,
     // Min/Max/Clamp/Sign
     min,

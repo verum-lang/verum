@@ -46,13 +46,14 @@ public mount .engine.{
     HooksEngine, new_engine,
 };
 
+public mount .op.{UpdateOp, UoInsert, UoUpdate, UoDelete};
+
 public mount .dispatcher.{
     ExtendedHooksEngine, ConnectionHooks,
     new_extended_engine, new_connection_hooks,
     CommitDecision, CdAllow, CdAbort,
     AuthDecision, AdAllow, AdDeny, AdIgnore,
     ProgressDecision, PdContinue, PdInterrupt,
-    UpdateOp, UoInsert, UoUpdate, UoDelete,
     UpdateHookCtx, PreUpdateHookCtx, AuthorizerCtx, TraceHookCtx,
     TraceEventKind, TeStmtPrepared, TeStmtRow, TeStmtClose, TeProfile,
     fire_commit_hook, fire_rollback_hook,
