@@ -137,7 +137,7 @@ public mount .select.join;
 public mount .select.join3;
 public mount .select.join4;
 public mount .select.join_all;
-public mount .select.timeout;
+public mount .select.timeout as select_timeout;
 // `select` and `timer` each declare a `TimeoutError`, and this module used
 // to re-export BOTH under that one name — line 181 carries timer's.  Two
 // different nominal types on one name in a module's public surface means a
@@ -295,7 +295,7 @@ public module prelude {
     public mount super.select_either;
     public mount super.join;
     public mount super.join_all;
-    public mount super.timeout;
+    public mount super.select_timeout;
     public mount super.yield_now;
 
     // Streams

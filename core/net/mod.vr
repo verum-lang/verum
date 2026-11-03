@@ -168,7 +168,7 @@ public mount .tls.TlsConfig;
 public mount .tls.TlsStream;
 public mount .tls.TlsConnector;
 public mount .tls.TlsAcceptor;
-public mount .tls.TlsError;
+public mount .tls.LegacyTlsError as TlsError;
 
 // From dns
 public mount .dns.lookup_host;
