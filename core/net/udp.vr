@@ -209,6 +209,7 @@ mount sys.windows.winsock2.{
 mount sys.common.{FileDesc};
 
 // Import I/O engine for async operations
+mount core.async.{Future, Poll, Context};
 mount sys.io_engine.{IOEngine, IOInterest};
 mount core.io.{IoError, IoErrorKind};
 mount core.io.protocols.{io_error_kind_from_os_code};
