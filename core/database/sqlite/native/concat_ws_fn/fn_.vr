@@ -48,29 +48,21 @@ public fn result_text(r: &ConcatWsResult) -> Text {
 
 // Compute concat_ws(sep, args...).
 public fn evaluate(sep: &Operand, args: &List<Operand>) -> ConcatWsResult {
-    match sep {
-        OpNull => return RNull,
-        OpText(_) => {},
-    }
-    let s = match sep {
-        OpText(t) => t.clone(),
-        OpNull    => "".clone(),     // unreachable due to early-return above
+    let separator = match sep {
+        OpNull => { return RNull; }
+        OpText(text) => text,
     };
-    let n = args.len() as Int;
     let mut out = Text.new();
-    let mut i = 0;
     let mut wrote = false;
-    while i < n {
-        let arg = args.get(i);
-        match &arg {
+    for arg in args.iter() {
+        match arg {
             OpNull => {},
-            OpText(t) => {
-                if wrote { out = out.append(s.clone()); }
-                out = out.append(t.clone());
+            OpText(text) => {
+                if wrote { out.push_str(separator); }
+                out.push_str(text);
                 wrote = true;
-            },
+            }
         }
-        i = i + 1;
     }
     RText(out)
 }
@@ -97,12 +89,9 @@ public fn arity_name(a: &ArityClass) -> Text {
 }
 
 public fn count_non_null(args: &List<Operand>) -> Int {
-    let mut i = 0;
-    let mut c = 0;
-    let n = args.len() as Int;
-    while i < n {
-        if !is_null(&args.get(i)) { c = c + 1; }
-        i = i + 1;
+    let mut count = 0;
+    for arg in args.iter() {
+        if !is_null(arg) { count = count + 1; }
     }
-    c
+    count
 }
