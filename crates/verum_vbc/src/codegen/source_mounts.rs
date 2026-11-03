@@ -76,11 +76,11 @@ struct ExportCandidates {
 }
 
 impl SourceExports {
-    fn merge_module(&mut self, owner: String, exports: ModuleExports) {
     pub fn mark_ambiguous_variant(&mut self, name: &str) {
         self.ambiguous_variants.insert(name.to_owned());
     }
 
+    fn merge_module(&mut self, owner: String, exports: ModuleExports) {
         use std::collections::hash_map::Entry;
         let scope = match self.modules.entry(owner) {
             Entry::Vacant(entry) => { entry.insert(exports); return; }
@@ -117,8 +117,6 @@ impl VbcCodegen {
         }
     }
 
-    /// Resolve external facades through their original source declarations.
-    pub fn set_source_exports(&mut self, index: std::sync::Arc<SourceExports>) {
     /// Constructors are inline values. Their source-owned names, tags and
     /// payloads are transferable even when the defining unit has no bodies yet.
     pub fn declared_variant_constructors(&self) -> std::collections::BTreeMap<&str, &FunctionInfo> {
@@ -131,6 +129,8 @@ impl VbcCodegen {
             .collect()
     }
 
+    /// Resolve external facades through their original source declarations.
+    pub fn set_source_exports(&mut self, index: std::sync::Arc<SourceExports>) {
         self.dependency_source_exports = Some(index);
     }
 
