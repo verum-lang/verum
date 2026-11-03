@@ -29530,6 +29530,13 @@ impl VbcCodegen {
                 expr: scrutinee,
                 arms,
             } => {
+                // After lowering, each returning arm has already contributed
+                // its declaration while its pattern bindings were in scope.
+                if let Some(Some(ty)) = self.ctx.declared_result_types.get(&expr.span)
+                    && let Some(name) = self.declaration_type_name(ty, 0)
+                {
+                    return Some(name);
+                }
                 // NEVER-ABSORB-1: `!`-typed arms (panic / unreachable /
                 // return-diverging bodies) never produce the match's VALUE —
                 // the never type is absorbing in the arm-type join.  Pre-fix,

@@ -295,3 +295,30 @@ fn probe() -> Int {
         1
     );
 }
+
+#[test]
+fn a_nested_match_binder_does_not_replace_another_arms_result_type() {
+    assert_eq!(run(r#"
+public type Reply<T,E> is Present(T) | Failed(E);
+public type Statement is First(Int) | Second(Int);
+public type Prepared is Ready(Int);
+fn parse_value() -> Reply<Statement, Int> { Reply.Present(Second(11)) }
+fn prepare() -> Reply<Prepared, Int> { Reply.Present(Ready(41)) }
+fn probe() -> Int {
+    let stmt_ast = match parse_value() {
+        Reply.Present(s) => s,
+        Reply.Failed(e) => {
+            let prepared = match prepare() {
+                Reply.Present(s) => s,
+                Reply.Failed(err) => { return err; }
+            };
+            return e;
+        }
+    };
+    match stmt_ast {
+        First(v) => v,
+        Second(v) => v,
+    }
+}
+"#), 11);
+}
