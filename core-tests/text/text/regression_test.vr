@@ -955,3 +955,21 @@ fn regression_z_utf16_round_trip() {
 fn main() {
     // Tests run via @test annotations
 }
+
+@test
+fn slice_accepts_the_terminal_utf8_boundary() {
+    for text in ["", "ascii", "ω"] {
+        assert_eq(text.slice(text.len(), text.len()), "");
+        assert_eq(text.slice(0, text.len()), text);
+    }
+}
+
+@test
+fn split_once_preserves_empty_suffixes() {
+    let (before, after) = "key=".split_once(&"=").unwrap();
+    assert_eq(before, "key");
+    assert_eq(after, "");
+    let (before, after) = "ω/".rsplit_once(&"/").unwrap();
+    assert_eq(before, "ω");
+    assert_eq(after, "");
+}

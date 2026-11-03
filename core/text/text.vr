@@ -794,7 +794,7 @@ implement Text {
 
         // Validate UTF-8 boundaries
         assert(
-            start == 0 || is_utf8_char_boundary(bytes[start]),
+            start == 0 || start == len || is_utf8_char_boundary(bytes[start]),
             "slice start not on UTF-8 boundary"
         );
         assert(
