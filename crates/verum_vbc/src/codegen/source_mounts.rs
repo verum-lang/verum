@@ -203,6 +203,65 @@ impl VbcCodegen {
             .insert(name.to_owned());
     }
 
+    /// An implementation may precede its protocol body in bootstrap. Reserve
+    /// the declared import target so its vtable row survives descriptor import.
+    pub(super) fn implementation_protocol_id(
+        &mut self,
+        path: &verum_ast::Path,
+        leaf: &str,
+    ) -> super::CodegenResult<crate::types::TypeId> {
+        use crate::types::{StringId, TypeDescriptor, TypeKind};
+        let scope = self.lexical_type_scope();
+        let written = self.declared_dyn_path(path);
+        let key = Self::resolve_module_path_head_in_scope(&mount_path_parts(&written), scope)
+            .map(|parts| parts.join("."))
+            .unwrap_or(written);
+        let selected = if key == leaf
+            && let Some(glob) = self.source_glob_type_id(leaf, scope)
+        {
+            Some(glob.ok_or_else(|| {
+                super::CodegenError::with_span(
+                    super::CodegenErrorKind::TypeInference(format!(
+                        "no unique visible protocol for `{leaf}`"
+                    )),
+                    path.span,
+                )
+            })?)
+        } else {
+            self.source_export_type_id(&key, scope)
+                .or_else(|| self.type_name_to_id.get(&key).copied())
+        };
+        if let Some(id) = selected {
+            if self
+                .type_by_id(id)
+                .is_some_and(|decl| decl.kind != TypeKind::Protocol)
+            {
+                return Err(super::CodegenError::with_span(
+                    super::CodegenErrorKind::TypeInference(format!(
+                        "implementation target `{key}` is not a protocol"
+                    )),
+                    path.span,
+                ));
+            }
+            return Ok(id);
+        }
+        let (module, name) = key
+            .rsplit_once('.')
+            .map_or((None, key.as_str()), |(m, n)| (Some(m), n));
+        let id = self.alloc_user_type_id();
+        let name = StringId(self.ctx.intern_string_raw(name));
+        let origin_module = module.map(|name| StringId(self.ctx.intern_string_raw(name)));
+        self.push_type_descriptor(TypeDescriptor {
+            id,
+            name,
+            kind: TypeKind::Protocol,
+            origin_module,
+            ..Default::default()
+        });
+        self.type_name_to_id.insert(key, id);
+        Ok(id)
+    }
+
     pub(super) fn source_callable_mount(
         &self,
         written: &str,

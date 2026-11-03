@@ -10346,39 +10346,8 @@ impl VbcCodegen {
                         // Look up protocol's TypeDescriptor to get canonical method order,
                         // then map each method to the concrete Type.method FunctionId.
                         //
-                        // **Foreign-protocol auto-stub**: when the protocol is
-                        // imported from a different module (e.g. `mount
-                        // core.base.coercion.{ArrayCoercible}` in
-                        // `core/collections/list.vr` declaring
-                        // `implement<T> ArrayCoercible for List<T> {}`), the
-                        // protocol type itself is not in this module's
-                        // `type_name_to_id` table — pre-fix the entire impl
-                        // record was silently dropped from
-                        // `TypeDescriptor.protocols`, breaking the
-                        // archive-side `metadata.implementations` table that
-                        // drives user-side `register_coercion_markers_from_metadata`
-                        // (and `register_stdlib_impls_for_target` more
-                        // generally).  Synthesise a placeholder protocol-
-                        // type stub in the local table so the impl record
-                        // survives and archive_metadata can resolve the
-                        // protocol name via `type_id_to_name`.  The stub
-                        // carries the protocol's name only; method bodies
-                        // live with the impl's concrete-type registration.
-                        if !self.type_name_to_id.contains_key(&pn) {
-                            let proto_id = self.alloc_user_type_id();
-                            let name_sid = StringId(self.ctx.intern_string_raw(&pn));
-                            self.push_type_descriptor(crate::types::TypeDescriptor {
-                                id: proto_id,
-                                name: name_sid,
-                                kind: crate::types::TypeKind::Protocol,
-                                ..Default::default()
-                            });
-                            if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
-                                eprintln!("[typebind] site=proto_impl name={} id={}", pn, proto_id.0);
-                            }
-                            self.type_name_to_id.insert(pn.clone(), proto_id);
-                        }
-                        if let Some(&proto_type_id) = self.type_name_to_id.get(&pn) {
+                        {
+                            let proto_type_id = self.implementation_protocol_id(protocol, &pn)?;
                             // Get protocol method names in vtable order (from protocol's variants)
                             let method_names: Vec<String> = self.type_by_id(proto_type_id)
                                 .map(|td| {

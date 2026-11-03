@@ -816,3 +816,43 @@ fn module_qualified_patterns_use_the_scrutinees_declaring_sum() {
     let err = compile("wire.columns.Textual", "wire.another.Marked").unwrap_err().to_string();
     assert!(err.contains("no declared tag") && err.contains("Marked"), "{err}");
 }
+
+#[test]
+fn protocol_marker_implementations_keep_the_foreign_protocol_owner_before_completion() {
+    let marker = "public type Marker is protocol {};";
+    let provider = producer("sample.contract", &format!("module sample.contract; {marker}"));
+    let foreign = producer("sample.foreign", &format!("module sample.foreign; {marker}"));
+    let ast = source("module sample.store;
+        mount sample.contract.Marker as Persist;
+        implement Persist for Int {}
+        implement sample.foreign.Marker for Float {}");
+    let mut forward = VbcCodegen::with_config(CodegenConfig::new("sample.store"));
+    let first = forward.collect_declaration_interface(&[&ast]).unwrap();
+    let mut complete = VbcCodegen::with_config(CodegenConfig::new("sample.store"));
+    complete.import_bootstrap_nominal_dependencies(&[&ast], &[&foreign, &first, &provider]).unwrap();
+    let second = complete.collect_declaration_interface(&[&ast]).unwrap();
+    for interface in [&first, &second] {
+        let bytes = verum_vbc::serialize::serialize_module(interface).unwrap();
+        let exported = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        for (scalar, owner) in [(TypeId::INT, "sample.contract"), (TypeId::FLOAT, "sample.foreign")] {
+            let implementation = exported.get_type(scalar).unwrap();
+            assert_eq!(implementation.protocols.len(), 1, "unexpected rows for {scalar:?}");
+            let marker = exported.get_type(TypeId(implementation.protocols[0].protocol.0)).unwrap();
+            assert_eq!(exported.get_string(marker.name).unwrap().rsplit('.').next(), Some("Marker"));
+            assert_eq!(marker.origin_module.and_then(|n| exported.get_string(n)), Some(owner));
+        }
+    }
+}
+
+#[test]
+fn a_mounted_record_cannot_supply_a_protocol_implementation_row() {
+    let provider = producer("source.schema", "
+        module source.schema; public type Marker is { marker: Int };
+    ");
+    let ast = source("module user.service; mount source.schema.Marker as Persist;
+        implement Persist for Int {}");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("user.service"));
+    codegen.import_bootstrap_nominal_dependencies(&[&ast], &[&provider]).unwrap();
+    let error = codegen.collect_declaration_interface(&[&ast]).unwrap_err();
+    assert!(error.to_string().contains("source.schema.Marker` is not a protocol"), "{error}");
+}
