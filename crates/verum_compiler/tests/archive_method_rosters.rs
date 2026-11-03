@@ -93,3 +93,25 @@ fn same_spelled_types_keep_independent_method_rosters() {
         );
     }
 }
+
+#[test]
+fn repeated_implementation_carriers_preserve_distinct_protocol_arguments_in_order() {
+    let carrier = VbcCodegen::with_config(CodegenConfig::new("core.a"))
+        .compile_module(&Parser::new(
+            "module core.a; public type Mark<T> is protocol {}; implement Mark<Int> for Text {}",
+        ).parse_module().unwrap()).unwrap();
+    let mut imported = carrier.clone();
+    let other_arg = imported.intern_string("Bool");
+    let text_type = imported.types.iter_mut().find(|ty| !ty.protocols.is_empty()).unwrap();
+    let mut sibling = text_type.protocols[0].clone();
+    sibling.protocol_args_text = vec![other_arg];
+    text_type.protocols.push(sibling);
+    let mut archive = ArchiveBuilder::stdlib();
+    archive.add_module("core.a", &carrier, &[]).unwrap();
+    archive.add_module("core.b", &imported, &[]).unwrap();
+    let metadata = archive_to_core_metadata(&archive.finish()).unwrap();
+    let args: Vec<_> = metadata.implementations.iter()
+        .filter(|row| row.protocol == "Mark" && row.target_type == "Text")
+        .map(|row| row.protocol_args[0].as_str()).collect();
+    assert_eq!(args, ["Int", "Bool"]);
+}

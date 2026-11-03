@@ -35,6 +35,7 @@
 //! typecheck phase archive-driven by construction — no surgery
 //! in `verum_types` required, just precompile-side data plumbing.
 
+use indexmap::IndexSet;
 use std::collections::HashMap;
 
 use verum_common::{List, Maybe, OrderedMap, Text};
@@ -155,6 +156,9 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
     // See `resolve_opaque_type_ids_in_alias_targets` for what it fixes.
     let mut archive_type_names: HashMap<u32, Option<String>> = HashMap::new();
     let mut declarations = std::collections::BTreeMap::new();
+    // Bootstrap carriers replay complete implementations across archive modules.
+    // Preserve the first occurrence of each exact descriptor, including its bounds.
+    let mut implementations = IndexSet::new();
     // A repeated owner is a replay only if its complete semantic declaration
     // agrees. Check before descriptor selection can enrich or replace its ABI.
     let mut semantic_declarations = std::collections::BTreeMap::new();
@@ -261,8 +265,9 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
                 archive_type_names.insert(t.id.0, Some(n.to_string()));
             }
         }
-        register_module_metadata(&module, &entry.name, &mut meta, &mut declarations);
+        register_module_metadata(&module, &entry.name, &mut meta, &mut declarations, &mut implementations);
     }
+    meta.implementations = implementations.into_iter().collect();
     reconcile_type_declarations(&mut meta, &declarations);
     resolve_opaque_type_ids_in_alias_targets(&mut meta, &archive_type_names);
     attach_declared_methods(&mut meta);
@@ -506,6 +511,7 @@ fn register_module_metadata(
     module_name: &str,
     meta: &mut CoreMetadata,
     declarations: &mut std::collections::BTreeMap<Text, TypeDescriptor>,
+    implementations: &mut IndexSet<ImplementationDescriptor>,
 ) {
     let type_id_to_name: HashMap<u32, String> = module
         .types
@@ -1189,7 +1195,7 @@ fn register_module_metadata(
             meta.type_declaration_order.push(type_name);
         }
 
-        collect_type_impls(ty, module, &mut meta.implementations, &type_id_to_name);
+        collect_type_impls(ty, module, implementations, &type_id_to_name);
     }
 
     // Pass 2: functions.
@@ -1820,7 +1826,7 @@ fn convert_generic_params(
 fn collect_type_impls(
     ty: &verum_vbc::types::TypeDescriptor,
     module: &VbcModule,
-    impls: &mut List<ImplementationDescriptor>,
+    impls: &mut IndexSet<ImplementationDescriptor>,
     type_id_to_name: &HashMap<u32, String>,
 ) {
     let target_name = match module.strings.get(ty.name) {
@@ -1933,7 +1939,7 @@ fn collect_type_impls(
                 .filter_map(|sid| module.strings.get(*sid).map(Text::from))
                 .collect(),
         };
-        impls.push(descriptor);
+        impls.insert(descriptor);
     }
 }
 
