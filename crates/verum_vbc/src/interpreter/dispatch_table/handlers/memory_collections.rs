@@ -1623,79 +1623,7 @@ pub(in super::super) fn handle_set_index(
     // Check for Map first (index may not be an integer)
     if header.type_id == TypeId::MAP {
         let key = state.get_reg(idx);
-        // Reuse map set logic inline
-        state.heap.revoke_projections(ptr as usize);
-        let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        let mut count = unsafe { (*header_ptr).as_i64() } as usize;
-        let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-        let mut entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-
-        // Check load factor and grow if needed (> 70% full)
-        if count * 10 >= capacity * 7 {
-            let new_capacity = capacity * 2;
-            let new_entries = state.heap.alloc_hash_buckets(new_capacity)?;
-            state.record_allocation();
-            let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-            let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            for i in 0..(new_capacity * 2) {
-                unsafe {
-                    *new_data.add(i) = Value::unit();
-                }
-            }
-            let old_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-            for i in 0..capacity {
-                let old_key = unsafe { *old_data.add(i * 2) };
-                if !old_key.is_unit() {
-                    let old_val = unsafe { *old_data.add(i * 2 + 1) };
-                    let hash = value_hash(old_key, state);
-                    let mut idx = hash % new_capacity;
-                    loop {
-                        let slot_key = unsafe { *new_data.add(idx * 2) };
-                        if slot_key.is_unit() {
-                            unsafe {
-                                *new_data.add(idx * 2) = old_key;
-                                *new_data.add(idx * 2 + 1) = old_val;
-                            }
-                            break;
-                        }
-                        idx = (idx + 1) % new_capacity;
-                    }
-                }
-            }
-            capacity = new_capacity;
-            entries_ptr = new_entries_ptr;
-            unsafe {
-                *header_ptr.add(1) = Value::from_i64(new_capacity as i64);
-                *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
-            }
-        }
-
-        let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        let hash = value_hash(key, state);
-        let mut map_idx = hash % capacity;
-        loop {
-            let entry_key = unsafe { *entries_data.add(map_idx * 2) };
-            if entry_key.is_unit() {
-                // Empty slot — insert
-                unsafe {
-                    *entries_data.add(map_idx * 2) = key;
-                    *entries_data.add(map_idx * 2 + 1) = value;
-                }
-                count += 1;
-                unsafe {
-                    *header_ptr = Value::from_i64(count as i64);
-                }
-                break;
-            }
-            if value_eq(entry_key, key, state) {
-                // Update existing
-                unsafe {
-                    *entries_data.add(map_idx * 2 + 1) = value;
-                }
-                break;
-            }
-            map_idx = (map_idx + 1) % capacity;
-        }
+        super::flat_map::insert(state, arr_val, key, value, true)?;
     } else {
         // Non-map: index must be an integer
         let index = state.get_reg(idx).as_i64();
@@ -2718,100 +2646,11 @@ pub(in super::super) fn handle_map_set(
     let key_reg = read_reg(state)?;
     let val_reg = read_reg(state)?;
 
-    let map_ptr = state.get_reg(map_reg).as_ptr::<u8>();
-    if map_ptr.is_null() {
-        return Err(InterpreterError::NullPointer);
-    }
-
-    state.heap.revoke_projections(map_ptr as usize);
+    let map = state.get_reg(map_reg);
     let key = state.get_reg(key_reg);
-    let val = state.get_reg(val_reg);
-
-    // Read map header
-    let header_ptr = unsafe { map_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    let mut count = unsafe { (*header_ptr).as_i64() } as usize;
-    let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-    let mut entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-
-    // Check load factor and grow if needed (> 70% full)
-    if count * 10 >= capacity * 7 {
-        let new_capacity = capacity * 2;
-        let new_entries = state.heap.alloc_hash_buckets(new_capacity)?;
-        state.record_allocation();
-        let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-
-        // Initialize new entries with unit
-        let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        for i in 0..(new_capacity * 2) {
-            unsafe {
-                *new_data.add(i) = Value::unit();
-            }
-        }
-
-        // Rehash existing entries
-        let old_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        for i in 0..capacity {
-            let old_key = unsafe { *old_data.add(i * 2) };
-            if !old_key.is_unit() {
-                let old_val = unsafe { *old_data.add(i * 2 + 1) };
-                let hash = value_hash(old_key, state);
-                let mut idx = hash % new_capacity;
-                loop {
-                    let slot_key = unsafe { *new_data.add(idx * 2) };
-                    if slot_key.is_unit() {
-                        unsafe {
-                            *new_data.add(idx * 2) = old_key;
-                            *new_data.add(idx * 2 + 1) = old_val;
-                        }
-                        break;
-                    }
-                    idx = (idx + 1) % new_capacity;
-                }
-            }
-        }
-
-        // Update header
-        capacity = new_capacity;
-        entries_ptr = new_entries_ptr;
-        unsafe {
-            *header_ptr.add(1) = Value::from_i64(new_capacity as i64);
-            *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
-        }
-    }
-
-    // Insert or update
-    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-
-    let hash = value_hash(key, state);
-    let mut idx = hash % capacity;
-
-    loop {
-        let entry_key = unsafe { *entries_data.add(idx * 2) };
-
-        if entry_key.is_unit() {
-            // Empty slot - insert new entry
-            unsafe {
-                *entries_data.add(idx * 2) = key;
-                *entries_data.add(idx * 2 + 1) = val;
-            }
-            count += 1;
-            unsafe {
-                *header_ptr = Value::from_i64(count as i64);
-            }
-            return Ok(DispatchResult::Continue);
-        }
-
-        if value_eq(entry_key, key, state) {
-            // Update existing entry
-            unsafe {
-                *entries_data.add(idx * 2 + 1) = val;
-            }
-            return Ok(DispatchResult::Continue);
-        }
-
-        // Linear probe
-        idx = (idx + 1) % capacity;
-    }
+    let value = state.get_reg(val_reg);
+    super::flat_map::insert(state, map, key, value, true)?;
+    Ok(DispatchResult::Continue)
 }
 
 /// MapContains (0x6E) - Check if key exists in map.

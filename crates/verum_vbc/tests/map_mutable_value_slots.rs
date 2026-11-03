@@ -24,11 +24,49 @@ const PRODUCTION_PRIMITIVES: &str = include_str!("../../../core/base/primitives.
 const CALLER: &str = r#"
 module mutable_map_values;
 mount core.collections.map.Map;
+mount core.mem.allocator.AllocError;
 
 type Cell is { padding: Int, value: Int };
 type Options is { version: Int, features: Maybe<Cell>, optional: Maybe<Bool> };
 type Dependency is Requirement(Int) | Detailed(Options);
 type Holder is { padding: Int, values: Map<Text, Int>, key: Text };
+
+fn read_number(values: &Map<Int, Int>, key: Int) -> Int {
+    match values.get(key) { Maybe.Some(n) => n, Maybe.None => panic("key missing") }
+}
+
+fn fallible_insert_contract() -> Int {
+    let mut values: Map<Int,Int> = { 11: 17 };
+    let old = match values.try_insert(11, 25) { Result.Ok(Maybe.Some(n)) => n, _ => 0 };
+    let fresh = match values.try_insert(12, 44) { Result.Ok(Maybe.None) => 1, _ => 0 };
+    assert_eq(read_number(&values, 11), 25);
+    old * 1000 + fresh * 100 + read_number(&values, 12)
+}
+
+fn conditional_insert_contract() -> Int {
+    let mut values: Map<Int, Int> = { 1: 17, 17: 36 };
+    let rejected = match values.insert_if_absent(1, 25) { Result.Err(n) => n, _ => 0 };
+    // All three keys start in the same bucket of the literal's table.
+    match values.insert_if_absent(33, 44) {
+        Result.Ok(slot) => { *slot = 51; },
+        Result.Err(_) => panic("absent key rejected"),
+    }
+    assert_eq(read_number(&values, 17), 36);
+    rejected * 1000 + read_number(&values, 1) * 100 + read_number(&values, 33)
+}
+
+fn fallible_growth_preserves_entries() -> Int {
+    let mut values: Map<Int, Int> = { 3: 17 };
+    let old_capacity = values.capacity();
+    let requested = match values.try_reserve(100000000) {
+        Result.Err(AllocError.OutOfMemory { requested }) => requested,
+        _ => 0,
+    };
+    assert(requested >= 1600000000);
+    assert_eq(values.capacity(), old_capacity);
+    assert_eq(values.len(), 1);
+    read_number(&values, 3)
+}
 
 fn read_int(values: &Map<Text, Int>, key: Text) -> Int {
     match values.get(key) {
@@ -510,6 +548,18 @@ fn check(name: &str, expected: i64) {
 #[test]
 fn existing_owned_lookup_control() {
     check("read_control", 719);
+}
+#[test]
+fn fallible_insert_returns_the_replaced_value() {
+    check("fallible_insert_contract", 17144);
+}
+#[test]
+fn vacant_insert_borrows_its_own_collision_slot() {
+    check("conditional_insert_contract", 26751);
+}
+#[test]
+fn rejected_growth_returns_typed_allocation_failure_and_preserves_map() {
+    check("fallible_growth_preserves_entries", 17);
 }
 #[test]
 fn shared_entry_lookup_reads_both_stored_slots() {

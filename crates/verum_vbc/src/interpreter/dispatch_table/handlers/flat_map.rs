@@ -5,6 +5,7 @@ use super::super::super::{
     heap,
     state::InterpreterState,
 };
+use super::memory_collections::{value_eq, value_hash};
 use crate::{
     drop_plan::{self, DropPlan},
     types::{TypeId, TypeKind},
@@ -128,6 +129,47 @@ impl<'heap> FlatMap<'heap> {
         })
     }
 
+    fn insertion_growth(&self) -> Option<usize> {
+        if self.capacity == 0 {
+            Some(16)
+        } else if self.len >= self.capacity - self.capacity / 4 {
+            // The validated bucket byte extent fits the u32 ObjectHeader.
+            Some(self.capacity * 2)
+        } else {
+            None
+        }
+    }
+
+    fn probe(&self, key: Value, state: &InterpreterState) -> Option<(usize, bool)> {
+        if self.capacity == 0 {
+            return None;
+        }
+        let mut index = value_hash(key, state) % self.capacity;
+        for _ in 0..self.capacity {
+            // SAFETY: the checked backing contains two Values per bucket.
+            let stored = unsafe { *self.entries.add(index * 2) };
+            if stored.is_unit() {
+                return Some((index, false));
+            }
+            if value_eq(stored, key, state) {
+                return Some((index, true));
+            }
+            index = (index + 1) % self.capacity;
+        }
+        None
+    }
+
+    fn pair(&self, index: usize) -> [*mut Value; 2] {
+        debug_assert!(index < self.capacity);
+        // SAFETY: callers obtain the index from a bounded probe of this table.
+        unsafe { [self.entries.add(index * 2), self.entries.add(index * 2 + 1)] }
+    }
+
+    pub(super) fn lookup(&self, key: Value, state: &InterpreterState) -> Option<[*mut Value; 2]> {
+        self.probe(key, state)
+            .and_then(|(index, occupied)| occupied.then(|| self.pair(index)))
+    }
+
     /// The checked allocation contains exactly two Values per bucket. Consume
     /// this view before executing user code that can mutate or release storage.
     pub(super) fn occupied(&self) -> impl Iterator<Item = [Value; 2]> + '_ {
@@ -137,6 +179,127 @@ impl<'heap> FlatMap<'heap> {
             (!pair[0].is_unit()).then_some(pair)
         })
     }
+}
+
+/// Allocate and populate a replacement before publishing it. Failure leaves
+/// existing entry witnesses and the original table intact.
+pub(super) fn resize(
+    state: &mut InterpreterState,
+    receiver: Value,
+    capacity: usize,
+) -> InterpreterResult<()> {
+    let old = FlatMap::checked(state, receiver)?;
+    if capacity == 0 || capacity < old.len {
+        return Err(InterpreterError::InvalidOperand {
+            message: "Map resize would discard entries".into(),
+        });
+    }
+    let storage = state.heap.alloc_hash_buckets(capacity)?;
+    state.record_allocation();
+    let entries = storage.data_ptr().cast::<[Value; 2]>();
+    // SAFETY: alloc_hash_buckets allocated exactly capacity pairs.
+    let entries = unsafe { std::slice::from_raw_parts_mut(entries, capacity) };
+    entries.fill([Value::unit(); 2]);
+    let old = FlatMap::checked(state, receiver)?;
+    let populated = old.occupied().try_for_each(|pair| {
+        let start = value_hash(pair[0], state) % capacity;
+        let index = (start..capacity)
+            .chain(0..start)
+            .find(|index| entries[*index][0].is_unit())?;
+        entries[index] = pair;
+        Some(())
+    });
+    if populated.is_none() {
+        // SAFETY: storage is still private to this operation.
+        unsafe { state.heap.free(storage) };
+        return Err(InterpreterError::InvalidOperand {
+            message: "Map length disagrees with occupied buckets".into(),
+        });
+    }
+    let backing = old.backing;
+    let header = old.header;
+    state
+        .heap
+        .revoke_projections(receiver.as_ptr::<u8>() as usize);
+    // SAFETY: fields and backing belong to this live map; no user code runs
+    // between installing the new backing and freeing the superseded one.
+    unsafe {
+        *header.add(1) = Value::from_i64(capacity as i64);
+        *header.add(2) = Value::from_ptr(storage.as_ptr().cast::<u8>());
+        if let Some(backing) = backing {
+            state
+                .heap
+                .free(heap::Object::from_raw(backing.as_ptr()).expect("checked map backing"));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn ensure_capacity(
+    state: &mut InterpreterState,
+    receiver: Value,
+) -> InterpreterResult<()> {
+    if let Some(capacity) = FlatMap::checked(state, receiver)?.insertion_growth() {
+        resize(state, receiver, capacity)?;
+    }
+    Ok(())
+}
+
+pub(super) enum Insertion {
+    Inserted(*mut Value),
+    Replaced(Value),
+    Occupied,
+}
+
+/// Probe before growing: replacing an existing value and rejecting an occupied
+/// entry cannot consume capacity. The returned slot is the actual chosen bucket.
+pub(super) fn insert(
+    state: &mut InterpreterState,
+    receiver: Value,
+    key: Value,
+    value: Value,
+    replace: bool,
+) -> InterpreterResult<Insertion> {
+    let table = FlatMap::checked(state, receiver)?;
+    let probe = table.probe(key, state);
+    if let Some((index, true)) = probe {
+        if !replace {
+            return Ok(Insertion::Occupied);
+        }
+        let slot = table.pair(index)[1];
+        state
+            .heap
+            .revoke_projections(receiver.as_ptr::<u8>() as usize);
+        // SAFETY: no rehashing or user code between the probe and this store.
+        return Ok(Insertion::Replaced(unsafe {
+            std::ptr::replace(slot, value)
+        }));
+    }
+    let (table, vacant) = if let Some(capacity) = table.insertion_growth() {
+        resize(state, receiver, capacity)?;
+        let table = FlatMap::checked(state, receiver)?;
+        let vacant = table.probe(key, state);
+        (table, vacant)
+    } else {
+        (table, probe)
+    };
+    let Some((index, false)) = vacant else {
+        return Err(InterpreterError::InvalidOperand {
+            message: "Map has no vacant bucket after growth".into(),
+        });
+    };
+    let [key_slot, value_slot] = table.pair(index);
+    let (header, length) = (table.header, table.len);
+    state
+        .heap
+        .revoke_projections(receiver.as_ptr::<u8>() as usize);
+    // SAFETY: both slots came from the vacant probe of the current backing.
+    unsafe {
+        *key_slot = key;
+        *value_slot = value;
+        *header = Value::from_i64((length + 1) as i64);
+    }
+    Ok(Insertion::Inserted(value_slot))
 }
 
 /// Select the VM representation only when both the allocation and the exact

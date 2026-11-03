@@ -13,7 +13,7 @@ use super::cbgr_helpers::{
     strip_cbgr_ref_mutability, validate_cbgr_generation, validate_epoch_window,
 };
 use crate::instruction::{CbgrSubOpcode, Opcode, Reg};
-use super::ffi_extended::{ALLOC_ERR_INVALID_SIZE, ALLOC_ERR_OUT_OF_MEMORY, cbgr_header_generation_epoch, cbgr_legacy_alloc, cbgr_legacy_allocate, cbgr_user_allocate, cbgr_user_deallocate, cbgr_user_realloc, make_alloc_err, MAX_FFI_ALLOCATION_SIZE, value_as_addr};
+use super::ffi_extended::{AllocatingOperation, AllocationFailure, cbgr_header_generation_epoch, cbgr_legacy_alloc, cbgr_legacy_allocate, cbgr_user_allocate, cbgr_user_deallocate, cbgr_user_realloc, make_alloc_err, MAX_FFI_ALLOCATION_SIZE, value_as_addr};
 use crate::types::TypeId;
 use crate::value::{Capabilities, FatRef, Value};
 use verum_common::cbgr::caps;
@@ -3910,6 +3910,7 @@ fn cbgr_extended_body(
             // the `VERUM_CBGR_LEGACY_ALLOC` path, which reproduces the old
             // alloc/alloc_zeroed split exactly.)
             let zeroed = matches!(sub_op, Some(CbgrSubOpcode::AllocZeroed));
+            let operation = AllocatingOperation::Intrinsic(if zeroed { "cbgr_alloc_zeroed" } else { "cbgr_alloc" });
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
             let align_reg = read_reg(state)?;
@@ -3929,7 +3930,7 @@ fn cbgr_extended_body(
                 // A rejected size/align is `Err(AllocError.InvalidSize)`
                 // with the offending size as the payload field — a real
                 // error value whose `.message()` works.
-                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, raw_size)?;
+                let err_val = make_alloc_err(state, operation, AllocationFailure::InvalidSize, raw_size)?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
@@ -3953,8 +3954,8 @@ fn cbgr_extended_body(
                 // — a real two-level variant. The ledger row that said
                 // "payload stays nil because this handler does not
                 // consult the type tables" is discharged: the type index
-                // resolves `AllocError` in O(1).
-                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, raw_size)?;
+                // links the error to its declared variant and payload.
+                let err_val = make_alloc_err(state, operation, AllocationFailure::OutOfMemory, raw_size)?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
@@ -4087,7 +4088,10 @@ fn cbgr_extended_body(
             let raw_align = state.get_reg(align_reg).as_integer_compatible();
             const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
             if new_size <= 0 || new_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
-                let err_val = make_alloc_err(state, ALLOC_ERR_INVALID_SIZE, new_size)?;
+                let err_val = make_alloc_err(
+                    state, AllocatingOperation::Intrinsic("cbgr_realloc"),
+                    AllocationFailure::InvalidSize, new_size,
+                )?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
@@ -4106,7 +4110,10 @@ fn cbgr_extended_body(
                 // The .vr contract is Result<(ptr, gen, epoch), AllocError> —
                 // a bare nil desynced the caller's match (T0463), and an
                 // Err(nil) payload exploded on `e.message()` (T0846).
-                let err_val = make_alloc_err(state, ALLOC_ERR_OUT_OF_MEMORY, new_size)?;
+                let err_val = make_alloc_err(
+                    state, AllocatingOperation::Intrinsic("cbgr_realloc"),
+                    AllocationFailure::OutOfMemory, new_size,
+                )?;
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }

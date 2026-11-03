@@ -2175,6 +2175,113 @@ pub(in crate::interpreter::dispatch_table) fn value_as_addr(v: Value) -> usize {
 // Public CBGR bridge helpers (header-model allocation)
 // ==============================================================
 
+/// Failure cases of the allocator ABI implemented by the CBGR VM operations.
+pub(super) enum AllocationFailure {
+    InvalidSize,
+    OutOfMemory,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum AllocatingOperation<'a> {
+    Intrinsic(&'a str),
+    MapMethod(&'a str),
+}
+
+/// The selected operation's Result<_, E> declares the owner of its error
+/// payload. Read E's actual discriminant and field layout in the same module.
+pub(super) fn make_alloc_err(
+    state: &mut InterpreterState,
+    operation: AllocatingOperation<'_>,
+    error: AllocationFailure,
+    field_value: i64,
+) -> InterpreterResult<Value> {
+    use crate::types::{TypeKind, TypeRef, VariantKind};
+    use verum_common::well_known_types::WellKnownType;
+    let (variant, field) = match error {
+        AllocationFailure::InvalidSize => ("InvalidSize", "size"),
+        AllocationFailure::OutOfMemory => ("OutOfMemory", "requested"),
+    };
+    let module = &state.module;
+    let mut owners = module.functions.iter().filter_map(|function| {
+        match operation {
+            AllocatingOperation::Intrinsic(name) => {
+                if function.intrinsic_name.and_then(|id| module.get_string(id)) != Some(name) {
+                    return None;
+                }
+            }
+            AllocatingOperation::MapMethod(method) => {
+                if module.get_string(function.name)?.rsplit('.').next()? != method {
+                    return None;
+                }
+                let parent = module.get_type(function.parent_type?)?;
+                let owner = parent
+                    .origin_module
+                    .and_then(|id| module.get_string(id))
+                    .unwrap_or(&module.name);
+                if WellKnownType::from_declaration(module.get_string(parent.name)?, owner)
+                    != Some(WellKnownType::Map)
+                {
+                    return None;
+                }
+            }
+        }
+        let TypeRef::Instantiated {
+            base: TypeId::RESULT,
+            args,
+        } = &function.return_type
+        else {
+            return None;
+        };
+        let [_, TypeRef::Concrete(owner)] = args.as_slice() else {
+            return None;
+        };
+        Some(*owner)
+    });
+    let invalid = || InterpreterError::InvalidOperand {
+        message: format!(
+            "{operation:?} has no unique Result error declaring {variant} {{ {field}: Int }}"
+        ),
+    };
+    let owner = owners.next().ok_or_else(invalid)?;
+    if owners.any(|id| id != owner) {
+        return Err(invalid());
+    }
+    let declaration = module
+        .get_type(owner)
+        .filter(|ty| ty.kind == TypeKind::Sum)
+        .ok_or_else(invalid)?;
+    let case = declaration
+        .variants
+        .iter()
+        .find(|case| module.get_string(case.name) == Some(variant))
+        .ok_or_else(invalid)?;
+    let [payload] = case.fields.as_slice() else {
+        return Err(invalid());
+    };
+    if case.kind != VariantKind::Record
+        || module.get_string(payload.name) != Some(field)
+        || payload.type_ref != TypeRef::Concrete(TypeId::INT)
+    {
+        return Err(invalid());
+    }
+    let tag = case.tag;
+    let payload = super::method_dispatch::alloc_variant_with_payload(
+        state,
+        owner,
+        tag,
+        Value::from_i64(field_value),
+    )?;
+    super::method_dispatch::make_result_variant(
+        state,
+        verum_common::well_known_types::result_error_tag(),
+        payload,
+    )
+}
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/allocator_error_contract.rs"]
+mod allocator_error_contract;
+
 /// Allocate `size` bytes prefixed by a 32-byte AllocationHeader, honouring
 /// `align` (power-of-two, ≤ 4096) for the USER pointer.  Returns the user
 /// address or 0.  Mirrors the AOT `verum_cbgr_allocate` model; the header's
@@ -2183,44 +2290,6 @@ pub(in crate::interpreter::dispatch_table) fn value_as_addr(v: Value) -> usize {
 /// side tables (this is also what lets the interpreter FREE bridge memory
 /// instead of the leak-over-double-free policy the internal CbgrDealloc op
 /// is forced into).
-/// Build `Err(AllocError.<variant>{field})` the way user code expects it:
-/// a REAL two-level variant, not an `Err(nil)` whose payload explodes on
-/// `e.message()`. The AllocError payload is a 1-field record variant
-/// anchored to the RESOLVED `AllocError` type id, so method dispatch on
-/// the error value finds `AllocError.message` (T0846 layer 2 — the
-/// nil-payload row of the ledger).
-///
-/// Falls back to `Err(nil)` only when the `AllocError` type is not in
-/// the module's type index (a no-stdlib module compiled without the
-/// declaring type) — the OLD behaviour, now the exception with a stated
-/// reason instead of the rule.
-pub(super) fn make_alloc_err(
-    state: &mut InterpreterState,
-    variant_tag: u32,
-    field_value: i64,
-) -> InterpreterResult<Value> {
-    let payload = match super::heap_helpers::lookup_type_id_by_name(state, "AllocError") {
-        Some(type_id) => super::method_dispatch::alloc_variant_with_payload(
-            state,
-            type_id,
-            variant_tag,
-            Value::from_i64(field_value),
-        )?,
-        None => Value::nil(),
-    };
-    super::method_dispatch::make_result_variant(
-        state,
-        verum_common::well_known_types::result_error_tag(),
-        payload,
-    )
-}
-
-/// `AllocError` variant tags, by declaration order in
-/// `core/mem/allocator.vr` (`OutOfMemory | InvalidSize |
-/// InvalidAlignment | ...`).
-pub(super) const ALLOC_ERR_OUT_OF_MEMORY: u32 = 0;
-pub(super) const ALLOC_ERR_INVALID_SIZE: u32 = 1;
-
 pub(super) fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i64) -> i64 {
     use verum_common::layout as l;
     const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;

@@ -5496,6 +5496,31 @@ fn map_entries_data(header_ptr: *const Value, capacity: usize) -> *mut Value {
     std::ptr::null_mut()
 }
 
+/// Only failure to acquire the replacement backing is a recoverable Map
+/// allocation error. A malformed bytecode operand remains an interpreter error.
+fn fallible_map_result(
+    state: &mut InterpreterState,
+    method: &str,
+    result: InterpreterResult<Value>,
+) -> InterpreterResult<Value> {
+    match result {
+        Ok(value) => make_result_variant(
+            state,
+            verum_common::well_known_types::result_success_tag(),
+            value,
+        ),
+        Err(InterpreterError::OutOfMemory { requested, .. }) => {
+            super::ffi_extended::make_alloc_err(
+                state,
+                super::ffi_extended::AllocatingOperation::MapMethod(method),
+                super::ffi_extended::AllocationFailure::OutOfMemory,
+                requested as i64,
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Locate the stored key and value in the interpreter's flat Map carrier.
 ///
 /// This is the shared lookup authority for owned and borrowed access. The
@@ -5507,24 +5532,7 @@ fn map_entry_slots(
     receiver: Value,
     key: Value,
 ) -> InterpreterResult<verum_common::Maybe<[*mut Value; 2]>> {
-    let table = super::flat_map::FlatMap::checked(state, receiver)?;
-    let capacity = table.capacity;
-    if capacity == 0 { return Ok(None); }
-    let entries = table.entries;
-    let mut index = value_hash(key, state) % capacity;
-    for _ in 0..capacity {
-        // SAFETY: index is below capacity and the complete pair extent is owned.
-        let entry_key = unsafe { *entries.add(index * 2) };
-        if entry_key.is_unit() {
-            return Ok(None);
-        }
-        if value_eq(entry_key, key, state) {
-            // SAFETY: the value follows the checked key in the same pair.
-            return Ok(Some(unsafe { [entries.add(index * 2), entries.add(index * 2 + 1)] }));
-        }
-        index = (index + 1) % capacity;
-    }
-    Ok(None)
+    Ok(super::flat_map::FlatMap::checked(state, receiver)?.lookup(key, state))
 }
 
 #[cfg(test)]
@@ -7978,201 +7986,75 @@ pub(super) fn dispatch_primitive_method(
                     }
                     return Ok(Some(Value::from_bool(found)));
                 }
-                "resize" if is_map => {
-                    state.heap.revoke_projections(ptr as usize);
-                    // Map.resize(new_cap). The stdlib `resize` body installs a
-                    // RAW `alloc_zeroed` Slot buffer (no ObjectHeader), which is
-                    // incompatible with the layout every Map intercept
-                    // (new/insert/get/len) uses — a heap-object backing whose
-                    // (key, value) Value pairs follow OBJECT_HEADER_SIZE. So a
-                    // map resized through the stdlib body (e.g. via `Map.from`)
-                    // reads back empty. Intercept it to grow into the intercept
-                    // layout instead, rehashing the existing entries.
-                    let caller_base = state.reg_base();
-                    let new_cap_arg =
-                        state.registers.get(caller_base, Reg(args.start.0)).as_i64();
-                    let new_cap = (new_cap_arg.max(1) as usize).next_power_of_two();
-                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    let old_cap = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-
-                    let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
-                    state.record_allocation();
-                    let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                    let new_entries_data =
-                        unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    for i in 0..(new_cap * 2) {
-                        unsafe {
-                            *new_entries_data.add(i) = Value::unit();
-                        }
+                "resize" | "try_resize" if is_map => {
+                    let capacity = state
+                        .registers
+                        .get(state.reg_base(), Reg(args.start.0))
+                        .as_i64();
+                    let capacity = usize::try_from(capacity.max(1))
+                        .ok()
+                        .and_then(usize::checked_next_power_of_two)
+                        .ok_or_else(|| InterpreterError::InvalidOperand {
+                            message: "Map capacity exceeds address space".into(),
+                        })?;
+                    let result = super::flat_map::resize(state, *receiver, capacity);
+                    if method == "try_resize" {
+                        return Ok(Some(fallible_map_result(
+                            state,
+                            method,
+                            result.map(|_| Value::unit()),
+                        )?));
                     }
-
-                    // Rehash existing intercept-layout entries (skip empties).
-                    if old_cap > 0 {
-                        let old_entries_val = unsafe { *header_ptr.add(2) };
-                        if old_entries_val.is_ptr() && !old_entries_val.is_nil() {
-                            let old_entries_ptr = old_entries_val.as_ptr::<u8>();
-                            if !old_entries_ptr.is_null() {
-                                let old_entries_data = unsafe {
-                                    old_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                                };
-                                for i in 0..old_cap {
-                                    let old_key = unsafe { *old_entries_data.add(i * 2) };
-                                    if old_key.is_unit() {
-                                        continue;
-                                    }
-                                    let old_val =
-                                        unsafe { *old_entries_data.add(i * 2 + 1) };
-                                    let h = value_hash(old_key, state);
-                                    let mut ni = h % new_cap;
-                                    loop {
-                                        if unsafe {
-                                            (*new_entries_data.add(ni * 2)).is_unit()
-                                        } {
-                                            unsafe {
-                                                *new_entries_data.add(ni * 2) = old_key;
-                                                *new_entries_data.add(ni * 2 + 1) = old_val;
-                                            }
-                                            break;
-                                        }
-                                        ni = (ni + 1) % new_cap;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Install the new backing (count is unchanged — same entries).
-                    unsafe {
-                        *header_ptr.add(1) = Value::from_i64(new_cap as i64);
-                        *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
-                    }
+                    result?;
                     return Ok(Some(Value::unit()));
                 }
-                "insert" if is_map => {
-                    state.heap.revoke_projections(ptr as usize);
-                    // Map.insert(key, value) -> Maybe<V>
-                    // Returns Some(old_value) if key existed, None otherwise
-                    let caller_base = state.reg_base();
-                    let key = state.registers.get(caller_base, Reg(args.start.0));
-                    let value = state.registers.get(caller_base, Reg(args.start.0 + 1));
-                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    let mut count = unsafe { (*header_ptr).as_i64() } as usize;
-                    let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let mut entries_data: *mut Value;
-
-                    // Cap=0 guard: Map.new() that ran through the stdlib body
-                    // (rather than the static-constructor intercept) returns
-                    // `cap: 0` and a non-pointer `entries` slot. This MUST run
-                    // before reading the `entries` slot — reading slot 2 as a
-                    // pointer on a cap==0 fresh map aborts with "Expected
-                    // pointer". The resize path also multiplies cap by 2 (still
-                    // zero) and `hash % capacity` would divide by zero — so
-                    // bootstrap the backing array on first insert.
-                    if capacity == 0 {
-                        const BOOTSTRAP_CAP: usize = 16;
-                        let new_entries =
-                            state.heap.alloc_hash_buckets(BOOTSTRAP_CAP)?;
-                        state.record_allocation();
-                        let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data =
-                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                        for i in 0..(BOOTSTRAP_CAP * 2) {
-                            unsafe {
-                                *new_entries_data.add(i) = Value::unit();
+                "insert" | "try_insert" | "insert_if_absent" if is_map => {
+                    use super::flat_map::Insertion;
+                    let base = state.reg_base();
+                    let key = state.registers.get(base, Reg(args.start.0));
+                    let value = state.registers.get(base, Reg(args.start.0 + 1));
+                    let insertion =
+                        super::flat_map::insert(state, *receiver, key, value, method != "insert_if_absent");
+                    if method == "insert_if_absent" {
+                        let (tag, payload) = match insertion? {
+                            Insertion::Occupied => {
+                                (verum_common::well_known_types::result_error_tag(), value)
                             }
-                        }
-                        capacity = BOOTSTRAP_CAP;
-                        entries_data = new_entries_data;
-                        unsafe {
-                            *header_ptr.add(1) = Value::from_i64(BOOTSTRAP_CAP as i64);
-                            *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
-                        }
-                    } else {
-                        // Backing already allocated (static-constructor intercept
-                        // or a prior bootstrap): slot 2 is a real pointer.
-                        entries_data = map_entries_data(header_ptr, capacity);
+                            Insertion::Inserted(slot) => (
+                                verum_common::well_known_types::result_success_tag(),
+                                super::flat_map::borrow_slot(
+                                    state,
+                                    *receiver,
+                                    slot,
+                                    Capabilities(Capabilities::READ | Capabilities::WRITE),
+                                )?,
+                            ),
+                            Insertion::Replaced(_) => unreachable!("occupied entries are preserved"),
+                        };
+                        return Ok(Some(make_result_variant(state, tag, payload)?));
                     }
-
-                    // Resize if load factor >= 75%
-                    if count * 4 >= capacity * 3 {
-                        let new_cap = capacity * 2;
-                        let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
-                        state.record_allocation();
-                        let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data =
-                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                        // Initialize all slots to unit
-                        for i in 0..(new_cap * 2) {
-                            unsafe {
-                                *new_entries_data.add(i) = Value::unit();
-                            }
+                    let inserted = match insertion {
+                        Ok(inserted) => inserted,
+                        Err(error) if method == "try_insert" => {
+                            return fallible_map_result(state, method, Err(error)).map(Some);
                         }
-                        // Rehash existing entries
-                        for i in 0..capacity {
-                            let old_key = unsafe { *entries_data.add(i * 2) };
-                            if !old_key.is_unit() {
-                                let old_val = unsafe { *entries_data.add(i * 2 + 1) };
-                                let h = value_hash(old_key, state);
-                                let mut ni = h % new_cap;
-                                loop {
-                                    if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
-                                        unsafe {
-                                            *new_entries_data.add(ni * 2) = old_key;
-                                            *new_entries_data.add(ni * 2 + 1) = old_val;
-                                        }
-                                        break;
-                                    }
-                                    ni = (ni + 1) % new_cap;
-                                }
-                            }
-                        }
-                        capacity = new_cap;
-                        entries_data = new_entries_data;
-                        unsafe {
-                            *header_ptr.add(1) = Value::from_i64(new_cap as i64);
-                            *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
-                        }
-                    }
-
-                    let hash = value_hash(key, state);
-                    let mut idx = hash % capacity;
-                    let start = idx;
-                    let mut old_value: Option<Value> = None;
-                    loop {
-                        let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
-                            // Empty slot - insert new entry
-                            unsafe {
-                                *entries_data.add(idx * 2) = key;
-                                *entries_data.add(idx * 2 + 1) = value;
-                            }
-                            count += 1;
-                            unsafe {
-                                *header_ptr = Value::from_i64(count as i64);
-                            }
-                            break;
-                        }
-                        if value_eq(entry_key, key, state) {
-                            // Key exists - replace value
-                            old_value = Some(unsafe { *entries_data.add(idx * 2 + 1) });
-                            unsafe {
-                                *entries_data.add(idx * 2 + 1) = value;
-                            }
-                            break;
-                        }
-                        idx = (idx + 1) % capacity;
-                        if idx == start {
-                            // Should not happen if load factor is maintained
-                            break;
-                        }
-                    }
-                    // Return Maybe: None if no old value, Some(old_value) if key existed
-                    let result = match old_value {
-                        None => make_none_value(state)?,
-                        Some(v) => make_some_value(state, v)?,
+                        Err(error) => return Err(error),
                     };
-                    return Ok(Some(result));
+                    let previous = match inserted {
+                        Insertion::Inserted(_) => make_none_value(state),
+                        Insertion::Replaced(old) => make_some_value(state, old),
+                        Insertion::Occupied => unreachable!("occupied entries are replaced"),
+                    }?;
+                    if method == "try_insert" {
+                        return Ok(Some(make_result_variant(
+                            state,
+                            verum_common::well_known_types::result_success_tag(),
+                            previous,
+                        )?));
+                    }
+                    return Ok(Some(previous));
                 }
+
                 "get" | "get_mut" | "get_key_value" if is_map => {
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
@@ -8199,80 +8081,8 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(result));
                 }
                 "ensure_capacity" if is_map => {
-                    state.heap.revoke_projections(ptr as usize);
-                    // Map.ensure_capacity() - resize if load factor is too high
-                    // This is called by user-defined Map.insert from core/collections
-                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    let count = unsafe { (*header_ptr).as_i64() } as usize;
-                    let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-
-                    // Handle initial capacity (0 means uninitialized)
-                    if capacity == 0 {
-                        const INITIAL_CAP: usize = 16;
-                        let new_entries = state.heap.alloc_hash_buckets(INITIAL_CAP)?;
-                        state.record_allocation();
-                        let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data =
-                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                        for i in 0..(INITIAL_CAP * 2) {
-                            unsafe {
-                                *new_entries_data.add(i) = Value::unit();
-                            }
-                        }
-                        unsafe {
-                            *header_ptr.add(1) = Value::from_i64(INITIAL_CAP as i64);
-                            *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
-                        }
-                        return Ok(Some(Value::unit()));
-                    }
-
-                    // Resize if load factor >= 75%
-                    if count * 4 >= capacity * 3 {
-                        let new_cap = capacity * 2;
-                        let entries_data = map_entries_data(header_ptr, capacity);
-                        let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
-                        state.record_allocation();
-                        let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data =
-                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                        // Initialize all slots to unit
-                        for i in 0..(new_cap * 2) {
-                            unsafe {
-                                *new_entries_data.add(i) = Value::unit();
-                            }
-                        }
-                        // Rehash existing entries
-                        for i in 0..capacity {
-                            let old_key = unsafe { *entries_data.add(i * 2) };
-                            if !old_key.is_unit() {
-                                let old_val = unsafe { *entries_data.add(i * 2 + 1) };
-                                let h = value_hash(old_key, state);
-                                let mut ni = h % new_cap;
-                                loop {
-                                    if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
-                                        unsafe {
-                                            *new_entries_data.add(ni * 2) = old_key;
-                                            *new_entries_data.add(ni * 2 + 1) = old_val;
-                                        }
-                                        break;
-                                    }
-                                    ni = (ni + 1) % new_cap;
-                                }
-                            }
-                        }
-                        unsafe {
-                            *header_ptr.add(1) = Value::from_i64(new_cap as i64);
-                            *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
-                        }
-                    }
+                    super::flat_map::ensure_capacity(state, *receiver)?;
                     return Ok(Some(Value::unit()));
-                }
-                "new" => {
-                    // Static constructor: create a new empty set/map
-                    // This handles Set.new() and Map.new()
-                    // But actually, "new" is called on the type value, not on an instance.
-                    // This won't match here since receiver would be a type marker, not a Set/Map object.
-                    // Fall through.
                 }
                 "remove" if is_map => {
                     state.heap.revoke_projections(ptr as usize);
