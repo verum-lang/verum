@@ -89,11 +89,8 @@ fn utf8_decode_char_len(bytes: &[Byte], byte_idx: Int) -> (Char, Int) {
     (ch, len)
 }
 
-/// Validate UTF-8 byte sequence.
-///
-
-/// Returns true if the bytes form valid UTF-8, false otherwise.
-fn utf8_validate(bytes: &[Byte]) -> Bool {
+/// Byte index of the first invalid UTF-8 sequence, or the buffer length.
+public fn utf8_valid_prefix_len(bytes: &[Byte]) -> Int {
     let len = bytes.len();
     let mut i = 0;
 
@@ -106,58 +103,58 @@ fn utf8_validate(bytes: &[Byte]) -> Bool {
         } else if (b & 0xE0) == 0xC0 {
             // 2-byte sequence (110xxxxx 10xxxxxx)
             if i + 1 >= len {
-                return false;
+                return i;
             }
             let b1 = bytes[i + 1] as Int;
             if (b1 & 0xC0) != 0x80 {
-                return false;
+                return i;
             }
             // Overlong check: must be > 0x7F
             let codepoint = ((b & 0x1F) << 6) | (b1 & 0x3F);
             if codepoint < 0x80 {
-                return false;
+                return i;
             }
             i = i + 2;
         } else if (b & 0xF0) == 0xE0 {
             // 3-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
             if i + 2 >= len {
-                return false;
+                return i;
             }
             let b1 = bytes[i + 1] as Int;
             let b2 = bytes[i + 2] as Int;
             if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 {
-                return false;
+                return i;
             }
             // Overlong check && surrogate check
             let codepoint = ((b & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
             if codepoint < 0x800 || (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
-                return false;
+                return i;
             }
             i = i + 3;
         } else if (b & 0xF8) == 0xF0 {
             // 4-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
             if i + 3 >= len {
-                return false;
+                return i;
             }
             let b1 = bytes[i + 1] as Int;
             let b2 = bytes[i + 2] as Int;
             let b3 = bytes[i + 3] as Int;
             if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80 {
-                return false;
+                return i;
             }
             // Overlong check && range check (max U+10FFFF)
             let codepoint = ((b & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
             if codepoint < 0x10000 || codepoint > 0x10FFFF {
-                return false;
+                return i;
             }
             i = i + 4;
         } else {
             // Invalid leading byte (10xxxxxx or 11111xxx)
-            return false;
+            return i;
         }
     }
 
-    true
+    len
 }
 
 // =============================================================================
@@ -351,8 +348,9 @@ implement Text {
     /// Create text from a byte slice (must be valid UTF-8).
     public fn from_utf8(bytes: &[Byte]) -> Result<Text, Utf8Error> {
         // Validate UTF-8
-        if !utf8_validate(bytes) {
-            return Result.Err(Utf8Error.new(0));
+        let valid = utf8_valid_prefix_len(bytes);
+        if valid != bytes.len() {
+            return Result.Err(Utf8Error.new(valid));
         }
 
         Result.Ok(Text.from_utf8_unchecked(bytes))
@@ -408,7 +406,7 @@ implement Text {
     /// `stdout()` / `stderr()` accessors and by any caller that needs
     /// best-effort textification of arbitrary byte streams.
     public fn from_utf8_lossy(bytes: &[Byte]) -> Text {
-        if utf8_validate(bytes) {
+        if utf8_valid_prefix_len(bytes) == bytes.len() {
             return Text.from_utf8_unchecked(bytes);
         }
         // Slow path: walk the bytes, replacing invalid sequences.

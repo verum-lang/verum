@@ -38,6 +38,7 @@
 module core.encoding.json;
 
 mount collections.{List, Map};
+mount core.text.text.{utf8_valid_prefix_len};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 
 // =============================================================================
@@ -408,16 +409,31 @@ public fn parse(source: &Text) -> Result<JsonValue, JsonError> {
 /// `max_bytes` counts the complete UTF-8 source, including whitespace and
 /// escapes. The bound is checked before allocating JSON strings or containers.
 /// Negative bounds are invalid; zero permits no nonempty JSON document.
-/// Existing nesting, string and collection limits also apply. Byte callers
-/// must validate UTF-8 when constructing Text; decode_bytes remains lossy.
+/// The same nesting, string and collection limits apply to text and wire input.
 public fn parse_strict(source: &Text, max_bytes: Int) -> Result<JsonValue, JsonError> {
-    let bytes = source.as_bytes();
+    parse_bounded_document(source.as_bytes(), max_bytes, false)
+}
+
+/// Decode a bounded wire document. Reject invalid UTF-8 at its original byte
+/// position and duplicate decoded keys before returning a JSON value.
+public fn decode_bytes_strict(source: &[Byte], max_bytes: Int) -> Result<JsonValue, JsonError> {
+    parse_bounded_document(source, max_bytes, true)
+}
+
+fn parse_bounded_document(bytes: &[Byte], max_bytes: Int, validate_utf8: Bool) -> Result<JsonValue, JsonError> {
     let mut p = new_parser(bytes);
     if max_bytes < 0 {
         return Result.Err(mk_err(&p, InvalidLimit, &"JSON document byte limit must be non-negative"));
     }
     if bytes.len() > max_bytes {
         return Result.Err(mk_err(&p, DocumentTooLarge, &"JSON document exceeds its byte limit"));
+    }
+    if validate_utf8 {
+        let valid = utf8_valid_prefix_len(bytes);
+        if valid != bytes.len() {
+            while p.pos < valid { advance(&mut p); }
+            return Result.Err(mk_err(&p, InvalidUnicode, &"invalid UTF-8 sequence"));
+        }
     }
     p.reject_duplicate_keys = true;
     parse_document(&mut p)
