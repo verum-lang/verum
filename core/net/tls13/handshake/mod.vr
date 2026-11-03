@@ -78,7 +78,7 @@ public mount .transcript.{Transcript};
 
 // Re-exports — client state machine
 public mount .client_sm.{
-    ClientConfig, ClientSm, StepOutput,
+    Tls13ClientConfig as ClientConfig, ClientSm, StepOutput,
     WaitServerHello, WaitEncryptedExtensions, Connected,
 };
 
