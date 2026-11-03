@@ -79,6 +79,7 @@ fn test_default_associated_type_used() {
             assoc.insert(
                 "Item".into(),
                 AssociatedType {
+                    binders: Default::default(),
                     name: "Item".into(),
                     type_params: List::new(),
                     bounds: List::new(),
@@ -194,6 +195,7 @@ fn test_explicit_associated_type_overrides_default() {
             assoc.insert(
                 "Item".into(),
                 AssociatedType {
+                    binders: Default::default(),
                     name: "Item".into(),
                     type_params: List::new(),
                     bounds: List::new(),
@@ -286,6 +288,7 @@ fn test_missing_associated_type_no_default_error() {
             assoc.insert(
                 "Item".into(),
                 AssociatedType {
+                    binders: Default::default(),
                     name: "Item".into(),
                     type_params: List::new(),
                     bounds: List::new(),
@@ -406,6 +409,7 @@ fn test_default_type_validates_bounds() {
             assoc.insert(
                 "Item".into(),
                 AssociatedType {
+                    binders: Default::default(),
                     name: "Item".into(),
                     type_params: List::new(),
                     bounds: List::from(vec![ProtocolBound {

@@ -5515,9 +5515,16 @@ impl TypeChecker {
                         }
                         ProtocolItemKind::Type { bounds, .. } => {
                             // Extract from associated type bounds
-                            for bound_path in bounds {
-                                if let Some(name) = bound_path.as_ident() {
-                                    deps.insert(verum_common::Text::from(name.as_str()));
+                            let mut pending: Vec<_> = bounds.iter().collect();
+                            while let Some(bound) = pending.pop() {
+                                use verum_ast::ty::TypeBoundKind;
+                                match &bound.kind {
+                                    TypeBoundKind::Protocol(path) | TypeBoundKind::NegativeProtocol(path) => {
+                                        if let Some(name) = path.as_ident() { deps.insert(name.name.clone()); }
+                                    }
+                                    TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => extract_from_type(ty, &mut deps),
+                                    TypeBoundKind::AssociatedTypeBound { bounds, .. } => pending.extend(bounds.iter()),
+                                    TypeBoundKind::AssociatedTypeEquality { eq_type, .. } => extract_from_type(eq_type, &mut deps),
                                 }
                             }
                         }
@@ -9214,22 +9221,11 @@ impl TypeChecker {
                                 // Exit method type parameter scope
                                 self.ctx.exit_scope();
                             }
-                            ProtocolItemKind::Type { name, bounds, .. } => {
-                                let assoc_name: Text = name.name.clone();
-                                let assoc_bounds: List<crate::protocol::ProtocolBound> = bounds
-                                    .iter()
-                                    .map(|path| {
-                                        crate::protocol::ProtocolBound::positive(
-                                            path.clone(),
-                                            List::new(),
-                                        )
-                                    })
-                                    .collect();
-                                let assoc_type = crate::protocol::AssociatedType::simple(
-                                    assoc_name.clone(),
-                                    assoc_bounds,
-                                );
-                                protocol_assoc_types.insert(assoc_name, assoc_type);
+                            ProtocolItemKind::Type { name, .. } => {
+                                match self.elaborate_associated_type(&type_decl.generics, &proto_item.kind) {
+                                    Ok(assoc) => { protocol_assoc_types.insert(name.name.clone(), assoc); }
+                                    Err(error) => self.push_diagnostic_for(error),
+                                }
                             }
                             ProtocolItemKind::Const { .. } => {
                                 // Skip associated consts for now

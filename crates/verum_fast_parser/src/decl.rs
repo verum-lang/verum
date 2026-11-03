@@ -4498,33 +4498,12 @@ impl<'a> RecursiveParser<'a> {
                 List::new()
             };
 
-            // Bounds: type Item: Clone + Debug OR type Size: Int{> 0}
+            // Preserve protocol arguments and associated equalities in the same
+            // typed bound carrier used by generic parameters and where clauses.
             let bounds = if self.stream.consume(&TokenKind::Colon).is_some() {
-                // Try to parse as a type first (handles refinements like Int{> 0})
-                // If we see a + after parsing, treat it as multiple protocol bounds
-                let first_type = self.parse_type()?;
-
-                // Check if this is a protocol bound list (Clone + Debug) or a single type constraint
-                if self.stream.check(&TokenKind::Plus) {
-                    // Multiple protocol bounds - convert type to path and continue
-                    let mut bounds = vec![self.type_to_path(first_type)?];
-
-                    while self.stream.consume(&TokenKind::Plus).is_some() {
-                        if !self.is_ident()
-                            && !self.stream.check(&TokenKind::SelfType)
-                            && !self.stream.check(&TokenKind::Bang)
-                        {
-                            break;
-                        }
-                        bounds.push(self.parse_path()?);
-                    }
-                    bounds
-                } else {
-                    // Single type constraint - convert to path if possible
-                    vec![self.type_to_path(first_type)?]
-                }
+                self.parse_type_bounds()?
             } else {
-                Vec::new()
+                List::new()
             };
 
             // Where clause (may come before or after default type)
@@ -8189,44 +8168,6 @@ impl<'a> RecursiveParser<'a> {
     // ========================================================================
     // Helper functions
     // ========================================================================
-
-    /// Convert a Type to a Path. Used for protocol bounds that can be either
-    /// simple paths (Clone, Debug) or refined types (Int{> 0}).
-    /// For refined types, we extract the base type's path.
-    /// For primitives, we convert them to paths.
-    fn type_to_path(&self, ty: Type) -> ParseResult<Path> {
-        match ty.kind {
-            TypeKind::Path(path) => Ok(path),
-            TypeKind::Refined { base, .. } => self.type_to_path(*base),
-            // Generic type: extract base path (e.g., Iterator from Iterator<Item = T>)
-            TypeKind::Generic { base, .. } => self.type_to_path(*base),
-            // Convert primitive types to paths
-            TypeKind::Int => Ok(Path::from_ident(Ident::new(Text::from("Int"), ty.span))),
-            TypeKind::Float => Ok(Path::from_ident(Ident::new(Text::from("Float"), ty.span))),
-            TypeKind::Bool => Ok(Path::from_ident(Ident::new(Text::from("Bool"), ty.span))),
-            TypeKind::Char => Ok(Path::from_ident(Ident::new(Text::from("Char"), ty.span))),
-            TypeKind::Text => Ok(Path::from_ident(Ident::new(Text::from("Text"), ty.span))),
-            // Existential type: `some T: Bound` - extract the bound as a path
-            // This occurs in associated type bounds like `type Iter: some I: Iterator;`
-            TypeKind::Existential { bounds, .. } => {
-                if let Some(first_bound) = bounds.first() {
-                    match &first_bound.kind {
-                        verum_ast::ty::TypeBoundKind::Protocol(path) => Ok(path.clone()),
-                        _ => Ok(Path::from_ident(Ident::new(Text::from("_"), ty.span))),
-                    }
-                } else {
-                    Ok(Path::from_ident(Ident::new(Text::from("_"), ty.span)))
-                }
-            }
-            // Refined types (all three surface forms: `T{p}`, `T where p`,
-            // `n: T where p`) fall through to the `Refined` arm above; the
-            // dedicated Sigma arm is gone after collapse.
-            _ => Err(ParseError::invalid_syntax(
-                "expected path or refined type in type bound",
-                ty.span,
-            )),
-        }
-    }
 
     // ========================================================================
     // View Declarations

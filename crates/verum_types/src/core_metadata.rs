@@ -19,7 +19,7 @@ pub use array_extents::{parse_archive_array_extent, validate_archive_array_exten
 mod source_signature_wire;
 
 /// Current sidecar schema; bincode archives must be rebuilt when this changes.
-pub const CORE_METADATA_VERSION: u32 = 5;
+pub const CORE_METADATA_VERSION: u32 = 6;
 
 /// Framed sidecars reject stale schemas before decoding their AST payloads.
 pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";

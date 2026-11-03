@@ -436,7 +436,7 @@ impl<'a> TypeExporter<'a> {
                                 name: name.name.clone(),
                                 bounds: bounds
                                     .iter()
-                                    .filter_map(|b| b.as_ident().map(|id| id.name.clone()))
+                                    .map(verum_ast::pretty::format_type_bound)
                                     .collect(),
                                 default: default_type.as_ref().map(|t| self.ast_type_to_type(t)),
                             })

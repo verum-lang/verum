@@ -691,6 +691,7 @@ fn test_associated_type_simple() {
     assoc_types.insert(
         "Item".into(),
         AssociatedType {
+            binders: Default::default(),
             name: "Item".into(),
             type_params: vec![].into(),
             bounds: vec![].into(),
@@ -781,6 +782,7 @@ fn test_associated_type_with_bounds() {
     assoc_types.insert(
         "Item".into(),
         AssociatedType {
+            binders: Default::default(),
             name: "Item".into(),
             type_params: vec![].into(),
             bounds,
@@ -824,6 +826,7 @@ fn test_nested_associated_types() {
     container_assoc.insert(
         "Item".into(),
         AssociatedType {
+            binders: Default::default(),
             name: "Item".into(),
             type_params: vec![].into(),
             bounds: vec![].into(),

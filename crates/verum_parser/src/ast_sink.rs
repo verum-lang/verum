@@ -1531,17 +1531,13 @@ impl AstSink {
                     SyntaxKind::GENERIC_PARAMS => {
                         type_params = self.convert_generic_params(&child_node);
                     }
-                    SyntaxKind::BOUND_LIST | SyntaxKind::TYPE_BOUND => {
-                        for bound_child in child_node.child_nodes() {
-                            if let Some(path) = self.convert_path(&bound_child) {
-                                bounds.push(path);
-                            }
+                    SyntaxKind::BOUND_LIST => {
+                        for bound in child_node.child_nodes() {
+                            bounds.push(self.convert_associated_type_bound(&bound)?);
                         }
-                        if child_node.kind() == SyntaxKind::TYPE_BOUND {
-                            if let Some(path) = self.convert_path(&child_node) {
-                                bounds.push(path);
-                            }
-                        }
+                    }
+                    SyntaxKind::TYPE_BOUND => {
+                        bounds.push(self.convert_associated_type_bound(&child_node)?);
                     }
                     SyntaxKind::WHERE_CLAUSE => {
                         where_clause = self.convert_where_clause(&child_node);
@@ -1567,6 +1563,27 @@ impl AstSink {
             },
             span,
         })
+    }
+
+    fn convert_associated_type_bound(&mut self, node: &SyntaxNode) -> Option<verum_ast::ty::TypeBound> {
+        use verum_ast::ty::{TypeBound, TypeBoundKind};
+        let span = self.range_to_span(node.text_range());
+        let child = node.child_nodes().find(|child| child.kind().can_start_type());
+        let ty = self.convert_type(child.as_ref().unwrap_or(node))?;
+        let kind = if self.has_token(node, SyntaxKind::BANG) {
+            let TypeKind::Path(path) = ty.kind else {
+                self.error_at(node.text_range(), "negative associated bounds require a protocol path");
+                return None;
+            };
+            TypeBoundKind::NegativeProtocol(path)
+        } else {
+            match ty.kind {
+                TypeKind::Path(path) => TypeBoundKind::Protocol(path),
+                TypeKind::Generic { .. } => TypeBoundKind::GenericProtocol(ty),
+                _ => TypeBoundKind::Equality(ty),
+            }
+        };
+        Some(TypeBound { kind, span })
     }
 
     /// Convert an associated const definition in a protocol.

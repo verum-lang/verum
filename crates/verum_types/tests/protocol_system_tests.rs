@@ -184,6 +184,7 @@ fn create_iterator_protocol() -> Protocol {
     associated_types.insert(
         "Item".into(),
         AssociatedType {
+            binders: Default::default(),
             name: "Item".into(),
             type_params: List::new(),
             bounds: List::new(),

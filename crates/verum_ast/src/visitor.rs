@@ -965,8 +965,12 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
                             }
                         }
                     }
-                    crate::decl::ProtocolItemKind::Type { name, .. } => {
+                    crate::decl::ProtocolItemKind::Type { name, type_params, bounds, where_clause, default_type } => {
                         visitor.visit_ident(name);
+                        walk_generic_parameters(visitor, type_params);
+                        walk_type_bounds(visitor, bounds);
+                        if let Some(clause) = where_clause { visit_child!(visitor, clause, WhereClause); }
+                        if let Some(ty) = default_type { visit_child!(visitor, ty, Type); }
                     }
                     crate::decl::ProtocolItemKind::Const { name, ty } => {
                         visitor.visit_ident(name);
@@ -1026,8 +1030,12 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
                             }
                         }
                     }
-                    crate::decl::ProtocolItemKind::Type { name, .. } => {
+                    crate::decl::ProtocolItemKind::Type { name, type_params, bounds, where_clause, default_type } => {
                         visitor.visit_ident(name);
+                        walk_generic_parameters(visitor, type_params);
+                        walk_type_bounds(visitor, bounds);
+                        if let Some(clause) = where_clause { visit_child!(visitor, clause, WhereClause); }
+                        if let Some(ty) = default_type { visit_child!(visitor, ty, Type); }
                     }
                     crate::decl::ProtocolItemKind::Const { name, ty } => {
                         visitor.visit_ident(name);
@@ -1069,7 +1077,13 @@ pub fn walk_protocol<V: Visitor>(visitor: &mut V, protocol: &ProtocolDecl) {
                     }
                 }
             }
-            ProtocolItemKind::Type { .. } => {}
+            ProtocolItemKind::Type { name, type_params, bounds, where_clause, default_type } => {
+                visitor.visit_ident(name);
+                walk_generic_parameters(visitor, type_params);
+                walk_type_bounds(visitor, bounds);
+                if let Some(clause) = where_clause { visit_child!(visitor, clause, WhereClause); }
+                if let Some(ty) = default_type { visit_child!(visitor, ty, Type); }
+            }
             ProtocolItemKind::Axiom(axiom_decl) => {
                 visit_child!(visitor, axiom_decl.proposition.as_ref(), Expr);
             }

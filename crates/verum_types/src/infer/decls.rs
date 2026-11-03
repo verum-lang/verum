@@ -2045,26 +2045,9 @@ impl TypeChecker {
                     {
                         let assoc_name: Text = name.name.clone();
 
-                        // Convert bounds to ProtocolBounds
-                        let bound_list: List<crate::protocol::ProtocolBound> = bounds
-                            .iter()
-                            .filter_map(|bound_path| {
-                                bound_path
-                                    .as_ident()
-                                    .map(|id| crate::protocol::ProtocolBound {
-                                        associated_types: Default::default(),
-                                        protocol: Path::single(id.clone()),
-                                        args: List::new(),
-                                        is_negative: false,
-                                    })
-                            })
-                            .collect();
-
-                        let assoc_type = associated_type_from_ast(
-                            assoc_name.clone(),
-                            assoc_type_params,
-                            bound_list,
-                        );
+                        let assoc_type = self.elaborate_associated_type(
+                            &type_decl.generics, &item.kind,
+                        )?;
                         protocol_assoc_types.insert(assoc_name, assoc_type);
                     }
 
@@ -3740,26 +3723,9 @@ impl TypeChecker {
                     {
                         let assoc_name: Text = name.name.clone();
 
-                        // Convert bounds to ProtocolBounds
-                        let bound_list: List<crate::protocol::ProtocolBound> = bounds
-                            .iter()
-                            .filter_map(|bound_path| {
-                                bound_path
-                                    .as_ident()
-                                    .map(|id| crate::protocol::ProtocolBound {
-                                        associated_types: Default::default(),
-                                        protocol: Path::single(id.clone()),
-                                        args: List::new(),
-                                        is_negative: false,
-                                    })
-                            })
-                            .collect();
-
-                        let assoc_type = associated_type_from_ast(
-                            assoc_name.clone(),
-                            assoc_type_params,
-                            bound_list,
-                        );
+                        let assoc_type = self.elaborate_associated_type(
+                            &type_decl.generics, &item.kind,
+                        )?;
                         protocol_assoc_types.insert(assoc_name, assoc_type);
                     }
 
@@ -5085,6 +5051,14 @@ impl TypeChecker {
             }
         }
 
+        let mut associated_types = verum_common::Map::new();
+        for item in &proto_decl.items {
+            if let verum_ast::decl::ProtocolItemKind::Type { name, .. } = &item.kind {
+                let associated = self.elaborate_associated_type(&proto_decl.generics, &item.kind)?;
+                associated_types.insert(name.name.clone(), associated);
+            }
+        }
+
         // Determine protocol kind from is_context flag
         let kind = if proto_decl.is_context {
             crate::protocol::ProtocolKind::ConstraintAndInjectable
@@ -5098,7 +5072,7 @@ impl TypeChecker {
             kind,
             type_params: self.convert_generic_params_to_type_params(&proto_decl.generics),
             methods: protocol_methods,
-            associated_types: verum_common::Map::new(),
+            associated_types,
             associated_consts: verum_common::Map::new(),
             super_protocols: proto_decl
                 .bounds
@@ -11102,84 +11076,4 @@ impl TypeChecker {
             ))),
         }
     }
-}
-
-/// Build a registry `AssociatedType` from a protocol's AST item, carrying
-/// the GAT type parameters of `type Out<T>;` instead of dropping them.
-///
-/// Both protocol-registration sites used to call
-/// `AssociatedType::simple`, which hardcodes `type_params: List::new()`.
-/// Everything that asks about a GAT reads that field — `is_gat()`,
-/// `arity()`, kind inference, and the impl-side arity check — so in a
-/// real compile the answer was always "not a GAT, arity 0", no matter
-/// what the source declared.  `AssociatedType::generic` already existed
-/// and had no production caller; this is its caller.
-///
-/// Const and meta parameters are skipped deliberately: they are not type
-/// parameters and must not count toward the associated type's arity.
-pub(crate) fn associated_type_from_ast(
-    name: Text,
-    ast_type_params: &List<verum_ast::ty::GenericParam>,
-    bounds: List<crate::protocol::ProtocolBound>,
-) -> crate::protocol::AssociatedType {
-    use crate::advanced_protocols::{AssociatedTypeKind, GATTypeParam, Variance};
-    use verum_ast::ty::{GenericParamKind, TypeBoundKind};
-
-    // `VERUM_NO_GAT_CARRIER=1` restores the pre-carrier behaviour (always
-    // `simple`, i.e. an empty type-param list) so the carrier's effect on a
-    // corpus is an A/B inside ONE binary rather than two builds.
-    if ast_type_params.is_empty() || std::env::var_os("VERUM_NO_GAT_CARRIER").is_some() {
-        return crate::protocol::AssociatedType::simple(name, bounds);
-    }
-
-    let to_protocol_bounds = |bs: &List<verum_ast::ty::TypeBound>| -> List<crate::protocol::ProtocolBound> {
-        bs.iter()
-            .filter_map(|b| match &b.kind {
-                TypeBoundKind::Protocol(path) => Some(crate::protocol::ProtocolBound {
-                    associated_types: Default::default(),
-                    protocol: path.clone(),
-                    args: List::new(),
-                    is_negative: false,
-                }),
-                TypeBoundKind::NegativeProtocol(path) => Some(crate::protocol::ProtocolBound {
-                    associated_types: Default::default(),
-                    protocol: path.clone(),
-                    args: List::new(),
-                    is_negative: true,
-                }),
-                _ => None,
-            })
-            .collect()
-    };
-
-    let mut has_hkt = false;
-    let mut params: List<GATTypeParam> = List::new();
-    for gp in ast_type_params.iter() {
-        let (param_name, param_bounds) = match &gp.kind {
-            GenericParamKind::Type { name, bounds, .. } => (name.name.clone(), bounds),
-            GenericParamKind::HigherKinded { name, bounds, .. } => {
-                has_hkt = true;
-                (name.name.clone(), bounds)
-            }
-            _ => continue,
-        };
-        params.push(GATTypeParam {
-            name: param_name,
-            bounds: to_protocol_bounds(param_bounds),
-            default: verum_common::Maybe::None,
-            variance: Variance::Invariant,
-        });
-    }
-
-    if params.is_empty() {
-        return crate::protocol::AssociatedType::simple(name, bounds);
-    }
-
-    let arity = params.len();
-    let mut assoc =
-        crate::protocol::AssociatedType::generic(name, params, bounds, List::new());
-    if has_hkt {
-        assoc.kind = AssociatedTypeKind::HigherKinded { arity };
-    }
-    assoc
 }

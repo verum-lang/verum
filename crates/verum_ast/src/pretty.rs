@@ -1315,7 +1315,7 @@ impl PrettyPrinter {
                             self.write(" + ");
                         }
                         first = false;
-                        self.format_path(bound);
+                        self.format_type_bound(bound);
                     }
                 }
                 if let Maybe::Some(wc) = where_clause {
@@ -3446,6 +3446,13 @@ impl PrettyPrinter {
 }
 
 // ==================== CONVENIENCE FUNCTIONS ====================
+
+/// Render a complete type bound, including associated equalities.
+pub fn format_type_bound(bound: &TypeBound) -> Text {
+    let mut printer = PrettyPrinter::default_printer();
+    printer.format_type_bound(bound);
+    printer.output.into()
+}
 
 /// Format a type to a string.
 pub fn format_type(ty: &Type) -> Text {

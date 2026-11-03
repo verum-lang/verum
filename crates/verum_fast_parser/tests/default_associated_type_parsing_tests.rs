@@ -178,7 +178,7 @@ fn test_default_associated_type_with_bounds() {
                 } => {
                     assert_eq!(name.name.as_str(), "Item");
                     assert_eq!(bounds.len(), 1);
-                    assert_eq!(bounds[0].as_ident().unwrap().as_str(), "Clone");
+                    assert!(matches!(&bounds[0].kind, verum_ast::ty::TypeBoundKind::Protocol(path) if path.as_ident().unwrap().as_str() == "Clone"));
                     assert!(default_type.is_some());
 
                     let default_ty = default_type.as_ref().unwrap();

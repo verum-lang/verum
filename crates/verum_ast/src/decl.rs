@@ -13,7 +13,7 @@ pub use crate::attr::{Attribute, FeatureAttr, ProfileAttr};
 use crate::expr::{Block, Expr};
 use crate::pattern::Pattern;
 use crate::span::{Span, Spanned};
-use crate::ty::{GenericParam, Ident, Path, Type, WhereClause};
+use crate::ty::{GenericParam, Ident, Path, Type, TypeBound, WhereClause};
 use serde::{Deserialize, Serialize};
 use verum_common::{Heap, List, Maybe, Text};
 
@@ -1673,7 +1673,7 @@ pub enum ProtocolItemKind {
         /// Example: `type Item<T>` has one type parameter
         type_params: List<GenericParam>,
         /// Protocol bounds on the associated type
-        bounds: List<Path>,
+        bounds: List<TypeBound>,
         /// Where clauses specific to this GAT
         /// Example: `type Item<T> where T: Clone`
         where_clause: Maybe<WhereClause>,

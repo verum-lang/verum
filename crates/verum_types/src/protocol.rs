@@ -626,8 +626,18 @@ impl ProtocolMethod {
 ///  fn pure<T>(value: T) -> Self.Wrapped<T>
 /// }
 /// ```
+/// Declaration-owned variables used to instantiate associated family bounds.
+#[derive(Debug, Clone, Default)]
+pub struct AssociatedTypeBinders {
+    /// Protocol parameter positions; value parameters do not become type variables.
+    pub owner: List<(usize, crate::ty::TypeVar)>,
+    /// Family parameters in declaration order, independently of their spelling.
+    pub local: List<crate::ty::TypeVar>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AssociatedType {
+    pub binders: AssociatedTypeBinders,
     /// Type name
     pub name: Text,
     /// Type parameters for GATs (empty for regular associated types)
@@ -668,6 +678,7 @@ impl AssociatedType {
     /// Create a simple (non-GAT) associated type for backward compatibility
     pub fn simple(name: Text, bounds: List<ProtocolBound>) -> Self {
         Self {
+            binders: Default::default(),
             name,
             type_params: List::new(),
             bounds,
@@ -688,6 +699,7 @@ impl AssociatedType {
     ) -> Self {
         let arity = type_params.len();
         Self {
+            binders: Default::default(),
             name,
             type_params,
             bounds,
@@ -706,6 +718,7 @@ impl AssociatedType {
         refinement: crate::advanced_protocols::RefinementConstraint,
     ) -> Self {
         Self {
+            binders: Default::default(),
             name,
             type_params: List::new(),
             bounds,
@@ -722,6 +735,7 @@ impl AssociatedType {
     /// Covariant types allow subtyping: if A <: B, then Container<A> <: Container<B>
     pub fn covariant(name: Text, bounds: List<ProtocolBound>) -> Self {
         Self {
+            binders: Default::default(),
             name,
             type_params: List::new(),
             bounds,
@@ -738,6 +752,7 @@ impl AssociatedType {
     /// Contravariant types reverse subtyping: if A <: B, then F<B> <: F<A>
     pub fn contravariant(name: Text, bounds: List<ProtocolBound>) -> Self {
         Self {
+            binders: Default::default(),
             name,
             type_params: List::new(),
             bounds,
@@ -15767,6 +15782,7 @@ mod tests {
         };
 
         let gat = AssociatedType {
+            binders: Default::default(),
             name: "Item".into(),
             type_params: List::from(vec![GATTypeParam {
                 name: "T".into(),
@@ -15824,6 +15840,7 @@ mod tests {
 
         // Create a GAT without a default: type Item<T>
         let gat = AssociatedType {
+            binders: Default::default(),
             name: "Item".into(),
             type_params: List::from(vec![GATTypeParam {
                 name: "T".into(),
@@ -16366,6 +16383,7 @@ mod tests {
 
         // Register Container protocol with associated type that has Clone bound
         let assoc_type = AssociatedType {
+            binders: Default::default(),
             name: "Element".into(),
             type_params: List::new(),
             bounds: List::from(vec![ProtocolBound {
@@ -16541,6 +16559,7 @@ mod tests {
 
         // Register protocol with associated type that has a default
         let assoc_type = AssociatedType {
+            binders: Default::default(),
             name: "Output".into(),
             type_params: List::new(),
             bounds: List::new(),

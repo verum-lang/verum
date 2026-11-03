@@ -1652,7 +1652,10 @@ fn scan_protocol_associated_type_bounds(
                     if bounds.is_empty() {
                         continue;
                     }
-                    let names: Vec<String> = bounds.iter().filter_map(path_simple_name).collect();
+                    let names: Vec<String> = bounds.iter().filter_map(|bound| match &bound.kind {
+                        verum_ast::ty::TypeBoundKind::Protocol(path) => path_simple_name(path),
+                        _ => None,
+                    }).collect();
                     if names.is_empty() {
                         continue;
                     }

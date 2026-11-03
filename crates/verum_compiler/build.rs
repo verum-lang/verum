@@ -1853,7 +1853,7 @@ pub(crate) const PRECOMPILE_SCHEMA_VERSION: &str =
     // reader had nothing to read. Bumping here is what invalidates it.
     // v61: retain source parameter kinds for mixed type/meta protocols.
     // v62: VBC2.33 and CoreMetadata5 preserve declared protocol method dispatch.
-    "v62-protocol-signatures";
+    "v63-typed-associated-family-bounds";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

@@ -49,6 +49,9 @@ pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<
 pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) -> Result<bool> {
     let universes = type_declaration_uses_universes(declaration)?;
     Ok(universes
+        || matches!(&declaration.body, crate::TypeDeclBody::Protocol(body) | crate::TypeDeclBody::Coinductive(body)
+            if body.items.iter().any(|item| matches!(&item.kind, crate::decl::ProtocolItemKind::Type { type_params, bounds, where_clause, default_type, .. }
+                if !type_params.is_empty() || !bounds.is_empty() || where_clause.is_some() || default_type.is_some())))
         || declaration.generics.iter().any(|param| {
             matches!(
                 param.kind,
@@ -526,11 +529,13 @@ impl Visitor for SignatureScan {
                         }
                         ProtocolItemKind::Type {
                             type_params,
+                            bounds,
                             where_clause,
                             default_type,
                             ..
                         } => {
                             self.push_generics(type_params);
+                            self.bounds(bounds);
                             if let Some(clause) = where_clause {
                                 self.visit_where_clause(clause);
                             }

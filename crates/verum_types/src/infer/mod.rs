@@ -13,6 +13,7 @@
 //! allowing the algorithm to prune the search space early.
 
 // Submodules containing impl TypeChecker method groups
+mod associated_type_bounds;
 mod source_declarations;
 mod source_type_registration;
 mod universe_parameters;
