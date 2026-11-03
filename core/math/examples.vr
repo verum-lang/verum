@@ -53,7 +53,7 @@ mount core.math.infinity_category.{
 mount core.math.simplicial.{Horn};
 mount core.math.infinity_topos.{
     Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
-    InfSubobjectClassifier, GeometricMorphism,
+    InfSubobjectClassifier, GeometricMorphism, id_geometric,
     InfinityTopos, SheafInfinityTopos,
 };
 mount core.math.fibration.{
@@ -2092,37 +2092,12 @@ public fn trivial_inf_subobject_classifier() -> TrivialInfSubobjectClassifier {
 // 2.37. IdentityGeometricMorphism — concrete `GeometricMorphism` instance
 // =============================================================================
 
-/// The **identity geometric morphism** `id : X → X` of an ∞-topos:
-/// both inverse image and direct image are the identity functor,
-/// and the adjunction / left-exactness obligations hold trivially.
-/// Concrete acid test for the `GeometricMorphism<X, Y>` protocol —
-/// the morphisms of the ∞-category `Top_∞`.
-public type IdentityGeometricMorphism is {
-    marker: Int,
-};
+/// The identity endomorphism of the point ∞-topos, represented by the
+/// same pair of functor actions used by geometric composition.
+public type IdentityGeometricMorphism is GeometricMorphism<PointSimplicialSet, PointSimplicialSet>;
 
-implement GeometricMorphism<PointSimplicialSet, PointSimplicialSet>
-    for IdentityGeometricMorphism {
-    fn inverse_image(&self, q: &Int) -> Int {
-        *q
-    }
-
-    fn direct_image(&self, p: &Int) -> Int {
-        *p
-    }
-
-    fn adjunction_unit_counit(p: &Int, q: &Int) -> Bool {
-        true
-    }
-
-    fn inverse_image_left_exact(p: &Int, q: &Int) -> Bool {
-        true
-    }
-}
-
-/// Smart constructor for the identity geometric morphism.
 public fn identity_geometric_morphism() -> IdentityGeometricMorphism {
-    IdentityGeometricMorphism { marker: 0 }
+    id_geometric<PointSimplicialSet>()
 }
 
 // =============================================================================
