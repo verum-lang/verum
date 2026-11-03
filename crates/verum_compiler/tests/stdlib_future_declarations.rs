@@ -80,6 +80,41 @@ fn sibling_private_functions_keep_their_call_and_result_owners() {
     );
 }
 
+#[test]
+fn an_earlier_consumer_cannot_change_a_forward_method_result() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    let db = core.join("db");
+    let ops = db.join("ops");
+    fs::create_dir_all(&ops).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module db;").unwrap();
+    fs::write(db.join("mod.vr"),
+        "module core.db; public module ops;
+         mount core.db.ops.declarations.{Pool,Entry};
+         public fn peek(p: &Pool) -> Entry { p.get(0) }").unwrap();
+    fs::write(ops.join("mod.vr"),
+        "module core.db.ops; public module declarations; public module actions;").unwrap();
+    fs::write(ops.join("declarations.vr"),
+        "module core.db.ops.declarations;
+         public type Other is KBool(Bool) | KInt(Int);
+         public type Entry is KInt(Int) | KBool(Bool);
+         public type Pool is { stored: Entry };
+         implement Pool { public fn get(&self, idx: Int) -> Entry { self.stored } }
+         public type Program is { constants: Pool };").unwrap();
+    fs::write(ops.join("actions.vr"),
+        "module core.db.ops.actions; mount core.db.ops.declarations.{Program,Pool,Entry};
+         public fn step(p: &Program) -> Int {
+             match p.constants.get(0) { KInt(i) => i, KBool(_) => 1 }
+         }
+         public fn probe() -> Int {
+             let p = Program { constants: Pool { stored: Entry.KInt(49) } };
+             step(&p)
+         }").unwrap();
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive,
+        "module app; mount core.db.ops.actions.probe; fn main() -> Int { probe() }"), 49);
+}
+
 fn check_bootstrap(glob: bool) {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");

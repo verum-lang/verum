@@ -2566,7 +2566,11 @@ one module and therefore never seeded",
                 self.global_function_registry.get(name.as_str()),
                 Some(existing) if is_in_stub_range(existing.id.0)
             );
-            if is_stub {
+            // An importing module may have specialized a forward declaration
+            // in its own type pool. Only an actual definition may replace the
+            // original forward. Publishing another forward leaks local type IDs
+            // into every later consumer of the same declaration.
+            if is_stub && !is_in_stub_range(info.id.0) {
                 self.global_function_registry
                     .insert(name.into_string(), info.clone());
             } else {
