@@ -527,7 +527,23 @@ pub(super) fn handle_bound_method(
     let receiver_reg = read_reg(state)?;
     let method_id = read_varint(state)? as u32;
     let args = read_reg_range(state)?;
+    if state.method_profile.is_some() {
+        return state.profile_method_dispatch(instruction_pc, StringId(method_id), |state| {
+            execute_method_call(state, declared_receiver, instruction_pc, dst, receiver_reg, method_id, args)
+        });
+    }
+    execute_method_call(state, declared_receiver, instruction_pc, dst, receiver_reg, method_id, args)
+}
 
+fn execute_method_call(
+    state: &mut InterpreterState,
+    declared_receiver: Option<crate::types::TypeRef>,
+    instruction_pc: u32,
+    dst: Reg,
+    receiver_reg: Reg,
+    method_id: u32,
+    args: RegRange,
+) -> InterpreterResult<DispatchResult> {
     // T1183: a Deref hop at the foot of this function rewound here after
     // staging the unwrapped value. Take it INSTEAD of reading the
     // register — the register belongs to the caller's variable, and

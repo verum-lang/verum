@@ -95,7 +95,7 @@ fn named_stdin_uses_the_project_closure_and_binds_the_unmodified_buffer_even_on_
 fn actual_cli_reports_exact_stdin_identity_and_refuses_reusing_output() {
     let dir = tempfile::tempdir().unwrap();
     // No trailing newline: the synthetic script adds one as well as a shebang.
-    let source = format!("print(42); // runtime report {}", uuid::Uuid::new_v4());
+    let source = format!("print(42.clone()); // runtime report {}", uuid::Uuid::new_v4());
     let hash = hex::encode(Sha256::digest(source.as_bytes()));
     for id in ["first", "cached"] {
         let path = dir.path().join(format!("{id}.json"));
@@ -120,6 +120,9 @@ fn actual_cli_reports_exact_stdin_identity_and_refuses_reusing_output() {
         assert_eq!(report.observation, RuntimeObservation::Captured);
         assert_eq!(report.wrapper_lines, 1);
         assert!(report.cbgr.unwrap().events.is_empty());
+        let methods = report.method_dispatch.unwrap();
+        assert!(methods.rows.iter().any(|site| site.selector.as_deref() == Some("Int.clone")
+            && site.count == 1 && site.function.is_some()));
         let retained = std::fs::read(&path).unwrap();
         assert!(!run(&source, &path, "overwrite").status.success());
         assert_eq!(std::fs::read(&path).unwrap(), retained);
@@ -138,6 +141,7 @@ fn compiler_refusal_leaves_unavailable_observation_and_cli_rejects_invalid_ident
         .unwrap();
     assert_eq!(report.observation, RuntimeObservation::Unavailable);
     assert!(report.cbgr.is_none());
+    assert!(report.method_dispatch.is_none());
     let rejected = dir.path().join("invalid.json");
     assert!(!run("print(1);", &rejected, "invalid/id").status.success());
     assert!(!rejected.exists());

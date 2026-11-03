@@ -3,6 +3,9 @@
 use crate::{CbgrViolationKind, List, Text};
 use serde::{Deserialize, Serialize};
 
+mod methods;
+pub use methods::*;
+
 pub const MAX_CBGR_EVENTS: usize = 256;
 pub const MAX_RUNTIME_REPORT_BYTES: u64 = 1024 * 1024;
 
@@ -80,6 +83,8 @@ pub struct RuntimeReport {
     pub compiler_version: Text,
     pub observation: RuntimeObservation,
     pub cbgr: Option<CbgrReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method_dispatch: Option<MethodDispatchReport>,
 }
 
 impl RuntimeReport {
@@ -110,6 +115,10 @@ impl RuntimeReport {
         }
         if (self.observation == RuntimeObservation::Captured) != self.cbgr.is_some() {
             return Err("Runtime report observation and payload disagree");
+        }
+        if self.method_dispatch.as_ref().is_some_and(|report|
+            self.observation != RuntimeObservation::Captured || !report.validate()) {
+            return Err("Invalid runtime method dispatch profile");
         }
         if let Some(report) = &self.cbgr {
             if report.capacity > MAX_CBGR_EVENTS || report.events.len() > report.capacity {

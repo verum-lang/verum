@@ -126,14 +126,15 @@ impl ReportFile {
             let path = path.to_str()?;
             (path.len() <= 2048).then(|| Text::from(path))
         });
-        self.write(session.take_runtime_report(), entry_source_path)
+        self.write(session.take_runtime_measurements(), entry_source_path)
     }
 
     fn write(
         &mut self,
-        report: Option<verum_vbc::interpreter::diagnostics::CbgrReport>,
+        report: Option<verum_compiler::session::RuntimeMeasurements>,
         entry_source_path: Option<Text>,
     ) -> Result<(), CliError> {
+        let (cbgr, method_dispatch) = report.map(|report| (report.cbgr, report.method_dispatch)).unzip();
         let body = RuntimeReport {
             schema: RuntimeReportSchema::V1,
             run_id: self.request.run_id.as_str().into(),
@@ -142,12 +143,13 @@ impl ReportFile {
             wrapper_lines: self.request.wrapper_lines,
             entry_source_path,
             compiler_version: env!("CARGO_PKG_VERSION").into(),
-            observation: if report.is_some() {
+            observation: if cbgr.is_some() {
                 RuntimeObservation::Captured
             } else {
                 RuntimeObservation::Unavailable
             },
-            cbgr: report,
+            cbgr,
+            method_dispatch,
         };
         let bytes =
             serde_json::to_vec(&body).map_err(|error| CliError::Custom(error.to_string()))?;

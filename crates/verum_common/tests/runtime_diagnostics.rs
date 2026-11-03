@@ -18,6 +18,7 @@ fn report() -> RuntimeReport {
         entry_source_path: None,
         compiler_version: "0.1.0".into(),
         observation: RuntimeObservation::Captured,
+        method_dispatch: None,
         cbgr: Some(CbgrReport {
             schema: CbgrSchema::DispatchV1,
             capacity: 1,
@@ -103,4 +104,40 @@ fn failed_reservation_preserves_the_existing_list() {
     assert_eq!(values.as_slice(), &[7]);
     assert!(values.try_reserve(usize::MAX).is_err());
     assert_eq!(values.as_slice(), &[7]);
+}
+
+#[test]
+fn method_measurements_require_this_execution_and_consistent_counts() {
+    use verum_common::runtime_diagnostics::{
+        MethodDispatchOutcome, MethodDispatchReport, MethodDispatchRow, MethodDispatchSchema,
+    };
+    let mut report = report();
+    let source = report.source_sha256.clone();
+    report.method_dispatch = Some(MethodDispatchReport {
+        schema: MethodDispatchSchema::V1,
+        capacity: 1,
+        dropped_calls: 0,
+        rows: [MethodDispatchRow {
+            module_instance: 0,
+            module: None,
+            function_id: 8,
+            function: None,
+            selector_id: 4,
+            selector: None,
+            pc: 3,
+            outcome: MethodDispatchOutcome::CompletedInline,
+            count: 3,
+            inclusive_ns: 15,
+            max_ns: 6,
+        }]
+        .into_iter()
+        .collect(),
+    });
+    assert!(report.validate_binding("current-run", &source).is_ok());
+    report.method_dispatch.as_mut().unwrap().rows[0].max_ns = 4;
+    assert!(report.validate_binding("current-run", &source).is_err());
+    report.method_dispatch.as_mut().unwrap().rows.clear();
+    report.observation = RuntimeObservation::Unavailable;
+    report.cbgr = None;
+    assert!(report.validate_binding("current-run", &source).is_err());
 }

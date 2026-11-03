@@ -481,6 +481,7 @@ pub struct InterpreterState {
     /// Opt-in, execution-owned CBGR dispatch observations. Never copied into
     /// another interpreter or retained across reset.
     pub(super) cbgr_diagnostics: Option<super::diagnostics::CbgrCapture>,
+    pub(super) method_profile: Option<Box<super::method_profile::MethodProfile>>,
 
     /// Configuration options.
     pub config: InterpreterConfig,
@@ -2665,6 +2666,7 @@ impl InterpreterState {
             heap: Heap::with_threshold(config.max_heap_size),
             stats: ExecutionStats::default(),
             cbgr_diagnostics: None,
+            method_profile: None,
             config,
             context_stack: ContextStack::new(),
             ctx_dense_slot_map: None,
@@ -3157,6 +3159,7 @@ impl InterpreterState {
     /// to prevent unbounded memory growth across repeated executions.
     pub fn reset(&mut self) {
         self.cbgr_diagnostics = None;
+        self.method_profile = None;
         self.host_callable_lifetime = Arc::new(());
         self.host_call_ctx = None;
         self.script_engines.clear();

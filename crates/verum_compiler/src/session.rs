@@ -194,7 +194,7 @@ pub struct Session {
     /// compile cost.
     pending_exit_code: Shared<RwLock<Option<i32>>>,
 
-    runtime_report: Shared<RwLock<Option<verum_vbc::interpreter::diagnostics::CbgrReport>>>,
+    runtime_report: Shared<RwLock<Option<RuntimeMeasurements>>>,
 
     /// AOT permission policy serialised as data (rather than a
     /// closure) so the LLVM lowerer can bake it into the generated
@@ -235,6 +235,13 @@ pub struct Session {
     /// Protocol max-Shapes (T0848 §5b): protocol name → CITED row.
     arch_protocol_max_shape_registry:
         Shared<RwLock<std::collections::BTreeMap<String, verum_kernel::arch_rows::Row>>>,
+}
+
+/// Measurements from one interpreter execution, transferred together to the CLI.
+#[derive(Debug, Clone)]
+pub struct RuntimeMeasurements {
+    pub cbgr: verum_common::runtime_diagnostics::CbgrReport,
+    pub method_dispatch: verum_common::runtime_diagnostics::MethodDispatchReport,
 }
 
 impl Session {
@@ -504,12 +511,18 @@ impl Session {
         self.runtime_report.write().take();
     }
 
-    pub(crate) fn record_runtime_report(&self, report: verum_vbc::interpreter::diagnostics::CbgrReport) {
+    pub(crate) fn record_runtime_report(&self, report: RuntimeMeasurements) {
         *self.runtime_report.write() = Some(report);
     }
 
-    pub fn take_runtime_report(&self) -> Option<verum_vbc::interpreter::diagnostics::CbgrReport> {
+    /// Drain observations together so every consumer sees one execution.
+    pub fn take_runtime_measurements(&self) -> Option<RuntimeMeasurements> {
         self.runtime_report.write().take()
+    }
+
+    /// Consume the CBGR part for callers of the original reporting API.
+    pub fn take_runtime_report(&self) -> Option<verum_common::runtime_diagnostics::CbgrReport> {
+        self.take_runtime_measurements().map(|report| report.cbgr)
     }
 
     /// Install a script-mode permission policy. Called by the CLI
