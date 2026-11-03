@@ -38,7 +38,7 @@
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
@@ -918,7 +918,12 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
         }
         let mut name_bytes = vec![0u8; name_len as usize];
         reader.read_exact(&mut name_bytes)?;
-        let name = String::from_utf8_lossy(&name_bytes).to_string();
+        let name = String::from_utf8(name_bytes).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("archive module name is not UTF-8: {}", error.utf8_error()),
+            )
+        })?;
 
         // Offsets and hash
         reader.read_exact(&mut buf8)?;
@@ -957,7 +962,16 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
         let mut dependencies = Vec::with_capacity(dep_count as usize);
         for _ in 0..dep_count {
             reader.read_exact(&mut buf4)?;
-            dependencies.push(u32::from_le_bytes(buf4));
+            let dependency = u32::from_le_bytes(buf4);
+            if dependency >= module_count {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "archive module '{name}' dependency index {dependency} is outside {module_count} entries"
+                    ),
+                ));
+            }
+            dependencies.push(dependency);
         }
 
         index.push(ModuleEntry {
@@ -967,6 +981,15 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
             content_hash,
             dependencies,
         });
+    }
+
+    let mut names = HashSet::with_capacity(index.len());
+    if let Some(entry) = index.iter().find(|entry| !names.insert(entry.name.as_str()))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("duplicate module '{}' in archive index", entry.name),
+        ));
     }
 
     // Read module data. `module_count` and per-entry `data_size`
