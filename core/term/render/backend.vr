@@ -12,7 +12,6 @@
 module core.term.render.backend;
 
 mount core.io.{Write, IoResult};
-mount super.cell.Cell;
 mount super.buffer.Buffer;
 mount super.super.raw.{TerminalSize, CursorShape};
 mount super.super.style.{Style, Color};

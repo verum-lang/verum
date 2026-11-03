@@ -26,5 +26,5 @@ public mount .cell.{RenderCell as Cell, char_display_width};
 public mount .buffer.Buffer;
 public mount .diff.{flush_diff, write_style_diff, write_color, write_modifiers};
 public mount .frame.{Frame, Terminal};
-public mount .viewport.Viewport;
+public mount .viewport.{RenderViewport as Viewport};
 public mount .graphics.{GraphicsRenderer, ImageFormat, KittyGraphics, SixelGraphics, ItermGraphics, BrailleGraphics, create_graphics_renderer};

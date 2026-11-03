@@ -10,7 +10,6 @@ module core.term.widget.block;
 
 mount super.protocol.{Widget, Styled};
 mount super.super.render.buffer.Buffer;
-mount super.super.render.cell.Cell;
 mount super.super.layout.rect.{Rect, Margin};
 mount super.super.style.style.Style;
 mount super.super.style.color.Color;

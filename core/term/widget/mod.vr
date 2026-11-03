@@ -43,7 +43,7 @@ public mount .paragraph.{Paragraph, Line, TextSpan as Span, Wrap};
 public mount .list.{SelectableList, ListState};
 public mount .table.{Table, TableCell, TableRow as Row, TableState, HighlightSpacing};
 public mount .input.{TextInput, TextInputState};
-public mount .gauge.Gauge;
+public mount .gauge.{TermGauge as Gauge};
 public mount .tabs.Tabs;
 public mount .scrollbar.{Scrollbar, ScrollbarOrientation, ScrollbarState};
 
