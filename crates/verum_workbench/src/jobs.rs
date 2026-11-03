@@ -26,6 +26,8 @@ const RECEIPT_LIMIT: u64 = 4 * WORKER_LIMITS.process.output_bytes;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Receipt {
     pub id: Text,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<crate::agent_runtime::TurnIdentity>,
     #[serde(flatten)]
     pub plan: ExecutionPlan,
     pub status: Text,
@@ -126,6 +128,12 @@ impl Jobs {
         ExecutionPlan::parse(params, &self.verum, &self.proof)
     }
     pub fn start(&mut self, params: &Value, source_path: PathBuf) -> Result<Value> {
+        self.start_inner(params, source_path, None)
+    }
+    pub(crate) fn start_owned(&mut self, params: &Value, source_path: PathBuf, owner: &crate::agent_runtime::Scope) -> Result<Value> {
+        owner.admit(|| self.start_inner(params, source_path, Some(owner.clone())))
+    }
+    fn start_inner(&mut self, params: &Value, source_path: PathBuf, owner: Option<crate::agent_runtime::Scope>) -> Result<Value> {
         let plan = self.plan(params)?;
         let source = params["source"].as_str().context("Expected source")?;
         let timeout = plan.timeout_ms;
@@ -193,6 +201,7 @@ impl Jobs {
             .with_context(|| format!("Start {}", plan.executable.display()))?;
         let receipt = Arc::new(Mutex::new(Receipt {
             id: id.clone(),
+            agent: owner.as_ref().map(|scope| scope.identity().clone()),
             plan,
             status: "running".into(),
             stdout: Text::new(),
@@ -225,6 +234,7 @@ impl Jobs {
                 proof_request,
                 receipt,
                 receiver,
+                owner,
                 Duration::from_millis(timeout),
             )
             .await;
@@ -307,6 +317,7 @@ async fn execute(
     proof_request: Option<SourceRequest>,
     receipt: Arc<Mutex<Receipt>>,
     mut cancel: watch::Receiver<bool>,
+    owner: Option<crate::agent_runtime::Scope>,
     timeout: Duration,
 ) {
     let group = ProcessGroup(child.id());
@@ -337,10 +348,18 @@ async fn execute(
         Ok::<_, anyhow::Error>(status)
     };
     let proof_job = receipt.lock().await.plan.kind == OperationKind::Proof;
+    let owner_ended = async {
+        match &owner {
+            Some(owner) => owner.cancelled().await,
+            None => std::future::pending().await,
+        }
+    };
     let (state, exit, reason) = tokio::select! {
+        biased;
+        reason = owner_ended => ("cancelled",None,Text::from(reason.reason())),
+        _ = cancel.changed() => ("cancelled",None,Text::from("Cancelled by user")),
         result = work => match result { Ok(s) => (process_status(s,proof_job), s.code(),Text::from(format!("Process {s}"))), Err(e) => (if e.is::<OutputBudget>() {"exhausted"} else {"inconclusive"},None,Text::from(e.to_string())) },
         _ = tokio::time::sleep(timeout) => ("exhausted",None,Text::from("Wall-time budget exceeded")),
-        _ = cancel.changed() => ("cancelled",None,Text::from("Cancelled by user")),
     };
     drop(group);
     let _ = child.kill().await;

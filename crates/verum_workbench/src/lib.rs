@@ -1,5 +1,6 @@
 //! Verum Studio: one local operation service, with browser and provider adapters.
 pub mod agent_tools;
+pub mod agent_runtime;
 pub mod codex;
 mod evidence;
 pub mod execution;
@@ -147,6 +148,12 @@ impl Studio {
                     // Client controls conversation input, not sandbox or execution policy.
                     args = json!({"threadId":args["threadId"],"input":args["input"]});
                 }
+                if method == "turn/interrupt" {
+                    // Revoke local authority before waiting for a provider acknowledgement.
+                    provider.events.lock().await.end_turn(
+                        field(&args, "threadId")?, field(&args, "turnId")?, agent_runtime::End::Interrupted,
+                    )?;
+                }
                 provider.request(method, args).await
             }
             "agent.respond" => self.respond(params).await,
@@ -156,11 +163,12 @@ impl Studio {
     async fn respond(&self, params: Value) -> Result<Value> {
         let provider = self.provider().await?;
         let thread = params["threadId"].as_str();
-        let (request, role) = {
+        let (request, role, scope) = {
             let mut events = provider.events.lock().await;
-            let request = events.take_review(field(&params, "reviewId")?, thread)?;
-            (request, thread.and_then(|id| events.role(id)))
+            let (request, scope) = events.take_review(field(&params, "reviewId")?, thread)?;
+            (request, thread.and_then(|id| events.role(id)), scope)
         };
+        let _guard = scope.as_ref().map(agent_runtime::Scope::guard);
         let id = &request["id"];
         if request["method"] != "item/tool/call" {
             // No generic shell/permission escalation in a Verum-only research workspace.
@@ -172,19 +180,41 @@ impl Studio {
         } else if role.and_then(|role| role.review_kind(request["params"]["tool"].as_str()?)).is_none() {
             Err(anyhow::anyhow!("This conversation is not authorized to invoke the requested tool"))
         } else {
-            self.tool(&request["params"]).await
+            match &scope {
+                Some(scope) => self.tool_owned(&request["params"], Some(scope)).await,
+                None => Err(anyhow::anyhow!("Agent operation has no live turn owner")),
+            }
         };
         let (success, tool_result) = match result {
             Ok(value) => (true, value),
             Err(error) => (false, json!({"error":error.to_string()})),
         };
         let content = tool_result.to_string();
+        // Keep the provider's wire ID reserved until its response is written.
+        let mut events = provider.events.lock().await;
+        if let Some(scope) = &scope
+            && !events.finish_review(id, scope)
+        {
+            return Ok(json!({"delivered":false,"success":false,"cancelled":true,"tool_result":tool_result}));
+        }
         provider.send(json!({"id":id,"result":{"success":success,"contentItems":[{"type":"inputText","text":content}]}})).await?;
         Ok(json!({"delivered":true,"success":success,"tool_result":tool_result}))
     }
+    #[cfg(test)]
     async fn tool(&self, params: &Value) -> Result<Value> {
+        self.tool_owned(params, None).await
+    }
+    async fn tool_owned(&self, params: &Value, owner: Option<&agent_runtime::Scope>) -> Result<Value> {
         let (method, args) = agent_tools::operation(params)?;
-        let result = self.workspace_operation(method, args).await?;
+        if let Some(owner) = owner { owner.admit(|| Ok(()))?; }
+        let operation = self.workspace_operation_owned(method, args, owner);
+        let result = if let Some(owner) = owner {
+            tokio::select! {
+                biased;
+                reason = owner.cancelled() => bail!("{}", reason.reason()),
+                result = operation => result?,
+            }
+        } else { operation.await? };
         if method != "operation.start" {
             return Ok(result);
         }
@@ -199,6 +229,9 @@ impl Studio {
     }
 
     async fn workspace_operation(&self, method: &str, params: Value) -> Result<Value> {
+        self.workspace_operation_owned(method, params, None).await
+    }
+    async fn workspace_operation_owned(&self, method: &str, params: Value, owner: Option<&agent_runtime::Scope>) -> Result<Value> {
         match method {
             "workspace.browse" | "workspace.search" | "workspace.changes" | "workspace.diff" => {
                 self.project_files(method, params).await
@@ -221,11 +254,16 @@ impl Studio {
             "evidence.packet" => self.evidence_packet(params).await,
             "workspace.read" => self.workspace.lock().await.read(field(&params, "path")?),
             "workspace.write" => {
-                self.workspace.lock().await.write(
+                let workspace = self.workspace.lock().await;
+                let write = || workspace.write(
                     field(&params, "path")?,
                     field(&params, "source")?,
                     expected_hash(&params)?,
-                )
+                );
+                match owner {
+                    Some(owner) => owner.admit(write),
+                    None => write(),
+                }
             }
             "operation.plan" | "operation.start" => {
                 let path = self.workspace.lock().await.path(field(&params, "path")?)?;
@@ -245,7 +283,10 @@ impl Studio {
                     running < 2,
                     "Two operations are already running; wait or cancel one"
                 );
-                jobs.start(&params, path)
+                match owner {
+                    Some(owner) => jobs.start_owned(&params, path, owner),
+                    None => jobs.start(&params, path),
+                }
             }
             "operation.read" => {
                 let id = &params["id"];

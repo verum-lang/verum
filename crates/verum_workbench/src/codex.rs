@@ -18,6 +18,7 @@ use tokio::{
 use verum_common::{List, Map, Text};
 
 use crate::agent_tools::Role;
+use crate::agent_runtime::{End, Scope, Turns};
 
 struct PendingRequest {
     reply: oneshot::Sender<Result<Value>>,
@@ -33,15 +34,22 @@ pub struct Events {
     // Live provider wire IDs are unique within this transport. Their values are
     // host-issued envelopes identifying the exact occurrence shown for review.
     requests: Map<Text, Value>,
+    scopes: Map<Text, Scope>,
+    executing: Map<Text, Scope>,
+    turns: Turns,
 }
 impl Default for Events {
     fn default() -> Self {
+        let connection = uuid::Uuid::new_v4();
         Self {
-            connection: uuid::Uuid::new_v4(),
+            connection,
             roles: Default::default(),
             next: 0,
             messages: Default::default(),
             requests: Map::new(),
+            scopes: Map::new(),
+            executing: Map::new(),
+            turns: Turns::new(connection),
         }
     }
 }
@@ -68,6 +76,9 @@ impl Events {
             .retain(|_, entry| entry["message"]["params"]["threadId"] != thread);
         if let Some(previous) = self.roles.get_mut(thread) {
             *previous = None;
+            self.turns.retire(thread);
+            self.scopes.retain(|_, scope| scope.identity().conversation != thread);
+            self.executing.retain(|_, scope| scope.identity().conversation != thread);
             bail!("Provider reused a conversation ID; its authorizations have been revoked");
         }
         self.can_start_thread()?;
@@ -88,15 +99,18 @@ impl Events {
                     || pending["message"]["params"]["threadId"] == params["threadId"])
             {
                 self.requests.remove(&key);
+                if let Some(scope) = self.scopes.remove(&key) { scope.end(End::Resolved); }
             }
+            if let Some(scope) = self.executing.get(&key)
+                && (params.get("threadId").is_none()
+                    || params["threadId"] == scope.identity().conversation.as_str())
+                && let Some(scope) = self.executing.remove(&key)
+            { scope.end(End::Resolved); }
         } else if message["method"] == "turn/completed"
             && let (Some(thread), Some(turn)) =
                 (params["threadId"].as_str(), params["turn"]["id"].as_str())
         {
-            self.requests.retain(|_, entry| {
-                let owner = &entry["message"]["params"];
-                owner["threadId"] != thread || owner["turnId"] != turn
-            });
+            self.end_turn(thread, turn, End::Completed)?;
         }
         let seq = self.next + 1;
         let mut entry = json!({"seq":seq,"message":message});
@@ -113,10 +127,11 @@ impl Events {
             );
             let key: Text = id.to_string().into();
             ensure!(
-                self.requests.len() < 64 && !self.requests.contains_key(&key),
+                self.requests.len() + self.executing.len() < 64
+                    && !self.requests.contains_key(&key) && !self.executing.contains_key(&key),
                 "Invalid pending provider request"
             );
-            entry["reviewId"] = json!(uuid::Uuid::new_v4().to_string());
+            let mut reviewable = true;
             if message["method"] == "item/tool/call"
                 && let Some(role) = params["threadId"]
                     .as_str()
@@ -125,9 +140,25 @@ impl Events {
                     .as_str()
                     .and_then(|tool| role.review_kind(tool))
             {
-                entry["reviewKind"] = json!(kind);
+                let thread = params["threadId"].as_str().expect("scoped request");
+                let turn = params["turnId"].as_str().context("Unscoped provider tool call")?;
+                match self.turns.get(thread, turn)?.child() {
+                    Ok(scope) => {
+                        self.scopes.insert(key.clone(), scope);
+                        entry["reviewKind"] = json!(kind);
+                    }
+                    Err(_) => {
+                        // Calls already in the stdout pipe can arrive after a
+                        // local interrupt. Retain the event, never its authority.
+                        reviewable = false;
+                        entry["reviewExpired"] = json!(true);
+                    }
+                }
             }
-            self.requests.insert(key, entry.clone());
+            if reviewable {
+                entry["reviewId"] = json!(uuid::Uuid::new_v4().to_string());
+                self.requests.insert(key, entry.clone());
+            }
         }
         self.next = seq;
         if self.messages.len() == 512 {
@@ -178,7 +209,7 @@ impl Events {
         json!({"connectionId":self.connection.to_string(),"cursor":self.next,"events":events,"gap":gap,"pendingReviews":reviews,"recoveredReviews":recovered})
     }
 
-    pub(crate) fn take_review(&mut self, review: &str, thread: Option<&str>) -> Result<Value> {
+    pub(crate) fn take_review(&mut self, review: &str, thread: Option<&str>) -> Result<(Value, Option<Scope>)> {
         let key = self
             .requests
             .iter()
@@ -189,7 +220,33 @@ impl Events {
             })
             .context("This review has expired or belongs to another conversation")?;
         let mut entry = self.requests.remove(&key).context("Review has expired")?;
-        Ok(entry["message"].take())
+        let scope = self.scopes.remove(&key);
+        if let Some(scope) = &scope {
+            scope.admit(|| Ok(()))?;
+            self.executing.insert(key, scope.clone());
+        }
+        Ok((entry["message"].take(), scope))
+    }
+
+    pub(crate) fn finish_review(&mut self, id: &Value, scope: &Scope) -> bool {
+        let key: Text = id.to_string().into();
+        if self.executing.get(&key).is_some_and(|current| current.same(scope)) {
+            self.executing.remove(&key);
+            return scope.admit(|| Ok(())).is_ok();
+        }
+        false
+    }
+
+    pub(crate) fn end_turn(&mut self, thread: &str, turn: &str, reason: End) -> Result<()> {
+        self.turns.end(thread, turn, reason)?;
+        self.requests.retain(|_, entry| {
+            let owner = &entry["message"]["params"];
+            owner["threadId"] != thread || owner["turnId"] != turn
+        });
+        let other = |scope: &Scope| scope.identity().conversation != thread || scope.identity().turn != turn;
+        self.scopes.retain(|_, scope| other(scope));
+        self.executing.retain(|_, scope| other(scope));
+        Ok(())
     }
 }
 pub struct Codex {
@@ -200,9 +257,24 @@ pub struct Codex {
     next: AtomicU64,
     reader: tokio::task::JoinHandle<()>,
     stderr: tokio::task::JoinHandle<()>,
+    turns: Turns,
+}
+struct Transmission<'a> {
+    provider: &'a Codex,
+    complete: bool,
+}
+impl Drop for Transmission<'_> {
+    fn drop(&mut self) {
+        if !self.complete {
+            // Cancellation may have interrupted a frame between writes.
+            self.provider.turns.disconnect();
+            self.provider.reader.abort();
+        }
+    }
 }
 impl Drop for Codex {
     fn drop(&mut self) {
+        self.turns.disconnect();
         let _ = self.child.start_kill();
         self.reader.abort();
         self.stderr.abort();
@@ -250,6 +322,7 @@ impl Codex {
         let stderr = child.stderr.take().context("Codex stderr")?;
         let pending: Pending = Arc::new(Mutex::new(Map::new()));
         let events = Arc::new(Mutex::new(Events::default()));
+        let turns = events.lock().await.turns.clone();
         let responses = pending.clone();
         let notifications = events.clone();
         let reader = tokio::spawn(async move {
@@ -285,9 +358,12 @@ impl Codex {
                     break;
                 };
                 if message.get("method").is_none() {
-                    if let Some(id) = message["id"].as_u64()
-                        && let Some(request) = responses.lock().await.remove(&id)
-                    {
+                    // Release the pending-request lock before registration awaits
+                    // the event journal. Response delivery takes the other order.
+                    let request = if let Some(id) = message["id"].as_u64() {
+                        responses.lock().await.remove(&id)
+                    } else { None };
+                    if let Some(request) = request {
                         // Install the role in wire order, before a following tool call
                         // can enter the approval journal. A cancelled start grants nothing.
                         let result = if let Some(role) = request.starting
@@ -325,7 +401,10 @@ impl Codex {
             }
             responses.lock().await.clear();
             let mut events = notifications.lock().await;
+            events.turns.disconnect();
             events.requests.clear();
+            events.scopes.clear();
+            events.executing.clear();
             let _ = events.push(json!({"method":"studio/disconnected","params":{"message":"Codex disconnected. Check CLI version and reconnect."}}));
         });
         let stderr_task = tokio::spawn(async move {
@@ -340,6 +419,7 @@ impl Codex {
             next: AtomicU64::new(1),
             reader,
             stderr: stderr_task,
+            turns,
         };
         client.request("initialize",json!({"clientInfo":{"name":"verum_studio","title":"Verum Studio","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}})).await?;
         client
@@ -350,10 +430,23 @@ impl Codex {
     pub async fn send(&self, value: Value) -> Result<()> {
         let mut bytes = serde_json::to_vec(&value)?;
         bytes.push(b'\n');
-        let mut writer = self.writer.lock().await;
-        writer.write_all(&bytes).await?;
-        writer.flush().await?;
-        Ok(())
+        let write = async {
+            let mut writer = self.writer.lock().await;
+            let mut transmission = Transmission { provider: self, complete: false };
+            writer.write_all(&bytes).await?;
+            writer.flush().await?;
+            transmission.complete = true;
+            Ok::<_, anyhow::Error>(())
+        };
+        let result = tokio::time::timeout(Duration::from_secs(5), write)
+            .await.context("Provider stopped accepting input").and_then(|result| result);
+        if result.is_err() {
+            // A partial JSON frame cannot be retried on the same connection.
+            self.turns.disconnect();
+            self.reader.abort();
+            self.pending.lock().await.clear();
+        }
+        result
     }
     pub(crate) async fn start_thread(&self, role: Role, params: Value) -> Result<Value> {
         self.events.lock().await.can_start_thread()?;
@@ -435,6 +528,48 @@ mod review_tests {
             .to_owned()
     }
 
+    #[tokio::test]
+    async fn terminal_turns_expire_execution_and_cannot_be_resurrected() {
+        let mut events = Events::default();
+        events.register_thread("author", Role::Author).unwrap();
+        events.push(call("author", "first.vr")).unwrap();
+        let (_, scope) = events.take_review(&ticket(&events, "author"), Some("author")).unwrap();
+        let scope = scope.unwrap();
+        events.end_turn("author", "turn", End::Interrupted).unwrap();
+        assert!(matches!(scope.cancelled().await, End::Interrupted));
+        assert!(!events.finish_review(&json!(7), &scope));
+        events.push(call("author", "late.vr")).unwrap();
+        let expired = events.read(0, Some("author"));
+        assert_eq!(expired["pendingReviews"], json!([]));
+        let last = expired["events"].as_array().unwrap().last().unwrap();
+        assert_eq!(last["reviewExpired"], true);
+        assert!(last.get("reviewId").is_none());
+        let mut fresh = call("author", "new.vr");
+        fresh["params"]["turnId"] = json!("new-turn");
+        events.push(fresh).unwrap();
+        assert_eq!(events.read(0, Some("author"))["pendingReviews"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn withdrawing_one_request_cancels_only_its_execution() {
+        let mut events = Events::default();
+        events.register_thread("author", Role::Author).unwrap();
+        events.push(call("author", "first.vr")).unwrap();
+        let (_, first) = events.take_review(&ticket(&events, "author"), Some("author")).unwrap();
+        let first = first.unwrap();
+        let mut second = call("author", "second.vr");
+        second["id"] = json!(8);
+        events.push(second).unwrap();
+        let (_, second) = events.take_review(&ticket(&events, "author"), Some("author")).unwrap();
+        let second = second.unwrap();
+        events.push(json!({"method":"serverRequest/resolved","params":{"threadId":"author","requestId":7}})).unwrap();
+        assert!(matches!(first.cancelled().await, End::Resolved));
+        assert!(!events.finish_review(&json!(7), &first));
+        assert!(second.admit(|| Ok(())).is_ok());
+        events.turns.disconnect();
+        assert!(matches!(second.cancelled().await, End::Disconnected));
+    }
+
     #[test]
     fn review_authorizes_one_exact_occurrence_in_one_conversation() {
         let mut events = Events::default();
@@ -461,9 +596,11 @@ mod review_tests {
             "source"
         );
         assert_eq!(
-            events.take_review(&first, Some("author")).unwrap()["params"]["arguments"]["path"],
+            events.take_review(&first, Some("author")).unwrap().0["params"]["arguments"]["path"],
             "first.vr"
         );
+        let scope = events.executing.get(&Text::from("7")).unwrap().clone();
+        assert!(events.finish_review(&json!(7), &scope));
         events.push(call("author", "second.vr")).unwrap();
         let second = ticket(&events, "author");
         assert_ne!(first, second);
@@ -488,7 +625,7 @@ mod review_tests {
         events.push(call("unregistered", "current.vr")).unwrap();
         let fresh = ticket(&events, "unregistered");
         assert_eq!(
-            events.take_review(&fresh, Some("unregistered")).unwrap()["params"]["arguments"]["path"],
+            events.take_review(&fresh, Some("unregistered")).unwrap().0["params"]["arguments"]["path"],
             "current.vr"
         );
     }
