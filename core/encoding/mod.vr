@@ -29,7 +29,6 @@ public module jcs;
 public module json_patch;
 
 // Re-exports — JSON
-public mount .json.Json;
 public mount .json.JsonValue;
 public mount .json.JsonError;
 public mount .json.JsonErrorKind;
