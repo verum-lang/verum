@@ -106,29 +106,29 @@ pub(crate) fn mount_tree_exports_name(tree: &verum_ast::decl::MountTree, name: &
 }
 
 pub(crate) fn resolve_builtin_meta_type(name: &str) -> Option<Type> {
-    match name {
-        "@builtin_interval" => Some(Type::Interval),
+    use verum_ast::ty::CubicalTypePrimitive;
+    match CubicalTypePrimitive::from_marker(name)? {
+        CubicalTypePrimitive::Interval => Some(Type::Interval),
         // Path / Glue are type *constructors* that already have their own
         // AST sugaring (`TypeKind::PathType`, `TypeKind::DependentApp`) at
         // use sites. The bare marker on the alias RHS is an opaque primitive
         // stand-in — the declared carrier (`Path`, `Glue`) becomes a named
         // type pointing at this opaque marker, and real uses `Path<A>(a, b)`
         // take the sugared AST path and lower to `Type::Eq` / dependent app.
-        "@builtin_path" => Some(Type::Named {
+        CubicalTypePrimitive::Path => Some(Type::Named {
             path: verum_ast::ty::Path::single(verum_ast::Ident::new(
                 verum_common::Text::from("Path"),
                 verum_ast::span::Span::dummy(),
             )),
             args: List::new(),
         }),
-        "@builtin_glue" => Some(Type::Named {
+        CubicalTypePrimitive::Glue => Some(Type::Named {
             path: verum_ast::ty::Path::single(verum_ast::Ident::new(
                 verum_common::Text::from("Glue"),
                 verum_ast::span::Span::dummy(),
             )),
             args: List::new(),
         }),
-        _ => None,
     }
 }
 

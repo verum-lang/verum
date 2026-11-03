@@ -271,3 +271,25 @@ fn alias_field_reads_cannot_manufacture_a_requested_result_type() {
         );
     }
 }
+
+#[test]
+fn cubical_alias_markers_retain_their_kernel_type_identities() {
+    for (marker, expected) in [
+        ("@builtin_interval", "I"),
+        ("@builtin_path", "Path"),
+        ("@builtin_glue", "Glue"),
+    ] {
+        let parsed = parse(&format!("public type Carrier<A>(a: A) is {marker};"));
+        let TypeDeclBody::Alias(target) = &declaration(&parsed, "Carrier").body else {
+            panic!("alias target");
+        };
+        let ty = TypeChecker::new().ast_to_type(target).unwrap();
+        if expected == "I" {
+            assert!(matches!(ty, Type::Interval));
+        } else {
+            assert!(
+                matches!(ty, Type::Named { path, args } if path.last_segment_name() == expected && args.is_empty())
+            );
+        }
+    }
+}
