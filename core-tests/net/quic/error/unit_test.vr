@@ -10,6 +10,15 @@
 // =============================================================================
 
 mount core.net.quic.error.{TransportErrorCode, ApplicationErrorCode, QuicError};
+mount core.net.quic.transport.pump.{PumpError};
+
+@test
+fn test_frame_pump_error_preserves_its_reason() {
+    let error = PumpError.QuicFrame("bad length".to_text());
+    assert(error == PumpError.QuicFrame("bad length".to_text()));
+    assert(!(error == PumpError.QuicFrame("short header".to_text())));
+    assert(!(error == PumpError.Cancelled));
+}
 
 // =============================================================================
 // Section 1: TransportErrorCode wire constants (RFC 9000 §20.1)

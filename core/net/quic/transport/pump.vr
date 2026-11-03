@@ -118,7 +118,7 @@ implement Display for PumpError {
             PumpError.Transport(e)         => f.write_str(f"QUIC pump transport: {e}".as_str()),
             PumpError.Crypto(reason)       => f.write_str(f"QUIC pump crypto: {reason}".as_str()),
             PumpError.Handshake(reason)    => f.write_str(f"QUIC pump handshake: {reason}".as_str()),
-            PumpError.Frame(reason)        => f.write_str(f"QUIC pump frame: {reason}".as_str()),
+            PumpError.QuicFrame(reason)    => f.write_str(f"QUIC pump frame: {reason}".as_str()),
             PumpError.Quic(e)              => f.write_str(f"QUIC pump: {e}".as_str()),
             PumpError.Cancelled            => f.write_str("QUIC pump: cancelled"),
         }
@@ -131,7 +131,7 @@ implement Debug for PumpError {
             PumpError.Transport(e)         => f.write_str(f"Transport({e})".as_str()),
             PumpError.Crypto(reason)       => f.write_str(f"Crypto({reason})".as_str()),
             PumpError.Handshake(reason)    => f.write_str(f"Handshake({reason})".as_str()),
-            PumpError.Frame(reason)        => f.write_str(f"QuicFrame({reason})".as_str()),
+            PumpError.QuicFrame(reason)    => f.write_str(f"QuicFrame({reason})".as_str()),
             PumpError.Quic(e)              => f.write_str(f"Quic({e})".as_str()),
             PumpError.Cancelled            => f.write_str("Cancelled"),
         }
@@ -144,7 +144,7 @@ implement Eq for PumpError {
             (PumpError.Transport(a),   PumpError.Transport(b))   => a == b,
             (PumpError.Crypto(a),      PumpError.Crypto(b))      => a == b,
             (PumpError.Handshake(a),   PumpError.Handshake(b))   => a == b,
-            (PumpError.Frame(a),       PumpError.Frame(b))       => a == b,
+            (PumpError.QuicFrame(a),   PumpError.QuicFrame(b))   => a == b,
             (PumpError.Quic(a),        PumpError.Quic(b))        => a == b,
             (PumpError.Cancelled,      PumpError.Cancelled)      => true,
             _ => false,
@@ -426,7 +426,7 @@ implement ConnectionPump {
 
         // Parse frames + dispatch.
         let frames = decode_all_frames(lp.payload.as_slice())
-            .map_err(|_| PumpError.Frame(Text.from("decode frames (long)")))?;
+            .map_err(|_| PumpError.QuicFrame(Text.from("decode frames (long)")))?;
         // §10.1.1 — idle timer resets on *any* ack-eliciting packet
         // successfully processed.
         let rx_ack_eliciting = any_ack_eliciting(&frames);
@@ -447,7 +447,7 @@ implement ConnectionPump {
         self.connection.loss.spaces[PnSpaceKind.Application.as_index()]
             .on_packet_received(sp.packet_number);
         let frames = decode_all_frames(sp.payload.as_slice())
-            .map_err(|_| PumpError.Frame(Text.from("decode frames (short)")))?;
+            .map_err(|_| PumpError.QuicFrame(Text.from("decode frames (short)")))?;
         let rx_ack_eliciting = any_ack_eliciting(&frames);
         let outcome = dispatch_frames(
             &frames, PnSpaceKind.Application, Instant.now(),
