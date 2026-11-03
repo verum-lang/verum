@@ -187,6 +187,17 @@ impl ExportCandidates {
 }
 
 impl VbcCodegen {
+    /// Source consumers share the AST's implicit-import policy. Publishing the
+    /// private lexical edge avoids cloning complete modules solely to prepend
+    /// the same mount that ordinary file compilation injects.
+    pub(super) fn collect_module_exports(&mut self, owner: &str, module: &verum_ast::Module) {
+        self.collect_callable_exports(owner, &module.items);
+        if let Some(path) = verum_ast::prelude::implicit_prelude_path(module) {
+            self.source_exports.modules.entry(owner.to_owned()).or_default()
+                .lexical_globs.insert(WrittenMountPath(path.into()));
+        }
+    }
+
     /// Select a written import once. Explicit relative/cog paths and the
     /// source's root-qualified paths already identify their namespace; only
     /// an unqualified module head participates in lexical namespace lookup.

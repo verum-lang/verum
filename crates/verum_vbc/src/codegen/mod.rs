@@ -8868,7 +8868,7 @@ impl VbcCodegen {
             self.config.module_name = (*parent).to_owned();
             let owner = self.source_file_owner(module, &self.config.module_name)
                 .unwrap_or_else(|| self.source_module_root().to_owned());
-            self.collect_callable_exports(&owner, &module.items);
+            self.collect_module_exports(&owner, module);
         }
         // Protocols first: a blanket impl monomorphises onto a concrete
         // implementor at the moment that implementor is collected, so
