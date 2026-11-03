@@ -1,0 +1,55 @@
+// HTTP/3 ↔ Weft value conversion, independent of the server transport.
+module core.net.weft.h3_conversion;
+
+mount core.net.h3.request.{H3Request, H3Method, H3Response};
+mount core.net.http.{Method, Headers, Response};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.error.{WeftError, IntoResponse};
+
+/// Convert decoded HTTP/3 data to Weft's transport-independent request.
+/// Unsupported methods are refused; no other method is substituted.
+public fn h3_to_weft_request(req: H3Request) -> Result<WeftRequest, WeftError> {
+    let method = match req.method {
+        H3Method.Get     => Method.Get,
+        H3Method.Post    => Method.Post,
+        H3Method.Put     => Method.Put,
+        H3Method.Delete  => Method.Delete,
+        H3Method.Patch   => Method.Patch,
+        H3Method.Head    => Method.Head,
+        H3Method.Options => Method.Options,
+        H3Method.Connect => Method.Connect,
+        H3Method.Other(t) => {
+            // H3Method preserves TRACE in its extension-token arm.
+            if t == "TRACE" { Method.Trace }
+            else { return Result.Err(WeftError.MethodNotAllowed); }
+        },
+    };
+    let (path, query) = match req.path.split_once(&"?") {
+        Maybe.Some((path, query)) => (path, Maybe.Some(query)),
+        Maybe.None => (req.path.clone(), Maybe.None),
+    };
+    let mut headers = Headers.with_capacity(req.headers.len() + 1);
+    for header in &req.headers {
+        headers.append(&header.name, &header.value);
+    }
+    // HTTP/3 carries authority in a pseudo-header, outside regular headers.
+    headers.set(&"host", &req.authority);
+    // H3Request has no transport peer address. The constructor preserves
+    // that absence until the transport supplies one with with_peer().
+    Result.Ok(WeftRequest.new(method, path, query, headers, req.body))
+}
+
+/// Preserve response status, repeated headers and body in their source order.
+public fn weft_to_h3_response(resp: Response) -> H3Response {
+    let mut response = H3Response.status(resp.status.code() as UInt16);
+    for (name, value) in resp.headers.iter() {
+        response = response.with_header(name.clone(), value.clone());
+    }
+    response.body = resp.body;
+    response
+}
+
+/// Use the same public error response policy for every transport.
+public fn error_to_h3_response(error: WeftError) -> H3Response {
+    weft_to_h3_response(error.into_response())
+}

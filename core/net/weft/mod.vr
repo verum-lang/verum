@@ -48,6 +48,7 @@ public mount .health.*;
 // the umbrella convention of "import core.net.weft.* and get
 // everything". Adding the missing forwards completes the surface.
 public mount .h3.*;              // HTTP/3 server adapter
+public mount .h3_conversion.*;   // Transport-independent request/response conversion
 public mount .h3_priority.*;     // RFC 9218 priority extractor
 public mount .json_extractor.*;  // Json<T> handler-arg extractor
 public mount .metrics_otlp.*;    // OTLP/HTTP push exporter

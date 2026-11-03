@@ -56,25 +56,14 @@
 module core.net.weft.h3;
 
 mount core.collections.list.{List};
-mount core.collections.map.{Map};
-mount core.net.addr.{SocketAddr};
-mount core.net.http.{Method, StatusCode, Headers, Response};
-mount core.net.h3.server.{H3Server, ServerOptions, H3ServerError, H3Handler};
-// `H3Status` was mounted here and is declared NOWHERE in core/;
-// `H3Response.status` takes a plain `UInt16` (`h3/request.vr:148`), so
-// every `H3Status.X` below fabricated a variant that went out on the
-// wire in place of a status code. (T1302)
-mount core.net.h3.request.{H3Request, H3Response, H3Method};
-mount core.net.h3.error.{H3Error};
-mount core.net.tls13.cipher_suite.{CipherSuite};
-mount core.net.tls13.named_group.{NamedGroup};
-mount core.net.tls13.handshake.dhe_pool.{DhePool, LocalDhePool};
+mount core.net.h3.server.{H3Server, ServerOptions, H3Handler};
+mount core.net.h3.request.{H3Request, H3Response};
 mount core.net.tls13.handshake.server_sm.{CertSigner};
 mount core.async.cancellation.{CancellationToken};
-mount core.async.task;
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
-mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.handler.{Handler};
 mount core.net.weft.error.{WeftError};
+mount core.net.weft.h3_conversion.{h3_to_weft_request, weft_to_h3_response, error_to_h3_response};
 
 // =============================================================================
 // WarpQuicConfig — §6.11 PQ-hybrid defaults wrapped over warp ServerOptions
@@ -98,9 +87,7 @@ implement WarpQuicConfig {
         cert_chain: List<List<Byte>>,
         signer: Heap<dyn CertSigner>,
     ) -> WarpQuicConfig {
-        let inner = ServerOptions.from_cert(cert_chain, signer)
-            .with_alpn([core.net.h3.server.default_alpn()])
-            .with_idle_timeout(core.time.Duration.from_secs(30));
+        let inner = ServerOptions.from_cert(cert_chain, signer);
         WarpQuicConfig {
             inner: inner,
             max_concurrent_requests: 10_000,
@@ -182,35 +169,15 @@ implement<H: Handler + Send + Sync + 'static> WarpH3Server<H> {
         let in_flight: Shared<AtomicInt> = Shared.new(AtomicInt.new(0));
         let max = config.max_concurrent_requests;
 
-        // The accept loop wraps H3Server.run_with — each accepted
-        // request becomes a spawn into the WarpH3Server's nursery
-        // (caller's nursery propagates).
-        let app_outer = app.clone();
-        let tok_outer = token.clone();
-        let drain_outer = draining.clone();
-        let in_flight_outer = in_flight.clone();
-
-        let serve_result = inner.run_with(|req: H3Request| async move {
-            // Backpressure cap.
-            let cur = in_flight_outer.fetch_add(1, MemoryOrdering.AcqRel) + 1;
-            if cur > max {
-                in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
-                return H3Response.status(503)
-                    .text(f"server saturated");
-            }
-            // Drain rejection — once shutdown begins, new requests
-            // get a courteous 503 instead of being silently dropped.
-            if drain_outer.load(MemoryOrdering.Acquire) {
-                in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
-                return H3Response.status(503)
-                    .header(&f"connection", &f"close")
-                    .text(f"server draining");
-            }
-
-            let response = dispatch_one_request(req, &*app_outer, &tok_outer).await;
-            in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
-            response
-        }).await;
+        let handler = Heap.new(WarpRequestHandler {
+            app: app,
+            token: token,
+            draining: draining,
+            in_flight: in_flight.clone(),
+            max: max,
+        });
+        let mut server = inner;
+        let serve_result = server.run_with(handler).await;
 
         // Drain wait — poll-based.
         let mut elapsed: Int = 0;
@@ -226,6 +193,33 @@ implement<H: Handler + Send + Sync + 'static> WarpH3Server<H> {
     }
 }
 
+// One protocol adapter owns the per-request state passed to H3Server.
+type WarpRequestHandler<H> is {
+    app: Heap<H>,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+    in_flight: Shared<AtomicInt>,
+    max: Int,
+};
+
+type ActiveH3Request is { count: Shared<AtomicInt> };
+implement Drop for ActiveH3Request {
+    fn drop(&mut self) {
+        self.count.fetch_sub(1, MemoryOrdering.AcqRel);
+    }
+}
+
+implement<H: Handler + Send + Sync + 'static> H3Handler for WarpRequestHandler<H> {
+    async fn serve(&self, req: H3Request) -> H3Response {
+        let active = self.in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+        let _lease = ActiveH3Request { count: self.in_flight.clone() };
+        if active > self.max || self.draining.load(MemoryOrdering.Acquire) {
+            return error_to_h3_response(WeftError.Overloaded);
+        }
+        dispatch_one_request(req, &*self.app, &self.token).await
+    }
+}
+
 // =============================================================================
 // dispatch_one_request — convert H3Request → WeftRequest, run the
 // Handler stack, convert WeftResponse → H3Response.
@@ -236,7 +230,10 @@ async fn dispatch_one_request<H: Handler>(
     app: &H,
     token: &CancellationToken,
 ) -> H3Response {
-    let weft_req = h3_to_weft_request(req);
+    let weft_req = match h3_to_weft_request(req) {
+        Result.Ok(request) => request,
+        Result.Err(error) => return error_to_h3_response(error),
+    };
 
     // Cancellation propagates to the user handler's first await
     // boundary if the server is shutting down mid-request.
@@ -248,114 +245,6 @@ async fn dispatch_one_request<H: Handler>(
 
     match result {
         Result.Ok(weft_resp) => weft_to_h3_response(weft_resp),
-        Result.Err(err)      => err.into_h3_response(),
-    }
-}
-
-fn h3_to_weft_request(req: H3Request) -> WeftRequest {
-    // Map H3Method → Method (HTTP-1.1 enum used by Weft).
-    let method = match req.method() {
-        H3Method.Get     => Method.Get,
-        H3Method.Post    => Method.Post,
-        H3Method.Put     => Method.Put,
-        H3Method.Delete  => Method.Delete,
-        H3Method.Patch   => Method.Patch,
-        H3Method.Head    => Method.Head,
-        H3Method.Options => Method.Options,
-        H3Method.Connect => Method.Connect,
-        H3Method.Other(t) => Method.Other(t),
-    };
-
-    let mut headers = Headers.new();
-    let h3_headers = req.headers();
-    let mut i: Int = 0;
-    while i < h3_headers.len() {
-        // Skip pseudo-headers (`:method`, `:path`, `:authority`,
-        // `:scheme`) — Weft consumes them via the typed extractors.
-        let name_text = h3_headers[i].name.clone();
-        if !name_text.starts_with(&f":") {
-            headers.append(name_text, h3_headers[i].value.clone());
-        }
-        i = i + 1;
-    }
-
-    // `WeftRequest` declares seven fields (see core/net/weft/handler.vr).
-    // This literal used to name `query` and `peer`, which do not exist on it
-    // — the type has `raw_query` and `peer_addr` — and omitted `path_params`
-    // entirely. The positional slots were guessed (FIELD-GUESS-HARD-1), so
-    // the query string and the peer address landed in the wrong fields on
-    // every HTTP/3 request.
-    //
-    // KNOWN, WIDER, NOT FIXED HERE: `H3Request` has no accessor methods at
-    // all — `implement H3Request` (core/net/h3/request.vr:92) provides only
-    // `get`, `post`, `with_header` and `to_field_list`. The `req.path()`,
-    // `req.query()`, `req.body_bytes()` and `req.peer_addr()` calls below
-    // therefore name a surface that does not exist, and `H3Request` has no
-    // peer address to give in the first place. Correcting the field names is
-    // necessary but not sufficient; the accessor surface is its own defect.
-    WeftRequest {
-        method:      method,
-        path:        req.path(),
-        raw_query:   req.query(),
-        headers:     headers,
-        body:        req.body_bytes(),
-        path_params: Map.new(),
-        peer_addr:   req.peer_addr(),
-    }
-}
-
-fn weft_to_h3_response(resp: Response) -> H3Response {
-    // `H3Response.status` already takes a UInt16, so the conversion the
-    // absent `H3Status.from_u16` promised is the identity.
-    let mut h3 = H3Response.status(resp.status.as_u16());
-
-    // Translate Weft headers to H3 trailing headers in emission order.
-    let names = resp.headers.names();
-    let mut i: Int = 0;
-    while i < names.len() {
-        let name = &names[i];
-        let values = resp.headers.get_all(name);
-        let mut j: Int = 0;
-        while j < values.len() {
-            h3 = h3.header(name, &values[j]);
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-
-    h3.bytes(resp.body)
-}
-
-// INHERENT extension — every WeftError gets a non-degenerate H3 response.
-// Mirrors the existing WeftError → Response surface used by the legacy
-// http3.vr adapter.
-//
-// This block used to read `implement IntoResponse for WeftError`, which was
-// a false protocol claim on two counts (T0327). `IntoResponse`
-// (core/net/weft/error.vr:24) requires `into_response(self) -> Response`;
-// this block defines `into_h3_response(self) -> H3Response` — a different
-// method with a different return type — so it never implemented the protocol
-// it named. And `implement IntoResponse for WeftError` ALREADY exists at
-// core/net/weft/error.vr:189, so the tree carried two impls of one protocol
-// for one type.
-//
-// Nothing moves: the five `.into_response()` call sites were always resolving
-// to the error.vr impl, never to this one, and `into_h3_response` keeps its
-// single caller at :248. An inherent impl is what the author wanted.
-implement WeftError {
-    public fn into_h3_response(self) -> H3Response {
-        // Maps every real WeftError variant (see core.net.weft.error) to its
-        // HTTP/3 status, mirroring the canonical WeftError.status() surface.
-        let status = match self {
-            WeftError.BadRequest(_)         => 400_u16,
-            WeftError.RouteNotFound         => 404_u16,
-            WeftError.MethodNotAllowed      => 405_u16,
-            WeftError.ExtractionRejected(_) => 400_u16,
-            WeftError.Timeout               => 504_u16,
-            WeftError.Overloaded            => 503_u16,
-            WeftError.UpstreamIo(_)         => 502_u16,
-            WeftError.Internal(_)           => 500_u16,
-        };
-        H3Response.status(status).text(self.to_text())
+        Result.Err(err)      => error_to_h3_response(err),
     }
 }

@@ -138,3 +138,58 @@ fn test_weft_category_disjoint_security_vs_client() {
 fn test_weft_category_disjoint_upstream_vs_permanent() {
     assert(!(WeftErrorCategory.ErrUpstream == WeftErrorCategory.ErrPermanent));
 }
+
+mount core.net.h3.request.{H3Request, H3Method};
+mount core.net.weft.h3_conversion.{h3_to_weft_request, weft_to_h3_response};
+mount core.net.weft.error.{WeftError};
+mount core.net.http.{Method, Response};
+
+@test
+fn h3_request_conversion_preserves_target_headers_and_body() {
+    let mut request = H3Request.post("registry.example", "/cogs?tag=a?b", [1, 2, 3]);
+    request = request.with_header("x-tag", "first").with_header("x-tag", "second");
+    let converted = h3_to_weft_request(request).unwrap();
+    assert(converted.method is Method.Post);
+    assert_eq(converted.path, "/cogs");
+    assert_eq(converted.raw_query.unwrap(), "tag=a?b");
+    assert_eq(converted.headers.get(&"host").unwrap(), &"registry.example");
+    assert_eq(converted.headers.get_all(&"x-tag").len(), 2);
+    assert_eq(converted.headers.get_all(&"x-tag")[1], &"second");
+    assert_eq(converted.body.len(), 3);
+    assert(converted.peer_addr is Maybe.None);
+}
+
+@test
+fn h3_request_conversion_distinguishes_an_empty_query() {
+    let converted = h3_to_weft_request(H3Request.get("registry.example", "/cogs?")).unwrap();
+    assert_eq(converted.path, "/cogs");
+    assert_eq(converted.raw_query.unwrap(), "");
+}
+
+@test
+fn h3_request_conversion_preserves_trace_and_refuses_unknown_methods() {
+    let mut request = H3Request.get("registry.example", "/");
+    request.method = H3Method.Other("TRACE");
+    assert(h3_to_weft_request(request).unwrap().method is Method.Trace);
+    for method in ["get", "BREW", "POST "] {
+        let mut request = H3Request.get("registry.example", "/");
+        request.method = H3Method.Other(method);
+        assert(h3_to_weft_request(request).unwrap_err() is WeftError.MethodNotAllowed);
+    }
+}
+
+@test
+fn h3_response_conversion_preserves_status_header_order_and_body() {
+    let mut response = Response.new(StatusCode.new(201));
+    response.headers.append(&"set-cookie", &"a=1");
+    response.headers.append(&"x-tag", &"middle");
+    response.headers.append(&"set-cookie", &"b=2");
+    response.body = [1, 2, 3];
+    let converted = weft_to_h3_response(response);
+    assert_eq(converted.status, 201_u16);
+    assert_eq(converted.headers.len(), 3);
+    assert_eq(converted.headers[1].name, "x-tag");
+    assert_eq(converted.headers[2].value, "b=2");
+    assert_eq(converted.body.len(), 3);
+    assert_eq(converted.trailers.len(), 0);
+}
