@@ -87,7 +87,7 @@ mount core.time.{Duration};
 mount core.sync.{Mutex, AtomicInt, AtomicBool};
 
 mount sys.io_engine.{
-    IOEngine, CompletionOp, CompletionResult, Duration as IoDuration,
+    IOEngine, CompletionOp, CompletionResult, EngineDuration,
     create_io_engine, DEFAULT_SQ_ENTRIES, WAKE_TOKEN,
     EngineIoError, POLLIN, POLLOUT,
 };
@@ -2018,14 +2018,14 @@ implement AsyncRuntime {
                     } else {
                         one_ms_ns
                     };
-                    Maybe.Some(IoDuration.from_micros((waitable_ns / 1_000) as Int))
+                    Maybe.Some(EngineDuration.from_micros(waitable_ns / 1_000))
                 }
                 Maybe.Some(_) => {
                     // Timer already expired — return immediately so
                     // the caller can drain it on the next iteration.
-                    Maybe.Some(IoDuration.from_millis(0))
+                    Maybe.Some(EngineDuration.from_millis(0))
                 }
-                Maybe.None => Maybe.Some(IoDuration.from_millis(1)),
+                Maybe.None => Maybe.Some(EngineDuration.from_millis(1)),
             };
 
             match engine_wait_active(self.io_engine_ptr, &mut results, timeout) {
