@@ -440,3 +440,26 @@ fn an_inline_facade_imports_its_reexported_type_from_a_separate_header() {
         Some("graph.entities")
     );
 }
+
+#[test]
+fn a_context_or_protocol_import_cannot_be_claimed_by_a_foreign_constructor() {
+    for declaration in [
+        "public context Storage { fn read() -> Int; }",
+        "public protocol Storage { fn read(&self) -> Int; }",
+    ] {
+        for reverse in [false, true] {
+            let surface = format!("module catalog.surface; {declaration}");
+            let caller = r#"
+                module catalog.client;
+                mount catalog.surface.Storage as Capability;
+                type Command is Idle | Storage(Int);
+                public fn probe() -> Int { 73 }
+            "#;
+            let module = compile_mounted(caller, &surface, reverse)
+                .expect("the named interface exists at its declared path");
+            assert!(module.find_function_by_name("catalog.client.probe").is_some());
+            assert!(module.find_function_by_name("catalog.surface.Storage").is_none());
+            assert!(module.find_function_by_name("catalog.client.Capability").is_none());
+        }
+    }
+}

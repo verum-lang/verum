@@ -58,7 +58,7 @@ pub(super) struct CallableExports {
 #[derive(Default)]
 struct ModuleExports {
     declarations: HashMap<String, BTreeSet<String>>,
-    values: HashSet<String>,
+    non_functions: HashSet<String>,
     visibility: HashMap<String, verum_ast::Visibility>,
     named: HashMap<String, BTreeSet<String>>,
     globs: BTreeSet<String>,
@@ -69,14 +69,14 @@ struct ModuleExports {
 #[derive(Default)]
 struct ExportCandidates {
     declarations: BTreeSet<String>,
-    values: HashSet<String>,
+    non_functions: HashSet<String>,
     inaccessible: bool,
 }
 
 impl ExportCandidates {
     fn nominal(&self) -> Option<&String> {
         let name = self.declarations.first()?;
-        (self.declarations.len() == 1 && self.values.contains(name)).then_some(name)
+        (self.declarations.len() == 1 && self.non_functions.contains(name)).then_some(name)
     }
 }
 
@@ -87,8 +87,8 @@ impl VbcCodegen {
             if !self.should_compile_item(item) {
                 continue;
             }
-            let mut value = |name: &verum_ast::Ident, visibility: &verum_ast::Visibility| {
-                exports.values.insert(name.name.to_string());
+            let mut non_function = |name: &verum_ast::Ident, visibility: &verum_ast::Visibility| {
+                exports.non_functions.insert(name.name.to_string());
                 exports
                     .visibility
                     .insert(name.name.to_string(), visibility.clone());
@@ -106,14 +106,25 @@ impl VbcCodegen {
                         .insert(format!("{owner}.{name}"));
                 }
                 ItemKind::Type(declaration) => {
-                    value(&declaration.name, &declaration.visibility);
+                    non_function(&declaration.name, &declaration.visibility);
                 }
                 ItemKind::Const(declaration) => {
-                    value(&declaration.name, &declaration.visibility);
+                    non_function(&declaration.name, &declaration.visibility);
                 }
                 ItemKind::Static(declaration) => {
-                    value(&declaration.name, &declaration.visibility);
+                    non_function(&declaration.name, &declaration.visibility);
                 }
+                // These declarations can occupy a named import even when another
+                // module has a function or constructor with the same spelling.
+                ItemKind::Protocol(d) => non_function(&d.name, &d.visibility),
+                ItemKind::Context(d) => non_function(&d.name, &d.visibility),
+                ItemKind::ContextGroup(d) => non_function(&d.name, &d.visibility),
+                ItemKind::Meta(d) => non_function(&d.name, &d.visibility),
+                ItemKind::Predicate(d) => non_function(&d.name, &d.visibility),
+                ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
+                    non_function(&d.name, &d.visibility);
+                }
+                ItemKind::Axiom(d) => non_function(&d.name, &d.visibility),
                 ItemKind::Mount(mount) => {
                     for parts in Self::extract_glob_mount_paths(&mount.tree, &[]) {
                         let path = Self::resolve_module_path_head_in_scope(&parts, owner)
@@ -166,7 +177,7 @@ impl VbcCodegen {
         for (name, targets) in exports.declarations {
             scope.declarations.entry(name).or_default().extend(targets);
         }
-        scope.values.extend(exports.values);
+        scope.non_functions.extend(exports.non_functions);
         scope.visibility.extend(exports.visibility);
         for (alias, targets) in exports.named {
             scope.named.entry(alias).or_default().extend(targets);
@@ -261,7 +272,7 @@ impl VbcCodegen {
                             continue;
                         }
                     }
-                    found.values.insert(path.clone());
+                    found.non_functions.insert(path.clone());
                     found.declarations.insert(path);
                 } else if self.ctx.functions.contains_key(&path) {
                     found.declarations.insert(path);
@@ -296,8 +307,8 @@ impl VbcCodegen {
             }
             if includes_declarations && let Some(targets) = source.declarations.get(name) {
                 found.declarations.extend(targets.iter().cloned());
-            } else if includes_declarations && source.values.contains(name) {
-                found.values.insert(path.clone());
+            } else if includes_declarations && source.non_functions.contains(name) {
+                found.non_functions.insert(path.clone());
                 found.declarations.insert(path);
             } else if let Some(targets) = source.named.get(name) {
                 pending.extend(targets.iter().map(|target| (anchored(target), true)));
@@ -383,7 +394,7 @@ impl VbcCodegen {
     ) -> Result<Option<(String, FunctionInfo)>, String> {
         let ExportCandidates {
             mut declarations,
-            values,
+            non_functions,
             ..
         } = self.source_export_candidates(path, None);
         if declarations.len() > 1 {
@@ -396,7 +407,7 @@ impl VbcCodegen {
             if let Some(info) = self.ctx.lookup_function(&key) {
                 return Ok(Some((key, info.clone())));
             }
-            if values.contains(&key) {
+            if non_functions.contains(&key) {
                 return Ok(None);
             }
         }
