@@ -29118,7 +29118,7 @@ impl VbcCodegen {
             // Static method call: OSError.new(...) or instance method call returning Maybe
             ExprKind::MethodCall { .. } => self.method_expression_types(expr).name.map(|name| name.to_string()),
 
-            ExprKind::Call { func, args, .. } => {
+            ExprKind::Call { func, args, type_args } => {
                 if let ExprKind::Path(path) = &func.kind {
                     if path.segments.len() == 1
                         && let PathSegment::Name(ident) = &path.segments[0]
@@ -29126,9 +29126,12 @@ impl VbcCodegen {
                         let name = &ident.name;
                         // A call's result belongs to its declaration in the caller's
                         // source module, including when a sibling has the same arity.
-                        if let Some(func_info) =
+                        let constructor = self.select_colliding_constructor(
+                            name, Some(args.len()), self.ctx.current_return_type_name.as_deref(), func.span,
+                        ).ok()?;
+                        if let Some(func_info) = constructor.or_else(||
                             self.ctx.lookup_function_with_arity_in_scope(name, args.len())
-                        {
+                        ) {
                             // For variant constructors (Some, Ok, Err), try to infer
                             // generic args from constructor arguments BEFORE falling back
                             // to bare return_type_name. This way Some(node) → "Maybe<Node>"
@@ -29200,6 +29203,14 @@ impl VbcCodegen {
                             // — those paths populated the variant payload
                             // type correctly, hence the 2-of-3 split where
                             // explicit-annotation tests passed.
+                            // A result is declared in the callee's scope. Transport the
+                            // instantiated declaration before interpreting display names
+                            // in a caller that may shadow or never mount those types.
+                            if let Some(result) = self.source_call_result(func_info, type_args, args, None, 0)
+                                && let Some(name) = self.declaration_type_name(&result, 0)
+                            {
+                                return Some(name);
+                            }
                             if let Some(ref ret_type) = func_info.return_type_name {
                                 // T1506: a bare generic return (`identity<T>
                                 // -> T`, `replace<T> -> T`) needs the same

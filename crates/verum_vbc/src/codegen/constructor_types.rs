@@ -21,7 +21,7 @@ impl VbcCodegen {
                 .iter()
                 .find_map(|(name, actual)| (*actual == id.0).then(|| name.clone())),
             TypeRef::Instantiated { base, args } => {
-                let owner = self.type_ref_to_field_name(&TypeRef::Concrete(*base))?;
+                let owner = self.render_field_type_ref(&TypeRef::Concrete(*base), true)?;
                 let args = args
                     .iter()
                     .map(|arg| self.declaration_type_name(arg, depth + 1))
@@ -46,7 +46,7 @@ impl VbcCodegen {
                     .collect::<Option<Vec<_>>>()?
                     .join(", ")
             )),
-            _ => self.type_ref_to_field_name(ty),
+            _ => self.render_field_type_ref(ty, true),
         }
     }
 
