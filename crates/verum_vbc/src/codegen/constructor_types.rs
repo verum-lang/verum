@@ -301,6 +301,9 @@ impl VbcCodegen {
             return None;
         }
         let expr = Self::normalized_place(expr);
+        if let Some(result) = self.lexical_call_result(expr) {
+            return result;
+        }
         if let Some(ty) = self.constructor_declaration(expr, expected, None, depth + 1) {
             return Some(ty);
         }
@@ -428,6 +431,21 @@ impl VbcCodegen {
         Some(())
     }
 
+    /// An in-scope callee shadows every module declaration, even when its
+    /// result cannot be recovered. The outer option records that distinction.
+    pub(super) fn lexical_call_result(&self, expr: &Expr) -> Option<Option<TypeRef>> {
+        let ExprKind::Call { func, .. } = &expr.kind else { return None };
+        let ExprKind::Path(path) = &Self::normalized_place(func).kind else { return None };
+        let name = path.as_ident()?;
+        self.ctx.lookup_var(name.as_str())?;
+        let result = self.declared_expression_result(func, None, 0, 0).and_then(|ty| match ty {
+            TypeRef::Function { return_type, .. } => Some(*return_type),
+            TypeRef::Generic(id) => self.ctx.registers.callable_bound_results.get(&id).cloned(),
+            _ => None,
+        });
+        Some(result)
+    }
+
     pub(super) fn source_call_declaration(
         &self,
         expr: &Expr,
@@ -436,6 +454,9 @@ impl VbcCodegen {
     ) -> Option<TypeRef> {
         if depth >= 64 {
             return None;
+        }
+        if let Some(result) = self.lexical_call_result(expr) {
+            return result;
         }
         let (name, type_args, args) = match &expr.kind {
             ExprKind::Call {

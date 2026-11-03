@@ -81,6 +81,76 @@ fn sibling_private_functions_keep_their_call_and_result_owners() {
 }
 
 #[test]
+fn a_callback_bound_owns_its_result_in_an_imported_protocol_default() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for module in ["rules", "consumer", "decoy"] {
+        fs::create_dir_all(core.join(module)).unwrap();
+    }
+    fs::write(core.join("mod.vr"), "module core; public module rules; public module consumer; public module decoy;").unwrap();
+    fs::write(core.join("rules/mod.vr"), r#"
+        module core.rules;
+        public type Decision is Smaller | Equal | Larger;
+        public type Walk is protocol {
+            type Item;
+            fn next(&mut self) -> Self.Item;
+            fn check<F: fn(&Self.Item, &Self.Item) -> Decision>(mut self, cmp: F) -> Bool {
+                let a = self.next();
+                let b = self.next();
+                match cmp(&a, &b) { Decision.Larger => false, _ => true }
+            }
+        }
+    "#).unwrap();
+    fs::write(core.join("consumer/mod.vr"), r#"
+        module core.consumer;
+        mount core.rules.Walk;
+        public type Walker is { item: Int };
+        implement Walk for Walker {
+            type Item = Int;
+            fn next(&mut self) -> Int { self.item }
+        }
+    "#).unwrap();
+    fs::write(core.join("decoy/mod.vr"), r#"
+        module core.decoy;
+        public fn cmp(a: &Int, b: &Int) -> Int { 42 }
+        public fn callback(a: &Int, b: &Int) -> Int { 43 }
+    "#).unwrap();
+    let app = r#"
+        module app;
+        mount core.consumer.Walker;
+        mount core.rules.Decision;
+        fn main() -> Int {
+            let low = Walker { item: 1 };
+            let high = Walker { item: 2 };
+            if low.check(|a, b| Decision.Smaller) && !high.check(|a, b| Decision.Larger) {
+                17
+            } else { 0 }
+        }
+    "#;
+
+    let rules_path = core.join("rules/mod.vr");
+    let inline = fs::read_to_string(&rules_path).unwrap();
+    let predicate = inline
+        .replace("check<F: fn(&Self.Item, &Self.Item) -> Decision>", "check<F>")
+        .replace("-> Bool {", "-> Bool where type F = fn(&Self.Item, &Self.Item) -> Decision {")
+        .replace("match cmp(", "let callback = cmp; match callback(");
+    for valid in [inline, predicate] {
+        fs::write(&rules_path, &valid).unwrap();
+        assert_eq!(execute(&bootstrap(&core), app), 17);
+        for wrong_variant in ["Wrong.Larger", "Wrong.No"] {
+            let invalid = valid.replace("Decision.Larger =>", &format!("{wrong_variant} =>"));
+            fs::write(&rules_path, invalid + "\npublic type Wrong is No | Larger;").unwrap();
+            let error = try_bootstrap(&core).err().expect("foreign enum pattern must fail");
+            let diagnostic = format!("{error:#}");
+            assert!(diagnostic.contains(&format!(
+                "no declared tag for variant pattern '{}' on Some(\"core.rules.Decision\")",
+                wrong_variant.replace('.', "::")
+            )), "{diagnostic}");
+        }
+    }
+}
+
+#[test]
 fn an_earlier_consumer_cannot_change_a_forward_method_result() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
@@ -260,6 +330,10 @@ public async fn accept(value: &Int) -> Result<(Int, Int), IoError> { AcceptFutur
 }
 
 fn bootstrap(core: &std::path::Path) -> verum_vbc::archive::VbcArchive {
+    try_bootstrap(core).unwrap()
+}
+
+fn try_bootstrap(core: &std::path::Path) -> anyhow::Result<verum_vbc::archive::VbcArchive> {
     let output = core.parent().unwrap().join("runtime.vbca");
     let mut session = Session::new(CompilerOptions {
         input: core.join("mod.vr"),
@@ -267,10 +341,9 @@ fn bootstrap(core: &std::path::Path) -> verum_vbc::archive::VbcArchive {
     });
     let result =
         CompilationPipeline::new_core(&mut session, CoreConfig::new(core).with_output(&output))
-            .compile_core()
-            .unwrap();
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    read_archive_from_file(&output).unwrap()
+            .compile_core()?;
+    anyhow::ensure!(result.errors.is_empty(), "{:?}", result.errors);
+    Ok(read_archive_from_file(&output)?)
 }
 
 fn execute(archive: &verum_vbc::archive::VbcArchive, source: &str) -> i64 {

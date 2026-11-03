@@ -17465,10 +17465,12 @@ impl VbcCodegen {
         Some(Self::substitute_self_in_type_name(&result, &receiver))
     }
 
-    /// A namespace call has one selected declaration, even when another module
-    /// declares the same leaf name. `Some(None)` preserves an unresolved explicit
-    /// path instead of inheriting the result of an unrelated suffix candidate.
-    fn namespace_call_result_type_name(&self, expr: &Expr) -> Option<Option<String>> {
+    /// A lexical binding or an explicit namespace selects the callee. An unknown
+    /// result in that scope must never inherit an unrelated declaration's result.
+    fn scoped_call_result_type_name(&self, expr: &Expr) -> Option<Option<String>> {
+        if let Some(result) = self.lexical_call_result(expr) {
+            return Some(result.and_then(|ty| self.declaration_type_name(&ty, 0)));
+        }
         let ExprKind::MethodCall { receiver, method, args, .. } = &expr.kind else {
             return None;
         };
@@ -28692,7 +28694,7 @@ impl VbcCodegen {
     /// Best-effort static type NAME of an expression, used for overload and
     /// variant disambiguation. `None` when the shape carries no usable name.
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
-        if let Some(result) = self.namespace_call_result_type_name(expr) {
+        if let Some(result) = self.scoped_call_result_type_name(expr) {
             return result;
         }
 
@@ -29787,7 +29789,7 @@ impl VbcCodegen {
     /// For inline record literals, extracts the type name directly.
     /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
     pub fn infer_expr_type_name(&self, expr: &Expr) -> Option<String> {
-        if let Some(result) = self.namespace_call_result_type_name(expr) {
+        if let Some(result) = self.scoped_call_result_type_name(expr) {
             return result;
         }
 
@@ -30960,6 +30962,11 @@ impl VbcCodegen {
         use verum_ast::expr::ExprKind;
         use verum_ast::literal::LiteralKind;
         use verum_ast::ty::TypeKind;
+
+        if let Some(result) = self.lexical_call_result(expr) {
+            return result.and_then(|ty| self.declaration_type_name(&ty, 0))
+                .and_then(|name| self.type_name_to_type_kind(&name));
+        }
 
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {

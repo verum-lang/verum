@@ -86,7 +86,7 @@ impl VbcCodegen {
             else {
                 continue;
             };
-            let bound = self.substitute_fn_bound_for_generic(generic.clone(), ty, &function.generics, scope);
+            let bound = self.substitute_fn_bound_for_generic(generic.clone(), ty, function, scope);
             if matches!(bound, TypeRef::Function { .. }) {
                 self.ctx.source_callable_bounds.insert((id, slot), bound);
             }
@@ -167,11 +167,7 @@ impl VbcCodegen {
         if !path.is_single() {
             return self.nominal_type_id(&name).is_some();
         }
-        let owner = self
-            .ctx
-            .current_source_module
-            .as_deref()
-            .unwrap_or(&self.config.module_name);
+        let owner = self.lexical_type_scope();
         if self
             .type_name_to_id
             .contains_key(&format!("{owner}.{name}"))
@@ -287,11 +283,7 @@ impl VbcCodegen {
         if !supported(ast, 0, &mut 4096, self, scope) {
             return None;
         }
-        let owner = self
-            .ctx
-            .current_source_module
-            .as_deref()
-            .unwrap_or(&self.config.module_name);
+        let owner = self.lexical_type_scope();
         // A runtime array carrier uses zero for both an empty array and an
         // unresolved extent. Publish a semantic type only when every count
         // was evaluated from its declaration. Free names need lexical evidence.

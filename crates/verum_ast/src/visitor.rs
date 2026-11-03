@@ -63,7 +63,7 @@ use crate::ffi::FFIBoundary;
 use crate::literal::Literal;
 use crate::pattern::{Pattern, PatternKind, VariantPatternData};
 use crate::stmt::{Stmt, StmtKind};
-use crate::ty::{GenericArg, Ident, Path, Type, TypeBound, TypeBoundKind, TypeKind, WhereClause, WherePredicate};
+use crate::ty::{GenericArg, GenericParam, GenericParamKind, Ident, Path, Type, TypeBound, TypeBoundKind, TypeKind, WhereClause, WherePredicate};
 use verum_common::Maybe;
 
 // ============================================================================
@@ -863,6 +863,7 @@ pub fn walk_item<V: Visitor>(visitor: &mut V, item: &Item) {
 /// Walk a function declaration.
 pub fn walk_function<V: Visitor>(visitor: &mut V, func: &FunctionDecl) {
     visitor.visit_ident(&func.name);
+    walk_generic_parameters(visitor, &func.generics);
 
     for param in &func.params {
         visit_child!(visitor, param, FunctionParam);
@@ -900,6 +901,7 @@ pub fn walk_function<V: Visitor>(visitor: &mut V, func: &FunctionDecl) {
 /// Walk a type declaration.
 pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
     visitor.visit_ident(&ty_decl.name);
+    walk_generic_parameters(visitor, &ty_decl.generics);
 
     // Visit generic where clause (where type T: Protocol)
     if let Maybe::Some(where_clause) = &ty_decl.generic_where_clause {
@@ -1044,6 +1046,7 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
 /// Walk a protocol declaration.
 pub fn walk_protocol<V: Visitor>(visitor: &mut V, protocol: &ProtocolDecl) {
     visitor.visit_ident(&protocol.name);
+    walk_generic_parameters(visitor, &protocol.generics);
 
     // Visit generic where clause (where type T: Protocol)
     if let Maybe::Some(where_clause) = &protocol.generic_where_clause {
@@ -1079,6 +1082,7 @@ pub fn walk_protocol<V: Visitor>(visitor: &mut V, protocol: &ProtocolDecl) {
 
 /// Walk an implementation block.
 pub fn walk_impl<V: Visitor>(visitor: &mut V, impl_decl: &ImplDecl) {
+    walk_generic_parameters(visitor, &impl_decl.generics);
     match &impl_decl.kind {
         ImplKind::Inherent(ty) => visit_child!(visitor, ty, Type),
         ImplKind::Protocol { for_type, .. } => visit_child!(visitor, for_type, Type),
@@ -2131,6 +2135,36 @@ pub fn walk_where_predicate<V: Visitor>(visitor: &mut V, predicate: &WherePredic
         // 4. Postcondition: where ensures result >= 0
         WherePredicateKind::Ensures { postcondition } => {
             visit_child!(visitor, postcondition, Expr);
+        }
+    }
+}
+
+fn walk_generic_parameters<V: Visitor>(visitor: &mut V, parameters: &[GenericParam]) {
+    for parameter in parameters {
+        match &parameter.kind {
+            GenericParamKind::Type { name, bounds, default } => {
+                visitor.visit_ident(name);
+                walk_type_bounds(visitor, bounds);
+                if let Some(ty) = default { visit_child!(visitor, ty, Type); }
+            }
+            GenericParamKind::HigherKinded { name, bounds, .. }
+            | GenericParamKind::KindAnnotated { name, bounds, .. } => {
+                visitor.visit_ident(name);
+                walk_type_bounds(visitor, bounds);
+            }
+            GenericParamKind::Const { name, ty } => {
+                visitor.visit_ident(name);
+                visit_child!(visitor, ty, Type);
+            }
+            GenericParamKind::Meta { name, ty, refinement } => {
+                visitor.visit_ident(name);
+                visit_child!(visitor, ty, Type);
+                if let Some(expr) = refinement { visit_child!(visitor, expr, Expr); }
+            }
+            GenericParamKind::Context { name } | GenericParamKind::Level { name } => {
+                visitor.visit_ident(name);
+            }
+            GenericParamKind::Lifetime { .. } => {}
         }
     }
 }

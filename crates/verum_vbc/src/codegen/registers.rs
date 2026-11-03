@@ -50,6 +50,7 @@ pub struct RegisterAllocator {
     /// `variables`, so nested-function compilation doesn't leak hints.
     type_hints: Vec<(u16, String)>,
     pub(super) value_uses: super::value_uses::ValueUseRecorder,
+    pub(super) callable_bound_results: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
 }
 
 /// Information about a register binding.
@@ -153,6 +154,7 @@ impl RegisterAllocator {
             recycle_temps: true,
             type_hints: Vec::new(),
             value_uses: Default::default(),
+            callable_bound_results: HashMap::new(),
         }
     }
 
@@ -506,6 +508,7 @@ impl RegisterAllocator {
             free_list: self.free_list.clone(),
             type_hints: self.type_hints.clone(),
             value_uses: self.value_uses.clone(),
+            callable_bound_results: self.callable_bound_results.clone(),
         }
     }
 
@@ -522,6 +525,7 @@ impl RegisterAllocator {
         self.free_list = snapshot.free_list.clone();
         self.type_hints = snapshot.type_hints.clone();
         self.value_uses = snapshot.value_uses.clone();
+        self.callable_bound_results.clone_from(&snapshot.callable_bound_results);
     }
 
     /// Resets the allocator for a new function.
@@ -538,6 +542,7 @@ impl RegisterAllocator {
         self.free_list.clear();
         self.type_hints.clear();
         self.value_uses = Default::default();
+        self.callable_bound_results.clear();
     }
 
     /// Records a register→owner-type hint for the current function
@@ -574,6 +579,7 @@ pub struct RegisterSnapshot {
     /// per-function-scoped across nested-function compilation.
     type_hints: Vec<(u16, String)>,
     pub(super) value_uses: super::value_uses::ValueUseRecorder,
+    pub(super) callable_bound_results: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
 }
 
 #[cfg(test)]

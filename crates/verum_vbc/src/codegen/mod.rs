@@ -18415,65 +18415,48 @@ impl VbcCodegen {
     fn substitute_fn_bound_for_generic(
         &self,
         resolved: TypeRef,
-        ast_ty: &verum_ast::ty::Type,
-        generics: &verum_common::List<verum_ast::ty::GenericParam>,
+        ast_ty: &verum_ast::Type,
+        function: &verum_ast::FunctionDecl,
         generic_param_map: &std::collections::HashMap<String, u16>,
     ) -> TypeRef {
-        use verum_ast::ty::{GenericParamKind, PathSegment, TypeBoundKind, TypeKind};
+        use verum_ast::ty::TypeKind;
 
-        // Only substitute when the resolved form is a bare generic
-        // (the un-substituted shape we'd otherwise carry into the
-        // archive). Direct fn types (`f: fn(...)`) already land as
-        // `TypeRef::Function` — leave them alone.
-        if !matches!(&resolved, TypeRef::Generic(_)) {
-            return resolved;
-        }
-        // Recover the generic-param name from the AST.
-        let target_name = match &ast_ty.kind {
-            TypeKind::Path(path) if path.segments.len() == 1 => {
-                match &path.segments[0] {
-                    PathSegment::Name(ident) => ident.name.to_string(),
-                    _ => return resolved,
-                }
-            }
-            _ => return resolved,
-        };
-        // Find the matching generic param and probe its bounds.
-        for gp in generics.iter() {
-            let (gp_name, bounds) = match &gp.kind {
-                GenericParamKind::Type { name, bounds, .. } => (name.name.as_str(), bounds),
-                GenericParamKind::HigherKinded { name, bounds, .. } => {
-                    (name.name.as_str(), bounds)
-                }
-                _ => continue,
-            };
-            if gp_name != target_name {
-                continue;
-            }
-            // The parser emits a Function-typed bound as
-            // `Equality(<Function type>)` (see
-            // `verum_fast_parser::ty::type_to_type_bound`); fall back
-            // through `GenericProtocol` for the
-            // `F: Iterator<Item=...>`-shaped bound that carries a
-            // Function payload.
-            for b in bounds.iter() {
-                let bound_ty = match &b.kind {
-                    TypeBoundKind::Equality(ty) => ty,
-                    TypeBoundKind::GenericProtocol(ty) => ty,
-                    _ => continue,
-                };
-                if matches!(&bound_ty.kind, TypeKind::Function { .. }) {
-                    // Resolve the bound through the same map so any
-                    // nested generic-param references inside the
-                    // bound (`fn(R, Self.Item) -> ReduceResult<R>`)
-                    // stay as `TypeRef::Generic` rather than
-                    // collapsing to `Concrete(PTR)`.
-                    // A callback bound describes its caller-visible signature, including borrows.
-                    return self.resolve_signature_type_ref(bound_ty, generic_param_map);
-                }
-            }
+        if let TypeRef::Generic(_) = &resolved
+            && let TypeKind::Path(path) = &ast_ty.kind
+            && let Some(parameter) = path.as_ident()
+            && let Some((_, bound)) = Self::generic_callable_bounds(function)
+                .find(|(name, _)| *name == parameter.name.as_str())
+        {
+            return self.resolve_signature_type_ref(bound, generic_param_map);
         }
         resolved
+    }
+
+    fn generic_callable_bounds(
+        function: &verum_ast::FunctionDecl,
+    ) -> impl Iterator<Item = (&str, &verum_ast::Type)> {
+        use verum_ast::ty::{GenericParamKind, TypeBoundKind, TypeKind, WherePredicateKind};
+
+        let inline = function.generics.iter().filter_map(|param| match &param.kind {
+            GenericParamKind::Type { name, bounds, .. }
+            | GenericParamKind::HigherKinded { name, bounds, .. }
+            | GenericParamKind::KindAnnotated { name, bounds, .. } => Some((name, bounds)),
+            _ => None,
+        });
+        let predicates = function.generic_where_clause.iter()
+            .flat_map(|clause| &clause.predicates)
+            .filter_map(|predicate| {
+                let WherePredicateKind::Type { ty, bounds } = &predicate.kind else { return None };
+                let TypeKind::Path(path) = &ty.kind else { return None };
+                Some((path.as_ident()?, bounds))
+            });
+        inline.chain(predicates).filter_map(|(name, bounds)| {
+            bounds.iter().find_map(|bound| match &bound.kind {
+                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
+                    if matches!(ty.kind, TypeKind::Function { .. }) => Some((name.as_str(), ty)),
+                _ => None,
+            })
+        })
     }
 
     /// The LAYOUT question: what a value of this type IS at runtime.
@@ -20093,6 +20076,17 @@ impl VbcCodegen {
         // Common source/bootstrap producer: preserve semantic parameter facts
         // after this declaration owns its exact generic roster, before any
         // current prologue operation is observed (T1599).
+        // A local value of generic type F keeps F's ownership discipline. Its
+        // callable bound supplies the result of invoking it (including aliases).
+        self.ctx.registers.callable_bound_results = Self::generic_callable_bounds(func)
+            .filter_map(|(name, bound)| {
+                let verum_ast::ty::TypeKind::Function { return_type, .. } = &bound.kind else { return None };
+                let id = self.ctx.current_generic_param_id(name)?;
+                let result = self.semantic_formal_type(
+                    return_type, &self.ctx.current_generic_param_ids, &declared_ids,
+                )?;
+                Some((id, result))
+            }).collect();
         let parameter_types = self.source_semantic_parameters(
             func, &self.ctx.current_generic_param_ids, &receiver_generics, &declared_ids,
         );
@@ -20940,7 +20934,7 @@ impl VbcCodegen {
                     // and drive the call-site disambig push for closure
                     // arguments.  No-op when the param isn't a generic-param
                     // path or when the generic carries no fn bound.
-                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &render_generic_param_map);
+                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, func, &render_generic_param_map);
                     // task #41: a scalar `&T` param keeps TypeRef::Reference so the
                     // AOT can deref a lone `&scalar` comparison operand (the
                     // interpreter auto-derefs the CBGR-ref at CmpI/CmpG runtime; the

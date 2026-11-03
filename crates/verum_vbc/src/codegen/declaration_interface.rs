@@ -89,7 +89,7 @@ impl VbcCodegen {
             // The declaration interface carries the same callable bound as
             // ordinary body compilation; the semantic slot still names O.
             let type_ref = match declared {
-                Some(ty) => self.substitute_fn_bound_for_generic(resolved, ty, &source.generics, &scope),
+                Some(ty) => self.substitute_fn_bound_for_generic(resolved, ty, source, &scope),
                 None => resolved,
             };
             descriptor.params.push(ParamDescriptor {

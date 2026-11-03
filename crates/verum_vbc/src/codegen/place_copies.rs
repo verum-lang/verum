@@ -157,6 +157,9 @@ impl VbcCodegen {
                 self.declared_method_result_type(&owner, method.name.as_str(), type_args)
             }
             ExprKind::Call { type_args, args, .. } => {
+                if let Some(result) = self.lexical_call_result(expr) {
+                    return result;
+                }
                 let (reg, start, end) = emitted?;
                 self.copy_selected_call_result(reg, start, end, type_args, args, depth)
             }

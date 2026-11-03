@@ -149,7 +149,7 @@ impl VbcCodegen {
             // Namespace resolution selects one declaration for every query
             // view. A missing explicit target cannot borrow method evidence
             // from an unrelated value with the same spelling.
-            if let Some(result) = self.namespace_call_result_type_name(expr) {
+            if let Some(result) = self.scoped_call_result_type_name(expr) {
                 let name: Maybe<Text> = result.map(Into::into);
                 types = ExpressionTypes {
                     callable: None,
