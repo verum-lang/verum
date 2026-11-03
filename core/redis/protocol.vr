@@ -280,6 +280,13 @@ public type Cursor is {
     offset: Int,
 }
 
+implement Cursor {
+    /// Copy the unread wire bytes for the next decode or socket refill.
+    public fn remaining_bytes(&self) -> List<Byte> {
+        self.bytes.slice(self.offset, self.bytes.len())
+    }
+}
+
 pub fn cursor_new(bytes: List<Byte>) -> Cursor { Cursor { bytes, offset: 0 } }
 
 /// Decode a single RESP frame. Returns the parsed value + the new
@@ -492,7 +499,7 @@ fn read_line(cur: &Cursor) -> Result<(Text, Cursor), RespError> {
 }
 
 fn parse_integer(s: &Text) -> Result<Int, RespError> {
-    Int.parse(s).map_err(|_| RespError.InvalidInteger(s.clone()))
+    s.parse_int().map_err(|_| RespError.InvalidInteger(s.clone()))
 }
 
 fn split_first_space(s: &Text) -> (Text, Text) {

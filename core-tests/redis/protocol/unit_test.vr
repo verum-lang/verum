@@ -9,7 +9,7 @@
 //   * RespError 8-variant error ADT + Display
 // =============================================================================
 
-mount core.redis.protocol.{RespValue, RespError};
+mount core.redis.protocol.{RespValue, RespError, cursor_new, decode};
 
 // =============================================================================
 // Section 1: RespValue scalar variants
@@ -231,4 +231,34 @@ fn test_display_too_deep_includes_numbers() {
     let s = f"{e}";
     assert(s.contains("100"));
     assert(s.contains("64"));
+}
+
+@test
+fn pipelined_responses_preserve_the_unconsumed_frame() {
+    let bytes: List<Byte> = [b'+', b'x', 13_u8, 10_u8, b':', b'7', 13_u8, 10_u8];
+    let cursor = cursor_new(bytes);
+    let (first, next) = decode(&cursor).unwrap();
+    match first {
+        RespValue.SimpleString(value) => assert(value == "x"),
+        _ => panic("expected first simple string"),
+    }
+    let tail = next.remaining_bytes();
+    assert(tail.len() == 4);
+    assert(tail[0] == b':');
+    let (second, end) = decode(&cursor_new(tail)).unwrap();
+    match second {
+        RespValue.Integer(value) => assert(value == 7),
+        _ => panic("expected second integer"),
+    }
+    assert(end.remaining_bytes().is_empty());
+    assert(decode(&end).is_err());
+}
+
+@test
+fn invalid_integer_reports_its_wire_value() {
+    let bytes: List<Byte> = [b':', b'x', 13_u8, 10_u8];
+    match decode(&cursor_new(bytes)) {
+        Result.Err(RespError.InvalidInteger(value)) => assert(value == "x"),
+        _ => panic("expected invalid integer"),
+    }
 }

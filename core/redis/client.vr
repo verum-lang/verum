@@ -482,13 +482,7 @@ async fn read_one_frame(conn: &mut RedisConnection) -> Result<RespValue, RedisEr
         let cur = core.redis.protocol.cursor_new(conn.rx_buffer.clone());
         match decode(&cur) {
             Result.Ok((v, after)) => {
-                let mut tail: List<Byte> = List.new();
-                let mut i: Int = after.pos;
-                while i < conn.rx_buffer.len() {
-                    tail.push(conn.rx_buffer[i]);
-                    i = i + 1;
-                }
-                conn.rx_buffer = tail;
+                conn.rx_buffer = after.remaining_bytes();
                 match v {
                     // Push frames are out-of-band — skip them on
                     // request/reply paths. (Pub/sub consumers use
