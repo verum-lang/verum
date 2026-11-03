@@ -531,63 +531,10 @@ impl ExportTable {
             None => return false, // Cannot check visibility without module path
         };
 
-        if let Maybe::Some(item) = self.get(name) {
-            match &item.visibility {
-                Visibility::Public => true,
-
-                Visibility::PublicCrate => {
-                    // public(crate): same crate check via first path segment
-                    // Check if from_module is in the same crate as item_module
-                    // Crate is determined by the first segment of the path
-                    item_module.segments().first() == from_module.segments().first()
-                }
-
-                Visibility::PublicSuper => {
-                    // public(super): immediate parent module check
-                    // Check if from_module is the parent of item_module
-                    match item_module.parent() {
-                        Some(parent) => &parent == from_module,
-                        None => false, // Root module has no parent
-                    }
-                }
-
-                Visibility::PublicIn(path) => {
-                    // public(in path): module subtree membership check
-                    // Check if from_module is within the specified path scope
-                    // Convert verum_ast::Path to ModulePath for comparison
-                    let path_str = path
-                        .segments
-                        .iter()
-                        .filter_map(|seg| match seg {
-                            verum_ast::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join(".");
-                    let target_path = crate::path::ModulePath::from_str(&path_str);
-
-                    // from_module is visible if it equals target_path or is a descendant
-                    target_path.is_prefix_of(from_module) || from_module == &target_path
-                }
-
-                Visibility::Private => {
-                    // Private items are only visible within the same module
-                    item_module == from_module
-                }
-
-                Visibility::Internal => {
-                    // Internal items are only visible within the same module (same as Private)
-                    item_module == from_module
-                }
-
-                Visibility::Protected => {
-                    // Protected items are only visible within the same module (same as Private)
-                    item_module == from_module
-                }
-            }
-        } else {
-            false
-        }
+        self.get(name).is_some_and(|item| item.visibility.visible_from(
+            item_module.segments().iter().map(Text::as_str),
+            from_module.segments().iter().map(Text::as_str),
+        ))
     }
 
     /// Merge another export table (for re-exports)

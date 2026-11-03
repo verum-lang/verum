@@ -3,6 +3,35 @@ use crate::{Ident, Path, PathSegment, Span, Visibility};
 use verum_common::{List, Text};
 
 impl Visibility {
+    /// Whether a declaration is visible from a canonical lexical module path.
+    /// The paths are borrowed segments so source and module passes share the rule.
+    pub fn visible_from<'a>(
+        &self,
+        mut owner: impl DoubleEndedIterator<Item = &'a str> + Clone,
+        mut consumer: impl Iterator<Item = &'a str>,
+    ) -> bool {
+        match self {
+            Self::Public => true,
+            Self::Private | Self::Internal | Self::Protected => owner.eq(consumer),
+            Self::PublicCrate => owner.next() == consumer.next(),
+            Self::PublicSuper => {
+                owner.next_back();
+                owner.clone().next().is_some() && owner.eq(consumer)
+            }
+            Self::PublicIn(path) => {
+                // Module paths are cog-relative. A source pass carrying an
+                // explicit cog prefix normalizes its policy at declaration time.
+                let mut segments = path.segments.iter().peekable();
+                if matches!(segments.peek(), Some(PathSegment::Cog | PathSegment::Relative)) {
+                    segments.next();
+                }
+                segments.peek().is_some() && segments.all(|segment| matches!(segment,
+                    PathSegment::Name(name) if consumer.next() == Some(name.as_str())
+                ))
+            }
+        }
+    }
+
     /// Resolve a restricted scope against the module that declares the item.
     /// The result contains only absolute name segments and no source spans;
     /// importers must not resolve the same policy again in their own module.

@@ -54,52 +54,10 @@ impl VisibilityChecker {
         item_module: &ModulePath,
         from_module: &ModulePath,
     ) -> bool {
-        match item_visibility {
-            Visibility::Private => item_module == from_module,
-            Visibility::Internal => item_module == from_module,
-            Visibility::Protected => item_module == from_module,
-            Visibility::Public => true,
-            Visibility::PublicCrate => {
-                // public(cog): visible only within the same cog.
-                // Two modules are in the same cog if they share the same
-                // first path segment (the cog name).
-                self.same_crate(item_module, from_module)
-            }
-            Visibility::PublicSuper => {
-                // public(super): visible ONLY to the immediate parent module.
-                // "Parent-public visibility means visible to parent module"
-                //
-
-                // This check ensures from_module is the IMMEDIATE parent of item_module,
-                // NOT any ancestor. For example:
-                // - item in `database.connection` with public(super) is visible ONLY from `database`
-                // - NOT visible from any other module, not even ancestors of `database`
-                item_module.parent().as_ref() == Some(from_module)
-            }
-            Visibility::PublicIn(ref path) => {
-                // public(in path): visible within the specified module subtree.
-                // The accessing module must be a descendant of the target path
-                // or the target path itself.
-                // Convert AST path to ModulePath for comparison
-                // Cog means "root of current cog" — skip it, use remaining segments
-                let path_str = path
-                    .segments
-                    .iter()
-                    .filter_map(|seg| match seg {
-                        verum_ast::PathSegment::Name(ident) => {
-                            Some(ident.name.as_str().to_string())
-                        }
-                        verum_ast::PathSegment::Cog => None, // Root marker, not a segment
-                        verum_ast::PathSegment::Super => Some("super".to_string()),
-                        verum_ast::PathSegment::SelfValue => Some("self".to_string()),
-                        verum_ast::PathSegment::Relative => None, // Skip relative markers
-                    })
-                    .collect::<Vec<_>>()
-                    .join(".");
-                let target_path = ModulePath::from_str(&path_str);
-                target_path.is_prefix_of(from_module) || from_module == &target_path
-            }
-        }
+        item_visibility.visible_from(
+            item_module.segments().iter().map(Text::as_str),
+            from_module.segments().iter().map(Text::as_str),
+        )
     }
 
     /// Check visibility and return an error if not visible.
