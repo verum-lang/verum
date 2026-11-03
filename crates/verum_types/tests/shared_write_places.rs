@@ -233,7 +233,7 @@ fn implicit_clone_borrows_only_duplicable_layouts() {
     for source in [
         "type Role is | Up | Down; type Entry is { role: Role }; fn read(e: &Entry) -> Role { e.role.clone() }",
         "type Digest is (Text); fn read(p: &Digest) -> Digest { p.clone() }",
-        "fn show(b: &Boxed) -> Text { b.value.to_text() }",
+        "implement Int { fn doubled(self) -> Int { self + self } } fn read(b: &Boxed) -> Int { b.value.doubled() }",
         "type Pair is { x: Int, y: Text }; fn read(p: &Pair) -> Pair { p.clone() }",
         "type Wrap<T> is { item: T }; fn read(p: &Wrap<Int>) -> Wrap<Int> { p.clone() }",
     ] {

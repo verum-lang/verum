@@ -56,7 +56,7 @@ mount core.intrinsics.float.{
     sinh, cosh, tanh, asinh, acosh, atanh,
 };
 mount core.intrinsics.runtime.text.{
-    char_is_alphabetic, char_is_numeric, char_is_whitespace, char_is_control,
+    int_to_text, char_is_alphabetic, char_is_numeric, char_is_whitespace, char_is_control,
     char_is_uppercase, char_is_lowercase,
     char_to_uppercase, char_to_lowercase, char_encode_utf8, char_escape_debug,
 };
@@ -76,6 +76,11 @@ fn popcnt<T>(x: T) -> T { @intrinsic("ctpop", x) }
 // =============================================================================
 
 implement Int {
+    /// Decimal representation of this signed integer.
+    public fn to_text(self) -> Text {
+        int_to_text(self)
+    }
+
     /// Bare-width f-string padding (`{v:N}` with no explicit
     /// alignment): numbers RIGHT-align by convention; `Text` implements
     /// the left-aligning twin — the default dispatches on the value's
