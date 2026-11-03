@@ -40,7 +40,7 @@ module core.math.agent;
 mount core.math.tensor.{
     DynTensor, zeros, ones, full, slice, slice_assign, cat, from_slice,
     add, sub, mul, div, matmul, softmax, argmax, topk,
-    reshape, unsqueeze, squeeze, transpose, clamp,
+    reshape, unsqueeze, squeeze, transpose, clip,
     sum_axis, mean_axis, min_axis, max_axis, norm_axis,
     index_select,
 };
@@ -889,7 +889,7 @@ public fn quantize_per_channel(
     let range = sub(&max_val, &min_val);
     let scale = div(&range, &full_like(&range, qmax - qmin));
     let zero_point_f = sub(&full_like(&min_val, qmin), &div(&min_val, &scale));
-    let zero_point_clamped = clamp(&zero_point_f, qmin, qmax);
+    let zero_point_clamped = clip(&zero_point_f, qmin, qmax);
     let zero_point: DynTensor<I8> = zero_point_clamped.cast();
 
     // Quantize
@@ -897,7 +897,7 @@ public fn quantize_per_channel(
     let zp_unsqueezed = unsqueeze(&zero_point, -1);
     let zp_float: DynTensor<Float> = zp_unsqueezed.cast();
     let shifted = add(&scaled, &zp_float);
-    let shifted_clamped = clamp(&shifted, qmin, qmax);
+    let shifted_clamped = clip(&shifted, qmin, qmax);
     let quantized: DynTensor<I8> = shifted_clamped.cast();
 
     (quantized, scale, zero_point)
