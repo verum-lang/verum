@@ -127,19 +127,14 @@ fn module(declaration: TypeDecl) -> VbcModule {
             | TypeDeclBody::Variant(_)
             | TypeDeclBody::Alias(_)
     ) {
-        for (source_index, parameter) in declaration.generics.iter().enumerate() {
-            if let GenericParamKind::Type { name, .. } = &parameter.kind {
-                let index = if matches!(
-                    declaration.body,
-                    TypeDeclBody::Variant(_) | TypeDeclBody::Alias(_)
-                ) {
-                    source_index
-                } else {
-                    descriptor.type_params.len()
-                };
+        for parameter in &declaration.generics {
+            if let GenericParamKind::Type { name, .. }
+            | GenericParamKind::HigherKinded { name, .. }
+            | GenericParamKind::Const { name, .. }
+            | GenericParamKind::Meta { name, .. } = &parameter.kind {
                 descriptor.type_params.push(TypeParamDescriptor {
                     name: module.intern_string(name.name.as_str()),
-                    id: TypeParamId(index.try_into().unwrap()),
+                    id: TypeParamId(descriptor.type_params.len().try_into().unwrap()),
                     ..Default::default()
                 });
             }
@@ -276,8 +271,8 @@ fn writer_refuses_variant_shape_and_generic_slot_mismatches() {
     wrong_order.types[0].type_params[0].name = wrong_order.types[0].type_params[1].name;
     wrong_order.types[0].type_params[1].name = first_name;
     let mut wrong_sum_id = valid.clone();
-    assert_eq!(wrong_sum_id.types[0].type_params[0].id, TypeParamId(1));
-    wrong_sum_id.types[0].type_params[0].id = TypeParamId(0);
+    assert_eq!(wrong_sum_id.types[0].type_params[0].id, TypeParamId(0));
+    wrong_sum_id.types[0].type_params[0].id = TypeParamId(1);
     let mut wrong_record_id = module(declaration(
         "public type Carrier<N: meta Int, A, B> is { value: Type(1), left: A, right: B };",
     ));

@@ -16,6 +16,7 @@ impl VbcCodegen {
             return None;
         }
         match ty {
+            TypeRef::RecordFieldProjection { .. } => None,
             TypeRef::Generic(id) => self
                 .ctx
                 .current_generic_param_ids
@@ -593,6 +594,10 @@ impl VbcCodegen {
             return None;
         }
         Some(match ty {
+            // Associated-type resolution cannot choose a record receiver.
+            TypeRef::RecordFieldProjection { owner, ordinal } => TypeRef::RecordFieldProjection {
+                owner: *owner, ordinal: *ordinal,
+            },
             TypeRef::AssociatedProjection { base, assoc } => {
                 let base = self.resolve_declared_projections(base, depth + 1)?;
                 let (owner, args) = match &base {
@@ -634,6 +639,7 @@ pub(super) fn fully_bound(ty: &TypeRef, bindings: &TypeSubstitution) -> bool {
 /// Only free parameters, lowered back into the caller's scope, need witnesses.
 fn fully_bound_at(ty: &TypeRef, bindings: &TypeSubstitution, depth: u32) -> bool {
     match ty {
+        TypeRef::RecordFieldProjection { .. } => false,
         TypeRef::Generic(id) => {
             let index = u32::from(id.0);
             index < depth || bindings.get(crate::types::TypeParamId((index - depth) as u16)).is_some()
@@ -670,6 +676,21 @@ fn fully_bound_at(ty: &TypeRef, bindings: &TypeSubstitution, depth: u32) -> bool
 mod binder_tests {
     use super::*;
     use crate::types::TypeParamId;
+
+    #[test]
+    fn record_projection_requires_a_receiver_not_a_generic_binding() {
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 };
+        let mut bindings = TypeSubstitution::empty();
+        bindings.bind(TypeParamId(0), TypeRef::Concrete(TypeId::INT));
+        assert!(!fully_bound(&projection, &bindings));
+        let cg = VbcCodegen::new();
+        assert_eq!(cg.resolve_declared_projections(&projection, 0), Some(projection.clone()));
+        assert!(cg.declaration_type_name(&projection, 0).is_none());
+        assert!(!fully_bound(&TypeRef::Rank2Function {
+            type_param_count: 1, params: vec![TypeRef::Generic(TypeParamId(0))],
+            return_type: Box::new(projection), contexts: Default::default(),
+        }, &bindings));
+    }
 
     #[test]
     fn quantified_local_is_bound_but_free_slot_requires_its_outer_witness() {

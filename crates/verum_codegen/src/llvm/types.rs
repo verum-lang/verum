@@ -49,6 +49,11 @@ impl<'ctx> TypeLowering<'ctx> {
 
     /// Lower a VBC TypeRef to LLVM BasicTypeEnum.
     pub fn lower_type_ref(&self, type_ref: &TypeRef) -> Result<BasicTypeEnum<'ctx>> {
+        if type_ref.contains_record_field_projection() {
+            return Err(LlvmLoweringError::type_lowering(
+                "Record-field projections require their receiver witness before lowering",
+            ));
+        }
         match type_ref {
             TypeRef::Concrete(type_id) => self.lower_type_id(*type_id),
             TypeRef::Generic(_) => Err(LlvmLoweringError::type_lowering(
@@ -83,6 +88,9 @@ impl<'ctx> TypeLowering<'ctx> {
             }
             TypeRef::AssociatedProjection { .. } => Err(LlvmLoweringError::type_lowering(
                 "Associated-type projections should be resolved before lowering",
+            )),
+            TypeRef::RecordFieldProjection { .. } => Err(LlvmLoweringError::type_lowering(
+                "Unresolved record-field projection",
             )),
             // CONST-GENERIC-VALUE-CARRY-1: a const-generic VALUE argument
             // is an integer at the value level.
@@ -356,6 +364,31 @@ pub const THIN_REF_SIZE: usize = verum_common::layout::THIN_REF_SIZE as usize;
 /// the single source of truth. `verum_codegen::llvm::cbgr` constructs
 /// the struct with all 6 fields, matching the stdlib declaration.
 pub const FAT_REF_SIZE: usize = verum_common::layout::FAT_REF_SIZE as usize;
+
+#[cfg(test)]
+mod record_projection_tests {
+    use super::*;
+
+    #[test]
+    fn record_projection_is_rejected_before_opaque_lowering() {
+        let context = Context::create();
+        let lowering = TypeLowering::new(&context);
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 };
+        for ty in [
+            projection.clone(),
+            TypeRef::Instantiated { base: TypeId::LIST, args: vec![projection.clone()] },
+            TypeRef::Slice(Box::new(projection.clone())),
+            TypeRef::Function {
+                params: vec![],
+                return_type: Box::new(projection),
+                contexts: Default::default(),
+            },
+        ] {
+            assert!(lowering.lower_type_ref(&ty).is_err(), "unexpected concrete lowering: {ty:?}");
+        }
+        assert!(lowering.lower_type_ref(&TypeRef::Concrete(TypeId::INT)).is_ok());
+    }
+}
 
 #[cfg(test)]
 mod meta_consolidation_pins {

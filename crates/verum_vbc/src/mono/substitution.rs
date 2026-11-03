@@ -139,7 +139,10 @@ fn map_free_parameters(
         TypeRef::Generic(id) if u32::from(id.0) >= depth => {
             map(TypeParamId((u32::from(id.0) - depth) as u16), depth)?
         }
-        TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) => ty.clone(),
+        TypeRef::Concrete(_)
+        | TypeRef::Generic(_)
+        | TypeRef::ConstValue(_)
+        | TypeRef::RecordFieldProjection { .. } => ty.clone(),
         TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
             base: *base,
             args: args
@@ -205,4 +208,32 @@ fn map_free_parameters(
             assoc: assoc.clone(),
         },
     })
+}
+
+#[cfg(test)]
+mod record_projection_tests {
+    use super::*;
+    use crate::types::TypeId;
+
+    #[test]
+    fn record_projection_is_not_a_free_callable_parameter() {
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: u32::MAX };
+        let mut substitution = TypeSubstitution::empty();
+        substitution.bind(TypeParamId(0), TypeRef::Concrete(TypeId::INT));
+        assert_eq!(substitution.apply(&projection).unwrap(), projection);
+        assert_eq!(lift_free_parameters(&projection, u32::MAX).unwrap(), projection);
+        let nested = TypeRef::Rank2Function {
+            type_param_count: 1,
+            params: vec![TypeRef::Generic(TypeParamId(1))],
+            return_type: Box::new(projection.clone()),
+            contexts: Default::default(),
+        };
+        let expected = TypeRef::Rank2Function {
+            type_param_count: 1,
+            params: vec![TypeRef::Concrete(TypeId::INT)],
+            return_type: Box::new(projection),
+            contexts: Default::default(),
+        };
+        assert_eq!(substitution.apply(&nested).unwrap(), expected);
+    }
 }

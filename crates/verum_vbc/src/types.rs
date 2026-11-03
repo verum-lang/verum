@@ -655,6 +655,12 @@ pub enum TypeRef {
     /// Wire format: bytecode-stream tag 0x0A, archive tag 0x0B (both
     /// additive — VBC format 2.8).
     ConstValue(i64),
+
+    /// A preceding type-valued field in this record declaration's telescope.
+    /// This is a template bound by `owner`, not an independent generic variable
+    /// or a projection from an arbitrary runtime receiver. `ordinal` is the
+    /// declaration ordinal (not a global field-name index).
+    RecordFieldProjection { owner: TypeId, ordinal: u32 },
 }
 
 // Non-self-describing serializers identify variants by their ordinal, ignoring
@@ -685,6 +691,24 @@ impl Default for TypeRef {
 }
 
 impl TypeRef {
+    /// Whether this template needs a record receiver before it can be used
+    /// outside the owning declaration's field telescope.
+    pub fn contains_record_field_projection(&self) -> bool {
+        match self {
+            Self::RecordFieldProjection { .. } => true,
+            Self::Concrete(_) | Self::Generic(_) | Self::ConstValue(_) => false,
+            Self::Instantiated { args, .. } | Self::Tuple(args) =>
+                args.iter().any(Self::contains_record_field_projection),
+            Self::Function { params, return_type, .. }
+            | Self::Rank2Function { params, return_type, .. } =>
+                params.iter().any(Self::contains_record_field_projection)
+                    || return_type.contains_record_field_projection(),
+            Self::Reference { inner, .. } | Self::Slice(inner)
+            | Self::Array { element: inner, .. }
+            | Self::AssociatedProjection { base: inner, .. } => inner.contains_record_field_projection(),
+        }
+    }
+
     /// Creates a concrete type reference.
     pub fn concrete(id: TypeId) -> Self {
         TypeRef::Concrete(id)
@@ -737,6 +761,7 @@ impl TypeRef {
             TypeRef::AssociatedProjection { base, .. } => base.is_generic(),
             // A carried const VALUE is fully concrete.
             TypeRef::ConstValue(_) => false,
+            TypeRef::RecordFieldProjection { .. } => true,
         }
     }
 

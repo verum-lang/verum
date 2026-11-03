@@ -103,6 +103,7 @@ fn resource_discipline_inner<'a>(
         TypeRef::Function { .. } | TypeRef::Rank2Function { .. } => return Unrestricted,
         TypeRef::Generic(_)
         | TypeRef::AssociatedProjection { .. }
+        | TypeRef::RecordFieldProjection { .. }
         | TypeRef::ConstValue(_) => return Unknown,
     };
     // Intrinsic primitives have a language-defined discipline. Registering

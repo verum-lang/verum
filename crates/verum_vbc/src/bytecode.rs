@@ -3158,6 +3158,11 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             output.push(0x0A);
             encode_varint(*v as u64, output);
         }
+        TypeRef::RecordFieldProjection { owner, ordinal } => {
+            output.push(0x0D);
+            encode_varint(u64::from(owner.0), output);
+            encode_varint(u64::from(*ordinal), output);
+        }
     }
 }
 
@@ -6158,6 +6163,13 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1
             let v = decode_varint(data, offset)? as i64;
             Ok(TypeRef::ConstValue(v))
+        }
+        0x0D => {
+            let owner = u32::try_from(decode_varint(data, offset)?)
+                .map_err(|_| VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?;
+            let ordinal = u32::try_from(decode_varint(data, offset)?)
+                .map_err(|_| VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?;
+            Ok(TypeRef::RecordFieldProjection { owner: TypeId(owner), ordinal })
         }
         _ => Err(VbcError::InvalidTypeRef {
             offset: *offset as u32 - 1,

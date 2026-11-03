@@ -83,6 +83,13 @@ fn actual_ntype_construction_and_projection_specialize_the_same_receiver() {
         || matches!(&item.kind, verum_ast::ItemKind::Type(decl) if ["IsTrunc", "NType"].contains(&decl.name.name.as_str())));
     let module = VbcCodegen::with_config(CodegenConfig::new("core.math"))
         .collect_declaration_interface(&[&ast]).unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    let owner = module.types.iter().find(|descriptor|
+        module.strings.get(descriptor.name).is_some_and(|name| name.ends_with("NType"))).unwrap();
+    assert!(matches!(&owner.fields[1].declaration_type,
+        Some(verum_vbc::TypeRef::Instantiated { args, .. })
+        if matches!(args.first(), Some(verum_vbc::TypeRef::RecordFieldProjection { owner: id, ordinal: 0 }) if *id == owner.id)));
     let mut builder = ArchiveBuilder::new();
     builder.add_module("core.math", &module, &[]).unwrap();
     let metadata = archive_to_core_metadata(&builder.finish()).unwrap();

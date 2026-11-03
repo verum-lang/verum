@@ -17533,7 +17533,7 @@ impl VbcCodegen {
                     return_type,
                     ..
                 } => params.iter().any(has_shadow) || has_shadow(return_type),
-                TypeRef::Concrete(_) | TypeRef::ConstValue(_) => false,
+                TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::RecordFieldProjection { .. } => false,
             }
         }
         let structural_return = self

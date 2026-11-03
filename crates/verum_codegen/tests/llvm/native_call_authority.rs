@@ -494,3 +494,50 @@ fn archived_pending_body_reserves_its_symbol_before_decoding() {
     assert_ne!(lower.functions.get(&one), lower.functions.get(&two));
     lower.module().verify().unwrap();
 }
+
+#[test]
+fn record_projection_is_refused_before_function_abi_erasure() {
+    use verum_vbc::types::{TypeId, TypeRef};
+    let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 };
+    for ty in [
+        projection.clone(),
+        TypeRef::Instantiated { base: TypeId::LIST, args: vec![projection] },
+        TypeRef::Concrete(TypeId::INT),
+    ] {
+        for position in ["parameter", "return", "semantic_parameter", "semantic_return", "generic_default", "generic_bound"] {
+            let mut vbc = compile("fn ordinary(value: Int) -> Int { value }");
+            let function_id = id(&vbc, "ordinary");
+            let function = vbc.functions.iter_mut().find(|f| f.id.0 == function_id).unwrap();
+            match position {
+                "parameter" => function.params[0].type_ref = ty.clone(),
+                "return" => function.return_type = ty.clone(),
+                "semantic_parameter" => function.semantic_params = Some(vec![Some(ty.clone())].into()),
+                "semantic_return" => function.semantic_return = Some(ty.clone()),
+                "generic_default" => function.type_params.push(verum_vbc::types::TypeParamDescriptor {
+                    default: Some(ty.clone()), ..Default::default()
+                }),
+                "generic_bound" => {
+                    let mut parameter = verum_vbc::types::TypeParamDescriptor::default();
+                    parameter.type_bounds.push(TypeRef::Function {
+                        params: vec![], return_type: Box::new(ty.clone()), contexts: Default::default(),
+                    });
+                    function.type_params.push(parameter);
+                }
+                _ => unreachable!(),
+            }
+            let context = Context::create();
+            let mut lower = VbcToLlvmLowering::new(&context,
+                LoweringConfig::debug("record-signature").with_debug_info(false));
+            let result = lower.lower_module(&vbc);
+            if ty.contains_record_field_projection() {
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains("receiver witness"), "{position}: {error}");
+                assert!(lower.module().get_function("ordinary").is_none());
+            } else {
+                result.unwrap();
+                assert_eq!(lower.functions.get(&function_id).unwrap().count_params(), 1);
+                lower.module().verify().unwrap();
+            }
+        }
+    }
+}

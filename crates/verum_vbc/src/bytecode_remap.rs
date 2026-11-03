@@ -181,6 +181,7 @@ pub fn rewrite_type_ref_ids(ty: &mut crate::types::TypeRef, remap: &dyn IdRemap)
     use crate::types::TypeRef;
     match ty {
         TypeRef::Concrete(id) => *id = remap.map_type_id(*id),
+        TypeRef::RecordFieldProjection { owner, .. } => *owner = remap.map_type_id(*owner),
         TypeRef::Instantiated { base, args } => {
             *base = remap.map_type_id(*base);
             for arg in args { rewrite_type_ref_ids(arg, remap); }

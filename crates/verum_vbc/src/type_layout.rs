@@ -98,6 +98,7 @@ fn layout<'a>(
         TypeRef::Generic(_)
         | TypeRef::Slice(_)
         | TypeRef::AssociatedProjection { .. }
+        | TypeRef::RecordFieldProjection { .. }
         | TypeRef::ConstValue(_) => None,
     }
 }
@@ -114,7 +115,8 @@ fn unsized_pointee<'a>(
     }
     match ty {
         TypeRef::Slice(_) => Some(true),
-        TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } => None,
+        TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. }
+        | TypeRef::RecordFieldProjection { .. } => None,
         TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => {
             if id.well_known_name().is_some() || *id == TypeId::PTR {
                 return Some(false);

@@ -16543,11 +16543,19 @@ impl VbcCodegen {
                 // Populate fields for drop tracking
                 // NOTE: Field offset must use global field index from intern_field_name,
                 // since that's what SetF/GetF use at runtime.
-                for field in fields.iter() {
+                let mut field_scope = self.current_source_substitution.clone();
+                for (ordinal, field) in fields.iter().enumerate() {
                     let field_name = field.name.name.to_string();
                     // Use full type resolution to preserve generic parameters.
                     // Check if field type is a generic type parameter (e.g., `first: A`).
-                    let field_type_ref = self.resolve_field_type_ref(&field.ty, &generic_param_map)?;
+                    let lower_field = |preserve_refs| field_scope.elaborate(&generic_param_map, |scope| {
+                        self.resolve_type_ref_in_scope(&field.ty, scope, preserve_refs, None,
+                            &mut |count| self.const_eval_i64(count).ok().flatten()
+                                .and_then(|value| u64::try_from(value).ok()),
+                            self.impl_self_type_ref(&generic_param_map).as_ref())
+                    });
+                    let field_type_ref = lower_field(false)?;
+                    let declaration_type = lower_field(true)?;
 
                     // Use the same global field index that SetF/GetF use
                     let field_idx = self.intern_field_name(&field_name);
@@ -16607,13 +16615,24 @@ impl VbcCodegen {
                         declared_visibility: Some(declared_visibility),
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
-                        declaration_type: Some(self.resolve_signature_type_ref(&field.ty, &generic_param_map)?),
+                        declaration_type: Some(declaration_type),
                         offset: field_idx * 8, // Use global field index * sizeof(Value)
                         visibility,
                         refinement_src,
                         refinement_binding,
                         type_name: field_type_name,
                     });
+                    // Only the checked prefix of this record's telescope is
+                    // visible. A projection is not a freely instantiable type
+                    // parameter; its owner and position survive transport.
+                    if matches!(field.ty.kind, verum_ast::ty::TypeKind::Universe { .. }) {
+                        let ordinal = u32::try_from(ordinal).map_err(|_| CodegenError::with_span(
+                            CodegenErrorKind::InvalidSourceSignature("record field index exceeds VBC range".into()), field.ty.span))?;
+                        field_scope.insert(field_name, ImplReceiverWitness {
+                            ty: TypeRef::RecordFieldProjection { owner: type_id, ordinal },
+                            semantic: true,
+                        });
+                    }
                 }
 
                 self.push_declared_type(type_desc);
@@ -16710,51 +16729,11 @@ impl VbcCodegen {
                     }
                 }
 
-                // Encode method signatures as variants (VBC convention for protocol methods).
-                //
-                // #131 Layer E — protocol-level + method-local generic
-                // param scoping.  Pre-fix `ast_type_to_type_ref` had
-                // no scope: an unknown `TypeKind::Path([Self])` /
-                // `[Item]` / `[U]` (protocol-level Self/Item or
-                // method-local `map<U, B>` params) fell through to
-                // `TypeRef::Concrete(TypeId::PTR=14)`.  At
-                // archive_metadata-time the PTR fallback resolved to
-                // the wrong-arity concrete name `"Heap"` /  `"List"`
-                // via the module-local type-id-to-name table —
-                // protocol-method signatures got rendered as
-                // `MappedIter<Heap, Heap>` instead of
-                // `MappedIter<Self, F>` and the typechecker actively
-                // mismatched user-side `Heap<T,V>` shapes.
-                //
-                // Fix: build a combined `generic_param_map`
-                // (protocol-level params at IDs 0..N from
-                // `type_decl.generics`, then method-local params at
-                // IDs N..N+M from `decl.generics`), and route every
-                // type-ref conversion through `resolve_field_type_ref`
-                // — which emits `TypeRef::Generic(id)` for path-name
-                // matches.  archive_metadata's
-                // `type_ref_to_text_with_params` only seeds its
-                // `param_id_to_name` from protocol-level params
-                // (IDs 0..N), so method-local IDs (N+) fall through
-                // to `__generic_N` placeholders, which the
-                // typechecker's `parse_descriptor_type_string`
-                // converts to fresh TypeVars (the unifier-permissive
-                // shape we want).
-                //
-                // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
-                // every binding comes from the protocol decl AST's
-                // own generics list, no hardcoded param names.
-                let mut proto_param_map: std::collections::HashMap<String, u16> = type_decl
-                    .generics
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, g)| match &g.kind {
-                        verum_ast::ty::GenericParamKind::Type { name, .. } => {
-                            Some((name.name.to_string(), i as u16))
-                        }
-                        _ => None,
-                    })
-                    .collect();
+                // Protocols use the same declaration-owned dense witness roster
+                // as every other nominal shape, including meta/const arguments.
+                let generics = self.declared_generic_parameters(type_id, type_decl)?;
+                let mut proto_param_map = generics.scope;
+                type_desc.type_params = generics.parameters;
                 // #131 Layer E — `Self` is the implicit
                 // implementor type in protocol method signatures
                 // (`fn lt(self, other: Self) -> Bool` in PartialOrd,
@@ -16840,48 +16819,6 @@ impl VbcCodegen {
                     }
                 }
 
-                // Add generic type parameters
-                for generic in &type_decl.generics {
-                    if let verum_ast::ty::GenericParamKind::Type {
-                        name,
-                        bounds,
-                        default,
-                    } = &generic.kind
-                    {
-                        let param_name_id =
-                            StringId(self.ctx.intern_string_raw(name.name.as_str()));
-                        let bound_ids: smallvec::SmallVec<[crate::types::ProtocolId; 2]> = bounds
-                            .iter()
-                            .filter_map(|bound| {
-                                if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind
-                                    && let Some(seg) = path.segments.last()
-                                    && let verum_ast::ty::PathSegment::Name(ident) = seg
-                                {
-                                    let bname = ident.name.to_string();
-                                    if let Some(&pid) = self.type_name_to_id.get(&bname) {
-                                        return Some(crate::types::ProtocolId(pid.0));
-                                    }
-                                }
-                                None
-                            })
-                            .collect();
-
-                        let default_ref = match default {
-                            verum_common::Maybe::Some(ty) => Some(self.resolve_signature_type_ref(ty, &proto_param_map)?),
-                            verum_common::Maybe::None => None,
-                        };
-
-                        let param_desc = crate::types::TypeParamDescriptor {
-                            name: param_name_id,
-                            id: crate::types::TypeParamId(type_desc.type_params.len() as u16),
-                            bounds: bound_ids,
-                            default: default_ref,
-                            ..Default::default()
-                        };
-                        type_desc.type_params.push(param_desc);
-                    }
-                }
-
                 self.push_declared_type(type_desc);
             }
 
@@ -16934,9 +16871,20 @@ impl VbcCodegen {
                 let alias_type_params = generics.parameters;
                 // Alias targets are declaration witnesses. The ABI pointer used for
                 // an unresolved type cannot establish ownership at a destructor.
-                self.resolve_signature_type_ref(target_type, &generic_param_map)?;
                 let ids: Vec<_> = alias_type_params.iter().map(|parameter| parameter.id).collect();
-                let target_ref = self.semantic_formal_type(target_type, &generic_param_map, &ids);
+                let is_cubical_primitive = match &target_type.kind {
+                    verum_ast::ty::TypeKind::Path(path) => path.as_ident().is_some_and(|name|
+                        verum_ast::ty::CubicalTypePrimitive::from_marker(name.name.as_str()).is_some()),
+                    _ => false,
+                };
+                let target_ref = if is_cubical_primitive {
+                    // Kernel primitives retain their checked source telescope;
+                    // they have no independently executable nominal target.
+                    None
+                } else {
+                    self.resolve_signature_type_ref(target_type, &generic_param_map)?;
+                    self.semantic_formal_type(target_type, &generic_param_map, &ids)
+                };
                 let origin_module = self.current_origin_module_sid();
                 let type_desc = crate::types::TypeDescriptor {
                     resource_discipline: type_decl.resource_discipline(),

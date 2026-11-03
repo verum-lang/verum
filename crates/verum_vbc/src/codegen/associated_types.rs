@@ -292,6 +292,7 @@ impl VbcCodegen {
             }
             let nested = |ty, active: &mut Set<TypeRef>| resolve(codegen, ty, active, depth + 1);
             match ty {
+                TypeRef::RecordFieldProjection { .. } => None,
                 TypeRef::AssociatedProjection { base, assoc } => {
                     if !active.insert(ty.clone()) {
                         return None;

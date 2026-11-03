@@ -931,6 +931,8 @@ impl VbcModule {
             // Const-generic VALUE argument renders as its literal —
             // `StackAllocator<256>` round-trips as written.
             TypeRef::ConstValue(v) => v.to_string(),
+            TypeRef::RecordFieldProjection { owner, ordinal } =>
+                format!("<record-field {}#{ordinal}>", self.display_type_id(*owner)),
         }
     }
 
@@ -2989,6 +2991,19 @@ impl Default for FunctionDescriptor {
 }
 
 impl FunctionDescriptor {
+    /// Every retained TypeRef root owned by this function declaration.
+    /// Consumers recurse into each root according to their own operation;
+    /// semantic signatures and generic constraints must not disappear when
+    /// projecting the declaration to an executable ABI.
+    pub fn type_references(&self) -> impl Iterator<Item = &TypeRef> + '_ {
+        self.params.iter().map(|parameter| &parameter.type_ref)
+            .chain(std::iter::once(&self.return_type))
+            .chain(self.yield_type.iter())
+            .chain(self.semantic_return.iter())
+            .chain(self.semantic_params.iter().flat_map(|parameters| parameters.iter().filter_map(Option::as_ref)))
+            .chain(self.type_params.iter().flat_map(|parameter| parameter.default.iter().chain(parameter.type_bounds.iter())))
+    }
+
     /// Instantiate an implementation through its declared self pattern. A heap
     /// type header cannot establish its arguments. Parameter order comes from
     /// this function, even if the impl reorders a nominal owner's parameters.

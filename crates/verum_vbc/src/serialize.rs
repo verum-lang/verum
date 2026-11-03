@@ -656,6 +656,11 @@ impl Serializer {
                 encode_varint(bytes.len() as u64, &mut self.output);
                 self.output.extend_from_slice(bytes);
             }
+            TypeRef::RecordFieldProjection { owner, ordinal } => {
+                self.output.push(0x0D);
+                encode_u32(owner.0, &mut self.output);
+                encode_u32(*ordinal, &mut self.output);
+            }
             TypeRef::ConstValue(v) => {
                 // CONST-GENERIC-VALUE-CARRY-1 (format 2.8): const-generic
                 // value argument.  Fixed 8-byte two's-complement payload —

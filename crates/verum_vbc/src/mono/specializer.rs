@@ -78,6 +78,8 @@ pub enum SpecializationError {
     },
     /// Unresolved type parameter.
     UnresolvedTypeParam(TypeParamId),
+    /// A deferred type has no receiver-bound runtime layout.
+    UnresolvedTypeLayout(TypeRef),
     /// Specialization lookup failed.
     SpecializationNotFound {
         /// The function that failed to specialize.
@@ -108,6 +110,9 @@ impl std::fmt::Display for SpecializationError {
             }
             SpecializationError::UnresolvedTypeParam(id) => {
                 write!(f, "Unresolved type parameter: {:?}", id)
+            }
+            SpecializationError::UnresolvedTypeLayout(ty) => {
+                write!(f, "Unresolved type layout: {ty:?}")
             }
             SpecializationError::SpecializationNotFound {
                 function_id,
@@ -949,8 +954,11 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Gets type size for a TypeRef.
     #[allow(dead_code)] // parked, T0134
-    fn get_type_size(&self, type_ref: &TypeRef) -> u32 {
-        match type_ref {
+    fn get_type_size(&self, type_ref: &TypeRef) -> Result<u32, SpecializationError> {
+        if type_ref.contains_record_field_projection() {
+            return Err(SpecializationError::UnresolvedTypeLayout(type_ref.clone()));
+        }
+        Ok(match type_ref {
             TypeRef::Concrete(id) => {
                 if id.is_builtin() {
                     TypeLayout::for_builtin(*id).size
@@ -960,21 +968,28 @@ impl<'a> BytecodeSpecializer<'a> {
             }
             TypeRef::Instantiated { base, .. } => self.type_layouts.get(base).map_or(8, |l| l.size),
             TypeRef::Reference { .. } => 16, // ThinRef size
-            TypeRef::Tuple(elements) => elements.iter().map(|e| self.get_type_size(e)).sum(),
-            TypeRef::Array { element, length } => self.get_type_size(element) * (*length as u32),
+            TypeRef::Tuple(elements) => elements.iter().try_fold(0u32, |size, e| {
+                self.get_type_size(e).map(|next| size + next)
+            })?,
+            TypeRef::Array { element, length } => self.get_type_size(element)? * (*length as u32),
             TypeRef::Slice(_) => 16,                   // ptr + len
             TypeRef::Function { .. } => 8,             // function pointer
             TypeRef::Rank2Function { .. } => 8,        // function pointer (rank-2 polymorphic)
-            TypeRef::Generic(_) => 8,                  // Should be substituted by now
-            TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
+            TypeRef::Generic(id) => return Err(SpecializationError::UnresolvedTypeParam(*id)),
+            TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. } => {
+                return Err(SpecializationError::UnresolvedTypeLayout(type_ref.clone()));
+            }
             TypeRef::ConstValue(_) => 8,               // integer value slot
-        }
+        })
     }
 
     /// Gets type alignment for a TypeRef.
     #[allow(dead_code)] // parked, T0134
-    fn get_type_alignment(&self, type_ref: &TypeRef) -> u32 {
-        match type_ref {
+    fn get_type_alignment(&self, type_ref: &TypeRef) -> Result<u32, SpecializationError> {
+        if type_ref.contains_record_field_projection() {
+            return Err(SpecializationError::UnresolvedTypeLayout(type_ref.clone()));
+        }
+        Ok(match type_ref {
             TypeRef::Concrete(id) => {
                 if id.is_builtin() {
                     TypeLayout::for_builtin(*id).alignment
@@ -986,19 +1001,19 @@ impl<'a> BytecodeSpecializer<'a> {
                 self.type_layouts.get(base).map_or(8, |l| l.alignment)
             }
             TypeRef::Reference { .. } => 8,
-            TypeRef::Tuple(elements) => elements
-                .iter()
-                .map(|e| self.get_type_alignment(e))
-                .max()
-                .unwrap_or(1),
-            TypeRef::Array { element, .. } => self.get_type_alignment(element),
+            TypeRef::Tuple(elements) => elements.iter().try_fold(1u32, |alignment, e| {
+                self.get_type_alignment(e).map(|next| alignment.max(next))
+            })?,
+            TypeRef::Array { element, .. } => self.get_type_alignment(element)?,
             TypeRef::Slice(_) => 8,
             TypeRef::Function { .. } => 8,
             TypeRef::Rank2Function { .. } => 8,
-            TypeRef::Generic(_) => 8,
-            TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
+            TypeRef::Generic(id) => return Err(SpecializationError::UnresolvedTypeParam(*id)),
+            TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. } => {
+                return Err(SpecializationError::UnresolvedTypeLayout(type_ref.clone()));
+            }
             TypeRef::ConstValue(_) => 8,               // integer value slot
-        }
+        })
     }
 
     /// Gets or creates an instantiated type.
@@ -1011,6 +1026,9 @@ impl<'a> BytecodeSpecializer<'a> {
         base: TypeId,
         args: &[TypeRef],
     ) -> Result<TypeId, SpecializationError> {
+        if let Some(ty) = args.iter().find(|ty| ty.contains_record_field_projection()) {
+            return Err(SpecializationError::UnresolvedTypeLayout(ty.clone()));
+        }
         // Check cache first
         let key = (base, args.to_vec());
         if let Some(&id) = self.instantiated_types.get(&key) {
@@ -1136,6 +1154,9 @@ impl<'a> BytecodeSpecializer<'a> {
         base: TypeId,
         args: &[TypeRef],
     ) -> Result<(u32, u32), SpecializationError> {
+        if let Some(ty) = args.iter().find(|ty| ty.contains_record_field_projection()) {
+            return Err(SpecializationError::UnresolvedTypeLayout(ty.clone()));
+        }
         // Get base type layout
         let base_layout = self.type_layouts.get(&base).copied().unwrap_or(TypeLayout {
             size: 8,
@@ -1145,6 +1166,10 @@ impl<'a> BytecodeSpecializer<'a> {
         // For simple cases, inherit from base
         // For complex cases (structs with generic fields), need to compute based on args
         if let Some(base_desc) = self.module.types.iter().find(|td| td.id == base) {
+            if let Some(field) = base_desc.fields.iter()
+                .find(|field| field.type_ref.contains_record_field_projection()) {
+                return Err(SpecializationError::UnresolvedTypeLayout(field.type_ref.clone()));
+            }
             // Check if any field uses a type parameter
             let has_generic_fields = base_desc
                 .fields
@@ -1159,8 +1184,8 @@ impl<'a> BytecodeSpecializer<'a> {
                 for field in &base_desc.fields {
                     // Substitute type params
                     let field_type = self.substitution.apply(&field.type_ref)?;
-                    let field_size = self.get_type_size(&field_type);
-                    let field_align = self.get_type_alignment(&field_type);
+                    let field_size = self.get_type_size(&field_type)?;
+                    let field_align = self.get_type_alignment(&field_type)?;
 
                     // Align current offset
                     total_size = (total_size + field_align - 1) & !(field_align - 1);
@@ -1230,6 +1255,28 @@ impl<'a> BytecodeSpecializer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_projection_cannot_acquire_a_concrete_layout() {
+        let module = VbcModule::new("record-layout".into());
+        let substitution = TypeSubstitution::empty();
+        let graph = InstantiationGraph::new();
+        let mut specializer = BytecodeSpecializer::new(&module, &substitution, &graph);
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 };
+        for ty in [
+            projection.clone(),
+            TypeRef::Tuple(vec![TypeRef::Concrete(TypeId::INT), projection.clone()]),
+            TypeRef::Slice(Box::new(projection.clone())),
+            TypeRef::Instantiated { base: TypeId::LIST, args: vec![projection.clone()] },
+        ] {
+            assert!(matches!(specializer.get_type_size(&ty), Err(SpecializationError::UnresolvedTypeLayout(t)) if t == ty));
+            assert!(matches!(specializer.get_type_alignment(&ty), Err(SpecializationError::UnresolvedTypeLayout(t)) if t == ty));
+            assert!(matches!(specializer.get_or_create_instantiated_type(TypeId::LIST, &[ty.clone()]), Err(SpecializationError::UnresolvedTypeLayout(t)) if t == ty));
+        }
+        assert_eq!(specializer.get_type_size(&TypeRef::Concrete(TypeId::INT)).unwrap(), 8);
+        assert_eq!(specializer.get_type_alignment(&TypeRef::Concrete(TypeId::INT)).unwrap(), 8);
+        assert!(specializer.take_new_type_descriptors().is_empty());
+    }
 
     #[test]
     fn test_type_layout_builtin() {

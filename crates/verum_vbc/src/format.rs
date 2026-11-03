@@ -128,7 +128,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.34 carries caller declarations at generic receiver calls.
 /// Version 2.35 gives rank-2 binders explicit scoped encoding. Earlier rank-2
 /// tags are rejected: their local and enclosing parameter IDs were ambiguous.
-pub const VERSION_MINOR: u16 = 35;
+/// Version 2.36 retains declaration-bound record field projections explicitly.
+pub const VERSION_MINOR: u16 = 36;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

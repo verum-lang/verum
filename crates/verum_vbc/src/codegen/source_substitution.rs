@@ -122,6 +122,23 @@ fn reserve_indices(ty: &TypeRef, reserved: &mut BTreeSet<u16>) {
         | TypeRef::Slice(inner)
         | TypeRef::Array { element: inner, .. }
         | TypeRef::AssociatedProjection { base: inner, .. } => reserve_indices(inner, reserved),
-        TypeRef::Concrete(_) | TypeRef::ConstValue(_) => {}
+        TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::RecordFieldProjection { .. } => {}
+    }
+}
+
+#[cfg(test)]
+mod record_projection_tests {
+    use super::*;
+    use crate::types::TypeId;
+
+    #[test]
+    fn record_projection_does_not_reserve_generic_indices() {
+        let mut reserved = BTreeSet::new();
+        reserve_indices(&TypeRef::Tuple(vec![
+            TypeRef::RecordFieldProjection { owner: TypeId(7), ordinal: 0 },
+            TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: u32::MAX },
+            TypeRef::Generic(TypeParamId(3)),
+        ]), &mut reserved);
+        assert_eq!(reserved, BTreeSet::from([3]));
     }
 }

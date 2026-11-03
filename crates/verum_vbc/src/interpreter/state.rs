@@ -3063,6 +3063,17 @@ impl InterpreterState {
     /// The descriptor owns parameter IDs; frame vectors carry only arguments.
     /// Shared substitution also carries arguments nested inside other types.
     pub(crate) fn resolve_generic_witness(&self, ty: &crate::types::TypeRef) -> InterpreterResult<crate::types::TypeRef> {
+        let require_runtime_witness = |ty: &crate::types::TypeRef| {
+            if ty.contains_record_field_projection() {
+                Err(InterpreterError::InvalidBytecode {
+                    pc: self.pc() as usize,
+                    message: "Record-field telescope requires its receiver witness before runtime use".into(),
+                })
+            } else {
+                Ok(())
+            }
+        };
+        require_runtime_witness(ty)?;
         if !ty.is_generic() {
             return Ok(ty.clone());
         }
@@ -3076,8 +3087,10 @@ impl InterpreterState {
         else {
             return Ok(ty.clone());
         };
-        crate::mono::TypeSubstitution::from_function(function, args).apply(ty)
-            .map_err(|error| InterpreterError::Panic { message: format!("invalid generic witness substitution: {error}") })
+        let resolved = crate::mono::TypeSubstitution::from_function(function, args).apply(ty)
+            .map_err(|error| InterpreterError::Panic { message: format!("invalid generic witness substitution: {error}") })?;
+        require_runtime_witness(&resolved)?;
+        Ok(resolved)
     }
 
     /// Install only an environment's own concrete witnesses, in the target
@@ -3656,6 +3669,64 @@ pub struct DebugSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn record_witness_module(instruction: crate::instruction::Instruction) -> VbcModule {
+        use crate::bytecode::encode_instruction;
+        use crate::instruction::{Instruction, Reg};
+        use crate::module::FunctionDescriptor;
+        let mut module = VbcModule::new("record-runtime-witness".into());
+        for (id, body) in [
+            vec![instruction, Instruction::Ret { value: Reg(0) }],
+            vec![Instruction::LoadUnit { dst: Reg(0) }, Instruction::Ret { value: Reg(0) }],
+        ].into_iter().enumerate() {
+            let name = module.intern_string(&format!("witness_{id}"));
+            let mut function = FunctionDescriptor::new(name);
+            function.id = FunctionId(id as u32);
+            function.register_count = 1;
+            function.bytecode_offset = module.bytecode.len() as u32;
+            for instruction in body { encode_instruction(&instruction, &mut module.bytecode); }
+            function.bytecode_length = module.bytecode.len() as u32 - function.bytecode_offset;
+            module.functions.push(function);
+        }
+        module
+    }
+
+    #[test]
+    fn record_projection_is_rejected_by_actual_callg_and_loadt() {
+        use crate::instruction::{Instruction, Reg, RegRange};
+        use crate::interpreter::Interpreter;
+        use crate::types::{TypeId, TypeRef};
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 };
+        for ty in [projection.clone(), TypeRef::Instantiated { base: TypeId::LIST, args: vec![projection] }, TypeRef::Concrete(TypeId::INT)] {
+            for instruction in [
+                Instruction::LoadT { dst: Reg(0), type_ref: ty.clone() },
+                Instruction::CallG { dst: Reg(0), func_id: 1, type_args: vec![ty.clone()], args: RegRange { start: Reg(0), count: 0 } },
+            ] {
+                // The non-validating constructor exercises runtime refusal,
+                // including CallG whose callee never consumes its witness.
+                let mut interpreter = Interpreter::new(Arc::new(record_witness_module(instruction)));
+                let result = interpreter.execute_function(FunctionId(0));
+                if ty.contains_record_field_projection() {
+                    assert!(matches!(result, Err(InterpreterError::InvalidBytecode { message, .. }) if message.contains("receiver witness")));
+                } else {
+                    assert!(result.is_ok(), "concrete witness must remain executable: {result:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn record_projection_is_rejected_after_generic_substitution() {
+        use crate::instruction::{Instruction, Reg};
+        use crate::types::{TypeId, TypeParamId, TypeRef};
+        let module = record_witness_module(Instruction::LoadUnit { dst: Reg(0) });
+        let mut state = InterpreterState::new(Arc::new(module));
+        state.call_stack.push_frame(FunctionId(0), 1, 0, Reg(0)).unwrap();
+        state.call_stack.set_generic_witnesses(vec![TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 }].into_boxed_slice());
+        assert!(matches!(state.resolve_generic_witness(&TypeRef::Generic(TypeParamId(0))), Err(InterpreterError::InvalidBytecode { message, .. }) if message.contains("receiver witness")));
+        state.call_stack.set_generic_witnesses(vec![TypeRef::Concrete(TypeId::INT)].into_boxed_slice());
+        assert_eq!(state.resolve_generic_witness(&TypeRef::Generic(TypeParamId(0))).unwrap(), TypeRef::Concrete(TypeId::INT));
+    }
 
     fn test_module() -> Arc<VbcModule> {
         Arc::new(VbcModule::new("test".to_string()))

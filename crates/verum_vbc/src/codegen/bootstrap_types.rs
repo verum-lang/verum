@@ -46,6 +46,7 @@ fn declared_name<'a>(module: &'a VbcModule, ty: &TypeDescriptor) -> Option<&'a s
 fn type_ids(ty: &TypeRef, ids: &mut Vec<TypeId>) {
     match ty {
         TypeRef::Concrete(id) => ids.push(*id),
+        TypeRef::RecordFieldProjection { owner, .. } => ids.push(*owner),
         TypeRef::Instantiated { base, args } => {
             ids.push(*base);
             for arg in args {

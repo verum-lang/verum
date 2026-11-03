@@ -13,6 +13,7 @@ pub(crate) fn concrete(ty: &TypeRef) -> bool {
     match ty {
         TypeRef::Generic(_)
         | TypeRef::AssociatedProjection { .. }
+        | TypeRef::RecordFieldProjection { .. }
         | TypeRef::Rank2Function { .. } => false,
         TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => args.iter().all(concrete),
         TypeRef::Function {
@@ -23,6 +24,23 @@ pub(crate) fn concrete(ty: &TypeRef) -> bool {
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => concrete(inner),
         TypeRef::Array { element, .. } => concrete(element),
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod record_projection_tests {
+    use super::*;
+    use crate::types::TypeId;
+
+    #[test]
+    fn record_projection_never_forms_a_concrete_instantiation() {
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 };
+        assert!(!concrete(&projection));
+        assert!(!concrete(&TypeRef::Tuple(vec![TypeRef::Concrete(TypeId::INT), projection.clone()])));
+        assert!(!concrete(&TypeRef::Function {
+            params: vec![], return_type: Box::new(projection), contexts: Default::default(),
+        }));
+        assert!(concrete(&TypeRef::Concrete(TypeId::INT)));
     }
 }
 

@@ -148,6 +148,9 @@ pub enum RegisterType {
     InlineStruct { type_name: String, size: u32 },
     /// Generic type parameter (compiled as ptr, value-as-pointer).
     GenericParam,
+    /// Descriptor-only record telescope, retained without a fabricated runtime
+    /// representation. Type lowering refuses this declaration before codegen.
+    UnresolvedRecordProjection(TypeRef),
     /// Unknown type (fallback, treat as i64).
     Unknown,
 }
@@ -423,6 +426,9 @@ impl RegisterType {
 
     /// Convert a VBC TypeRef to a RegisterType.
     pub fn from_type_ref(ty: &TypeRef) -> Self {
+        if ty.contains_record_field_projection() {
+            return Self::UnresolvedRecordProjection(ty.clone());
+        }
         match ty {
             TypeRef::Concrete(id) => Self::from_type_id(*id),
 
@@ -457,6 +463,7 @@ impl RegisterType {
 
             // A projection like `F.Output` is generic until monomorphized.
             TypeRef::AssociatedProjection { .. } => Self::GenericParam,
+            TypeRef::RecordFieldProjection { .. } => Self::UnresolvedRecordProjection(ty.clone()),
 
             // CONST-GENERIC-VALUE-CARRY-1: a const-generic VALUE argument
             // is an integer at the value level.
@@ -1353,6 +1360,23 @@ impl MethodDispatchTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_projection_retains_structure_without_a_runtime_class() {
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 };
+        for ty in [
+            projection.clone(),
+            TypeRef::Instantiated { base: TypeId::LIST, args: vec![projection.clone()] },
+            TypeRef::Slice(Box::new(projection)),
+        ] {
+            let register = RegisterType::from_type_ref(&ty);
+            assert!(matches!(&register, RegisterType::UnresolvedRecordProjection(saved) if saved == &ty));
+            assert!(!register.is_int());
+            assert!(!register.is_list());
+            assert_eq!(register.type_name(), None);
+        }
+        assert!(RegisterType::from_type_ref(&TypeRef::Concrete(TypeId::INT)).is_int());
+    }
 
     #[test]
     fn test_register_type_from_type_id() {

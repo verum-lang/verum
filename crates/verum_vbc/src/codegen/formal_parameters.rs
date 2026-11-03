@@ -459,6 +459,7 @@ fn remapped_declaration_type(
         };
         match ty {
             TypeRef::Concrete(id) => id_known(*id),
+            TypeRef::RecordFieldProjection { owner, .. } => map.contains_key(&owner.0),
             TypeRef::Generic(_) | TypeRef::ConstValue(_) => true,
             TypeRef::Reference { inner, .. }
             | TypeRef::Slice(inner)
@@ -504,6 +505,8 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
             index < binders || declared_ids.contains(&TypeParamId((index - binders) as u16))
         }
         TypeRef::ConstValue(_) => true,
+        // The record telescope supplies this binder, not the callable's scope.
+        TypeRef::RecordFieldProjection { .. } => false,
         TypeRef::AssociatedProjection { base, assoc } => !assoc.is_empty()
             && resolved_in_scope(base, declared_ids, depth + 1, binders),
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner)
@@ -527,5 +530,24 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
                 && params.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
                 && resolved_in_scope(return_type, declared_ids, depth + 1, binders)
         }
+    }
+}
+
+#[cfg(test)]
+mod record_projection_tests {
+    use super::*;
+
+    #[test]
+    fn record_projection_transport_requires_its_nominal_owner() {
+        let projection = TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 7 };
+        assert!(remapped_declaration_type(&projection, &Default::default()).is_none());
+        let map = std::collections::HashMap::from([(2048, 4096)]);
+        assert_eq!(remapped_declaration_type(&projection, &map), Some(
+            TypeRef::RecordFieldProjection { owner: TypeId(4096), ordinal: 7 }
+        ));
+        assert!(!resolved(&projection, &[TypeParamId(7)], 0));
+        assert!(!resolved(&TypeRef::Function {
+            params: vec![], return_type: Box::new(projection), contexts: Default::default(),
+        }, &[TypeParamId(7)], 0));
     }
 }

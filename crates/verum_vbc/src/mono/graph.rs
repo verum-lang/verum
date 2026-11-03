@@ -230,6 +230,11 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             hash_type_ref(base, hasher);
             assoc.hash(hasher);
         }
+        TypeRef::RecordFieldProjection { owner, ordinal } => {
+            12u8.hash(hasher);
+            owner.0.hash(hasher);
+            ordinal.hash(hasher);
+        }
         TypeRef::ConstValue(v) => {
             // Const-generic VALUE — distinct values are distinct
             // specializations (CONST-GENERIC-VALUE-CARRY-1).
@@ -582,6 +587,22 @@ pub struct CallSite {
 mod tests {
     use super::*;
     use crate::types::TypeId;
+
+    #[test]
+    fn record_projection_hash_preserves_owner_ordinal_and_kind() {
+        let types = [
+            TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 0 },
+            TypeRef::RecordFieldProjection { owner: TypeId(2049), ordinal: 0 },
+            TypeRef::RecordFieldProjection { owner: TypeId(2048), ordinal: 1 },
+            TypeRef::Concrete(TypeId(2048)),
+            TypeRef::Generic(crate::types::TypeParamId(0)),
+        ];
+        let hashes: std::collections::HashSet<_> = types.iter()
+            .map(|ty| InstantiationRequest::compute_hash(FunctionId(1), std::slice::from_ref(ty)))
+            .collect();
+        assert_eq!(hashes.len(), types.len());
+        assert_eq!(type_ref_depth(&types[0]), 1);
+    }
 
     #[test]
     fn test_instantiation_request_hash() {

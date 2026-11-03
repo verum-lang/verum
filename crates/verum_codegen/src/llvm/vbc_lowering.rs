@@ -2119,6 +2119,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // symbols are still bodyless here, but are not disposable forward stubs.
         let mut pending_source_bodies = Set::new();
         for (func_idx, func_desc) in vbc_module.functions.iter().enumerate() {
+            // ABI normalization must never erase a declaration-only telescope
+            // into an executable word or pointer. Check both runtime and
+            // semantic signatures before projecting them to the native ABI.
+            let unresolved = func_desc.type_references()
+                .any(TypeRef::contains_record_field_projection);
+            if unresolved {
+                return Err(super::error::LlvmLoweringError::type_lowering(format!(
+                    "Function {} contains a record-field telescope without its receiver witness",
+                    vbc_module.get_string(func_desc.name).unwrap_or("<anonymous>"),
+                )));
+            }
             // Determine effective return type:
             // - If instructions available and contain Ret (value return), use i64
             // - If instructions available and only RetV (void return), use UNIT

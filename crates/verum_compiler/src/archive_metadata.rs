@@ -590,7 +590,8 @@ fn register_module_metadata(
                 let fields: List<FieldDescriptor> = ty
                     .fields
                     .iter()
-                    .map(|f| {
+                    .enumerate()
+                    .map(|(ordinal, f)| {
                         // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533/T0109):
                         // a cross-module field type that codegen collapsed to
                         // `TypeRef::Concrete(TypeId::PTR)` renders
@@ -615,7 +616,17 @@ fn register_module_metadata(
                         // Reducer<A, R>`. Rendering from the TypeRef cannot:
                         // the local `R` and the enclosing `A`/`B` share one
                         // index space there (T0997).
-                        let ty = if rendered.contains("__opaque_type_")
+                        let source_field = ty.source_declaration.as_ref().and_then(|declaration| {
+                            if let verum_ast::TypeDeclBody::Record(fields) = &declaration.body {
+                                fields.get(ordinal)
+                            } else { None }
+                        });
+                        // The validated AST binds dependent field names and
+                        // universes. Text is a display channel, not a substitute
+                        // for that semantic declaration.
+                        let ty = if let Some(field) = source_field {
+                            verum_ast::pretty::format_type(&field.ty).to_string()
+                        } else if rendered.contains("__opaque_type_")
                             || rendered == "__opaque_typeref"
                         {
                             match module.strings.get(f.type_name) {
@@ -1974,6 +1985,7 @@ fn declaration_type_to_text(
     ty: &TypeRef,
     names: &verum_common::Map<u32, Text>,
 ) -> Maybe<Text> {
+    if ty.contains_record_field_projection() { return Maybe::None; }
     let complete = std::cell::Cell::new(true);
     let rendered = render_type_ref(ty, &|id| {
         let name = names.get(&id).map(|name| name.to_string());
@@ -2080,6 +2092,8 @@ fn render_type_ref(
         // as its literal so `StackAllocator<256>` round-trips through the
         // metadata text form instead of degrading to `__opaque_typeref`.
         TypeRef::ConstValue(v) => v.to_string(),
+        TypeRef::RecordFieldProjection { owner, ordinal } =>
+            format!("<record-field {}#{ordinal}>", owner.0),
         // T0190 (same root as the TypeId table below, structural half):
         // these three shapes have exact spellings that
         // `parse_descriptor_type_string` already parses back — `(A, B)` to

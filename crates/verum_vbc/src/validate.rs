@@ -192,6 +192,9 @@ impl<'a> Validator<'a> {
 
     /// Validates a single type descriptor.
     fn validate_type_descriptor(&mut self, desc: &TypeDescriptor, _index: usize) {
+        if let Err(reason) = crate::source_declaration_integrity::validate_type_descriptor(desc, &self.module.strings) {
+            self.errors.push(VbcError::Deserialization(reason.to_string()));
+        }
         // Validate name reference
         if self.module.get_string(desc.name).is_none() && desc.name.0 != 0 {
             self.errors.push(VbcError::InvalidStringId(desc.name.0));
@@ -199,7 +202,12 @@ impl<'a> Validator<'a> {
 
         // Validate field types
         for field in &desc.fields {
-            self.validate_type_ref(&field.type_ref, 0);
+            // The integrity check above establishes the exact declaration,
+            // prefix and universe-valued owner for any record projection.
+            self.validate_type_ref_in_record(&field.type_ref, 0, true);
+            if let Some(declaration) = &field.declaration_type {
+                self.validate_type_ref_in_record(declaration, 0, true);
+            }
         }
 
         // Validate variant payloads
@@ -220,6 +228,10 @@ impl<'a> Validator<'a> {
 
     /// Validates a type reference (with depth check for circularity).
     fn validate_type_ref(&mut self, type_ref: &TypeRef, depth: usize) {
+        self.validate_type_ref_in_record(type_ref, depth, false);
+    }
+
+    fn validate_type_ref_in_record(&mut self, type_ref: &TypeRef, depth: usize, record_field: bool) {
         if depth > self.options.max_type_depth {
             self.errors.push(VbcError::CircularType(TypeId(0)));
             return;
@@ -235,6 +247,15 @@ impl<'a> Validator<'a> {
             TypeRef::Generic(_) => {
                 // Generic type params are validated in context
             }
+            TypeRef::RecordFieldProjection { owner, .. } => {
+                if !record_field {
+                    self.errors.push(VbcError::Deserialization(
+                        "record field projection requires its declaration telescope or an actual receiver witness".into()));
+                }
+                if self.module.get_type(*owner).is_none() {
+                    self.errors.push(VbcError::InvalidTypeId(owner.0));
+                }
+            }
             TypeRef::Instantiated { base, args } => {
                 if !base.is_builtin()
                     && !base.is_semantic_type()
@@ -243,7 +264,7 @@ impl<'a> Validator<'a> {
                     self.errors.push(VbcError::InvalidTypeId(base.0));
                 }
                 for arg in args {
-                    self.validate_type_ref(arg, depth + 1);
+                    self.validate_type_ref_in_record(arg, depth + 1, record_field);
                 }
             }
             TypeRef::Function {
@@ -252,26 +273,26 @@ impl<'a> Validator<'a> {
                 ..
             } => {
                 for param in params {
-                    self.validate_type_ref(param, depth + 1);
+                    self.validate_type_ref_in_record(param, depth + 1, record_field);
                 }
-                self.validate_type_ref(return_type, depth + 1);
+                self.validate_type_ref_in_record(return_type, depth + 1, record_field);
             }
             TypeRef::Reference { inner, .. } => {
-                self.validate_type_ref(inner, depth + 1);
+                self.validate_type_ref_in_record(inner, depth + 1, record_field);
             }
             TypeRef::Tuple(elems) => {
                 for elem in elems {
-                    self.validate_type_ref(elem, depth + 1);
+                    self.validate_type_ref_in_record(elem, depth + 1, record_field);
                 }
             }
             TypeRef::Array { element, .. } => {
-                self.validate_type_ref(element, depth + 1);
+                self.validate_type_ref_in_record(element, depth + 1, record_field);
             }
             TypeRef::Slice(inner) => {
-                self.validate_type_ref(inner, depth + 1);
+                self.validate_type_ref_in_record(inner, depth + 1, record_field);
             }
             TypeRef::AssociatedProjection { base, .. } => {
-                self.validate_type_ref(base, depth + 1);
+                self.validate_type_ref_in_record(base, depth + 1, record_field);
             }
             TypeRef::ConstValue(_) => {
                 // Const-generic VALUE — nothing to validate (no ids).
@@ -282,9 +303,9 @@ impl<'a> Validator<'a> {
                 ..
             } => {
                 for param in params {
-                    self.validate_type_ref(param, depth + 1);
+                    self.validate_type_ref_in_record(param, depth + 1, record_field);
                 }
-                self.validate_type_ref(return_type, depth + 1);
+                self.validate_type_ref_in_record(return_type, depth + 1, record_field);
             }
         }
     }
@@ -326,13 +347,11 @@ impl<'a> Validator<'a> {
             });
         }
 
-        // Validate parameter types
-        for param in &desc.params {
-            self.validate_type_ref(&param.type_ref, 0);
+        // All declaration-owned types share the same function scope, including
+        // semantic signatures, yielded values, generic defaults and bounds.
+        for ty in desc.type_references() {
+            self.validate_type_ref(ty, 0);
         }
-
-        // Validate return type
-        self.validate_type_ref(&desc.return_type, 0);
 
         // Validate register count is reasonable (max ~16K for good performance)
         if desc.register_count > 16384 {
@@ -571,10 +590,14 @@ impl<'a> Validator<'a> {
                 self.check_reg(*src, max_reg, &func_name);
                 self.validate_type_ref(type_ref, 0);
             }
-            Instruction::TypeResource { dst, type_ref }
+            Instruction::LoadT { dst, type_ref }
+            | Instruction::TypeResource { dst, type_ref }
             | Instruction::TypeLayout { dst, type_ref, .. } => {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.validate_type_ref(type_ref, 0);
+            }
+            Instruction::SetCallWitness { type_args } => {
+                for ty in type_args { self.validate_type_ref(ty, 0); }
             }
             // -----------------------------------------------------------
             // Function-call cross-references — `func_id` in range AND
@@ -605,9 +628,7 @@ impl<'a> Validator<'a> {
                     self.check_call_arity(*func_id, args.count as u32, &func_name);
                 }
                 self.check_reg(*dst, max_reg, &func_name);
-                // `type_args` are static `TypeRef`s, not registers — nothing
-                // register-shaped to validate here.
-                let _ = type_args;
+                for ty in type_args { self.validate_type_ref(ty, 0); }
                 self.check_reg_range(*args, max_reg, &func_name);
             }
             Instruction::TailCall { func_id, args } => {
@@ -744,6 +765,8 @@ impl<'a> Validator<'a> {
                 dst,
                 func_id,
                 captures,
+                capture_types,
+                lexical_types,
                 ..
             } => {
                 if *func_id >= function_count {
@@ -752,6 +775,10 @@ impl<'a> Validator<'a> {
                 self.check_reg(*dst, max_reg, &func_name);
                 for r in captures {
                     self.check_reg(*r, max_reg, &func_name);
+                }
+                for ty in lexical_types { self.validate_type_ref(ty, 0); }
+                if let Some(types) = capture_types {
+                    for ty in types.iter().flatten() { self.validate_type_ref(ty, 0); }
                 }
             }
 

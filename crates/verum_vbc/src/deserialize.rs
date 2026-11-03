@@ -1467,6 +1467,10 @@ impl<'a> Deserializer<'a> {
      let v = decode_u64(self.data, &mut self.offset)? as i64;
      Ok(TypeRef::ConstValue(v))
  }
+ 0x0D if self.header.as_ref().is_some_and(|header| header.version_minor >= 36) => Ok(TypeRef::RecordFieldProjection {
+     owner: TypeId(decode_u32(self.data, &mut self.offset)?),
+     ordinal: decode_u32(self.data, &mut self.offset)?,
+ }),
  _ => Err(VbcError::InvalidTypeRefTag(tag)),
  }
  }
