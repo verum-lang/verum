@@ -52,10 +52,8 @@ mount core.database.sqlite.native.l6_session.connection.{
     CmRead, CmWrite, CmAdmin,
     open_memory, open_file,
 };
-mount core.database.sqlite.native.l7_api.capability.{
-    ReadCap, WriteCap, AdminCap,
-    Capability, CanRead, CanWrite, CanDdl,
-};
+mount core.database.sqlite.native.l7_api.capability.{ReadCap, WriteCap, AdminCap};
+mount core.database.common.capability.{Capability, CanRead, CanWrite, CanDdl};
 
 // -----------------------------------------------------------------------------
 // TypedConnection<C>
