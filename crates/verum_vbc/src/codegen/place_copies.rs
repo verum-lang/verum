@@ -130,7 +130,9 @@ impl VbcCodegen {
                 });
                 match nested(inner, input)? {
                     TypeRef::Reference { inner, .. } => Some(*inner),
-                    _ => None,
+                    owner => self.declared_protocol_member(
+                        &owner, verum_common::well_known_types::WellKnownProtocol::Deref, "Target",
+                    ),
                 }
             }
             ExprKind::Unary { op, expr: inner } if matches!(op,

@@ -19065,7 +19065,7 @@ impl VbcCodegen {
             .compile_expr(iter)?
             .or_internal("for iter has no value")?;
         let item = self.source_expression_declaration(iter, None, 0).and_then(|ty| {
-            self.iterator_protocol_item(&ty, verum_common::well_known_types::WellKnownProtocol::Iterator)
+            self.declared_protocol_member(&ty, verum_common::well_known_types::WellKnownProtocol::Iterator, "Item")
         });
         let iter_reg = self.ctx.define_var("__for_iter", true);
         self.ctx.emit(Instruction::Mov {
@@ -19281,7 +19281,7 @@ impl VbcCodegen {
         // For a declared iterator or adapter, the actual return value owns Item.
         // The container fallback applies only when the native iterator has no declaration.
         let declared_item = iterable.as_ref().and_then(|ty| {
-            self.iterator_protocol_item(ty, verum_common::well_known_types::WellKnownProtocol::IntoIterator)
+            self.declared_protocol_member(ty, verum_common::well_known_types::WellKnownProtocol::IntoIterator, "Item")
         });
         let (item_type, borrow) = match declared_item {
             Some(item) => (Some(item), None),
