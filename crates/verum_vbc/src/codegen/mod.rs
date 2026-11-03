@@ -9366,31 +9366,49 @@ impl VbcCodegen {
         source_path: &str,
         core_root: &str,
     ) -> Vec<String> {
-        let mut candidates = Vec::new();
-
-        if module_path.is_empty() {
-            return candidates;
+        // Path normalization is independent from discovery: every normalized
+        // module can be a file, a directory module, or a parent's exported item.
+        fn candidates(root: &std::path::Path, segments: &[String]) -> Vec<String> {
+            let mut result = Vec::new();
+            let mut add = |path: std::path::PathBuf| {
+                let path = path.to_string_lossy().to_string();
+                if !result.contains(&path) { result.push(path); }
+            };
+            if segments.is_empty() {
+                add(root.join("mod.vr"));
+                return result;
+            }
+            let selected = root.join(segments.join("/"));
+            add(selected.with_extension("vr"));
+            let parent = root.join(segments[..segments.len() - 1].join("/"));
+            if segments.len() > 1 {
+                add(parent.with_extension("vr"));
+            }
+            add(selected.join("mod.vr"));
+            // A single remaining item belongs to the normalized root itself.
+            // Requiring a second segment loses parent-facade imports.
+            add(parent.join("mod.vr"));
+            result
         }
 
+        if module_path.is_empty() {
+            return Vec::new();
+        }
         let source_dir = std::path::Path::new(source_path)
             .parent()
             .unwrap_or(std::path::Path::new("."));
 
-        // Handle relative paths (starting with "." or "super")
         if module_path[0] == "." || module_path[0] == "super" {
             let mut base = source_dir.to_path_buf();
             let mut start_idx = 0;
             let mut super_count = 0u32;
-
-            for (i, seg) in module_path.iter().enumerate() {
-                match seg.as_str() {
-                    "." => {
-                        start_idx = i + 1;
-                    }
+            for (i, segment) in module_path.iter().enumerate() {
+                match segment.as_str() {
+                    "." => start_idx = i + 1,
                     "super" => {
                         super_count += 1;
-                        // First `super` stays in source_dir (parent module = containing directory).
-                        // Each additional `super` goes up one more level.
+                        // First super names the containing module; further
+                        // ancestors move the same normalized base upward.
                         if super_count > 1 {
                             base = base.parent().unwrap_or(&base).to_path_buf();
                         }
@@ -9399,78 +9417,13 @@ impl VbcCodegen {
                     _ => break,
                 }
             }
-
-            let remaining: Vec<&str> = module_path[start_idx..]
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
-            if !remaining.is_empty() {
-                // Try as file: base/remaining.vr
-                let file_path = base.join(remaining.join("/")).with_extension("vr");
-                candidates.push(file_path.to_string_lossy().to_string());
-
-                // Try parent as file (last segment might be item name)
-                if remaining.len() > 1 {
-                    let parent_path = base
-                        .join(remaining[..remaining.len() - 1].join("/"))
-                        .with_extension("vr");
-                    candidates.push(parent_path.to_string_lossy().to_string());
-                }
-
-                // Try as directory with mod.vr
-                let mod_path = base.join(remaining.join("/")).join("mod.vr");
-                candidates.push(mod_path.to_string_lossy().to_string());
-                // The last segment may be an item exported by a directory
-                // module, just as it may be an item in the parent file above.
-                if remaining.len() > 1 {
-                    let parent = base.join(remaining[..remaining.len() - 1].join("/"));
-                    candidates.push(parent.join("mod.vr").to_string_lossy().to_string());
-                }
-            }
-            return candidates;
+            return candidates(&base, &module_path[start_idx..]);
         }
 
-        // Handle absolute paths starting with "core"
-        let (root, segments) = if module_path[0] == "core" {
-            // Strip "core" prefix, use core_root as base
-            (
-                std::path::Path::new(core_root).to_path_buf(),
-                &module_path[1..],
-            )
-        } else {
-            // Non-core paths: try under core/ anyway (e.g., "sys" → "core/sys")
-            (std::path::Path::new(core_root).to_path_buf(), module_path)
-        };
-
-        let path_segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
-
-        if !path_segments.is_empty() {
-            // Direct file: core_root/base/protocols.vr
-            let file_path = root.join(path_segments.join("/")).with_extension("vr");
-            candidates.push(file_path.to_string_lossy().to_string());
-
-            // Parent file (last segment is item name): core_root/base.vr
-            if path_segments.len() > 1 {
-                let parent = root
-                    .join(path_segments[..path_segments.len() - 1].join("/"))
-                    .with_extension("vr");
-                candidates.push(parent.to_string_lossy().to_string());
-            }
-
-            // Module directory: core_root/base/protocols/mod.vr
-            let mod_path = root.join(path_segments.join("/")).join("mod.vr");
-            candidates.push(mod_path.to_string_lossy().to_string());
-            if path_segments.len() > 1 {
-                let parent = root.join(path_segments[..path_segments.len() - 1].join("/"));
-                candidates.push(parent.join("mod.vr").to_string_lossy().to_string());
-            }
-        } else {
-            // Just "core" itself - try core/mod.vr
-            let mod_path = root.join("mod.vr");
-            candidates.push(mod_path.to_string_lossy().to_string());
-        }
-
-        candidates
+        // Preserve the language's standard-library root interpretation. The
+        // candidate builder above does not depend on any module or item name.
+        let segments = if module_path[0] == "core" { &module_path[1..] } else { module_path };
+        candidates(std::path::Path::new(core_root), segments)
     }
 
     /// Compiles function bodies only, assuming declarations are already registered.
