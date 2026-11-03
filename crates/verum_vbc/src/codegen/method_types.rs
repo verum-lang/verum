@@ -25,10 +25,8 @@ impl VbcCodegen {
     pub(in crate::codegen) fn method_receiver_declaration_name(&self, name: &str) -> Maybe<Text> {
         let name = Self::method_receiver_type_name(name);
         let base = Self::strip_generic_args(name);
-        let Some(alias) = self
-            .nominal_type_id(base)
-            .and_then(|id| self.type_by_id(id))
-            .filter(|ty| ty.kind == crate::types::TypeKind::Alias)
+        let declaration = self.nominal_type_id(base).and_then(|id| self.type_by_id(id));
+        let Some(alias) = declaration.filter(|ty| ty.kind == crate::types::TypeKind::Alias)
         else {
             // A mount rename is a source binding, not a TypeKind::Alias.
             // Its selected owner still governs method lookup; retain explicit
@@ -36,6 +34,10 @@ impl VbcCodegen {
             if !self.local_concrete_types.contains(base)
                 && let Some(owner) = self.mounted_type_path(base)
             {
+                // The public mount may be a facade re-export. Its selected
+                // declaration owns the layout and methods, not the export path.
+                let owner = declaration.and_then(|ty| self.type_declaration_identity(ty))
+                    .unwrap_or_else(|| owner.into());
                 return Some(format!("{owner}{}", &name[base.len()..]).into());
             }
             return Some(name.into());

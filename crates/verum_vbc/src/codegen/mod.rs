@@ -56,6 +56,7 @@ pub mod registers;
 
 mod bootstrap_types;
 mod source_mounts;
+mod mount_filesystem;
 pub use source_mounts::SourceExports;
 mod expressions;
 mod array_coercions;
@@ -532,6 +533,7 @@ pub enum ItemFailurePolicy {
 /// Reachable source files contribute declarations under their own file modules,
 /// including a single-segment root header loaded by a nested consumer.
 struct MountedSourceFiles {
+    filesystem: mount_filesystem::MountFilesystem,
     modules: Vec<Module>,
     parents: std::collections::HashMap<verum_ast::FileId, String>,
     root: Option<(std::path::PathBuf, String)>,
@@ -545,12 +547,12 @@ impl MountedSourceFiles {
             let module = verum_fast_parser::Parser::new(&source).parse_module().ok()?;
             VbcCodegen::extract_source_module_name(&module).map(|name| (path, name))
         });
-        Self { modules: Vec::new(), parents: Default::default(), root, next_id: 0 }
+        Self { filesystem: Default::default(), modules: Vec::new(), parents: Default::default(), root, next_id: 0 }
     }
 
-    fn parent_for(&self, file: &str) -> Option<String> {
+    fn parent_for(&mut self, file: &str) -> Option<String> {
+        let file = self.filesystem.canonicalize(file)?;
         let (root, name) = self.root.as_ref()?;
-        let file = VbcCodegen::canonicalize_memo(file)?;
         let directory = std::path::Path::new(&file).parent()?.strip_prefix(root).ok()?;
         let mut parent = name.clone();
         for part in directory {
@@ -8856,7 +8858,7 @@ impl VbcCodegen {
         let parent_candidates =
             Self::module_path_to_file_candidates(&parent_path, source_path, core_root);
         for candidate in parent_candidates {
-            if Self::canonicalize_memo(&candidate).is_none() {
+            if imported.filesystem.canonicalize(&candidate).is_none() {
                 continue;
             }
             let Ok(source) = std::fs::read_to_string(&candidate) else {
@@ -8959,7 +8961,7 @@ impl VbcCodegen {
                     let file_candidates =
                         Self::module_path_to_file_candidates(&module_path, source_path, core_root);
                     for candidate in file_candidates {
-                        let canonical = match Self::canonicalize_memo(&candidate) {
+                        let canonical = match imported.filesystem.canonicalize(&candidate) {
                             Some(c) => c,
                             None => continue, // File doesn't exist
                         };
@@ -8997,9 +8999,9 @@ impl VbcCodegen {
                         } else {
                             dir.to_path_buf()
                         };
-                        if walk_root.is_dir() {
-                            for vr_file in Self::walk_vr_files_memo(&walk_root).iter() {
-                                let canonical = match Self::canonicalize_memo(vr_file) {
+                        if imported.filesystem.canonicalize(&walk_root).is_some() && walk_root.is_dir() {
+                            for vr_file in imported.filesystem.walk_vr_files(&walk_root).iter() {
+                                let canonical = match imported.filesystem.canonicalize(vr_file) {
                                     Some(c) => c,
                                     None => continue,
                                 };
@@ -9107,129 +9109,6 @@ impl VbcCodegen {
             MountTreeKind::File { .. } => {}
         }
         results
-    }
-
-    /// [`walk_vr_files`] and [`std::fs::canonicalize`], memoized for the
-    /// lifetime of the process.
-    ///
-    /// T0717 root cause, MEASURED on `test_compile_stdlib_char` (one file,
-    /// mount closure = all of `core/`): 172 s total, of which parsing was
-    /// 0.62 s (0.4 %) and filesystem work 96.5 s (56 %).  The task's recorded
-    /// hypothesis — "the thread re-parses modules continuously" — was wrong;
-    /// the parse is the cheapest part.
-    ///
-    /// The cost is combinatorial, not algorithmic-in-one-place: **1195 of
-    /// core/'s 2560 files declare `mount core.*;`**, and each such glob walks
-    /// the whole `core/` tree again and calls `canonicalize` on every `.vr`
-    /// it finds.  1195 × 2560 ≈ 3.06 M `canonicalize` syscalls plus the
-    /// directory reads, per compiled file.  `resolved_files` deduplicates
-    /// the PARSE but not the WALK, so the second and later globs pay full
-    /// price to rediscover paths already known.
-    ///
-    /// The filesystem is immutable for the duration of a compile — the same
-    /// assumption `resolved_files` already makes when it treats a canonical
-    /// path as a stable identity — so both results are cacheable.  Memoizing
-    /// turns those 3.06 M syscalls into hash lookups.
-    ///
-    /// `VERUM_NO_MOUNT_FS_MEMO=1` restores the un-memoized behaviour (A/B
-    /// kill switch: it must reproduce the old timings exactly, which is how
-    /// the memo is shown to be a cost change and not a behaviour change).
-    fn mount_fs_memo_disabled() -> bool {
-        static DISABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *DISABLED.get_or_init(|| std::env::var_os("VERUM_NO_MOUNT_FS_MEMO").is_some())
-    }
-
-    /// Canonical path for `path`, or `None` when it does not exist.
-    /// Memoized — see [`Self::mount_fs_memo_disabled`].
-    fn canonicalize_memo(path: &str) -> Option<String> {
-        fn uncached(path: &str) -> Option<String> {
-            std::fs::canonicalize(path)
-                .ok()
-                .map(|c| c.to_string_lossy().to_string())
-        }
-        if Self::mount_fs_memo_disabled() {
-            return uncached(path);
-        }
-        static MEMO: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashMap<String, Option<String>>>,
-        > = std::sync::OnceLock::new();
-        let memo = MEMO.get_or_init(Default::default);
-        if let Ok(guard) = memo.read()
-            && let Some(hit) = guard.get(path)
-        {
-            return hit.clone();
-        }
-        let value = uncached(path);
-        if let Ok(mut guard) = memo.write() {
-            guard.insert(path.to_string(), value.clone());
-        }
-        value
-    }
-
-    /// Every `.vr` file under `root`.  Memoized — see
-    /// [`Self::mount_fs_memo_disabled`].  Returns a shared handle rather
-    /// than a fresh `Vec` so the 1195 globs that name the same root also
-    /// stop re-allocating ~2560 `String`s apiece.
-    fn walk_vr_files_memo(root: &std::path::Path) -> std::sync::Arc<Vec<String>> {
-        if Self::mount_fs_memo_disabled() {
-            return std::sync::Arc::new(Self::walk_vr_files(root));
-        }
-        static MEMO: std::sync::OnceLock<
-            std::sync::RwLock<
-                std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<String>>>,
-            >,
-        > = std::sync::OnceLock::new();
-        let memo = MEMO.get_or_init(Default::default);
-        if let Ok(guard) = memo.read()
-            && let Some(hit) = guard.get(root)
-        {
-            return std::sync::Arc::clone(hit);
-        }
-        let value = std::sync::Arc::new(Self::walk_vr_files(root));
-        if let Ok(mut guard) = memo.write() {
-            guard.insert(root.to_path_buf(), std::sync::Arc::clone(&value));
-        }
-        value
-    }
-
-    /// Walk a directory recursively and collect every `.vr` file path.
-    /// Used by the glob-mount expansion to enumerate all sibling
-    /// modules under a `mount core.*` / `mount core.text.*` declaration.
-    /// Skips hidden directories and target build artefacts.
-    ///
-    /// Call [`Self::walk_vr_files_memo`] instead from resolution paths that
-    /// may repeat a root — this is the uncached primitive.
-    fn walk_vr_files(root: &std::path::Path) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut stack: Vec<std::path::PathBuf> = vec![root.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            let entries = match std::fs::read_dir(&dir) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let file_type = match entry.file_type() {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
-                let name = match path.file_name().and_then(|n| n.to_str()) {
-                    Some(n) => n,
-                    None => continue,
-                };
-                if name.starts_with('.') || name == "target" {
-                    continue;
-                }
-                if file_type.is_dir() {
-                    stack.push(path);
-                } else if file_type.is_file()
-                    && path.extension().and_then(|s| s.to_str()) == Some("vr")
-                {
-                    out.push(path.to_string_lossy().to_string());
-                }
-            }
-        }
-        out
     }
 
     /// Extracts module path segments from a mount tree.
@@ -9380,6 +9259,12 @@ impl VbcCodegen {
                 // Try as directory with mod.vr
                 let mod_path = base.join(remaining.join("/")).join("mod.vr");
                 candidates.push(mod_path.to_string_lossy().to_string());
+                // The last segment may be an item exported by a directory
+                // module, just as it may be an item in the parent file above.
+                if remaining.len() > 1 {
+                    let parent = base.join(remaining[..remaining.len() - 1].join("/"));
+                    candidates.push(parent.join("mod.vr").to_string_lossy().to_string());
+                }
             }
             return candidates;
         }
@@ -9414,6 +9299,10 @@ impl VbcCodegen {
             // Module directory: core_root/base/protocols/mod.vr
             let mod_path = root.join(path_segments.join("/")).join("mod.vr");
             candidates.push(mod_path.to_string_lossy().to_string());
+            if path_segments.len() > 1 {
+                let parent = root.join(path_segments[..path_segments.len() - 1].join("/"));
+                candidates.push(parent.join("mod.vr").to_string_lossy().to_string());
+            }
         } else {
             // Just "core" itself - try core/mod.vr
             let mod_path = root.join("mod.vr");

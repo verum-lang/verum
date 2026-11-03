@@ -103,6 +103,7 @@ block = { version = "0.1", optional = true }
 foreign-types-shared = { version = "0.3", optional = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 pretty_assertions = { workspace = true }
