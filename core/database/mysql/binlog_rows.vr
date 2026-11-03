@@ -545,15 +545,6 @@ public type RowEventKind is RkWrite | RkUpdate | RkDelete | RkPartialUpdate;
 // consumer applies to the OLD JSON to derive the NEW JSON.
 // (P-PROD-MYSQL-PARTIAL-UPDATE-ROWS-V0)
 //
-// Per `sql/json_diff.cc`:
-//
-//   diff_count: lenenc int
-//   for each diff:
-//     path: lenenc string (JSON path expression, e.g. "$.author")
-//     operation: u8 (0 = Replace, 1 = Insert, 2 = Remove)
-//     if operation != Remove:
-//       new_value: lenenc string (JSON-binary encoded inner)
-//
 // V0 surface — `decode_json_diff` returns a structured List<JsonDiff>.
 // Application of the diff to a base JsonValue is the consumer's
 // responsibility (V0 doesn't ship a JSON-path-aware applier; that's
@@ -565,100 +556,74 @@ public type JsonDiffOp is JdoReplace | JdoInsert | JdoRemove;
 public type JsonDiff is {
     /// JSON path expression (e.g. `"$.author"`, `"$[0].title"`).
     /// Caller-side applier walks this against the old value.
-    path: Text,
-    op: JsonDiffOp,
+    public path: Text,
+    public op: JsonDiffOp,
     /// Replace / Insert payload — JSON-binary-encoded bytes
     /// suitable for `core.database.mysql.json_binary.decode_json_binary`.
     /// `Maybe.None` for Remove.
-    value: Maybe<List<Byte>>,
+    public value: Maybe<List<Byte>>,
 };
 
-/// Decode a JSON-diff sequence from a contiguous byte slice.
-/// Caller is responsible for isolating the slice (typically the
-/// per-column AFTER-image bytes for a JSON column flagged as
-/// partial in PARTIAL_UPDATE_ROWS_EVENT). Format per
-/// `sql/json_diff.cc`:
-///
-///   * `diff_count` lenenc int
-///   * For each diff:
-///     - `path` lenenc string
-///     - `op` u8 (0 = Replace, 1 = Insert, 2 = Remove)
-///     - Non-Remove: `new_value` lenenc string (JSON-binary)
-///
-/// Errors surface as `DbError.Adapter("BINLOG_JSON_DIFF_*", …)`.
+/// Decode one serialized MySQL Json_diff_vector, including its four-byte
+/// little-endian payload length. Each operation precedes its length-encoded
+/// UTF-8 path. Replace and insert also carry a length-encoded binary JSON value.
 public fn decode_json_diff(buf: &[Byte]) -> Result<List<JsonDiff>, DbError> {
-    let mut off: Int = 0;
-    let (diff_count, _, lei_n) = match decode_lei(buf, off) {
-        Result.Ok(t)  => t,
-        Result.Err(_) => { return Result.Err(bad_diff("diff_count")); }
+    let payload_len = match read_u32_le(buf, 0) {
+        Result.Ok(value) => value,
+        Result.Err(_) => { return Result.Err(bad_diff("payload length")); }
     };
-    off = off + lei_n;
+    let end = buf.len() as Int;
+    if payload_len != end - 4 { return Result.Err(bad_diff("payload length")); }
 
-    let mut out: List<JsonDiff> = List.with_capacity(diff_count);
-    let mut i: Int = 0;
-    while i < diff_count {
-        // path: lenenc string
-        let (path_len, _, p_lei_n) = match decode_lei(buf, off) {
-            Result.Ok(t)  => t,
-            Result.Err(_) => { return Result.Err(bad_diff("path_len")); }
-        };
-        off = off + p_lei_n;
-        let path_bytes = match read_bytes(buf, off, path_len) {
-            Result.Ok(b)  => b,
-            Result.Err(_) => { return Result.Err(bad_diff("path_bytes")); }
-        };
-        off = off + path_len;
-        let path_text = match Text.from_bytes(&path_bytes) {
-            Maybe.Some(t) => t,
-            Maybe.None    => { return Result.Err(bad_diff("path utf-8")); }
-        };
-
-        // op: u8
-        let op_byte = match read_u8(buf, off) {
-            Result.Ok(v)  => v,
-            Result.Err(_) => { return Result.Err(bad_diff("op_byte")); }
-        };
-        off = off + 1;
-        let op = match op_byte {
+    let mut out: List<JsonDiff> = List.new();
+    let mut off: Int = 4;
+    while off < end {
+        let op = match buf[off] as Int {
             0 => JdoReplace,
             1 => JdoInsert,
             2 => JdoRemove,
-            other => {
-                return Result.Err(bad_diff(&f"unknown op {other}".clone()));
-            }
+            _ => { return Result.Err(bad_diff("unknown operation")); }
         };
-
-        // value (only for non-Remove)
+        off = off + 1;
+        let (path_bytes, next) = read_diff_bytes(buf, off)?;
+        let path = match Text.from_utf8(path_bytes.as_slice()) {
+            Result.Ok(value) => value,
+            Result.Err(_) => { return Result.Err(bad_diff("path utf-8")); }
+        };
+        off = next;
         let value = match op {
             JdoRemove => Maybe.None,
             _ => {
-                let (val_len, _, v_lei_n) = match decode_lei(buf, off) {
-                    Result.Ok(t)  => t,
-                    Result.Err(_) => { return Result.Err(bad_diff("value_len")); }
-                };
-                off = off + v_lei_n;
-                let val_bytes = match read_bytes(buf, off, val_len) {
-                    Result.Ok(b)  => b,
-                    Result.Err(_) => { return Result.Err(bad_diff("value_bytes")); }
-                };
-                off = off + val_len;
-                Maybe.Some(val_bytes)
+                let (bytes, next_value) = read_diff_bytes(buf, off)?;
+                off = next_value;
+                Maybe.Some(bytes)
             }
         };
-
-        out.push(JsonDiff { path: path_text, op: op, value: value });
-        i = i + 1;
+        out.push(JsonDiff { path: path, op: op, value: value });
     }
     Result.Ok(out)
 }
 
+fn read_diff_bytes(buf: &[Byte], off: Int) -> Result<(List<Byte>, Int), DbError> {
+    let (length, _, header) = match decode_lei(buf, off) {
+        Result.Ok(value) => value,
+        Result.Err(_) => { return Result.Err(bad_diff("field length")); }
+    };
+    let start = off + header;
+    // The length-encoded NULL marker and unrepresentable u64 lengths are invalid.
+    if length < 0 || length > (buf.len() as Int) - start {
+        return Result.Err(bad_diff("field length"));
+    }
+    let bytes = match read_bytes(buf, start, length) {
+        Result.Ok(value) => value,
+        Result.Err(_) => { return Result.Err(bad_diff("field bytes")); }
+    };
+    Result.Ok((bytes, start + length))
+}
+
 fn bad_diff(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BINLOG_JSON_DIFF".clone(),
-        message: f"PARTIAL_UPDATE_ROWS json-diff decode error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(AdapterId.AdMysql, "BINLOG_JSON_DIFF".clone(),
+        f"PARTIAL_UPDATE_ROWS json-diff decode error: {what}", false))
 }
 
 public type RowsEvent is {

@@ -13,6 +13,7 @@ mount core.database.mysql.binlog.{
     ET_PARTIAL_UPDATE_ROWS_V2,
     ET_GTID, ET_ANONYMOUS_GTID, ET_PREVIOUS_GTIDS, ET_HEARTBEAT,
 };
+mount core.database.mysql.binlog_rows.{decode_json_diff, JsonDiffOp};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -141,6 +142,41 @@ fn test_et_gtid_family_distinct() {
     assert(ET_GTID != ET_ANONYMOUS_GTID);
     assert(ET_ANONYMOUS_GTID != ET_PREVIOUS_GTIDS);
     assert(ET_GTID != ET_PREVIOUS_GTIDS);
+}
+
+@test
+fn test_json_diff_vector_decodes_operations_in_wire_order() {
+    // Replace $.x with JSON true (literal type + true), insert $.y, remove $.é.
+    let wire: List<Byte> = [
+        22_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 3_u8, 36_u8, 46_u8, 120_u8, 2_u8, 4_u8, 1_u8,
+        1_u8, 3_u8, 36_u8, 46_u8, 121_u8, 2_u8, 4_u8, 0_u8,
+        2_u8, 4_u8, 36_u8, 46_u8, 195_u8, 169_u8,
+    ];
+    let diffs = decode_json_diff(wire.as_slice()).unwrap();
+    assert_eq(diffs.len(), 3);
+    assert(diffs[0].op is JsonDiffOp.JdoReplace);
+    assert_eq(diffs[0].value.unwrap()[1], 1_u8);
+    assert(diffs[1].op is JsonDiffOp.JdoInsert);
+    assert(diffs[2].op is JsonDiffOp.JdoRemove);
+    assert_eq(diffs[2].path, "$.é");
+    assert(diffs[2].value is Maybe.None);
+}
+
+@test
+fn test_json_diff_vector_rejects_malformed_fields() {
+    let invalid_utf8: List<Byte> = [3_u8, 0_u8, 0_u8, 0_u8, 2_u8, 1_u8, 255_u8];
+    let short_path: List<Byte> = [3_u8, 0_u8, 0_u8, 0_u8, 2_u8, 2_u8, 36_u8];
+    let null_length: List<Byte> = [2_u8, 0_u8, 0_u8, 0_u8, 2_u8, 251_u8];
+    let short_value: List<Byte> = [3_u8, 0_u8, 0_u8, 0_u8, 0_u8, 1_u8, 36_u8];
+    let bad_length: List<Byte> = [1_u8, 0_u8, 0_u8, 0_u8];
+    let empty: List<Byte> = [0_u8, 0_u8, 0_u8, 0_u8];
+    assert(decode_json_diff(invalid_utf8.as_slice()) is Result.Err);
+    assert(decode_json_diff(short_path.as_slice()) is Result.Err);
+    assert(decode_json_diff(null_length.as_slice()) is Result.Err);
+    assert(decode_json_diff(short_value.as_slice()) is Result.Err);
+    assert(decode_json_diff(bad_length.as_slice()) is Result.Err);
+    assert_eq(decode_json_diff(empty.as_slice()).unwrap().len(), 0);
 }
 
 fn main() {}
