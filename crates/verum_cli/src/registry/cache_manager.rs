@@ -573,7 +573,13 @@ fn member_key(path: &Path, directory: bool) -> Option<String> {
 }
 
 fn unpack_source(input: impl std::io::Read, dest: &Path) -> Result<()> {
-    tar::Archive::new(input)
+    let mut archive = tar::Archive::new(input);
+    // The destination filesystem decides path equivalence (including Unicode
+    // normalization and case). A lexical archive key cannot detect every alias.
+    // Keep tar's exclusive file creation and refuse any existing object instead
+    // of unlinking it and replacing the first member or a pre-existing file.
+    archive.set_overwrite(false);
+    archive
         .unpack(dest)
         .map_err(|e| CliError::Custom(format!("Failed to extract archive: {e}")))
 }
