@@ -59,7 +59,7 @@ use verum_vbc::module::{
 use verum_vbc::types::{TypeId, TypeRef};
 
 use super::context::{CaptureKind, FunctionContext};
-use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::instruction::lower_instruction;
 use super::types::{RefTier, TypeLowering};
 use super::well_known_types::WellKnownType as WKT;
@@ -1582,6 +1582,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             )
             .with_runtime_bridge(self.config.runtime_bridge);
             platform.emit_platform_functions(&self.module)?;
+            if let Some(index) = entry_index {
+                let function_id = vbc_module.functions[index].id.0;
+                let entry_function = self.functions.get(&function_id).copied()
+                    .or_internal("selected program entry has no native declaration")?;
+                platform.emit_program_entry(&self.module, entry_function)?;
+            }
             // VERUM_DUMP_IR above fires BEFORE this call, so the dump it
             // writes cannot contain a single platform function —
             // `verum_store_args`, `verum_get_argv`, `verum_getenv_linux`

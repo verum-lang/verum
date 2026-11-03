@@ -451,7 +451,8 @@ fn only_unused_bodyless_wrong_arity_declarations_are_replaceable() {
             builder.position_at_end(context.append_basic_block(existing, "entry"));
             builder.build_return(Some(&ty.const_int(19, false))).unwrap();
         }
-        lower.declare_functions(&vbc).unwrap();
+        assert_eq!(vbc.entry_main(), verum_vbc::module::EntryMain::None);
+        lower.declare_functions(&vbc, None).unwrap();
         let selected = lower.functions.get(&id(&vbc, "choose")).unwrap();
         assert_eq!(selected.count_params(), 1);
         let primary = lower.module().get_function("choose").unwrap();
@@ -486,7 +487,8 @@ fn archived_pending_body_reserves_its_symbol_before_decoding() {
     let context = Context::create();
     let mut lower = VbcToLlvmLowering::new(&context,
         LoweringConfig::debug("archived-arity").with_debug_info(false));
-    lower.declare_functions(&vbc).unwrap();
+    assert_eq!(vbc.entry_main(), verum_vbc::module::EntryMain::None);
+    lower.declare_functions(&vbc, None).unwrap();
     assert_eq!(lower.functions.get(&one).unwrap().count_params(), 1);
     assert_eq!(lower.functions.get(&two).unwrap().count_params(), 2);
     assert_ne!(lower.functions.get(&one), lower.functions.get(&two));

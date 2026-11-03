@@ -436,17 +436,6 @@ impl<'ctx> PlatformIR<'ctx> {
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_sync_primitives"); }
         self.emit_sync_primitives(module)?;
 
-        // Entry point — LLVM IR main() wraps user's verum_main.
-        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_main_entry"); }
-        self.emit_main_entry(module)?;
-
-        // Windows PE entry point — mainCRTStartup → main() → ExitProcess().
-        // Cross-compilation-correct: TARGET-triple dispatch.
-        if target_is_windows(module) {
-            if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_windows_entry"); }
-        self.emit_windows_entry(module)?;
-        }
-
         // Exception handling declarations (setjmp/longjmp)
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_exception_handling"); }
         self.emit_exception_handling(module)?;
@@ -1792,9 +1781,27 @@ impl<'ctx> PlatformIR<'ctx> {
     // Entry point — main() in LLVM IR
     // ========================================================================
 
-    /// Emit main(argc, argv) → int as LLVM IR.
-    /// Calls verum_store_args, verum_runtime_init, verum_main, verum_os_exit.
-    fn emit_main_entry(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+    /// Emit process entry points for the application's selected declaration.
+    /// Runtime helpers alone do not give a library an executable entry point.
+    pub fn emit_program_entry(
+        &self,
+        module: &Module<'ctx>,
+        entry_function: FunctionValue<'ctx>,
+    ) -> super::error::Result<()> {
+        if entry_function.count_params() != 0 {
+            return Err(super::error::LlvmLoweringError::type_lowering(
+                "Program entry must take no parameters",
+            ));
+        }
+        self.emit_main_entry(module, entry_function)?;
+        if target_is_windows(module) {
+            self.emit_windows_entry(module)?;
+        }
+        Ok(())
+    }
+
+    /// Emit main(argc, argv) → int as LLVM IR around an exact entry identity.
+    fn emit_main_entry(&self, module: &Module<'ctx>, entry_function: FunctionValue<'ctx>) -> super::error::Result<()> {
         // Only emit if main doesn't already exist
         if module
             .get_function("main")
@@ -1815,8 +1822,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(main_fn, "entry");
-        let call_main = ctx.append_basic_block(main_fn, "call_main");
-        let no_main = ctx.append_basic_block(main_fn, "no_main");
 
         let argc = main_fn.get_nth_param(0).or_internal("missing param 0")?;
         let argv = main_fn.get_nth_param(1).or_internal("missing param 1")?;
@@ -1845,56 +1850,40 @@ impl<'ctx> PlatformIR<'ctx> {
             builder.build_call(static_init, &[], "").or_llvm_err()?;
         }
 
-        // Call verum_main() if it exists (weak symbol)
-        let verum_main = module.get_function("verum_main");
-        if let Some(vm) = verum_main {
-            builder
-                .build_unconditional_branch(call_main)
-                .or_llvm_err()?;
-
-            builder.position_at_end(call_main);
-            let result = builder
-                .build_call(vm, &[], "result")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .unwrap_or_else(|| i32_type.const_zero().into());
-            // Static finalizers before runtime teardown — the mirror of
-            // `__verum_static_init` above, and for the same reason: a
-            // finalizer needs a live runtime, which `llvm.global_dtors`
-            // (image teardown) cannot guarantee.
-            if let Some(static_fini) = module.get_function("__verum_static_fini") {
-                builder.build_call(static_fini, &[], "").or_llvm_err()?;
-            }
-            // Cleanup
-            if let Some(cleanup_fn) = module.get_function("verum_runtime_cleanup") {
-                builder.build_call(cleanup_fn, &[], "").or_llvm_err()?;
-            }
-            let ret_val = match result {
-                BasicValueEnum::IntValue(i) => {
-                    if i.get_type().get_bit_width() > 32 {
-                        builder
-                            .build_int_truncate(i, i32_type, "ret32")
-                            .or_llvm_err()?
-                    } else if i.get_type().get_bit_width() < 32 {
-                        builder
-                            .build_int_z_extend(i, i32_type, "ret32")
-                            .or_llvm_err()?
-                    } else {
-                        i
-                    }
-                }
-                _ => i32_type.const_zero(),
-            };
-            builder.build_return(Some(&ret_val)).or_llvm_err()?;
-        } else {
-            builder.build_unconditional_branch(no_main).or_llvm_err()?;
+        let result = builder
+            .build_call(entry_function, &[], "result")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .unwrap_or_else(|| i32_type.const_zero().into());
+        // Static finalizers before runtime teardown — the mirror of
+        // `__verum_static_init` above, and for the same reason: a
+        // finalizer needs a live runtime, which `llvm.global_dtors`
+        // (image teardown) cannot guarantee.
+        if let Some(static_fini) = module.get_function("__verum_static_fini") {
+            builder.build_call(static_fini, &[], "").or_llvm_err()?;
         }
-
-        builder.position_at_end(no_main);
-        builder
-            .build_return(Some(&i32_type.const_int(1, false)))
-            .or_llvm_err()?;
+        // Cleanup
+        if let Some(cleanup_fn) = module.get_function("verum_runtime_cleanup") {
+            builder.build_call(cleanup_fn, &[], "").or_llvm_err()?;
+        }
+        let ret_val = match result {
+            BasicValueEnum::IntValue(i) => {
+                if i.get_type().get_bit_width() > 32 {
+                    builder
+                        .build_int_truncate(i, i32_type, "ret32")
+                        .or_llvm_err()?
+                } else if i.get_type().get_bit_width() < 32 {
+                    builder
+                        .build_int_z_extend(i, i32_type, "ret32")
+                        .or_llvm_err()?
+                } else {
+                    i
+                }
+            }
+            _ => i32_type.const_zero(),
+        };
+        builder.build_return(Some(&ret_val)).or_llvm_err()?;
         Ok(())
     }
 
@@ -19525,3 +19514,71 @@ mod runtime_bridge_zero_overhead_tests {
 #[cfg(test)]
 #[path = "../../tests/llvm/spawn_pack_bounds.rs"]
 mod spawn_pack_bounds_tests;
+
+#[cfg(test)]
+mod program_entry_tests {
+    use super::*;
+    use crate::llvm::{LoweringConfig, VbcToLlvmLowering};
+    use verum_fast_parser::Parser;
+    use verum_llvm::{targets::TargetTriple, values::CallSiteValue};
+    use verum_vbc::codegen::VbcCodegen;
+
+    #[test]
+    fn library_lowering_owns_no_process_entry_but_program_lowering_does() {
+        for (source, executable) in [
+            ("public fn ordinary(value: Int) -> Int { value }", false),
+            ("fn main() -> Int { 7 }", true),
+        ] {
+            let vbc = VbcCodegen::new().compile_module(&Parser::new(source).parse_module().unwrap()).unwrap();
+            let context = Context::create();
+            let mut lower = VbcToLlvmLowering::new(&context,
+                LoweringConfig::debug("entry-ownership").with_debug_info(false));
+            lower.lower_module(&vbc).unwrap();
+            lower.module().verify().unwrap();
+            assert_eq!(lower.module().get_function("main").is_some(), executable);
+            assert_eq!(lower.module().get_function("verum_main").is_some(), executable);
+            if !executable {
+                assert!(lower.module().get_function("mainCRTStartup").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn platform_program_entry_calls_the_selected_identity_on_every_target() {
+        for triple in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"] {
+            let context = Context::create();
+            let module = context.create_module("selected-entry");
+            module.set_triple(&TargetTriple::create(triple));
+            let ty = context.i64_type();
+            let selected = module.add_function("selected_entry", ty.fn_type(&[], false), None);
+            let decoy = module.add_function("verum_main", ty.fn_type(&[], false), None);
+            let builder = context.create_builder();
+            for (function, result) in [(selected, 7), (decoy, 99)] {
+                builder.position_at_end(context.append_basic_block(function, "entry"));
+                builder.build_return(Some(&ty.const_int(result, false))).unwrap();
+            }
+            let platform = PlatformIR::new(&context);
+            platform.emit_program_entry(&module, selected).unwrap();
+            module.verify().unwrap();
+            let main = module.get_function("main").unwrap();
+            let calls: Vec<_> = main.get_basic_blocks().into_iter()
+                .flat_map(|block| block.get_instructions())
+                .filter_map(|instruction| CallSiteValue::try_from(instruction).ok())
+                .filter_map(|call| call.get_called_fn_value())
+                .collect();
+            assert_eq!(calls, vec![selected]);
+            assert_eq!(module.get_function("mainCRTStartup").is_some(), triple.contains("windows"));
+        }
+    }
+
+    #[test]
+    fn parameterized_program_entry_is_refused_without_emitting_main() {
+        let context = Context::create();
+        let module = context.create_module("invalid-entry");
+        let ty = context.i64_type();
+        let selected = module.add_function("requires_input", ty.fn_type(&[ty.into()], false), None);
+        assert!(PlatformIR::new(&context).emit_program_entry(&module, selected).is_err());
+        assert!(module.get_function("main").is_none());
+        module.verify().unwrap();
+    }
+}
