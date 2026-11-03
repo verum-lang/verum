@@ -228,9 +228,6 @@ public mount .diagnostics.{
 /// for the design rationale.
 public mount .cap_audit.{
     CapEvent, CapEventKind,
-    record_revoke, record_attenuate,
-    record_ref_incr, record_ref_decr,
-    record_gen_bump, record_epoch_advance,
 };
 
 /// Capability-audit ring buffer — lock-free SPMC storage for CapEvent.
@@ -239,6 +236,9 @@ public mount .cap_audit.{
 /// `mem/cap_audit_ring.vr` for the design rationale and seqlock
 /// concurrency protocol.
 public mount .cap_audit_ring.{
+    record_revoke, record_attenuate,
+    record_ref_incr, record_ref_decr,
+    record_gen_bump, record_epoch_advance,
     commit as commit_cap_event,
     recent as recent_cap_events,
     count as cap_event_count,
