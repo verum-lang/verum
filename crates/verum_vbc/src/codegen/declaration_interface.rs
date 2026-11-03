@@ -100,6 +100,9 @@ impl VbcCodegen {
                         let name = Self::render_scheme_type_name(ty, false, &|path| self.declared_dyn_path(path));
                         StringId(self.intern_string(&name))
                     })
+                    .or_else(|| {
+                        parameter.kind.receiver_type_spelling().map(|ty| StringId(self.intern_string(ty)))
+                    })
                     .unwrap_or(StringId::EMPTY),
                 ..Default::default()
             });

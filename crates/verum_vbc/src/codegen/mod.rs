@@ -21070,18 +21070,16 @@ impl VbcCodegen {
             // BAKED-DEFAULT-ARG-1: carry literal defaults through the
             // (previously dormant) descriptor channel.
             let default = self.param_default_const_id(param);
-            // PARAMNAME-CARRY (v2.10): the source-verbatim declared
-            // spelling, rendered by the same faithful authority as
-            // RETNAME-CARRY (`extract_type_name_at(_, top=false)` keeps
-            // `&`/`&mut`, `Self`, generic args, tuples, slices).  Self
-            // params carry EMPTY — their shape already round-trips via
-            // the task-#11 TypeRef encoding above.
+            // Preserve the source receiver even when its implementation target
+            // or ABI carrier cannot distinguish a copy from an exclusive borrow.
             let type_name = match &param.kind {
                 FunctionParamKind::Regular { ty, .. } => self
                     .extract_type_name_at(ty, false)
                     .map(|n| StringId(self.intern_string(&n)))
                     .unwrap_or(StringId::EMPTY),
-                _ => StringId::EMPTY,
+                kind => kind.receiver_type_spelling()
+                    .map(|ty| StringId(self.intern_string(ty)))
+                    .unwrap_or(StringId::EMPTY),
             };
             descriptor.params.push(ParamDescriptor {
                 name: param_name_id,

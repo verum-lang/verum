@@ -3929,6 +3929,11 @@ impl TypeChecker {
                 Some(ReceiverKind::from_declaration(signature))
             } else if is_static {
                 Some(ReceiverKind::None)
+            } else if let Some(parameter) = fn_desc.params.first()
+                && parameter.name == "self"
+                && let Some(kind) = ReceiverKind::from_declared_self_type(&parameter.declared_ty)
+            {
+                Some(kind)
             } else {
                 fn_desc.params.first().and_then(|p| match to_type(&p.ty) {
                     Type::Reference { mutable, .. }

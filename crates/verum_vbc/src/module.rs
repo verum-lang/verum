@@ -3139,7 +3139,8 @@ pub struct ParamDescriptor {
     ///     E404 "not fully determined".
     /// Mirrors `FieldDescriptor::type_name` (the record-field twin,
     /// v2.9) and `FunctionDescriptor::return_type_name` (v2.6).
-    /// `StringId::EMPTY` for self params and pre-2.10 archives.
+    /// Self slots carry their declaration-relative type (for example `Self`
+    /// or `&mut Self`). Older producers left self slots empty.
     #[serde(default)]
     pub type_name: StringId,
 }

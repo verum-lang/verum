@@ -473,3 +473,129 @@ fn nested_dyn_arguments_keep_the_function_declaration_owner() {
             "eager={eager}: {rejected:?}");
     }
 }
+
+#[test]
+fn an_archived_value_receiver_copies_scalars_without_authorizing_writes() {
+    let ast = Parser::new(
+        r#"
+        module core.alpha;
+        public type Parcel is { public count: Int };
+        implement Int {
+            public fn snapshot(self) -> Int { self }
+            public fn exclusive(&mut self) -> Int { *self }
+        }
+        implement Parcel {
+            public fn consume(self) -> Int { self.count }
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    for declaration_only in [false, true] {
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.alpha"));
+        let module = if declaration_only {
+            producer.collect_declaration_interface(&[&ast]).unwrap()
+        } else {
+            producer.collect_unit_declarations(&[&ast]).unwrap();
+            producer
+                .compile_unit_items(&[&ast], ItemFailurePolicy::Strict)
+                .unwrap();
+            producer.finalize_module().unwrap()
+        };
+        let mut builder = ArchiveBuilder::new();
+        builder.add_module(&module.name, &module, &[]).unwrap();
+        let mut bytes = List::new();
+        verum_vbc::archive::write_archive(&builder.finish(), &mut bytes).unwrap();
+        let archive =
+            verum_vbc::archive::read_archive(std::io::Cursor::new(bytes.as_slice())).unwrap();
+        let metadata = archive_to_core_metadata(&archive).unwrap();
+        let wire = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
+        let metadata = verum_types::core_metadata::decode_metadata(&wire).unwrap();
+        for (name, spelling) in [("snapshot", "Self"), ("exclusive", "&mut Self")] {
+            assert!(
+                metadata
+                    .functions
+                    .values()
+                    .any(|f| f.name.as_str().rsplit('.').next() == Some(name)
+                        && f.params
+                            .first()
+                            .is_some_and(|p| p.name == "self" && p.declared_ty == spelling)),
+                "missing {name}: {spelling}"
+            );
+        }
+        for eager in [false, true] {
+            let test = |source: &str| {
+                errors(
+                    &metadata,
+                    &format!("mount core.alpha.Parcel; {source}"),
+                    eager,
+                )
+            };
+            let read = test("fn probe(value: &Parcel) -> Int { value.count.snapshot() }");
+            assert!(
+                read.is_empty(),
+                "interface={declaration_only} eager={eager}: {read:?}"
+            );
+            for bad in [
+                "fn probe(value: &Parcel) -> Int { value.count.exclusive() }",
+                "fn probe(value: &Parcel) -> Int { value.consume() }",
+            ] {
+                let bad = test(bad);
+                assert!(
+                    bad.iter()
+                        .any(|error| error.contains("SharedReferenceWrite")
+                            || error.contains("shared reference")),
+                    "{bad:?}"
+                );
+            }
+        }
+        let mut erased = metadata;
+        for function in erased
+            .functions
+            .values_mut()
+            .filter(|f| f.name.as_str().rsplit('.').next() == Some("snapshot"))
+        {
+            function.params[0].declared_ty = Text::new();
+        }
+        let denied = errors(
+            &erased,
+            "mount core.alpha.Parcel; fn probe(value: &Parcel) -> Int { value.count.snapshot() }",
+            false,
+        );
+        assert!(
+            denied
+                .iter()
+                .any(|error| error.contains("SharedReferenceWrite")
+                    || error.contains("shared reference")),
+            "erased receiver: {denied:?}"
+        );
+    }
+}
+
+#[test]
+fn actual_integer_formatting_copies_a_shared_record_field() {
+    let primitives = Parser::new(include_str!("../../../core/base/primitives.vr"))
+        .parse_module()
+        .unwrap();
+    let parcel = Parser::new(
+        "module core.alpha; public type Stamp is { public published_at: Int };",
+    )
+    .parse_module()
+    .unwrap();
+    let mut builder = ArchiveBuilder::new();
+    for (owner, ast) in [("core.base", &primitives), ("core.alpha", &parcel)] {
+        let module = VbcCodegen::with_config(CodegenConfig::new(owner))
+            .collect_declaration_interface(&[ast])
+            .unwrap();
+        builder.add_module(owner, &module, &[]).unwrap();
+    }
+    let metadata = archive_to_core_metadata(&builder.finish()).unwrap();
+    for eager in [false, true] {
+        let result = errors(
+            &metadata,
+            "mount core.alpha.Stamp; fn format_stamp(record: &Stamp) -> Text { record.published_at.to_text() }",
+            eager,
+        );
+        assert!(result.is_empty(), "eager={eager}: {result:?}");
+    }
+}

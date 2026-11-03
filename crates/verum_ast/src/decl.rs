@@ -625,6 +625,25 @@ pub enum FunctionParamKind {
     SelfOwnMut,
 }
 
+impl FunctionParamKind {
+    /// The declared type of a receiver, independent of its implementation carrier.
+    /// Mutability of an owned binding does not change the type passed by value.
+    pub fn receiver_type_spelling(&self) -> Option<&'static str> {
+        Some(match self {
+            Self::Regular { .. } => return None,
+            Self::SelfValue | Self::SelfValueMut => "Self",
+            Self::SelfRef => "&Self",
+            Self::SelfRefMut => "&mut Self",
+            Self::SelfRefChecked => "&checked Self",
+            Self::SelfRefCheckedMut => "&checked mut Self",
+            Self::SelfRefUnsafe => "&unsafe Self",
+            Self::SelfRefUnsafeMut => "&unsafe mut Self",
+            Self::SelfOwn => "%Self",
+            Self::SelfOwnMut => "%mut Self",
+        })
+    }
+}
+
 impl FunctionParam {
     /// Create a new function parameter with no attributes.
     pub fn new(kind: FunctionParamKind, span: Span) -> Self {

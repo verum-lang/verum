@@ -52,14 +52,31 @@ pub struct ReceiverKindMeta {
 }
 
 impl ReceiverKind {
+    /// Recover permission only from declaration-relative receiver syntax.
+    /// Ordinary parameter types and erased ABI descriptors cannot supply it.
+    pub fn from_declared_self_type(spelling: &str) -> Option<Self> {
+        use crate::decl::FunctionParamKind::*;
+        [
+            &SelfValue, &SelfRef, &SelfRefMut, &SelfRefChecked, &SelfRefCheckedMut,
+            &SelfRefUnsafe, &SelfRefUnsafeMut, &SelfOwn, &SelfOwnMut,
+        ]
+        .into_iter()
+        .find(|kind| kind.receiver_type_spelling() == Some(spelling))
+        .map(Self::from_parameter)
+    }
+
     /// Source receiver permission before method parameters are lowered.
     pub fn from_declaration(function: &crate::FunctionDecl) -> Self {
+        function.params.first().map_or(Self::None, |p| Self::from_parameter(&p.kind))
+    }
+
+    fn from_parameter(kind: &crate::decl::FunctionParamKind) -> Self {
         use crate::decl::FunctionParamKind::*;
-        match function.params.first().map(|p| &p.kind) {
-            Some(SelfRef | SelfRefChecked | SelfRefUnsafe) => Self::SelfRef,
-            Some(SelfRefMut | SelfRefCheckedMut | SelfRefUnsafeMut) => Self::SelfMut,
-            Some(SelfValue | SelfValueMut | SelfOwn | SelfOwnMut) => Self::SelfValue,
-            Some(Regular { .. }) | None => Self::None,
+        match kind {
+            SelfRef | SelfRefChecked | SelfRefUnsafe => Self::SelfRef,
+            SelfRefMut | SelfRefCheckedMut | SelfRefUnsafeMut => Self::SelfMut,
+            SelfValue | SelfValueMut | SelfOwn | SelfOwnMut => Self::SelfValue,
+            Regular { .. } => Self::None,
         }
     }
 

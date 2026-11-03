@@ -641,8 +641,9 @@ pub struct ParamDescriptor {
     /// erases: the scheme builder uses it to reconnect a return type
     /// mentioning `F` (`-> MappedIter<Self, F>`) with the param's
     /// structural type, and to repair `__opaque_type_`-lossy `ty`
-    /// renders.  Empty when the bake predates v2.10 or the param is a
-    /// self receiver.
+    /// renders. Receiver spellings such as `Self` and `&mut Self` preserve
+    /// the declaration’s permissions independently of the lowered carrier.
+    /// Empty for descriptors produced without a source spelling.
     #[serde(default)]
     pub declared_ty: Text,
 }
