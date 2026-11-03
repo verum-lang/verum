@@ -91,6 +91,131 @@ impl Storage {
     }
 }
 
+/// An initialized native List prefix with the element destructor from its source declaration.
+pub(super) struct OwnedElements<'heap> {
+    _heap: std::marker::PhantomData<&'heap heap::Heap>,
+    storage: Storage,
+    owner: *mut Value,
+    len: usize,
+    pub(super) element: crate::drop_plan::DropPlan,
+}
+
+impl<'heap> OwnedElements<'heap> {
+    pub(super) fn resolve(
+        state: &'heap InterpreterState,
+        value: Value,
+        plan: &crate::drop_plan::DropPlan,
+    ) -> InterpreterResult<Option<Self>> {
+        use crate::{
+            drop_plan,
+            types::{TypeId, TypeRef},
+        };
+        use verum_common::well_known_types::WellKnownType;
+        if !value.is_regular_ptr() || !state.heap.contains(value.as_ptr()) {
+            return Ok(None);
+        }
+        // SAFETY: the receiver is a live allocation in this interpreter.
+        let header = unsafe { &*value.as_ptr::<heap::ObjectHeader>() };
+        if !header.type_id.is_list_like() {
+            return Ok(None);
+        }
+        let Some(arguments) = plan.standard_record_arguments(&state.module, WellKnownType::List)
+        else {
+            return Ok(None);
+        };
+        let [element] = arguments else {
+            return Err(invalid(
+                "List destruction requires its declared element witness",
+            ));
+        };
+        if !header.is_valid()
+            || header.flags.contains(heap::ObjectFlags::VARIANT)
+            || header.size as usize != 3 * std::mem::size_of::<Value>()
+        {
+            return Err(invalid("List destruction requires a three-field owner"));
+        }
+        if header.type_id == TypeId::BYTE_LIST && *element != TypeRef::Concrete(TypeId::BYTE) {
+            return Err(invalid(
+                "packed List storage requires a Byte element witness",
+            ));
+        }
+        let storage = Storage::resolve(state, value)?;
+        let backing = state.heap.backing_view(storage.data);
+        if !storage.data.is_null()
+            && (backing.owner == Some(value.as_ptr())
+                || backing.owner.is_none()
+                    && !state
+                        .cbgr_bridge_extents
+                        .contains_key(&(storage.data as usize)))
+        {
+            return Err(invalid(
+                "List destruction requires an owned backing allocation",
+            ));
+        }
+        // SAFETY: the owner extent was checked and storage resolution validated the backing.
+        let owner = unsafe {
+            value
+                .as_ptr::<u8>()
+                .add(heap::OBJECT_HEADER_SIZE)
+                .cast::<Value>()
+        };
+        let len = unsafe { owner.read_unaligned() }
+            .try_as_i64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n <= storage.capacity)
+            .ok_or_else(|| invalid("List storage length exceeds capacity"))?;
+        let element = drop_plan::build(&state.module, element).map_err(invalid)?;
+        Ok(Some(Self {
+            _heap: std::marker::PhantomData,
+            storage,
+            owner,
+            len,
+            element,
+        }))
+    }
+
+    pub(super) fn values(&self) -> impl DoubleEndedIterator<Item = Value> + '_ {
+        // A packed Byte or a trivial element has no component destructor.
+        let count = if matches!(self.element, crate::drop_plan::DropPlan::Ignore) {
+            0
+        } else {
+            self.len
+        };
+        (0..count).map(move |i| {
+            // SAFETY: a nontrivial element requires a Value slot; the entire prefix was checked.
+            unsafe { self.storage.data.cast::<Value>().add(i).read_unaligned() }
+        })
+    }
+}
+
+/// Detach before invoking user Drop. Reverse order matches List.clear's pop loop.
+pub(super) fn take_owned_elements(
+    state: &mut InterpreterState,
+    value: Value,
+    plan: &crate::drop_plan::DropPlan,
+) -> InterpreterResult<Option<(crate::drop_plan::DropPlan, Vec<Value>)>> {
+    let Some(list) = OwnedElements::resolve(state, value, plan)? else {
+        return Ok(None);
+    };
+    let elements = list.values().rev().collect();
+    let backing = list.storage.data as usize;
+    // SAFETY: exclusive access to state and the validated extent precede all callbacks.
+    unsafe {
+        list.owner.write_unaligned(Value::from_i64(0));
+        list.owner.add(1).write_unaligned(Value::from_i64(0));
+        list.owner
+            .add(2)
+            .write_unaligned(Value::from_ptr(std::ptr::null_mut::<()>()));
+    }
+    let element = list.element;
+    state.heap.revoke_projections(value.as_ptr::<u8>() as usize);
+    // Managed backing follows the same GC ownership as resize; bridge storage is explicit.
+    if state.cbgr_bridge_extents.contains_key(&backing) {
+        super::ffi_extended::cbgr_user_deallocate(state, backing as i64);
+    }
+    Ok(Some((element, elements)))
+}
+
 /// Swap initialized elements without changing the owner's length, capacity or
 /// backing. Both ranges are checked before either write, for either encoding.
 pub(super) fn swap(

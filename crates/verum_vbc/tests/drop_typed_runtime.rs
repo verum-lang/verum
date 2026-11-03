@@ -23,9 +23,13 @@ fn dispose<T>(value: T) {}
 "#;
 
 fn compile(body: &str, bootstrap: bool) -> VbcModule {
-    let source = format!("{DECLARATIONS}\n{body}");
+    compile_in("drop_runtime", body, bootstrap)
+}
+
+fn compile_in(owner: &str, body: &str, bootstrap: bool) -> VbcModule {
+    let source = format!("module {owner};\n{DECLARATIONS}\n{body}");
     let ast = Parser::new(&source).parse_module().expect("source grammar");
-    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("drop_runtime"));
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new(owner));
     let mut module = if bootstrap {
         compiler
             .collect_unit_declarations(&[&ast])
@@ -38,7 +42,7 @@ fn compile(body: &str, bootstrap: bool) -> VbcModule {
         compiler.compile_module(&ast).expect("source codegen")
     };
     let dispose = module
-        .find_function_by_name("drop_runtime.dispose")
+        .find_function_by_name(&format!("{owner}.dispose"))
         .expect("dispose declaration");
     let function = module.get_function(dispose).unwrap();
     let declared = function
@@ -334,5 +338,63 @@ fn foreign_map_declaration_cannot_claim_the_vm_table() {
             error.to_string().contains("nominal owner mismatch"),
             "bootstrap={bootstrap}: {error}"
         );
+    }
+}
+
+#[test]
+fn native_list_destruction_uses_the_declared_element_and_owner() {
+    const SOURCE: &str = r#"
+        type List<T> is { len: Int, cap: Int, ptr: &unsafe T };
+        type Digit is { counter: &mut Int, digit: Int };
+        implement Drop for Digit {
+            fn drop(&mut self) { *self.counter = *self.counter * 10 + self.digit; }
+        }
+        fn ordered() -> Int {
+            let mut digits = 0;
+            dispose<List<List<Digit>>>([
+                [Digit { counter: &mut digits, digit: 1 }, Digit { counter: &mut digits, digit: 2 }],
+                [Digit { counter: &mut digits, digit: 3 }],
+            ]);
+            digits
+        }
+        fn drop_numbers(xs: List<Int>) { dispose<List<Int>>(xs); }
+    "#;
+    for bootstrap in [false, true] {
+        for owner in ["core.collections.list", "example.foreign"] {
+            let module = compile_in(owner, SOURCE, bootstrap);
+            let entry = module
+                .find_function_by_name(&format!("{owner}.ordered"))
+                .unwrap();
+            let numbers = module
+                .find_function_by_name(&format!("{owner}.drop_numbers"))
+                .unwrap();
+            let mut interpreter = Interpreter::new(Arc::new(module));
+            let result = interpreter.execute_function(entry);
+            if owner == "example.foreign" {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("nominal owner mismatch")
+                );
+                continue;
+            }
+            assert_eq!(
+                result.expect("all three owned elements dropped").as_i64(),
+                321
+            );
+            let packed = interpreter
+                .state
+                .heap
+                .alloc(verum_vbc::types::TypeId::BYTE_LIST, 24)
+                .unwrap();
+            let error = interpreter
+                .execute_function_with_args(numbers, &[verum_vbc::Value::from_ptr(packed.as_ptr())])
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("Byte element witness"),
+                "{error}"
+            );
+        }
     }
 }

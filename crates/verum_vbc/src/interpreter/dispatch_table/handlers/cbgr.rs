@@ -1396,6 +1396,10 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
 fn validate_typed_drop(state: &InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
     -> InterpreterResult<()>
 {
+    if let Some(list) = super::list_storage::OwnedElements::resolve(state, value, plan)? {
+        for value in list.values() { validate_typed_drop(state, value, &list.element)?; }
+        return Ok(());
+    }
     if let Some(entry) = super::flat_map::entry_plans(state, value, plan)? {
         let table = super::flat_map::FlatMap::checked(state, value)?;
         let mut occupied = 0;
@@ -1424,6 +1428,10 @@ fn execute_typed_drop(state: &mut InterpreterState, value: Value, plan: &crate::
 {
     use crate::drop_plan::DropPlan;
     if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(()); }
+    if let Some((plan, elements)) = super::list_storage::take_owned_elements(state, value, plan)? {
+        for value in elements { execute_typed_drop(state, value, &plan)?; }
+        return Ok(());
+    }
     if let Some(entry) = super::flat_map::entry_plans(state, value, plan)? {
         let retain = entry.iter().any(|plan| !matches!(plan, DropPlan::Ignore));
         let entries = super::flat_map::take_entries(state, value, retain)?;

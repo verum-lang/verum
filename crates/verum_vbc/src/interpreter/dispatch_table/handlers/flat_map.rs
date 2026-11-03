@@ -8,7 +8,7 @@ use super::super::super::{
 use super::memory_collections::{value_eq, value_hash};
 use crate::{
     drop_plan::{self, DropPlan},
-    types::{TypeId, TypeKind},
+    types::TypeId,
     value::Value,
 };
 use verum_common::well_known_types::WellKnownType;
@@ -309,33 +309,12 @@ pub(super) fn entry_plans(
     value: Value,
     plan: &DropPlan,
 ) -> InterpreterResult<Option<[DropPlan; 2]>> {
-    let (owner, args) = match plan {
-        DropPlan::Glue {
-            owner, owner_args, ..
-        }
-        | DropPlan::Record {
-            owner, owner_args, ..
-        } if !owner_args.is_empty() => (*owner, owner_args.as_slice()),
-        _ => return Ok(None),
-    };
     if !FlatMap::is_carrier(state, value) {
         return Ok(None);
     }
-    let declaration = state
-        .module
-        .get_type(owner)
-        .expect("DropPlan carries a declared owner");
-    let name = state.module.get_string(declaration.name);
-    let origin = declaration
-        .origin_module
-        .and_then(|id| state.module.get_string(id))
-        .unwrap_or(&state.module.name);
-    if declaration.kind != TypeKind::Record
-        || name.and_then(|name| WellKnownType::from_declaration(name, origin))
-            != Some(WellKnownType::Map)
-    {
+    let Some(args) = plan.standard_record_arguments(&state.module, WellKnownType::Map) else {
         return Ok(None);
-    }
+    };
     let [key, value] = args else {
         return Err(InterpreterError::Panic {
             message: "Map carrier requires its declared key and value witnesses".into(),

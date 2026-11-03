@@ -43,6 +43,34 @@ pub enum DropPlan {
 }
 
 impl DropPlan {
+    /// Generic arguments of this exact, source-declared standard record.
+    /// A runtime representation may interpret them only after checking its own storage.
+    pub(crate) fn standard_record_arguments(
+        &self,
+        module: &VbcModule,
+        expected: verum_common::well_known_types::WellKnownType,
+    ) -> Option<&[TypeRef]> {
+        let (owner, arguments) = match self {
+            Self::Glue {
+                owner, owner_args, ..
+            }
+            | Self::Record {
+                owner, owner_args, ..
+            } => (*owner, owner_args.as_slice()),
+            _ => return None,
+        };
+        let declaration = module.get_type(owner)?;
+        let origin = declaration
+            .origin_module
+            .and_then(|id| module.get_string(id))
+            .unwrap_or(&module.name);
+        let kind = verum_common::well_known_types::WellKnownType::from_declaration(
+            module.get_string(declaration.name)?,
+            origin,
+        )?;
+        (declaration.kind == TypeKind::Record && kind == expected).then_some(arguments)
+    }
+
     /// Generic destructor bodies required by this concrete plan.
     pub fn generic_calls(&self) -> List<(FunctionId, List<TypeRef>)> {
         let mut calls = List::new();
