@@ -768,6 +768,14 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .record-annotation { font-family: var(--font-code); }
 .record-dependency { color: var(--accent-text); }
 .context-requirement { display: block; font-family: var(--font-code); text-align: left; color: var(--accent-text); padding: 8px 0; overflow-wrap: anywhere; }
+.architecture-annotation { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.architecture-arguments { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: baseline; gap: 6px 12px; margin: 10px 0; }
+.architecture-arguments dt { color: var(--muted); overflow-wrap: anywhere; }
+.architecture-arguments dd { min-width: 0; margin: 0; }
+.architecture-value { font-family: var(--font-code); text-align: left; color: var(--accent-text); overflow-wrap: anywhere; white-space: pre-wrap; padding: 0; }
+.architecture-annotation details { margin-top: 8px; }
+.architecture-annotation pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.architecture-invalid { color: var(--danger); }
 .language-hover { max-width: min(440px, 80vw); max-height: 280px; overflow: auto; padding: 12px; }
 #source-status {
   overflow: hidden;

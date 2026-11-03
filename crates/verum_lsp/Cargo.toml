@@ -34,6 +34,7 @@ verum_common = { workspace = true, features = ["lsp"] }
 verum_parser = { workspace = true }
 verum_lexer = { workspace = true }
 verum_ast = { workspace = true }
+verum_kernel = { workspace = true }
 verum_types = { workspace = true }
 verum_diagnostics = { workspace = true }
 # DEPRECATED: Superseded by stdlib/ and verum_common types

@@ -69,6 +69,68 @@ const MAIN: &str =
     "mount dependency.{Token, answer};\nfn read(value: Token) -> Int { value.id + answer() }";
 
 #[tokio::test]
+async fn architecture_projection_preserves_explicit_arguments_owner_and_evidence_revision() {
+    let project = Project::new();
+    let source = "// 😀 source identity\n@arch_module(\n    foundation: Foundation.ZfcTwoInacc,\n    stratum: MsfsStratum.LFnd,\n    lifecycle: Lifecycle.Definition\n)\nmodule example.main;\nfn main() -> Int { 42 }";
+    let uri = project.open("main.vr", source);
+    let snapshot = project.snapshot(&uri).await;
+    assert_eq!(snapshot["parsed"], true, "{snapshot:#}");
+    assert_eq!(snapshot["architecture"], json!([]), "item attributes must not move to the AST root");
+    let module = snapshot["declarations"].as_array().unwrap().iter().find(|item| item["kind"] == "module").unwrap();
+    let annotation = &module["architecture"][0];
+    assert_eq!(annotation["state"], "declared");
+    assert_eq!(annotation["canonical"]["foundation"], "ZfcTwoInacc");
+    assert_eq!(annotation["canonical"]["stratum"], "LFnd");
+    assert_eq!(annotation["canonical"]["lifecycle"], "Definition");
+    assert_eq!(annotation["supplied"].as_array().unwrap().len(), 3);
+    assert_eq!(annotation["supplied"][0]["name"], "foundation");
+    assert_eq!(annotation["supplied"][0]["value"]["source"], "Foundation.ZfcTwoInacc");
+    assert_eq!(annotation["supplied"][0]["value"]["range"]["start"], json!({"line":2,"character":16}));
+    assert_eq!(annotation["attribute"]["range"]["start"], json!({"line":1,"character":0}));
+    assert!(annotation["canonical"].get("at_tier").is_some());
+    assert!(annotation["supplied"].as_array().unwrap().iter().all(|argument| argument["name"] != "at_tier"), "canonical defaults must not become explicit arguments");
+    assert!(snapshot["declarations"].as_array().unwrap().iter().filter(|item| item["kind"] == "function").all(|item| item["architecture"] == json!([])));
+    let params = crate::project::EvidenceParams {
+        snapshot: SnapshotParams { text_document: TextDocumentIdentifier { uri: uri.clone() }, version: 1 },
+        expected_source_hash: snapshot["source_hash"].as_str().unwrap().into(),
+        expected_project_revision: snapshot["project_revision"].as_str().map(str::to_owned),
+        declaration_id: Some(module["id"].as_str().unwrap().into()),
+    };
+    let evidence = project.service.inner().handle_document_evidence(params).await.unwrap();
+    assert_eq!(evidence["declaration"]["architecture"], module["architecture"]);
+    let changed = source.replace("Lifecycle.Definition", "Lifecycle.Theorem");
+    project.service.inner().documents.try_update(&uri, changed, 2).unwrap();
+    let next = project.service.inner().handle_document_snapshot(SnapshotParams {
+        text_document: TextDocumentIdentifier { uri }, version: 2,
+    }).await.unwrap();
+    assert_ne!(next["source_hash"], snapshot["source_hash"]);
+    let next_module = next["declarations"].as_array().unwrap().iter().find(|item| item["kind"] == "module").unwrap();
+    assert_eq!(next_module["architecture"][0]["state"], "declared", "a lifecycle marker is not verification evidence");
+    assert!(next_module["architecture"][0].get("verified").is_none());
+}
+
+#[tokio::test]
+async fn architecture_projection_keeps_invalid_unrelated_and_unparsed_states_distinct() {
+    let project = Project::new();
+    let uri = project.open("invalid.vr", "@arch_module(stratum: MsfsStratum.DoesNotExist)\nmodule invalid;");
+    let invalid = project.snapshot(&uri).await;
+    assert_eq!(invalid["parsed"], true, "{invalid:#}");
+    let annotation = &invalid["declarations"][0]["architecture"][0];
+    assert_eq!(annotation["state"], "invalid");
+    assert!(annotation["message"].as_str().unwrap().contains("DoesNotExist"));
+    assert!(annotation.get("canonical").is_none());
+    assert_eq!(annotation["supplied"][0]["value"]["source"], "MsfsStratum.DoesNotExist");
+    let unrelated = project.open("unrelated.vr", "@deprecated(\"arch_module foundation: Foundation.ZfcTwoInacc\")\nfn ordinary() -> Int { 1 }");
+    let unrelated = project.snapshot(&unrelated).await;
+    assert_eq!(unrelated["parsed"], true, "{unrelated:#}");
+    assert_eq!(unrelated["declarations"][0]["architecture"], json!([]));
+    let broken = project.open("broken.vr", "@arch_module(stratum:");
+    let broken = project.snapshot(&broken).await;
+    assert_eq!(broken["parsed"], false);
+    assert_eq!(broken["architecture"], Value::Null, "failed parsing is not an empty declaration set");
+}
+
+#[tokio::test]
 async fn explicit_script_language_changes_project_semantics_without_changing_source() {
     let project = Project::new();
     let source = "public fn value() -> Int { 42 } let mut i = 0; while i < 3 { i = i + 1; }";

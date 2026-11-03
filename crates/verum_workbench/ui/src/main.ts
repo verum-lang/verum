@@ -17,7 +17,7 @@ import { installTooltips } from './tooltips';
 import { moduleNeighborhood, importDependencyPath, type ProjectAnalysis, type ImportSite, type ImportFailure } from './topology';
 import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
-import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type SourceLocation, type Range } from './language';
+import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type ArchitectureAnnotation, type SourceLocation, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, initialToken, isConnected, connectSession, onSessionChange } from './api';
 import { SessionAccessError, SessionChangedError } from './session';
@@ -649,6 +649,7 @@ function renderAnalysis(snapshot: Analysis) {
   receipt.append(iconButton('source', m('Inspect document evidence'), () =>
     inspectEvidence(revision, snapshot.source_hash, snapshot.project_revision)));
   structure.append(receipt);
+  renderArchitectureAnnotations(structure, snapshot.architecture ?? [], reveal);
   if (!snapshot.declarations.length) structure.append(node('p', 'muted', m('No declarations available for this revision.')));
   for (const declaration of snapshot.declarations) {
     const card = node('article', 'declaration-card');
@@ -658,6 +659,7 @@ function renderAnalysis(snapshot: Analysis) {
       iconButton('source', m('Inspect evidence for {name}', { name: declaration.name }), () =>
         inspectEvidence(revision, snapshot.source_hash, snapshot.project_revision, declaration.id)));
     card.append(bar);
+    renderArchitectureAnnotations(card, declaration.architecture ?? [], reveal);
     if (declaration.type_display) card.append(node('code', 'muted', declaration.type_display));
     const fields = declaration.record_fields;
     if (fields?.length) {
@@ -707,6 +709,25 @@ function renderAnalysis(snapshot: Analysis) {
   if (snapshot.mounts.length) {
     structure.append(node('h3', '', m('Mounts')));
     for (const mount of snapshot.mounts) structure.append(button(mount.source, () => reveal(mount.range), 'context-requirement'));
+  }
+}
+function renderArchitectureAnnotations(parent: HTMLElement, annotations: ArchitectureAnnotation[], reveal: (range: Range) => void) {
+  for (const annotation of annotations) {
+    const block = node('section', 'architecture-annotation');
+    const header = node('header', 'declaration-heading');
+    header.append(button('@arch_module', () => reveal(annotation.attribute.range), 'declaration-name'),
+      node('span', 'badge', m(annotation.state === 'declared' ? 'Declared architecture' : 'Invalid architecture declaration')));
+    block.append(header);
+    if (annotation.state === 'invalid') block.append(node('p', 'architecture-invalid', annotation.message));
+    const argumentsList = node('dl', 'architecture-arguments');
+    for (const argument of annotation.supplied) {
+      const value = node('dd');
+      value.append(button(argument.value.source, () => reveal(argument.value.range), 'architecture-value'));
+      argumentsList.append(node('dt', '', argument.name ?? m('Argument')), value);
+    }
+    block.append(argumentsList, node('p', 'muted', m('Source declarations only; inference and proof are not evaluated here.')));
+    if (annotation.state === 'declared') appendDetails(block, m('Kernel interpretation and defaults'), annotation.canonical, 'architecture-canonical');
+    parent.append(block);
   }
 }
 bind('reload-source', reloadSource);

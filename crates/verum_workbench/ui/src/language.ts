@@ -7,12 +7,16 @@ export type FormattingOptions = { tabSize: number; insertSpaces: boolean };
 export type SourceLocation = { uri: string; range: Range };
 export type Diagnostic = { relatedInformation?: Array<{ location: SourceLocation; message: string }>; range: Range; severity?: number; message: string; source?: string; code?: string | number };
 export type RecordMember = { name: string; selection_range: Range; annotation: { source: string; range: Range }; depends_on: number[] | null };
-export type Declaration = { id: string; name: string; kind: string; type_display?: string | null; record_fields?: RecordMember[]; range: Range; selection_range: Range; requirements: Array<{ source: string; range: Range }>; preconditions?: Array<{ source: string; range: Range }>; postconditions?: Array<{ source: string; range: Range }> };
+export type ArchitectureAnnotation = {
+  attribute: { source: string; range: Range };
+  supplied: Array<{ name: string | null; value: { source: string; range: Range } }>;
+} & ({ state: 'declared'; canonical: Record<string, unknown> } | { state: 'invalid'; message: string });
+export type Declaration = { id: string; name: string; kind: string; type_display?: string | null; record_fields?: RecordMember[]; range: Range; selection_range: Range; requirements: Array<{ source: string; range: Range }>; preconditions?: Array<{ source: string; range: Range }>; postconditions?: Array<{ source: string; range: Range }>; architecture?: ArchitectureAnnotation[] };
 export type Binding = { name: string; type_display: string; source_module?: string; definition: { uri: string; range: Range } | null };
 export type Mount = { source: string; range: Range; resolution?:
   | { state: 'resolved'; bindings: { start: number; end: number } }
   | { state: 'unresolved'; reason: string } | null };
-export type Analysis = { library_metadata?: { sha256: string; format_version: number } | null; project_revision?: string | null; bindings?: Binding[]; source_hash: string; version: number; parsed: boolean; analysis_scope: string; diagnostics: Diagnostic[]; declarations: Declaration[]; mounts: Mount[] };
+export type Analysis = { library_metadata?: { sha256: string; format_version: number } | null; project_revision?: string | null; bindings?: Binding[]; source_hash: string; version: number; parsed: boolean; analysis_scope: string; diagnostics: Diagnostic[]; declarations: Declaration[]; mounts: Mount[]; architecture?: ArchitectureAnnotation[] | null };
 export function analysisScopeLabel(scope: Analysis['analysis_scope']) {
   switch (scope) {
     case 'project-sources-with-library-metadata': return m('Project sources and compiled standard library');

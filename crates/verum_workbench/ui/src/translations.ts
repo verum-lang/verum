@@ -1,6 +1,11 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Declared architecture': 'Объявленная архитектура',
+  'Invalid architecture declaration': 'Ошибка объявления архитектуры',
+  'Argument': 'Аргумент',
+  'Source declarations only; inference and proof are not evaluated here.': 'Только объявления из исходника; вывод свойств и доказательства здесь не выполняются.',
+  'Kernel interpretation and defaults': 'Интерпретация ядра и значения по умолчанию',
   'Source navigation': 'Навигация по исходникам',
   'Navigate back': 'Назад по исходникам',
   'Navigate forward': 'Вперёд по исходникам',

@@ -10,7 +10,7 @@ use tower_lsp::{
     jsonrpc,
     lsp_types::{Diagnostic, Range, TextDocumentIdentifier, Url},
 };
-use verum_ast::{ItemKind, Span, decl::TypeDeclBody};
+use verum_ast::{ItemKind, Span, decl::TypeDeclBody, expr::{BinOp, ExprKind}, ty::PathSegment};
 use verum_common::{List, Text};
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +31,7 @@ pub struct Declaration {
     pub requirements: List<Requirement>,
     pub preconditions: List<Requirement>,
     pub postconditions: List<Requirement>,
+    pub architecture: List<ArchitectureAnnotation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub record_fields: Option<Vec<RecordMember>>,
 }
@@ -47,6 +48,28 @@ pub struct RecordMember {
 pub struct Requirement {
     pub source: Text,
     pub range: Range,
+}
+#[derive(Debug, Serialize)]
+pub struct ArchitectureArgument {
+    pub name: Option<Text>,
+    pub value: Requirement,
+}
+#[derive(Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ArchitectureInterpretation {
+    /// A parsed declaration, including kernel defaults. No body inference or
+    /// architecture proof has been run by this projection.
+    Declared { canonical: verum_kernel::arch::Shape },
+    Invalid { message: Text },
+}
+#[derive(Debug, Serialize)]
+pub struct ArchitectureAnnotation {
+    pub attribute: Requirement,
+    /// Preserve the actual supplied arguments separately from normalized
+    /// values: defaulted fields are not claims made explicitly by the author.
+    pub supplied: List<ArchitectureArgument>,
+    #[serde(flatten)]
+    pub interpretation: ArchitectureInterpretation,
 }
 #[derive(Debug, Serialize)]
 pub struct MountSnapshot {
@@ -69,6 +92,8 @@ pub struct DocumentSnapshot {
     pub diagnostics: List<Diagnostic>,
     pub declarations: List<Declaration>,
     pub mounts: List<MountSnapshot>,
+    /// None means parsing is unavailable; an empty list means no root attribute.
+    pub architecture: Option<List<ArchitectureAnnotation>>,
 }
 
 fn requirement(doc: &DocumentState, span: Span) -> Requirement {
@@ -80,6 +105,35 @@ fn requirement(doc: &DocumentState, span: Span) -> Requirement {
             .into(),
         range: ast_span_to_range(&span, &doc.text),
     }
+}
+
+fn architecture_annotations(doc: &DocumentState, attributes: &[verum_ast::Attribute]) -> List<ArchitectureAnnotation> {
+    attributes.iter().filter(|attribute| attribute.is_named("arch_module")).map(|attribute| {
+        let args = attribute.args.as_ref().map(|args| args.as_slice()).unwrap_or(&[]);
+        let supplied = args.iter().map(|argument| {
+            // Project syntax from AST nodes, not from spelling searches in text.
+            let (name, value) = match &argument.kind {
+                ExprKind::NamedArg { name, value } => (Some(name.name.clone()), value.as_ref()),
+                ExprKind::Binary { op: BinOp::Assign, left, right } => {
+                    let name = match &left.kind {
+                        ExprKind::Path(path) => match path.segments.as_slice() {
+                            [PathSegment::Name(name)] => Some(name.name.clone()),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    (name, right.as_ref())
+                }
+                _ => (None, argument),
+            };
+            ArchitectureArgument { name, value: requirement(doc, value.span) }
+        }).collect();
+        let interpretation = match verum_kernel::arch_parse::parse_arch_module(args) {
+            Ok(canonical) => ArchitectureInterpretation::Declared { canonical },
+            Err(error) => ArchitectureInterpretation::Invalid { message: error.human_message().into() },
+        };
+        ArchitectureAnnotation { attribute: requirement(doc, attribute.span), supplied, interpretation }
+    }).collect()
 }
 
 fn declaration_heading(item: &verum_ast::Item) -> Option<(&verum_ast::Ident, &'static str)> {
@@ -206,6 +260,7 @@ fn project_declaration(
         requirements,
         preconditions,
         postconditions,
+        architecture: architecture_annotations(doc, &item.attributes),
         record_fields,
     }
 }
@@ -247,6 +302,7 @@ impl DocumentSnapshot {
             diagnostics: convert_diagnostics(doc.diagnostics.clone(), &doc.text, uri).into(),
             declarations,
             mounts,
+            architecture: doc.module.as_ref().map(|module| architecture_annotations(doc, &module.attributes)),
         }
     }
 }
@@ -298,7 +354,8 @@ fn document_evidence(
         "schema":"verum-document-evidence/1", "uri":uri, "source_hash":hash, "source_mode":doc.source_mode, "version":doc.version,
         "project_revision":doc.analysis_revision, "library_metadata":doc.library_metadata, "analysis_scope":analysis_scope(doc),
         "parsed":doc.module.is_some(), "document_diagnostics":{"total":doc.diagnostics.len(),"errors":errors},
-        "declaration":declaration, "declaration_span":extent
+        "declaration":declaration, "declaration_span":extent,
+        "architecture":doc.module.as_ref().map(|module| architecture_annotations(doc, &module.attributes))
     }))
 }
 
