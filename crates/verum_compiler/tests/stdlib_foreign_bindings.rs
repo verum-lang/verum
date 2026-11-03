@@ -112,7 +112,7 @@ fn public_wrapper_reexport_does_not_capture_the_local_or_explicitly_mounted_exte
     .parse_module()
     .unwrap();
     let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
-    ArchiveCtxCache::new().apply_lazy_with_types(&archive, &mut consumer, &app, &[]).expect("valid archive");
+    ArchiveCtxCache::new(&archive).apply_lazy_with_types(&mut consumer, &app, &[]).expect("valid archive");
     consumer.collect_unit_declarations(&[&app]).unwrap();
     consumer.resolve_pending_imports();
     consumer

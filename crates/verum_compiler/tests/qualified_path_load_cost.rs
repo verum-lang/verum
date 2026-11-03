@@ -34,10 +34,8 @@ fn modules_loaded(code: &str) -> usize {
     let archive = verum_compiler::embedded_stdlib_vbc::get_runtime_archive()
         .expect("the embedded runtime archive must be available for this gate");
 
-    let cache = verum_compiler::archive_ctx_loader::ArchiveCtxCache::new();
-    let (fn_modules, _type_modules) = cache.apply_lazy_with_types(
-        archive,
-        &mut codegen,
+    let cache = verum_compiler::archive_ctx_loader::ArchiveCtxCache::new(&archive);
+    let (fn_modules, _type_modules) = cache.apply_lazy_with_types(&mut codegen,
         &module,
         // No sibling modules: this gate measures the cost of loading ONE
         // module's qualified paths, and an empty slice is what the call

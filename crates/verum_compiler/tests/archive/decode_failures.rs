@@ -107,7 +107,7 @@ fn every_import_route_propagates_the_actual_module_decode_failure() {
             for broken_first in [false, true] {
                 let archive = archive(Some(damage), compressed, broken_first);
                 let ast = consumer();
-                let cache = ArchiveCtxCache::new();
+                let cache = ArchiveCtxCache::new(&archive);
                 let mut ctx = CodegenContext::new();
                 let mut next_id = 41;
                 check_error(
@@ -117,30 +117,28 @@ fn every_import_route_propagates_the_actual_module_decode_failure() {
                 // Direct preload owns a disposable compilation context. The
                 // shared cache below must not publish its partial state.
                 let mut ctx = CodegenContext::new();
-                check_error(cache.get_or_build(&archive).unwrap_err(), damage);
-                check_error(cache.apply(&archive, &mut ctx).unwrap_err(), damage);
+                check_error(cache.get_or_build().unwrap_err(), damage);
+                check_error(cache.apply(&mut ctx).unwrap_err(), damage);
                 check_error(
-                    cache
-                        .apply_lazy(&archive, &mut ctx, &ast, &mut next_id)
-                        .unwrap_err(),
+                    cache.apply_lazy(&mut ctx, &ast, &mut next_id).unwrap_err(),
                     damage,
                 );
                 let mut codegen = VbcCodegen::new();
                 check_error(
-                    ArchiveCtxCache::import_types_for_module(&archive, &mut codegen, &ast)
+                    cache
+                        .import_types_for_module(&mut codegen, &ast)
                         .unwrap_err(),
                     damage,
                 );
                 check_error(
                     cache
-                        .apply_lazy_with_types(&archive, &mut codegen, &ast, &[])
+                        .apply_lazy_with_types(&mut codegen, &ast, &[])
                         .unwrap_err(),
                     damage,
                 );
                 check_error(
                     cache
                         .apply_lazy_supplemental(
-                            &archive,
                             &mut codegen,
                             ["broken.value".to_owned()].into_iter().collect(),
                         )
@@ -161,23 +159,17 @@ fn every_import_route_propagates_the_actual_module_decode_failure() {
 #[test]
 fn failed_cache_initialization_never_publishes_a_partial_table_or_graph() {
     let archive = archive(Some(Damage::LegacyRank2), false, false);
-    let cache = ArchiveCtxCache::new();
+    let cache = ArchiveCtxCache::new(&archive);
     for _ in 0..2 {
+        check_error(cache.get_or_build().unwrap_err(), Damage::LegacyRank2);
         check_error(
-            cache.get_or_build(&archive).unwrap_err(),
-            Damage::LegacyRank2,
-        );
-        check_error(
-            cache.graph(&archive).err().expect("no partial graph"),
+            cache.graph().err().expect("no partial graph"),
             Damage::LegacyRank2,
         );
         assert!(matches!(cache.table.get(), Some(Err(_))));
         assert!(matches!(cache.graph.get(), Some(Err(_))));
         let mut ctx = CodegenContext::new();
-        check_error(
-            cache.apply(&archive, &mut ctx).unwrap_err(),
-            Damage::LegacyRank2,
-        );
+        check_error(cache.apply(&mut ctx).unwrap_err(), Damage::LegacyRank2);
         assert!(ctx.lookup_function("good.value").is_none());
     }
 }
@@ -186,12 +178,12 @@ fn failed_cache_initialization_never_publishes_a_partial_table_or_graph() {
 fn valid_scoped_modules_keep_the_cached_fast_path() {
     for compressed in [false, true] {
         let archive = archive(None, compressed, false);
-        let cache = ArchiveCtxCache::new();
-        let table = cache.get_or_build(&archive).unwrap();
+        let cache = ArchiveCtxCache::new(&archive);
+        let table = cache.get_or_build().unwrap();
         assert!(table.contains_key("good.value"));
         assert!(table.contains_key("broken.value"));
-        assert!(std::ptr::eq(table, cache.get_or_build(&archive).unwrap()));
-        let graph = cache.graph(&archive).unwrap();
-        assert!(std::ptr::eq(graph, cache.graph(&archive).unwrap()));
+        assert!(std::ptr::eq(table, cache.get_or_build().unwrap()));
+        let graph = cache.graph().unwrap();
+        assert!(std::ptr::eq(graph, cache.graph().unwrap()));
     }
 }

@@ -372,13 +372,14 @@ impl<'s> CompilationPipeline<'s> {
         // T3/T4 land), error out loudly: building user code without
         // a stdlib archive is a configuration error, not a fallback
         // we should silently paper over.
-        let archive = crate::embedded_stdlib_vbc::get_runtime_archive().ok_or_else(|| {
+        let cache = crate::archive_ctx_loader::embedded_runtime_cache().ok_or_else(|| {
             anyhow::anyhow!(
                 "no precompiled stdlib archive embedded in this verum binary — \
                  single-path archive-driven codegen requires `target/precompiled-stdlib/runtime.vbca`. \
                  Run `verum stdlib precompile` and rebuild verum to embed the archive."
             )
         })?;
+        let archive = cache.archive();
         if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
             eprintln!(
                 "[compile_ast_to_vbc] archive-driven: {} modules, {} KB",
@@ -418,8 +419,6 @@ impl<'s> CompilationPipeline<'s> {
         // re-registration on miss).  Cost amortises across
         // compilations within the same process for REPL / watch /
         // test-runner workflows.
-        static CTX_CACHE: crate::archive_ctx_loader::ArchiveCtxCache =
-            crate::archive_ctx_loader::ArchiveCtxCache::new();
         let t_pop = std::time::Instant::now();
         // Split borrows so apply_lazy can REMAP each archive-local
         // FunctionId to a globally-unique slot.  Without this, two
@@ -445,8 +444,7 @@ impl<'s> CompilationPipeline<'s> {
         // in a sibling file.
         let siblings: Vec<std::sync::Arc<Module>> =
             self.project_modules.values().cloned().collect();
-        let (fn_modules, type_modules) = CTX_CACHE.apply_lazy_with_types(
-            archive,
+        let (fn_modules, type_modules) = cache.apply_lazy_with_types(
             &mut codegen,
             module,
             &siblings,
@@ -558,7 +556,7 @@ impl<'s> CompilationPipeline<'s> {
             let extra = codegen.collect_post_codegen_dispatch_names();
             if !extra.is_empty() {
                 let merged =
-                    CTX_CACHE.apply_lazy_supplemental(archive, &mut codegen, extra)?;
+                    cache.apply_lazy_supplemental(&mut codegen, extra)?;
                 if merged > 0 {
                     step_mark!("supplemental archive merge");
                 }

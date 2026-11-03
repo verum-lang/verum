@@ -33,21 +33,21 @@ fn archive(modules: &[VbcModule]) -> VbcArchive {
     read_archive(std::io::Cursor::new(bytes.as_slice())).expect("decode archive")
 }
 
-fn cache(archive: &VbcArchive) -> ArchiveCtxCache {
-    let cache = ArchiveCtxCache::new();
+fn cache(archive: &VbcArchive) -> ArchiveCtxCache<'_> {
+    let cache = ArchiveCtxCache::new(archive);
     // This synthetic archive owns its graph; the process's embedded stdlib
     // graph is unrelated and must not participate in these controls.
     assert!(cache.graph.set(SymbolGraph::build(archive)).is_ok());
     cache
 }
 
-fn primary(cache: &ArchiveCtxCache, archive: &VbcArchive, body: &str, offset: u32) -> VbcCodegen {
+fn primary(cache: &ArchiveCtxCache<'_>, body: &str, offset: u32) -> VbcCodegen {
     let ast = Parser::new(body)
         .parse_module()
         .expect("parse archive consumer");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
     *codegen.next_func_id_mut() += offset;
-    let (modules, _) = cache.apply_lazy_with_types(archive, &mut codegen, &ast, &[]).expect("valid archive");
+    let (modules, _) = cache.apply_lazy_with_types(&mut codegen, &ast, &[]).expect("valid archive");
     assert!(modules > 0, "primary must import the real archive");
     codegen
 }
@@ -56,14 +56,14 @@ fn id(codegen: &mut VbcCodegen, name: &str) -> FunctionId {
     codegen.ctx_mut().lookup_function(name).expect(name).id
 }
 
-fn supplement(cache: &ArchiveCtxCache, archive: &VbcArchive, codegen: &mut VbcCodegen, name: &str) {
+fn supplement(cache: &ArchiveCtxCache<'_>, codegen: &mut VbcCodegen, name: &str) {
     assert!(
         codegen.ctx_mut().lookup_function(name).is_none(),
         "new requested name {name}"
     );
     // A new name may refer to a body already copied by an earlier wave.
     // Registration, stable identity and execution are the success oracles.
-    cache.apply_lazy_supplemental(archive, codegen, [name.to_owned()].into_iter().collect()).expect("valid archive");
+    cache.apply_lazy_supplemental(codegen, [name.to_owned()].into_iter().collect()).expect("valid archive");
     assert!(
         codegen.ctx_mut().lookup_function(name).is_some(),
         "requested declaration {name}"
@@ -138,10 +138,10 @@ fn assert_result(module: &VbcModule, name: &str, expected: i64) {
 fn supplemental_registration_preserves_primary_qualified_and_bare_ids() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+    let mut codegen = primary(&cache, "fn main() -> Int { original() }", 0);
     let original = id(&mut codegen, "alpha.original");
     assert_eq!(id(&mut codegen, "original"), original);
-    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    supplement(&cache, &mut codegen, "alpha.later");
     assert_eq!(id(&mut codegen, "alpha.original"), original);
     assert_eq!(id(&mut codegen, "original"), original);
     assert_ne!(id(&mut codegen, "alpha.later"), original);
@@ -154,9 +154,9 @@ fn supplemental_registration_preserves_primary_qualified_and_bare_ids() {
 fn a_new_body_calls_the_original_consumer_id() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+    let mut codegen = primary(&cache, "fn main() -> Int { original() }", 0);
     let original = id(&mut codegen, "alpha.original");
-    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    supplement(&cache, &mut codegen, "alpha.later");
     assert_ne!(id(&mut codegen, "alpha.later"), original);
     let module = finish(&mut codegen);
     assert!(
@@ -170,9 +170,7 @@ fn a_new_body_calls_the_original_consumer_id() {
 fn declared_method_aliases_and_real_empty_bodies_survive_supplemental_load() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(
-        &cache,
-        &archive,
+    let mut codegen = primary(&cache,
         "fn main(counter: &Counter) -> Int { counter.empty(); counter.value() + original() }",
         0,
     );
@@ -186,7 +184,7 @@ fn declared_method_aliases_and_real_empty_bodies_survive_supplemental_load() {
             qualified_id
         })
         .collect();
-    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    supplement(&cache, &mut codegen, "alpha.later");
     for (name, original) in names.iter().zip(original.iter()) {
         assert_eq!(id(&mut codegen, &format!("alpha.{name}")), *original);
         assert_eq!(id(&mut codegen, name), *original);
@@ -206,11 +204,11 @@ fn same_leaf_foreign_functions_remain_distinct_in_both_archive_orders() {
         }
         let archive = archive(&modules);
         let cache = cache(&archive);
-        let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+        let mut codegen = primary(&cache, "fn main() -> Int { original() }", 0);
         let alpha = id(&mut codegen, "alpha.original");
         let beta = id(&mut codegen, "beta.original");
         assert_ne!(alpha, beta);
-        supplement(&cache, &archive, &mut codegen, "alpha.later");
+        supplement(&cache, &mut codegen, "alpha.later");
         assert_eq!(id(&mut codegen, "alpha.original"), alpha);
         assert_eq!(id(&mut codegen, "beta.original"), beta);
         let module = finish(&mut codegen);
@@ -223,19 +221,17 @@ fn same_leaf_foreign_functions_remain_distinct_in_both_archive_orders() {
 fn later_supplemental_waves_reuse_the_same_call_closure() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+    let mut codegen = primary(&cache, "fn main() -> Int { original() }", 0);
     let original = id(&mut codegen, "alpha.original");
-    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    supplement(&cache, &mut codegen, "alpha.later");
     let later = id(&mut codegen, "alpha.later");
-    supplement(&cache, &archive, &mut codegen, "alpha.latest");
+    supplement(&cache, &mut codegen, "alpha.latest");
     assert_eq!(id(&mut codegen, "alpha.original"), original);
     assert_eq!(id(&mut codegen, "alpha.later"), later);
     assert_ne!(id(&mut codegen, "alpha.latest"), later);
     let next = *codegen.next_func_id_mut();
     assert_eq!(
-        cache.apply_lazy_supplemental(
-            &archive,
-            &mut codegen,
+        cache.apply_lazy_supplemental(&mut codegen,
             ["alpha.latest".to_owned()].into_iter().collect()
         ).expect("valid archive"),
         0
@@ -252,10 +248,10 @@ fn a_new_compilation_epoch_does_not_reuse_previous_consumer_ids() {
     let cache = cache(&archive);
     let mut originals = List::new();
     for offset in [0, 1000] {
-        let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", offset);
+        let mut codegen = primary(&cache, "fn main() -> Int { original() }", offset);
         let original = id(&mut codegen, "alpha.original");
         originals.push(original);
-        supplement(&cache, &archive, &mut codegen, "alpha.later");
+        supplement(&cache, &mut codegen, "alpha.later");
         assert_eq!(id(&mut codegen, "alpha.original"), original);
         assert_ne!(id(&mut codegen, "alpha.later"), original);
         let module = finish(&mut codegen);
@@ -274,14 +270,14 @@ fn a_new_compilation_epoch_does_not_reuse_previous_consumer_ids() {
 fn interleaved_compilations_keep_their_own_function_ids_and_bodies() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut first = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+    let mut first = primary(&cache, "fn main() -> Int { original() }", 0);
     let first_original = id(&mut first, "alpha.original");
-    let mut second = primary(&cache, &archive, "fn main() -> Int { original() }", 1000);
+    let mut second = primary(&cache, "fn main() -> Int { original() }", 1000);
     let second_original = id(&mut second, "alpha.original");
     assert_ne!(first_original, second_original);
 
-    supplement(&cache, &archive, &mut first, "alpha.later");
-    supplement(&cache, &archive, &mut second, "alpha.later");
+    supplement(&cache, &mut first, "alpha.later");
+    supplement(&cache, &mut second, "alpha.later");
     assert_eq!(id(&mut first, "alpha.original"), first_original);
     assert_eq!(id(&mut second, "alpha.original"), second_original);
     assert_ne!(
@@ -328,9 +324,9 @@ fn a_later_name_registration_preserves_remapped_nominal_signatures() {
     // Import an unrelated declared record first, so consumer IDs cannot
     // accidentally equal the archive-local Parcel ID.
     codegen.import_archive_module_types(&source("occupier", 99));
-    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]).expect("valid archive");
+    let (modules, _) = cache.apply_lazy_with_types(&mut codegen, &consumer, &[]).expect("valid archive");
     assert!(modules > 0);
-    supplement(&cache, &archive, &mut codegen, "alpha.make");
+    supplement(&cache, &mut codegen, "alpha.make");
     let expected = codegen
         .ctx_mut()
         .lookup_function("alpha.make")
@@ -347,9 +343,7 @@ fn a_later_name_registration_preserves_remapped_nominal_signatures() {
 
     // The first supplemental wave merges the complete entry. This later
     // wave may add only names/signatures, but they still need consumer IDs.
-    cache.apply_lazy_supplemental(
-        &archive,
-        &mut codegen,
+    cache.apply_lazy_supplemental(&mut codegen,
         ["alpha.echo".to_owned()].into_iter().collect(),
     ).expect("valid archive");
     for name in ["alpha.make", "make", "alpha.echo", "echo"] {
@@ -376,9 +370,9 @@ fn a_later_name_registration_preserves_remapped_nominal_signatures() {
 fn resetting_the_same_codegen_starts_a_new_archive_identity_space() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+    let mut codegen = primary(&cache, "fn main() -> Int { original() }", 0);
     let previous = id(&mut codegen, "alpha.original");
-    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    supplement(&cache, &mut codegen, "alpha.later");
     assert_result(&finish(&mut codegen), "alpha.later", 42);
 
     let reset = Parser::new("fn reset_marker() -> Int { 0 }")
@@ -397,12 +391,12 @@ fn resetting_the_same_codegen_starts_a_new_archive_identity_space() {
     let consumer = Parser::new("fn main() -> Int { original() }")
         .parse_module()
         .expect("parse new consumer");
-    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]).expect("valid archive");
+    let (modules, _) = cache.apply_lazy_with_types(&mut codegen, &consumer, &[]).expect("valid archive");
     assert!(modules > 0);
     let current = id(&mut codegen, "alpha.original");
     assert!(current.0 >= 1000, "reset must use the new allocator space");
     assert_ne!(current, previous);
-    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    supplement(&cache, &mut codegen, "alpha.later");
     assert_eq!(id(&mut codegen, "alpha.original"), current);
     assert_result(&finish(&mut codegen), "alpha.later", 42);
 }

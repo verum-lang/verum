@@ -33,8 +33,8 @@ fn archive(sources: &[(&str, &str)], reverse: bool) -> VbcArchive {
 fn import(archive: &VbcArchive) -> VbcCodegen {
     let mut codegen = VbcCodegen::new();
     codegen.populate_types_from_archive(archive);
-    let cache = verum_compiler::archive_ctx_loader::ArchiveCtxCache::new();
-    codegen.import_functions(cache.get_or_build(archive).expect("valid archive"));
+    let cache = verum_compiler::archive_ctx_loader::ArchiveCtxCache::new(&archive);
+    codegen.import_functions(cache.get_or_build().expect("valid archive"));
     for entry in &archive.index {
         let module = archive.load_module(&entry.name).unwrap();
         let remap: Map<_, _> = module

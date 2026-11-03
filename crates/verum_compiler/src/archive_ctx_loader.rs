@@ -2362,7 +2362,17 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
     ModuleSymbolView { functions, qualified_aliases }
 }
 
-pub struct ArchiveCtxCache {
+/// Immutable archive ownership. The concrete carriers cannot switch the
+/// borrowed archive between cache operations.
+enum ArchiveSource<'a> {
+    Borrowed(&'a VbcArchive),
+    Shared(std::sync::Arc<VbcArchive>),
+}
+
+/// Declaration and reachability caches belong to exactly one immutable archive.
+/// Compilation contexts remain per-run; only archive-derived data is shared.
+pub struct ArchiveCtxCache<'a> {
+    archive: ArchiveSource<'a>,
     /// One-shot lazily-built table: qualified name → FunctionInfo.
     /// Holds both qualified (`module.simple`) and simple-name keys
     /// after first build.
@@ -2373,12 +2383,20 @@ pub struct ArchiveCtxCache {
     graph: OnceLock<Result<SymbolGraph, CtxLoadError>>,
 }
 
-impl ArchiveCtxCache {
-    /// Construct an empty cache.  Cheap; no archive work happens here.
-    pub const fn new() -> Self {
+impl<'a> ArchiveCtxCache<'a> {
+    /// Bind a borrowed immutable archive. No decoding happens at construction.
+    pub const fn new(archive: &'a VbcArchive) -> Self {
         Self {
+            archive: ArchiveSource::Borrowed(archive),
             table: OnceLock::new(),
             graph: OnceLock::new(),
+        }
+    }
+
+    pub fn archive(&self) -> &VbcArchive {
+        match &self.archive {
+            ArchiveSource::Borrowed(archive) => archive,
+            ArchiveSource::Shared(archive) => archive,
         }
     }
 
@@ -2386,7 +2404,8 @@ impl ArchiveCtxCache {
     /// from `CallM` / `Call` / `TailCall` edges). Cached for the
     /// process lifetime — first call pays the full archive decode
     /// (~250ms on a 12 MB archive), every later call is free.
-    pub(crate) fn graph(&self, archive: &VbcArchive) -> Result<&SymbolGraph, CtxLoadError> {
+    pub(crate) fn graph(&self) -> Result<&SymbolGraph, CtxLoadError> {
+        let archive = self.archive();
         self.graph
             .get_or_init(|| {
                 loadcost::timed("symbol_graph_load", || {
@@ -2399,13 +2418,10 @@ impl ArchiveCtxCache {
             }).as_ref().map_err(Clone::clone)
     }
 
-    /// Lazily build the cache from `archive` (idempotent — first call
-    /// wins, every later call no-ops on the OnceLock side).  Returns
-    /// the cached table on every call.
-    pub fn get_or_build(
-        &self,
-        archive: &VbcArchive,
-    ) -> Result<&HashMap<String, FunctionInfo>, CtxLoadError> {
+    /// Lazily build the table from the bound archive. Later calls reuse the
+    /// same complete table or the same typed failure; there is no rebinding.
+    pub fn get_or_build(&self) -> Result<&HashMap<String, FunctionInfo>, CtxLoadError> {
+        let archive = self.archive();
         self.table.get_or_init(|| {
             let mut staging = CodegenContext::new();
             // Local id allocator for the staging path.  This call site
@@ -2424,8 +2440,8 @@ impl ArchiveCtxCache {
     /// [`CodegenContext::import_functions`].  Equivalent to running
     /// `populate_ctx_from_archive` but ~30× faster on the
     /// second+later calls because the conversion only happens once.
-    pub fn apply(&self, archive: &VbcArchive, ctx: &mut CodegenContext) -> Result<(), CtxLoadError> {
-        let table = self.get_or_build(archive)?;
+    pub fn apply(&self, ctx: &mut CodegenContext) -> Result<(), CtxLoadError> {
+        let table = self.get_or_build()?;
         ctx.import_functions(table);
         Ok(())
     }
@@ -2450,11 +2466,11 @@ impl ArchiveCtxCache {
     /// gone for one-shot scripts.
     pub fn apply_lazy(
         &self,
-        archive: &VbcArchive,
         ctx: &mut CodegenContext,
         user_module: &verum_ast::Module,
         next_id: &mut u32,
     ) -> Result<(), CtxLoadError> {
+        let archive = self.archive();
         let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut harvest);
@@ -2599,7 +2615,7 @@ impl ArchiveCtxCache {
         // declaration), walk the rest of the archive looking only
         // at simple-name matches.  Most stdlib symbols come in via
         // mounts so this branch typically processes nothing.
-        let symbol_graph = self.graph(archive)?;
+        let symbol_graph = self.graph()?;
         let unqualified_wanted: std::collections::HashSet<String> = wanted
             .iter()
             .filter(|n| !n.contains('.'))
@@ -2641,13 +2657,28 @@ impl ArchiveCtxCache {
     }
 }
 
-impl Default for ArchiveCtxCache {
-    fn default() -> Self {
-        Self::new()
+impl ArchiveCtxCache<'static> {
+    /// Own a session's archive without copying its encoded bytes. Retaining an
+    /// Arc prevents any caller from obtaining mutable access while cached.
+    pub fn from_shared(archive: std::sync::Arc<VbcArchive>) -> Self {
+        Self {
+            archive: ArchiveSource::Shared(archive),
+            table: OnceLock::new(),
+            graph: OnceLock::new(),
+        }
     }
 }
 
-impl ArchiveCtxCache {
+/// The single process-wide cache for the immutable embedded runtime archive.
+/// Source compilation and independently loaded project archives use their own
+/// explicitly bound caches; they cannot replace this cache's backing archive.
+pub(crate) fn embedded_runtime_cache() -> Option<&'static ArchiveCtxCache<'static>> {
+    static CACHE: OnceLock<ArchiveCtxCache<'static>> = OnceLock::new();
+    let archive = crate::embedded_stdlib_vbc::get_runtime_archive()?;
+    Some(CACHE.get_or_init(|| ArchiveCtxCache::new(archive)))
+}
+
+impl<'a> ArchiveCtxCache<'a> {
     /// Walks every archive module the user mounts (transitively, via
     /// `harvest_names_in_*`) and pushes each module's TypeDescriptors
     /// into the user codegen via `import_archive_type`.  Pairs with
@@ -2663,10 +2694,11 @@ impl ArchiveCtxCache {
     ///
     /// Returns the number of modules whose type tables were imported.
     pub fn import_types_for_module(
-        archive: &VbcArchive,
+        &self,
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
     ) -> Result<usize, CtxLoadError> {
+        let archive = self.archive();
         let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut harvest);
@@ -2731,10 +2763,10 @@ impl ArchiveCtxCache {
     /// to the codegen compilation, independently of this shared cache.
     pub fn apply_lazy_supplemental(
         &self,
-        archive: &VbcArchive,
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         extra_wanted: std::collections::HashSet<String>,
     ) -> Result<usize, CtxLoadError> {
+        let archive = self.archive();
         if extra_wanted.is_empty() {
             return Ok(0);
         }
@@ -2747,7 +2779,7 @@ impl ArchiveCtxCache {
         if unresolved.is_empty() {
             return Ok(0);
         }
-        let graph = self.graph(archive)?;
+        let graph = self.graph()?;
         // No AST here — `extra_wanted` arrives as bare names that could
         // NOT be resolved in ctx, so their provenance is unknown and the
         // seed cap must not apply: this path exists precisely to find
@@ -2840,7 +2872,7 @@ impl ArchiveCtxCache {
                     "[wanted/filter '{}'] in wanted: {:?}",
                     filter, hits
                 );
-                let g = self.graph(archive)?;
+                let g = self.graph()?;
                 for h in hits {
                     let reg = codegen.ctx_mut().lookup_function(h).is_some();
                     let in_graph = g.baked.module_of(h.as_str());
@@ -2880,11 +2912,11 @@ impl ArchiveCtxCache {
     /// an unresolved stub while `verum check` reported success.
     pub fn apply_lazy_with_types(
         &self,
-        archive: &VbcArchive,
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
         sibling_modules: &[std::sync::Arc<verum_ast::Module>],
     ) -> Result<(usize, usize), CtxLoadError> {
+        let archive = self.archive();
         let t_load = std::time::Instant::now();
         // **ONE-authority alias seeding** (T0695/T0692): every codegen
         // that loads the embedded archive gets the DECLARED type
@@ -3085,7 +3117,7 @@ impl ArchiveCtxCache {
         // qualified-name set into `wanted` + the defining-module set
         // into `wanted_module_prefixes`. Every cross-module dependency
         // surfaces by construction — no hardcoded entries.
-        let graph = self.graph(archive)?;
+        let graph = self.graph()?;
         let (reached_qualified, reached_module_idxs) =
             loadcost::timed("bfs_reachable", || {
                 graph.reachable(&wanted, &bare_method_seeds)
@@ -3537,7 +3569,7 @@ impl ArchiveCtxCache {
         // `carries_simple_name` is a hash lookup on the symbol graph, which
         // these runs have already built for the reachability step — the
         // filter is free where the scan it prevents is not.
-        let graph_for_names = self.graph(archive)?;
+        let graph_for_names = self.graph()?;
         // A MOUNT PATH SEGMENT IS NOT A FUNCTION NAME (T0753).
         //
         // `collect_mount_names` inserts a Path mount's last segment as a
@@ -7891,8 +7923,8 @@ mod tests {
         wanted.insert("Text.new".to_string());
         wanted.insert("print".to_string());
 
-        let cache = ArchiveCtxCache::new();
-        let graph = cache.graph(archive).expect("valid archive");
+        let cache = ArchiveCtxCache::new(&archive);
+        let graph = cache.graph().expect("valid archive");
 
         // Step 1: graph must have Text.new in qualified_to_module.
         let text_new_module_idx = graph
@@ -7961,8 +7993,8 @@ mod tests {
             Some(a) => a,
             None => return, // bootstrap-phase build, no archive
         };
-        let cache = ArchiveCtxCache::new();
-        let graph = cache.graph(archive).expect("valid archive");
+        let cache = ArchiveCtxCache::new(&archive);
+        let graph = cache.graph().expect("valid archive");
         // Quick sanity: graph indexes some functions.
         assert!(
             graph.baked.function_count() > 0,
@@ -8097,14 +8129,14 @@ mod tests {
             Some(a) => a,
             None => return,
         };
-        let cache = ArchiveCtxCache::new();
+        let cache = ArchiveCtxCache::new(&archive);
         let mut ctx_first = CodegenContext::new();
-        cache.apply(archive, &mut ctx_first).expect("valid archive");
+        cache.apply(&mut ctx_first).expect("valid archive");
         let first_count = ctx_first.export_functions().len();
         assert!(first_count > 0);
 
         let mut ctx_second = CodegenContext::new();
-        cache.apply(archive, &mut ctx_second).expect("valid archive");
+        cache.apply(&mut ctx_second).expect("valid archive");
         let second_count = ctx_second.export_functions().len();
         assert_eq!(
             first_count, second_count,
@@ -8401,3 +8433,7 @@ mod supplemental_function_identity;
 #[cfg(test)]
 #[path = "../tests/archive/decode_failures.rs"]
 mod decode_failures;
+
+#[cfg(test)]
+#[path = "../tests/archive/cache_binding.rs"]
+mod cache_binding;

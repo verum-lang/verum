@@ -66,17 +66,14 @@ pub fn compile_module_with_stdlib(
     // proceed — the user module won't see stdlib symbols, which fails
     // loudly at the call sites rather than silently producing
     // garbage bytecode.
-    if let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() {
+    if let Some(cache) = crate::archive_ctx_loader::embedded_runtime_cache() {
         // Process-wide cache: the FunctionInfo→key table is built once
         // per archive bytes and reused across compilations. The
         // `apply_lazy_with_types` variant filters by the user
         // module's mount tree + harvested call sites, so a hello-world
         // compile touches a handful of archive entries instead of all
         // 7000+.
-        static CTX_CACHE: crate::archive_ctx_loader::ArchiveCtxCache =
-            crate::archive_ctx_loader::ArchiveCtxCache::new();
-        CTX_CACHE.apply_lazy_with_types(
-            archive,
+        cache.apply_lazy_with_types(
             &mut codegen,
             module,
             // T1126: a single-module compile has no siblings by

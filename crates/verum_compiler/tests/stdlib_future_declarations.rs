@@ -560,9 +560,7 @@ fn execute(archive: &verum_vbc::archive::VbcArchive, source: &str) -> i64 {
         .unwrap();
     let mut codegen =
         verum_vbc::codegen::VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("app"));
-    verum_compiler::archive_ctx_loader::ArchiveCtxCache::new().apply_lazy_with_types(
-        archive,
-        &mut codegen,
+    verum_compiler::archive_ctx_loader::ArchiveCtxCache::new(&archive).apply_lazy_with_types(&mut codegen,
         &app,
         &[],
     ).expect("valid archive");
