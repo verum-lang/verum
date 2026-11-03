@@ -8651,6 +8651,10 @@ impl VbcCodegen {
             if !self.should_compile_item(item) { continue; }
             match &item.kind {
                 ItemKind::Type(declaration) => self.claim_user_type_name(owner, declaration),
+                ItemKind::Mount(mount) => {
+                    let owner = source_owner.unwrap_or(&self.config.module_name).to_owned();
+                    self.publish_source_type_mount(&owner, mount);
+                }
                 ItemKind::Module(module) => {
                     if let Some(items) = &module.items {
                         // Match scope_to_inline_module: a file-owned child
@@ -12688,15 +12692,14 @@ impl VbcCodegen {
                 // private rename or a lowercase namespace prefix. Capture it
                 // before namespace/function lowering takes an early return.
                 let source_owner = self.ctx.current_source_module.as_deref()
-                    .unwrap_or(&self.config.module_name);
-                self.source_type_mounts.entry(source_owner.into()).or_default()
-                    .insert(alias_name.as_str().into(), Some(full_path.join(".").into()));
+                    .unwrap_or(&self.config.module_name).to_owned();
+                self.record_source_type_mount(&source_owner, &alias_name, &full_path.join("."));
 
                 // An exact declared module is a namespace even when it has
                 // only types or a single path segment. Publish this intent
                 // before item/function fallbacks can bind the same spelling.
                 let written = full_path.join(".");
-                if self.declared_namespace_mount(&written, source_owner)?
+                if self.declared_namespace_mount(&written, &source_owner)?
                     || self.unit_module_paths.contains(&written)
                 {
                     self.ctx.module_aliases.insert(alias_name, full_path);
@@ -12746,10 +12749,6 @@ impl VbcCodegen {
                         .is_some_and(|c| c.is_ascii_uppercase())
                 {
                     let mount_path = full_path.join(".");
-                    let owner = self.ctx.current_source_module.as_deref()
-                        .unwrap_or(&self.config.module_name);
-                    self.source_type_mounts.entry(owner.into()).or_default()
-                        .insert(alias_name.as_str().into(), Some(mount_path.as_str().into()));
                     self.ctx
                         .mounted_types
                         .insert(alias_name.clone(), mount_path);

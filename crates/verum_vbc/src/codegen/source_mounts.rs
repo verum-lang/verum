@@ -114,6 +114,37 @@ impl ExportCandidates {
 }
 
 impl VbcCodegen {
+    /// Import intent belongs to the declaring source, independently of item
+    /// order. Capture paths before signatures, without binding callable IDs or
+    /// requiring the imported descriptors to have been collected yet.
+    pub(super) fn publish_source_type_mount(
+        &mut self,
+        owner: &str,
+        mount: &verum_ast::MountDecl,
+    ) {
+        visit_named_mounts(&mount.tree, "", mount.alias.as_ref(), &mut |alias, written| {
+            let parts = mount_path_parts(&written);
+            let target = Self::resolve_module_path_head_in_scope(&parts, owner)
+                .map(|parts| parts.join("."))
+                .unwrap_or(written);
+            self.record_source_type_mount(owner, alias, &target);
+        });
+    }
+
+    /// Repeated declaration passes are idempotent. Distinct explicit targets
+    /// remain ambiguous; a later item cannot silently replace their evidence.
+    pub(super) fn record_source_type_mount(&mut self, owner: &str, alias: &str, target: &str) {
+        use std::collections::hash_map::Entry;
+        match self.source_type_mounts.entry(owner.into()).or_default().entry(alias.into()) {
+            Entry::Vacant(entry) => { entry.insert(Some(target.into())); }
+            Entry::Occupied(mut entry) => {
+                if entry.get().as_deref() != Some(target) {
+                    entry.insert(None);
+                }
+            }
+        }
+    }
+
     /// Publish the completed declaration pass without copying bodies or
     /// interpreting function IDs from another compilation unit.
     pub fn publish_source_exports(&mut self, index: &mut SourceExports) {
