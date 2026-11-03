@@ -39,13 +39,13 @@ public module split;
 // Re-exports — primitives
 public mount .protocol.{Widget, StatefulWidget, Styled};
 public mount .block.{Block, BorderType, BorderChars, Borders, Alignment};
-public mount .paragraph.{Paragraph, Line, Span, Wrap};
+public mount .paragraph.{Paragraph, Line, TextSpan as Span, Wrap};
 public mount .list.{SelectableList, ListState};
-public mount .table.{Table, Row, TableState};
+public mount .table.{Table, TableCell, TableRow as Row, TableState, HighlightSpacing};
 public mount .input.{TextInput, TextInputState};
 public mount .gauge.Gauge;
 public mount .tabs.Tabs;
-public mount .scrollbar.{Scrollbar, ScrollbarOrientation};
+public mount .scrollbar.{Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 // Re-exports — extended
 public mount .canvas.{
@@ -63,4 +63,4 @@ public mount .notification.{Notification, NotificationLevel};
 // Re-exports — industrial additions
 public mount .textarea.{TextArea, TextAreaState, WrapMode, Pos};
 public mount .dropdown.{Dropdown, DropdownState};
-public mount .split.{Split, SplitState, SplitOrientation, SplitSize};
+public mount .split.{TermSplit as Split, SplitState, SplitOrientation, SplitSize};

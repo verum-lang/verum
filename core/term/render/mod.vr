@@ -22,10 +22,9 @@ public module viewport;
 public module graphics;
 
 // Re-exports
-public mount .cell.{Cell, char_display_width};
+public mount .cell.{RenderCell as Cell, char_display_width};
 public mount .buffer.Buffer;
 public mount .diff.{flush_diff, write_style_diff, write_color, write_modifiers};
-public mount .frame.Frame;
-public mount .backend.{Terminal};
+public mount .frame.{Frame, Terminal};
 public mount .viewport.Viewport;
 public mount .graphics.{GraphicsRenderer, ImageFormat, KittyGraphics, SixelGraphics, ItermGraphics, BrailleGraphics, create_graphics_renderer};

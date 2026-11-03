@@ -55,7 +55,7 @@ public module clipboard;
 public mount .termios.PosixTerminal;
 public mount .escape.{EscapeWriter, ClearMode};
 public mount .capabilities.{
-    TermCapabilities, ColorProfile, UnicodeSupport, MouseProtocol,
+    TermCapabilities, ColorSupportLevel as ColorProfile, UnicodeSupport, MouseProtocol,
     detect_capabilities, query_background_color,
 };
 public mount .screen.{enter_alternate_screen, leave_alternate_screen, get_terminal_size};

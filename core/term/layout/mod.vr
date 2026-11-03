@@ -28,7 +28,7 @@ public module responsive;
 public mount .rect.{Rect, Margin, Position};
 // LayoutConstraint is the unique decl name (bare `Constraint` collided
 // across three domains); the alias keeps the public term surface.
-public mount .constraint.{LayoutConstraint, LayoutConstraint as Constraint, Direction, Flex, TermLayout};
+public mount .constraint.{LayoutConstraint, LayoutConstraint as Constraint, Direction, Flex, TermLayout, TermLayout as Layout};
 public mount .flex.{FlexLayout, FlexDirection, FlexWrap, JustifyContent, AlignItems, AlignContent, FlexItem, FlexBasis};
 public mount .shortcuts.{header_body_footer, sidebar_main, centered, equal_columns, equal_rows, percentage_split, percentage_rows};
 public mount .grid.{GridLayout, GridTrack};
