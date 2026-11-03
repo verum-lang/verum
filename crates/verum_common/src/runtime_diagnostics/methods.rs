@@ -63,14 +63,19 @@ pub struct MethodDispatchReport {
 
 impl MethodDispatchReport {
     pub fn validate(&self) -> bool {
+        self.validate_with_export_loss(0)
+    }
+
+    pub(super) fn validate_with_export_loss(&self, omitted: usize) -> bool {
+        let captured = self.rows.len().saturating_add(omitted);
         self.capacity <= MAX_METHOD_DISPATCH_SITES
-            && self.rows.len() <= self.capacity
-            && (self.dropped_calls == 0 || self.rows.len() == self.capacity)
+            && captured <= self.capacity
+            && (self.dropped_calls == 0 || captured == self.capacity)
             && self.rows.iter().all(|r| {
                 r.count != 0
                     && r.max_ns <= r.inclusive_ns
                     && r.inclusive_ns <= r.max_ns.saturating_mul(r.count)
-                    && r.module_instance < self.rows.len()
+                    && r.module_instance < captured
                     && [&r.module, &r.function, &r.selector]
                         .into_iter()
                         .flatten()

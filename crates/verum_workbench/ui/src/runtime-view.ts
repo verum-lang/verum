@@ -1,5 +1,5 @@
 import type { Receipt } from './model';
-import { rankMethodSites, taskSnapshotCounts, type AsyncTaskReport, type AsyncTaskStatus, type CbgrEvent, type MethodDispatchReport, type MethodOutcome } from './runtime';
+import { cbgrObservationState, rankMethodSites, taskSnapshotCounts, type AsyncTaskReport, type AsyncTaskStatus, type CbgrEvent, type MethodDispatchReport, type MethodOutcome } from './runtime';
 import { m, setText, setAttribute, type Content } from './i18n';
 
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: Content) => {
@@ -86,11 +86,19 @@ export function runtimeView(receipt: Receipt, canNavigate: (event: CbgrEvent) =>
     if (receipt.runtime_error) section.append(element('pre', receipt.runtime_error));
     return section;
   }
+  const loss = report.export_loss;
+  if (loss && loss.cbgr_events + loss.method_sites + loss.task_rows > 0) {
+    const warning = element('p', m('Report byte limit reached. Omitted: {cbgr} CBGR observations, {methods} method sites, {tasks} task outcomes. Missing observations cannot establish absence of failures.',
+      { cbgr: loss.cbgr_events, methods: loss.method_sites, tasks: loss.task_rows }));
+    warning.className = 'runtime-truncated'; section.append(warning);
+  }
   if (report.method_dispatch) section.append(methodView(report.method_dispatch));
   if (report.async_tasks) section.append(taskView(report.async_tasks));
   const cbgr = report.cbgr;
   if (!cbgr.checks_enabled_at_start) section.append(element('p', m('CBGR checks were disabled when capture started.')));
-  section.append(element('p', m(cbgr.events.length ? '{count} dispatch observations' : 'No CBGR failures observed in this capture.', { count: cbgr.events.length })));
+  section.append(element('p', m(cbgrObservationState(report) === 'omitted'
+    ? 'No CBGR failure records retained; capture or export omitted observations.'
+    : cbgr.events.length ? '{count} dispatch observations' : 'No CBGR failures observed in this capture.', { count: cbgr.events.length })));
   if (cbgr.truncated) { const warning = element('p', m('Capture limit reached. Additional observations were dropped.')); warning.className = 'runtime-truncated'; section.append(warning); }
   const coverage = element('details'); coverage.dataset.key = 'cbgr-coverage';
   const summary = element('summary', m('Capture scope')); summary.dataset.focusKey = 'cbgr-coverage';

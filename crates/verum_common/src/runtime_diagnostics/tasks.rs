@@ -51,9 +51,14 @@ pub struct AsyncTaskReport {
 
 impl AsyncTaskReport {
     pub fn validate(&self) -> bool {
+        self.validate_with_export_loss(0)
+    }
+
+    pub(super) fn validate_with_export_loss(&self, omitted: usize) -> bool {
+        let captured = self.rows.len().saturating_add(omitted);
         self.capacity <= MAX_ASYNC_TASK_ROWS
-            && self.rows.len() <= self.capacity
-            && (self.omitted_tasks == 0 || self.rows.len() == self.capacity)
+            && captured <= self.capacity
+            && (self.omitted_tasks == 0 || captured == self.capacity)
             && self.rows.windows(2).all(|w| w[0].task_id < w[1].task_id)
             && self.rows.iter().all(|r| {
                 (!r.entered || r.function_id.is_some())

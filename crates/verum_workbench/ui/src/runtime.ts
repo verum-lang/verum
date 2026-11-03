@@ -38,13 +38,20 @@ export function rankMethodSites(report: MethodDispatchReport) {
 }
 
 export type RuntimeReport = {
-  schema: 'verum.runtime-report/1'; run_id: string; source_sha256: string;
+  schema: 'verum.runtime-report/1' | 'verum.runtime-report/2'; run_id: string; source_sha256: string;
+  export_loss?: { cbgr_events: number; method_sites: number; task_rows: number } | null;
   prepared_source_sha256: string; wrapper_lines: number; entry_source_path: string | null;
   compiler_version: string; observation: 'captured' | 'unavailable';
   method_dispatch?: MethodDispatchReport | null;
   async_tasks?: AsyncTaskReport | null;
   cbgr: { schema: 'verum.cbgr.dispatch/1'; capacity: number; checks_enabled_at_start: boolean; truncated: boolean; events: CbgrEvent[] } | null;
 };
+
+export function cbgrObservationState(report: RuntimeReport): 'unavailable' | 'retained' | 'omitted' | 'empty' {
+  if (report.observation !== 'captured' || !report.cbgr) return 'unavailable';
+  if (report.cbgr.events.length) return 'retained';
+  return report.cbgr.truncated || (report.export_loss?.cbgr_events ?? 0) > 0 ? 'omitted' : 'empty';
+}
 
 // Navigate only an exact entry-source mapping for the current editor revision.
 // Dependency paths and cached bytecode without source identity remain inspectable

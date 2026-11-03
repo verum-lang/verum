@@ -21,6 +21,17 @@ pub enum CbgrSchema {
 pub enum RuntimeReportSchema {
     #[serde(rename = "verum.runtime-report/1")]
     V1,
+    #[serde(rename = "verum.runtime-report/2")]
+    V2,
+}
+
+/// Whole observations removed to satisfy the serialized transport byte limit.
+/// These counts are separate from losses that occurred during runtime capture.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct RuntimeExportLoss {
+    pub cbgr_events: usize,
+    pub method_sites: usize,
+    pub task_rows: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +84,9 @@ pub enum RuntimeObservation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuntimeReport {
     pub schema: RuntimeReportSchema,
+    /// Required in v2. Absence in v1 says nothing about an export byte budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_loss: Option<RuntimeExportLoss>,
     pub run_id: Text,
     /// Bytes submitted by the caller, before an optional script shebang.
     pub source_sha256: Text,
@@ -98,6 +112,20 @@ impl RuntimeReport {
         if self.run_id.as_str() != run_id || self.source_sha256.as_str() != source_hash {
             return Err("Runtime report belongs to another run or source");
         }
+        let loss = match (self.schema, self.export_loss) {
+            (RuntimeReportSchema::V1, None) => RuntimeExportLoss::default(),
+            (RuntimeReportSchema::V2, Some(loss)) => loss,
+            _ => return Err("Runtime report version and export accounting disagree"),
+        };
+        if loss.cbgr_events > MAX_CBGR_EVENTS
+            || loss.method_sites > MAX_METHOD_DISPATCH_SITES
+            || loss.task_rows > MAX_ASYNC_TASK_ROWS
+            || (loss.cbgr_events != 0 && self.cbgr.is_none())
+            || (loss.method_sites != 0 && self.method_dispatch.is_none())
+            || (loss.task_rows != 0 && self.async_tasks.is_none())
+        {
+            return Err("Invalid runtime export loss accounting");
+        }
         let hash = |value: &str| {
             value.len() == 64
                 && value
@@ -121,15 +149,15 @@ impl RuntimeReport {
             return Err("Runtime report observation and payload disagree");
         }
         if self.method_dispatch.as_ref().is_some_and(|report|
-            self.observation != RuntimeObservation::Captured || !report.validate()) {
+            self.observation != RuntimeObservation::Captured || !report.validate_with_export_loss(loss.method_sites)) {
             return Err("Invalid runtime method dispatch profile");
         }
         if self.async_tasks.as_ref().is_some_and(|report|
-            self.observation != RuntimeObservation::Captured || !report.validate()) {
+            self.observation != RuntimeObservation::Captured || !report.validate_with_export_loss(loss.task_rows)) {
             return Err("Invalid runtime async task snapshot");
         }
         if let Some(report) = &self.cbgr {
-            if report.capacity > MAX_CBGR_EVENTS || report.events.len() > report.capacity {
+            if report.capacity > MAX_CBGR_EVENTS || report.events.len().saturating_add(loss.cbgr_events) > report.capacity {
                 return Err("Runtime report exceeds capture bounds");
             }
             for event in &report.events {

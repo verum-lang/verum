@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runtimeSourceRange, type CbgrEvent } from '../src/runtime.ts';
+import { cbgrObservationState, runtimeSourceRange, type CbgrEvent } from '../src/runtime.ts';
 import type { Receipt } from '../src/model.ts';
 
 const event: CbgrEvent = {
@@ -20,6 +20,23 @@ const receipt: Receipt = {
 };
 const range = (record = receipt, observed = event, path = 'experiment.vr', hash: string | null = 'hash-one') =>
   runtimeSourceRange(record, observed, path, hash, 'let λ = 1;\r\nprint(λ);');
+
+test('omitted failure records never display an observed clean capture', () => {
+  const report = structuredClone(receipt.runtime!);
+  assert.equal(cbgrObservationState(report), 'retained');
+  report.cbgr!.events = [];
+  assert.equal(cbgrObservationState(report), 'empty');
+  report.cbgr!.truncated = true;
+  assert.equal(cbgrObservationState(report), 'omitted');
+  report.cbgr!.truncated = false;
+  report.schema = 'verum.runtime-report/2';
+  report.export_loss = { cbgr_events: 256, method_sites: 2, task_rows: 3 };
+  assert.equal(cbgrObservationState(report), 'omitted');
+  report.export_loss.cbgr_events = 0;
+  assert.equal(cbgrObservationState(report), 'empty');
+  report.observation = 'unavailable';
+  assert.equal(cbgrObservationState(report), 'unavailable');
+});
 
 test('exact runtime source navigation accounts for the script wrapper without guessing column units', () => {
   assert.deepEqual(range(), { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } });

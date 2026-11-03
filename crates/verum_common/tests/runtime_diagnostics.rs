@@ -11,6 +11,7 @@ use verum_common::{
 fn report() -> RuntimeReport {
     RuntimeReport {
         schema: RuntimeReportSchema::V1,
+        export_loss: None,
         run_id: "current-run".into(),
         source_sha256: "a".repeat(64).into(),
         prepared_source_sha256: "b".repeat(64).into(),
@@ -54,6 +55,28 @@ fn identical_source_does_not_authorize_another_runs_observations() {
             .validate_binding("current-run", &"c".repeat(64))
             .is_err()
     );
+}
+
+#[test]
+fn export_losses_require_the_new_version_and_account_for_present_captures() {
+    use verum_common::runtime_diagnostics::RuntimeExportLoss;
+    let valid = |r: &RuntimeReport| r.validate_binding("current-run", &"a".repeat(64)).is_ok();
+    let mut report = report();
+    report.schema = RuntimeReportSchema::V2;
+    assert!(!valid(&report), "v2 must declare export accounting");
+    report.export_loss = Some(RuntimeExportLoss::default());
+    assert!(valid(&report));
+    report.schema = RuntimeReportSchema::V1;
+    assert!(!valid(&report), "legacy consumers must not silently lose omission semantics");
+    report.schema = RuntimeReportSchema::V2;
+    report.export_loss.as_mut().unwrap().cbgr_events = 1;
+    assert!(!valid(&report), "retained plus omitted may not exceed capture capacity");
+    report.cbgr.as_mut().unwrap().events.clear();
+    assert!(valid(&report));
+    report.export_loss.as_mut().unwrap().task_rows = 1;
+    assert!(!valid(&report), "absent capture cannot have exported losses");
+    report.export_loss.as_mut().unwrap().task_rows = usize::MAX;
+    assert!(!valid(&report));
 }
 
 #[test]

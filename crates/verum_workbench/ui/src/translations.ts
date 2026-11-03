@@ -59,6 +59,8 @@ export const translations = {
   'Runtime observations unavailable.': 'Наблюдения за выполнением недоступны.',
   '{count} dispatch observations': 'Наблюдений диспетчера: {count}',
   'No CBGR failures observed in this capture.': 'В этой записи ошибки CBGR не наблюдались.',
+  'No CBGR failure records retained; capture or export omitted observations.': 'Записи ошибок CBGR не сохранены: часть наблюдений пропущена при сборе или экспорте.',
+  'Report byte limit reached. Omitted: {cbgr} CBGR observations, {methods} method sites, {tasks} task outcomes. Missing observations cannot establish absence of failures.': 'Достигнут лимит размера отчёта. Пропущено наблюдений CBGR: {cbgr}, точек вызова методов: {methods}, результатов задач: {tasks}. Отсутствующие наблюдения не подтверждают отсутствие ошибок.',
   'Capture limit reached. Additional observations were dropped.': 'Достигнут лимит записи. Последующие наблюдения пропущены.',
   'Capture scope': 'Область наблюдения',
   'CBGR errors returned by this interpreter’s table dispatcher only. Other interpreters, native/AOT code, allocation lifetimes and successful validation checks are not captured. One failure may appear at several call boundaries. This is not a memory-safety proof.': 'Только ошибки CBGR, возвращённые табличным диспетчером этого интерпретатора. Другие интерпретаторы, нативный/AOT-код, жизненный цикл выделений и успешные проверки не отслеживаются. Одна ошибка может появиться на нескольких границах вызовов. Это не доказательство безопасности памяти.',
