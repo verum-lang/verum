@@ -178,6 +178,41 @@ fn inherited_application_avoids_method_and_rank2_capture() {
 }
 
 #[test]
+fn implementation_application_and_default_receiver_share_binder_identity() {
+    // The receiver's declaration uses A/B, while this implementation uses
+    // Y/Z. Reordering its telescope cannot change the meaning of Read<Z>.
+    for generics in ["Z, Y", "Y, Z"] {
+        let source = format!(r#"
+            module generic_order;
+            type Read<T> is protocol {{
+                fn echo(&self, value: T) -> T {{ value }}
+                fn choose<Z>(&self, value: Z) -> Z {{ value }}
+            }};
+            type Pair<A, B> is {{ first: A, second: B }};
+            implement<{generics}> Read<Z> for Pair<Y, Z> {{}}
+            fn main() -> Int {{
+                let pair: Pair<Bool, Int> = Pair {{ first: false, second: 3 }};
+                pair.echo(17) + pair.choose<Int>(25)
+            }}
+        "#);
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let module = VbcCodegen::new().compile_module(&ast).unwrap();
+        for module in [module.clone(), roundtrip(&module)] {
+            let echo = method(&module, "echo");
+            assert_eq!(echo.return_type, TypeRef::Generic(TypeParamId(1)), "{generics}");
+            assert_eq!(echo.semantic_return, Some(TypeRef::Generic(TypeParamId(1))));
+            assert_eq!(echo.semantic_params.as_ref().unwrap()[1], Some(TypeRef::Generic(TypeParamId(1))));
+            let choose = method(&module, "choose");
+            assert_eq!(choose.semantic_return, Some(TypeRef::Generic(TypeParamId(0x8000))));
+            let entry = module.find_function_by_name("generic_order.main").unwrap();
+            let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+                .execute_function(entry).unwrap();
+            assert_eq!(result.try_as_i64(), Some(42));
+        }
+    }
+}
+
+#[test]
 fn protocol_application_cannot_drop_or_invent_positional_arguments() {
     for application in ["Extend", "Extend<Int, Bool>", "Extend<Missing>"] {
         let source = format!(

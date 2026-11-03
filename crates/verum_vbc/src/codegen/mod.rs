@@ -3480,10 +3480,9 @@ impl VbcCodegen {
         let verum_ast::decl::ImplKind::Protocol { protocol, protocol_args, for_type } = &implementation.kind else {
             return Err(CodegenError::internal("protocol method generation requires an implementation application"));
         };
-        let scope: HashMap<_, _> = declaration.ordered_generics.iter().enumerate()
-            .map(|(index, name)| u16::try_from(index).map(|index| (name.clone(), index)))
-            .collect::<Result<_, _>>().map_err(|_| CodegenError::with_span(
+        u16::try_from(declaration.ordered_generics.len()).map_err(|_| CodegenError::with_span(
                 CodegenErrorKind::InvalidSourceSignature("implementation binder roster exceeds VBC index space".into()), implementation.span))?;
+        let scope = self.declared_impl_generic_scope(&implementation.kind, &declaration.ordered_generics);
         let receiver = self.resolve_impl_receiver(for_type, &scope, &declaration.ordered_generics)?;
         let declared_ids = Self::ordered_generic_param_ids(&scope, &Default::default());
         let application = self.with_protocol_source_scope(
@@ -3492,6 +3491,15 @@ impl VbcCodegen {
         )?;
         let root_application = application.key.clone();
         let mut protocols_to_check = vec![application];
+        // The receiver has implementation scope, never method scope. Resolve
+        // it once using the same binder prefix as ordinary method lowering.
+        let deferred_scope = DeferredImplScope {
+            receiver: receiver.clone(),
+            dense: scope,
+            shadow: Default::default(),
+            source_substitution: Default::default(),
+            declaration: declaration.clone(),
+        };
         let mut checked: HashMap<String, source_substitution::SourceTypeSubstitution> = HashMap::new();
 
         // Shadowed per-protocol override: blanket-impl entries carry their
@@ -3574,10 +3582,10 @@ impl VbcCodegen {
                     // T0701: deferred like the plain default-method
                     // materialisation below — explicit bodies from
                     // LATER blocks must win the unsuffixed slot.
-                    let mut method = self.deferred_default_method(
-                        body_func, type_name, implementation, &declaration,
+                    let mut method = Self::deferred_default_method(
+                        body_func, type_name, &deferred_scope,
                         blanket.source_module.clone(), None,
-                    )?;
+                    );
                     method.implementation.source_substitution = blanket_substitution.for_function(body_func);
                     self.pending_default_registrations.push(method);
                 }
@@ -3645,10 +3653,10 @@ impl VbcCodegen {
                             protocol: crate::types::ProtocolId(protocol.0),
                         })
                     } else { None };
-                    let mut method = self.deferred_default_method(
-                        default_func, type_name, implementation, &declaration,
+                    let mut method = Self::deferred_default_method(
+                        default_func, type_name, &deferred_scope,
                         Some(protocol_info.source_module.clone()), constraints,
-                    )?;
+                    );
                     method.implementation.source_substitution = application.substitution.for_function(default_func);
                     self.pending_default_registrations.push(method);
                 }
@@ -3658,35 +3666,26 @@ impl VbcCodegen {
     }
 
     fn deferred_default_method(
-        &self,
         function: &FunctionDecl,
         receiver_name: &str,
-        implementation: &verum_ast::decl::ImplDecl,
-        declaration: &std::sync::Arc<DeferredImplDeclaration>,
+        implementation: &DeferredImplScope,
         lexical_owner: Option<String>,
         constraints: Option<DefaultConstraintScope>,
-    ) -> CodegenResult<DeferredDefaultMethod> {
-        let (dense, shadow) = self.declared_impl_generic_param_maps(
-            function, &implementation.kind, &declaration.ordered_generics,
-        );
-        let target = match &implementation.kind {
-            verum_ast::decl::ImplKind::Inherent(target) => target,
-            verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
-        };
-        let receiver = self.resolve_impl_receiver(target, &dense, &declaration.ordered_generics)?;
-        Ok(DeferredDefaultMethod {
+    ) -> DeferredDefaultMethod {
+        let (dense, shadow) = Self::extend_function_generic_scope(function, implementation.dense.clone());
+        DeferredDefaultMethod {
             function: function.clone(),
             receiver_name: receiver_name.to_owned(),
             lexical_owner,
             constraints,
             implementation: DeferredImplScope {
-                receiver,
-                source_substitution: Default::default(),
                 dense,
                 shadow,
-                declaration: declaration.clone(),
+                receiver: implementation.receiver.clone(),
+                source_substitution: implementation.source_substitution.clone(),
+                declaration: implementation.declaration.clone(),
             },
-        })
+        }
     }
 
     /// All deferred phases enter the same retained declaration context and
@@ -13770,9 +13769,11 @@ impl VbcCodegen {
         parent_names: &[String],
         fallback_generics: &[String],
     ) -> (std::collections::HashMap<String, u16>, std::collections::HashMap<String, u16>) {
-        use verum_ast::ty::GenericParamKind;
-        let mut dense = std::collections::HashMap::new();
-        let mut shadow = std::collections::HashMap::new();
+        Self::extend_function_generic_scope(func, Self::implementation_generic_scope(parent_names, fallback_generics))
+    }
+
+    fn implementation_generic_scope(parent_names: &[String], fallback_generics: &[String]) -> HashMap<String, u16> {
+        let mut dense = HashMap::new();
         let mut next_id = 0u16;
         for name in parent_names {
             // Only declarations present in the actual impl scope are binders.
@@ -13793,6 +13794,13 @@ impl VbcCodegen {
                 next_id += 1;
             }
         }
+        dense
+    }
+
+    fn extend_function_generic_scope(func: &FunctionDecl, mut dense: HashMap<String, u16>) -> (HashMap<String, u16>, HashMap<String, u16>) {
+        use verum_ast::ty::GenericParamKind;
+        let mut next_id = dense.len() as u16;
+        let mut shadow = HashMap::new();
         for p in &func.generics {
             if let GenericParamKind::Type { name, .. } = &p.kind {
                 let name = name.name.to_string();

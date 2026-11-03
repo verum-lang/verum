@@ -442,6 +442,19 @@ impl VbcCodegen {
         std::collections::HashMap<String, u16>,
         std::collections::HashMap<String, u16>,
     ) {
+        Self::extend_function_generic_scope(
+            function,
+            self.declared_impl_generic_scope(implementation, generics),
+        )
+    }
+
+    /// The implementation prefix is independent of any method-local binder.
+    /// Retaining it lets deferred methods share one exact receiver witness.
+    pub(super) fn declared_impl_generic_scope(
+        &self,
+        implementation: &ImplKind,
+        generics: &[String],
+    ) -> std::collections::HashMap<String, u16> {
         let parent_names = self
             .implementation_nominal_id(implementation)
             .and_then(|id| self.declaration_generic_roster(id))
@@ -452,7 +465,7 @@ impl VbcCodegen {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        Self::declaration_generic_param_maps(function, &parent_names, generics)
+        Self::implementation_generic_scope(&parent_names, generics)
     }
 
     /// Exact carried Self takes precedence; otherwise source lexical lookup
