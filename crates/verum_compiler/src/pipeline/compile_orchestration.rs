@@ -646,6 +646,7 @@ impl<'s> CompilationPipeline<'s> {
     /// (e.g., 16MB) in the build/test environment.
     pub fn check_project(&mut self) -> Result<CheckResult> {
         let start = Instant::now();
+        let mut phase = start;
 
         info!("Starting project-wide type checking...");
 
@@ -664,10 +665,10 @@ impl<'s> CompilationPipeline<'s> {
         let external_sources = self.external_cog_sources()?;
         let mut prescan_files = project_files.clone();
         prescan_files.extend(external_sources.iter().map(|(_, path)| path.clone()));
-        let stdlib_started = Instant::now();
+        self.session.finish_phase("Project discovery", &mut phase);
         let prescan_scope = prescan_stdlib_scope(&prescan_files);
         self.load_stdlib_modules_scoped(prescan_scope.as_ref())?;
-        self.session.record_phase_metrics("Stdlib Loading", stdlib_started.elapsed(), 0);
+        self.session.finish_phase("Stdlib Loading", &mut phase);
 
         info!("Found {} .vr file(s) to check", project_files.len());
 
@@ -795,6 +796,8 @@ impl<'s> CompilationPipeline<'s> {
                 "Phase 0: Skipped for check-only mode (type signatures available from built-ins)"
             );
         }
+
+        self.session.finish_phase("Source loading", &mut phase);
 
         // 4. PASS 1: Parse and Register
         self.current_pass = CompilerPass::Pass1Registration;
@@ -947,6 +950,8 @@ impl<'s> CompilationPipeline<'s> {
         info!("Pass 1.5: Module registration for cross-file resolution");
         self.register_modules_for_cross_file_resolution()?;
 
+        self.session.finish_phase("Parsing and registration", &mut phase);
+
         // 5. PASS 2: Staged Compilation with Caching
         // Uses StagedPipeline for N-level metaprogramming with fine-grained caching.
         // Falls back to simple expand_module() on errors for robustness.
@@ -1046,6 +1051,8 @@ impl<'s> CompilationPipeline<'s> {
             module_paths.len(),
             self.incremental_compiler.stats().item_hashes_cached
         );
+
+        self.session.finish_phase("Staged compilation", &mut phase);
 
         // 6. PASS 3: Type Checking with Import Resolution
         self.current_pass = CompilerPass::Pass3Analysis;
@@ -1521,6 +1528,7 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        self.session.finish_phase("Project type checking", &mut phase);
         let elapsed = start.elapsed();
 
         // Calculate diagnostics

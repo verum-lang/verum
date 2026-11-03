@@ -94,6 +94,30 @@ fn project_check_profiles_each_real_module_under_its_own_name() {
         &["--all", "--functions", "same", "--json"],
     ));
     assert_eq!(report["files_checked"], 2);
+    let phases = report["compilation"]["phases"].as_array().unwrap();
+    let phase_names: Vec<_> = phases.iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert_eq!(
+        phase_names,
+        [
+            "Project discovery",
+            "Stdlib Loading",
+            "Source loading",
+            "Parsing and registration",
+            "Staged compilation",
+            "Project type checking"
+        ]
+    );
+    let elapsed = |v: &Value| {
+        std::time::Duration::new(
+            v["secs"].as_u64().unwrap(),
+            u32::try_from(v["nanos"].as_u64().unwrap()).unwrap(),
+        )
+    };
+    let covered: std::time::Duration = phases.iter().map(|p| elapsed(&p["elapsed"])).sum();
+    assert!(
+        covered > std::time::Duration::ZERO
+            && covered <= elapsed(&report["compilation"]["elapsed"])
+    );
     let functions = report["functions"].as_object().unwrap();
     assert_eq!(functions.len(), 2, "{report}");
     assert!(functions.contains_key("profile_test.left.same"));

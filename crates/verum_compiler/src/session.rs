@@ -1724,6 +1724,13 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
             .record_phase(Text::from(phase_name), duration, memory_allocated);
     }
 
+    /// Record one completed interval and start the next at the same instant.
+    pub(crate) fn finish_phase(&self, phase: &str, since: &mut Instant) {
+        let now = Instant::now();
+        self.record_phase_metrics(phase, now.duration_since(*since), 0);
+        *since = now;
+    }
+
     /// Get individual phase timings as (name, duration) pairs.
     pub fn get_phase_timings(&self) -> Vec<(String, Duration)> {
         let metrics = self.metrics.read();
