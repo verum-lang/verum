@@ -328,14 +328,23 @@ impl VbcCodegen {
                         let written = format!("{glob}.{head}");
                         let declared = resolve_export(&written)
                             .or_else(|| resolve_export(&format!("core.{written}")))?;
-                        let key = if catalog.contains_key(declared.as_str()) {
-                            declared.into_string()
-                        } else {
-                            format!("core.{declared}")
+                        // The source unit owns its local declarations and does
+                        // not import its own provisional header. Its exported
+                        // types still participate in glob and prelude lookup.
+                        let public = |key: &str| {
+                            if let Some(visibility) = self.source_type_visibility.get(key) {
+                                return visibility.is_public();
+                            }
+                            catalog.get(key).is_some_and(|&(mi, ti)| {
+                                matches!(available[mi].types[ti].visibility, crate::types::Visibility::Public)
+                            })
                         };
-                        let &(mi, ti) = catalog.get(&key)?;
-                        matches!(available[mi].types[ti].visibility, crate::types::Visibility::Public)
-                            .then_some(key)
+                        if public(declared.as_str()) {
+                            Some(declared.into_string())
+                        } else {
+                            let rooted = format!("core.{declared}");
+                            public(&rooted).then_some(rooted)
+                        }
                     }).collect();
                     if !candidates.is_empty() {
                         let selected = (candidates.len() == 1)
@@ -634,9 +643,7 @@ impl VbcCodegen {
                 Some(owner),
                 Some(carrier_eligible),
             );
-            if let Some((owner, leaf)) = key.rsplit_once('.')
-                && self.user_claimed_type_names.contains(&(owner.to_owned(), leaf.to_owned()))
-            {
+            if self.source_type_visibility.contains_key(key) {
                 self.bootstrap_local_forwards.insert(Text::from(key.as_str()));
             }
             let local = target_ids[key];

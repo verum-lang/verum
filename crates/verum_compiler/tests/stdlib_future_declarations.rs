@@ -48,6 +48,48 @@ fn inline_reexport_matches_the_declaring_generic_sum_after_bootstrap() {
 }
 
 #[test]
+fn an_owning_unit_completes_its_source_with_the_declared_prelude_owner() {
+    for origin in ["model/origin.vr", "model/origin/mod.vr"] {
+        let root = tempfile::tempdir().unwrap();
+        let core = root.path().join("core");
+        for (file, source) in [
+            ("mod.vr", "module core; public module model;
+                 public module prelude { public mount core.model.origin.Node; }"),
+            (origin, "module core.model.origin; public type Node is { value: Int };
+                 public fn make() -> Node { Node { value: 47 } }"),
+            ("model/mod.vr", "module core.model; public module origin; public module decoy;
+                 public module unit; public module consumer;"),
+            ("model/decoy.vr", "module core.model.decoy; public type Node is Other(Int);"),
+            ("model/unit.vr", "module core.model.unit;
+                 public type Carrier is { witness: Type, node: Node };
+                 public fn read(node: Node) -> Int { node.value }"),
+            ("model/consumer.vr", "module core.model.consumer;
+                 mount core.model.unit.{Carrier, read};
+                 public fn keep(x: Carrier) -> Carrier { x }
+                 public fn probe() -> Int { read(core.model.origin.make()) }"),
+        ] {
+            let path = core.join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, source).unwrap();
+        }
+
+        let archive = bootstrap(&core);
+        let model = archive.load_module("core.model").unwrap();
+        let bindings = model.declaration_type_bindings.get(&"core.model.unit".into()).unwrap();
+        assert_eq!(bindings.get(&"Node".into()).unwrap().as_deref(), Some("core.model.origin.Node"));
+        let carrier = model.types.iter().find(|ty| model.get_string(ty.name) == Some("Carrier")).unwrap();
+        let node = model.get_type(carrier.fields[1].type_ref.base_type_id().unwrap()).unwrap();
+        let owner = node.origin_module.and_then(|id| model.get_string(id)).unwrap();
+        assert_eq!(owner, "core.model.origin");
+        assert_eq!(
+            verum_vbc::module::qualify_module_name(owner, model.get_string(node.name).unwrap()),
+            "core.model.origin.Node"
+        );
+        assert_eq!(execute(&archive, "module app; mount core.model.consumer.probe; fn main() -> Int { probe() }"), 47);
+    }
+}
+
+#[test]
 fn sibling_private_functions_keep_their_call_and_result_owners() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");

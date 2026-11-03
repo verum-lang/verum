@@ -972,12 +972,12 @@ pub struct VbcCodegen {
     /// (RECORD-LITERAL-SETF-IDX-0: both literal fields resolved against
     /// the stdlib layout, missed, and fell back to index 0). Archive
     /// body remap is unaffected: it prefers module-QUALIFIED type keys.
-    /// Keyed by (module_name, type_name): the claim is idempotent across
+    /// Keyed by the fully qualified declaration name: the claim is idempotent across
     /// repeated declaration passes over the SAME module, while a later
     /// module declaring the same simple name re-claims it for its own
     /// bodies (each module's literals resolve against its own types;
     /// already-compiled bodies keep their baked indices).
-    user_claimed_type_names: std::collections::HashSet<(String, String)>,
+    source_type_visibility: std::collections::HashMap<String, verum_ast::Visibility>,
     /// Exact local declarations reached through a cyclic bootstrap dependency.
     /// Their IDs are final, but their imported field types are provisional.
     bootstrap_local_forwards: std::collections::HashSet<Text>,
@@ -2365,7 +2365,7 @@ impl VbcCodegen {
             field_name_indices: std::collections::HashMap::new(),
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
-            user_claimed_type_names: std::collections::HashSet::new(),
+            source_type_visibility: Default::default(),
             bootstrap_local_forwards: Default::default(),
             type_name_claim_owner: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
@@ -3345,10 +3345,10 @@ impl VbcCodegen {
             let _ = self.reject_source_declaration_conflict(&qualified);
             return;
         }
-        if !self
-            .user_claimed_type_names
-            .insert((module_name.to_string(), type_name.to_string()))
-        {
+        let claim = self.source_type_visibility.entry(qualified.clone());
+        if let std::collections::hash_map::Entry::Vacant(claim) = claim {
+            claim.insert(declaration.visibility.clone());
+        } else {
             if trace_type_binding(type_name) {
                 eprintln!(
                     "[type-claim] SKIP   name={} module={} (pair already claimed) holds={:?}",
@@ -6465,7 +6465,7 @@ impl VbcCodegen {
 
     fn claim_local_type_id(&mut self, type_name: &str) -> crate::types::TypeId {
         if let Some(owner) = &self.ctx.current_source_module {
-            if self.user_claimed_type_names.contains(&(owner.clone(), type_name.to_owned())) {
+            if self.source_type_visibility.contains_key(&crate::module::qualify_module_name(owner, type_name)) {
                 if let Some(id) = self.type_name_to_id.get(&format!("{owner}.{type_name}")) {
                     return *id;
                 }
@@ -23147,8 +23147,8 @@ impl VbcCodegen {
             .current_source_module
             .as_ref()
             .is_some_and(|module| {
-                self.user_claimed_type_names
-                    .contains(&(module.clone(), type_name.to_owned()))
+                self.source_type_visibility
+                    .contains_key(&crate::module::qualify_module_name(module, type_name))
             });
         if !local
             && !type_name.contains('.')
@@ -26676,8 +26676,8 @@ impl VbcCodegen {
         self.archive_claimed_type_ids.insert(new_id.0);
         // When a source declaration has already claimed the leaf, carry the
         // imported owner's spelling through serialization and the next import.
-        let shadowed_by_source = !owns_simple_key && self.user_claimed_type_names.iter()
-            .any(|(_, leaf)| leaf == &name_str);
+        let shadowed_by_source = !owns_simple_key && self.source_type_visibility.keys()
+            .any(|name| name.rsplit('.').next() == Some(name_str.as_str()));
         let descriptor_name = if shadowed_by_source {
             qualified_key.as_ref().unwrap_or(&name_str)
         } else {

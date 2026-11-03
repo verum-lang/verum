@@ -1433,7 +1433,13 @@ one module and therefore never seeded",
                 );
                 let sources: Vec<_> = files.iter().map(|(_, ast)| ast).collect();
                 if !available.is_empty() {
-                    self.import_core_nominal_dependencies(&mut declarations, &sources, available)
+                    // This unit owns its declarations. Its preliminary header has
+                    // unelaborated scopes and field types, so feeding it back as
+                    // a foreign archive would turn provisional guesses into ABI.
+                    let dependencies: Vec<_> = available.iter().copied()
+                        .filter(|header| header.name.as_str() != name)
+                        .collect();
+                    self.import_core_nominal_dependencies(&mut declarations, &sources, &dependencies)
                         .map_err(|error| anyhow::anyhow!("interface for {name}: {error}"))?;
                 }
                 let interface = declarations.collect_declaration_interface(&sources)
