@@ -11803,7 +11803,9 @@ impl VbcCodegen {
         expected: Option<&str>,
         span: verum_ast::Span,
     ) -> CodegenResult<Option<&FunctionInfo>> {
-        if !self.variant_collisions.contains(name) || self.ctx.get_var_reg(name).is_ok() {
+        let ambiguous = self.variant_collisions.contains(name) || self.dependency_source_exports
+            .as_ref().is_some_and(|exports| exports.ambiguous_variants.contains(name));
+        if !ambiguous || self.ctx.get_var_reg(name).is_ok() {
             return Ok(None);
         }
         if self.ctx.unit_declared_fns.contains(name)

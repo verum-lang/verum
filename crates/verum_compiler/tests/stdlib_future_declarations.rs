@@ -48,6 +48,40 @@ fn inline_reexport_matches_the_declaring_generic_sum_after_bootstrap() {
 }
 
 #[test]
+fn cyclic_mounts_bind_the_exact_declared_sum_constructor_before_its_body() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        ("mod.vr", "module core; public module model; public module reader;"),
+        ("model/mod.vr", "module core.model; public module either; public module decoy;
+             mount core.reader.control.anchor; public fn anchor_value() -> Int { anchor() }"),
+        ("model/either.vr", "module core.model.either; public type Choice<T> is Missing | Found(T);"),
+        ("model/decoy.vr", "module core.model.decoy; public type Choice<T> is Found(T) | Missing;"),
+        ("reader/mod.vr", "module core.reader; public module control;"),
+        ("reader/control.vr", "module core.reader.control;
+             mount core.model.either.{Choice, Missing, Found};
+             public fn anchor() -> Int { 41 }
+             fn score(value: Choice<Int>) -> Int {
+                 match value { Choice.Missing => 7, Choice.Found(n) => n }
+             }
+             public fn both() -> Int { score(Missing) + score(Found(anchor())) }"),
+    ] {
+        let path = core.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive, "module app; mount core.reader.control.both;
+        fn main() -> Int { both() }"), 48);
+
+    let source = core.join("reader/control.vr");
+    let text = fs::read_to_string(&source).unwrap();
+    fs::write(&source, text.replace("Choice, Missing, Found", "Choice, Missing, Nonexistent as Found")).unwrap();
+    let error = format!("{:#}", try_bootstrap(&core).unwrap_err());
+    assert!(error.contains("core.model.either.Nonexistent"), "{error}");
+}
+
+#[test]
 fn transitive_callable_facades_cross_units_without_losing_the_declaring_body() {
     for (public_mount, public_function) in [(true, true), (false, true), (true, false)] {
         let root = tempfile::tempdir().unwrap();

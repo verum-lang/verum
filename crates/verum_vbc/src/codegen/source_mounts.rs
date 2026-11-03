@@ -53,6 +53,7 @@ pub(super) fn visit_named_mounts(
 /// no module-local function or type IDs and can be shared by other VBC units.
 #[derive(Default)]
 pub struct SourceExports {
+    pub(super) ambiguous_variants: HashSet<String>,
     modules: HashMap<String, ModuleExports>,
 }
 
@@ -76,6 +77,10 @@ struct ExportCandidates {
 
 impl SourceExports {
     fn merge_module(&mut self, owner: String, exports: ModuleExports) {
+    pub fn mark_ambiguous_variant(&mut self, name: &str) {
+        self.ambiguous_variants.insert(name.to_owned());
+    }
+
         use std::collections::hash_map::Entry;
         let scope = match self.modules.entry(owner) {
             Entry::Vacant(entry) => { entry.insert(exports); return; }
@@ -114,6 +119,18 @@ impl VbcCodegen {
 
     /// Resolve external facades through their original source declarations.
     pub fn set_source_exports(&mut self, index: std::sync::Arc<SourceExports>) {
+    /// Constructors are inline values. Their source-owned names, tags and
+    /// payloads are transferable even when the defining unit has no bodies yet.
+    pub fn declared_variant_constructors(&self) -> std::collections::BTreeMap<&str, &FunctionInfo> {
+        self.source_exports.modules.values()
+            .flat_map(|module| module.declarations.values().flatten())
+            .filter_map(|key| {
+                let info = self.ctx.functions.get(key.as_str())?;
+                info.variant_tag.map(|_| (key.as_str(), info))
+            })
+            .collect()
+    }
+
         self.dependency_source_exports = Some(index);
     }
 
