@@ -1,7 +1,8 @@
 //! Bind qualified callable mounts to declared functions, constructors and public re-exports.
 use super::{FunctionInfo, VbcCodegen};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use verum_ast::{Item, ItemKind, MountTree, MountTreeKind};
+use verum_common::Text;
 
 pub(super) fn mount_path_parts(written: &str) -> Vec<String> {
     if let Some(tail) = written.strip_prefix("..") {
@@ -62,14 +63,45 @@ struct ModuleExports {
     // Only inline AST nesting establishes lexical ancestry. A file's dotted
     // namespace does not grant access to declarations in another file.
     lexical_parents: BTreeSet<String>,
-    declarations: HashMap<String, BTreeSet<String>>,
-    non_functions: HashSet<String>,
-    visibility: HashMap<String, verum_ast::Visibility>,
+    declarations: HashMap<String, Vec<DeclaredExport>>,
     named: HashMap<String, BTreeSet<WrittenMountPath>>,
     globs: BTreeSet<WrittenMountPath>,
     lexical_globs: BTreeSet<WrittenMountPath>,
     public_children: BTreeSet<String>,
-    namespaces: HashSet<String>,
+}
+
+/// Category and visibility belong to the same declaration. A public value
+/// cannot change the visibility of a same-named private type.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DeclarationCategory { Type, Callable, Value, Namespace }
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum DeclarationNamespace { Type, Value, Module }
+
+impl DeclarationCategory {
+    fn namespace(self) -> DeclarationNamespace {
+        match self {
+            Self::Type => DeclarationNamespace::Type,
+            Self::Callable | Self::Value => DeclarationNamespace::Value,
+            Self::Namespace => DeclarationNamespace::Module,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct DeclaredExport {
+    target: String,
+    category: DeclarationCategory,
+    visibility: verum_ast::Visibility,
+}
+
+impl ModuleExports {
+    fn declare(&mut self, name: &str, target: String, category: DeclarationCategory,
+        visibility: &verum_ast::Visibility) {
+        let declaration = DeclaredExport { target, category, visibility: visibility.clone() };
+        let entries = self.declarations.entry(name.to_owned()).or_default();
+        if !entries.contains(&declaration) { entries.push(declaration); }
+    }
 }
 
 /// Export discovery can precede namespace discovery. Keep the written edge
@@ -84,11 +116,28 @@ impl WrittenMountPath {
     }
 }
 
+/// Retain every selected import until its declaration namespace is known.
+/// A value import and a type import may legally share a local spelling.
+#[derive(Clone)]
+pub(super) enum SourceMountBinding {
+    Targets(BTreeSet<Text>),
+    Blocked,
+}
+
+impl From<Option<Text>> for SourceMountBinding {
+    fn from(target: Option<Text>) -> Self {
+        match target {
+            Some(target) => Self::Targets(BTreeSet::from([target])),
+            None => Self::Blocked,
+        }
+    }
+}
+
 #[derive(Default)]
 struct ExportCandidates {
-    declarations: BTreeSet<String>,
-    non_functions: HashSet<String>,
+    declarations: BTreeMap<String, BTreeSet<DeclarationCategory>>,
     inaccessible: bool,
+    unresolved: bool,
 }
 
 impl SourceExports {
@@ -102,26 +151,38 @@ impl SourceExports {
             Entry::Vacant(entry) => { entry.insert(exports); return; }
             Entry::Occupied(entry) => entry.into_mut(),
         };
-        for (name, targets) in exports.declarations {
-            scope.declarations.entry(name).or_default().extend(targets);
+        for (name, declarations) in exports.declarations {
+            for declaration in declarations {
+                scope.declare(&name, declaration.target, declaration.category, &declaration.visibility);
+            }
         }
-        scope.non_functions.extend(exports.non_functions);
-        scope.visibility.extend(exports.visibility);
         for (alias, targets) in exports.named {
             scope.named.entry(alias).or_default().extend(targets);
         }
         scope.globs.extend(exports.globs);
         scope.lexical_globs.extend(exports.lexical_globs);
         scope.public_children.extend(exports.public_children);
-        scope.namespaces.extend(exports.namespaces);
         scope.lexical_parents.extend(exports.lexical_parents);
     }
 }
 
 impl ExportCandidates {
+    fn insert(&mut self, target: String, category: DeclarationCategory) {
+        self.declarations.entry(target).or_default().insert(category);
+    }
+
     fn nominal(&self) -> Option<&String> {
-        let name = self.declarations.first()?;
-        (self.declarations.len() == 1 && self.non_functions.contains(name)).then_some(name)
+        if self.unresolved { return None; }
+        let mut types = self.declarations.iter()
+            .filter(|(_, kinds)| kinds.contains(&DeclarationCategory::Type));
+        let first = types.next()?.0;
+        types.next().is_none().then_some(first)
+    }
+
+    fn only_values(&self) -> bool {
+        !self.inaccessible && !self.unresolved && !self.declarations.is_empty()
+            && self.declarations.values().all(|kinds| kinds.iter()
+                .all(|kind| matches!(kind, DeclarationCategory::Callable | DeclarationCategory::Value)))
     }
 }
 
@@ -161,15 +222,26 @@ impl VbcCodegen {
     /// Repeated declaration passes are idempotent. Distinct explicit targets
     /// remain ambiguous; a later item cannot silently replace their evidence.
     pub(super) fn record_source_type_mount(&mut self, owner: &str, alias: &str, target: &str) {
-        use std::collections::hash_map::Entry;
-        match self.source_type_mounts.entry(owner.into()).or_default().entry(alias.into()) {
-            Entry::Vacant(entry) => { entry.insert(Some(target.into())); }
-            Entry::Occupied(mut entry) => {
-                if entry.get().as_deref() != Some(target) {
-                    entry.insert(None);
-                }
-            }
+        let binding = self.source_type_mounts.entry(owner.into()).or_default()
+            .entry(alias.into()).or_insert_with(|| SourceMountBinding::Targets(BTreeSet::new()));
+        if let SourceMountBinding::Targets(targets) = binding {
+            targets.insert(target.into());
         }
+    }
+
+    /// A known value declaration contributes no binding in type position.
+    /// Unknown, inaccessible and conflicting imports retain their refusal.
+    pub(super) fn select_type_mount<'a>(
+        &self, binding: &'a SourceMountBinding, owner: &str,
+    ) -> Option<Option<&'a Text>> {
+        let SourceMountBinding::Targets(targets) = binding else { return Some(None) };
+        let mut selected = None;
+        for target in targets {
+            if self.source_export_candidates(target, Some(owner)).only_values() { continue; }
+            if selected.is_some() { return Some(None); }
+            selected = Some(target);
+        }
+        selected.map(Some)
     }
 
     /// Publish the completed declaration pass without copying bodies or
@@ -186,9 +258,10 @@ impl VbcCodegen {
     pub fn declared_variant_constructors(&self) -> std::collections::BTreeMap<&str, &FunctionInfo> {
         self.source_exports.modules.values()
             .flat_map(|module| module.declarations.values().flatten())
-            .filter_map(|key| {
-                let info = self.ctx.functions.get(key.as_str())?;
-                info.variant_tag.map(|_| (key.as_str(), info))
+            .filter_map(|declaration| {
+                let key = declaration.target.as_str();
+                let info = self.ctx.functions.get(key)?;
+                info.variant_tag.map(|_| (key, info))
             })
             .collect()
     }
@@ -224,11 +297,12 @@ impl VbcCodegen {
     pub(super) fn declared_namespace_mount(&self, path: &str, consumer: &str) -> super::CodegenResult<bool> {
         let Some((owner, name)) = path.rsplit_once('.') else { return Ok(false) };
         let Some(parent) = self.source_export_scope(owner) else { return Ok(false) };
-        if !parent.namespaces.contains(name) || self.source_export_scope(path).is_none() {
-            return Ok(false);
-        }
-        let visible = parent.visibility.get(name).is_some_and(|policy| {
-            policy.resolve_declared_scope(owner).is_ok_and(|policy| {
+        let Some(declarations) = parent.declarations.get(name) else { return Ok(false) };
+        let namespaces: Vec<_> = declarations.iter().filter(|declaration|
+            declaration.category == DeclarationCategory::Namespace && declaration.target == path).collect();
+        if namespaces.is_empty() || self.source_export_scope(path).is_none() { return Ok(false); }
+        let visible = namespaces.iter().all(|declaration| {
+            declaration.visibility.resolve_declared_scope(owner).is_ok_and(|policy| {
                 policy.visible_from(owner.split('.'), consumer.split('.'))
             })
         });
@@ -246,44 +320,35 @@ impl VbcCodegen {
             if !self.should_compile_item(item) {
                 continue;
             }
-            let mut non_function = |name: &verum_ast::Ident, visibility: &verum_ast::Visibility| {
-                exports.non_functions.insert(name.name.to_string());
-                exports
-                    .visibility
-                    .insert(name.name.to_string(), visibility.clone());
+            let mut declare = |name: &verum_ast::Ident, visibility: &verum_ast::Visibility, category| {
+                exports.declare(&name.name, crate::module::qualify_module_name(owner, &name.name), category, visibility);
             };
+            use DeclarationCategory::{Callable, Namespace, Type, Value};
             match &item.kind {
-                ItemKind::Function(declaration) => {
-                    let name = declaration.name.name.as_str();
-                    exports
-                        .visibility
-                        .insert(name.to_owned(), declaration.visibility.clone());
-                    exports
-                        .declarations
-                        .entry(name.to_owned())
-                        .or_default()
-                        .insert(crate::module::qualify_module_name(owner, name));
+                ItemKind::Function(d) => declare(&d.name, &d.visibility, Callable),
+                ItemKind::Type(d) => {
+                    declare(&d.name, &d.visibility, Type);
+                    if let verum_ast::TypeDeclBody::Variant(variants)
+                        | verum_ast::TypeDeclBody::Inductive(variants) = &d.body
+                    {
+                        let parent = crate::module::qualify_module_name(owner, &d.name.name);
+                        for variant in variants {
+                            let name = variant.name.name.as_str();
+                            exports.declare(name, format!("{parent}.{name}"), Callable, &d.visibility);
+                        }
+                    }
                 }
-                ItemKind::Type(declaration) => {
-                    non_function(&declaration.name, &declaration.visibility);
-                }
-                ItemKind::Const(declaration) => {
-                    non_function(&declaration.name, &declaration.visibility);
-                }
-                ItemKind::Static(declaration) => {
-                    non_function(&declaration.name, &declaration.visibility);
-                }
-                // These declarations can occupy a named import even when another
-                // module has a function or constructor with the same spelling.
-                ItemKind::Protocol(d) => non_function(&d.name, &d.visibility),
-                ItemKind::Context(d) => non_function(&d.name, &d.visibility),
-                ItemKind::ContextGroup(d) => non_function(&d.name, &d.visibility),
-                ItemKind::Meta(d) => non_function(&d.name, &d.visibility),
-                ItemKind::Predicate(d) => non_function(&d.name, &d.visibility),
+                ItemKind::Protocol(d) => declare(&d.name, &d.visibility, Type),
+                ItemKind::Const(d) => declare(&d.name, &d.visibility, Value),
+                ItemKind::Static(d) => declare(&d.name, &d.visibility, Value),
+                ItemKind::Context(d) => declare(&d.name, &d.visibility, Value),
+                ItemKind::ContextGroup(d) => declare(&d.name, &d.visibility, Value),
+                ItemKind::Meta(d) => declare(&d.name, &d.visibility, Value),
+                ItemKind::Predicate(d) => declare(&d.name, &d.visibility, Value),
                 ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
-                    non_function(&d.name, &d.visibility);
+                    declare(&d.name, &d.visibility, Value);
                 }
-                ItemKind::Axiom(d) => non_function(&d.name, &d.visibility),
+                ItemKind::Axiom(d) => declare(&d.name, &d.visibility, Value),
                 ItemKind::Mount(mount) => {
                     for parts in Self::extract_glob_mount_paths(&mount.tree, &[]) {
                         let path = WrittenMountPath(parts.join(".").into());
@@ -313,8 +378,7 @@ impl VbcCodegen {
                     let name = module.name.name.as_str();
                     let child = crate::module::qualify_module_name(owner, name);
                     if child != owner {
-                        exports.namespaces.insert(name.to_owned());
-                        exports.visibility.insert(name.to_owned(), module.visibility.clone());
+                        exports.declare(name, child.clone(), Namespace, &module.visibility);
                     }
                     if let Some(items) = &module.items {
                         self.collect_callable_exports(&child, items);
@@ -326,8 +390,9 @@ impl VbcCodegen {
                 _ => {}
             }
         }
-        self.source_callable_names
-            .extend(exports.declarations.keys().cloned());
+        self.source_callable_names.extend(exports.declarations.iter()
+            .filter(|(_, declarations)| declarations.iter().any(|d| d.category == DeclarationCategory::Callable))
+            .map(|(name, _)| name.clone()));
         self.source_exports.merge_module(owner.to_owned(), exports);
     }
 
@@ -337,13 +402,13 @@ impl VbcCodegen {
         let Some(source) = self.source_exports.modules.get_mut(owner) else {
             return;
         };
-        source
-            .declarations
-            .entry(name.to_owned())
-            .or_default()
-            .insert(key.to_owned());
-        self.source_callable_names
-            .insert(name.to_owned());
+        // Source discovery owns the declaration and its visibility; later
+        // executable registration may only confirm that exact selected target.
+        if source.declarations.get(name).is_some_and(|declarations| declarations.iter()
+            .any(|d| d.target == key && d.category == DeclarationCategory::Callable))
+        {
+            self.source_callable_names.insert(name.to_owned());
+        }
     }
 
     /// An implementation may precede its protocol body in bootstrap. Reserve
@@ -431,108 +496,119 @@ impl VbcCodegen {
         named_callable.then(|| path.to_owned())
     }
 
-    /// Follow public export edges once for both nominal IDs and callable bindings.
-    /// Only selections which converge on one declaration identify a symbol.
-    fn source_export_candidates(
-        &self,
-        path: &str,
-        glob_consumer: Option<&str>,
+    /// Classify reachable declarations without selecting a precedence tier.
+    /// This finite, cycle-safe inventory distinguishes a valid other-namespace
+    /// export from an unresolved named re-export. Selection still happens below.
+    fn export_namespaces(&self, path: &str) -> BTreeSet<DeclarationNamespace> {
+        let mut found = BTreeSet::new();
+        let mut pending = vec![(path.to_owned(), true)];
+        let mut visited = HashSet::new();
+        while let Some((path, include_declarations)) = pending.pop() {
+            if !visited.insert((path.clone(), include_declarations)) { continue; }
+            let Some((owner, name)) = path.rsplit_once('.') else { continue };
+            let Some(source) = self.source_export_scope(owner) else {
+                if self.type_name_to_id.get(&path).and_then(|id| self.type_by_id(*id))
+                    .and_then(|ty| self.type_declaration_identity(ty)).is_some_and(|key| key.as_str() == path)
+                { found.insert(DeclarationNamespace::Type); }
+                if self.ctx.functions.contains_key(&path) { found.insert(DeclarationNamespace::Value); }
+                continue;
+            };
+            if include_declarations && let Some(declarations) = source.declarations.get(name) {
+                found.extend(declarations.iter().filter(|declaration|
+                    declaration.category != DeclarationCategory::Namespace
+                        || self.source_export_scope(&declaration.target).is_some())
+                    .map(|declaration| declaration.category.namespace()));
+            }
+            if let Some(targets) = source.named.get(name) {
+                pending.extend(targets.iter().map(|target| (target.select(self, owner).into_string(), true)));
+            }
+            pending.extend(source.globs.iter()
+                .map(|module| (format!("{}.{name}", module.select(self, owner)), true)));
+            pending.extend(source.public_children.iter().map(|child| (format!("{child}.{name}"), false)));
+        }
+        found
+    }
+
+    fn source_export_candidates(&self, path: &str, consumer: Option<&str>) -> ExportCandidates {
+        self.source_export_candidates_in(path, consumer, None)
+    }
+
+    /// Precedence is local to the requested namespace. A declared value cannot
+    /// hide a type re-export, and a named value import cannot hide a type glob.
+    /// The worklist retains cycle detection; its per-query category inventory
+    /// cannot become a stale cross-unit resolution cache.
+    fn source_export_candidates_in(
+        &self, path: &str, consumer: Option<&str>, namespace: Option<DeclarationNamespace>,
     ) -> ExportCandidates {
         let root = path;
         let mut found = ExportCandidates::default();
-        let mut pending = vec![(path.to_owned(), true)];
+        let mut pending: Vec<_> = [DeclarationNamespace::Type, DeclarationNamespace::Value, DeclarationNamespace::Module]
+            .into_iter().filter(|candidate| namespace.is_none_or(|ns| ns == *candidate))
+            .map(|ns| (path.to_owned(), true, ns)).collect();
         let mut visited = HashSet::new();
-        while let Some((path, includes_declarations)) = pending.pop() {
-            if !visited.insert((path.clone(), includes_declarations)) {
-                continue;
-            }
-            let Some((owner, name)) = path.rsplit_once('.') else {
-                continue;
-            };
+        let mut categories = HashMap::<String, BTreeSet<DeclarationNamespace>>::new();
+        while let Some((path, include_declarations, namespace)) = pending.pop() {
+            if !visited.insert((path.clone(), include_declarations, namespace)) { continue; }
+            let Some((owner, name)) = path.rsplit_once('.') else { continue };
             let Some(source) = self.source_export_scope(owner) else {
-                // Imported nominal IDs and callable descriptors are independent
-                // witnesses. A constructor elsewhere cannot turn a type into a call.
-                if let Some(id) = self.type_name_to_id.get(&path) {
-                    // Compatibility aliases in the flat ID table are not module
-                    // declarations. Qualified lookup retains the actual owner.
-                    if !self.type_by_id(*id).and_then(|ty| self.type_declaration_identity(ty))
-                        .is_some_and(|identity| identity.as_str() == path)
-                    {
-                        continue;
+                if namespace == DeclarationNamespace::Type
+                    && let Some(id) = self.type_name_to_id.get(&path)
+                    && let Some(descriptor) = self.type_by_id(*id)
+                    && self.type_declaration_identity(descriptor).is_some_and(|identity| identity.as_str() == path)
+                {
+                    if let Some(consumer) = consumer {
+                        use crate::types::Visibility;
+                        let visible = match descriptor.visibility {
+                            Visibility::Public => true,
+                            Visibility::Cog => path == root && owner.split('.').next() == consumer.split('.').next(),
+                            Visibility::Private => path == root && owner == consumer,
+                        };
+                        if !visible { found.inaccessible = true; continue; }
                     }
-                    if let Some(consumer) = glob_consumer {
-                        let visible = self.type_by_id(*id).is_some_and(|descriptor| {
-                            use crate::types::Visibility;
-                            match descriptor.visibility {
-                                Visibility::Public => true,
-                                Visibility::Cog => {
-                                    path == root
-                                        && owner.split('.').next() == consumer.split('.').next()
-                                }
-                                Visibility::Private => path == root && owner == consumer,
-                            }
-                        });
-                        if !visible {
-                            found.inaccessible = true;
-                            continue;
-                        }
-                    }
-                    found.non_functions.insert(path.clone());
-                    found.declarations.insert(path);
-                } else if self.ctx.functions.contains_key(&path) {
-                    found.declarations.insert(path);
+                    found.insert(path, DeclarationCategory::Type);
+                } else if namespace == DeclarationNamespace::Value && self.ctx.functions.contains_key(&path) {
+                    found.insert(path, DeclarationCategory::Callable);
                 }
                 continue;
             };
-            if includes_declarations && let Some(visibility) = source.visibility.get(name) {
-                // A direct wildcard uses the importer's visibility. Every
-                // public re-export edge preserves the declaration's access.
-                let visible = if path != root {
-                    visibility.is_public()
-                } else if let Some(consumer) = glob_consumer {
-                    if matches!(visibility, verum_ast::Visibility::PublicIn(_)) {
-                        visibility.resolve_declared_scope(owner).is_ok_and(|policy| policy.visible_from(owner.split('.'), consumer.split('.')))
-                    } else {
-                        visibility.visible_from(owner.split('.'), consumer.split('.'))
+            let declarations: Vec<_> = source.declarations.get(name).into_iter().flatten()
+                .filter(|declaration| include_declarations && declaration.category.namespace() == namespace).collect();
+            if !declarations.is_empty() {
+                for declaration in declarations {
+                    let visible = if path != root {
+                        declaration.visibility.is_public()
+                    } else if let Some(consumer) = consumer {
+                        declaration.visibility.resolve_declared_scope(owner).is_ok_and(|policy|
+                            policy.visible_from(owner.split('.'), consumer.split('.')))
+                    } else { true };
+                    if !visible { found.inaccessible = true; continue; }
+                    if declaration.category == DeclarationCategory::Namespace
+                        && self.source_export_scope(&declaration.target).is_none()
+                    { continue; }
+                    found.insert(declaration.target.clone(), declaration.category);
+                }
+                continue;
+            }
+            let mut named_selected = false;
+            if let Some(targets) = source.named.get(name) {
+                for target in targets {
+                    let target = target.select(self, owner).into_string();
+                    let exported = categories.entry(target.clone()).or_insert_with(|| self.export_namespaces(&target));
+                    if exported.contains(&namespace) {
+                        pending.push((target, true, namespace));
+                        named_selected = true;
+                    } else if exported.is_empty() {
+                        // An unresolved explicit target is not evidence that
+                        // it occupies some different namespace.
+                        found.unresolved = true;
+                        named_selected = true;
                     }
-                } else {
-                    true
-                };
-                if !visible {
-                    found.inaccessible = true;
-                    continue;
                 }
             }
-            if includes_declarations && let Some(targets) = source.declarations.get(name) {
-                found.declarations.extend(targets.iter().cloned());
-            } else if includes_declarations && source.namespaces.contains(name) {
-                // An external declaration denotes a namespace only if its module
-                // was actually loaded. It cannot borrow an unrelated callable.
-                if self.source_export_scope(&path).is_some() {
-                    found.non_functions.insert(path.clone());
-                    found.declarations.insert(path);
-                }
-            } else if includes_declarations && source.non_functions.contains(name) {
-                found.non_functions.insert(path.clone());
-                found.declarations.insert(path);
-            } else if let Some(targets) = source.named.get(name) {
-                pending.extend(targets.iter().map(|target| (target.select(self, owner).into_string(), true)));
-            } else {
-                pending.extend(
-                    source
-                        .globs
-                        .iter()
-                        .map(|module| (format!("{}.{name}", module.select(self, owner)), true)),
-                );
-                // Public inline modules expose their re-exports to the
-                // enclosing facade. Their own declarations stay qualified.
-                pending.extend(
-                    source
-                        .public_children
-                        .iter()
-                        .map(|child| (format!("{child}.{name}"), false)),
-                );
-            }
+            if named_selected { continue; }
+            pending.extend(source.globs.iter()
+                .map(|module| (format!("{}.{name}", module.select(self, owner)), true, namespace)));
+            pending.extend(source.public_children.iter().map(|child| (format!("{child}.{name}"), false, namespace)));
         }
         found
     }
@@ -556,9 +632,9 @@ impl VbcCodegen {
         let mut inaccessible = false;
         for root in roots {
             let path = format!("{}.{name}", root.select(self, scope));
-            let candidates = self.source_export_candidates(&path, Some(scope));
-            inaccessible |= candidates.inaccessible;
-            if candidates.declarations.is_empty() {
+            let candidates = self.source_export_candidates_in(&path, Some(scope), Some(DeclarationNamespace::Type));
+            inaccessible |= candidates.inaccessible || candidates.unresolved;
+            if candidates.declarations.is_empty() || candidates.only_values() {
                 continue;
             }
             let Some(nominal) = candidates.nominal() else {
@@ -603,7 +679,7 @@ impl VbcCodegen {
         }
         let mut consumer = scope;
         loop {
-            let candidates = self.source_export_candidates(path, Some(consumer));
+            let candidates = self.source_export_candidates_in(path, Some(consumer), Some(DeclarationNamespace::Type));
             if !candidates.inaccessible {
                 return self.type_name_to_id.get(candidates.nominal()?).copied();
             }
@@ -614,27 +690,42 @@ impl VbcCodegen {
     }
 
     pub(super) fn resolve_source_callable_export(
-        &self,
-        path: &str,
+        &self, path: &str, consumer: &str,
     ) -> Result<Option<(String, FunctionInfo)>, String> {
-        let ExportCandidates {
-            mut declarations,
-            non_functions,
-            ..
-        } = self.source_export_candidates(path, None);
-        if declarations.len() > 1 {
-            return Err(format!(
-                "ambiguous callable mount `{path}`: {}",
-                declarations.into_iter().collect::<Vec<_>>().join(", ")
-            ));
+        let mut scope = consumer;
+        let candidates = loop {
+            let candidates = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Value));
+            if !candidates.inaccessible { break candidates; }
+            let Some(Some(parent)) = self.lexical_type_parent(scope) else {
+                return Err(format!("callable mount `{path}` is inaccessible from `{consumer}`"));
+            };
+            scope = parent;
+        };
+        if candidates.unresolved {
+            return Err(format!("unresolved callable re-export for mount `{path}`"));
         }
-        if let Some(key) = declarations.pop_first() {
-            if let Some(info) = self.ctx.lookup_function(&key) {
-                return Ok(Some((key, info.clone())));
+        if candidates.declarations.len() > 1 {
+            return Err(format!("ambiguous callable mount `{path}`: {}",
+                candidates.declarations.keys().cloned().collect::<Vec<_>>().join(", ")));
+        }
+        if let Some((key, kinds)) = candidates.declarations.first_key_value() {
+            if kinds.contains(&DeclarationCategory::Callable) {
+                if let Some(info) = self.ctx.lookup_function(key) {
+                    return Ok(Some((key.clone(), info.clone())));
+                }
+            } else { return Ok(None); }
+        } else {
+            // A nominal constructor is available only when no source value
+            // declaration occupies this name. A private function cannot borrow
+            // a public same-named type's visibility through this path.
+            let nominal = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Type));
+            if nominal.inaccessible { return Err(format!("type mount `{path}` is inaccessible from `{consumer}`")); }
+            if let Some(key) = nominal.nominal() {
+                return Ok(self.ctx.lookup_function(key).map(|info| (key.clone(), info.clone())));
             }
-            if non_functions.contains(&key) {
-                return Ok(None);
-            }
+            if !nominal.declarations.is_empty() { return Ok(None); }
+            let namespace = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Module));
+            if !namespace.declarations.is_empty() && !namespace.inaccessible { return Ok(None); }
         }
         Err(format!("no callable declaration for mount `{path}`"))
     }

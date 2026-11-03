@@ -350,7 +350,7 @@ impl VbcCodegen {
                         let selected = (candidates.len() == 1)
                             .then(|| candidates.first().unwrap().clone());
                         self.source_type_mounts.entry(owner.as_str().into()).or_default()
-                            .insert(head.into(), selected.clone().map(Text::from));
+                            .insert(head.into(), selected.clone().map(Text::from).into());
                         if let Some(selected) = selected {
                             names.insert(if tail.is_empty() { selected }
                                 else { format!("{selected}.{tail}") });
@@ -789,13 +789,13 @@ impl VbcCodegen {
         }
     }
 
-    fn source_type_binding(&self, owner: &str, name: &str) -> Option<&Option<Text>> {
+    pub(super) fn source_type_binding(&self, owner: &str, name: &str) -> Option<Option<&Text>> {
         let owner = Text::from(owner);
         let name = Text::from(name);
         match self.source_type_mounts.get(&owner) {
-            Some(scope) => scope.get(&name),
+            Some(scope) => scope.get(&name).and_then(|binding| self.select_type_mount(binding, &owner)),
             None => self.imported_declaration_type_bindings.get(&owner)
-                .and_then(Option::as_ref).and_then(|scope| scope.get(&name)),
+                .and_then(Option::as_ref).and_then(|scope| scope.get(&name)).map(Option::as_ref),
         }
     }
 

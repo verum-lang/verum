@@ -1151,8 +1151,8 @@ pub struct VbcCodegen {
     /// files share one bootstrap unit. Empty entries prevent a source with no
     /// mounts from inheriting the last sibling's bindings. Keep these tables
     /// through body compilation, which revisits each source after collection.
-    // None is an ambiguous glob binding, not permission to use a bare alias.
-    source_type_mounts: Map<Text, Map<Text, Option<Text>>>,
+    // Blocked imports remain refusals; target sets preserve independent namespaces.
+    source_type_mounts: Map<Text, Map<Text, source_mounts::SourceMountBinding>>,
     source_exports: SourceExports,
     source_callable_names: std::collections::HashSet<String>,
     dependency_source_exports: Option<std::sync::Arc<SourceExports>>,
@@ -1934,8 +1934,8 @@ impl VbcCodegen {
         let owner = self.lexical_type_scope();
         let owner = Text::from(owner);
         let name_key = Text::from(name);
-        if let Some(mounts) = self.source_type_mounts.get(&owner) {
-            return mounts.get(&name_key).and_then(Option::as_deref);
+        if self.source_type_mounts.contains_key(&owner) {
+            return self.source_type_binding(&owner, &name_key).flatten().map(Text::as_str);
         }
         if let Some(scope) = self.imported_declaration_type_bindings.get(&owner) {
             return scope.as_ref()?.get(&name_key).and_then(Option::as_deref);
@@ -7312,17 +7312,18 @@ impl VbcCodegen {
         for owner in owners {
             let owner = Text::from(owner);
             let source: Option<verum_common::OrderedMap<_, _>> = self.source_type_mounts.get(&owner)
-                .map(|names| names.iter().map(|(name, target)| {
+                .map(|names| names.iter().filter_map(|(name, binding)| {
+                    let target = self.select_type_mount(binding, &owner)?;
                     // A qualified re-export may have a different declaring
                     // owner. Only the exact registered path and its nominal
                     // ID can establish that identity; never consult a leaf.
-                    let target = target.as_ref().map(|target| {
+                    let target = target.map(|target| {
                         target.contains(".").then(|| self.type_name_to_id.get(target.as_str()))
                             .flatten().and_then(|id| self.type_by_id(*id))
                             .and_then(|descriptor| self.type_declaration_identity(descriptor))
                             .unwrap_or_else(|| target.clone())
                     });
-                    (name.clone(), target)
+                    Some((name.clone(), target))
                 }).collect());
             let imported = self.imported_declaration_type_bindings.get(&owner);
             if source.is_some() && imported.is_some_and(|scope| scope != &source) {
@@ -8455,15 +8456,7 @@ impl VbcCodegen {
         self.compile_pending_default_methods()?;
 
         // Pass 3: Compile function bodies
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.compile_item(item)?;
-            }
-        }
-
-        // Compile any pending constants (struct literals, etc.)
-        self.compile_pending_constants()?;
-        self.compile_pending_tls_inits()?;
+        self.compile_unit_items(&[module], ItemFailurePolicy::Strict)?;
 
         // Build the VBC module
         self.build_module()
@@ -8493,15 +8486,7 @@ impl VbcCodegen {
         self.compile_pending_default_methods()?;
 
         // Pass 3: Compile function bodies
-        for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                self.compile_item(item)?;
-            }
-        }
-
-        // Compile any pending constants (struct literals, etc.)
-        self.compile_pending_constants()?;
-        self.compile_pending_tls_inits()?;
+        self.compile_unit_items(&[module], ItemFailurePolicy::Strict)?;
 
         // Build the VBC module
         self.build_module()
@@ -12705,7 +12690,7 @@ impl VbcCodegen {
                 // source callable only after all declarations and export edges
                 // exist. No bare or shortened spelling establishes its owner.
                 if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name) {
-                    match self.resolve_source_callable_export(&target) {
+                    match self.resolve_source_callable_export(&target, &source_owner) {
                         Ok(Some((key, info))) => self.bind_mounted_function(&alias_name, &func_name, &key, info),
                         Ok(None) => {}
                         Err(_) => self.defer_named_mount(full_path, alias_name),
@@ -13361,7 +13346,7 @@ impl VbcCodegen {
             }
 
             if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name) {
-                match self.resolve_source_callable_export(&target) {
+                match self.resolve_source_callable_export(&target, owning_module.as_deref().unwrap_or(&self.config.module_name)) {
                     Ok(Some((key, info))) => self.bind_deferred_mounted_function(
                         &alias_name, &func_name, &key, info, owning_module.as_deref(),
                     ),

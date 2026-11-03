@@ -96,7 +96,7 @@ impl VbcCodegen {
             self.ctx.current_source_module = previous;
             if !bindings.is_empty() {
                 let lexical = self.source_type_mounts.entry(owner.into()).or_default();
-                for (name, binding) in bindings { lexical.entry(name).or_insert(binding); }
+                for (name, binding) in bindings { lexical.entry(name).or_insert_with(|| binding.into()); }
             }
         }
     }
