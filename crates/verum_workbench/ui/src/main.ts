@@ -13,6 +13,7 @@ import { installPanels } from './panels';
 import { installExplorer } from './explorer';
 import { icon, installIcons, type IconName } from './icons';
 import { installTooltips } from './tooltips';
+import { moduleNeighborhood, type ProjectAnalysis, type ImportSite } from './topology';
 import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
 import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
@@ -269,11 +270,19 @@ function sourceView() {
   editor.view.requestMeasure();
 }
 function showRange(range: Range) { sourceView(); setPane('editor'); editor.select(range); }
-async function navigateDefinition(location: { uri: string; range: Range }) {
+async function navigateDefinition(location: { uri: string; range: Range }, expectedProject?: string) {
   const relative = workspaceFilePath(location.uri, $('workspace-root').dataset.root || '');
   if (relative === null) throw new Error(t(m('Definition is outside this workspace.')));
   if (relative !== currentPath) await openFile(relative);
-  if (relative === currentPath) showRange(location.range);
+  if (relative !== currentPath) return;
+  if (expectedProject) {
+    const revision = languageRevision();
+    const reply = await languageRequest<Analysis>(revision);
+    if (!sameRevision(revision, languageRevision()) || reply.result.project_revision !== expectedProject) {
+      throw new Error(t(m('The project changed. Refresh the topology before navigating.')));
+    }
+  }
+  showRange(location.range);
 }
 editor.connectLanguage({ revision: languageRevision, failure: fail, navigate: navigateDefinition });
 bind('architecture-toggle', async () => {
@@ -284,13 +293,94 @@ bind('architecture-toggle', async () => {
   await inspectProject();
 });
 let projectRequest = 0;
+let currentAnalysis: Analysis | null = null;
+let lastProject: { root: string; analysis: ProjectAnalysis } | null = null;
+
+function selectedProjectDocument(snapshot: Analysis) {
+  if (!lastProject || !snapshot.project_revision || lastProject.analysis.project_revision !== snapshot.project_revision) return;
+  const { analysis, root } = lastProject;
+  return analysis.documents.find(doc => doc.project_revision === snapshot.project_revision &&
+    doc.source_hash === snapshot.source_hash && workspaceFilePath(doc.uri, root) === currentPath);
+}
+
+function moduleName(path: string) {
+  const name = node('code', 'module-name');
+  const parts = path.split('.');
+  for (const part of parts.slice(0, -1)) name.append(node('span', 'module-qualifier', part + '.'), document.createElement('wbr'));
+  name.append(document.createTextNode(parts.at(-1) ?? path));
+  return name;
+}
+
+function drawTopology() {
+  const view = $('module-topology');
+  view.replaceChildren();
+  if (!lastProject || !currentAnalysis || $('architecture').hidden) return;
+  const { root, analysis } = lastProject;
+  const selected = selectedProjectDocument(currentAnalysis);
+  const graph = selected ? moduleNeighborhood(analysis, selected.uri, currentAnalysis.source_hash) : null;
+  if (!graph) {
+    view.append(node('p', 'muted', m('No matching project topology for this revision.')));
+    return;
+  }
+  const lanes = node('div', 'topology-lanes');
+  function lane(label: Content, links: Map<string, ImportSite[]>) {
+    const group = node('section', 'topology-lane');
+    group.append(node('h4', '', label));
+    if (!links.size) group.append(node('p', 'muted', m('No observed links')));
+    for (const [module, sites] of [...links].sort(([a], [b]) => a.localeCompare(b))) {
+      const branch = node('details', 'topology-edge');
+      const title = node('summary');
+      title.append(icon('chevronRight'), moduleName(module), node('span', 'topology-count', String(sites.reduce((n, site) => n + site.names.length, 0))));
+      branch.append(title);
+      branch.addEventListener('toggle', () => {
+        if (!branch.open || branch.childElementCount > 1) return;
+        for (const site of sites) {
+          const detail = node('div', 'topology-detail');
+          detail.append(button(site.source, () => navigateDefinition(site.location, analysis.project_revision), 'topology-site'));
+          for (const binding of site.names) {
+            const target = binding.definition;
+            const entry = target && workspaceFilePath(target.uri, root) !== null
+              ? button(binding.name, () => navigateDefinition(target, analysis.project_revision), 'declaration-name')
+              : node('code', '', binding.name);
+            detail.append(entry);
+          }
+          branch.append(detail);
+        }
+      });
+      group.append(branch);
+    }
+    return group;
+  }
+  const center = node('div', 'topology-subject');
+  center.append(icon('structure'), node('span', 'muted', m('Selected module')), moduleName(graph.owner));
+  lanes.append(lane(m('Imported by'), graph.incoming), lane(m('Imports from'), graph.outgoing));
+  const coverage = !graph.coverage
+    ? m('Import coverage: {analyzed} analyzed documents · {indexed} indexed sources', { analyzed: graph.analyzed, indexed: graph.indexed })
+    : m('Modules inspected: {inspected} / {indexed} · unresolved imports: {unresolved}',
+      { inspected: graph.coverage.inspected_modules, indexed: graph.indexed, unresolved: graph.coverage.unresolved_mounts });
+  view.append(center, lanes, node('p', 'topology-coverage', coverage));
+  if (graph.gaps.length) {
+    const gaps = node('details', 'topology-gaps');
+    const summary = node('summary');
+    summary.append(icon('chevronRight'), node('span', '', m('Unresolved imports in this module')), node('span', 'topology-count', String(graph.gaps.length)));
+    gaps.append(summary);
+    for (const { site, reason } of graph.gaps) {
+      const row = node('div');
+      row.append(button(site.source, () => navigateDefinition(site.location, analysis.project_revision), 'topology-site'),
+        node('span', 'muted', reason || m('Resolution unavailable')));
+      gaps.append(row);
+    }
+    view.append(gaps);
+  }
+}
 async function inspectProject() {
   const request = ++projectRequest;
   const list = $('project-content');
   list.setAttribute('aria-busy', 'true');
   try {
-    const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: { sources?: Array<{ uri: string }>; issues?: string[]; documents: Array<Analysis & { uri: string }> } }>('project.inspect');
+    const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: ProjectAnalysis }>('project.inspect');
     if (request !== projectRequest) return;
+    lastProject = { root: project.workspace.root, analysis: project.analysis }; drawTopology();
     const index = projectSourceIndex(project.workspace.root, project.analysis.sources ?? [], project.analysis.documents);
     const rows = document.createDocumentFragment();
     for (const issue of project.analysis.issues ?? []) rows.append(node('p', 'muted', issue));
@@ -322,7 +412,7 @@ for (const id of ['operations-tab', 'diagnostics-tab']) $(id).addEventListener('
 });
 bind('language-status', () => { resultView(true); setPane('results'); });
 function scheduleAnalysis() {
-  ++analysisGeneration;
+  ++analysisGeneration; currentAnalysis = null; $('module-topology').replaceChildren();
   proofTargets.begin(languageRevision()); renderProofTargets();
   window.clearTimeout(analysisTimer);
   editor.diagnostics(editor.source(), []);
@@ -385,6 +475,11 @@ async function inspectEvidence(revision: DocumentRevision, hash: string, project
   }
 }
 function renderAnalysis(snapshot: Analysis) {
+  currentAnalysis = snapshot;
+  if (!$('architecture').hidden) {
+    drawTopology();
+    if (snapshot.project_revision && !selectedProjectDocument(snapshot)) void inspectProject().catch(fail);
+  }
   const revision = languageRevision();
   proofTargets.accept(revision, snapshot); renderProofTargets();
   editor.diagnostics(editor.source(), snapshot.diagnostics);
@@ -414,16 +509,20 @@ function renderAnalysis(snapshot: Analysis) {
   }
   if (!count) diagnostics.append(node('p', 'muted', m('No module diagnostics')));
   const structure = $('architecture-content'); structure.replaceChildren();
-  structure.append(node('p', 'result-meta', `${currentPath} · ${snapshot.source_hash.slice(0, 12)}${snapshot.project_revision ? ` · ${snapshot.project_revision.slice(0, 12)}` : ''}`));
-  structure.append(iconButton('source', m('Inspect document evidence'), () =>
+  const receipt = node('div', 'architecture-receipt');
+  receipt.append(node('h3', '', m('Declarations and contexts')));
+  receipt.append(iconButton('source', m('Inspect document evidence'), () =>
     inspectEvidence(revision, snapshot.source_hash, snapshot.project_revision)));
+  structure.append(receipt);
   if (!snapshot.declarations.length) structure.append(node('p', 'muted', m('No declarations available for this revision.')));
   for (const declaration of snapshot.declarations) {
     const card = node('article', 'declaration-card');
     const heading = button(declaration.name, () => showRange(declaration.selection_range), 'declaration-name');
-    card.append(node('span', 'badge', declaration.kind), heading,
+    const bar = node('header', 'declaration-heading');
+    bar.append(node('span', 'badge', declaration.kind), heading,
       iconButton('source', m('Inspect evidence for {name}', { name: declaration.name }), () =>
         inspectEvidence(revision, snapshot.source_hash, snapshot.project_revision, declaration.id)));
+    card.append(bar);
     if (declaration.type_display) card.append(node('code', 'muted', declaration.type_display));
     const fields = declaration.record_fields;
     if (fields?.length) {
@@ -452,7 +551,7 @@ function renderAnalysis(snapshot: Analysis) {
       for (const clause of clauses) card.append(button(clause.source, () => showRange(clause.range), 'context-requirement'));
     }
     const profile = declarationProfile(declaration);
-    if (profile) card.append(iconButton('proof', m(profile === 'verum-source-finite/1' ? 'Check finite function contract' : 'Check logical theorem'), () => {
+    if (profile) bar.append(iconButton('proof', m(profile === 'verum-source-finite/1' ? 'Check finite function contract' : 'Check logical theorem'), () => {
       if (!sameRevision(revision, languageRevision())) throw new Error(t(m('Source changed. Select a declaration from the current analysis.')));
       proofTargets.select(revision, { profile, declaration: declaration.name }); renderProofTargets();
       return startOperation('proof');
@@ -1105,6 +1204,7 @@ onSessionChange(state => {
     updateDocumentState();
   }
   if (!unlocked) {
+    projectRequest++; lastProject = null; currentAnalysis = null; $('module-topology').replaceChildren();
     proofTargets.clear(); renderProofTargets();
     document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach(dialog => dialog.close('session-locked'));
     document.title = 'Verum Studio';

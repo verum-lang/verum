@@ -368,11 +368,16 @@ kbd {
   background: var(--sidebar);
 }
 .file-search {
-  padding: 10px var(--gutter);
+  display: flex;
+  align-items: center;
+  height: var(--pane-heading-height);
+  padding: 0 var(--gutter);
   flex: 0 0 auto;
 }
 .file-search input {
   width: 100%;
+  height: var(--control-size);
+  padding-block: 0;
   font-size: 12px;
   background: var(--surface);
   border-color: transparent;
@@ -600,7 +605,7 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   align-items: center;
   justify-content: space-between;
   gap: 5px;
-  height: 48px;
+  height: var(--pane-heading-height);
   flex: 0 0 auto;
   padding: 0 var(--gutter);
   border-bottom: 1px solid var(--subtle-border);
@@ -608,11 +613,11 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 #run-settings svg { display: block; }
 .execution-settings {
   position: absolute;
-  top: calc(var(--pane-heading-height) + 48px);
+  top: calc(2 * var(--pane-heading-height));
   left: 0;
   right: 0;
   z-index: 5;
-  max-height: calc(100% - var(--pane-heading-height) - 48px);
+  max-height: calc(100% - 2 * var(--pane-heading-height));
   overflow: auto;
   box-shadow: 0 10px 24px #0003;
   display: flex;
@@ -741,8 +746,7 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 }
 .status-action:hover { color: var(--accent-text); }
 .architecture { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
-.architecture-intro { max-width: 640px; margin-bottom: 20px; }
-.architecture-intro p { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.architecture-intro { margin-block-end: var(--space-3); }
 .project-inspector { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; }
 .project-inspector summary { cursor: pointer; font-size: 12px; }
 #project-content { max-height: 220px; overflow: auto; }
@@ -750,6 +754,9 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .project-file span:first-child { overflow-wrap: anywhere; min-width: 0; }
 .declaration-card { border: 1px solid var(--border); padding: 12px; margin: 8px 0; border-radius: 6px; }
 .declaration-name { font-family: var(--font-code); padding: 0 8px; color: var(--accent-text); }
+.declaration-heading { display: flex; align-items: center; gap: var(--space-2); }
+.declaration-heading > .badge { flex: none; line-height: 16px; }
+.declaration-heading > .declaration-name { min-width: 0; margin-inline-end: auto; padding: 0; text-align: start; overflow-wrap: anywhere; }
 .declaration-card p { margin-top: 10px; }
 .declaration-card > code { display: block; margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
 .record-members { margin-top: 8px; }
@@ -1466,3 +1473,64 @@ a {
 .runtime-diagnostics p { overflow-wrap:anywhere; }
 .runtime-diagnostics pre { white-space:pre-wrap; overflow-wrap:anywhere; }
 .runtime-truncated { color:var(--warning); }
+
+/* Keep the same reading order when the editor is resized independently of the window. */
+#module-topology { container-type: inline-size; }
+.topology-subject {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  border-block: 1px solid var(--subtle-border);
+}
+.topology-subject > .icon { color: var(--accent-text); flex: none; }
+.topology-subject > code { color: var(--accent-text); }
+.module-name, .topology-site { min-width: 0; overflow-wrap: anywhere; }
+.module-qualifier { color: var(--muted); }
+.topology-lanes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.topology-lane h4 { margin: 0; padding-block: var(--space-3) var(--space-1); font-size: var(--font-size-body); font-weight: 600; }
+.topology-lane > p { color: var(--muted); padding-block: var(--space-1); }
+.topology-edge > summary, .topology-gaps > summary {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-size);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+.topology-edge summary::-webkit-details-marker, .topology-gaps summary::-webkit-details-marker { display: none; }
+.topology-edge > summary:hover, .topology-gaps > summary:hover { background: var(--hover); }
+.topology-edge > summary .icon, .topology-gaps > summary .icon { width: 14px; height: 14px; color: var(--muted); }
+.topology-edge[open] > summary .icon, .topology-gaps[open] > summary .icon { transform: rotate(90deg); }
+.topology-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  padding-inline: var(--space-1);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--hover);
+  font: var(--font-size-caption)/18px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+.topology-detail, .topology-gaps > div { padding: var(--space-1) var(--space-2) var(--space-2) 30px; overflow-wrap: anywhere; }
+.topology-site { display: block; width: 100%; text-align: start; padding: var(--space-1) 0; color: var(--accent-text); font-family: var(--font-code); }
+.topology-detail > code, .topology-detail > .declaration-name { display: inline-block; margin-inline-end: var(--space-2); }
+.topology-coverage { margin-block: var(--space-3) var(--space-2); color: var(--muted); font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; }
+.topology-gaps { border-block-start: 1px solid var(--subtle-border); margin-block-end: var(--space-3); }
+.topology-gaps > summary { color: var(--warning); }
+.architecture-receipt { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.project-inspector > summary { display: flex; align-items: center; gap: var(--space-2); list-style: none; }
+.project-inspector > summary::-webkit-details-marker { display: none; }
+.project-inspector > summary .icon { width: 14px; height: 14px; }
+.project-inspector[open] > summary .icon { transform: rotate(90deg); }
+@media (pointer: coarse) {
+  .topology-edge > summary, .topology-gaps > summary, .topology-site, .declaration-heading > button { min-height: 44px; }
+}
+@container (max-width: 38rem) {
+  .topology-lanes { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}

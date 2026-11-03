@@ -1,6 +1,17 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Module architecture': 'Архитектура модуля',
+  'Modules inspected: {inspected} / {indexed} · unresolved imports: {unresolved}': 'Разобрано модулей: {inspected} из {indexed} · неразрешённых импортов: {unresolved}',
+  'The project changed. Refresh the topology before navigating.': 'Проект изменился. Обновите карту перед переходом к исходному коду.',
+  'Selected module': 'Выбранный модуль',
+  'Imported by': 'Кто импортирует',
+  'Imports from': 'Откуда импортирует',
+  'No observed links': 'Связей в этом срезе нет',
+  'Import coverage: {analyzed} analyzed documents · {indexed} indexed sources': 'Охват импортов: проанализировано документов — {analyzed}, в индексе — {indexed}',
+  'No matching project topology for this revision.': 'Для этой редакции файла нет согласованной карты проекта.',
+  'Unresolved imports in this module': 'Неразрешённые импорты этого модуля',
+  'Resolution unavailable': 'Данные о разрешении отсутствуют',
   'Conversation': 'Беседа',
   'Switch conversation': 'Переключить беседу',
   'Other conversations awaiting review: {count}': 'Запросы в других беседах: {count}',
