@@ -135,3 +135,89 @@ fn check_does_not_emit_codegen_artifacts() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// Source comments describe VCS expectations only to the VCS runner. Ordinary
+// checking reports the actual selected phase, including in editor/agent jobs.
+#[test]
+fn source_directives_cannot_skip_or_invert_parse_failures() {
+    for (index, header) in [
+        "// @skip: fixture",
+        "// @expect: errors",
+        "// @test: parse-fail",
+        "// @test: typecheck-fail",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let dir = make_fixture(
+            &format!("directive_parse_{index}"),
+            &format!("{header}\nfn main() {{ let x = ;\n"),
+        );
+        let out = Command::new(binary())
+            .args(["check", "src/main.vr", "--parse-only"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(
+            !out.status.success(),
+            "{header} suppressed a parse error: {} {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn negative_test_comments_do_not_invert_a_successful_parse() {
+    let dir = make_fixture(
+        "directive_valid",
+        "// @test: parse-fail\n// @expect: errors\nfn main() {}\n",
+    );
+    let out = Command::new(binary())
+        .args(["check", "src/main.vr", "--parse-only"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "comments changed a successful parse: {} {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn only_the_explicit_parse_option_can_omit_type_checking() {
+    let dir = make_fixture(
+        "directive_phase",
+        "// @test: parse-pass\nfn main() { let x = undeclared_check_sentinel; }\n",
+    );
+    let checked = Command::new(binary())
+        .args(["check", "src/main.vr"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        !checked.status.success(),
+        "source comments weakened checking: {} {}",
+        String::from_utf8_lossy(&checked.stdout),
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&checked.stderr).contains("undeclared_check_sentinel"),
+        "expected the actual type-check diagnostic: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let parsed = Command::new(binary())
+        .args(["check", "src/main.vr", "--parse-only"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        parsed.status.success(),
+        "explicit parse-only mode must retain its documented meaning"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

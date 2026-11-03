@@ -146,57 +146,6 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
         return Err(CliError::FileNotFound(file.to_string()));
     }
 
-    // Auto-detect test type annotations for parse-only mode, expected errors, and skip
-    let (parse_only, expect_errors, skip_reason) = {
-        if let Ok(content) = std::fs::read_to_string(&input) {
-            let mut is_parse_only = parse_only;
-            let mut expects_errors = false;
-            let mut skip: Option<String> = None;
-            for line in content.lines().take(15) {
-                let trimmed = line.trim();
-                if trimmed.starts_with("// @test:") {
-                    let test_type = trimmed.trim_start_matches("// @test:").trim();
-                    if matches!(
-                        test_type,
-                        "parse-pass" | "parser" | "parse-recover" | "parse-fail"
-                    ) {
-                        is_parse_only = true;
-                    }
-                    // typecheck-fail, meta-fail, verify-fail tests expect errors
-                    if matches!(
-                        test_type,
-                        "typecheck-fail"
-                            | "parse-fail"
-                            | "parse-recover"
-                            | "meta-fail"
-                            | "verify-fail"
-                    ) {
-                        expects_errors = true;
-                    }
-                }
-                if trimmed.starts_with("// @expect:") {
-                    let expect = trimmed.trim_start_matches("// @expect:").trim();
-                    if matches!(expect, "errors" | "fail" | "error") {
-                        expects_errors = true;
-                    }
-                }
-                if trimmed.starts_with("// @skip:") {
-                    let reason = trimmed.trim_start_matches("// @skip:").trim();
-                    skip = Some(reason.to_string());
-                }
-            }
-            (is_parse_only, expects_errors, skip)
-        } else {
-            (parse_only, false, None)
-        }
-    };
-
-    // Handle @skip annotation
-    if let Some(reason) = skip_reason {
-        ui::status("Skipping", &format!("{} ({})", file, reason));
-        return Ok(());
-    }
-
     if parse_only {
         ui::status("Parsing", file);
     } else {
@@ -219,65 +168,18 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
     let mut pipeline = CompilationPipeline::new(&mut session);
 
     if parse_only {
-        let result = pipeline.run_parse_only();
-        if expect_errors {
-            // For parse-recover/parse-fail tests with @expect: errors,
-            // parse errors are expected — success means errors were found
-            if result.is_err() {
-                ui::success(&format!(
-                    "parsing {} (errors expected) in {}",
-                    file,
-                    ui::format_duration(start.elapsed())
-                ));
-            } else {
-                // The file DECLARED that it must fail, and it did not.
-                // Printing the ordinary success line here made an unmet
-                // expectation indistinguishable from a clean parse — same
-                // text, same exit code — so a conformance spec whose
-                // defect had returned reported success (T1028).
-                return Err(CliError::CompilationFailed(format!(
-                    "{file}: declares `@expect: errors` (or a *-fail test type) \
-                     and parsed cleanly — the expected errors never appeared"
-                )));
-            }
-        } else {
-            result.map_err(|e| CliError::CompilationFailed(e.to_string()))?;
-            ui::success(&format!(
-                "parsing {} in {}",
-                file,
-                ui::format_duration(start.elapsed())
-            ));
-        }
-    } else if expect_errors {
-        // For typecheck-fail tests, errors are expected
-        let result = pipeline.run_check_only();
-        if result.is_err() {
-            ui::success(&format!(
-                "checking {} (errors expected) in {}",
-                file,
-                ui::format_duration(start.elapsed())
-            ));
-        } else {
-            // Same as the parse branch above: a file that declares
-            // `@expected-error` and then type-checks cleanly is a
-            // FAILURE, not a quiet success. This is the shape that made
-            // main and a fixed branch produce identical exit codes for
-            // opposite outcomes (T1028).
-            return Err(CliError::CompilationFailed(format!(
-                "{file}: declares `@expected-error` (or a typecheck-fail test type) \
-                 and checked cleanly — the expected errors never appeared"
-            )));
-        }
-    } else {
-        pipeline
-            .run_check_only()
+        pipeline.run_parse_only()
             .map_err(|e| CliError::CompilationFailed(e.to_string()))?;
-        ui::success(&format!(
-            "checking {} in {}",
-            file,
-            ui::format_duration(start.elapsed())
-        ));
+    } else {
+        pipeline.run_check_only()
+            .map_err(|e| CliError::CompilationFailed(e.to_string()))?;
     }
+    ui::success(&format!(
+        "{} {} in {}",
+        if parse_only { "parsing" } else { "checking" },
+        file,
+        ui::format_duration(start.elapsed())
+    ));
     Ok(())
 }
 
