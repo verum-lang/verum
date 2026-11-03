@@ -1384,7 +1384,7 @@ impl VbcCodegen {
             ExprKind::Await(inner) => self.compile_await(inner, demand, expr.span),
 
             // === Error Handling ===
-            ExprKind::Try(inner) => self.compile_try(inner),
+            ExprKind::Try(inner) => self.compile_try(inner, expr.span),
             ExprKind::TryBlock(inner) => self.compile_try_block(inner),
 
             // === Cast ===
@@ -17341,13 +17341,22 @@ impl VbcCodegen {
         Ok(None)
     }
 
-    /// Read a method result through the same finite Deref route used to
-    /// compile its receiver. Substitute the resolved owner's arguments before
-    /// the result becomes the receiver of the next call.
     /// The source signature retains references erased by the runtime ABI.
     /// Substitute the selected owner's declared generic slots before exposing
     /// the result to bindings or to another call in a method chain.
     pub(super) fn declared_method_result_type(
+        &self,
+        receiver: &str,
+        method: &str,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> Option<crate::types::TypeRef> {
+        let result = self.instantiated_method_result(receiver, method, explicit)?;
+        (!result.is_generic()).then_some(result)
+    }
+
+    /// Unbound method parameters may remain in this intermediate signature.
+    /// Consumers must establish that their selected result or component is closed.
+    fn instantiated_method_result(
         &self,
         receiver: &str,
         method: &str,
@@ -17368,8 +17377,7 @@ impl VbcCodegen {
             let ty = arg.type_for_declared_slot()?;
             substitution.bind((*id)?, self.explicit_type_witness(&ty, None)?);
         }
-        let result = substitution.apply(return_type);
-        (!result.is_generic()).then_some(result)
+        Some(substitution.apply(return_type))
     }
 
     fn resolved_method_return_type_name(
@@ -26709,7 +26717,8 @@ impl VbcCodegen {
     ///   - On success: extract the payload (field index 0) and continue.
     ///   - On failure: propagate via from_residual when types differ, or direct
     ///     Ret when same-type (layout-compatible, no conversion needed).
-    fn compile_try(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
+    fn compile_try(&mut self, inner: &Expr, span: verum_ast::Span) -> CodegenResult<Option<Reg>> {
+        let start = self.ctx.instructions.len();
         let inner_reg = self
             .compile_expr(inner)?
             .or_internal("try expr has no value")?;
@@ -26805,6 +26814,23 @@ impl VbcCodegen {
                 .unwrap_or(0);
             looked_up
         };
+
+        if span.start < span.end {
+            let declared = self.declared_expression_result(
+                inner, Some(inner_reg), start, self.ctx.instructions.len(),
+            );
+            let projected = declared.as_ref().and_then(|ty| self.try_success_payload(ty, success_tag))
+                .or_else(|| {
+                    // An unmapped error parameter does not erase a closed success type.
+                    let ExprKind::MethodCall { receiver, method, type_args, .. } = &inner.kind else {
+                        return None;
+                    };
+                    let owner = self.extract_expr_type_name(receiver)?;
+                    let signature = self.instantiated_method_result(&owner, method.name.as_str(), type_args)?;
+                    self.try_success_payload(&signature, success_tag).filter(|field| !field.is_generic())
+                });
+            self.ctx.declared_result_types.insert(span, projected);
+        }
 
         self.ctx.emit(Instruction::IsVar {
             dst: is_ok,

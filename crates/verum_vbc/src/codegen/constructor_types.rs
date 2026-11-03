@@ -8,6 +8,7 @@ use crate::{
 };
 use std::borrow::Cow;
 use verum_ast::{Expr, ExprKind};
+use verum_common::well_known_types::{maybe_success_tag, result_success_tag};
 
 impl VbcCodegen {
     pub(super) fn declaration_type_name(&self, ty: &TypeRef, depth: usize) -> Option<String> {
@@ -48,6 +49,33 @@ impl VbcCodegen {
             )),
             _ => self.render_field_type_ref(ty, true),
         }
+    }
+
+    /// The structural Try fast path projects the payload of a canonical success variant.
+    /// Custom Try implementations can choose their output independently of their layout.
+    pub(super) fn try_success_payload(&self, ty: &TypeRef, tag: u32) -> Option<TypeRef> {
+        let (id, args) = match ty {
+            TypeRef::Concrete(id) => (*id, &[][..]),
+            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+            _ => return None,
+        };
+        match id {
+            TypeId::MAYBE if tag == maybe_success_tag() => {}
+            TypeId::RESULT if tag == result_success_tag() => {}
+            _ => return None,
+        }
+        let owner = self.type_by_id(id)?;
+        if owner.kind != crate::types::TypeKind::Sum || owner.type_params.len() != args.len() {
+            return None;
+        }
+        let variant = owner.variants.iter().find(|v| v.tag == tag)?;
+        let member = variant.fields.first()?.declaration_type.as_ref()?;
+        let ids: verum_common::List<_> = owner.type_params.iter().map(|param| param.id).collect();
+        if !super::formal_parameters::resolved(member, &ids, 0) {
+            return None;
+        }
+        let result = TypeSubstitution::new(&owner.type_params, args).apply(member);
+        self.declared_type_in_scope(&result).then_some(result)
     }
 
     pub(super) fn future_implementation_for_type(

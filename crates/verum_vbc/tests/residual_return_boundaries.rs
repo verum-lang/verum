@@ -474,3 +474,75 @@ fn probe() -> Int {
         170,
     );
 }
+
+#[test]
+fn success_projection_through_a_match_keeps_its_declared_field_owner() {
+    let ast = Parser::new(r#"
+module receipts;
+type Row is { marker: Int, rows: Int };
+type Other is { owner: Text, slot: Int, state: Bool, rows: Int };
+fn query(found: Bool) -> Result<Row, Int> {
+    if found { Result.Ok(Row { marker: 17, rows: 42 }) } else { Result.Err(9) }
+}
+implement<T, E> Result<T, E> {
+    fn translate_error<F, G: fn(E) -> F>(self, convert: G) -> Result<T, F> {
+        match self { Result.Ok(value) => Result.Ok(value), Result.Err(error) => Result.Err(convert(error)) }
+    }
+    fn translate_value<F, G: fn(T) -> F>(self, convert: G) -> Result<F, E> {
+        match self { Result.Ok(value) => Result.Ok(convert(value)), Result.Err(error) => Result.Err(error) }
+    }
+}
+fn read(active: Bool, found: Bool) -> Result<Int, Int> {
+    let row = match active {
+        true => query(found).translate_error(|error| error + 3)?,
+        false => return Result.Err(39),
+    };
+    Result.Ok(row.rows)
+}
+fn remap() -> Result<Int, Int> {
+    let other = query(true).translate_value(|_| Other { owner: "other", slot: 7, state: true, rows: 57 })?;
+    Result.Ok(other.rows)
+}
+fn inspect() -> Int {
+    let ok = match read(true, true) { Result.Ok(i) => i, Result.Err(_) => 0 };
+    let mapped = match read(true, false) { Result.Err(i) => i, _ => 0 };
+    let inactive = match read(false, true) { Result.Err(i) => i, _ => 0 };
+    let other = match remap() { Result.Ok(i) => i, _ => 0 };
+    if ok == 42 && mapped == 12 && inactive == 39 && other == 57 { 1 } else { 0 }
+}
+"#).parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("receipts"))
+        .compile_module(&ast)
+        .unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    for module in [module, wire] {
+        let read = module
+            .get_function(module.find_function_by_name("receipts.read").unwrap())
+            .unwrap();
+        let start = read.bytecode_offset as usize;
+        let ops = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + read.bytecode_length as usize],
+        )
+        .unwrap();
+        use verum_vbc::instruction::Instruction;
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, Instruction::GetF { field_idx: 1, .. })),
+            "{ops:?}"
+        );
+        assert!(
+            !ops.iter()
+                .any(|op| matches!(op, Instruction::GetFieldNamed { .. })),
+            "{ops:?}"
+        );
+        let probe = module.find_function_by_name("receipts.inspect").unwrap();
+        assert_eq!(
+            Interpreter::new(Arc::new(module))
+                .execute_function(probe)
+                .unwrap()
+                .as_i64(),
+            1
+        );
+    }
+}
