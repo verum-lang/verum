@@ -19,6 +19,16 @@ pub struct CodegenError {
     pub context: Option<String>,
 }
 
+impl From<crate::source_declaration_integrity::SourceDeclarationDiagnostic> for CodegenError {
+    fn from(diagnostic: crate::source_declaration_integrity::SourceDeclarationDiagnostic) -> Self {
+        Self {
+            kind: CodegenErrorKind::InvalidSourceSignature(diagnostic.message.into_string()),
+            span: diagnostic.span,
+            context: None,
+        }
+    }
+}
+
 /// Categories of codegen errors.
 #[derive(Debug, Clone)]
 pub enum CodegenErrorKind {

@@ -10,7 +10,20 @@ use verum_ast::{FunctionDecl, Type, TypeDecl, TypeKind, decl::ImplKind, ty::Gene
 #[derive(Debug, Clone)]
 pub(super) struct DeclaredGenericParameter {
     pub(super) name: String,
-    pub(super) is_value: bool,
+    /// The source declaration establishes kind, defaults and refinements before
+    /// a nominal layout or semantic descriptor is complete.
+    pub(super) source: Option<std::sync::Arc<verum_ast::ty::GenericParam>>,
+}
+
+impl DeclaredGenericParameter {
+    pub(super) fn value_parameter(&self) -> Option<&verum_ast::ty::GenericParam> {
+        self.source.as_deref().filter(|parameter| {
+            matches!(
+                parameter.kind,
+                GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
+            )
+        })
+    }
 }
 
 pub(super) type GenericRoster = Vec<DeclaredGenericParameter>;
@@ -20,7 +33,193 @@ pub(super) struct DeclaredGenericParameters {
     pub(super) parameters: smallvec::SmallVec<[TypeParamDescriptor; 2]>,
 }
 
+fn validate_nominal_default(
+    ty: &Type,
+    preceding: &[DeclaredGenericParameter],
+) -> CodegenResult<()> {
+    use verum_ast::visitor::{Visitor, walk_expr, walk_type};
+    struct DefaultScope<'a> {
+        preceding: &'a [DeclaredGenericParameter],
+        error: Option<verum_ast::Span>,
+        depth: usize,
+        budget: usize,
+    }
+    impl DefaultScope<'_> {
+        fn enter(&mut self, span: verum_ast::Span) -> bool {
+            if self.depth >= 128 || self.budget == 0 {
+                self.error = Some(span);
+            }
+            if self.error.is_some() {
+                return false;
+            }
+            self.depth += 1;
+            self.budget -= 1;
+            true
+        }
+    }
+    impl Visitor for DefaultScope<'_> {
+        fn visit_type(&mut self, ty: &Type) {
+            if matches!(ty.kind, TypeKind::Refined { .. }) {
+                self.error = Some(ty.span);
+            }
+            if !self.enter(ty.span) {
+                return;
+            }
+            walk_type(self, ty);
+            self.depth -= 1;
+        }
+        fn visit_expr(&mut self, expression: &verum_ast::Expr) {
+            if !self.enter(expression.span) {
+                return;
+            }
+            walk_expr(self, expression);
+            self.depth -= 1;
+        }
+        fn visit_path(&mut self, path: &verum_ast::Path) {
+            if path.as_ident().is_some_and(|name| {
+                self.preceding.iter().any(|parameter| {
+                    parameter.name == name.name.as_str() && parameter.value_parameter().is_some()
+                })
+            }) || path
+                .segments
+                .iter()
+                .any(|part| matches!(part, verum_ast::ty::PathSegment::SelfValue))
+            {
+                self.error = Some(path.span);
+            }
+        }
+    }
+    let mut scope = DefaultScope {
+        preceding,
+        error: None,
+        depth: 0,
+        budget: 4096,
+    };
+    scope.visit_type(ty);
+    scope.error.map_or(Ok(()), |span| Err(CodegenError::with_span(
+        CodegenErrorKind::InvalidSourceSignature("nominal default requires unsupported dependent value, refinement, or recursive receiver evidence".into()), span)))
+}
+
 impl VbcCodegen {
+    /// Complete nominal applications before their argument vector becomes a
+    /// semantic witness. Defaults belong to the selected declaration and see
+    /// only its preceding binders, never unrelated caller names.
+    pub(super) fn complete_nominal_arguments(
+        &self,
+        nominal: TypeId,
+        mut arguments: Vec<TypeRef>,
+        span: verum_ast::Span,
+        active_defaults: &[TypeId],
+    ) -> CodegenResult<Vec<TypeRef>> {
+        let Some(roster) = self.declaration_generic_roster(nominal) else {
+            // This mapper does not synthesize a header for opaque imported
+            // carriers. A consumer needing source authority rejects that case.
+            return Ok(arguments);
+        };
+        let identity = self
+            .type_by_id(nominal)
+            .and_then(|descriptor| self.type_declaration_identity(descriptor));
+        let invalid = |message: String| {
+            let mut error =
+                CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(message), span);
+            error.context = identity
+                .as_ref()
+                .map(|name| format!("nominal application of '{name}'"));
+            error
+        };
+        if arguments.len() > roster.len() {
+            return Err(invalid(format!(
+                "nominal application has {} arguments for {} declared parameters",
+                arguments.len(),
+                roster.len()
+            )));
+        }
+        if arguments.len() == roster.len() {
+            return Ok(arguments);
+        }
+        if active_defaults.contains(&nominal) || active_defaults.len() >= 128 {
+            return Err(invalid(
+                "cyclic or excessively deep nominal default expansion".into(),
+            ));
+        }
+        let mut nested_defaults = active_defaults.to_vec();
+        nested_defaults.push(nominal);
+        let owner = self
+            .type_by_id(nominal)
+            .and_then(|descriptor| self.type_declaration_identity(descriptor))
+            .and_then(|name| name.rsplit_once('.').map(|(owner, _)| owner.to_owned()))
+            .ok_or_else(|| invalid("nominal defaults lack their declaration owner".into()))?;
+        let mut substitution = super::source_substitution::SourceTypeSubstitution::default();
+        for (index, parameter) in roster.iter().enumerate() {
+            if index == arguments.len() {
+                let default = parameter
+                    .source
+                    .as_deref()
+                    .and_then(|source| match &source.kind {
+                        GenericParamKind::Type { default, .. } => default.as_ref(),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "nominal application is missing required argument '{}'",
+                            parameter.name
+                        ))
+                    })?;
+                validate_nominal_default(default, &roster[..index])?;
+                let mut complete = true;
+                let mut active = verum_common::Set::new();
+                let mut cache = verum_common::Map::new();
+                let mut count = |expression: &verum_ast::Expr| {
+                    let value = self
+                        .const_eval_i64_in_scope(
+                            expression,
+                            Some(&owner),
+                            None,
+                            false,
+                            &mut active,
+                            &mut cache,
+                            0,
+                        )
+                        .ok()
+                        .flatten()
+                        .and_then(|n| u64::try_from(n).ok());
+                    complete &= value.is_some();
+                    value
+                };
+                let argument = substitution.elaborate(&Default::default(), |scope, values| {
+                    self.resolve_type_ref_in_scope(
+                        default,
+                        scope,
+                        true,
+                        Some(&owner),
+                        &mut count,
+                        None,
+                        values,
+                        &nested_defaults,
+                    )
+                })?;
+                if !complete {
+                    return Err(invalid(
+                        "nominal default has an unresolved array extent".into(),
+                    ));
+                }
+                arguments.push(argument);
+            }
+            // Value-dependent defaults need scalar-kind/obligation elaboration;
+            // validate_nominal_default refuses them rather than erasing evidence.
+            if parameter.value_parameter().is_none() {
+                substitution.insert(
+                    parameter.name.clone(),
+                    super::ImplReceiverWitness {
+                        ty: arguments[index].clone(),
+                        semantic: false,
+                    },
+                );
+            }
+        }
+        Ok(arguments)
+    }
+
     /// Every executable descriptor uses the same dense slots as its claimed
     /// source header. Lifetimes have no runtime slot; value parameters do.
     pub(super) fn declared_generic_parameters(
@@ -94,10 +293,31 @@ impl VbcCodegen {
                     declaration.name.name
                 )));
             }
+            // A protocol default may depend on the receiver of a future
+            // implementation. Its source template is authoritative until that
+            // receiver is selected; no runtime TypeRef can represent it here.
+            let receiver_dependent = default.is_some_and(|ty| {
+                use verum_ast::visitor::{Visitor, walk_type};
+                struct Receiver(bool);
+                impl Visitor for Receiver {
+                    fn visit_type(&mut self, ty: &Type) {
+                        if VbcCodegen::ast_type_is_bare_self(ty) {
+                            self.0 = true;
+                        } else {
+                            walk_type(self, ty);
+                        }
+                    }
+                }
+                let mut receiver = Receiver(false);
+                receiver.visit_type(ty);
+                receiver.0
+            });
+            let deferred = declaration.body.is_protocol_like() && receiver_dependent;
             let mut descriptor = TypeParamDescriptor {
                 name: StringId(self.ctx.intern_string_raw(name.name.as_str())),
                 id: TypeParamId(index),
                 default: default
+                    .filter(|_| !deferred)
                     .map(|ty| self.resolve_signature_type_ref(ty, &scope))
                     .transpose()?,
                 ..Default::default()
@@ -130,26 +350,30 @@ impl VbcCodegen {
     }
 
     pub(super) fn claim_generic_roster(&mut self, id: TypeId, declaration: &TypeDecl) {
-        let roster = declaration
+        self.source_generic_rosters
+            .insert(id, Self::source_generic_roster(declaration));
+    }
+
+    fn source_generic_roster(declaration: &TypeDecl) -> Option<GenericRoster> {
+        declaration
             .generics
             .iter()
             .filter(|parameter| !matches!(parameter.kind, GenericParamKind::Lifetime { .. }))
             .map(|parameter| {
-                let (name, is_value) = match &parameter.kind {
+                let name = match &parameter.kind {
                     GenericParamKind::Type { name, .. }
-                    | GenericParamKind::HigherKinded { name, .. } => (name, false),
+                    | GenericParamKind::HigherKinded { name, .. } => name,
                     GenericParamKind::Const { name, .. } | GenericParamKind::Meta { name, .. } => {
-                        (name, true)
+                        name
                     }
                     _ => return None,
                 };
                 Some(DeclaredGenericParameter {
                     name: name.name.to_string(),
-                    is_value,
+                    source: Some(std::sync::Arc::new(parameter.clone())),
                 })
             })
-            .collect();
-        self.source_generic_rosters.insert(id, roster);
+            .collect()
     }
 
     /// A known unsupported source header remains unknown. It cannot fall back
@@ -163,15 +387,19 @@ impl VbcCodegen {
                 .as_ref()
                 .map(|roster| Cow::Borrowed(roster.as_slice()));
         }
+        let descriptor = self.type_by_id(id)?;
+        if let Some(source) = &descriptor.source_declaration {
+            return Self::source_generic_roster(source).map(Cow::Owned);
+        }
         // Imported executable descriptors declare only their actual type slots.
         // No absent source value parameter is reconstructed from a name.
-        self.type_by_id(id)?
+        descriptor
             .type_params
             .iter()
             .map(|parameter| {
                 Some(DeclaredGenericParameter {
                     name: self.ctx.strings.get(parameter.name.0 as usize)?.clone(),
-                    is_value: false,
+                    source: None,
                 })
             })
             .collect::<Option<Vec<_>>>()

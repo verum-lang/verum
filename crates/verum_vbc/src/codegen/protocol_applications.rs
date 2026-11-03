@@ -5,10 +5,11 @@ use super::{
     CodegenError, CodegenErrorKind, CodegenResult, ImplReceiverWitness, ProtocolInfo, VbcCodegen,
     source_substitution::SourceTypeSubstitution,
 };
+use crate::types::{TypeId, TypeParamId, TypeRef};
 use std::collections::HashMap;
 use verum_ast::{
-    Path, Type,
-    ty::{GenericArg, GenericParamKind, TypeKind},
+    Expr, ExprKind, Path, Type,
+    ty::{GenericArg, GenericParam, GenericParamKind, TypeKind},
 };
 
 #[derive(Debug, Clone)]
@@ -46,6 +47,7 @@ impl VbcCodegen {
         args: &[GenericArg],
         scope: &HashMap<String, u16>,
         declared_ids: &[crate::types::TypeParamId],
+        caller_parameters: &[GenericParam],
     ) -> CodegenResult<ProtocolApplication> {
         let written = Self::format_type_path(path);
         let selected = self.nominal_type_id(&written);
@@ -80,9 +82,45 @@ impl VbcCodegen {
                         path.span,
                     ));
                 }
-                self.resolve_protocol_arguments(&info, args, scope, declared_ids, path.span)?
+                self.resolve_protocol_arguments(
+                    &info,
+                    args,
+                    scope,
+                    declared_ids,
+                    caller_parameters,
+                    path.span,
+                )?
             }
-            None => SourceTypeSubstitution::default(),
+            None => {
+                let has_arguments = args.iter().any(|argument| {
+                    !matches!(argument, GenericArg::Lifetime(_) | GenericArg::Binding(_))
+                });
+                let declares_parameters =
+                    selected
+                        .and_then(|id| self.type_by_id(id))
+                        .is_some_and(|descriptor| {
+                            !descriptor.type_params.is_empty()
+                                || descriptor.source_declaration.as_ref().is_some_and(
+                                    |declaration| {
+                                        declaration.generics.iter().any(|parameter| {
+                                            !matches!(
+                                                parameter.kind,
+                                                GenericParamKind::Lifetime { .. }
+                                            )
+                                        })
+                                    },
+                                )
+                        });
+                if has_arguments || declares_parameters {
+                    return Err(invalid(
+                        &format!(
+                            "protocol application '{key}' lacks its declaration-owned parameter header"
+                        ),
+                        path.span,
+                    ));
+                }
+                SourceTypeSubstitution::default()
+            }
         };
         Ok(ProtocolApplication {
             key,
@@ -98,6 +136,7 @@ impl VbcCodegen {
         args: &[GenericArg],
         scope: &HashMap<String, u16>,
         declared_ids: &[crate::types::TypeParamId],
+        caller_parameters: &[GenericParam],
         span: verum_ast::Span,
     ) -> CodegenResult<SourceTypeSubstitution> {
         // Associated equalities are not positional type parameters. Lifetimes
@@ -111,45 +150,466 @@ impl VbcCodegen {
             if matches!(parameter.kind, GenericParamKind::Lifetime { .. }) {
                 continue;
             }
-            let GenericParamKind::Type { name, default, .. } = &parameter.kind else {
-                return Err(invalid(
-                    "protocol application parameter has no source type substitution representation",
+            let argument = arguments.next();
+            let resolved = (|| {
+                match &parameter.kind {
+                    GenericParamKind::Type { name, default, .. } => {
+                        let witness = if let Some(argument) = argument {
+                            let ty = argument.type_for_declared_slot().ok_or_else(|| {
+                                invalid(
+                                    "protocol application argument does not denote a type",
+                                    span,
+                                )
+                            })?;
+                            self.reject_protocol_value_as_type(&ty, caller_parameters, scope)?;
+                            self.resolve_protocol_argument(&ty, scope, declared_ids)?
+                        } else if let Some(default) = default {
+                            self.with_protocol_source_scope(
+                                Some(protocol.source_module.clone()),
+                                result.clone(),
+                                None,
+                                |cg| {
+                                    cg.reject_protocol_value_as_type(
+                                        default,
+                                        &protocol.generics,
+                                        &HashMap::new(),
+                                    )?;
+                                    cg.resolve_protocol_argument(
+                                        default,
+                                        &HashMap::new(),
+                                        declared_ids,
+                                    )
+                                },
+                            )?
+                        } else {
+                            return Err(invalid(
+                                "protocol application is missing a type argument",
+                                span,
+                            ));
+                        };
+                        result.insert(name.name.to_string(), witness);
+                    }
+                    GenericParamKind::Meta { name, ty, .. }
+                    | GenericParamKind::Const { name, ty } => {
+                        let value_type = self.with_protocol_source_scope(
+                            Some(protocol.source_module.clone()),
+                            result.clone(),
+                            None,
+                            |cg| {
+                                cg.protocol_value_carrier(
+                                    parameter,
+                                    ty,
+                                    &HashMap::new(),
+                                    declared_ids,
+                                )
+                            },
+                        )?;
+                        let argument = argument.ok_or_else(|| {
+                            invalid("protocol application is missing a value argument", span)
+                        })?;
+                        let witness = self.resolve_protocol_value_argument(
+                            argument,
+                            scope,
+                            declared_ids,
+                            caller_parameters,
+                            &[],
+                            &value_type,
+                            span,
+                        )?;
+                        result.insert_value(name.name.to_string(), witness, value_type);
+                    }
+                    _ => {
+                        return Err(invalid(
+                            "protocol application parameter has no source substitution representation",
+                            parameter.span,
+                        ));
+                    }
+                }
+                Ok(())
+            })();
+            resolved.map_err(|mut error: CodegenError| {
+                let name = parameter_name(parameter).unwrap_or("<unsupported>");
+                error.context = Some(format!(
+                    "protocol application '{}.{}', parameter '{}', declaration {:?}; {}",
+                    protocol.source_module,
+                    protocol.name,
+                    name,
                     parameter.span,
+                    error
+                        .context
+                        .as_deref()
+                        .unwrap_or("argument checked at application span")
                 ));
-            };
-            let witness = if let Some(argument) = arguments.next() {
-                let ty = argument.type_for_declared_slot().ok_or_else(|| {
-                    invalid("protocol application argument does not denote a type", span)
-                })?;
-                self.resolve_protocol_argument(&ty, scope, declared_ids)?
-            } else if let Some(default) = default {
-                self.with_protocol_source_scope(
-                    Some(protocol.source_module.clone()),
-                    result.clone(),
-                    None,
-                    |cg| cg.resolve_protocol_argument(default, &HashMap::new(), declared_ids),
-                )?
-            } else {
-                return Err(invalid(
-                    &format!(
-                        "protocol application '{}' is missing argument '{}'",
-                        protocol.name, name.name
-                    ),
-                    span,
-                ));
-            };
-            result.insert(name.name.to_string(), witness);
+                error
+            })?;
         }
         if arguments.next().is_some() {
             return Err(invalid(
                 &format!(
                     "protocol application '{}' has too many positional arguments",
-                    protocol.name
+                    crate::module::qualify_module_name(&protocol.source_module, &protocol.name)
                 ),
                 span,
             ));
         }
         Ok(result)
+    }
+
+    /// Walk type positions, preserving the kind of nominal argument slots and
+    /// locally quantified shadowing. A value is legal inside Sized<N>, but not
+    /// inside (N, Int), &N, or fn() -> N.
+    fn reject_protocol_value_as_type(
+        &mut self,
+        ty: &Type,
+        parameters: &[GenericParam],
+        scope: &HashMap<String, u16>,
+    ) -> CodegenResult<()> {
+        use verum_ast::visitor::{Visitor, walk_type};
+        struct Positions<'a> {
+            cg: &'a mut VbcCodegen,
+            parameters: &'a [GenericParam],
+            scope: &'a HashMap<String, u16>,
+            locals: Vec<String>,
+            error: Option<CodegenError>,
+            depth: usize,
+            budget: usize,
+        }
+        impl Positions<'_> {
+            fn value_name(&self, name: &str) -> bool {
+                !self.locals.iter().any(|local| local == name)
+                    && (self
+                        .cg
+                        .current_source_substitution
+                        .get_value(name)
+                        .is_some()
+                        || self.parameters.iter().any(|parameter| {
+                            parameter_name(parameter) == Some(name)
+                                && matches!(
+                                    parameter.kind,
+                                    GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
+                                )
+                        }))
+            }
+        }
+        impl Visitor for Positions<'_> {
+            fn visit_expr(&mut self, _: &Expr) {} // Array extents/refinement predicates are value positions.
+            fn visit_type(&mut self, ty: &Type) {
+                if self.error.is_some() {
+                    return;
+                }
+                if self.depth >= 128 || self.budget == 0 {
+                    self.error = Some(invalid(
+                        "protocol type argument exceeds its structural limit",
+                        ty.span,
+                    ));
+                    return;
+                }
+                self.budget -= 1;
+                self.depth += 1;
+                match &ty.kind {
+                    TypeKind::Path(path)
+                        if path
+                            .as_ident()
+                            .is_some_and(|name| self.value_name(name.name.as_str())) =>
+                    {
+                        self.error = Some(invalid(
+                            "protocol type argument names a value parameter",
+                            ty.span,
+                        ));
+                    }
+                    TypeKind::Generic { base, args } => {
+                        self.visit_type(base);
+                        let roster = self
+                            .cg
+                            .resolve_signature_type_ref(base, self.scope)
+                            .ok()
+                            .and_then(|base| {
+                                if let TypeRef::Concrete(id) = base {
+                                    self.cg
+                                        .declaration_generic_roster(id)
+                                        .map(|roster| (id, roster.into_owned()))
+                                } else {
+                                    None
+                                }
+                            });
+                        let Some((nominal, roster)) = roster else {
+                            self.error = Some(invalid(
+                                "protocol type argument has no declaration-owned parameter roster",
+                                base.span,
+                            ));
+                            self.depth -= 1;
+                            return;
+                        };
+                        for (index, argument) in args
+                            .iter()
+                            .filter(|arg| !matches!(arg, GenericArg::Lifetime(_)))
+                            .enumerate()
+                        {
+                            let Some(parameter) = roster.get(index) else {
+                                self.error = Some(invalid(
+                                    "protocol type argument exceeds the nominal parameter roster",
+                                    ty.span,
+                                ));
+                                break;
+                            };
+                            if let Some(declaration) = parameter.value_parameter() {
+                                if let Err(error) = self.cg.validate_nested_protocol_value(
+                                    nominal,
+                                    declaration,
+                                    argument,
+                                    self.scope,
+                                    self.parameters,
+                                    &self.locals,
+                                    ty.span,
+                                ) {
+                                    self.error = Some(error);
+                                }
+                                continue;
+                            }
+                            if let Some(argument) = argument.type_for_declared_slot() {
+                                self.visit_type(&argument);
+                            } else {
+                                self.error = Some(invalid(
+                                    "protocol type argument supplies a value to a type slot",
+                                    ty.span,
+                                ));
+                            }
+                        }
+                    }
+                    TypeKind::Rank2Function {
+                        type_params,
+                        params,
+                        return_type,
+                        ..
+                    } => {
+                        let outer = self.locals.len();
+                        self.locals.extend(
+                            type_params
+                                .iter()
+                                .filter_map(parameter_name)
+                                .map(str::to_owned),
+                        );
+                        for parameter in params {
+                            self.visit_type(parameter);
+                        }
+                        self.visit_type(return_type);
+                        self.locals.truncate(outer);
+                    }
+                    _ => walk_type(self, ty),
+                }
+                self.depth -= 1;
+            }
+        }
+        let mut positions = Positions {
+            cg: self,
+            parameters,
+            scope,
+            locals: vec![],
+            error: None,
+            depth: 0,
+            budget: 4096,
+        };
+        positions.visit_type(ty);
+        positions.error.map_or(Ok(()), Err)
+    }
+
+    fn validate_nested_protocol_value(
+        &mut self,
+        nominal: TypeId,
+        parameter: &GenericParam,
+        argument: &GenericArg,
+        scope: &HashMap<String, u16>,
+        parameters: &[GenericParam],
+        local_types: &[String],
+        span: verum_ast::Span,
+    ) -> CodegenResult<()> {
+        let descriptor = self
+            .type_by_id(nominal)
+            .ok_or_else(|| invalid("protocol value slot lacks its nominal declaration", span))?;
+        let owner = self
+            .type_declaration_identity(descriptor)
+            .and_then(|name| name.rsplit_once('.').map(|(owner, _)| owner.to_string()));
+        let (GenericParamKind::Meta { ty, .. } | GenericParamKind::Const { ty, .. }) =
+            &parameter.kind
+        else {
+            return Err(invalid(
+                "protocol nominal argument kind disagrees with its source declaration",
+                span,
+            ));
+        };
+        let declared_ids = Self::ordered_generic_param_ids(scope, &Default::default());
+        let carrier = self.with_protocol_source_scope(
+            owner,
+            SourceTypeSubstitution::default(),
+            None,
+            |cg| cg.protocol_value_carrier(parameter, ty, &HashMap::new(), &[]),
+        )?;
+        self.resolve_protocol_value_argument(
+            argument,
+            scope,
+            &declared_ids,
+            parameters,
+            local_types,
+            &carrier,
+            span,
+        )?;
+        Ok(())
+    }
+
+    /// ConstValue has one wire interpretation: a checked signed 64-bit integer.
+    /// Other scalar carriers and refinements need their own typed evidence; an
+    /// integer payload or an erased ABI type cannot establish that evidence.
+    fn protocol_value_carrier(
+        &self,
+        parameter: &GenericParam,
+        ty: &Type,
+        scope: &HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+    ) -> CodegenResult<TypeRef> {
+        if matches!(ty.kind, TypeKind::Refined { .. })
+            || matches!(&parameter.kind, GenericParamKind::Meta { refinement, .. } if refinement.is_some())
+        {
+            return Err(invalid(
+                "refined protocol value parameters require a checked refinement witness",
+                parameter.span,
+            ));
+        }
+        let witness = self.resolve_protocol_argument(ty, scope, declared_ids)?;
+        if !witness.semantic || witness.ty != TypeRef::Concrete(TypeId::INT) {
+            return Err(invalid(
+                "protocol value parameter carrier has no exact VBC scalar representation",
+                ty.span,
+            ));
+        }
+        Ok(witness.ty)
+    }
+
+    fn protocol_named_value(
+        &self,
+        name: &str,
+        scope: &HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+        parameters: &[GenericParam],
+        local_types: &[String],
+        expected: &TypeRef,
+        span: verum_ast::Span,
+    ) -> CodegenResult<ImplReceiverWitness> {
+        if local_types.iter().any(|local| local == name) {
+            return Err(invalid(
+                "protocol value argument names a locally quantified type",
+                span,
+            ));
+        }
+        if let Some((witness, actual)) = self.current_source_substitution.get_value(name) {
+            if actual == expected && witness.semantic {
+                return Ok(witness.clone());
+            }
+            return Err(invalid(
+                "protocol value argument has an incompatible declared carrier",
+                span,
+            ));
+        }
+        // A dense slot is an address, not proof that a name denotes a value.
+        // Only the caller's declaration can establish its kind and carrier.
+        if self.current_source_substitution.get(name).is_none()
+            && let Some(parameter) = parameters.iter().find(|p| parameter_name(p) == Some(name))
+            && let GenericParamKind::Meta { ty, .. } | GenericParamKind::Const { ty, .. } =
+                &parameter.kind
+        {
+            let actual = self.protocol_value_carrier(parameter, ty, scope, declared_ids)?;
+            if &actual == expected
+                && let Some(&id) = scope.get(name)
+            {
+                return Ok(ImplReceiverWitness {
+                    ty: TypeRef::Generic(TypeParamId(id)),
+                    semantic: true,
+                });
+            }
+        }
+        Err(invalid(
+            "protocol value argument lacks a declaration-owned value witness",
+            span,
+        ))
+    }
+
+    fn resolve_protocol_value_argument(
+        &self,
+        argument: &GenericArg,
+        scope: &HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+        parameters: &[GenericParam],
+        local_types: &[String],
+        expected: &TypeRef,
+        span: verum_ast::Span,
+    ) -> CodegenResult<ImplReceiverWitness> {
+        let expression = match argument {
+            GenericArg::Type(ty) => {
+                if let TypeKind::Path(path) = &ty.kind
+                    && let Some(name) = path.as_ident()
+                {
+                    return self.protocol_named_value(
+                        name.name.as_str(),
+                        scope,
+                        declared_ids,
+                        parameters,
+                        local_types,
+                        expected,
+                        ty.span,
+                    );
+                }
+                return Err(invalid(
+                    "protocol value argument does not denote a value",
+                    ty.span,
+                ));
+            }
+            GenericArg::Const(expression) => expression,
+            _ => {
+                return Err(invalid(
+                    "protocol value argument does not denote a value",
+                    span,
+                ));
+            }
+        };
+        let expression = Self::normalized_place(expression);
+        if let ExprKind::Path(path) = &expression.kind
+            && let Some(name) = path.as_ident()
+        {
+            return self.protocol_named_value(
+                name.name.as_str(),
+                scope,
+                declared_ids,
+                parameters,
+                local_types,
+                expected,
+                expression.span,
+            );
+        }
+        let value =
+            super::source_substitution::checked_scalar_expression(expression, &mut |leaf| {
+                let ExprKind::Path(path) = &leaf.kind else {
+                    return Ok(None);
+                };
+                let Some(name) = path.as_ident() else {
+                    return Ok(None);
+                };
+                let witness = self.protocol_named_value(
+                    name.name.as_str(),
+                    scope,
+                    declared_ids,
+                    parameters,
+                    local_types,
+                    expected,
+                    leaf.span,
+                )?;
+                Ok(match witness.ty {
+                    TypeRef::ConstValue(value) => Some(value),
+                    _ => None,
+                })
+            })?;
+        Ok(ImplReceiverWitness {
+            ty: TypeRef::ConstValue(value),
+            semantic: true,
+        })
     }
 
     fn resolve_protocol_argument(
@@ -191,6 +651,19 @@ impl VbcCodegen {
             self.current_impl_receiver = previous;
         }
         result
+    }
+}
+
+fn parameter_name(parameter: &GenericParam) -> Option<&str> {
+    match &parameter.kind {
+        GenericParamKind::Type { name, .. }
+        | GenericParamKind::Const { name, .. }
+        | GenericParamKind::Meta { name, .. }
+        | GenericParamKind::Context { name }
+        | GenericParamKind::HigherKinded { name, .. }
+        | GenericParamKind::Level { name }
+        | GenericParamKind::KindAnnotated { name, .. } => Some(name.name.as_str()),
+        GenericParamKind::Lifetime { .. } => None,
     }
 }
 

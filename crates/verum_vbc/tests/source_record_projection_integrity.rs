@@ -501,21 +501,83 @@ fn generic_kinds_come_from_the_source_header_without_erasing_runtime_binders() {
 fn source_codegen_cannot_publish_an_ambiguous_record_binder_as_an_unrelated_generic() {
     use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
     for argument in ["[left]", "[left; 3]", "[&left]"] {
-        let ast = Parser::new(&format!(
+        let source = format!(
             "module telescope; type Wrap<A> is {{ value: A }}; public type Envelope<T> is {{ left: Type, value: Wrap<{argument}> }};"
-        )).parse_module().unwrap();
+        );
+        let ast = Parser::new(&source).parse_module().unwrap();
         let result = VbcCodegen::with_config(CodegenConfig::new("telescope"))
             .collect_declaration_interface(&[&ast]);
-        let error = match result {
-            Err(error) => error.to_string(),
-            Ok(module) => serialize_module(&module)
-                .expect_err("dependent binder cannot become T on wire")
-                .to_string(),
-        };
+        match result {
+            Err(error) => {
+                assert!(
+                    matches!(
+                        error.kind,
+                        verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(_)
+                    ),
+                    "{argument}: {error}"
+                );
+                let span = error.span.expect("signature refusal identifies its source");
+                let start = source.rfind(argument).unwrap() as u32;
+                assert!(
+                    span.start >= start && span.end <= start + argument.len() as u32,
+                    "{argument}: {error}"
+                );
+            }
+            Ok(module) => {
+                let error = serialize_module(&module)
+                    .expect_err("dependent binder cannot become T on wire")
+                    .to_string();
+                assert!(
+                    error.contains("ambiguous generic argument containing a record field"),
+                    "{argument}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "codegen")]
+fn archive_import_refusal_preserves_the_exact_dependent_argument_span() {
+    use verum_vbc::codegen::{CodegenConfig, CodegenErrorKind, VbcCodegen};
+    let source = "type Carrier<T> is { left: Type, value: Counted<[left]> };";
+    let mut module = fixture(source);
+    let ty = TypeRef::Instantiated {
+        base: TypeId(1001),
+        args: vec![TypeRef::Slice(Box::new(projection()))],
+    };
+    module.types[0].fields[1].type_ref = ty.clone();
+    module.types[0].fields[1].declaration_type = Some(ty);
+    for whole_module in [false, true] {
+        let mut consumer = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        if whole_module {
+            consumer.import_archive_module_types(&module);
+        } else {
+            consumer.import_archive_type_with_protocol_remap_qualified(
+                &module.types[0],
+                &module.strings,
+                &Default::default(),
+                Some(&module.name),
+            );
+        }
+        let error = consumer
+            .finalize_module_from_state()
+            .expect_err("ambiguous dependent source must be refused");
         assert!(
-            error.contains("ambiguous generic argument containing a record field"),
-            "{argument}: {error}"
+            matches!(error.kind, CodegenErrorKind::InvalidSourceSignature(_)),
+            "{error}"
         );
+        assert!(
+            error
+                .to_string()
+                .contains("ambiguous generic argument containing a record field"),
+            "{error}"
+        );
+        let span = error
+            .span
+            .expect("source argument location survives import refusal");
+        let start = source.find("[left]").unwrap() as u32;
+        assert_eq!((span.start, span.end), (start, start + 6));
     }
 }
 

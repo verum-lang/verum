@@ -14,6 +14,36 @@ use verum_ast::{
 };
 use verum_common::{List, Set, Text};
 
+/// A declaration compatibility failure retains the innermost source node
+/// responsible for it. Archive-only diagnostics may have no source location.
+#[derive(Debug, Clone)]
+pub(crate) struct SourceDeclarationDiagnostic {
+    pub message: Text,
+    pub span: Option<verum_ast::Span>,
+}
+
+impl SourceDeclarationDiagnostic {
+    fn at(mut self, span: verum_ast::Span) -> Self {
+        self.span.get_or_insert(span);
+        self
+    }
+}
+
+impl From<Text> for SourceDeclarationDiagnostic {
+    fn from(message: Text) -> Self {
+        Self {
+            message,
+            span: None,
+        }
+    }
+}
+
+impl From<&str> for SourceDeclarationDiagnostic {
+    fn from(message: &str) -> Self {
+        Text::from(message).into()
+    }
+}
+
 /// Require both string operands to denote one binder and a complete function type.
 pub(crate) fn validate_impl_function_bounds(
     implementation: &crate::types::ProtocolImpl,
@@ -36,6 +66,13 @@ pub fn validate_type_descriptor(
     descriptor: &TypeDescriptor,
     strings: &StringTable,
 ) -> Result<(), Text> {
+    validate_type_descriptor_diagnostic(descriptor, strings).map_err(|error| error.message)
+}
+
+pub(crate) fn validate_type_descriptor_diagnostic(
+    descriptor: &TypeDescriptor,
+    strings: &StringTable,
+) -> Result<(), SourceDeclarationDiagnostic> {
     for implementation in &descriptor.protocols {
         validate_impl_function_bounds(implementation, strings)?;
     }
@@ -50,14 +87,19 @@ pub fn validate_type_descriptor(
     // Bound every retained AST node before any semantic traversal, including
     // the dependency-pattern walk used for record-field correspondence below.
     if let Some(declaration) = &descriptor.source_declaration {
-        verum_ast::source_signature::validate_source_type_declaration(declaration)?;
+        verum_ast::source_signature::validate_source_type_declaration(declaration)
+            .map_err(|message| SourceDeclarationDiagnostic::from(message).at(declaration.span))?;
     }
     validate_record_projections(descriptor)?;
     let Some(declaration) = &descriptor.source_declaration else {
         return Ok(());
     };
-    let fail = |detail: &str| -> Text {
-        format!("semantic type {}: {detail}", declaration.name.name).into()
+    let fail = |detail: &str| -> SourceDeclarationDiagnostic {
+        SourceDeclarationDiagnostic::from(Text::from(format!(
+            "semantic type {}: {detail}",
+            declaration.name.name
+        )))
+        .at(declaration.span)
     };
     let name = strings
         .get(descriptor.name)
@@ -214,8 +256,14 @@ pub fn validate_type_descriptor(
                 strings,
             )
             .map_err(|message| fail(message.as_str()))?;
-            validate_record_projection_correspondence(descriptor, fields)
-                .map_err(|message| fail(message.as_str()))?;
+            validate_record_projection_correspondence(descriptor, fields).map_err(
+                |mut error| {
+                    error.message =
+                        format!("semantic type {}: {}", declaration.name.name, error.message)
+                            .into();
+                    error.at(declaration.span)
+                },
+            )?;
         }
         TypeDeclBody::Newtype(_) => {
             check_fields(
@@ -524,7 +572,15 @@ fn source_projection_pattern(
     ty: &verum_ast::Type,
     scope: &verum_common::Map<Text, u32>,
     preserve_refs: bool,
-) -> Result<Option<ProjectionPattern>, Text> {
+) -> Result<Option<ProjectionPattern>, SourceDeclarationDiagnostic> {
+    source_projection_pattern_inner(ty, scope, preserve_refs).map_err(|error| error.at(ty.span))
+}
+
+fn source_projection_pattern_inner(
+    ty: &verum_ast::Type,
+    scope: &verum_common::Map<Text, u32>,
+    preserve_refs: bool,
+) -> Result<Option<ProjectionPattern>, SourceDeclarationDiagnostic> {
     use crate::types::{CbgrTier, Mutability};
     use verum_ast::ty::{GenericArg, TypeKind as S};
     let child = |ty| source_projection_pattern(ty, scope, preserve_refs);
@@ -592,7 +648,7 @@ fn source_projection_pattern(
                 match arg {
                     GenericArg::Lifetime(_) => continue,
                     GenericArg::Type(ty) => children.push(child(ty)?),
-                    GenericArg::Const(_) => {
+                    GenericArg::Const(expression) => {
                         // Bracket syntax can still denote a type argument. This
                         // descriptor alone does not own the target's parameter
                         // roster, so it cannot choose that interpretation. An
@@ -602,7 +658,7 @@ fn source_projection_pattern(
                             .type_for_declared_slot()
                             .is_some_and(|ty| contains_source_projection(&ty, scope))
                         {
-                            return Err("ambiguous generic argument containing a record field requires declared-slot normalization".into());
+                            return Err(SourceDeclarationDiagnostic::from("ambiguous generic argument containing a record field requires declared-slot normalization").at(expression.span));
                         }
                         children.push(None);
                     }
@@ -764,7 +820,7 @@ fn projection_pattern_matches(
 fn validate_record_projection_correspondence(
     descriptor: &TypeDescriptor,
     fields: &[verum_ast::decl::RecordField],
-) -> Result<(), Text> {
+) -> Result<(), SourceDeclarationDiagnostic> {
     let mut scope = verum_common::Map::new();
     for (ordinal, (actual, source)) in descriptor.fields.iter().zip(fields).enumerate() {
         let pattern = source_projection_pattern(&source.ty, &scope, false)?;

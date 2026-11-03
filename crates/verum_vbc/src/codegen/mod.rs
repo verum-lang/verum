@@ -2944,28 +2944,10 @@ impl VbcCodegen {
                     }
                 }
 
-                // Register protocol info when it carries default methods
-                // OR super-protocols.  The "always-register" attempt
-                // caused regressions in the Poll suite (5 tests including
-                // test_poll_default_is_pending) because empty-protocol
-                // entries triggered additional protocol-walk iterations
-                // on Poll-implementers whose Default method was already
-                // materialised by the existing path — the second walk
-                // re-materialised the same default body under a different
-                // FunctionId and the runtime then dispatched to the wrong
-                // bytecode.
-                //
-                // For the blanket-impl case (Future → FutureExt), the
-                // `protocol_registry.get(&proto_name)` lookup in
-                // `generate_default_protocol_methods` was the symptom,
-                // not the root cause — the actual blanket walk consults
-                // `self.blanket_impls` (populated by the pre-pass in
-                // `collect_all_declarations`), and the loop visits
-                // EVERY queued protocol whether it's registered or not.
-                // The protocol_info lookup is gated to skip the inner
-                // default-method emission for empty protocols, which
-                // is correct (nothing to emit).
-                if !default_methods.is_empty() || !super_protocols.is_empty() {
+                // Binder kind and application validation belong to every protocol,
+                // including marker protocols and declarations with no defaults.
+                // Default generation remains empty when there are no bodies.
+                {
                     let info = ProtocolInfo {
                         name: protocol_name.clone(),
                         source_module: self.source_file_owner(module, &self.config.module_name)
@@ -3505,7 +3487,7 @@ impl VbcCodegen {
         let declared_ids = Self::ordered_generic_param_ids(&scope, &Default::default());
         let application = self.with_protocol_source_scope(
             declaration.owner.clone(), self.current_source_substitution.clone(), Some(receiver.clone()),
-            |cg| cg.resolve_protocol_application(protocol, protocol_args, &scope, &declared_ids),
+            |cg| cg.resolve_protocol_application(protocol, protocol_args, &scope, &declared_ids, &implementation.generics),
         )?;
         let root_application = application.key.clone();
         let mut protocols_to_check = vec![application];
@@ -3557,7 +3539,7 @@ impl VbcCodegen {
                 );
                 let derived = self.with_protocol_source_scope(
                     blanket.source_module.clone(), blanket_substitution.clone(), Some(receiver.clone()),
-                    |cg| cg.resolve_protocol_application(protocol, protocol_args, &HashMap::new(), &declared_ids),
+                    |cg| cg.resolve_protocol_application(protocol, protocol_args, &HashMap::new(), &declared_ids, &blanket.declaration.generics),
                 )?;
                 // T0623: monomorphise the blanket impl's OWN BODY onto this
                 // concrete implementor.  The loop further down replays only
@@ -3604,7 +3586,7 @@ impl VbcCodegen {
                     let (path, args) = Self::protocol_application_parts(super_proto)?;
                     let parent = self.with_protocol_source_scope(
                         Some(protocol_info.source_module.clone()), application.substitution.clone(), Some(receiver.clone()),
-                        |cg| cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids),
+                        |cg| cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids, &protocol_info.generics),
                     )?;
                     protocols_to_check.push(parent);
                 }
@@ -13645,7 +13627,7 @@ impl VbcCodegen {
                 continue;
             };
             ordered.push(arg.clone());
-            if parameter.is_value {
+            if parameter.value_parameter().is_some() {
                 const_g.push(arg);
             } else {
                 type_g.push(arg);
@@ -16513,11 +16495,11 @@ impl VbcCodegen {
                     let field_name = field.name.name.to_string();
                     // Use full type resolution to preserve generic parameters.
                     // Check if field type is a generic type parameter (e.g., `first: A`).
-                    let lower_field = |preserve_refs| field_scope.elaborate(&generic_param_map, |scope| {
+                    let lower_field = |preserve_refs| field_scope.elaborate(&generic_param_map, |scope, values| {
                         self.resolve_type_ref_in_scope(&field.ty, scope, preserve_refs, None,
                             &mut |count| self.const_eval_i64(count).ok().flatten()
                                 .and_then(|value| u64::try_from(value).ok()),
-                            self.impl_self_type_ref(&generic_param_map).as_ref())
+                            self.impl_self_type_ref(&generic_param_map).as_ref(), values, &[])
                     });
                     let field_type_ref = lower_field(false)?;
                     let declaration_type = lower_field(true)?;
@@ -18327,8 +18309,14 @@ impl VbcCodegen {
         array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
     ) -> CodegenResult<TypeRef> {
         let self_type = self.impl_self_type_ref(generic_param_map);
-        self.current_source_substitution.elaborate(generic_param_map, |scope| {
-            self.resolve_type_ref_in_scope(ty, scope, preserve_refs, declaration_scope, array_count, self_type.as_ref())
+        self.current_source_substitution.elaborate(generic_param_map, |scope, values| {
+            self.resolve_type_ref_in_scope(ty, scope, preserve_refs, declaration_scope, array_count, self_type.as_ref(), values, &[])
+        }).map_err(|mut error| {
+            if error.context.is_none() {
+                error.context = Some(format!("in declaration scope '{}'",
+                    declaration_scope.unwrap_or_else(|| self.lexical_type_scope())));
+            }
+            error
         })
     }
 
@@ -18340,6 +18328,8 @@ impl VbcCodegen {
         declaration_scope: Option<&str>,
         array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
         self_type: Option<&TypeRef>,
+        values: &source_substitution::SourceValueScope,
+        nominal_defaults: &[TypeId],
     ) -> CodegenResult<TypeRef> {
         use verum_ast::ty::{PathSegment, TypeKind};
         // Generic instantiation: recurse into args with the same map
@@ -18348,44 +18338,31 @@ impl VbcCodegen {
         // T → TypeRef::Generic(0) instead of degrading to
         // TypeRef::Concrete(PTR) via the un-aware fallback.
         if let TypeKind::Generic { base, args } = &ty.kind {
-            let base_ref = self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?;
+            let base_ref = self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?;
             if let TypeRef::Concrete(base_id) = base_ref {
-                // T1228 — same arity rule as `type_name_to_type_ref_mono`:
-                // an argument that cannot be resolved HOLDS ITS POSITION
-                // as a `Generic` placeholder instead of vanishing. The
-                // comment below says positional recovery happens at the
-                // callsite witness layer — which a dropped element makes
-                // impossible for every argument AFTER it, since they all
-                // shift down one slot.
-                let arg_refs: Vec<TypeRef> = args
-                    .iter()
-                    // Lifetime arguments constrain source borrows but have no
-                    // runtime TypeRef slot. Erase them before numbering type
-                    // and const witnesses, including lifetime-only receivers.
-                    .filter(|arg| !matches!(arg, verum_ast::ty::GenericArg::Lifetime(_)))
+                // Source arguments carry an actual declaration binder or a checked
+                // value. A missing representation must never invent a witness slot.
+                let roster = self.declaration_generic_roster(base_id);
+                let arg_refs: Vec<TypeRef> = args.iter()
+                    .filter(|argument| !matches!(argument, verum_ast::ty::GenericArg::Lifetime(_)))
                     .enumerate()
-                    .map(|(i, arg)| {
-                        Ok(Self::position_or_generic(i, match arg {
-                        verum_ast::ty::GenericArg::Type(inner_ty) => {
-                            Some(self.resolve_type_ref_in_scope(
-                                inner_ty,
-                                generic_param_map,
-                                preserve_refs, declaration_scope, array_count, self_type)?)
+                    .map(|(index, argument)| {
+                        if roster.as_ref().and_then(|parameters| parameters.get(index))
+                            .is_some_and(|parameter| parameter.value_parameter().is_none())
+                        {
+                            let projected = argument.type_for_declared_slot().ok_or_else(|| CodegenError::with_span(
+                                CodegenErrorKind::InvalidSourceSignature("nominal type parameter received a value argument".into()), ty.span))?;
+                            return self.resolve_type_ref_in_scope(&projected, generic_param_map, preserve_refs,
+                                declaration_scope, array_count, self_type, values, nominal_defaults);
                         }
-                        // CONST-GENERIC-VALUE-CARRY-1: a LITERAL const arg
-                        // carries its value (`StackAllocator<1024>` →
-                        // ConstValue(1024)). A SYMBOLIC const-param
-                        // mention still yields no value, but it no longer
-                        // vanishes — the wrapper above turns it into a
-                        // positional `Generic`, so the callsite witness
-                        // layer can still recover it by index.
-                        verum_ast::ty::GenericArg::Const(expr) => {
-                            Self::closed_const_generic_argument(expr).map(TypeRef::ConstValue)
-                        }
-                        _ => None,
-                        }))
-                    })
-                    .collect::<CodegenResult<_>>()?;
+                        match argument {
+                        verum_ast::ty::GenericArg::Type(inner) => self.resolve_type_ref_in_scope(
+                            inner, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults),
+                        verum_ast::ty::GenericArg::Const(expression) => values.argument(expression, generic_param_map),
+                        _ => Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                            "nominal argument has no scoped witness representation".into()), ty.span)),
+                    }}).collect::<CodegenResult<_>>()?;
+                let arg_refs = self.complete_nominal_arguments(base_id, arg_refs, ty.span, nominal_defaults)?;
                 if arg_refs.is_empty() { return Ok(TypeRef::Concrete(base_id)); }
                 return Ok(TypeRef::Instantiated {
                     base: base_id,
@@ -18428,7 +18405,7 @@ impl VbcCodegen {
                     inner: Box::new(self.resolve_type_ref_in_scope(
                         inner,
                         generic_param_map,
-                        preserve_refs, declaration_scope, array_count, self_type)?),
+                        preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?),
                     mutability: if mutable {
                         crate::types::Mutability::Mutable
                     } else {
@@ -18450,7 +18427,7 @@ impl VbcCodegen {
         if let TypeKind::Reference { inner, .. }
         | TypeKind::CheckedReference { inner, .. } = &ty.kind
         {
-            return self.resolve_type_ref_in_scope(inner, generic_param_map, preserve_refs, declaration_scope, array_count, self_type);
+            return self.resolve_type_ref_in_scope(inner, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults);
         }
         // Refinement types erase to their base at the descriptor layer
         // — the runtime representation of `Float{>= 0.0, <= 1.0}` IS a
@@ -18464,7 +18441,7 @@ impl VbcCodegen {
         // compared 0.4 < 0.7 → false). The refinement PREDICATE is not
         // lost — assert emission reads the AST, never descriptors.
         if let TypeKind::Refined { base, .. } = &ty.kind {
-            return self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type);
+            return self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults);
         }
         // #131 Layer E — nested function types must preserve the
         // map through recursion.  The standard `ast_type_to_type_ref`
@@ -18486,9 +18463,9 @@ impl VbcCodegen {
         {
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_type_ref_in_scope(p, generic_param_map, preserve_refs, declaration_scope, array_count, self_type))
+                .map(|p| self.resolve_type_ref_in_scope(p, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults))
                 .collect::<CodegenResult<_>>()?;
-            let ret_ref = self.resolve_type_ref_in_scope(return_type, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?;
+            let ret_ref = self.resolve_type_ref_in_scope(return_type, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?;
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
@@ -18524,14 +18501,15 @@ impl VbcCodegen {
                     "locally quantified calling conventions and where constraints have no VBC representation".into()), ty.span));
             }
             let (count, inner_scope) = Self::rank2_type_scope(type_params, generic_param_map, ty.span)?;
+            let inner_values = values.lifted(count, ty.span)?;
             let inner_self = self_type.map(|owner| crate::mono::lift_free_parameters(owner, u32::from(count)))
                 .transpose().map_err(|error| CodegenError::with_span(
                     CodegenErrorKind::InvalidSourceSignature(error.to_string()), ty.span))?;
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_type_ref_in_scope(p, &inner_scope, preserve_refs, declaration_scope, array_count, inner_self.as_ref()))
+                .map(|p| self.resolve_type_ref_in_scope(p, &inner_scope, preserve_refs, declaration_scope, array_count, inner_self.as_ref(), &inner_values, nominal_defaults))
                 .collect::<CodegenResult<_>>()?;
-            let ret_ref = self.resolve_type_ref_in_scope(return_type, &inner_scope, preserve_refs, declaration_scope, array_count, inner_self.as_ref())?;
+            let ret_ref = self.resolve_type_ref_in_scope(return_type, &inner_scope, preserve_refs, declaration_scope, array_count, inner_self.as_ref(), &inner_values, nominal_defaults)?;
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
@@ -18558,11 +18536,11 @@ impl VbcCodegen {
         // does not distinguish an unresolved count from an empty array.
         if let TypeKind::Slice(element) = &ty.kind {
             return Ok(TypeRef::Slice(Box::new(self.resolve_type_ref_in_scope(
-                element, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?)));
+                element, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?)));
         }
         if let TypeKind::Array { element, size } = &ty.kind {
             let element = self.resolve_type_ref_in_scope(
-                element, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?;
+                element, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?;
             if size.as_deref().is_some_and(Self::inferred_array_extent) {
                 // Existing Array<T> represents the runtime-extent family. It
                 // carries an element declaration but no fixed-length claim.
@@ -18587,7 +18565,7 @@ impl VbcCodegen {
             }
             let elem_refs: Vec<TypeRef> = elements
                 .iter()
-                .map(|e| self.resolve_type_ref_in_scope(e, generic_param_map, preserve_refs, declaration_scope, array_count, self_type))
+                .map(|e| self.resolve_type_ref_in_scope(e, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults))
                 .collect::<CodegenResult<_>>()?;
             return Ok(TypeRef::Tuple(elem_refs));
         }
@@ -18681,10 +18659,10 @@ impl VbcCodegen {
             // function's parameter binds — the link the fix depends on.
             let base_ref = match &ty.kind {
                 TypeKind::AssociatedType { base, .. } => {
-                    self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?
+                    self.resolve_type_ref_in_scope(base, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?
                 }
                 TypeKind::Qualified { self_ty, .. } => {
-                    self.resolve_type_ref_in_scope(self_ty, generic_param_map, preserve_refs, declaration_scope, array_count, self_type)?
+                    self.resolve_type_ref_in_scope(self_ty, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?
                 }
                 _ => TypeRef::Concrete(crate::types::TypeId::UNIT),
             };
@@ -19224,19 +19202,6 @@ impl VbcCodegen {
             }
             _ => None,
         }
-    }
-
-    /// Keep a generic argument's POSITION when its value is unknown.
-    ///
-    /// T1228: three sites built `TypeRef::Instantiated { args }` with
-    /// `filter_map`, so an argument that failed to resolve disappeared
-    /// and every argument after it moved down a slot. Consumers read
-    /// those lists BY INDEX (`args.iter().take(k).enumerate()`), and
-    /// they already treat `Generic` as "not known yet" — so the honest
-    /// stand-in for an unresolved argument is a `Generic` at its own
-    /// index, never an absence.
-    fn position_or_generic(i: usize, resolved: Option<TypeRef>) -> TypeRef {
-        resolved.unwrap_or(TypeRef::Generic(crate::types::TypeParamId(i as u16)))
     }
 
     /// Renders a const-generic ARGUMENT expression as its canonical
@@ -26073,10 +26038,8 @@ impl VbcCodegen {
         }
 
         for descriptor in &module.types {
-            crate::source_declaration_integrity::validate_type_descriptor(descriptor, &module.strings)
-                .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
-                    message.to_string(),
-                )))?;
+            crate::source_declaration_integrity::validate_type_descriptor_diagnostic(descriptor, &module.strings)
+                .map_err(CodegenError::from)?;
         }
         Ok(module)
     }
@@ -26216,8 +26179,8 @@ impl VbcCodegen {
         if self.check_source_declaration_error().is_err() {
             return;
         }
-        if let Err(message) = crate::source_declaration_integrity::validate_type_descriptor(ty, archive_strings) {
-            let _ = self.reject_source_declaration(message);
+        if let Err(message) = crate::source_declaration_integrity::validate_type_descriptor_diagnostic(ty, archive_strings) {
+            self.record_source_declaration_error(CodegenError::from(message));
             return;
         }
         let intern = |this: &mut Self, sid: crate::types::StringId| -> crate::types::StringId {
@@ -26858,8 +26821,8 @@ impl VbcCodegen {
                 }
                 continue;
             };
-            if let Err(message) = crate::source_declaration_integrity::validate_type_descriptor(descriptor, &module.strings) {
-                let _ = self.reject_source_declaration(message);
+            if let Err(message) = crate::source_declaration_integrity::validate_type_descriptor_diagnostic(descriptor, &module.strings) {
+                self.record_source_declaration_error(CodegenError::from(message));
                 return;
             }
             let Some(owner) = bootstrap_types::identity(module, descriptor) else {

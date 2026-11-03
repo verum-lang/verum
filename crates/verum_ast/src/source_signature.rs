@@ -43,14 +43,28 @@ pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<
     scan.finish().map(|_| scan.uses_universes)
 }
 
-/// A protocol's runtime type parameter IDs omit compile-time value slots.
-/// Its checked source signatures supply their kinds, positions and bounds.
+/// Defaults belong to their source telescope, including its lexical scope and
+/// prior binders. Protocol value kinds likewise cannot be inferred from runtime
+/// type slots. Keep these declarations for exact application elaboration.
 pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) -> Result<bool> {
     let universes = type_declaration_uses_universes(declaration)?;
-    Ok(universes || (matches!(declaration.body, crate::TypeDeclBody::Protocol(_))
-        && declaration.generics.iter().any(|param| matches!(
-            param.kind, GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
-        ))))
+    Ok(universes
+        || declaration.generics.iter().any(|param| {
+            matches!(
+                param.kind,
+                GenericParamKind::Type {
+                    default: Some(_),
+                    ..
+                }
+            )
+        })
+        || (matches!(declaration.body, crate::TypeDeclBody::Protocol(_))
+            && declaration.generics.iter().any(|param| {
+                matches!(
+                    param.kind,
+                    GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
+                )
+            })))
 }
 
 /// Preserve declaration semantics that the runtime descriptor erases. Protocol
