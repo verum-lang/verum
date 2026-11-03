@@ -363,6 +363,9 @@ enum Commands {
         /// Resolve interpreted stdin (`-`) as this project file without writing it.
         #[clap(long, value_name = "PATH", requires = "file", conflicts_with_all = ["eval", "aot"])]
         stdin_filepath: Option<PathBuf>,
+        /// Parsing policy for the stdin entry: source declarations or explicit scripting.
+        #[clap(long, value_name = "MODE", requires = "stdin_filepath")]
+        stdin_mode: Option<verum_common::source_mode::SourceMode>,
  /// Run via interpreter (overrides the project execution tier)
         #[clap(long, conflicts_with = "aot")]
         interp: bool,
@@ -500,6 +503,9 @@ enum Commands {
  /// Only parse, don't type check (for VCS parse-pass tests)
         #[clap(long)]
         parse_only: bool,
+        /// Permit top-level statements in the selected entry file.
+        #[clap(long, requires = "path", conflicts_with = "workspace")]
+        script: bool,
 
  /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
@@ -1188,7 +1194,7 @@ enum Commands {
         sub: CogRegistrySub,
     },
 
-    /// SMT certificate replay (multi-backend cross-validation)
+    /// Inspect SMT certificates and request independent replay
     #[command(display_order = 308)]
     CertReplay {
         #[clap(subcommand)]
@@ -2260,10 +2266,8 @@ enum CertReplaySub {
         conclusion: String,
         #[clap(long, default_value = "")]
         body: String,
- /// Fail with non-zero exit when any available backend
- /// disagrees with the others. This is the
- /// `@verify(certified)` semantics: every available solver
- /// must accept.
+ /// Require every requested replay to accept. Structural inspection,
+ /// absent adapters and missing tools never establish proof authority.
         #[clap(long)]
         require_consensus: bool,
         #[clap(long, default_value = "plain")]
@@ -3143,6 +3147,7 @@ fn run_command(cli: Cli) -> Result<()> {
             file,
             eval,
             stdin_filepath,
+            stdin_mode,
             interp,
             aot,
             release,
@@ -3221,6 +3226,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     let report = runtime_report.request(buf.as_bytes(), false)?;
                     return commands::file::run_stdin_at(
                         path, buf, args_list, timings, permission_flags, report,
+                        stdin_mode.unwrap_or(verum_common::source_mode::SourceMode::Script),
                     );
                 }
                 let report = runtime_report.request(buf.as_bytes(), true)?;
@@ -3351,14 +3357,16 @@ fn run_command(cli: Cli) -> Result<()> {
             path,
             workspace,
             parse_only,
+            script,
             feature_overrides,
         } => {
             feature_overrides::install(feature_overrides);
             match resolve_path(path.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
                     ui::status("Checking", file_path.as_str());
-                    commands::file::check(file_path.as_str(), false, parse_only)
+                    commands::file::check(file_path.as_str(), false, parse_only, script)
                 }
+                PathTarget::Project if script => Err(CliError::InvalidArgument("--script requires an entry file, not a project".into())),
                 PathTarget::Project => commands::check::execute(workspace, false, false),
             }
         }

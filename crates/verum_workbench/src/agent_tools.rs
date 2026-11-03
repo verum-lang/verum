@@ -255,10 +255,14 @@ fn define_tools() -> Vec<Tool> {
             json!({"path":{"type":"string"},"source":source,"declaration":{"type":"string"},"timeout_ms":timeout,"proof_profile":proof_profile}),
             json!(["path", "source", "declaration"]),
         ),
-    ].into_iter().map(|(name, route, description, properties, required)| Tool {
-        name,
-        route,
-        definition: json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}),
+    ].into_iter().map(|(name, route, description, mut properties, required)| {
+        if matches!(&route, Route::Analyze | Route::Format | Route::Evidence | Route::Plan | Route::Start("run" | "check")) {
+            properties["source_mode"] = json!({"type":"string","enum":["source","script"],"description":"Parsing policy shared with execution: source (default) honors modules and shebang scripts; script permits top-level statements only in this entry."});
+        }
+        Tool {
+            name, route,
+            definition: json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}),
+        }
     }).collect()
 }
 

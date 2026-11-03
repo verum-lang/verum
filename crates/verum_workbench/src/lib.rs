@@ -267,7 +267,7 @@ impl Studio {
         let draft = params.get("source").map(|value| value.as_str().map(Text::from).context("Expected source text")).transpose()?;
         let (path, source) = self.workspace.lock().await.source_input(field(params, "path")?, draft)?;
         self.language
-            .request(
+            .request_with_source_mode(
                 path,
                 source,
                 params["method"].as_str().unwrap_or("analyze"),
@@ -277,6 +277,7 @@ impl Studio {
                     "position"
                 }]
                 .clone(),
+                params.get("source_mode").map(|value| serde_json::from_value(value.clone())).transpose()?.unwrap_or_default(),
             )
             .await
     }

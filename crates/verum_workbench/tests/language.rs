@@ -13,6 +13,33 @@ fn studio(root: &std::path::Path) -> Studio {
 }
 
 #[tokio::test]
+async fn explicit_source_mode_drives_shared_analysis_and_invalidates_same_text() {
+    let root = tempfile::tempdir().unwrap();
+    let studio = studio(root.path());
+    let source = "let mut i = 0; while i < 3 { i = i + 1; }";
+    let mut generations = Vec::new();
+    for (mode, parsed) in [("source", false), ("script", true), ("source", false)] {
+        let reply = studio.call("language.request", json!({
+            "path":"entry.vr", "source":source, "source_mode":mode,
+        })).await.unwrap();
+        assert_eq!(reply["source_mode"], mode);
+        assert_eq!(reply["result"]["source_mode"], mode);
+        assert_eq!(reply["result"]["parsed"], parsed, "{reply}");
+        if parsed { assert_eq!(reply["result"]["diagnostics"], json!([]), "{reply}"); }
+        generations.push(reply["result"]["project_revision"].clone());
+        let plan = studio.call("operation.plan", json!({
+            "kind":"run", "path":"entry.vr", "source":source, "source_mode":mode,
+        })).await.unwrap();
+        assert_eq!(plan["source_mode"], mode);
+    }
+    assert_ne!(generations[0], generations[1]);
+    assert_eq!(generations[0], generations[2]);
+    assert!(studio.call("language.request", json!({
+        "path":"entry.vr", "source":source, "source_mode":"auto-retry",
+    })).await.is_err());
+}
+
+#[tokio::test]
 async fn loose_workspace_keeps_root_files_and_nested_module_owners() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();

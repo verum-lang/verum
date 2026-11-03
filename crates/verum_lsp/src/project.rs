@@ -56,6 +56,7 @@ pub struct MountSnapshot {
 }
 #[derive(Debug, Serialize)]
 pub struct DocumentSnapshot {
+    pub source_mode: verum_common::source_mode::SourceMode,
     pub schema: &'static str,
     pub uri: Url,
     pub version: i32,
@@ -237,6 +238,7 @@ impl DocumentSnapshot {
             uri: uri.clone(),
             version: doc.version,
             source_hash: hex::encode(Sha256::digest(doc.text.as_bytes())).into(),
+            source_mode: doc.source_mode,
             parsed: doc.module.is_some(),
             project_revision: doc.analysis_revision.clone(),
             library_metadata: doc.library_metadata.clone(),
@@ -293,7 +295,7 @@ fn document_evidence(
     }).transpose()?;
     let (declaration, extent) = selected.unzip();
     Ok(serde_json::json!({
-        "schema":"verum-document-evidence/1", "uri":uri, "source_hash":hash, "version":doc.version,
+        "schema":"verum-document-evidence/1", "uri":uri, "source_hash":hash, "source_mode":doc.source_mode, "version":doc.version,
         "project_revision":doc.analysis_revision, "library_metadata":doc.library_metadata, "analysis_scope":analysis_scope(doc),
         "parsed":doc.module.is_some(), "document_diagnostics":{"total":doc.diagnostics.len(),"errors":errors},
         "declaration":declaration, "declaration_span":extent

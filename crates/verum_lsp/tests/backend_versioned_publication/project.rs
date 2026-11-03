@@ -69,6 +69,47 @@ const MAIN: &str =
     "mount dependency.{Token, answer};\nfn read(value: Token) -> Int { value.id + answer() }";
 
 #[tokio::test]
+async fn explicit_script_language_changes_project_semantics_without_changing_source() {
+    let project = Project::new();
+    let source = "public fn value() -> Int { 42 } let mut i = 0; while i < 3 { i = i + 1; }";
+    let uri = project.open("entry.vr", source);
+    let before = project.snapshot(&uri).await;
+    assert_eq!(before["parsed"], false);
+    project.service.inner().did_close(DidCloseTextDocumentParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+    }).await;
+    project.service.inner().did_open(DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(), language_id: "verum-script".into(),
+            version: 1, text: source.into(),
+        },
+    }).await;
+    let script = project.snapshot(&uri).await;
+    assert_eq!(script["parsed"], true, "{script:#}");
+    assert!(errors(&script).is_empty(), "{script:#}");
+    assert_ne!(before["project_revision"], script["project_revision"]);
+    let consumer = project.open("consumer.vr", "mount entry.value; fn f() -> Int { value() }");
+    let imported = project.snapshot(&consumer).await;
+    assert!(!errors(&imported).is_empty(), "an entry's explicit script mode cannot authorize importing its unmarked statements: {imported:#}");
+    project.service.inner().did_close(DidCloseTextDocumentParams {
+        text_document: TextDocumentIdentifier { uri: consumer.clone() },
+    }).await;
+    std::fs::remove_file(consumer.to_file_path().unwrap()).unwrap();
+    project.service.inner().did_close(DidCloseTextDocumentParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+    }).await;
+    project.service.inner().did_open(DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(), language_id: "verum".into(),
+            version: 1, text: source.into(),
+        },
+    }).await;
+    let restored = project.snapshot(&uri).await;
+    assert_eq!(restored["parsed"], false);
+    assert_eq!(restored["project_revision"], before["project_revision"]);
+}
+
+#[tokio::test]
 async fn project_mount_failure_carries_its_source_range_and_clears_after_repair() {
     let project = Project::new();
     let dependency = project.file("dependency.vr", DEP);

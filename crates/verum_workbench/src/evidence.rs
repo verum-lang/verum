@@ -8,6 +8,8 @@ use crate::{Studio, execution::OperationKind, jobs::Receipt};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
+    #[serde(default)]
+    source_mode: verum_common::source_mode::SourceMode,
     path: String,
     expected_source_hash: String,
     expected_project_revision: Option<String>,
@@ -26,7 +28,7 @@ impl Studio {
             .source_input(&request.path, request.source.map(Into::into))?;
         let analysis = self
             .language
-            .request(
+            .request_with_source_mode(
                 path,
                 source,
                 "evidence",
@@ -35,6 +37,7 @@ impl Studio {
                     "expectedProjectRevision":request.expected_project_revision,
                     "declarationId":request.declaration_id,
                 }),
+                request.source_mode,
             )
             .await?;
         let operation = if let Some(id) = request.operation_id {
@@ -67,8 +70,9 @@ fn operation_evidence(receipt: &Receipt, path: &str, analysis: &Value) -> Result
     let plan = &receipt.plan;
     ensure!(
         std::path::Path::new(plan.path.as_str()) == std::path::Path::new(path)
-            && analysis["source_hash"] == plan.source_hash.as_str(),
-        "Operation belongs to another document or source revision"
+            && analysis["source_hash"] == plan.source_hash.as_str()
+            && plan.source_mode.is_some_and(|mode| analysis["source_mode"] == mode.as_str()),
+        "Operation belongs to another document, source revision or parsing mode"
     );
     let relation = if !analysis["declaration"].is_null() {
         let binding = receipt

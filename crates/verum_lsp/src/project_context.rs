@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::{Location, Url};
 use verum_ast::{FileId, ItemKind, Module};
 use verum_common::{List, Map, Set, Text};
+use verum_common::source_mode::SourceMode;
 use verum_modules::{
     ExportTable, ImportResolver, ModuleId, ModuleInfo, ModuleLoader, ModulePath, ModuleRegistry,
     SharedModuleRegistry, extract_exports_from_module, resolve_glob_reexports,
@@ -31,6 +32,7 @@ pub enum MountResolution {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SourceIdentity {
+    pub source_mode: SourceMode,
     pub module: Text,
     pub uri: Url,
     pub source_hash: Text,
@@ -39,13 +41,22 @@ pub struct SourceIdentity {
 }
 #[derive(Clone)]
 struct Source {
+    source_mode: SourceMode,
     path: PathBuf,
     text: Text,
     file_id: FileId,
     ast: Option<Module>,
+    // An editor's explicit entry policy must not change how peers import it.
+    module_ast: Option<Module>,
     version: Option<i32>,
     owner: ModulePath,
     module_id: Option<ModuleId>,
+}
+impl Source {
+    fn dependency_ast(&self) -> Option<&Module> {
+        if self.source_mode == SourceMode::Script { self.module_ast.as_ref() }
+        else { self.ast.as_ref() }
+    }
 }
 struct AnalysisReceipt {
     file_id: FileId,
@@ -287,12 +298,13 @@ impl ProjectContext {
                         doc.version,
                         doc.file_id,
                         doc.module.clone(),
+                        doc.source_mode,
                     )]
                 })
                 .unwrap_or_default()
         });
         open.sort_by(|a, b| a.0.cmp(&b.0));
-        for (path, text, _, _, _) in &open {
+        for (path, text, ..) in &open {
             if !owners.contains_key(path) {
                 if path.starts_with(&source_root) {
                     owners.insert(
@@ -333,6 +345,9 @@ impl ProjectContext {
         for path in &paths {
             hash.update(path.to_string_lossy().as_bytes());
             hash.update([0]);
+            let mode = open.iter().find(|(p, ..)| p == path).map_or(SourceMode::Source, |entry| entry.5);
+            hash.update(mode.as_str().as_bytes());
+            hash.update([0]);
             hash.update(captured.get(path).unwrap().as_bytes());
             hash.update([0]);
         }
@@ -362,6 +377,7 @@ impl ProjectContext {
             control.check()?;
             let text = captured.remove(&path).unwrap();
             let opened = open.iter().find(|(p, ..)| p == &path);
+            let source_mode = opened.map_or(SourceMode::Source, |entry| entry.5);
             // Compiler source identity is independent of an editor incarnation.
             // Reopening identical text must not rewrite every imported AST span.
             let (file_id, ast, version) = if let Some(old) = self
@@ -369,8 +385,10 @@ impl ProjectContext {
                 .get(&path)
                 .filter(|old| old.text == text)
             {
-                (old.file_id, old.ast.clone(), opened.map(|(_, _, version, ..)| *version))
-            } else if let Some((_, _, version, id, ast)) = opened {
+                let ast = if old.source_mode == source_mode { old.ast.clone() }
+                    else { crate::source_parsing::parse_with_mode(&text, old.file_id, source_mode).ok() };
+                (old.file_id, ast, opened.map(|(_, _, version, ..)| *version))
+            } else if let Some((_, _, version, id, ast, _)) = opened {
                 (*id, ast.clone(), Some(*version))
             } else {
                 let uri = Url::from_file_path(&path).map_err(|_| anyhow::anyhow!("Source URI"))?;
@@ -378,13 +396,21 @@ impl ProjectContext {
                 let ast = crate::source_parsing::parse(&text, id).ok();
                 (id, ast, None)
             };
+            let module_ast = if source_mode == SourceMode::Script {
+                self.sources.get(&path)
+                    .filter(|old| old.text == text)
+                    .map(|old| old.dependency_ast().cloned())
+                    .unwrap_or_else(|| crate::source_parsing::parse(&text, file_id).ok())
+            } else { None };
             sources.insert(
                 path.clone(),
                 Source {
+                    source_mode,
                     path: path.clone(),
                     text,
                     file_id,
                     ast,
+                    module_ast,
                     version,
                     owner: owners.remove(&path).unwrap(),
                     module_id: self.sources.get(&path).and_then(|old| old.module_id),
@@ -430,7 +456,7 @@ impl ProjectContext {
         ordered.sort_by(|a, b| a.path.cmp(&b.path));
         for source in ordered {
             control.check()?;
-            let Some(ast) = &source.ast else {
+            let Some(ast) = source.dependency_ast() else {
                 issues.push(format!("Cannot parse {}", source.path.display()).into());
                 continue;
             };
@@ -478,7 +504,7 @@ impl ProjectContext {
             .map(|(id, info)| (*id, info.path.clone()))
             .collect();
         let base = std::sync::Arc::new(registry);
-        for (path, _, _, document_file_id, _) in &open {
+        for (path, _, _, document_file_id, _, _) in &open {
             control.check()?;
             let Some(source) = sources.get(path) else {
                 continue;
@@ -504,6 +530,19 @@ impl ProjectContext {
             }
             let (observed, reads) = base.observe_reads();
             let registry = SharedModuleRegistry::from_registry(observed);
+            if source.source_mode == SourceMode::Script && source.module_ast.is_none() {
+                if let Some(ast) = &source.ast {
+                    let mut ast = ast.clone();
+                    ast.items = loader.cfg_evaluator().filter_items(&ast.items);
+                    let id = source.module_id.expect("source identity allocated");
+                    let mut info = ModuleInfo::new(id, source.owner.clone(), ast.clone(), source.file_id, source.text.clone());
+                    info.exports = extract_exports_from_module(&ast, id, &source.owner)?;
+                    // Only this entry's checker sees the script AST. The shared
+                    // dependency registry retains source-declared module rules.
+                    // This local write conservatively disables read-set reuse.
+                    registry.write().register(info);
+                }
+            }
             let info = registry.read().get_by_path(source.owner.to_string().as_str());
             let Some(info) = info else {
                 documents.with_document_mut(&uri, |doc| {
@@ -612,6 +651,7 @@ impl ProjectContext {
         self.identities = sources
             .values()
             .map(|source| SourceIdentity {
+                source_mode: source.source_mode,
                 module: source.owner.to_string().into(),
                 uri: Url::from_file_path(&source.path).unwrap(),
                 source_hash: hex::encode(Sha256::digest(source.text.as_bytes())).into(),

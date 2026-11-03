@@ -26,7 +26,7 @@ test('document replacement distinguishes consent, current results and failed rea
   assert.deepEqual(applied, ['new']);
 });
 
-const receipt: Receipt = { id: 'one', kind: 'proof', path: 'identity.vr', source_hash: 'revision-a', status: 'succeeded', stdout: '', stderr: '', elapsed_ms: 4, exit_code: 0 };
+const receipt: Receipt = { id: 'one', kind: 'proof', path: 'identity.vr', source_mode: 'source', source_hash: 'revision-a', status: 'succeeded', stdout: '', stderr: '', elapsed_ms: 4, exit_code: 0 };
 
 test('startup restore is revoked by typing or opening another file during an async read', async () => {
   const requested = { path: 'experiment.vr', editVersion: 0 };
@@ -42,6 +42,8 @@ test('results never describe another file, edited source, or a pending hash', ()
   assert.equal(isStale(receipt, 'identity.vr', 'revision-b'), true);
   assert.equal(isStale(receipt, 'other.vr', 'revision-a'), true);
   assert.equal(isStale(receipt, 'identity.vr', null), true);
+  assert.equal(isStale(receipt, 'identity.vr', 'revision-a', 'script'), true);
+  assert.equal(isStale({ ...receipt, source_mode: undefined }, 'identity.vr', 'revision-a'), true);
 });
 
 test('sign-in links permit HTTPS, never executable URLs or embedded credentials', () => {

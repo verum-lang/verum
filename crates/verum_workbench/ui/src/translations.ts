@@ -1,6 +1,15 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Source mode': 'Режим исходного кода',
+  'Proof replay requires source-declared parsing.': 'Проверка доказательства требует режима, заданного исходником.',
+  'This Studio host did not preserve the requested source mode.': 'Сервер Studio не подтвердил запрошенный режим исходного кода.',
+  'Language analysis did not preserve the requested source mode.': 'Языковой анализ не подтвердил запрошенный режим исходного кода.',
+  'Source declarations': 'Объявления исходника',
+  'Script entry': 'Скриптовая точка входа',
+  'Verum script': 'Скрипт Verum',
+  'Use source-declared parsing': 'Использовать режим, заданный исходником',
+  'Use script entry parsing': 'Использовать скриптовый режим входного файла',
   'Module architecture': 'Архитектура модуля',
   'Modules inspected: {inspected} / {indexed} · unresolved imports: {unresolved}': 'Разобрано модулей: {inspected} из {indexed} · неразрешённых импортов: {unresolved}',
   'The project changed. Refresh the topology before navigating.': 'Проект изменился. Обновите карту перед переходом к исходному коду.',

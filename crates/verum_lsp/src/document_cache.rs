@@ -28,6 +28,7 @@ use crate::incremental::IncrementalState;
 /// A parsed document with incremental parsing support
 #[derive(Debug)]
 pub struct ParsedDocument {
+    pub source_mode: verum_common::source_mode::SourceMode,
     /// The full source text
     pub source: String,
     /// Document version (from LSP)
@@ -47,8 +48,13 @@ pub struct ParsedDocument {
 impl ParsedDocument {
     /// Create a new parsed document from source text
     pub fn new(source: String, version: i32, file_id: FileId) -> Self {
+        Self::with_source_mode(source, version, file_id, Default::default())
+    }
+
+    pub fn with_source_mode(source: String, version: i32, file_id: FileId, source_mode: verum_common::source_mode::SourceMode) -> Self {
         let line_count = source.lines().count();
         let mut doc = Self {
+            source_mode,
             source,
             version,
             ast: None,
@@ -65,7 +71,7 @@ impl ParsedDocument {
     fn parse_full(&mut self) {
         let start = Instant::now();
 
-        match crate::source_parsing::parse(&self.source, self.file_id) {
+        match crate::source_parsing::parse_with_mode(&self.source, self.file_id, self.source_mode) {
             Ok(module) => {
                 self.ast = Some(module);
                 self.parse_errors.clear();
@@ -116,7 +122,8 @@ impl ParsedDocument {
         // A script's synthesized entry owns all top-level statements. A parsed
         // fragment cannot be merged as module items without changing that scope.
         // Header edits must also replace the previous script entry as a whole.
-        if self.ast.as_ref().is_some_and(Module::is_script)
+        if self.source_mode == verum_common::source_mode::SourceMode::Script
+            || self.ast.as_ref().is_some_and(Module::is_script)
             || crate::source_parsing::is_script(&self.source, self.file_id)
         {
             self.parse_full();
@@ -312,8 +319,12 @@ impl DocumentCache {
 
     /// Open a new document
     pub fn open_document(&self, uri: Url, text: String, version: i32) {
+        self.open_document_with_source_mode(uri, text, version, Default::default());
+    }
+
+    pub fn open_document_with_source_mode(&self, uri: Url, text: String, version: i32, source_mode: verum_common::source_mode::SourceMode) {
         let file_id = self.get_or_create_file_id(&uri);
-        let doc = ParsedDocument::new(text, version, file_id);
+        let doc = ParsedDocument::with_source_mode(text, version, file_id, source_mode);
 
         let mut documents = self.documents.write();
         documents.insert(uri, doc);
@@ -398,6 +409,7 @@ impl DocumentCache {
         let documents = self.documents.read();
         documents.get(uri).map(|doc| {
             crate::document::DocumentState {
+                source_mode: doc.source_mode,
                 library_metadata: None,
                 text: doc.source.clone(),
                 analysis_revision: None,

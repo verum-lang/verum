@@ -1,12 +1,15 @@
 import type { RuntimeReport } from './runtime';
 export type RunPermissions = 'source' | 'deny-all' | 'allow-all';
+export type SourceMode = 'source' | 'script';
 export type ProofProfile = 'verum-source-pi-id/1' | 'verum-source-finite/1';
 export type ExecutionPlan = {
+  source_mode?: SourceMode | null;
   kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
   executable: string; timeout_ms: number; permissions: RunPermissions | null; runtime_diagnostics?: boolean | null; declaration: string | null;
   proof_profile?: ProofProfile | null;
 };
 export type Receipt = {
+  source_mode?: SourceMode | null;
   id: string; kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
   status: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'exhausted' | 'inconclusive' | 'unsupported';
   stdout: string; stderr: string; exit_code: number | null; elapsed_ms: number; proof?: unknown;
@@ -39,8 +42,8 @@ export async function replaceDocumentRevision<T>(revision: DocumentRevision,
   return 'applied';
 }
 
-export function isStale(receipt: Receipt, path: string, hash: string | null): boolean {
-  return receipt.path !== path || hash === null || receipt.source_hash !== hash;
+export function isStale(receipt: Receipt, path: string, hash: string | null, sourceMode: SourceMode = 'source'): boolean {
+  return receipt.path !== path || hash === null || receipt.source_hash !== hash || receipt.source_mode !== sourceMode;
 }
 
 export function mergeReceipts(existing: Receipt[], changes: Receipt[]): Receipt[] {

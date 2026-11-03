@@ -275,6 +275,7 @@ impl CbgrCostInfo {
 
 /// Stores the parsed and analyzed state of a document
 pub struct DocumentState {
+    pub source_mode: verum_common::source_mode::SourceMode,
     pub analysis_revision: Option<Text>,
     pub library_metadata: Option<crate::library_metadata::LibraryIdentity>,
     pub project_bindings: List<crate::project_context::ProjectBinding>,
@@ -327,7 +328,12 @@ impl std::fmt::Debug for DocumentState {
 impl DocumentState {
     /// Create a new document state from text
     pub fn new(text: String, version: i32, file_id: FileId) -> Self {
+        Self::with_source_mode(text, version, file_id, Default::default())
+    }
+
+    pub fn with_source_mode(text: String, version: i32, file_id: FileId, source_mode: verum_common::source_mode::SourceMode) -> Self {
         let mut state = Self {
+            source_mode,
             analysis_revision: None,
             library_metadata: None,
             project_bindings: List::new(),
@@ -431,7 +437,7 @@ impl DocumentState {
 
         // Parse the document
         let parse_started = std::time::Instant::now();
-        let parse_result = crate::source_parsing::parse(&self.text, self.file_id);
+        let parse_result = crate::source_parsing::parse_with_mode(&self.text, self.file_id, self.source_mode);
         self.last_parse_us = parse_started.elapsed().as_micros() as u64;
 
         match parse_result {
@@ -875,8 +881,12 @@ impl DocumentStore {
 
     /// Open a new document
     pub fn open(&self, uri: Url, text: String, version: i32) -> FileId {
+        self.open_with_source_mode(uri, text, version, Default::default())
+    }
+
+    pub fn open_with_source_mode(&self, uri: Url, text: String, version: i32, source_mode: verum_common::source_mode::SourceMode) -> FileId {
         let file_id = self.get_file_id(&uri);
-        let state = DocumentState::new(text, version, file_id);
+        let state = DocumentState::with_source_mode(text, version, file_id, source_mode);
         self.documents.insert(uri, RwLock::new(state));
         file_id
     }

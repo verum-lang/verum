@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use verum_common::Text;
+use verum_common::source_mode::SourceMode;
 use verum_source_proof::SourceProfile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +38,9 @@ impl RunPermissions {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExecutionPlan {
+    /// None on retained legacy receipts means the parsing policy was unrecorded.
+    #[serde(default)]
+    pub source_mode: Option<SourceMode>,
     pub kind: OperationKind,
     pub path: Text,
     pub source_hash: Text,
@@ -58,6 +62,11 @@ impl ExecutionPlan {
         let kind: OperationKind = serde_json::from_value(params["kind"].clone())
             .context("Expected operation kind: run, check or proof")?;
         let source = params["source"].as_str().context("Expected source")?;
+        let source_mode: SourceMode = params.get("source_mode")
+            .map(|value| serde_json::from_value(value.clone())).transpose()?
+            .unwrap_or_default();
+        ensure!(kind != OperationKind::Proof || source_mode == SourceMode::Source,
+            "Source proof replay requires source-declared parsing mode");
         ensure!(source.len() <= SOURCE_LIMIT, "Source exceeds limit");
         let path = params["path"].as_str().context("Expected source path")?;
         let timeout_ms = match params.get("timeout_ms") {
@@ -117,6 +126,7 @@ impl ExecutionPlan {
             None
         };
         Ok(Self {
+            source_mode: Some(source_mode),
             kind,
             path: path.into(),
             source_hash: digest(source.as_bytes()),

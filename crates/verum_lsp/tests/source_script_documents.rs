@@ -2,6 +2,28 @@
 use tower_lsp::lsp_types::{Position, Range, TextDocumentContentChangeEvent};
 use verum_ast::FileId;
 use verum_lsp::{ParsedDocument, document::DocumentState};
+use verum_common::source_mode::SourceMode;
+
+#[test]
+fn declared_script_mode_preserves_source_spans_and_remains_explicit() {
+    let source = "let mut i = 0;\nwhile i < 3 { i = i + 1; }\n";
+    let module = DocumentState::new(source.into(), 1, FileId::new(7));
+    assert!(module.module.is_none());
+    let script = DocumentState::with_source_mode(source.into(), 1, FileId::new(7), SourceMode::Script);
+    assert!(script.module.as_ref().is_some_and(|m| m.is_script()));
+    assert!(script.diagnostics.is_empty(), "{:?}", script.diagnostics);
+    assert_eq!(script.text, source);
+    let mut cached = ParsedDocument::with_source_mode(source.into(), 1, FileId::new(7), SourceMode::Script);
+    cached.apply_incremental_changes(&[TextDocumentContentChangeEvent {
+        range: Some(Range::new(Position::new(0, 12), Position::new(0, 13))),
+        range_length: Some(1), text: "1".into(),
+    }], 2).unwrap();
+    assert!(cached.ast.as_ref().is_some_and(|m| m.is_script()));
+    assert!(cached.source.starts_with("let mut i = 1;"));
+    cached.update_full("let = ;".into(), 3);
+    assert!(cached.ast.is_none());
+    assert!(!cached.parse_errors.is_empty());
+}
 
 #[test]
 fn source_headers_select_script_mode_without_rewriting_spans() {

@@ -501,10 +501,11 @@ impl LanguageServer for Backend {
         tracing::debug!("Document opened: {}", params.text_document.uri);
         let gate = self.document_gate(&params.text_document.uri);
         let guard = gate.lock().await;
-        self.documents.open(
+        self.documents.open_with_source_mode(
             params.text_document.uri.clone(),
             params.text_document.text,
             params.text_document.version,
+            verum_common::source_mode::SourceMode::from_language_id(&params.text_document.language_id),
         );
 
         // Index document in workspace index

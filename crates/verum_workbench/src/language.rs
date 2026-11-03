@@ -12,6 +12,7 @@ use tower_lsp::{
     lsp_types::Url,
 };
 use verum_common::{Map, Text};
+use verum_common::source_mode::SourceMode;
 use verum_lsp::Backend;
 
 pub(super) const DOCUMENT_QUERIES: &[&str] = &[
@@ -22,6 +23,7 @@ pub(super) const DOCUMENT_QUERIES: &[&str] = &[
 ];
 
 struct Command {
+    source_mode: SourceMode,
     control: verum_lsp::AnalysisControl,
     path: PathBuf,
     source: Text,
@@ -97,6 +99,11 @@ impl Language {
         method: &str,
         argument: Value,
     ) -> Result<Value> {
+        self.request_with_source_mode(path, source, method, argument, SourceMode::Source).await
+    }
+    pub async fn request_with_source_mode(
+        &self, path: PathBuf, source: Text, method: &str, argument: Value, source_mode: SourceMode,
+    ) -> Result<Value> {
         ensure!(
             source.len() <= crate::workspace::SOURCE_LIMIT,
             "Source exceeds editor limit"
@@ -112,6 +119,7 @@ impl Language {
         let (reply, response) = oneshot::channel();
         self.requests
             .try_send(Command {
+                source_mode,
                 control,
                 path,
                 source,
@@ -133,7 +141,7 @@ impl Language {
 
 struct Session {
     service: LspService<Backend>,
-    documents: Map<Text, (Text, i32)>,
+    documents: Map<Text, (Text, i32, SourceMode)>,
     sequence: i64,
     capabilities: Value,
 }
@@ -190,21 +198,21 @@ impl Session {
             None => bail!("Language server omitted the response"),
         }
     }
-    async fn open_document(&mut self, uri: &Url, source: &str) -> Result<()> {
-        self.rpc("textDocument/didOpen", json!({"textDocument":{"uri":uri,"languageId":"verum","version":1,"text":source}}), false).await?;
+    async fn open_document(&mut self, uri: &Url, source: &str, source_mode: SourceMode) -> Result<()> {
+        self.rpc("textDocument/didOpen", json!({"textDocument":{"uri":uri,"languageId":source_mode.language_id(),"version":1,"text":source}}), false).await?;
         Ok(())
     }
 
-    async fn evidence(&mut self, command: &Command, uri: &Url, hash: &Text, active: Option<(Text, i32)>) -> Result<Value> {
+    async fn evidence(&mut self, command: &Command, uri: &Url, hash: &Text, active: Option<(Text, i32, SourceMode)>) -> Result<Value> {
         let expected = command.argument["expectedSourceHash"].as_str().context("Evidence requires a SHA-256 source hash")?;
         ensure!(expected.eq_ignore_ascii_case(hash.as_str()), "Evidence source hash differs from the requested revision");
         let transient = active.is_none();
-        let version = if let Some((active_hash, version)) = active {
-            ensure!(active_hash == *hash, "Another revision is active in Studio; refresh analysis before requesting evidence");
+        let version = if let Some((active_hash, version, mode)) = active {
+            ensure!(active_hash == *hash && mode == command.source_mode, "Another source revision or mode is active in Studio; refresh analysis before requesting evidence");
             version
         } else {
             // A cold evidence read must not evict an editor buffer or keep a stale disk overlay.
-            self.open_document(uri, &command.source).await?;
+            self.open_document(uri, &command.source, command.source_mode).await?;
             1
         };
         let mut params = command.argument.clone();
@@ -213,7 +221,7 @@ impl Session {
         let result = self.rpc("verum/documentEvidence", params, true).await;
         if transient {
             if let Err(error) = self.rpc("textDocument/didClose", json!({"textDocument":{"uri":uri}}), false).await {
-                self.documents.insert(uri.as_str().into(), (hash.clone(), version));
+                self.documents.insert(uri.as_str().into(), (hash.clone(), version, command.source_mode));
                 return Err(error);
             }
         }
@@ -230,9 +238,14 @@ impl Session {
         let uri = Url::from_file_path(&command.path).map_err(|_| anyhow::anyhow!("Source URI"))?;
         let key = Text::from(uri.as_str());
         let hash = crate::workspace::digest(command.source.as_bytes());
-        let previous = self.documents.get(&key).cloned();
+        let mut previous = self.documents.get(&key).cloned();
         if command.method == "evidence" {
             return self.evidence(command, &uri, &hash, previous).await;
+        }
+        if previous.as_ref().is_some_and(|entry| entry.2 != command.source_mode) {
+            self.rpc("textDocument/didClose", json!({"textDocument":{"uri":uri}}), false).await?;
+            self.documents.remove(&key);
+            previous = None;
         }
         if previous.is_none() && self.documents.len() >= 128 {
             // Bound retained source/AST memory; reopening reconstructs from exact source.
@@ -248,8 +261,8 @@ impl Session {
             }
         }
         let version = match previous {
-            Some((old, version)) if old == hash => version,
-            Some((_, version)) => {
+            Some((old, version, _)) if old == hash => version,
+            Some((_, version, _)) => {
                 let version = version
                     .checked_add(1)
                     .context("Document version exhausted")?;
@@ -257,11 +270,11 @@ impl Session {
                 version
             }
             None => {
-                self.open_document(&uri, &command.source).await?;
+                self.open_document(&uri, &command.source, command.source_mode).await?;
                 1
             }
         };
-        self.documents.insert(key, (hash.clone(), version));
+        self.documents.insert(key, (hash.clone(), version, command.source_mode));
         command.control.check()?;
         let result = if command.method == "analyze" {
             self.rpc(
@@ -302,7 +315,7 @@ impl Session {
         };
         command.control.check()?;
         Ok(
-            json!({"source_hash":hash,"version":version,"result":result,"server":self.capabilities["serverInfo"]}),
+            json!({"source_hash":hash,"source_mode":command.source_mode,"version":version,"result":result,"server":self.capabilities["serverInfo"]}),
         )
     }
 }

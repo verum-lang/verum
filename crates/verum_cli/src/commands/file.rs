@@ -138,7 +138,7 @@ pub fn build(
 }
 
 /// Check single file without compilation
-pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<(), CliError> {
+pub fn check(file: &str, continue_on_error: bool, parse_only: bool, script_mode: bool) -> Result<(), CliError> {
     let start = std::time::Instant::now();
 
     let input = PathBuf::from(file);
@@ -160,6 +160,7 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
         input,
         output_format: OutputFormat::Human,
         continue_on_error,
+        script_mode,
         language_features,
         ..Default::default()
     };
@@ -240,6 +241,7 @@ pub fn run_stdin_at(
     timings: bool,
     permission_flags: crate::script::permission_flags::PermissionFlags,
     runtime_report: Option<crate::runtime_diagnostics::ReportRequest>,
+    source_mode: verum_common::source_mode::SourceMode,
 ) -> Result<(), CliError> {
     let input = std::path::absolute(path)?;
     if input.file_name().is_none() || input.is_dir() {
@@ -249,7 +251,7 @@ pub fn run_stdin_at(
     }
     let options = CompilerOptions {
         input: input.clone(),
-        script_mode: true,
+        script_mode: source_mode == verum_common::source_mode::SourceMode::Script,
         language_features: crate::feature_overrides::scratch_features()?,
         ..Default::default()
     };

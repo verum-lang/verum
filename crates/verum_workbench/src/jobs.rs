@@ -174,6 +174,7 @@ impl Jobs {
                     .arg("--runtime-run-id").arg(id.as_str());
             }
             command.arg("--stdin-filepath").arg(&source_path).arg("-");
+            command.arg("--stdin-mode").arg(plan.source_mode.unwrap_or_default().as_str());
             (Some(source.as_bytes().iter().copied().collect()), None)
         } else {
             let mut snapshot = tempfile::Builder::new()
@@ -182,6 +183,9 @@ impl Jobs {
                 .tempfile_in(source_path.parent().context("Source parent")?)?;
             snapshot.write_all(source.as_bytes())?;
             command.arg("check").arg(snapshot.path());
+            if plan.source_mode == Some(verum_common::source_mode::SourceMode::Script) {
+                command.arg("--script");
+            }
             (None, Some(snapshot))
         };
         let child = command

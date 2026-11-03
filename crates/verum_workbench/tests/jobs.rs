@@ -48,7 +48,7 @@ async fn plans_permissions_and_receipts_describe_the_actual_child_arguments() {
         jobs.start(&request, dir.path().join("lesson.vr")).unwrap();
         let receipt = done(&jobs).await;
         assert_eq!(receipt["status"], "succeeded", "{receipt}");
-        let expected = format!("run\n--interp\n{}--stdin-filepath\n{}\n-\n",
+        let expected = format!("run\n--interp\n{}--stdin-filepath\n{}\n-\n--stdin-mode\nsource\n",
             flag.map(|value| format!("{value}\n")).unwrap_or_default(),
             dir.path().join("lesson.vr").display());
         assert_eq!(receipt["stdout"], expected);
@@ -58,6 +58,19 @@ async fn plans_permissions_and_receipts_describe_the_actual_child_arguments() {
         let mut restored = runner(dir.path(), "exit 0");
         restored.restore().unwrap();
         assert_eq!(restored.list().await[0]["permissions"], policy);
+    }
+}
+
+#[tokio::test]
+async fn explicit_script_mode_is_part_of_both_run_and_check_contracts() {
+    for kind in ["run", "check"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut jobs = runner(dir.path(), "printf '%s\\n' \"$@\"\ncat >/dev/null");
+        jobs.start(&json!({"kind":kind,"path":"entry.vr","source":"let x = 3;","source_mode":"script"}), dir.path().join("entry.vr")).unwrap();
+        let receipt = done(&jobs).await;
+        assert_eq!(receipt["source_mode"], "script");
+        let arguments = receipt["stdout"].as_str().unwrap();
+        assert!(arguments.contains(if kind == "run" { "--stdin-mode\nscript\n" } else { "--script\n" }), "{receipt}");
     }
 }
 

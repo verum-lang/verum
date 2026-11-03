@@ -16,6 +16,8 @@ test('an obsolete analysis cannot describe a new buffer or another file with ide
   assert.equal(sameRevision(snapshot, { ...snapshot }), true);
   assert.equal(sameRevision(snapshot, { ...snapshot, path: 'two.vr' }), false);
   assert.equal(sameRevision(snapshot, { ...snapshot, source: snapshot.source + '\n' }), false);
+  assert.equal(sameRevision(snapshot, { ...snapshot, source_mode: 'script' }), false);
+  assert.equal(sameRevision(snapshot, { ...snapshot, source_mode: 'source' }), true);
 });
 
 test('format edits preserve untouched Unicode and CRLF text and use original coordinates', () => {

@@ -1,4 +1,5 @@
-import { m } from './i18n.ts';
+import { m, t } from './i18n.ts';
+import type { SourceMode } from './model.ts';
 
 export type Position = { line: number; character: number };
 export type Range = { start: Position; end: Position };
@@ -20,9 +21,9 @@ export function analysisScopeLabel(scope: Analysis['analysis_scope']) {
     default: return m('Analysis scope unavailable');
   }
 }
-export type DocumentRevision = { path: string; source: string };
-export type LanguageReply<T> = { source_hash: string; version: number; result: T };
-export const sameRevision = (left: DocumentRevision, right: DocumentRevision) => left.path === right.path && left.source === right.source;
+export type DocumentRevision = { path: string; source: string; source_mode?: SourceMode };
+export type LanguageReply<T> = { source_hash: string; source_mode: SourceMode; version: number; result: T };
+export const sameRevision = (left: DocumentRevision, right: DocumentRevision) => left.path === right.path && left.source === right.source && (left.source_mode ?? 'source') === (right.source_mode ?? 'source');
 
 // JavaScript and LSP both count UTF-16 code units. Never convert these columns to bytes.
 export function positionAt(source: string, offset: number): Position {
@@ -67,5 +68,7 @@ export function textEditChanges(source: string, edits: unknown): Array<{ from: n
 }
 export async function languageRequest<T>(revision: DocumentRevision, method = 'analyze', argument?: Position | FormattingOptions) {
   const { api } = await import('./api');
-  return api<LanguageReply<T>>('language.request', { ...revision, method, ...(argument ? { [method === 'textDocument/formatting' ? 'options' : 'position']: argument } : {}) });
+  const reply = await api<LanguageReply<T>>('language.request', { ...revision, method, ...(argument ? { [method === 'textDocument/formatting' ? 'options' : 'position']: argument } : {}) });
+  if (reply.source_mode !== (revision.source_mode ?? 'source')) throw new Error(t(m('Language analysis did not preserve the requested source mode.')));
+  return reply;
 }

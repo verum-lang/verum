@@ -20,6 +20,7 @@ import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevisio
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, initialToken, isConnected, connectSession, onSessionChange } from './api';
 import { SessionAccessError, SessionChangedError } from './session';
+import type { SourceMode } from './model';
 import { STARTER, IDENTITY, sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
 
 // Register before command/editor handlers. The connection page keeps ordinary
@@ -79,6 +80,8 @@ type SourceFile = { path: string; source: string; hash: string };
 let files: FileRecord[] = [];
 let explorer: ReturnType<typeof installExplorer> | null = null;
 let currentPath = 'experiment.vr';
+const sourceModes = new Map<string, SourceMode>();
+const sourceMode = (): SourceMode => sourceModes.get(currentPath) ?? 'source';
 let savedSource: string | null = null;
 let savedHash: string | null = null;
 let currentHash: string | null = null;
@@ -125,7 +128,7 @@ function updateDocumentState() {
   for (const id of ['run', 'check', 'prove']) $<HTMLButtonElement>(id).disabled = !verum || starting;
   for (const id of ['run-settings', 'architecture-toggle']) $<HTMLButtonElement>(id).disabled = !verum;
   setText($('document-kind'), verum ? 'vr' : '·');
-  setText($('document-language'), verum ? 'Verum' : m('Plain text'));
+  setText($('document-language'), verum ? sourceMode() === 'script' ? m('Verum script') : 'Verum' : m('Plain text'));
 }
 function scheduleHash() {
   const generation = ++hashGeneration;
@@ -141,6 +144,7 @@ function scheduleHash() {
 function loadDocument(path: string, source: string, hash: string | null) {
   editVersion++;
   currentPath = path; savedSource = hash === null ? null : source; savedHash = hash;
+  $<HTMLSelectElement>('source-mode').value = sourceMode();
   editor.document(path); editor.replace(source); scheduleHash(); scheduleAnalysis(); updateDocumentState();
   explorer?.reveal(path).catch(fail); setPane('editor'); sourceView(); editor.view.focus();
 }
@@ -262,7 +266,7 @@ async function newDocument(source = '', suggestion = 'experiment.vr') {
 bind('save', save); bind('refresh-files', refreshFiles); bind('new-file', () => newDocument());
 let analysisGeneration = 0;
 let analysisTimer = 0, analysisBusy = false, analysisPending = false;
-const languageRevision = (): DocumentRevision => ({ path: currentPath, source: editor.source() });
+const languageRevision = (): DocumentRevision => ({ path: currentPath, source: editor.source(), source_mode: sourceMode() });
 function sourceView() {
   $('architecture').hidden = true; $('editor').hidden = false;
   setAttribute($('architecture-toggle'), 'aria-label', m('Source architecture')); $('architecture-toggle').setAttribute('aria-expanded', 'false');
@@ -483,7 +487,7 @@ type EvidencePacket = {
 async function inspectEvidence(revision: DocumentRevision, hash: string, project?: string | null, declaration?: string, operation?: string) {
   if (!sameRevision(revision, languageRevision())) throw new Error(t(m('Source changed. Select a declaration from the current analysis.')));
   const packet = await api<EvidencePacket>('evidence.packet', {
-    path: revision.path, source: revision.source, expected_source_hash: hash,
+    path: revision.path, source: revision.source, source_mode: revision.source_mode, expected_source_hash: hash,
     expected_project_revision: project, declaration_id: declaration, operation_id: operation,
   });
   if (!sameRevision(revision, languageRevision())) throw new Error(t(m('Source changed. Select a declaration from the current analysis.')));
@@ -649,8 +653,15 @@ function operationRequest(kind: Receipt['kind'], diagnostics = input('runtime-di
     throw new Error(t(m('Select a declaration from the current source analysis.')));
   }
   const permissions = $<HTMLSelectElement>('run-permissions').value as RunPermissions;
-  return { kind, source, path, ...(kind === 'proof' && target ? { declaration: target.declaration, proof_profile: target.profile } : {}), ...(kind === 'run' ? { permissions, runtime_diagnostics: diagnostics } : {}), timeout_ms: Math.round(seconds * 1000) };
+  if (kind === 'proof' && sourceMode() === 'script') throw new Error(t(m('Proof replay requires source-declared parsing.')));
+  return { kind, source, path, source_mode: sourceMode(), ...(kind === 'proof' && target ? { declaration: target.declaration, proof_profile: target.profile } : {}), ...(kind === 'run' ? { permissions, runtime_diagnostics: diagnostics } : {}), timeout_ms: Math.round(seconds * 1000) };
 }
+function selectSourceMode(mode: SourceMode) {
+  sourceModes.set(currentPath, mode);
+  $<HTMLSelectElement>('source-mode').value = mode;
+  editVersion++; scheduleAnalysis(); updateDocumentState(); renderResults();
+}
+$('source-mode').addEventListener('change', () => selectSourceMode($<HTMLSelectElement>('source-mode').value as SourceMode));
 for (const id of ['run-permissions', 'runtime-diagnostics', 'timeout', 'declaration', 'proof-profile']) $(id).addEventListener('input', () => { $('execution-plan').hidden = true; });
 bind('preview-run', async () => {
   const request = operationRequest('run'), revision = documentRevision();
@@ -666,10 +677,9 @@ async function startOperation(kind: Receipt['kind'], diagnostics?: boolean) {
   const request = operationRequest(kind, diagnostics);
   starting = true; ['run', 'check', 'prove'].forEach(id => { $<HTMLButtonElement>(id).disabled = true; });
   try {
-    if (kind === 'run' && request.runtime_diagnostics) {
-      const plan = await api<ExecutionPlan>('operation.plan', request);
-      if (plan.runtime_diagnostics !== true) throw new Error(t(m('This Studio host does not support runtime diagnostics. Restart with the matching Studio build.')));
-    }
+    const plan = await api<ExecutionPlan>('operation.plan', request);
+    if (plan.source_mode !== request.source_mode) throw new Error(t(m('This Studio host did not preserve the requested source mode.')));
+    if (kind === 'run' && request.runtime_diagnostics && plan.runtime_diagnostics !== true) throw new Error(t(m('This Studio host does not support runtime diagnostics. Restart with the matching Studio build.')));
     const result = await api<{ id: string }>('operation.start', request);
     selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path: request.path }));
   } finally { starting = false; updateDocumentState(); }
@@ -737,7 +747,7 @@ function renderResults() {
   const receipt = receipts.find(receipt => receipt.id === selectedReceipt);
   setText($('result-summary'), receipt ? m('{kind} · {status}', { kind: resultLabel(receipt.kind), status: m(receipt.status) }) : m('No operations yet'));
   if (!receipt) return;
-  const nextDetail = JSON.stringify(receipt) + currentPath + currentHash + Math.floor(elapsed(receipt) / 1000);
+  const nextDetail = JSON.stringify(receipt) + currentPath + currentHash + sourceMode() + Math.floor(elapsed(receipt) / 1000);
   if (detailSignature === nextDetail) return;
   detailSignature = nextDetail;
   const detail = $('result-detail');
@@ -748,7 +758,7 @@ function renderResults() {
   const restoreFocus = restoreFocusAfterRender(detail);
   detail.replaceChildren(); detail.dataset.receipt = receipt.id;
   const heading = node('div', 'result-heading'); heading.append(node('strong', '', resultLabel(receipt.kind)), node('span', `badge ${receipt.status}`, m(receipt.status)));
-  if (isStale(receipt, currentPath, currentHash)) {
+  if (isStale(receipt, currentPath, currentHash, sourceMode())) {
     const badge = node('span', 'badge stale', currentHash === null && currentPath === receipt.path ? m('Checking revision') : m('Different revision'));
     setAttribute(badge, 'title', m('This result does not describe the current editor source.')); heading.append(badge);
   } else heading.append(node('span', 'badge', m('Current source')));
@@ -756,7 +766,7 @@ function renderResults() {
     const cancel = iconButton('close', m('Cancel'), async () => { await api('operation.cancel', { id: receipt.id }); await refreshOperations(); });
     cancel.dataset.focusKey = 'cancel'; heading.append(cancel);
   }
-  if (currentPath === receipt.path && currentHash === receipt.source_hash) {
+  if (!isStale(receipt, currentPath, currentHash, sourceMode())) {
     const revision = languageRevision();
     heading.append(iconButton('source', m('Inspect operation evidence'), () =>
       inspectEvidence(revision, receipt.source_hash, undefined, undefined, receipt.id)));
@@ -1171,6 +1181,8 @@ const commandRegistry = new CommandRegistry([
   control('run', m('Run source'), 'Mod+Enter', ['editor']), control('check', m('Check source'), 'Mod+Shift+Enter', ['editor']),
   control('prove', m('Check a declaration'), 'Alt+Shift+Enter', ['editor']),
   command('run.cbgr', m('Run with runtime diagnostics'), '', () => startOperation('run', true), ['editor'], () => currentPath.endsWith('.vr') && !starting),
+  command('source.mode.source', m('Use source-declared parsing'), '', () => selectSourceMode('source'), ['editor'], () => currentPath.endsWith('.vr')),
+  command('source.mode.script', m('Use script entry parsing'), '', () => selectSourceMode('script'), ['editor'], () => currentPath.endsWith('.vr')),
   control('run-settings', m('Execution options')), control('preview-run', m('Inspect run plan')),
   control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),
   control('language-status', m('Show module diagnostics')), control('theme', m('Change color theme')),

@@ -297,11 +297,21 @@ async fn packet_binds_one_declaration_and_retained_proof_without_promoting_the_r
     std::fs::create_dir_all(&run).unwrap();
     std::fs::write(run.join("source.vr"), source).unwrap();
     std::fs::write(run.join("receipt.json"), serde_json::to_vec(&json!({
-        "id":"saved-proof","kind":"proof","path":"subject.vr","source_hash":hash,
+        "id":"saved-proof","kind":"proof","path":"subject.vr","source_hash":hash,"source_mode":"source",
         "declaration":"first","proof_profile":request.profile,"status":"succeeded","proof":proof,
         "executable":"verum-source-replay","timeout_ms":1000,"elapsed_ms":1,"exit_code":0,
         "stdout":"","stderr":"","evidence_path":run,"started_unix_ms":1,"termination":"exit","version":1
     })).unwrap()).unwrap();
+    for (id, mode) in [("legacy-proof", None), ("script-proof", Some("script"))] {
+        let mut receipt: Value = serde_json::from_slice(&std::fs::read(run.join("receipt.json")).unwrap()).unwrap();
+        receipt["id"] = json!(id);
+        if let Some(mode) = mode { receipt["source_mode"] = json!(mode); }
+        else { receipt.as_object_mut().unwrap().remove("source_mode"); }
+        let directory = root.path().join(".verum-studio/runs").join(id);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("source.vr"), source).unwrap();
+        std::fs::write(directory.join("receipt.json"), serde_json::to_vec(&receipt).unwrap()).unwrap();
+    }
     let studio = Studio::open(Config {
         workspace: root.path().into(),
         codex: "unused".into(),
@@ -354,6 +364,9 @@ async fn packet_binds_one_declaration_and_retained_proof_without_promoting_the_r
         ("declaration_id", snapshot["declarations"][1]["id"].clone()),
         ("declaration_id", json!("unknown")),
         ("operation_id", json!("missing")),
+        ("operation_id", json!("legacy-proof")),
+        ("operation_id", json!("script-proof")),
+        ("source_mode", json!("script")),
     ] {
         let mut wrong = args.clone();
         wrong[field] = invalid;

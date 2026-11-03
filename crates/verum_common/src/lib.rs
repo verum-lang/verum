@@ -178,6 +178,7 @@ pub mod memory_budget; // Self-imposed memory ceiling (ulimit -v does not work o
 pub mod semantic_types; // Complete semantic types with full API
 pub mod shared; // Thread-safe reference counting (Shared<T>, Weak<T>)
 pub mod span;
+pub mod source_mode;
 pub mod span_utils;
 pub mod text_utf8; // UTF-8-safe primitives (clamp, prefix, truncate, word-bounds)
 pub mod to_text; // ToText trait for converting to Text
