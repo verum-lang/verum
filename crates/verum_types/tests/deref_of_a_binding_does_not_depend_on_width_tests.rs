@@ -63,11 +63,12 @@ fn check_errors(code: &str) -> Vec<String> {
             let _ = checker.register_function_signature(f);
         }
     }
-    module
-        .items
-        .iter()
-        .filter_map(|item| checker.check_item(item).err().map(|e| format!("{:?}", e)))
-        .collect()
+    let mut errors: Vec<_> = module.items.iter()
+        .filter_map(|item| checker.check_item(item).err().map(|e| format!("{e:?}")))
+        .collect();
+    errors.extend(checker.take_deferred_errors().iter().map(|e| format!("{e:?}")));
+    errors.extend(checker.diagnostics().iter().filter(|d| d.is_error()).map(|d| format!("{d:?}")));
+    errors
 }
 
 /// `(*x)` on a binding taken through a `&` scrutinee, one field type per
@@ -162,4 +163,31 @@ fn read(t: Thing) -> Int {
         errs[0].contains("Cannot dereference"),
         "an owned record must still receive E409: {errs:?}"
     );
+}
+
+#[test]
+fn generic_storage_requires_a_declared_deref_target() {
+    let declaration = "type Parcel<T> is { item: T };";
+    for body in [
+        "fn read(x: Parcel<Int>) -> Int { *x }",
+        "fn read(x: Parcel<Int>) -> Int { let value = *x; value }",
+    ] {
+        let errors = check_errors(&format!("{declaration} {body}"));
+        assert_eq!(errors.len(), 1, "{body}: {errors:?}");
+        assert!(errors[0].contains("Cannot dereference"), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn declared_deref_target_can_differ_from_the_storage_parameter() {
+    let errors = check_errors(r#"
+        type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+        type Parcel<T> is { padding: T, item: Int };
+        implement<T> Deref for Parcel<T> {
+            type Target = Int;
+            fn deref(&self) -> &Int { &self.item }
+        }
+        fn read(x: Parcel<Bool>) -> Int { *x }
+    "#);
+    assert!(errors.is_empty(), "declared target: {errors:?}");
 }

@@ -4110,176 +4110,56 @@ impl TypeChecker {
                 inner: Box::new(inner_ty.clone()),
                 mutable: true,
             }),
-            Deref => match inner_ty {
-                // Never propagation
-                Type::Never => Ok(Type::Never),
-                Type::Reference { inner, .. }
-                | Type::CheckedReference { inner, .. }
-                | Type::UnsafeReference { inner, .. }
-                | Type::Ownership { inner, .. }
-                | Type::Pointer { inner, .. }
-                | Type::VolatilePointer { inner, .. } => Ok((**inner).clone()),
-                // Smart pointer types are dereferenceable to T
-                // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — Smart pointer types
-                Type::Generic { name, args } => {
-                    // Protocol-based deref: check for Ref<T>/Deref implementation
-                    if let Some(target_ty) = self.find_deref_target_type(inner_ty) {
-                        // CRITICAL FIX: If the protocol lookup returns an unresolved type variable
-                        // (from a blanket impl like `implement<T> Ref<T> for Heap<T>`), prefer
-                        // the concrete type arg from args[0] when available.
-                        if matches!(&target_ty, Type::Var(_)) && args.len() == 1 {
-                            // Resolve through unifier for recursive types (e.g., Heap<Var>
-                            // where Var was unified with Node from List<Heap<Node>>).
-                            Ok(self.unifier.apply(&args[0]))
-                        } else {
-                            Ok(target_ty)
-                        }
-                    } else if args.len() == 1 {
-                        // Fallback: single-arg generic types are likely smart pointer wrappers
-                        Ok(self.unifier.apply(&args[0]))
-                    } else {
-                        // E409 with the operator's span: this used to be a
-                        // bare `TypeError::Other`, which carries no location,
-                        // so the diagnostic printed
-                        // "<no source location attached to this diagnostic>"
-                        // and the reader had no line to go to.  `span` is a
-                        // parameter of this very function.
-                        Err(TypeError::OtherWithCodeSpanned {
-                            code: verum_common::Text::from("E409"),
-                            msg: format!(
-                                "Cannot dereference non-reference type: {}",
-                                inner_ty
-                            )
-                            .into(),
-                            span,
-                        })
-                    }
-                }
-                Type::Named { path, args } => {
-                    // Protocol-based deref: check for Ref<T>/Deref implementation
-                    if let Some(target_ty) = self.find_deref_target_type(inner_ty) {
-                        // CRITICAL FIX: If the protocol lookup returns an unresolved type variable
-                        // (from a blanket impl like `implement<T> Ref<T> for Heap<T>`), prefer
-                        // the concrete type arg from args[0] when available. The blanket impl's
-                        // fresh type variable won't have been unified with the actual type arg.
-                        if matches!(&target_ty, Type::Var(_)) && args.len() == 1 {
-                            // Resolve the type arg through unification in case it's a Var
-                            // that was unified with a concrete type (e.g., Heap<Var> where
-                            // Var was unified with Node from List<Heap<Node>> indexing).
-                            Ok(self.unifier.apply(&args[0]))
-                        } else {
-                            Ok(target_ty)
-                        }
-                    } else if args.len() == 1 {
-                        // Fallback: single-arg generic types are likely smart pointer wrappers
-                        Ok(self.unifier.apply(&args[0]))
-                    } else if named_primitive_value(path) {
-                        // TRANSPARENT DEREF REACHES SIZED INTEGERS TOO
-                        // (T1338).  The `_` arm at the bottom of this match
-                        // grants `*x` on a value type the identity meaning
-                        // the CBGR model gives it — and it was reachable
-                        // only for the types that own a `Type` variant.
-                        // `Bool`, `Int`, `Float`, `Char` and `Text` do;
-                        // `Int8`…`UInt64` do not, so they arrived here as
-                        // `Named` and were refused.
-                        //
-                        // Measured before the change — one shape, only the
-                        // FIELD TYPE varying:
-                        //
-                        //   Int v=1   Float v=1.0   Bool v=true   Text v=a
-                        //   Int8 Int32 Int64 UInt8 UInt32 UInt64 -> E409
-                        //
-                        // Same declaration, same operator, same scrutinee:
-                        // the verdict followed the WIDTH. That is the
-                        // representation deciding a language question.
-                        //
-                        // E409 keeps its job — a `Named` type that is not a
-                        // primitive value (`Process`, a user record) still
-                        // cannot be dereferenced, which is the case the
-                        // error registry pins.
-                        Ok(inner_ty.clone())
-                    } else {
-                        // E409 with the operator's span: this used to be a
-                        // bare `TypeError::Other`, which carries no location,
-                        // so the diagnostic printed
-                        // "<no source location attached to this diagnostic>"
-                        // and the reader had no line to go to.  `span` is a
-                        // parameter of this very function.
-                        Err(TypeError::OtherWithCodeSpanned {
-                            code: verum_common::Text::from("E409"),
-                            msg: format!(
-                                "Cannot dereference non-reference type: {}",
-                                inner_ty
-                            )
-                            .into(),
-                            span,
-                        })
-                    }
-                }
-                // Auto-deref through protocol bounds
-                // Spec: L0-critical/reference_system/reference_tiers/tier_conversion.vr
-                // When `*r` is used on a type variable `R` with a `Ref<T>` bound,
-                // the dereference returns `T` (the target type from the protocol).
-                Type::Var(var) => {
-                    // First, try to resolve the type variable through unification
-                    let resolved = self.unifier.apply(&Type::Var(*var));
-                    // If the type variable resolved to a reference type, use that
-                    match &resolved {
-                        Type::Reference { inner, .. } => {
-                            return Ok(*inner.clone());
-                        }
-                        Type::CheckedReference { inner, .. } => {
-                            return Ok(*inner.clone());
-                        }
-                        Type::UnsafeReference { inner, .. } => {
-                            return Ok(*inner.clone());
-                        }
-                        _ => {}
-                    }
+            Deref => self.unary_deref_target(inner_ty, span),
+        }
+    }
 
-                    let bounds = self.get_type_var_bounds(var);
-                    for bound in &bounds {
-                        if let Some(ident) = bound.protocol.as_ident() {
-                            let proto_name = ident.name.as_str();
-                            if proto_name == "Ref" || proto_name == "RefMut" {
-                                if let Some(target_ty) = bound.args.first() {
-                                    return Ok(target_ty.clone());
-                                }
-                            }
-                        }
-                    }
-                    // When the type variable is unresolved and has no Ref bound,
-                    // produce a fresh type variable for the deref result.
-                    // This handles cases like `*value` where `value: T` and T
-                    // will be resolved to a reference type later through unification
-                    // (e.g., Iterator.next() returning Maybe<&T>).
-                    let result_var = TypeVar::fresh();
-                    // Constrain: the original var must be a reference to the result
-                    let ref_ty = Type::Reference {
-                        inner: Box::new(Type::Var(result_var)),
-                        mutable: false,
-                    };
-                    let _ = self.unifier.unify(&resolved, &ref_ty, span);
-                    Ok(Type::Var(result_var))
-                }
-                _ => {
-                    if let Some(target_ty) = self.find_deref_target_type(inner_ty) {
-                        Ok(target_ty)
-                    } else if self.in_unsafe_context {
-                        // In unsafe context, allow dereferencing any type
-                        // (raw pointer arithmetic)
-                        Ok(Type::Var(TypeVar::fresh()))
-                    } else {
-                        // Transparent deref: when `*x` is applied to a value type
-                        // (not a reference/pointer), treat it as a no-op and return
-                        // the type itself. This handles common patterns where iterator
-                        // items may be resolved as values rather than references
-                        // (e.g., `for v in map.values() { *v }` where v is already Int).
-                        // Spec: CBGR three-tier reference model — deref on value types is identity.
-                        Ok(inner_ty.clone())
+    /// Explicit dereference has the same operand contract in both inference engines.
+    pub(super) fn unary_deref_target(&mut self, operand: &Type, span: Span) -> Result<Type> {
+        let resolved = self.unifier.apply(operand);
+        let ty = self.unifier.normalize_aliases(&resolved);
+        match &ty {
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. }
+            | Type::Ownership { inner, .. }
+            | Type::Pointer { inner, .. }
+            | Type::VolatilePointer { inner, .. } => Ok((**inner).clone()),
+            Type::Var(var) => {
+                for bound in &self.get_type_var_bounds(var) {
+                    if bound.protocol.as_ident().is_some_and(|id| matches!(id.name.as_str(), "Ref" | "RefMut"))
+                        && let Some(target) = bound.args.first()
+                    {
+                        return Ok(self.unifier.apply(target));
                     }
                 }
-            },
+                // A rigid value parameter retains its type. An unresolved inference
+                // variable can still be constrained by a later reference operand.
+                if self.unifier.is_rigid(*var) {
+                    return Ok(ty);
+                }
+                let target = Type::Var(TypeVar::fresh());
+                self.unifier.unify(&ty, &Type::reference(false, target.clone()), span)?;
+                Ok(target)
+            }
+            _ => {
+                if let Some((owner, _)) = self.conversion_nominal_head(&ty) {
+                    self.ensure_stdlib_type_loaded_transitive(&owner);
+                }
+                if let Some(target) = self.find_deref_target_type(&ty) {
+                    return Ok(self.unifier.apply(&target));
+                }
+                match &ty {
+                    Type::Named { path, args } if args.is_empty() && named_primitive_value(path) => Ok(ty),
+                    Type::Named { .. } | Type::Generic { .. } => Err(TypeError::OtherWithCodeSpanned {
+                        code: "E409".into(),
+                        msg: format!("Cannot dereference non-reference type: {ty}").into(),
+                        span,
+                    }),
+                    // CBGR value operands retain their value type.
+                    _ => Ok(ty),
+                }
+            }
         }
     }
 
