@@ -470,7 +470,7 @@ fn shell_child_polls_both_pipes_and_consumes_its_exit_status() {
     assert_eq!(execute_from_archive(source), 7 * 65536 + 65 * 256 + 66);
 }
 
-fn execute_from_archive(source: &str) -> i64 {
+fn compile_from_archive(source: &str) -> verum_vbc::module::VbcModule {
     let archive =
         PathBuf::from(std::env::var_os("VERUM_TEST_FROZEN_STDLIB").expect("candidate .vbca"));
     let archive = read_archive_from_file(archive).unwrap();
@@ -482,7 +482,11 @@ fn execute_from_archive(source: &str) -> i64 {
     codegen
         .compile_unit_items(&[&app], ItemFailurePolicy::Strict)
         .unwrap();
-    let module = codegen.finalize_module_from_state().unwrap();
+    codegen.finalize_module_from_state().unwrap()
+}
+
+fn execute_from_archive(source: &str) -> i64 {
+    let module = compile_from_archive(source);
     let main = module.find_function_by_name("app.main").unwrap();
     let mut vm = Interpreter::new(Arc::new(module));
     vm.run_global_ctors().unwrap();
@@ -621,4 +625,49 @@ fn archived_select_preserves_both_channel_receiver_witnesses() {
         }
     "#;
     assert_eq!(execute_from_archive(source), 3173);
+}
+
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn pool_checkout_passes_the_session_declaration_to_the_error_mapping_call() {
+    use verum_vbc::{bytecode::decode_instructions, instruction::Instruction, types::{TypeId, TypeRef}};
+
+    let source = r#"
+        module app;
+        mount core.database.common.error.DbError;
+        mount core.database.common.pool_impl.ConnectionPool;
+        type Failure is Database(DbError);
+        type Reader is { pool: ConnectionPool<Int> };
+        implement Reader {
+            fn checkout(&self) -> Result<Int, Failure> {
+                let mut loan = self.pool.acquire().map_err(|error| Failure.Database(error))?;
+                Result.Ok(*loan.conn_mut())
+            }
+        }
+    "#;
+    let module = compile_from_archive(source);
+    let function = module.functions.iter().find(|function|
+        module.get_string(function.name).is_some_and(|name| name.ends_with("Reader.checkout"))
+    ).unwrap();
+    let start = function.bytecode_offset as usize;
+    let code = decode_instructions(&module.bytecode[start..start + function.bytecode_length as usize]).unwrap();
+    let witnesses = code.windows(2).find_map(|pair| match pair {
+        [Instruction::SetCallWitness { type_args }, Instruction::CallM { method_id, .. }]
+            if module.get_string(verum_vbc::types::StringId(*method_id)) == Some("Result.map_err") => Some(type_args),
+        _ => None,
+    }).expect("witnesses of the actual Result.map_err call");
+    let TypeRef::Instantiated { base, args } = &witnesses[0] else {
+        panic!("PooledConnection<Int> expected, got {:?}", witnesses[0]);
+    };
+    let declared_name = |id| module.get_string(module.get_type(id).unwrap().name).unwrap()
+        .rsplit('.').next().unwrap();
+    assert_eq!(declared_name(*base), "PooledConnection");
+    assert_eq!(args.as_slice(), &[TypeRef::Concrete(TypeId::INT)]);
+    let [_, TypeRef::Concrete(error), TypeRef::Concrete(failure), TypeRef::Function { params, return_type, contexts }] =
+        witnesses.as_slice() else { panic!("incomplete mapping witnesses: {witnesses:?}") };
+    assert_eq!(declared_name(*error), "DbError");
+    assert_eq!(declared_name(*failure), "Failure");
+    assert_eq!(params.as_slice(), &[TypeRef::Concrete(*error)]);
+    assert_eq!(**return_type, TypeRef::Concrete(*failure));
+    assert!(contexts.is_empty());
 }

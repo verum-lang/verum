@@ -118,11 +118,17 @@ impl VbcCodegen {
             },
             _ => name.clone(),
         };
+        // A projected place carries the owner's substituted field declaration.
+        // A displayed nominal head cannot recover its nested type arguments.
+        let projection = matches!(root.kind, ExprKind::Field { .. })
+            .then(|| self.declared_expression_result(root, None, 0, 0))
+            .flatten();
         let declared = self
             .declared_nominal_receiver_name(root)
+            .or_else(|| projection.as_ref().and_then(|ty| self.callable_result_name(ty)))
             .or_else(|| name.clone());
         let mut types = ExpressionTypes {
-            callable: None,
+            callable: projection,
             name,
             chain,
             declared,
