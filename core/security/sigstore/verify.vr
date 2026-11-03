@@ -8,41 +8,10 @@
 //               time/{rfc3339, system_time}
 // =============================================================================
 //
-// **Purpose.** End-to-end "keyless" verification per the Sigstore
-// "verification protocol". Given a Sigstore Bundle (DSSE envelope +
-// Fulcio cert chain + Rekor inclusion proof) and an expected OIDC
-// identity (issuer + subject pattern), validate that:
-//
-//   1. Cert chain validates against the Fulcio root CA (via TUF).
-//   2. EE cert was valid at the integrated time recorded by Rekor.
-//   3. The DSSE envelope's signature verifies against the EE cert's
-//      public key.
-//   4. The Rekor inclusion proof is valid (SET + Merkle audit hashes).
-//   5. The EE cert's SAN extension binds to the expected OIDC
-//      identity (issuer URL + subject email/URI/SPIFFE/etc.).
-//
-// **Verification protocol (Sigstore spec §4).**
-//
-//   Inputs: bundle, trust_root, expected_identity
-//   1. Extract cert chain, envelope, tlog entries from bundle.
-//   2. Verify cert chain against trust_root.fulcio_ca with EKU=
-//      codeSigning, time = bundle.tlog_entries[0].integratedTime.
-//   3. For each tlog entry: verify SET via trust_root.rekor_pubkey,
-//      verify inclusion proof if present, check entry references
-//      this envelope (envelope_hash matches body's hash field).
-//   4. Verify DSSE envelope signature using EE cert's SPKI.
-//   5. Extract OIDC identity from EE cert:
-//        - issuer:  custom extension OID 1.3.6.1.4.1.57264.1.1
-//        - subject: SAN entry (email/URI/dnsName/otherName)
-//      Match against expected_identity's `issuer` (exact) +
-//      `subject_pattern` (regex or glob).
-//   6. Return ValidationResult with all verified fields.
-//
-// **Categorical structure.** Verification is the pullback in the
-// category of attestations: bundle + trust_root + expected_identity
-// are projected onto a single ValidationResult that witnesses the
-// commutative diagram of (signature) → (cert) → (OIDC) → (log).
-// =============================================================================
+// Verify the DSSE signature, signer certificate and identity, and a
+// matching Rekor v1 DSSE or in-toto entry. The entry's authenticated
+// integration time supplies the X.509 validation time. Inclusion requires
+// both a Merkle proof and a checkpoint pinned by the caller's trust root.
 
 @arch_module(
     foundation:    Foundation.ZfcTwoInacc,
@@ -65,8 +34,10 @@ module core.security.sigstore.verify;
 
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Set};
-mount core.encoding.json.{JsonValue, decode as json_decode};
+mount core.encoding.base64;
+mount core.encoding.json.{JsonValue, decode_bytes_strict};
 mount core.encoding.pem.{decode_all as pem_decode_all};
+mount core.security.x509.spki.SubjectPublicKey;
 mount core.security.x509.certificate.{X509Certificate, parse_certificate};
 mount core.security.x509.trust_store.{TrustStore};
 mount core.security.x509.ext.{ExtensionSet};
@@ -81,12 +52,12 @@ mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount core.security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify};
 mount core.hash.crypto.sha256.{Sha256, digest};
 mount core.security.provenance.{
-    DsseEnvelope, dsse_envelope_from_json, DsseVerifyError,
+    DsseEnvelope, DsseVerifyError, DSSE_PAYLOAD_TYPE_INTOTO,
 };
 mount core.security.sigstore.types.{
-    SigstoreBundle, LogEntry, EntryBody, HashedRekordBody, IntotoBody,
-    DsseBody, Digest,
+    SigstoreBundle, LogEntry, SIGSTORE_BUNDLE_MEDIA_TYPE, SIGSTORE_BUNDLE_MEDIA_TYPE_V03_LEGACY,
 };
+mount core.security.sigstore.attestation.matches_logged_dsse;
 mount core.security.sigstore.rekor.{
     RekorClientConfig, RekorError,
     verify_entry_set, verify_inclusion_proof,
@@ -104,12 +75,21 @@ mount time.system_time.epoch_seconds;
 // + the Fulcio root CA chain + the Rekor public key. We expose a
 // typed view here.
 
+/// A checkpoint obtained through the caller's authenticated trust channel.
+@derive(Clone, Debug)
+public type TrustedCheckpoint is {
+    log_id_hex: Text,
+    tree_size: Int,
+    root_hash: Text,
+};
+
 @derive(Clone, Debug)
 public type SigstoreTrustRoot is {
     /// Fulcio Certificate Authorities (root + intermediates).
     fulcio_trust_store: TrustStore,
     /// Rekor instance configurations (multiple if a log rotated keys).
     rekor_instances:    List<RekorClientConfig>,
+    checkpoints:        List<TrustedCheckpoint>,
     /// CT log public keys for SCT verification (currently unused;
     /// surfaced for future SCT verification).
     ct_log_keys:        List<P256PublicKey>,
@@ -146,7 +126,7 @@ public type SigstoreVerifyError is
     | InvalidPem(Text)
     | NoCertsInBundle
     | NoTlogEntries
-    | X509Failed(VerificationError)
+    | X509Failed(X509VerifyError)
     | RekorSetFailed(RekorError)
     | RekorInclusionFailed(RekorError)
     | EnvelopeNotInLog { computed_hash: Text }
@@ -185,6 +165,17 @@ implement Debug for SigstoreVerifyError {
 // Output
 // =============================================================================
 
+/// Only facts authenticated by the SET and the trusted checkpoint are exposed.
+@derive(Clone, Debug)
+public type LogAnchor is {
+    log_id_hex: Text,
+    log_index: Int,
+    integrated_time: Int,
+    tree_size: Int,
+    root_hash: Text,
+    body_b64: Text,
+};
+
 @derive(Clone, Debug)
 public type ValidationResult is {
     /// EE cert (Fulcio-issued ephemeral cert).
@@ -197,7 +188,7 @@ public type ValidationResult is {
     /// Integrated time used as the cert validity reference.
     integrated_time:        Int,
     /// Rekor entry that anchored the verification.
-    tlog_entry:             core.security.provenance.TlogEntry,
+    tlog_entry:             LogAnchor,
     /// The DSSE-verified Statement payload (raw JSON).
     statement_payload:      JsonValue,
 }
@@ -218,6 +209,12 @@ public async fn verify_bundle<C: HttpClient>(
     trust:     &SigstoreTrustRoot,
     expected:  &ExpectedIdentity,
 ) -> Result<ValidationResult, SigstoreVerifyError> {
+    if bundle.media_type != SIGSTORE_BUNDLE_MEDIA_TYPE && bundle.media_type != SIGSTORE_BUNDLE_MEDIA_TYPE_V03_LEGACY {
+        return Result.Err(InvalidBundle("unsupported Sigstore bundle media type".to_text()));
+    }
+    if bundle.envelope.payload_type != DSSE_PAYLOAD_TYPE_INTOTO || bundle.envelope.signatures.len() != 1 {
+        return Result.Err(InvalidBundle("expected one in-toto DSSE signature".to_text()));
+    }
     // Step 1: parse cert chain.
     let cert_chain = parse_pem_chain(&bundle.cert_chain_pem)?;
     if cert_chain.is_empty() { return Result.Err(NoCertsInBundle); }
@@ -226,22 +223,16 @@ public async fn verify_bundle<C: HttpClient>(
     let mut k: Int = 1;
     while k < cert_chain.len() { intermediates.push(cert_chain[k].clone()); k = k + 1; }
 
-    // Step 2: ensure tlog entries exist + pick the first one as the
-    // anchor for cert-validity time.
     if bundle.tlog_entries.is_empty() { return Result.Err(NoTlogEntries); }
-    let anchor_entry = &bundle.tlog_entries[0];
-    let integrated_time = anchor_entry.integrated_time.unix_seconds;
-
-    // Step 3: validate EE cert against Fulcio CA at integratedTime.
+    let payload = base64.decode(&bundle.envelope.payload_b64)
+        .map_err(|_| DsseSignatureFailed(DsseVerifyError.DecodeError("payload".to_text())))?;
+    let signature = verified_signature(&bundle.envelope, &ee, &payload)?;
+    let payload_hash = encoding.hex.encode(&Sha256.digest(payload.as_slice()));
     let nb = security.x509.time.time_to_unix(&ee.tbs.validity.not_before);
     let na = security.x509.time.time_to_unix(&ee.tbs.validity.not_after);
-    if integrated_time < nb || integrated_time > na {
-        return Result.Err(InvalidValidityWindow {
-            cert_not_before: nb,
-            cert_not_after:  na,
-            integrated_time,
-        });
-    }
+    let anchor_entry = authenticated_anchor(&bundle.tlog_entries, trust, &bundle.envelope.payload_type,
+        &payload_hash, &signature, &ee.raw_der, nb, na)?;
+    let integrated_time = anchor_entry.integrated_time;
     let mut x509_config = security.x509.verifier.verifier_config_for_code_signing();
     x509_config.now_override = Maybe.Some(integrated_time);
     // Fulcio EE certs are short-lived; revocation checks waste budget.
@@ -252,15 +243,8 @@ public async fn verify_bundle<C: HttpClient>(
     let _x509_result = security.x509.verifier.verify_parsed(http, &ee, &intermediates, &trust.fulcio_trust_store, &x509_config).await
         .map_err(|e| X509Failed(e))?;
 
-    // Step 4: verify each tlog entry's SET against trusted Rekor pubkey.
-    verify_tlog_entries(&bundle.tlog_entries, &trust.rekor_instances)?;
-
-    // Step 5: verify the DSSE envelope's signature against EE cert SPKI.
-    verify_envelope_against_cert(&bundle.envelope, &ee)?;
-
-    // Step 6: extract Statement payload + verify it's anchored in the log.
-    let statement_payload = decode_envelope_payload(&bundle.envelope)?;
-    verify_envelope_in_log(&bundle.envelope, &bundle.tlog_entries)?;
+    let statement_payload = decode_bytes_strict(payload.as_slice(), payload.len())
+        .map_err(|_| InvalidBundle("DSSE payload is not valid JSON".to_text()))?;
 
     // Step 7: extract + match OIDC identity.
     let oidc_issuer = extract_oidc_issuer(&ee).ok_or_else(|| IssuerExtMissing)?;
@@ -286,7 +270,7 @@ public async fn verify_bundle<C: HttpClient>(
         oidc_issuer:       expected.issuer.clone(),
         oidc_subject:      matched_subject,
         integrated_time,
-        tlog_entry:        anchor_entry.clone(),
+        tlog_entry:        anchor_entry,
         statement_payload,
     })
 }
@@ -322,203 +306,71 @@ fn parse_pem_chain(pems: &List<Text>) -> Result<List<X509Certificate>, SigstoreV
 // Step 4 — tlog entry verification
 // =============================================================================
 
-fn verify_tlog_entries(
-    entries: &List<core.security.provenance.TlogEntry>,
-    rekor_instances: &List<RekorClientConfig>,
-) -> Result<(), SigstoreVerifyError> {
-    let mut i: Int = 0;
-    while i < entries.len() {
-        let entry = &entries[i];
-        // Match the entry's log_id against a trusted Rekor instance.
-        let mut matched = false;
-        let mut j: Int = 0;
-        while j < rekor_instances.len() {
-            if rekor_instances[j].log_id_hex == entry.log_id_hex {
-                let log_entry = log_entry_from_provenance(entry);
-                verify_entry_set(&log_entry, &rekor_instances[j])
-                    .map_err(|e| RekorSetFailed(e))?;
-                if entry.inclusion_proof.is_some() {
-                    verify_inclusion_proof(&log_entry)
-                        .map_err(|e| RekorInclusionFailed(e))?;
-                }
-                matched = true;
-                break;
-            }
-            j = j + 1;
+fn authenticated_anchor(
+    entries: &List<LogEntry>, trust: &SigstoreTrustRoot, payload_type: &Text,
+    payload_hash: &Text, signature: &Text, cert_der: &List<Byte>, nb: Int, na: Int,
+) -> Result<LogAnchor, SigstoreVerifyError> {
+    let mut outside_window: Maybe<Int> = Maybe.None;
+    for entry in entries.iter() {
+        // Parse the exact signed body. A separately decoded body has no authority here.
+        let bytes = base64.decode(&entry.body_b64)
+            .map_err(|_| InvalidBundle("invalid Rekor body encoding".to_text()))?;
+        let body = decode_bytes_strict(bytes.as_slice(), bytes.len())
+            .map_err(|_| InvalidBundle("invalid Rekor body JSON".to_text()))?;
+        if !matches_logged_dsse(&body, payload_type, payload_hash, signature, cert_der) { continue; }
+        let config = trust.rekor_instances.iter().find(|log| log.log_id_hex == entry.log_id_hex)
+            .ok_or_else(|| InvalidBundle("untrusted Rekor instance".to_text()))?;
+        verify_entry_set(entry, config).map_err(|e| RekorSetFailed(e))?;
+        let proof = entry.inclusion_proof.as_ref()
+            .ok_or_else(|| InvalidBundle("missing Rekor inclusion proof".to_text()))?;
+        if proof.log_index != entry.log_index || !trust.checkpoints.iter().any(|pin|
+            pin.log_id_hex == entry.log_id_hex && pin.tree_size == proof.tree_size
+            && pin.root_hash == proof.root_hash) {
+            return Result.Err(InvalidBundle("Rekor inclusion proof has no trusted checkpoint".to_text()));
         }
-        if !matched {
-            return Result.Err(RekorSetFailed(RekorError.LogIdMismatch {
-                expected: "<any trusted>".to_text(),
-                found:    entry.log_id_hex.clone(),
-            }));
+        verify_inclusion_proof(entry).map_err(|e| RekorInclusionFailed(e))?;
+        // This same authenticated entry owns its timestamp, body and inclusion.
+        if entry.integrated_time >= nb && entry.integrated_time <= na {
+            return Result.Ok(LogAnchor {
+                log_id_hex: entry.log_id_hex.clone(), log_index: entry.log_index,
+                integrated_time: entry.integrated_time, tree_size: proof.tree_size,
+                root_hash: proof.root_hash.clone(), body_b64: entry.body_b64.clone(),
+            });
         }
-        i = i + 1;
+        outside_window = Maybe.Some(entry.integrated_time);
     }
-    Result.Ok(())
-}
-
-fn log_entry_from_provenance(p: &core.security.provenance.TlogEntry) -> LogEntry {
-    let inclusion = p.inclusion_proof.as_ref().map(|ip| {
-        security.sigstore.types.RekorInclusionProof {
-            log_index:    ip.log_index,
-            tree_size:    ip.tree_size,
-            root_hash:    "".to_text(), // provenance form does not surface root_hash
-            hashes_hex:   ip.hashes_hex.clone(),
-            checkpoint_b64: ip.checkpoint_sig_hex.clone(),
-        }
-    });
-    LogEntry {
-        uuid:            "".to_text(),
-        body_b64:        p.canonicalized_body_b64.clone(),
-        body:            EntryBody.Raw(JsonValue.JsonNull),
-        integrated_time: p.integrated_time.unix_seconds,
-        log_id_hex:      p.log_id_hex.clone(),
-        log_index:       p.log_index,
-        set:             security.sigstore.types.SignedEntryTimestamp { signature_b64: "".to_text() },
-        inclusion_proof: inclusion,
+    if let Maybe.Some(time) = outside_window {
+        return Result.Err(InvalidValidityWindow {
+            cert_not_before: nb, cert_not_after: na, integrated_time: time,
+        });
     }
+    Result.Err(EnvelopeNotInLog { computed_hash: payload_hash.clone() })
 }
 
-// =============================================================================
-// Step 5 — DSSE signature against EE cert
-// =============================================================================
-
-fn verify_envelope_against_cert(
-    envelope: &DsseEnvelope,
-    ee: &X509Certificate,
-) -> Result<(), SigstoreVerifyError> {
-    if envelope.signatures.is_empty() {
-        return Result.Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature));
-    }
-    // Extract the EE cert's SPKI raw public key bytes.
-    let spki_bytes = extract_spki_pubkey_bits(ee);
-    let payload_b64 = &envelope.payload_b64;
-    let payload_bytes = b64_decode(payload_b64)
-        .map_err(|_| DsseSignatureFailed(DsseVerifyError.DecodeError("payload".to_text())))?;
-    // DSSE PAE prefix
-    let pae = security.provenance.dsse_pae(&envelope.payload_type, &payload_bytes);
-
-    // Try each signature against the EE cert's key.
-    let mut i: Int = 0;
-    while i < envelope.signatures.len() {
-        let sig = &envelope.signatures[i];
-        let sig_bytes = b64_decode(&sig.sig_b64)
-            .map_err(|_| DsseSignatureFailed(DsseVerifyError.DecodeError("sig".to_text())))?;
-
-        // Dispatch on EE cert's public key algorithm.
-        match &ee.tbs.spki.public_key {
-            security.x509.spki.SubjectPublicKey.Ed25519(ed) => {
-                if sig_bytes.len() != 64 { i = i + 1; continue; }
-                let mut sig64: Ed25519Signature = [0_u8; 64];
-                let mut k: Int = 0;
-                while k < 64 { sig64[k] = sig_bytes[k]; k = k + 1; }
-                if security.ecc.ed25519.verify(&ed.bytes, pae.as_slice(), &sig64).is_ok() {
-                    return Result.Ok(());
-                }
-            }
-            security.x509.spki.SubjectPublicKey.EcP256(ec) => {
-                let pk = match P256.public_key_from_bytes(ec.bytes.as_slice()) {
-                    Result.Ok(p)  => p,
-                    Result.Err(_) => { i = i + 1; continue; }
-                };
-                let p_sig = match P256.signature_from_der(sig_bytes.as_slice()) {
-                    Result.Ok(s)  => s,
-                    Result.Err(_) => { i = i + 1; continue; }
-                };
-                let digest = Sha256.digest(pae.as_slice());
-                if P256.verify_prehashed(&pk, &digest, &p_sig).is_ok() {
-                    return Result.Ok(());
-                }
-            }
-            _ => {
-                let _ = spki_bytes; // RSA-PSS / RSA-PKCS1 dispatch — follow-up
-            }
+fn verified_signature(
+    envelope: &DsseEnvelope, ee: &X509Certificate, payload: &List<Byte>,
+) -> Result<Text, SigstoreVerifyError> {
+    let sig_bytes = base64.decode(&envelope.signatures[0].sig_b64)
+        .map_err(|_| DsseSignatureFailed(DsseVerifyError.DecodeError("sig".to_text())))?;
+    let pae = security.provenance.dsse_pae(&envelope.payload_type, payload);
+    let valid = match &ee.tbs.spki.public_key {
+        SubjectPublicKey.Ed25519(ed) => {
+            if sig_bytes.len() != 64 { return Result.Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature)); }
+            let mut sig64: Ed25519Signature = [0_u8; 64];
+            for i in 0..64 { sig64[i] = sig_bytes[i]; }
+            security.ecc.ed25519.verify(&ed.bytes, pae.as_slice(), &sig64).is_ok()
         }
-        i = i + 1;
-    }
-    Result.Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature))
-}
-
-fn extract_spki_pubkey_bits(cert: &X509Certificate) -> List<Byte> {
-    cert.tbs.spki.raw_der.clone()
-}
-
-// =============================================================================
-// Step 6a — decode envelope payload + verify transcription
-// =============================================================================
-
-fn decode_envelope_payload(envelope: &DsseEnvelope) -> Result<JsonValue, SigstoreVerifyError> {
-    let payload_bytes = b64_decode(&envelope.payload_b64)
-        .map_err(|_| InvalidBundle("payload not base64".to_text()))?;
-    json_decode(payload_bytes.as_slice())
-        .map_err(|e| InvalidBundle(f"payload not JSON: {e}"))
-}
-
-// =============================================================================
-// Step 6b — envelope hash present in tlog entries
-// =============================================================================
-//
-// Each tlog entry carries a `canonicalizedBody` (base64-encoded
-// canonical JSON of the entry body). For an Intoto/DSSE entry, the
-// body's `envelope_hash` field is SHA-256 of the canonical envelope.
-// We compute the envelope's canonical hash and look for it.
-
-fn verify_envelope_in_log(
-    envelope: &DsseEnvelope,
-    entries:  &List<core.security.provenance.TlogEntry>,
-) -> Result<(), SigstoreVerifyError> {
-    let envelope_json = security.provenance.dsse_envelope_to_json(envelope);
-    let canonical = encoding.jcs.canonicalize(&envelope_json)
-        .map_err(|_| InvalidBundle("envelope canonicalisation failed".to_text()))?;
-    let envelope_hash_hex = encoding.hex.encode(&hash.crypto.sha256.digest(&canonical));
-
-    let mut i: Int = 0;
-    while i < entries.len() {
-        let entry = &entries[i];
-        // Decode the entry's canonicalised body (base64) → JSON.
-        let body_bytes = match b64_decode(&entry.canonicalized_body_b64) {
-            Result.Ok(b)  => b,
-            Result.Err(_) => { i = i + 1; continue; }
-        };
-        let body_value = match json_decode(body_bytes.as_slice()) {
-            Result.Ok(v)  => v,
-            Result.Err(_) => { i = i + 1; continue; }
-        };
-        if body_contains_envelope_hash(&body_value, &envelope_hash_hex) {
-            return Result.Ok(());
-        }
-        i = i + 1;
-    }
-    Result.Err(EnvelopeNotInLog { computed_hash: envelope_hash_hex })
-}
-
-fn body_contains_envelope_hash(body: &JsonValue, want_hex: &Text) -> Bool {
-    // Walk the JSON looking for any `{"algorithm":"sha256","value":"<hex>"}`
-    // shape that matches `want_hex`.
-    match body {
-        JsonValue.Object(obj) => {
-            // Direct match
-            if let (Maybe.Some(alg), Maybe.Some(val)) = (
-                obj.get(&"algorithm".to_text()).and_then(|v| v.as_string()),
-                obj.get(&"value".to_text()).and_then(|v| v.as_string()),
-            ) {
-                if alg == "sha256" && val == *want_hex { return true; }
-            }
-            for (_, child) in obj.iter() {
-                if body_contains_envelope_hash(child, want_hex) { return true; }
-            }
-            false
-        }
-        JsonValue.Array(arr) => {
-            let mut i: Int = 0;
-            while i < arr.len() {
-                if body_contains_envelope_hash(&arr[i], want_hex) { return true; }
-                i = i + 1;
-            }
-            false
+        SubjectPublicKey.EcP256(ec) => {
+            let pk = P256.public_key_from_bytes(ec.bytes.as_slice())
+                .map_err(|_| DsseSignatureFailed(DsseVerifyError.InvalidSignature))?;
+            let sig = P256.signature_from_der(sig_bytes.as_slice())
+                .map_err(|_| DsseSignatureFailed(DsseVerifyError.InvalidSignature))?;
+            P256.verify_prehashed(&pk, &Sha256.digest(pae.as_slice()), &sig).is_ok()
         }
         _ => false,
-    }
+    };
+    if !valid { return Result.Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature)); }
+    Result.Ok(base64.encode(sig_bytes.as_slice()))
 }
 
 // =============================================================================

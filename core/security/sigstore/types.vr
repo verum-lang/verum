@@ -356,14 +356,12 @@ public type FulcioIdentity is {
 // the Bundle just adds verification material + tlog entries on top.
 
 mount core.security.provenance.{
-    DsseEnvelope, dsse_envelope_to_json, dsse_envelope_from_json,
-    RekorInclusionProof as ProvenanceInclusionProof,
-    TlogEntry as ProvenanceTlogEntry,
+    DsseEnvelope,
 };
 
 @derive(Clone, Debug)
 public type SigstoreBundle is {
-    /// Always `application/vnd.dev.sigstore.bundle+json;version=0.3`.
+    /// Versioned Sigstore bundle media type.
     media_type:    Text,
     /// PEM-encoded cert chain leaf-first (or raw DER lifted into
     /// PEM). The first cert is the Fulcio EE cert with the OIDC
@@ -373,10 +371,11 @@ public type SigstoreBundle is {
     /// SLSA / in-toto / SBOM predicate.
     envelope:      DsseEnvelope,
     /// Rekor inclusion proofs — at least one required for SLSA L3.
-    tlog_entries:  List<ProvenanceTlogEntry>,
+    tlog_entries:  List<LogEntry>,
 };
 
-public const SIGSTORE_BUNDLE_MEDIA_TYPE: Text =
+public const SIGSTORE_BUNDLE_MEDIA_TYPE: Text = "application/vnd.dev.sigstore.bundle.v0.3+json";
+public const SIGSTORE_BUNDLE_MEDIA_TYPE_V03_LEGACY: Text =
     "application/vnd.dev.sigstore.bundle+json;version=0.3";
 
 // =============================================================================

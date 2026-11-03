@@ -91,7 +91,7 @@ public mount .fulcio.{
 
 // Re-exports — Verify
 public mount .verify.{
-    SigstoreTrustRoot, ExpectedIdentity, IdentityMatcher,
+    SigstoreTrustRoot, TrustedCheckpoint, LogAnchor, ExpectedIdentity, IdentityMatcher,
     ValidationResult, SigstoreVerifyError,
     verify_bundle, extract_oidc_issuer, extract_oidc_subjects,
 };
