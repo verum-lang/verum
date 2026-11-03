@@ -131,10 +131,6 @@ implement Sync for Heap<T> where T: Send + Sync {}
 implement Send for Shared<T> where T: Send + Sync {}
 implement Sync for Shared<T> where T: Send + Sync {}
 
-// Channel<T> — Send if T is Send (channels transfer ownership)
-implement Send for Channel<T> where T: Send {}
-implement Sync for Channel<T> where T: Send {}
-
 // Mutex<T> — always Sync (that's its purpose), Send if T is Send
 implement Send for Mutex<T> where T: Send {}
 implement Sync for Mutex<T> where T: Send {}

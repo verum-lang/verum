@@ -95,6 +95,11 @@ public type Channel<T> is {
     lock: FutexLock,
 };
 
+// These implementations belong with the channel declaration: synchronization
+// primitives do not depend on the higher-level async channel module.
+implement Send for Channel<T> where T: Send {}
+implement Sync for Channel<T> where T: Send {}
+
 implement Channel<T> {
     public fn new(capacity: Int) -> Channel<T> {
         assert(capacity > 0, "Channel capacity must be positive");
