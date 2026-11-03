@@ -570,6 +570,12 @@ impl Session {
 
     /// Set the cross-cog resolver for external package imports.
     pub fn set_cog_resolver(&mut self, resolver: verum_modules::cog_resolver::CogResolver) {
+        {
+            let mut registry = self.module_registry.write();
+            for name in resolver.cog_names() {
+                registry.register_external_cog(name.clone());
+            }
+        }
         self.cog_resolver = Some(resolver);
     }
 
@@ -995,7 +1001,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         for (name, version, root_path) in deps {
             resolver.register_cog(name, version, root_path);
         }
-        self.cog_resolver = Some(resolver);
+        self.set_cog_resolver(resolver);
     }
 
     /// Create a new compilation session with a pre-populated module registry.

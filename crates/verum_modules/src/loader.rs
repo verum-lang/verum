@@ -334,6 +334,12 @@ impl ModuleSource {
     }
 }
 
+#[derive(Debug)]
+struct SnapshotSource {
+    text: Text,
+    owner: Option<ModulePath>,
+}
+
 /// Module loader - loads modules from the filesystem.
 ///
 /// Implements the file system mapping rules from Section 1.2 of the spec:
@@ -356,7 +362,10 @@ pub struct ModuleLoader {
     /// Root directory for module search
     root_path: PathBuf,
     /// A closed source generation: missing paths never fall back to disk.
-    source_snapshot: Option<Map<PathBuf, Text>>,
+    source_snapshot: Option<Map<PathBuf, SnapshotSource>>,
+    /// Explicit ownership of captured sources outside the ordinary root layout.
+    /// This is an index of the same closed snapshot, never a disk search fallback.
+    snapshot_module_files: Map<String, List<PathBuf>>,
     /// Name of the cog rooted at `root_path`. When set, any module path
     /// whose first segment equals this name is treated as rooted at
     /// the cog itself — the prefix is stripped before file lookup.
@@ -414,6 +423,7 @@ impl ModuleLoader {
         Self {
             root_path: root_path.into(),
             source_snapshot: None,
+            snapshot_module_files: Map::new(),
             cog_name: None,
             next_file_id: 0,
             shared_file_id: None,
@@ -431,7 +441,24 @@ impl ModuleLoader {
     /// Replacing it invalidates parsed modules and path identities together.
     pub fn set_source_snapshot(&mut self, sources: Map<PathBuf, Text>) {
         self.clear_cache();
-        self.source_snapshot = Some(sources);
+        self.source_snapshot = Some(sources.into_iter()
+            .map(|(path, text)| (path, SnapshotSource { text, owner: None })).collect());
+        self.snapshot_module_files.clear();
+    }
+
+    /// Capture module ownership and bytes together. Entries can live outside
+    /// the conventional source root, but participate in its collision rules.
+    /// Replacing a snapshot retires both prior bytes and ownership bindings.
+    pub fn set_owned_source_snapshot(&mut self, sources: Map<PathBuf, (ModulePath, Text)>) {
+        let mut files = Map::new();
+        let mut modules: Map<String, List<PathBuf>> = Map::new();
+        for (path, (owner, source)) in sources {
+            modules.entry(owner.to_string()).or_default().push(path.clone());
+            files.insert(path, SnapshotSource { text: source, owner: Some(owner) });
+        }
+        self.clear_cache();
+        self.source_snapshot = Some(files);
+        self.snapshot_module_files = modules;
     }
 
     fn source_exists(&self, path: &Path) -> bool {
@@ -442,7 +469,7 @@ impl ModuleLoader {
 
     fn read_source(&self, path: &Path) -> std::io::Result<Text> {
         match &self.source_snapshot {
-            Some(files) => files.get(&path.to_path_buf()).cloned().ok_or_else(|| {
+            Some(files) => files.get(&path.to_path_buf()).map(|entry| entry.text.clone()).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     "source is absent from this generation",
@@ -499,22 +526,14 @@ impl ModuleLoader {
         self.cog_name.as_deref()
     }
 
-    /// Canonicalise a dotted path against the current cog name. If
-    /// the path's first segment matches `cog_name`, it's stripped.
-    /// Used both as the key for the loader's own caches and by
-    /// `module_path_to_file_path` below.
+    /// Canonical module identity for caches and captured ownership. Local
+    /// paths are qualified with the current cog, while external cog paths
+    /// retain their identity. Stripping the local cog would conflate, for
+    /// example, local `app.math.item` with external `math.item`.
     fn canonical_key(&self, path: &str) -> String {
-        if let Some(cog) = &self.cog_name {
-            if path == cog.as_str() {
-                return String::new();
-            }
-            if let Some(rest) = path.strip_prefix(cog.as_str()) {
-                if let Some(tail) = rest.strip_prefix('.') {
-                    return tail.to_string();
-                }
-            }
-        }
-        path.to_string()
+        crate::path::qualified_module_key(path, self.cog_name.as_deref(), |first| {
+            self.cog_resolver.as_ref().is_some_and(|resolver| resolver.is_external_cog(first))
+        })
     }
 
     /// Attach a CogResolver for cross-cog module resolution.
@@ -541,6 +560,7 @@ impl ModuleLoader {
         Self {
             root_path: root_path.into(),
             source_snapshot: None,
+            snapshot_module_files: Map::new(),
             cog_name: None,
             next_file_id: 0,
             shared_file_id: None,
@@ -564,6 +584,7 @@ impl ModuleLoader {
         Self {
             root_path: root_path.into(),
             source_snapshot: None,
+            snapshot_module_files: Map::new(),
             cog_name: None,
             next_file_id: 0,
             shared_file_id: None,
@@ -612,55 +633,63 @@ impl ModuleLoader {
         module_path: &ModulePath,
         _module_id: ModuleId,
     ) -> ModuleResult<ModuleSource> {
-        // Cross-cog resolution: if first segment matches an external cog,
-        // search in the cog's root directory instead of the local root.
-        // Clone the resolved root to avoid borrow conflict with &mut self.
-        let cross_cog_target: Option<(PathBuf, ModulePath)> =
-            if let Some(ref cog_resolver) = self.cog_resolver {
-                let segments = module_path.segments();
-                if !segments.is_empty() {
-                    let first_segment = segments[0].as_str();
-                    if cog_resolver.is_external_cog(first_segment) {
-                        cog_resolver
-                            .get_cog_location(first_segment)
-                            .map(|location| {
-                                let rest_segments: List<Text> =
-                                    segments.iter().skip(1).cloned().collect();
-                                let cog_module_path = if rest_segments.is_empty() {
-                                    ModulePath::root()
-                                } else {
-                                    ModulePath::new(rest_segments)
-                                };
-                                (location.source_root(), cog_module_path)
-                            })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-        if let Some((cog_root, cog_module_path)) = cross_cog_target {
-            return self.load_module_from_root(&cog_root, &cog_module_path);
-        }
-
-        let candidates = self.find_module_file(module_path)?;
+        let candidates = self.module_candidates(module_path)?;
         self.resolve_unique_candidate(module_path, &candidates)
-            .and_then(|p| self.load_file(&p))
+            .and_then(|path| self.load_file(&path))
     }
 
-    /// Load a module from a specific root directory (used for cross-cog resolution).
-    fn load_module_from_root(
-        &mut self,
-        root: &std::path::Path,
-        module_path: &ModulePath,
-    ) -> ModuleResult<ModuleSource> {
-        let candidates = self.find_module_file_in_root(root, module_path)?;
-        self.resolve_unique_candidate(module_path, &candidates)
-            .and_then(|p| self.load_file(&p))
+    /// Source layout and explicit generation ownership feed one candidate set.
+    /// A captured entry never overrides another declaration of the same owner.
+    fn module_candidates(&self, module_path: &ModulePath) -> ModuleResult<List<PathBuf>> {
+        let cross_cog_target = self.cog_resolver.as_ref().and_then(|resolver| {
+            let first = module_path.segments().first()?;
+            if !resolver.is_external_cog(first.as_str()) {
+                return None;
+            }
+            let location = resolver.get_cog_location(first.as_str())?;
+            let rest = module_path.segments().iter().skip(1).cloned().collect();
+            Some((location.source_root(), ModulePath::new(rest)))
+        });
+        let mut candidates = match &cross_cog_target {
+            Some((root, relative)) => self.find_module_file_in_root(root, relative)?,
+            None => self.find_module_file(module_path)?,
+        };
+        let requested = module_path.to_string();
+        if let Some(paths) = self.snapshot_module_files.get(&requested) {
+            candidates.extend(paths.iter().cloned());
+        }
+        // Local qualified and relative requests denote the same owner. External
+        // cog bindings retain their full identity, even if a local name matches.
+        if cross_cog_target.is_none() {
+            if let Some(cog) = &self.cog_name {
+                let alias = if requested == cog.as_str() {
+                    String::new()
+                } else if let Some(relative) = requested.strip_prefix(&format!("{cog}.")) {
+                    relative.to_string()
+                } else if requested.is_empty() {
+                    cog.clone()
+                } else {
+                    format!("{cog}.{requested}")
+                };
+                if let Some(paths) = self.snapshot_module_files.get(&alias) {
+                    candidates.extend(paths.iter().cloned());
+                }
+            }
+        }
+        let canonical = self.canonical_key(&requested);
+        // A layout candidate that belongs to another captured owner cannot
+        // introduce an implicit alias. In particular, project main/lib modules
+        // are distinct from an explicitly captured mod.vr root module.
+        candidates.retain(|path| {
+            self.source_snapshot
+                .as_ref()
+                .and_then(|files| files.get(path))
+                .and_then(|entry| entry.owner.as_ref())
+                .is_none_or(|owner| self.canonical_key(&owner.to_string()) == canonical)
+        });
+        candidates.sort();
+        candidates.dedup();
+        Ok(candidates)
     }
 
     /// Walk every candidate path and return the unique one that exists,
@@ -1176,7 +1205,13 @@ impl ModuleLoader {
         module_id: ModuleId,
     ) -> ModuleResult<ModuleInfo> {
         let source = self.load_module(module_path, module_id)?;
-        self.parse_module(&source, module_id, module_path.clone())
+        let owner = if module_path.is_root() {
+            self.cog_name.as_deref().filter(|name| !name.is_empty())
+                .map(ModulePath::from_str).unwrap_or_else(ModulePath::root)
+        } else {
+            ModulePath::from_str(&self.canonical_key(&module_path.to_string()))
+        };
+        self.parse_module(&source, module_id, owner)
     }
 
     /// Get the root path.
@@ -1276,8 +1311,8 @@ pub trait LazyModuleResolver: Send + Sync {
 impl LazyModuleResolver for ModuleLoader {
     fn resolve_module(&mut self, module_path: &str) -> ModuleResult<ModuleInfo> {
         // Canonical-path dedupe — see field docs on `module_path_to_id`.
-        // The key strips the cog-name prefix so that `core.foo.bar` and
-        // `foo.bar` (at cog_name="core") share the same cache slot.
+        // Local `core.foo.bar` and `foo.bar` (at cog_name="core") share
+        // a cache slot; an external cog's owner keeps its distinct identity.
         let key = self.canonical_key(module_path);
         if let Some(cached) = self.module_info_cache.get(&key) {
             return Ok(cached.clone());
@@ -1299,7 +1334,7 @@ impl LazyModuleResolver for ModuleLoader {
         // ModuleLoader can potentially resolve any path within its root
         // The actual existence check happens in resolve_module
         let path = ModulePath::from_str(module_path);
-        match self.find_module_file(&path) {
+        match self.module_candidates(&path) {
             Ok(candidates) => candidates.iter().any(|c| self.source_exists(c)),
             Err(_) => false,
         }

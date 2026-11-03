@@ -67,6 +67,7 @@ impl ModuleObservations {
         let before = &self.before;
         if reads.mutated
             || before.cog_name != current.cog_name
+            || before.external_cogs != current.external_cogs
             || before.path_aliases != current.path_aliases
         {
             return false;

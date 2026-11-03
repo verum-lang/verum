@@ -631,3 +631,27 @@ mod super_resolution_tests {
         assert_eq!(resolved, ModulePath::from_str("a.b.d"));
     }
 }
+
+
+/// Qualify a local request without erasing external cog identity. Callers
+/// supply the configured namespace boundaries; spellings do not imply one.
+pub(crate) fn qualified_module_key(
+    path: &str,
+    cog: Option<&str>,
+    external: impl FnOnce(&str) -> bool,
+) -> String {
+    if path.split('.').next().is_some_and(external) {
+        return path.to_string();
+    }
+    let Some(cog) = cog.filter(|name| !name.is_empty()) else {
+        return path.to_string();
+    };
+    if path.is_empty() {
+        return cog.to_string();
+    }
+    if path == cog || path.strip_prefix(cog).is_some_and(|rest| rest.starts_with('.')) {
+        path.to_string()
+    } else {
+        format!("{cog}.{path}")
+    }
+}

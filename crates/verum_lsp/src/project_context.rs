@@ -423,9 +423,9 @@ impl ProjectContext {
         }
         let snapshot: Map<_, _> = sources
             .iter()
-            .map(|(path, source)| (path.clone(), source.text.clone()))
+            .map(|(path, source)| (path.clone(), (source.owner.clone(), source.text.clone())))
             .collect();
-        loader.set_source_snapshot(snapshot);
+        loader.set_owned_source_snapshot(snapshot);
         let mut cogs = verum_modules::cog_resolver::CogResolver::new();
         for (prefix, directory) in &roots {
             if !prefix.is_empty() {
@@ -439,6 +439,11 @@ impl ProjectContext {
             .map(|library| library.registry.deep_clone())
             .unwrap_or_else(ModuleRegistry::new);
         registry.set_cog_name(cog.as_str());
+        for (prefix, _) in &roots {
+            if !prefix.is_empty() {
+                registry.register_external_cog(prefix.clone());
+            }
+        }
         // Retain source identities across generations so adding a module does
         // not renumber unrelated declarations and their export provenance.
         for source in sources.values() {
@@ -532,18 +537,27 @@ impl ProjectContext {
             let registry = SharedModuleRegistry::from_registry(observed);
             if source.source_mode == SourceMode::Script && source.module_ast.is_none() {
                 if let Some(ast) = &source.ast {
-                    let mut ast = ast.clone();
-                    ast.items = loader.cfg_evaluator().filter_items(&ast.items);
                     let id = source.module_id.expect("source identity allocated");
-                    let mut info = ModuleInfo::new(id, source.owner.clone(), ast.clone(), source.file_id, source.text.clone());
-                    info.exports = extract_exports_from_module(&ast, id, &source.owner)?;
-                    // Only this entry's checker sees the script AST. The shared
-                    // dependency registry retains source-declared module rules.
-                    // This local write conservatively disables read-set reuse.
-                    registry.write().register(info);
+                    match loader.load_module(&source.owner, id) {
+                        Err(error) => issues.push(error.to_string().into()),
+                        Ok(_) if registry.read().get_by_path(source.owner.to_string().as_str()).is_some() => {
+                            issues.push(format!("Source module {} conflicts with an installed library module", source.owner).into());
+                        }
+                        Ok(_) => {
+                            let mut ast = ast.clone();
+                            ast.items = loader.cfg_evaluator().filter_items(&ast.items);
+                            let mut info = ModuleInfo::new(id, source.owner.clone(), ast.clone(), source.file_id, source.text.clone());
+                            info.exports = extract_exports_from_module(&ast, id, &source.owner)?;
+                            // Only this entry's checker sees the script AST. The shared
+                            // dependency registry retains source-declared module rules.
+                            // This local write conservatively disables read-set reuse.
+                            registry.write().register(info);
+                        }
+                    }
                 }
             }
-            let info = registry.read().get_by_path(source.owner.to_string().as_str());
+            let info = registry.read().get_by_path(source.owner.to_string().as_str())
+                .filter(|info| Some(info.id) == source.module_id);
             let Some(info) = info else {
                 documents.with_document_mut(&uri, |doc| {
                     doc.analysis_revision = Some(revision.clone());

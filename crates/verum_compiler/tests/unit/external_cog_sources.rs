@@ -9,6 +9,41 @@ use tempfile::TempDir;
 use verum_common::Text;
 use verum_modules::cog_resolver::CogResolver;
 
+#[test]
+fn dependency_namespace_reaches_both_source_loader_and_registry() {
+    use verum_modules::{ModuleId, ModuleLoader, ModulePath};
+    for from_lockfile in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let local_root = root.path().join("local");
+        let dependency_root = root.path().join("dependency");
+        write(&local_root.join("math/item.vr"), "public fn value() -> Int { 1 }");
+        write(&dependency_root.join("item.vr"), "public fn value() -> Bool { true }");
+        let mut session = Session::new(CompilerOptions {
+            input: local_root.join("main.vr"),
+            check_only: true,
+            ..Default::default()
+        });
+        if from_lockfile {
+            session.register_cog_dependencies(vec![("math".into(), "1".into(), dependency_root)]);
+        } else {
+            let mut resolver = CogResolver::new();
+            resolver.register_cog("math", "1", dependency_root);
+            session.set_cog_resolver(resolver);
+        }
+        let local = ModuleLoader::new(local_root).with_cog_name("core")
+            .load_and_parse(&ModulePath::from_str("core.math.item"), ModuleId::new(100)).unwrap();
+        let external = session.create_module_loader()
+            .load_and_parse(&ModulePath::from_str("math.item"), ModuleId::new(101)).unwrap();
+        let registry = session.module_registry();
+        let mut registry = registry.write();
+        registry.set_cog_name("core");
+        registry.register(local);
+        registry.register(external);
+        assert_eq!(registry.get_by_path("core.math.item").unwrap().id, ModuleId::new(100));
+        assert_eq!(registry.get_by_path("math.item").unwrap().id, ModuleId::new(101));
+    }
+}
+
 struct Fixture {
     directory: TempDir,
     consumer: PathBuf,

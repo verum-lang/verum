@@ -577,3 +577,217 @@ async fn reexport_changes_and_new_previously_missing_modules_invalidate_observat
     project.file("dependency.vr", DEP);
     assert!(errors(&project.snapshot(&main).await).is_empty());
 }
+
+#[tokio::test]
+async fn unsaved_project_entries_share_dependency_types_and_retire_on_close() {
+    for (relative, owner) in [
+        ("draft.vr", "demo.draft"),
+        ("research/draft.vr", "demo.research.draft"),
+        ("src/draft.vr", "demo.draft"),
+    ] {
+        let project = Project::new();
+        project.file("Verum.toml", "[cog]\nname='demo'\n");
+        let dependency = project.file("src/dependency.vr", DEP);
+        let path = project.root.path().join(relative);
+        let uri = Url::from_file_path(&path).unwrap();
+        let source = "mount demo.dependency.{Token, answer}; public fn read(value: Token) -> Int { value.id + answer() }";
+        let backend = project.service.inner();
+        backend.documents.open(uri.clone(), source.into(), 1);
+        assert!(!path.exists(), "the entry must remain unsaved");
+        let first = project.snapshot(&uri).await;
+        assert!(first["parsed"].as_bool().unwrap());
+        assert!(errors(&first).is_empty(), "{relative}: {first:#}");
+        let token = first["bindings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|binding| binding["name"] == "Token")
+            .unwrap();
+        assert_eq!(token["definition"]["uri"], dependency.as_str());
+        assert!(!token["type_display"].as_str().unwrap().is_empty());
+        let consumer = project.open("src/consumer.vr", &format!("mount {owner}.read;"));
+        assert!(errors(&project.snapshot(&consumer).await).is_empty());
+        backend
+            .documents
+            .try_update(&uri, source.replace("value.id + answer()", "true"), 2)
+            .unwrap();
+        let invalid = backend
+            .handle_document_snapshot(SnapshotParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                version: 2,
+            })
+            .await
+            .unwrap();
+        assert!(
+            !errors(&invalid).is_empty(),
+            "invalid return type must be diagnosed: {invalid:#}"
+        );
+        assert!(
+            errors(&invalid).iter().all(|error| !error["message"]
+                .as_str()
+                .unwrap()
+                .contains("unavailable in this source generation")),
+            "{invalid:#}"
+        );
+        assert_ne!(first["project_revision"], invalid["project_revision"]);
+        backend.documents.close(&uri);
+        let closed = project.snapshot(&consumer).await;
+        assert!(
+            !errors(&closed).is_empty(),
+            "closed unsaved entry cannot leave stale exports: {closed:#}"
+        );
+        let graph = backend.handle_project_snapshot(Value::Null).await.unwrap();
+        assert!(
+            graph["sources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|entry| entry["uri"] != uri.as_str())
+        );
+        assert!(!path.exists());
+    }
+}
+
+#[tokio::test]
+async fn root_entry_uses_buffer_bytes_but_cannot_shadow_a_source_module() {
+    let project = Project::new();
+    project.file("Verum.toml", "[cog]\nname='demo'\n");
+    project.file("src/dependency.vr", DEP);
+    let uri = project.file("draft.vr", "invalid disk contents");
+    let source = "mount demo.dependency.answer; public fn read() -> Int { answer() }";
+    project
+        .service
+        .inner()
+        .documents
+        .open(uri.clone(), source.into(), 1);
+    assert!(errors(&project.snapshot(&uri).await).is_empty());
+    let collision = project.file("src/draft.vr", "public fn other() -> Bool { true }");
+    let ambiguous = project.snapshot(&uri).await;
+    assert!(!errors(&ambiguous).is_empty(), "{ambiguous:#}");
+    let graph = project
+        .service
+        .inner()
+        .handle_project_snapshot(Value::Null)
+        .await
+        .unwrap();
+    assert!(
+        graph["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue.as_str().unwrap().contains("E_MODULE_PATH_COLLISION")),
+        "{graph:#}"
+    );
+    std::fs::remove_file(collision.to_file_path().unwrap()).unwrap();
+    assert!(errors(&project.snapshot(&uri).await).is_empty());
+}
+
+#[tokio::test]
+async fn unsaved_script_entry_obeys_the_same_source_ownership_collisions() {
+    let project = Project::new();
+    project.file("Verum.toml", "[cog]\nname='demo'\n");
+    project.file("src/dependency.vr", DEP);
+    let uri = Url::from_file_path(project.root.path().join("draft.vr")).unwrap();
+    project.service.inner().documents.open_with_source_mode(
+        uri.clone(),
+        "mount demo.dependency.answer; let value = answer();".into(),
+        1,
+        verum_common::source_mode::SourceMode::Script,
+    );
+    let valid = project.snapshot(&uri).await;
+    assert!(errors(&valid).is_empty(), "{valid:#}");
+    let collision = project.file("src/draft.vr", "public fn other() -> Bool { true }");
+    let invalid = project.snapshot(&uri).await;
+    assert!(!errors(&invalid).is_empty(), "script parsing cannot grant owner override: {invalid:#}");
+    std::fs::remove_file(collision.to_file_path().unwrap()).unwrap();
+    assert!(errors(&project.snapshot(&uri).await).is_empty());
+}
+
+#[tokio::test]
+async fn script_entry_cannot_replace_an_installed_library_owner() {
+    let project = Project::with_library(Some(library_fixture("Int")));
+    project.file("Verum.toml", "[cog]\nname='portable'\n");
+    let consumer = project.open("src/main.vr", "mount portable.units.Count; fn read(value: Count) -> Int { value }");
+    let uri = Url::from_file_path(project.root.path().join("units.vr")).unwrap();
+    let source = "let value = 42; print(value);";
+    assert!(crate::source_parsing::parse(source, verum_ast::FileId::new(0)).is_err(),
+        "this control must exercise the script-only checker path");
+    project.service.inner().documents.open_with_source_mode(
+        uri.clone(), source.into(), 1,
+        verum_common::source_mode::SourceMode::Script,
+    );
+    let refused = project.snapshot(&uri).await;
+    assert!(!errors(&refused).is_empty(), "an entry must not be checked using a library's source identity: {refused:#}");
+    let imported = project.snapshot(&consumer).await;
+    assert!(errors(&imported).is_empty(), "library ownership must survive an invalid entry: {imported:#}");
+    assert_eq!(imported["bindings"][0]["type_display"], "Int");
+}
+
+#[tokio::test]
+async fn project_root_and_main_lib_modules_do_not_alias_each_others_source() {
+    let project = Project::new();
+    let root = project.open("mod.vr", "public fn root_value() -> Int { 1 }");
+    let main = project.open("main.vr", "fn main() -> Int { 2 }");
+    let lib = project.open("lib.vr", "public fn library_value() -> Int { 3 }");
+    for uri in [&root, &main, &lib] {
+        let snapshot = project.snapshot(uri).await;
+        assert!(errors(&snapshot).is_empty(), "{snapshot:#}");
+    }
+    let graph = project.service.inner().handle_project_snapshot(Value::Null).await.unwrap();
+    for (uri, owner) in [(root, "<root>"), (main, "main"), (lib, "lib")] {
+        let source = graph["sources"].as_array().unwrap().iter()
+            .find(|source| source["uri"] == uri.as_str()).unwrap();
+        assert_eq!(source["module"], owner);
+    }
+    assert!(graph["issues"].as_array().unwrap().is_empty(), "{graph:#}");
+}
+
+#[tokio::test]
+async fn local_and_external_modules_keep_distinct_owners_and_binding_types() {
+    let project = Project::new();
+    project.file(
+        "Verum.toml",
+        "[cog]\nname='demo'\n[dependencies]\nmath={path='vendor/math'}\n",
+    );
+    project.file("vendor/math/Verum.toml", "[cog]\nname='math'\n");
+    let external = project.file("vendor/math/src/item.vr", "public fn value() -> Bool { true }");
+    let local = project.file("src/math/item.vr", "public fn value() -> Int { 42 }");
+    let entry = project.open("src/main.vr", "mount math.item.value as external; mount demo.math.item.value as local; fn first() -> Bool { external() } fn second() -> Int { local() }");
+    let result = project.snapshot(&entry).await;
+    assert!(errors(&result).is_empty(), "{result:#}");
+    for (name, uri, expected) in [("external", external, "Bool"), ("local", local, "Int")] {
+        let binding = result["bindings"].as_array().unwrap().iter()
+            .find(|binding| binding["name"] == name).unwrap();
+        assert_eq!(binding["definition"]["uri"], uri.as_str());
+        assert!(binding["type_display"].as_str().unwrap().contains(expected), "{binding:#}");
+    }
+}
+
+#[tokio::test]
+async fn source_library_owner_conflict_refuses_the_generation_and_recovers_on_close() {
+    let project = Project::with_library(Some(library_fixture("Int")));
+    project.file("Verum.toml", "[cog]\nname='portable'\n");
+    let consumer = project.open("src/main.vr", "mount portable.units.Count; fn read(value: Count) -> Int { value }");
+    let before = project.snapshot(&consumer).await;
+    assert!(errors(&before).is_empty(), "{before:#}");
+    assert_eq!(before["bindings"][0]["type_display"], "Int");
+    let uri = Url::from_file_path(project.root.path().join("units.vr")).unwrap();
+    let source = "let value = 42;";
+    assert!(crate::source_parsing::parse(source, verum_ast::FileId::new(0)).is_ok(),
+        "this control must exercise importable source declarations");
+    project.service.inner().documents.open_with_source_mode(
+        uri.clone(), source.into(), 1, verum_common::source_mode::SourceMode::Script,
+    );
+    let refused = project.snapshot(&uri).await;
+    assert!(!errors(&refused).is_empty(), "{refused:#}");
+    let conflicted = project.snapshot(&consumer).await;
+    assert!(errors(&conflicted).iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("conflicts with an installed library module")), "{conflicted:#}");
+    assert!(conflicted["project_revision"].is_null());
+    assert!(conflicted["bindings"].as_array().unwrap().is_empty());
+    project.service.inner().documents.close(&uri);
+    let recovered = project.snapshot(&consumer).await;
+    assert!(errors(&recovered).is_empty(), "{recovered:#}");
+    assert_eq!(recovered["bindings"], before["bindings"]);
+    assert_eq!(recovered["library_metadata"], before["library_metadata"]);
+    assert_eq!(recovered["project_revision"], before["project_revision"]);
+}

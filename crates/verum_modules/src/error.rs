@@ -845,19 +845,18 @@ impl fmt::Display for ModuleError {
             } => {
                 write!(
                     f,
-                    "module path collision: '{}' resolves to multiple files on disk:\n  using:    {}",
+                    "module path collision: '{}' has multiple source candidates:\n  {}",
                     path,
                     winning_path.display(),
                 )?;
                 for p in losing_paths.iter() {
-                    write!(f, "\n  ignoring: {}", p.display())?;
+                    write!(f, "\n  {}", p.display())?;
                 }
                 write!(
                     f,
-                    "\n  hint: pick exactly one of the file form (`<name>.vr`) \
-                     or the directory form (`<name>/mod.vr`); having both makes \
-                     declarations in the loser invisible at use sites and is \
-                     classified as `E_MODULE_PATH_COLLISION`",
+                    "\n  No source was selected. Give each module a unique source path; \
+                     file and directory forms, or explicit source ownership, must not \
+                     declare the same module twice (`E_MODULE_PATH_COLLISION`).",
                 )
             }
             ModuleError::InvalidPath { path, reason, .. } => {

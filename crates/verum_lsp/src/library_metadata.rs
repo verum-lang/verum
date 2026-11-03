@@ -35,6 +35,9 @@ impl LibraryMetadata {
         for module in verum_types::module_projection::project_modules(&core, None, |_| {
             registry.allocate_id()
         })? {
+            if let Some(cog) = module.path.segments().first() {
+                registry.register_external_cog(cog.clone());
+            }
             registry.register(module);
         }
         let core = Arc::new(core);

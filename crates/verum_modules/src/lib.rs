@@ -111,7 +111,7 @@
 #![allow(dead_code)]
 
 // v6.0-BALANCED semantic types (MANDATORY)
-use verum_common::{List, Map, Maybe, Shared, Text};
+use verum_common::{List, Map, Maybe, Set, Shared, Text};
 
 pub mod cache;
 pub mod cog_resolver;
@@ -303,7 +303,7 @@ impl ModuleInfo {
 pub struct ModuleRegistry {
     /// All loaded modules by ID
     modules: Map<ModuleId, Shared<ModuleInfo>>,
-    /// Canonical (cog-name-stripped) module path → ID mapping.
+    /// Exact declared module owner → ID mapping. Lookup aliases never rewrite it.
     path_to_id: Map<Text, ModuleId>,
     /// Path-alias map: when a user writes `mount X.Y.Z` and the
     /// registry has no module under that exact path, the alias map
@@ -316,12 +316,11 @@ pub struct ModuleRegistry {
     path_aliases: Map<Text, Text>,
     /// Next module ID to allocate
     next_id: Shared<std::sync::atomic::AtomicU32>,
-    /// Name of the primary cog under compilation. When set, module
-    /// paths beginning with this segment are canonicalised by stripping
-    /// the prefix before being used as a lookup key. Mirrors
-    /// `ModuleLoader::cog_name` so that loader and registry agree on
-    /// the same canonical form.
+    /// Namespace used to interpret cog-relative requests. Changing it does
+    /// not change the ownership of any already registered declaration.
     cog_name: Option<String>,
+    /// Explicit external namespace roots from the project/dependency model.
+    external_cogs: Set<Text>,
     observations: Option<std::sync::Arc<parking_lot::Mutex<observations::Reads>>>,
 }
 
@@ -333,6 +332,7 @@ impl ModuleRegistry {
             path_aliases: Map::new(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(0)),
             cog_name: None,
+            external_cogs: Set::new(),
             observations: None,
         }
     }
@@ -363,8 +363,8 @@ impl ModuleRegistry {
         &self.path_aliases
     }
 
-    /// Set the primary cog name (for path canonicalisation on
-    /// register / get_by_path).
+    /// Set the primary cog for relative lookup. Declared owners stay exact,
+    /// including metadata registered before this context was configured.
     pub fn set_cog_name(&mut self, cog_name: impl Into<String>) {
         self.observe_mutation();
         self.cog_name = Some(cog_name.into());
@@ -375,20 +375,10 @@ impl ModuleRegistry {
         self.cog_name.as_deref()
     }
 
-    /// Canonicalise a dotted module path by stripping the cog-name
-    /// prefix when present.
-    fn canonical_key(&self, path: &str) -> String {
-        if let Some(cog) = &self.cog_name {
-            if path == cog.as_str() {
-                return String::new();
-            }
-            if let Some(rest) = path.strip_prefix(cog.as_str()) {
-                if let Some(tail) = rest.strip_prefix('.') {
-                    return tail.to_string();
-                }
-            }
-        }
-        path.to_string()
+    /// Mark a dependency namespace as absolute, rather than cog-relative.
+    pub fn register_external_cog(&mut self, name: impl Into<Text>) {
+        self.observe_mutation();
+        self.external_cogs.insert(name.into());
     }
 
     /// Allocate a new module ID
@@ -420,26 +410,15 @@ impl ModuleRegistry {
 
     /// Register a module.
     ///
-    /// Dedupes by canonical module path: if a module with the same
-    /// path is already registered, the existing entry's ModuleId is
-    /// returned and the incoming `module.id` is ignored. This is
-    /// essential for correctness — without it, calling `register`
-    /// twice for the same path (via any combination of the loader /
-    /// pipeline / type-inference lazy paths) leaves two entries in
-    /// `modules` with distinct ModuleIds, which then appear as
-    /// "different source_modules" in `ExportTable::add_export` and
-    /// raise spurious "Conflicting export" errors.
-    ///
-    /// The existing-entry's exports are merged with the incoming
-    /// module's exports so that partial registrations (e.g. entry
-    /// created by the loader, exports filled in by a later pass)
-    /// coalesce into a single authoritative record.
+    /// Dedupes only the exact declared owner. Loaders resolve request aliases
+    /// before constructing ModuleInfo, so local and external declarations
+    /// cannot coalesce merely because stripping a prefix gives the same text.
+    /// Existing populated entries retain their ID and exports; empty forward
+    /// declarations can be completed without changing that identity.
     pub fn register(&mut self, module: ModuleInfo) -> ModuleId {
         self.observe_mutation();
         self.reserve_id(module.id);
-        let path_str = module.path.to_string();
-        let canonical = self.canonical_key(&path_str);
-        let path_key = Text::from(canonical);
+        let path_key = Text::from(module.path.to_string());
         if let Some(&existing_id) = self.path_to_id.get(&path_key) {
             // Merge exports from the incoming registration into the
             // already-stored entry. Keep the original ModuleId so that
@@ -473,40 +452,32 @@ impl ModuleRegistry {
         self.modules.get(&id).cloned()
     }
 
-    /// Get a module by path. Accepts either the absolute form
-    /// (`core.foo.bar`) or the cog-relative form (`foo.bar`) —
-    /// both canonicalise to the same key.
-    ///
-    /// Stdlib modules are registered from `core/` with their bare paths
-    /// (`shell.exec`, `io.process`); user code addresses them via either
-    /// the bare form or the `core.` prefix. This method probes both —
-    /// canonical form first, then strips the `core.` prefix on miss to
-    /// catch the bare-key registration, then tries adding the `core.`
-    /// prefix in the reverse direction.
+    /// Resolve an exact or cog-relative request without changing ownership.
+    /// A relative spelling with two distinct candidates is unavailable; callers
+    /// must qualify it. Namespace and shorthand aliases are explicit policy.
     pub fn get_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         self.observe(|reads| { reads.paths.insert(path.into()); });
         self.lookup_by_path(path)
     }
 
+    /// Missing and ambiguous are distinct: an alias must never conceal an
+    /// ambiguous direct request by selecting an unrelated third declaration.
+    fn resolve_path_id(&self, path: &str) -> Result<Option<ModuleId>, ()> {
+        let qualified = path::qualified_module_key(path, self.cog_name.as_deref(), |first| {
+            self.external_cogs.contains(&Text::from(first))
+        });
+        let exact = self.path_to_id.get(&Text::from(path)).copied();
+        let relative = self.path_to_id.get(&Text::from(qualified)).copied();
+        match (exact, relative) {
+            (Some(left), Some(right)) if left != right => Err(()),
+            (Some(id), _) | (_, Some(id)) => Ok(Some(id)),
+            _ => Ok(None),
+        }
+    }
+
     fn lookup_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
-        let canonical = self.canonical_key(path);
-        if let Some(id) = self.path_to_id.get(&Text::from(canonical.clone())) {
-            return self.modules.get(id).cloned();
-        }
-        // Try stripping the canonical "core." prefix.
-        if let Some(stripped) = canonical.strip_prefix("core.") {
-            if let Some(id) = self.path_to_id.get(&Text::from(stripped.to_string())) {
-                return self.modules.get(id).cloned();
-            }
-        }
-        // Try adding the canonical "core." prefix.
-        if !canonical.starts_with("core.") && !canonical.starts_with("std.") {
-            let with_core = format!("core.{}", canonical);
-            if let Some(id) = self.path_to_id.get(&Text::from(with_core)) {
-                return self.modules.get(id).cloned();
-            }
-        }
-        Maybe::None
+        self.resolve_path_id(path).ok().flatten()
+            .and_then(|id| self.modules.get(&id).cloned())
     }
 
     /// Alias-aware variant of [`Self::get_by_path`]. Probes the direct
@@ -525,19 +496,12 @@ impl ModuleRegistry {
     }
 
     fn lookup_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
-        // 1. Direct lookup with canonical-key normalisation.
-        if let Maybe::Some(m) = self.lookup_by_path(path) {
-            return Maybe::Some(m);
+        match self.resolve_path_id(path) {
+            Ok(Some(id)) => self.modules.get(&id).cloned(),
+            Ok(None) => self.path_aliases.get(&Text::from(path))
+                .and_then(|canonical| self.lookup_by_path(canonical.as_str())),
+            Err(()) => Maybe::None,
         }
-        // 2. Alias map. Two-level lookup (alias → canonical → ModuleInfo)
-        //  rather than recursive — alias chains are forbidden by
-        //  convention so we never need more than one hop.
-        if let Some(canonical) = self.path_aliases.get(&Text::from(path)) {
-            if let Maybe::Some(m) = self.lookup_by_path(canonical.as_str()) {
-                return Maybe::Some(m);
-            }
-        }
-        Maybe::None
     }
 
     /// Get all modules
@@ -788,6 +752,7 @@ impl ModuleRegistry {
             path_aliases: self.path_aliases.clone(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(max_id + 1)),
             cog_name: self.cog_name.clone(),
+            external_cogs: self.external_cogs.clone(),
             observations: self.observations.clone(),
         }
     }
