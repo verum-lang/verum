@@ -599,3 +599,122 @@ fn actual_integer_formatting_copies_a_shared_record_field() {
         assert!(result.is_empty(), "eager={eager}: {result:?}");
     }
 }
+
+fn namespace_archive_declarations() -> verum_vbc::VbcModule {
+    let namespaces = Parser::new(
+        "module core.parent; public module core; public module api; public module decoy;",
+    )
+    .parse_module()
+    .unwrap();
+    let payload =
+        Parser::new("module core.parent.core; public type Envelope<T> is { public value: T };")
+            .parse_module()
+            .unwrap();
+    let decoy =
+        Parser::new("module core.parent.decoy; public type Envelope<T> is { public value: T };")
+            .parse_module()
+            .unwrap();
+    let api = Parser::new("module core.parent.api; mount super.core as selected; public type Carrier<T> is { public cell: selected.Envelope<T>, public witness: Type };")
+        .parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("core.parent"))
+        .collect_declaration_interface(&[&namespaces, &payload, &decoy, &api])
+        .unwrap();
+    assert!(module.bytecode.is_empty());
+    verum_vbc::deserialize::deserialize_module(&verum_vbc::serialize::serialize_module(&module).unwrap()).unwrap()
+}
+
+
+#[test]
+fn archive_and_sidecar_replay_the_generic_record_in_its_selected_namespace() {
+    // Only decoded archive data reaches the metadata loader and fresh checkers.
+    let module = namespace_archive_declarations();
+    let mut builder = ArchiveBuilder::new();
+    builder.add_module("core.parent", &module, &[]).unwrap();
+    let mut bytes = List::new();
+    verum_vbc::archive::write_archive(&builder.finish(), &mut bytes).unwrap();
+    let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes.as_slice())).unwrap();
+    let metadata = archive_to_core_metadata(&archive).unwrap();
+    let metadata = verum_types::core_metadata::decode_metadata(
+        &verum_types::core_metadata::encode_metadata(&metadata).unwrap()).unwrap();
+    assert_eq!(
+        metadata
+            .declaration_type_bindings
+            .get(&Text::from("core.parent.api"))
+            .unwrap()
+            .get(&Text::from("selected"))
+            .unwrap()
+            .as_deref(),
+        Some("core.parent.core")
+    );
+    let source = "fn inspect<T>(x: core.parent.api.Carrier<T>) -> core.parent.core.Envelope<T> { x.cell } fn value(x: core.parent.api.Carrier<Int>) -> Int { x.cell.value }";
+    for eager in [false, true] {
+        let good = errors(&metadata, source, eager);
+        assert!(good.is_empty(), "eager={eager}: {good:?}");
+        let wrong = errors(
+            &metadata,
+            "fn wrong(x: core.parent.api.Carrier<Int>) -> core.parent.decoy.Envelope<Int> { x.cell }",
+            eager,
+        );
+        assert!(
+            wrong
+                .iter()
+                .any(|message| message.to_lowercase().contains("mismatch")),
+            "eager={eager}: {wrong:?}"
+        );
+        let mut missing = metadata.clone();
+        missing
+            .declaration_type_bindings
+            .get_mut(&Text::from("core.parent.api"))
+            .unwrap()
+            .remove(&Text::from("selected"));
+        let refused = errors(&missing, source, eager);
+        assert!(
+            refused.iter().any(|message| message.contains("selected")),
+            "missing binding, eager={eager}: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn fresh_vbc_consumer_executes_the_same_imported_generic_record() {
+    let archive = namespace_archive_declarations();
+    let consumer = Parser::new(
+        r#"
+        module core.parent.consumer;
+        mount core.parent.api.Carrier;
+        mount core.parent.core.Envelope as Expected;
+        type Envelope<T> is { wrong: T };
+        fn inspect<T>(value: &Carrier<T>) -> T { value.cell.value }
+        fn main() -> Int {
+            let carrier: Carrier<Int> = Carrier { cell: Expected { value: 41 }, witness: Int };
+            inspect<Int>(&carrier)
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let mut importer = VbcCodegen::with_config(CodegenConfig::new("core.parent.consumer"));
+    importer.import_archive_module_types(&archive);
+    importer.collect_unit_declarations(&[&consumer]).unwrap();
+    importer.resolve_pending_imports();
+    importer
+        .compile_default_methods_with_policy(ItemFailurePolicy::Strict)
+        .unwrap();
+    importer
+        .compile_unit_items(&[&consumer], ItemFailurePolicy::Strict)
+        .unwrap();
+    let module = importer.finalize_module_from_state().unwrap();
+    let replay = verum_vbc::deserialize::deserialize_module(&verum_vbc::serialize::serialize_module(&module).unwrap()).unwrap();
+    for module in [module, replay] {
+        let entry = module
+            .find_function_by_name("core.parent.consumer.main")
+            .unwrap();
+        assert_eq!(
+            verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+                .execute_function(entry)
+                .unwrap()
+                .try_as_i64(),
+            Some(41)
+        );
+    }
+}

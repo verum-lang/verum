@@ -537,6 +537,12 @@ impl TypeChecker {
         // Resolve source authority before cached templates so an earlier
         // owner-local load cannot make a private declaration visible elsewhere.
         let qualified = self.path_to_string(path);
+        if self.resolving_source_signature {
+            // A qualified head in an archived declaration uses that owner's
+            // retained namespace bindings, just like an unqualified type name.
+            // It must not become an unresolved forward type in the consumer.
+            return self.resolve_declaring_source_type_with_parameter_key(&qualified, span);
+        }
         if let Some((ty, key)) =
             self.resolve_qualified_source_type_with_parameter_key(&qualified, span)?
         {

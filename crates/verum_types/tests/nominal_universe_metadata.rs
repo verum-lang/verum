@@ -243,6 +243,121 @@ fn imported_generic_defaults_use_the_declaration_scope() {
     }
 }
 
+fn namespace_carrier_metadata(declaration: &str) -> CoreMetadata {
+    let mut data = metadata("core.parent.api", declaration);
+    for owner in ["core.parent.core.deep", "core.parent.decoy.deep"] {
+        let dependency = metadata(owner,
+            "public type Envelope<T> is { public level: Type, public value: T };");
+        data.type_declaration_order.extend(dependency.type_declaration_order);
+        for (key, descriptor) in dependency.types { data.types.insert(key, descriptor); }
+    }
+    data.declaration_type_bindings.entry("core.parent.api".into()).or_default()
+        .insert("selected".into(), Some("core.parent.core".into()));
+    data
+}
+
+#[test]
+fn archived_qualified_generic_heads_replay_their_namespace_binding() {
+    let data = namespace_carrier_metadata(
+        "public type Carrier<T> is { public level: Type, public payload: selected.deep.Envelope<T> };");
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "type Envelope<T> is { public wrong: Bool }; fn payload<T>(x: core.parent.api.Carrier<T>) -> core.parent.core.deep.Envelope<T> { x.payload } fn value(x: core.parent.api.Carrier<Int>) -> Int { x.payload.value }",
+            eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn wrong(x: core.parent.api.Carrier<Int>) -> core.parent.decoy.deep.Envelope<Int> { x.payload }", eager);
+        assert!(errors.iter().any(|error| error.to_lowercase().contains("mismatch")),
+            "foreign owner, eager={eager}: {errors:?}");
+    }
+}
+
+#[test]
+fn archived_qualified_generic_heads_refuse_missing_and_ambiguous_bindings() {
+    let data = namespace_carrier_metadata(
+        "public type Carrier<T> is { public level: Type, public payload: selected.deep.Envelope<T> };");
+    for eager in [false, true] {
+        for binding in [None, Some(None), Some(Some(Text::from("unavailable")))] {
+            let mut invalid = data.clone();
+            let scope = invalid.declaration_type_bindings.get_mut(&Text::from("core.parent.api")).unwrap();
+            scope.remove(&Text::from("selected"));
+            if let Some(binding) = binding.clone() { scope.insert("selected".into(), binding); }
+            let (_, errors) = check(decode_metadata(&encode_metadata(&invalid).unwrap()).unwrap(),
+                "fn value(x: core.parent.api.Carrier<Int>) -> Int { x.payload.value }", eager);
+            assert!(errors.iter().any(|error| error.contains("selected.deep.Envelope")),
+                "binding={binding:?}, eager={eager}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn archived_qualified_defaults_retain_the_selected_parameter_registration() {
+    let data = namespace_carrier_metadata(
+        "public type Carrier<A = selected.deep.Envelope<Int>, B = A> is { public level: Type, public payload: A };");
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let (checker, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn value(x: core.parent.api.Carrier<core.parent.core.deep.Envelope<Int>, Bool>) -> Int { x.payload.value }", eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        let Type::Tuple(defaults) = checker.resolved_type("__type_param_defaults_core.parent.api.Carrier")
+            .expect("the source declaration retains its ordered defaults") else { panic!("default tuple") };
+        assert_eq!(defaults[0].to_string(), "core.parent.core.deep.Envelope<Int>");
+        assert_eq!(defaults[1].to_string(), "A");
+    }
+}
+
+#[test]
+fn archived_qualified_bindings_cannot_grant_cross_owner_private_access() {
+    let mut data = namespace_carrier_metadata(
+        "public type Carrier<T> is { public level: Type, public payload: selected.deep.Envelope<T> };");
+    let descriptor = data.types.get_mut(&Text::from("core.parent.core.deep.Envelope")).unwrap();
+    descriptor.is_public = false;
+    descriptor.source_declaration.as_mut().unwrap().visibility = verum_ast::Visibility::Private;
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn value(x: core.parent.api.Carrier<Int>) -> Int { x.payload.value }", eager);
+        assert!(errors.iter().any(|error| error.contains("Private") && error.contains("core.parent.core.deep")),
+            "eager={eager}: {errors:?}");
+    }
+}
+
+#[test]
+fn archived_qualified_bindings_keep_owner_local_private_access() {
+    let mut data = metadata("core.parent.api",
+        "public type Carrier<T> is { public level: Type, public payload: selected.Envelope<T> };");
+    let mut dependency = metadata("core.parent.api",
+        "type Envelope<T> is { public level: Type, public value: T };");
+    dependency.types.values_mut().next().unwrap().is_public = false;
+    data.type_declaration_order.extend(dependency.type_declaration_order);
+    for (key, descriptor) in dependency.types { data.types.insert(key, descriptor); }
+    data.declaration_type_bindings.entry("core.parent.api".into()).or_default()
+        .insert("selected".into(), Some("core.parent.api".into()));
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            "fn value(x: core.parent.api.Carrier<Int>) -> Int { x.payload.value }", eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+    }
+}
+
+#[test]
+fn archived_qualified_self_and_parameter_projections_keep_their_receiver() {
+    let data = metadata("provider",
+        "public type Reader is protocol { type Item; fn level(&self) -> Type(1); fn take(&self, value: Self.Item) -> Int; };");
+    let bytes = encode_metadata(&data).unwrap();
+    for eager in [false, true] {
+        let source = "fn read<A: provider.Reader>(reader: &A, value: A.Item) -> Int { reader.take(value) }";
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(), source, eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        let (_, errors) = check(decode_metadata(&bytes).unwrap(),
+            &source.replace("-> Int", "-> Bool"), eager);
+        assert!(errors.iter().any(|error| error.to_lowercase().contains("mismatch")),
+            "eager={eager}: {errors:?}");
+    }
+}
+
 #[test]
 fn dependent_record_replay_preserves_the_field_binder_and_meta_index() {
     let mut data = metadata("test.pack", "public type Pack<N: meta Int> is { public carrier: Type, public evidence: Witness<carrier, N> };");

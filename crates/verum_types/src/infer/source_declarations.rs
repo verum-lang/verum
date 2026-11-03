@@ -208,21 +208,38 @@ impl TypeChecker {
             // It must not fall through to a different declaration of `name`.
             if let Some(path) = binding {
                 let path = if tail.is_empty() { path } else { format!("{path}.{tail}").into() };
-                if let Some((owner, declared_name)) = path.rsplit_once('.')
-                    && let Some((ty, key)) = self.ensure_mounted_type_loaded_with_parameter_key(declared_name, owner)
-                {
+                if let Some((ty, key)) = self.load_declaring_archive_type(&path, span)? {
                     return Ok((ty, Some(key)));
                 }
             }
-        } else if let Some((owner, declared_name)) = name.rsplit_once('.')
-            && let Some((ty, key)) = self.ensure_mounted_type_loaded_with_parameter_key(declared_name, owner)
-        {
+        } else if let Some((ty, key)) = self.load_declaring_archive_type(name, span)? {
             return Ok((ty, Some(key)));
         }
         Err(TypeError::TypeNotFound {
             name: name.into(),
             span,
         })
+    }
+
+    /// A retained namespace binding selects a declaration; it does not widen
+    /// that declaration's visibility. Its own source may still name private types.
+    fn load_declaring_archive_type(
+        &mut self, path: &str, span: Span,
+    ) -> Result<Option<(Type, Text)>> {
+        let Some((owner, name)) = path.rsplit_once('.') else { return Ok(None) };
+        let (declared_name, declared_owner) = self.reexport_source_module_for(owner, name)
+            .unwrap_or_else(|| (name.into(), owner.into()));
+        let key: Text = format!("{declared_owner}.{declared_name}").into();
+        if let Some(descriptor) = self.core_metadata.as_ref()
+            .and_then(|metadata| Self::metadata_type_with_declaring_key(metadata, &key))
+            && !descriptor.is_public && declared_owner != self.current_module_path
+        {
+            return Err(TypeError::VisibilityError {
+                name: declared_name, visibility: "Private".into(),
+                module_path: declared_owner, span,
+            });
+        }
+        Ok(self.ensure_mounted_type_loaded_with_parameter_key(name, owner))
     }
 
     /// A source module may privately mount an archive-only declaration in a public signature.
