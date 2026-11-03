@@ -6,8 +6,12 @@ use verum_common::{List, Map, Set, Text};
 
 pub(crate) type ImplementationIndex = Map<Text, List<usize>>;
 
+pub(crate) type NominalIdentities = Map<Text, Text>;
+
 pub struct CoreMetadataSnapshot {
     metadata: Arc<CoreMetadata>,
+    pub(crate) source_owners: Arc<crate::core_metadata::NominalSourceOwners>,
+    pub(crate) identities: Arc<NominalIdentities>,
     pub(crate) implementations: Arc<ImplementationIndex>,
     pub(crate) names: Arc<MetadataNameIndex>,
 }
@@ -19,10 +23,17 @@ impl CoreMetadataSnapshot {
         control.check()?;
         crate::core_metadata::validate_archive_array_extents(&metadata)
             .map_err(crate::TypeError::Other)?;
+        let mut source_owners = crate::core_metadata::NominalSourceOwners::default();
+        source_owners.admit(&metadata).map_err(|message| crate::TypeError::UniverseBinding {
+            message, span: Default::default(),
+        })?;
+        let identities = Arc::new(nominal_identities(&metadata));
         let implementations = implementation_index(&metadata, Some(control), &mut 0)?;
         let names = MetadataNameIndex::prepare(&metadata, Some(control))?;
         Ok(Self {
             metadata,
+            source_owners: Arc::new(source_owners),
+            identities,
             implementations: Arc::new(implementations),
             names: Arc::new(names),
         })
@@ -31,6 +42,13 @@ impl CoreMetadataSnapshot {
     pub fn metadata(&self) -> &Arc<CoreMetadata> {
         &self.metadata
     }
+}
+
+pub(crate) fn nominal_identities(metadata: &CoreMetadata) -> NominalIdentities {
+    metadata.types.iter()
+        .filter(|(_, descriptor)| !matches!(descriptor.kind, crate::core_metadata::TypeDescriptorKind::Alias { .. }))
+        .map(|(key, descriptor)| (key.clone(), crate::core_metadata::nominal_declaring_key(descriptor)))
+        .collect()
 }
 
 /// An accelerator over raw declaration keys, not a declaration authority.

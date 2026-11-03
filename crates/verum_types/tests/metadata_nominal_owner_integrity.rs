@@ -163,11 +163,11 @@ fn every_in_memory_loading_entry_rejects_conflicts_before_registering_types() {
                         checker
                     }
                     _ => {
-                        let snapshot = Arc::new(
-                            CoreMetadataSnapshot::prepare(data, &AnalysisControl::default())
-                                .unwrap(),
-                        );
-                        TypeChecker::new_with_core_snapshot(snapshot)
+                        let Err(error) = CoreMetadataSnapshot::prepare(data, &AnalysisControl::default()) else {
+                            panic!("conflicting declarations must not produce a shareable snapshot")
+                        };
+                        assert_owner_error(&[error], if abi_only { "semantic and ABI-only" } else { "conflicting semantic type declarations" });
+                        continue;
                     }
                 };
                 assert!(checker.core_metadata().is_none(), "mode={mode}");
@@ -282,4 +282,21 @@ fn equal_ast_cannot_change_its_declaring_import_scope_after_admission() {
     assert_owner_error(&checker.take_deferred_errors(), "binding scopes");
     checker.set_core_metadata(Arc::new(accepted));
     assert!(checker.take_deferred_errors().is_empty());
+}
+
+#[test]
+fn sharing_prepared_owners_keeps_replacement_checks_local_and_transactional() {
+    let snapshot = |version| Arc::new(CoreMetadataSnapshot::prepare(
+        Arc::new(metadata(version)), &AnalysisControl::default(),
+    ).unwrap());
+    let initial = snapshot(1);
+    let changed = snapshot(2);
+    let mut first = TypeChecker::new_with_core_snapshot(initial.clone());
+    let mut second = TypeChecker::new_with_core_snapshot(initial.clone());
+    first.set_core_snapshot(&changed);
+    assert_owner_error(&first.take_deferred_errors(), "conflicting semantic type declarations");
+    assert!(std::ptr::eq(first.core_metadata().unwrap(), initial.metadata().as_ref()));
+    second.set_core_snapshot(&initial);
+    assert!(second.take_deferred_errors().is_empty());
+    assert!(std::ptr::eq(second.core_metadata().unwrap(), initial.metadata().as_ref()));
 }

@@ -646,7 +646,7 @@ pub struct TypeChecker {
     /// success so a Berardi-shaped declaration tucked inside an
     /// imported module still aborts the build.
     pub(crate) deferred_soundness_errors: Vec<TypeError>,
-    pub(crate) metadata_source_owners: crate::core_metadata::NominalSourceOwners,
+    pub(crate) metadata_source_owners: std::sync::Arc<crate::core_metadata::NominalSourceOwners>,
     pub(crate) source_type_registration: source_type_registration::SourceTypeRegistration,
     /// Names a refinement predicate mentioned that were not resolvable
     /// AT THE TIME THE TYPE WAS CONVERTED. Re-checked when the module

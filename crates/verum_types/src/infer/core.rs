@@ -1117,18 +1117,28 @@ impl TypeChecker {
         checker
     }
 
-    /// Share only indexes paired with their owning immutable metadata snapshot.
-    /// Protocol registrations and admission receipts remain checker-local.
+    /// Share immutable declarations and lookup indexes. Each checker owns its inference state.
     pub fn new_with_core_snapshot(snapshot: std::sync::Arc<crate::CoreMetadataSnapshot>) -> Self {
         let mut checker = Self::with_minimal_context();
-        let metadata = snapshot.metadata();
-        if !checker.install_core_metadata_scope(metadata.clone()) {
-            return checker;
-        }
-        checker.register_coercion_markers_from_metadata(metadata);
-        checker.metadata_impls_by_owner = Some(snapshot.implementations.clone());
-        checker.metadata_names = std::cell::OnceCell::from(snapshot.names.clone());
+        checker.set_core_snapshot(&snapshot);
         checker
+    }
+
+    /// Fresh checkers share validated ownership. Replacements must also agree with
+    /// every declaration this checker has already admitted.
+    pub fn set_core_snapshot(&mut self, snapshot: &crate::CoreMetadataSnapshot) {
+        let metadata = snapshot.metadata();
+        if self.metadata_source_owners.is_empty() {
+            self.metadata_source_owners = snapshot.source_owners.clone();
+        } else if !std::sync::Arc::ptr_eq(&self.metadata_source_owners, &snapshot.source_owners)
+            && !self.admit_core_metadata(metadata)
+        {
+            return;
+        }
+        self.attach_core_metadata(metadata.clone(), snapshot.identities.clone());
+        self.register_coercion_markers_from_metadata(metadata);
+        self.metadata_impls_by_owner = Some(snapshot.implementations.clone());
+        self.metadata_names = std::cell::OnceCell::from(snapshot.names.clone());
     }
 
     /// One-shot scan of `metadata.implementations` that mirrors
@@ -1184,23 +1194,30 @@ impl TypeChecker {
             self.deferred_soundness_errors.push(TypeError::Other(message));
             return false;
         }
-        self.install_core_metadata_scope(metadata)
+        if !self.admit_core_metadata(&metadata) {
+            return false;
+        }
+        let identities = std::sync::Arc::new(crate::metadata_snapshot::nominal_identities(&metadata));
+        self.attach_core_metadata(metadata, identities);
+        true
     }
 
-    // Raw installations and prepared snapshots have both validated the extents of
-    // this exact allocation. Declaration ownership is checked against this checker.
-    fn install_core_metadata_scope(
-        &mut self,
-        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
-    ) -> bool {
-        if let Err(message) = self.metadata_source_owners.admit(&metadata) {
+    fn admit_core_metadata(&mut self, metadata: &crate::core_metadata::CoreMetadata) -> bool {
+        if let Err(message) = std::sync::Arc::make_mut(&mut self.metadata_source_owners).admit(metadata) {
             self.deferred_soundness_errors.push(TypeError::UniverseBinding {
-                message,
-                span: Span::default(),
+                message, span: Span::default(),
             });
             return false;
         }
-        self.install_metadata_nominal_identity(&metadata);
+        true
+    }
+
+    fn attach_core_metadata(
+        &mut self,
+        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
+        identities: std::sync::Arc<crate::metadata_snapshot::NominalIdentities>,
+    ) {
+        self.install_metadata_nominal_identity(identities);
         self.core_metadata = Maybe::Some(metadata);
         self.metadata_names = std::cell::OnceCell::new();
         self.metadata_own_surface = std::cell::RefCell::new(None);
@@ -1208,7 +1225,6 @@ impl TypeChecker {
         self.metadata_impls_by_owner = Maybe::None;
         self.metadata_impl_receipts.clear();
         self.stdlib_tail_registered.clear();
-        true
     }
 
     pub(super) fn metadata_name_index(
@@ -1232,15 +1248,9 @@ impl TypeChecker {
     /// Retain exact metadata bindings and their declaration owners. This is a
     /// derived snapshot of descriptor facts, not a suffix or visibility lookup.
     /// Transparent aliases keep their existing argument-substitution authority.
-    fn install_metadata_nominal_identity(&mut self, metadata: &crate::core_metadata::CoreMetadata) {
-        let identities: Map<Text, Text> = metadata
-            .types
-            .iter()
-            .filter(|(_, descriptor)| {
-                !matches!(descriptor.kind, crate::core_metadata::TypeDescriptorKind::Alias { .. })
-            })
-            .map(|(key, descriptor)| (key.clone(), Self::metadata_declaring_key(descriptor)))
-            .collect();
+    fn install_metadata_nominal_identity(
+        &mut self, identities: std::sync::Arc<crate::metadata_snapshot::NominalIdentities>,
+    ) {
         self.unifier.set_nominal_identity_resolver(std::sync::Arc::new(move |left, right| {
             let left_owner = identities.get(&Text::from(left));
             let right_owner = identities.get(&Text::from(right));

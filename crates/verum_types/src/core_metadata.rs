@@ -117,6 +117,8 @@ pub(crate) struct NominalSourceOwners {
 }
 
 impl NominalSourceOwners {
+    pub(crate) fn is_empty(&self) -> bool { self.owners.is_empty() }
+
     /// Validate the whole incoming snapshot before recording any of it.
     /// ABI-only duplicates retain their existing path; a semantic declaration
     /// requires an identical AST and lexical binding environment on every copy.
