@@ -1328,7 +1328,7 @@ impl<'s> CompilationPipeline<'s> {
             // shared alias map.
             install_canonical_module_aliases(&mut reg);
         }
-        let resolver = StdlibModuleResolver::new(&config.stdlib_path);
+        let resolver = StdlibModuleResolver::with_target(&config.stdlib_path, session.target_config().clone());
         // Create a shared lazy resolver for on-demand module loading.
         // For stdlib bootstrap, uses the stdlib path as the root.
         // Wire FileId + ModuleId allocators to the session so the

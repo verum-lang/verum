@@ -442,6 +442,16 @@ impl Module {
         }
     }
 
+    /// Index of the first named module declaration without an inline body.
+    /// This declaration names the source file; later declarations introduce
+    /// children. Visibility and the backing filename do not change this rule.
+    pub fn file_header_index(&self) -> Option<usize> {
+        self.items.iter().position(|item| matches!(&item.kind,
+            ItemKind::Module(declaration)
+                if declaration.items.is_none() && !declaration.name.name.is_empty()
+        ))
+    }
+
     /// True iff this module was parsed in script mode. Scripts allow
     /// top-level statements without an enclosing `fn main()`. Encoded as a
     /// synthetic `@![__verum_kind("script")]` attribute (see [`CogKind`]).

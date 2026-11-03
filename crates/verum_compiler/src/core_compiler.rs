@@ -664,43 +664,55 @@ pub struct StdlibModuleResolver {
     modules: HashMap<String, StdlibModule>,
     /// Compilation order (topologically sorted)
     compilation_order: Vec<String>,
-    /// Files backing `@cfg(runtime = "embedded"|"none")` module declarations,
-    /// excluded from the default (full-runtime) bake (task #44). Populated at
-    /// `discover()` from the shared `module_utils::runtime_gated_modules`
-    /// authority so this VBC-compilation walk drops exactly the files that
-    /// `build.rs` drops from the embedded source archive.
-    runtime_excluded: module_utils::RuntimeGatedModules,
+    /// The same target configuration used to compile the selected sources.
+    target: TargetConfig,
 }
 
 impl StdlibModuleResolver {
     /// Creates a new resolver for the given stdlib path
     pub fn new(stdlib_path: impl Into<PathBuf>) -> Self {
+        Self::with_target(stdlib_path, TargetConfig::host())
+    }
+
+    pub fn with_target(stdlib_path: impl Into<PathBuf>, target: TargetConfig) -> Self {
         Self {
             stdlib_path: stdlib_path.into(),
             modules: HashMap::new(),
             compilation_order: Vec::new(),
-            runtime_excluded: module_utils::RuntimeGatedModules::default(),
+            target,
         }
     }
 
     /// Discovers all modules in the stdlib directory
     pub fn discover(&mut self) -> Result<(), CompilationError> {
         let stdlib_path = self.stdlib_path.clone();
-        self.runtime_excluded = module_utils::runtime_gated_modules(&stdlib_path);
-        self.discover_modules(&stdlib_path, "")?;
-        self.resolve_dependencies()?;
-        self.compute_compilation_order()?;
+        self.modules.clear();
+        self.compilation_order.clear();
+        let mut staged = Self::with_target(stdlib_path.clone(), self.target.clone());
+        staged.discover_modules(&stdlib_path, "", module_utils::SourceModuleSelection::unrestricted())?;
+        staged.resolve_dependencies()?;
+        staged.compute_compilation_order()?;
+        self.modules = staged.modules;
+        self.compilation_order = staged.compilation_order;
         Ok(())
     }
 
     /// Recursively discovers modules
-    fn discover_modules(&mut self, dir: &Path, prefix: &str) -> Result<(), CompilationError> {
+    fn discover_modules(&mut self, dir: &Path, prefix: &str, inherited: module_utils::SourceModuleSelection) -> Result<(), CompilationError> {
         if !dir.is_dir() {
             return Err(CompilationError::new(
                 CompilationErrorKind::IoError,
                 format!("Not a directory: {}", dir.display()),
             ));
         }
+
+        let owner = if prefix.is_empty() { "core" } else { prefix };
+        let header = dir.join("mod.vr");
+        let mut selection = if header.is_file() {
+            self.source_selection(&header, owner)?
+        } else { module_utils::SourceModuleSelection::unrestricted() };
+        selection.intersect(inherited);
+        if !selection.include { return Ok(()); }
 
         let entries = std::fs::read_dir(dir).map_err(|e| {
             CompilationError::new(
@@ -733,24 +745,18 @@ impl StdlibModuleResolver {
                 // global-intern field fallbacks traced 2026-07-05) and
                 // perturbed the precompile content hash on every test
                 // run.  Twin guards live in `precompile.rs`'s walkers.
-                if !name.starts_with('.') && !name.starts_with('_') && name != "target" {
+                if !name.starts_with('.') && !name.starts_with('_') && name != "target"
+                    && selection.includes_child(&name) {
                     subdirs.push((path, name));
                 }
             } else if path.extension().map_or(false, |e| e == "vr") {
-                // Drop files backing `@cfg(runtime = "embedded"|"none")`
-                // module declarations from the default bake (task #44).
-                // These are file-submodules (e.g. `sys/embedded.vr`) swept
-                // into the parent directory's module; without this guard
-                // their symbols land in the default `runtime.vbca` and
-                // collide with the full-runtime types (#41 dup-type class).
-                let rel = path
-                    .strip_prefix(&self.stdlib_path)
-                    .ok()
-                    .map(|p| p.to_string_lossy().replace('\\', "/"));
-                if let Some(rel) = &rel {
-                    if self.runtime_excluded.excludes(rel) {
+                let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or_default();
+                if stem != "mod" {
+                    if !selection.includes_child(stem) {
                         continue;
                     }
+                    let file_owner = format!("{owner}.{stem}");
+                    if !self.source_selection(&path, &file_owner)?.include { continue; }
                 }
                 vr_files.push(path);
             }
@@ -792,7 +798,6 @@ impl StdlibModuleResolver {
         }
 
         // Process subdirectories
-        let target = TargetConfig::host();
         for (subdir, name) in subdirs {
             let new_prefix = if prefix.is_empty() {
                 // Root level subdirs get "core." prefix (e.g., simd -> core.simd)
@@ -801,36 +806,23 @@ impl StdlibModuleResolver {
                 format!("{}.{}", prefix, name)
             };
 
-            // Skip an entire subtree backing a `@cfg(runtime="embedded"|"none")`
-            // module declaration (task #44 — directory-submodule form).
-            let subdir_rel = subdir
-                .strip_prefix(&self.stdlib_path)
-                .ok()
-                .map(|p| format!("{}/", p.to_string_lossy().replace('\\', "/")));
-            if let Some(subdir_rel) = &subdir_rel {
-                if self.runtime_excluded.excludes(subdir_rel) {
-                    continue;
-                }
-            }
-
-            // Check for module-level @cfg in mod.vr
-            // If @cfg evaluates to false, skip this entire module directory
-            let mod_vr_path = subdir.join("mod.vr");
-            if mod_vr_path.exists() && !module_utils::check_module_cfg(&mod_vr_path, &target) {
-                // Module has @cfg that doesn't match current target - skip entirely
-                continue;
-            }
-
-            self.discover_modules(&subdir, &new_prefix)?;
+            self.discover_modules(&subdir, &new_prefix, selection.for_child(&name))?;
         }
 
         Ok(())
     }
 
+    fn source_selection(&self, path: &Path, owner: &str) -> Result<module_utils::SourceModuleSelection, CompilationError> {
+        let source = std::fs::read_to_string(path).map_err(|error| CompilationError::new(
+            CompilationErrorKind::IoError, format!("cannot read {}: {error}", path.display()),
+        ))?;
+        module_utils::source_module_selection(&source, owner, &self.target).map_err(|error|
+            CompilationError::new(CompilationErrorKind::ParseError, format!("{}: {error}", path.display())))
+    }
+
     /// Resolves dependencies between modules by analyzing imports.
-    /// Dependencies on platform-specific modules are filtered based on the host target.
+    /// Dependencies may only name modules retained by source selection.
     fn resolve_dependencies(&mut self) -> Result<(), CompilationError> {
-        let target = TargetConfig::host();
 
         // Known dependency structure for stdlib
         // This is based on the module analysis done earlier
@@ -972,12 +964,13 @@ impl StdlibModuleResolver {
         .into_iter()
         .collect();
 
-        // Update dependencies, filtering platform-specific modules based on target
+        // Source discovery is the authority for which target modules exist.
+        let available: HashSet<_> = self.modules.keys().cloned().collect();
         for (name, deps) in known_deps {
             if let Some(module) = self.modules.get_mut(name) {
                 module.dependencies = deps
                     .iter()
-                    .filter(|dep| module_utils::should_compile_module_for_target(dep, &target))
+                    .filter(|dep| available.contains(**dep))
                     .map(|s| s.to_string())
                     .collect();
             }
@@ -1013,7 +1006,7 @@ impl StdlibModuleResolver {
         // if the scan derives a cycle, it's a genuine bug in the source
         // (a mount that should be inverted), not a defect of this gate.
         // ====================================================================
-        self.augment_dependencies_from_mounts(&target)?;
+        self.augment_dependencies_from_mounts()?;
 
         Ok(())
     }
@@ -1022,10 +1015,7 @@ impl StdlibModuleResolver {
     /// declarations and add the implied top-level module dependency.
     /// Augments (never overwrites) the entries in `known_deps`. See the
     /// comment at the call site for the architectural rationale.
-    fn augment_dependencies_from_mounts(
-        &mut self,
-        target: &TargetConfig,
-    ) -> Result<(), CompilationError> {
+    fn augment_dependencies_from_mounts(&mut self) -> Result<(), CompilationError> {
         // Foundation modules whose registered `@intrinsic`-decorated
         // declarations user-side codegen's mount-resolution looks up by
         // exact qualified name. When these compile BEFORE their
@@ -1197,7 +1187,7 @@ impl StdlibModuleResolver {
         sorted_edges.sort();
 
         for (consumer, dep) in sorted_edges {
-            if !module_utils::should_compile_module_for_target(&dep, target) {
+            if !self.modules.contains_key(&dep) {
                 continue;
             }
             // Skip if the consumer module doesn't exist (already
@@ -1307,15 +1297,10 @@ impl StdlibModuleResolver {
         Ok(())
     }
 
-    /// Returns modules in compilation order, filtered by the current platform.
-    /// Platform-specific modules (sys.linux, sys.darwin, sys.windows) are only
-    /// included when they match the host target_os.
+    /// Returns modules already selected by their source declarations and target.
     pub fn modules_in_order(&self) -> Vec<&StdlibModule> {
-        let target = TargetConfig::host();
-
         self.compilation_order
             .iter()
-            .filter(|name| module_utils::should_compile_module_for_target(name, &target))
             .filter_map(|name| self.modules.get(name))
             .collect()
     }

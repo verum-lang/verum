@@ -3215,28 +3215,11 @@ impl VbcCodegen {
     }
 
     fn extract_source_module_name(module: &Module) -> Option<String> {
-        for item in module.items.iter() {
-            if let ItemKind::Module(decl) = &item.kind {
-                // Only a bodiless header declaration (`module X;`, the stdlib
-                // file-identity form) names THIS file's source module. An
-                // INLINE module (`module X { ... }`, carrying a body) is a
-                // CHILD module, never the file's own identity — adopting its
-                // name as the file's source module qualifies the file's own
-                // free functions under it, so a user program's top-level
-                // `fn main` became `X.main` and entry-point detection could no
-                // longer find bare `main` ("No main function found in VBC
-                // module"). Skip inline modules; keep scanning for a header
-                // (T0534: any top-level inline module dropped `main`).
-                if decl.items.is_some() {
-                    continue;
-                }
-                let name = decl.name.name.to_string();
-                if !name.is_empty() {
-                    return Some(name);
-                }
-            }
+        let header = &module.items[module.file_header_index()?];
+        match &header.kind {
+            ItemKind::Module(declaration) => Some(declaration.name.name.to_string()),
+            _ => None,
         }
-        None
     }
 
     /// Resolve the full module path for the AST being compiled, given
@@ -8838,14 +8821,9 @@ impl VbcCodegen {
             // The first named bodiless declaration is the file header selected
             // by extract_source_module_name, already published above. Later or
             // nested forward declarations still introduce child owners.
-            let mut header_seen = false;
-            for item in &module.items {
-                if !header_seen && matches!(&item.kind,
-                    ItemKind::Module(decl) if decl.items.is_none() && !decl.name.name.is_empty()
-                ) {
-                    header_seen = true;
-                    continue;
-                }
+            let header = module.file_header_index();
+            for (index, item) in module.items.iter().enumerate() {
+                if Some(index) == header { continue; }
                 self.collect_source_module_owners(std::slice::from_ref(item), &owner);
             }
         }
