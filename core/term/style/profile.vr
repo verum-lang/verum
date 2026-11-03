@@ -53,28 +53,12 @@ public type ColorProfile is
 ///  adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), NoColor) -> Color.Reset
 public fn adapt_color(color: Color, profile: ColorProfile) -> Color {
     match (color, profile) {
-        // True color: no changes needed
-        (_, TrueColor) => color,
-
-        // Downscale Rgb to Ansi256 palette
-        (Rgb(rgb), Ansi256) => Color.Ansi256(rgb.to_ansi256()),
-
-        // Downscale Rgb to Base16
-        (Rgb(rgb), Base16) => rgb.to_base16(),
-
-        // Hsl: convert to Rgb first, then downscale
-        (Hsl(hsl), _) => adapt_color(Color.TrueColor(hsl.to_rgb()), profile),
-
-        // Ansi256 to Base16: convert via approximate Rgb
-        (Ansi256(n), Base16) => {
-            let rgb = ansi256_to_approx_rgb(n);
-            rgb.to_base16()
-        }
-
-        // NoColor: strip all color information
-        (_, NoColor) => Color.Reset,
-
-        // Base16/Ansi256 colors at their own level or above: no change
+        (_, ColorProfile.NoColor) => Color.Reset,
+        (_, ColorProfile.TrueColor) => color,
+        (Color.TrueColor(rgb), ColorProfile.Ansi256) => Color.Ansi256(rgb.to_ansi256()),
+        (Color.TrueColor(rgb), ColorProfile.Base16) => rgb.to_base16(),
+        (Color.FromHsl(hsl), _) => adapt_color(Color.TrueColor(hsl.to_rgb()), profile),
+        (Color.Ansi256(n), ColorProfile.Base16) => ansi256_to_approx_rgb(n).to_base16(),
         _ => color,
     }
 }

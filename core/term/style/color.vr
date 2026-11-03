@@ -15,7 +15,7 @@
 )
 module core.term.style.color;
 
-mount core.math.{sqrt, pow, abs};
+mount core.math.{sqrt, pow};
 mount super.convert.{srgb_to_linear, linear_to_srgb, rgb_to_hsl, hsl_to_rgb, parse_hex_pair};
 
 // =============================================================================
@@ -189,7 +189,7 @@ implement Rgb {
         let gray_color = 232 + gray_idx;
 
         // Snap to 6x6x6 color cube (indices 16-231)
-        let cube_levels = [0, 0x5F, 0x87, 0xAF, 0xD7, 0xFF];
+        let cube_levels: [Int; 6] = [0, 0x5F, 0x87, 0xAF, 0xD7, 0xFF];
         let cr = nearest_cube_index(self.r as Int, &cube_levels);
         let cg = nearest_cube_index(self.g as Int, &cube_levels);
         let cb = nearest_cube_index(self.b as Int, &cube_levels);
@@ -313,17 +313,12 @@ fn lab_f(t: Float) -> Float {
 
 /// Find the index of the nearest value in the 6-level cube array.
 /// Used for mapping an 8-bit channel value to the 6x6x6 Ansi256 cube.
-fn nearest_cube_index(val: Int, levels: &List<Int>) -> Int {
-    let mut best = 0;
-    let mut best_diff = abs(val - levels[0]);
-    for i in 1..6 {
-        let diff = abs(val - levels[i]);
-        if diff < best_diff {
-            best_diff = diff;
-            best = i;
-        }
+fn nearest_cube_index(val: Int, levels: &[Int; 6]) -> Int {
+    // Palette levels are increasing. An exact midpoint rounds to the lower index.
+    for i in 1..levels.len() {
+        if 2 * val <= levels[i - 1] + levels[i] { return i - 1; }
     }
-    best
+    levels.len() - 1
 }
 
 // =============================================================================

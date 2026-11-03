@@ -14,6 +14,7 @@
 // =============================================================================
 
 mount core.term.style.color.{Rgb, Hsl, Color, Lab};
+mount core.term.style.profile.{ColorProfile, adapt_color};
 mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
@@ -289,4 +290,16 @@ fn test_to_lab_red_is_not_neutral() {
     let red = Rgb { r: 255_u8, g: 0_u8, b: 0_u8 };
     let lab = red.to_lab();
     assert(lab.a > 50.0);
+}
+
+@test
+fn test_profile_adaptation_uses_color_payloads_and_terminal_capability() {
+    let rgb = Rgb.new(255_u8, 0_u8, 0_u8);
+    let hsl = Hsl.new(0.0, 1.0, 0.5);
+    assert(adapt_color(Color.FromHsl(hsl), ColorProfile.NoColor) is Color.Reset);
+    assert(adapt_color(Color.FromHsl(hsl), ColorProfile.TrueColor) is Color.FromHsl);
+    assert_eq(adapt_color(Color.TrueColor(rgb), ColorProfile.Ansi256), Color.Ansi256(196));
+    assert_eq(adapt_color(Color.FromHsl(hsl), ColorProfile.Base16), Color.DarkRed);
+    assert_eq(adapt_color(Color.Ansi256(0), ColorProfile.Base16), Color.Black);
+    assert_eq(adapt_color(Color.Blue, ColorProfile.Ansi256), Color.Blue);
 }
