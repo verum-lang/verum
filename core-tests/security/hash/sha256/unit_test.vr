@@ -2,17 +2,16 @@
 // core-tests/security/hash/sha256/unit_test.vr
 // =============================================================================
 //
-// `core/security/hash/sha256.vr` — SHA-256 / FIPS 180-4 §6.2.
+// `core/hash/crypto/sha256.vr` — SHA-256 / FIPS 180-4 §6.2.
 //
 // Pure-data surface tested:
 //   * BLOCK_SIZE / OUTPUT_SIZE canonical values
 //   * Width-relationship invariants
 //
-// Streaming Sha256 record + digest() entry deferred behind byte-array
-// compile-time class.
+// Independent streaming states are checked against complete digest vectors.
 // =============================================================================
 
-mount core.hash.crypto.sha256.{BLOCK_SIZE, OUTPUT_SIZE};
+mount core.hash.crypto.sha256.{Sha256, BLOCK_SIZE, OUTPUT_SIZE};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -66,6 +65,33 @@ fn test_sha256_output_is_eight_x_uint32() {
 fn test_sha256_constants_positive() {
     assert(BLOCK_SIZE > 0);
     assert(OUTPUT_SIZE > 0);
+}
+
+@test
+fn test_streaming_states_own_their_initial_words() {
+    let mut filled = Sha256.new();
+    let empty = Sha256.new();
+    filled.update(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let actual_full = filled.finalize();
+    let actual_empty = empty.finalize();
+    let expected_full: [Byte; 32] = [
+        0xff, 0xe0, 0x54, 0xfe, 0x7a, 0xe0, 0xcb, 0x6d,
+        0xc6, 0x5c, 0x3a, 0xf9, 0xb6, 0x1d, 0x52, 0x09,
+        0xf4, 0x39, 0x85, 0x1d, 0xb4, 0x3d, 0x0b, 0xa5,
+        0x99, 0x73, 0x37, 0xdf, 0x15, 0x46, 0x68, 0xeb,
+    ];
+    let expected_empty: [Byte; 32] = [
+        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+        0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+        0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+        0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+    ];
+    let mut i = 0;
+    while i < 32 {
+        assert_eq(actual_full[i], expected_full[i]);
+        assert_eq(actual_empty[i], expected_empty[i]);
+        i = i + 1;
+    }
 }
 
 fn main() {}

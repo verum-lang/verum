@@ -71,10 +71,6 @@ module core.hash.crypto.sha256;
 
 /// Initial hash values H(0)..H(7) (first 32 bits of fractional parts of
 /// square roots of the first 8 primes 2..19). FIPS 180-4 §5.3.3.
-// `public` qualifier required — without it the const isn't properly
-// extracted at load time and `H_INIT[i]` access in `Sha256.new`
-// receives a Bool placeholder, failing with GetE pointer-mismatch
-// (sister to the Char-const fix in commit c14e4ca87).
 public const H_INIT: [UInt32; 8] = [
     0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
     0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
@@ -128,10 +124,7 @@ implement Sha256 {
     @inline
     public fn new() -> Sha256 {
         Sha256 {
-            h: [
-                H_INIT[0], H_INIT[1], H_INIT[2], H_INIT[3],
-                H_INIT[4], H_INIT[5], H_INIT[6], H_INIT[7],
-            ],
+            h: H_INIT,
             buf: [0; 64],
             buf_len: 0,
             length_bytes: 0_u64,
