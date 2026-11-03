@@ -12203,6 +12203,9 @@ impl VbcCodegen {
     ) {
         let scope = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
         let path = if scope.is_empty() { name.to_owned() } else { format!("{scope}.{name}") };
+        if let Some((owner, _)) = path.rsplit_once('.') {
+            self.record_declared_callable(owner, name, &path);
+        }
         let key = format!("{path}#{}", info.param_count);
         self.ffi_symbol_link_names.insert(symbol.0, link_name.unwrap_or_else(|| name.to_owned()));
         self.ffi_function_map.insert(name.to_owned(), symbol);
@@ -16240,7 +16243,7 @@ impl VbcCodegen {
                         qualified.parent_type_name = Some(parent.clone());
                         qualified.return_type_name = Some(parent.clone());
                         let key = format!("{parent}.{variant_name}");
-                        self.record_source_constructor(&owner, &variant_name, &key);
+                        self.record_declared_callable(&owner, &variant_name, &key);
                         self.ctx.register_function(key, qualified);
                     }
 

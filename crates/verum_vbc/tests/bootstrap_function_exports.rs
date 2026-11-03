@@ -293,3 +293,44 @@ fn ordinary_single_file_with_inline_modules_refuses_an_unowned_mount() {
         "{error}"
     );
 }
+
+#[test]
+fn a_foreign_mount_selects_its_declared_link_symbol_in_either_order() {
+    let sources = [
+        r#"module host.native; extern "C" { @link_name("real_symbol") public fn fetch() -> Int; }"#,
+        "module host.other; public fn fetch()->Int { 43 }",
+        "module host.surface; public mount host.native.{fetch as selected};",
+        "module host.client; mount host.surface.{selected}; public fn probe()->Int { selected() }",
+    ]
+    .map(|s| Parser::new(s).parse_module().unwrap());
+    for order in [[0, 1, 2, 3], [3, 2, 1, 0]] {
+        let files = order.map(|i| &sources[i]);
+        let mut cg = VbcCodegen::new();
+        cg.collect_unit_declarations(&files).unwrap();
+        cg.resolve_pending_imports();
+        cg.compile_unit_items(&files, ItemFailurePolicy::Strict)
+            .unwrap();
+        let exports = cg.export_functions();
+        assert_eq!(
+            exports["host.surface.selected"]
+                .foreign_declaration
+                .as_deref(),
+            Some("host.native.fetch#0")
+        );
+        let module = cg.finalize_module().unwrap();
+        let wire = verum_vbc::deserialize::deserialize_module(
+            &verum_vbc::serialize::serialize_module(&module).unwrap(),
+        )
+        .unwrap();
+        let probe = wire.find_function_by_name("host.client.probe").unwrap();
+        let function = wire.get_function(probe).unwrap();
+        let start = function.bytecode_offset as usize;
+        let end = start + function.bytecode_length as usize;
+        let ops = verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end]).unwrap();
+        assert!(ops.iter().any(|op| matches!(op, verum_vbc::instruction::Instruction::FfiExtended { sub_op, .. } if *sub_op == verum_vbc::instruction::SystemSubOpcode::CallFfiC as u8)));
+        assert_eq!(
+            wire.get_string(wire.ffi_symbols[0].name),
+            Some("real_symbol")
+        );
+    }
+}

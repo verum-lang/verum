@@ -143,10 +143,9 @@ impl VbcCodegen {
         scope.public_children.extend(exports.public_children);
     }
 
-    /// Called only by the sum declaration producer after it emits a real
-    /// constructor. The parser also permits single-name aliases in variant
-    /// syntax; only the emitted nominal can witness a constructor export.
-    pub(super) fn record_source_constructor(&mut self, owner: &str, name: &str, key: &str) {
+    /// Constructors and foreign calls acquire a canonical callable identity
+    /// during declaration registration, after target and ABI selection.
+    pub(super) fn record_declared_callable(&mut self, owner: &str, name: &str, key: &str) {
         let Some(source) = self.source_callable_exports.modules.get_mut(owner) else {
             return;
         };
