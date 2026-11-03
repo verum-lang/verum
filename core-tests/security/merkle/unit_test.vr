@@ -5,7 +5,8 @@
 // `core/security/merkle.vr` — Merkle tree error surface.
 // =============================================================================
 
-mount core.security.merkle.MerkleError;
+mount core.security.merkle.{MerkleError, MerkleTree, InclusionProof, verify_inclusion_proof};
+mount core.encoding.hex;
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -106,3 +107,25 @@ fn test_merkle_error_describe_bad_proof_length() {
 }
 
 fn main() {}
+
+@test
+fn test_canonical_ragged_tree_paths() {
+    let empty: List<List<Byte>> = [];
+    let empty_root = MerkleTree.from_leaves(&empty).root();
+    assert_eq(hex.encode(&empty_root[..]), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    let leaves: List<List<Byte>> = [[0_u8], [1_u8], [2_u8], [3_u8], [4_u8]];
+    let tree = MerkleTree.from_leaves(&leaves);
+    let root = tree.root();
+    assert_eq(hex.encode(&root[..]), "b855b42d6c30f5b087e05266783fbd6e394f7b926013ccaa67700a8b0c5a596f");
+    for i in 0..5 {
+        let proof = tree.inclusion_proof(i).unwrap();
+        assert(verify_inclusion_proof(leaves[i].as_slice(), i, 5, &proof, &root));
+    }
+    let mut rightmost = tree.inclusion_proof(4).unwrap();
+    assert_eq(rightmost.siblings.len(), 1);
+    assert(!verify_inclusion_proof(leaves[4].as_slice(), 3, 5, &rightmost, &root));
+    let absent = InclusionProof { siblings: [] };
+    assert(!verify_inclusion_proof(leaves[4].as_slice(), 4, 5, &absent, &root));
+    rightmost.siblings.push([0_u8; 32]);
+    assert(!verify_inclusion_proof(leaves[4].as_slice(), 4, 5, &rightmost, &root));
+}

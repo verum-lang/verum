@@ -112,7 +112,7 @@ implement Eq for MerkleError {
 // =============================================================================
 
 public type InclusionProof is {
-    /// Sibling hashes, bottom-up. Length = ⌈log2(leaf_count)⌉.
+    /// Sibling hashes in leaf-to-root order. Unpaired levels contribute no hash.
     siblings: List<[Byte; 32]>,
 };
 
@@ -123,13 +123,13 @@ public type InclusionProof is {
 public type MerkleTree is {
     /// Leaf hashes (already salted with 0x00 prefix).
     leaf_hashes: List<[Byte; 32]>,
-    /// Computed root (empty-tree root = all zeros).
+    /// Computed root (the empty tree hashes the empty byte string).
     root:        [Byte; 32],
 };
 
 implement MerkleTree {
     /// Build from raw leaf bytes (each inner List is one leaf's
-    /// payload). Empty input yields an empty tree with zero root.
+    /// payload). Empty input yields the RFC 6962 empty-tree hash.
     public fn from_leaves(leaves: &List<List<Byte>>) -> MerkleTree {
         let mut leaf_hashes: List<[Byte; 32]> = [];
         let mut i: Int = 0;
@@ -144,7 +144,7 @@ implement MerkleTree {
     /// Number of leaves.
     public fn len(&self) -> Int { self.leaf_hashes.len() }
 
-    /// Root hash. All-zero for empty trees.
+    /// Root hash, including the defined hash for an empty tree.
     public fn root(&self) -> [Byte; 32] { self.root }
 
     /// Produce an inclusion proof for leaf `index`. Returns the
@@ -161,13 +161,6 @@ implement MerkleTree {
             let sibling_idx = if (idx & 1) == 0 { idx + 1 } else { idx - 1 };
             if sibling_idx < level.len() {
                 path.push(clone_hash(&level[sibling_idx]));
-            } else {
-                // Odd-leaf promotion — sibling is the leaf itself;
-                // convention: the verifier treats "no sibling" as
-                // identity. We push a zero hash as placeholder; the
-                // verifier recognises the odd-size case from
-                // `total_leaves` and skips the combine.
-                path.push([0_u8; 32]);
             }
             level = combine_level(&level);
             idx = idx / 2;
@@ -205,20 +198,11 @@ public fn verify_inclusion_proof(
             } else {
                 node_hash(sib, &current)
             };
-        } else {
-            // Odd-leaf promotion — skip sibling entry (but proof may
-            // or may not have included a placeholder; our builder
-            // pushed `[0; 32]`, so swallow it if present).
-            if p < proof.siblings.len() {
-                // Allow a zero placeholder to be present or absent.
-                if is_zero_hash(&proof.siblings[p]) { p = p + 1; }
-            }
-            // current unchanged — promoted as-is to the next level.
         }
         idx = idx / 2;
-        level_size = (level_size + 1) / 2;
+        level_size = level_size / 2 + level_size % 2;
     }
-    hash_eq(&current, expected_root)
+    p == proof.siblings.len() && hash_eq(&current, expected_root)
 }
 
 // =============================================================================
@@ -245,7 +229,7 @@ public fn node_hash(left: &[Byte; 32], right: &[Byte; 32]) -> [Byte; 32] {
 // =============================================================================
 
 fn compute_root(leaf_hashes: &List<[Byte; 32]>) -> [Byte; 32] {
-    if leaf_hashes.len() == 0 { return [0_u8; 32]; }
+    if leaf_hashes.len() == 0 { return Sha256.digest(b""); }
     let mut level: List<[Byte; 32]> = clone_hash_list(leaf_hashes);
     while level.len() > 1 {
         level = combine_level(&level);
@@ -284,11 +268,5 @@ fn clone_hash(src: &[Byte; 32]) -> [Byte; 32] {
 fn hash_eq(a: &[Byte; 32], b: &[Byte; 32]) -> Bool {
     let mut i: Int = 0;
     while i < 32 { if a[i] != b[i] { return false; } i = i + 1; }
-    true
-}
-
-fn is_zero_hash(h: &[Byte; 32]) -> Bool {
-    let mut i: Int = 0;
-    while i < 32 { if h[i] != 0_u8 { return false; } i = i + 1; }
     true
 }
