@@ -450,6 +450,7 @@ public type IdtEntry is {
     reserved: UInt32,
 };
 
+@cfg(target_arch = "x86_64")
 implement IdtEntry {
     /// Create an IDT entry for an interrupt handler.
     @cfg(target_arch = "x86_64")
