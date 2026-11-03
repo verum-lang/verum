@@ -29,6 +29,8 @@
 )
 module core.security.zk.stark.air;
 
+mount core.base.memory.Heap;
+
 // =============================================================================
 // Field choice
 // =============================================================================
@@ -102,19 +104,19 @@ implement TraceLayout {
 public type Expr is
     | Constant(List<Byte>)              // canonical encoding of Fp constant
     | Cell { column: Int, offset: Int }
-    | Add(Box<Expr>, Box<Expr>)
-    | Sub(Box<Expr>, Box<Expr>)
-    | Mul(Box<Expr>, Box<Expr>)
-    | Pow(Box<Expr>, Int);
+    | Add(Heap<Expr>, Heap<Expr>)
+    | Sub(Heap<Expr>, Heap<Expr>)
+    | Mul(Heap<Expr>, Heap<Expr>)
+    | Pow(Heap<Expr>, Int);
 
 implement Expr {
     public fn constant(c: List<Byte>) -> Expr { Constant(c) }
     public fn cell(column: Int) -> Expr { Cell { column, offset: 0 } }
     public fn next(column: Int)  -> Expr { Cell { column, offset: 1 } }
-    public fn add(self, rhs: Expr) -> Expr { Add(Box.new(self), Box.new(rhs)) }
-    public fn sub(self, rhs: Expr) -> Expr { Sub(Box.new(self), Box.new(rhs)) }
-    public fn mul(self, rhs: Expr) -> Expr { Mul(Box.new(self), Box.new(rhs)) }
-    public fn pow(self, k: Int) -> Expr { Pow(Box.new(self), k) }
+    public fn add(self, rhs: Expr) -> Expr { Add(Heap.new(self), Heap.new(rhs)) }
+    public fn sub(self, rhs: Expr) -> Expr { Sub(Heap.new(self), Heap.new(rhs)) }
+    public fn mul(self, rhs: Expr) -> Expr { Mul(Heap.new(self), Heap.new(rhs)) }
+    public fn pow(self, k: Int) -> Expr { Pow(Heap.new(self), k) }
 }
 
 /// Transition constraint — must hold across every adjacent pair of

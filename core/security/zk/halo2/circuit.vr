@@ -36,6 +36,8 @@
 )
 module core.security.zk.halo2.circuit;
 
+mount core.base.memory.Heap;
+
 // =============================================================================
 // Column types
 // =============================================================================
@@ -122,11 +124,11 @@ public type Cell is {
 public type GateConstraint is
     | Constant(Bytes32)              // 32-byte little-endian Fp constant
     | ColumnRef { column: Column, rotation: Int }
-    | Add(Box<GateConstraint>, Box<GateConstraint>)
-    | Sub(Box<GateConstraint>, Box<GateConstraint>)
-    | Mul(Box<GateConstraint>, Box<GateConstraint>)
-    | Scale(Bytes32, Box<GateConstraint>)
-    | Pow(Box<GateConstraint>, Int);
+    | Add(Heap<GateConstraint>, Heap<GateConstraint>)
+    | Sub(Heap<GateConstraint>, Heap<GateConstraint>)
+    | Mul(Heap<GateConstraint>, Heap<GateConstraint>)
+    | Scale(Bytes32, Heap<GateConstraint>)
+    | Pow(Heap<GateConstraint>, Int);
 
 /// Pre-canonical 32-byte LE field element. Validation against the
 /// scalar-field modulus happens at prover binding time, not here.
@@ -144,19 +146,19 @@ implement GateConstraint {
     }
 
     public fn add(self, rhs: GateConstraint) -> GateConstraint {
-        Add(Box.new(self), Box.new(rhs))
+        Add(Heap.new(self), Heap.new(rhs))
     }
     public fn sub(self, rhs: GateConstraint) -> GateConstraint {
-        Sub(Box.new(self), Box.new(rhs))
+        Sub(Heap.new(self), Heap.new(rhs))
     }
     public fn mul(self, rhs: GateConstraint) -> GateConstraint {
-        Mul(Box.new(self), Box.new(rhs))
+        Mul(Heap.new(self), Heap.new(rhs))
     }
     public fn scale(self, c: Bytes32) -> GateConstraint {
-        Scale(c, Box.new(self))
+        Scale(c, Heap.new(self))
     }
     public fn pow(self, k: Int) -> GateConstraint {
-        Pow(Box.new(self), k)
+        Pow(Heap.new(self), k)
     }
 }
 
