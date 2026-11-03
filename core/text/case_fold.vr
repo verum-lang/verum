@@ -34,7 +34,6 @@ module core.text.case_fold;
 // =============================================================================
 
 mount core.text.text.Text;
-mount core.text.char.Char;
 mount core.base.ordering.Ordering;
 
 // -----------------------------------------------------------------------------
