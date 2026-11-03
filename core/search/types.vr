@@ -48,8 +48,8 @@ mount encoding.json.JsonValue;
 /// payload (full-text + facet attributes + sort attributes).
 @derive(Eq, Clone, Debug)
 public type Document is {
-    id:     Text,
-    fields: JsonValue,
+    public id:     Text,
+    public fields: JsonValue,
 };
 
 // =============================================================================

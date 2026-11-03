@@ -12,8 +12,16 @@
 // =============================================================================
 
 mount core.search.types.{
-    SortDirection, SearchError,
+    Document, SortDirection, SearchError,
 };
+mount core.encoding.json.JsonValue;
+
+@test
+fn test_document_exposes_its_identity_and_payload_to_backends() {
+    let document = Document { id: "entry".to_text(), fields: JsonValue.JsonNull };
+    assert_eq(document.id, "entry");
+    assert(document.fields is JsonValue.JsonNull);
+}
 
 // =============================================================================
 // Section 1: SortDirection variants

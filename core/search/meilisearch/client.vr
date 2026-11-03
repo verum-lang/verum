@@ -209,42 +209,68 @@ fn build_search_body(q: &SearchQuery) -> JsonValue {
 // boolean combinators `AND` / `OR` / `NOT`. We render the typed
 // `SearchFilter` to that text form.
 
-fn filter_to_text(f: &SearchFilter) -> Text {
-    match f {
-        SearchFilter.Eq { field, value }  => f"{field} = {json_to_filter_lit(value)}",
-        SearchFilter.Gt { field, value }  => f"{field} > {json_to_filter_lit(value)}",
-        SearchFilter.Gte { field, value } => f"{field} >= {json_to_filter_lit(value)}",
-        SearchFilter.Lt { field, value }  => f"{field} < {json_to_filter_lit(value)}",
-        SearchFilter.Lte { field, value } => f"{field} <= {json_to_filter_lit(value)}",
+fn filter_to_text(filter: &SearchFilter) -> Text {
+    let mut out = Text.new();
+    write_filter(filter, &mut out);
+    out
+}
+
+fn write_filter(filter: &SearchFilter, out: &mut Text) {
+    match filter {
+        SearchFilter.Eq { field, value }  => write_comparison(field, " = ", value, out),
+        SearchFilter.Gt { field, value }  => write_comparison(field, " > ", value, out),
+        SearchFilter.Gte { field, value } => write_comparison(field, " >= ", value, out),
+        SearchFilter.Lt { field, value }  => write_comparison(field, " < ", value, out),
+        SearchFilter.Lte { field, value } => write_comparison(field, " <= ", value, out),
         SearchFilter.In { field, values } => {
-            let parts: List<Text> = values.iter().map(json_to_filter_lit).collect();
-            f"{field} IN [{parts.join(", ")}]"
+            out.push_str(field);
+            out.push_str(" IN [");
+            let mut first = true;
+            for value in values.iter() {
+                if !first { out.push_str(", "); }
+                out.push_str(&encode(value));
+                first = false;
+            }
+            out.push_str("]");
         }
-        SearchFilter.And(parts) => {
-            let rendered: List<Text> = parts.iter().map(filter_to_text).collect();
-            f"({rendered.join(" AND ")})"
+        SearchFilter.And(parts) => write_filter_group(parts, " AND ", out),
+        SearchFilter.Or(parts)  => write_filter_group(parts, " OR ", out),
+        SearchFilter.Not(inner) => {
+            out.push_str("NOT (");
+            write_filter(inner.deref(), out);
+            out.push_str(")");
         }
-        SearchFilter.Or(parts) => {
-            let rendered: List<Text> = parts.iter().map(filter_to_text).collect();
-            f"({rendered.join(" OR ")})"
-        }
-        SearchFilter.Not(inner) => f"NOT ({filter_to_text(inner.as_ref())})",
-        SearchFilter.RawFilter(s) => s.clone(),
+        SearchFilter.RawFilter(raw) => out.push_str(raw),
     }
 }
 
-fn json_to_filter_lit(v: &JsonValue) -> Text {
-    match v {
-        JsonValue.String(s) => f"\"{escape_quotes(s)}\"",
-        JsonValue.Number(n) => f"{n}",
-        JsonValue.Bool(b)   => if *b { "true".to_text() } else { "false".to_text() },
-        JsonValue.JsonNull      => "null".to_text(),
-        other               => encoding.json.encode(other), // arrays/objects — pass through (caller's problem)
-    }
+fn write_comparison(field: &Text, operator: &Text, value: &JsonValue, out: &mut Text) {
+    out.push_str(field);
+    out.push_str(operator);
+    out.push_str(&encode(value));
 }
 
-fn escape_quotes(s: &Text) -> Text {
-    s.replace("\"", "\\\"")
+fn write_filter_group(parts: &List<SearchFilter>, operator: &Text, out: &mut Text) {
+    out.push_str("(");
+    let mut first = true;
+    for part in parts.iter() {
+        if !first { out.push_str(operator); }
+        write_filter(part, out);
+        first = false;
+    }
+    out.push_str(")");
+}
+
+@test
+fn test_filter_literals_and_nested_predicates() {
+    let values: List<JsonValue> = [json_string("a\\b\"c".to_text()), json_bool(false)];
+    let negated = SearchFilter.Not(Heap.new(SearchFilter.In { field: "tag", values }));
+    let parts: List<SearchFilter> = [
+        SearchFilter.Eq { field: "count", value: JsonValue.JsonInt(-3) },
+        negated,
+    ];
+    assert_eq(filter_to_text(&SearchFilter.And(parts)),
+              "(count = -3 AND NOT (tag IN [\"a\\\\b\\\"c\", false]))");
 }
 
 // =============================================================================
@@ -299,12 +325,10 @@ fn documents_to_json_array(docs: &List<Document>) -> JsonValue {
     let mut arr: List<JsonValue> = List.with_capacity(docs.len());
     let mut i: Int = 0;
     while i < docs.len() {
-        // We expect each `Document.fields` to already include an
-        // `id` field; if not, we inject `Document.id` into the
-        // object.
+        // The document identifier is the key used for upserts and deletes.
         let mut value = docs[i].fields.clone();
         match &mut value {
-            JsonValue.Object(obj) => {
+            JsonValue.JsonObject(obj) => {
                 obj.insert("id".to_text(), json_string(docs[i].id.clone()));
             }
             _ => {}
