@@ -1,8 +1,8 @@
 //! T1196: mutable Map access must alias the value slot owned by its runtime carrier.
 //!
 //! Compile the complete production Map module and its caller without filtering or
-//! replacing the Slot/get_mut declarations. Primitive bodies are also compiled,
-//! so collection helpers execute the real Clone implementations. The mount
+//! replacing the Slot/get_mut declarations. List and primitive bodies are also
+//! compiled so collection helpers execute the real Drop and Clone implementations. The mount
 //! loader supplies other dependency declarations. Callers use real map literals (NewMap) to select the runtime
 //! carrier; source-only Map.new takes a different route from the ordinary
 //! archive compiler. The adversarial bytecode test replaces only its own caller helper. Each executed
@@ -20,6 +20,7 @@ use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::VbcModule;
 
 const PRODUCTION_MAP: &str = include_str!("../../../core/collections/map.vr");
+const PRODUCTION_LIST: &str = include_str!("../../../core/collections/list.vr");
 const PRODUCTION_PRIMITIVES: &str = include_str!("../../../core/base/primitives.vr");
 const CALLER: &str = r#"
 module mutable_map_values;
@@ -446,12 +447,14 @@ fn source() -> Arc<VbcModule> {
             let primitives = Parser::new(PRODUCTION_PRIMITIVES)
                 .parse_module()
                 .expect("production primitive implementations");
+            let list = Parser::new(PRODUCTION_LIST)
+                .parse_module()
+                .expect("production List implementation");
+            // Mounts installed the declarations. The exercised collection helpers
+            // also need the executable Int.clone and List.drop bodies.
             codegen
-                .collect_unit_declarations(&[&primitives])
-                .expect("primitive declarations");
-            codegen
-                .compile_unit_items(&[&primitives], ItemFailurePolicy::Strict)
-                .expect("complete primitive bodies, including Int.clone");
+                .compile_unit_items(&[&primitives, &list], ItemFailurePolicy::Strict)
+                .expect("complete primitive and List bodies");
             codegen
                 .collect_unit_declarations(&[&caller])
                 .expect("caller declarations");
