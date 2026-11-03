@@ -15,7 +15,7 @@
 // codegen class.
 // =============================================================================
 
-mount core.encoding.der.{TagClass, Tag, DerErrorKind};
+mount core.encoding.der.{TagClass, Tag, DerErrorKind, DerReader, encode_oid, encode_bit_octets, encode_sequence};
 mount core.encoding.der.{TAG_BOOLEAN, TAG_INTEGER, TAG_BIT_STRING, TAG_OCTET_STRING};
 mount core.encoding.der.{TAG_NULL, TAG_OID, TAG_UTF8_STRING, TAG_SEQUENCE, TAG_SET};
 mount core.base.maybe.{Maybe, Some, None};
@@ -241,3 +241,34 @@ fn test_der_error_kind_invalid_time() {
 }
 
 fn main() {}
+
+@test
+fn test_canonical_der_key_components() {
+    let ec: List<UInt32> = [1_u32, 2_u32, 840_u32, 10045_u32, 2_u32, 1_u32];
+    let encoded = encode_oid(ec.as_slice()).unwrap();
+    let expected: List<Byte> = [6_u8, 7_u8, 42_u8, 134_u8, 72_u8, 206_u8, 61_u8, 2_u8, 1_u8];
+    assert_eq(encoded.len(), expected.len());
+    for i in 0..expected.len() { assert_eq(encoded[i], expected[i]); }
+    let wide: List<UInt32> = [2_u32, 4294967295_u32, 4294967295_u32];
+    let bytes = encode_oid(wide.as_slice()).unwrap();
+    let mut r = DerReader.new(bytes.as_slice());
+    let arcs = r.read_oid().unwrap();
+    assert(r.is_at_end());
+    assert_eq(arcs.len(), 3);
+    assert_eq(arcs[1], 4294967295_u32);
+    assert_eq(arcs[2], 4294967295_u32);
+    let invalid: List<UInt32> = [1_u32, 40_u32];
+    assert(encode_oid(invalid.as_slice()).is_err());
+    let mut key: List<Byte> = [];
+    for i in 0..128 { key.push(i as Byte); }
+    let bits = encode_bit_octets(key.as_slice());
+    assert_eq(bits.len(), 132);
+    assert_eq(bits[0], 3_u8);
+    assert_eq(bits[1], 129_u8);
+    assert_eq(bits[2], 129_u8);
+    assert_eq(bits[3], 0_u8);
+    let seq = encode_sequence(bits.as_slice());
+    assert_eq(seq[0], 48_u8);
+    assert_eq(seq[1], 129_u8);
+    assert_eq(seq[2], 132_u8);
+}

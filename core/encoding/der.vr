@@ -555,53 +555,32 @@ implement DerReader {
             return Result.Err(err(InvalidOid, self.pos, "OID empty"));
         }
         let bytes = self.take_bytes(len)?;
-        let mut sub_ids: List<UInt32> = [];
-
-        // Pass 1: decode each base-128 sub-identifier, preserving order.
-        let mut cur: UInt32 = 0;
-        let mut in_multibyte: Bool = false;
-        let mut i: Int = 0;
-        while i < bytes.len() {
-            let bx = bytes[i];
-            // Non-canonical leading 0x80 on a fresh sub-id = forbidden.
-            if !in_multibyte && bx == 0x80_u8 {
-                return Result.Err(err(InvalidOid, self.pos - bytes.len() + i, "non-canonical OID sub-id"));
-            }
-            // Overflow guard — no real-world OID uses sub-ids > 28 bits.
-            if (cur >> 25) != 0_u32 {
-                return Result.Err(err(InvalidOid, self.pos - bytes.len() + i, "OID sub-id overflow"));
-            }
-            cur = (cur << 7) | ((bx & 0x7F_u8) as UInt32);
-            if (bx & 0x80_u8) == 0_u8 {
-                sub_ids.push(cur);
-                cur = 0;
-                in_multibyte = false;
-            } else {
-                in_multibyte = true;
-            }
-            i = i + 1;
-        }
-        if in_multibyte {
-            return Result.Err(err(InvalidOid, self.pos - 1, "OID truncated in multi-byte sub-id"));
-        }
-        if sub_ids.len() == 0 {
-            return Result.Err(err(InvalidOid, self.pos - len, "OID has no sub-identifiers"));
-        }
-
-        // Pass 2: split the first sub-id into (arc0, arc1).
-        let first = sub_ids[0];
         let mut arcs: List<UInt32> = [];
-        if first < 40_u32 {
-            arcs.push(0_u32); arcs.push(first);
-        } else if first < 80_u32 {
-            arcs.push(1_u32); arcs.push(first - 40_u32);
-        } else {
-            arcs.push(2_u32); arcs.push(first - 80_u32);
+        let mut value: UInt64 = 0_u64;
+        let mut continued = false;
+        for i in 0..len {
+            let byte = bytes[i];
+            if !continued && byte == 0x80_u8 {
+                return Result.Err(err(InvalidOid, self.pos - len + i, "non-canonical OID sub-id"));
+            }
+            value = (value << 7) | ((byte & 0x7f_u8) as UInt64);
+            // The first sub-identifier combines two arcs and may exceed UInt32 by 80.
+            let max = if arcs.is_empty() { 4294967375_u64 } else { 4294967295_u64 };
+            if value > max {
+                return Result.Err(err(InvalidOid, self.pos - len + i, "OID sub-id overflow"));
+            }
+            continued = (byte & 0x80_u8) != 0_u8;
+            if !continued {
+                if arcs.is_empty() {
+                    let first: UInt64 = if value < 40_u64 { 0_u64 } else if value < 80_u64 { 1_u64 } else { 2_u64 };
+                    arcs.push(first as UInt32);
+                    arcs.push((value - first * 40_u64) as UInt32);
+                } else { arcs.push(value as UInt32); }
+                value = 0_u64;
+            }
         }
-        let mut j: Int = 1;
-        while j < sub_ids.len() {
-            arcs.push(sub_ids[j]);
-            j = j + 1;
+        if continued {
+            return Result.Err(err(InvalidOid, self.pos - 1, "OID truncated in multi-byte sub-id"));
         }
         Result.Ok(arcs)
     }
@@ -793,4 +772,64 @@ fn validate_time(
     }
     let _ = year;  // no upper bound; callers enforce certificate validity window
     Result.Ok(())
+}
+
+/// Append a definite-length DER element with a one-octet identifier.
+fn append_element(out: &mut List<Byte>, identifier: Byte, contents: &[Byte]) {
+    out.push(identifier);
+    let size = contents.len();
+    if size < 128 {
+        out.push(size as Byte);
+    } else {
+        let mut high_shift: Int = 0;
+        let mut high = size;
+        while high > 255 { high = high >> 8; high_shift = high_shift + 8; }
+        out.push((0x80 | (high_shift / 8 + 1)) as Byte);
+        let mut shift = high_shift;
+        while shift >= 0 {
+            out.push(((size >> shift) & 0xff) as Byte);
+            shift = shift - 8;
+        }
+    }
+    out.extend_from_slice(contents);
+}
+
+/// DER SEQUENCE of already encoded elements.
+public fn encode_sequence(elements: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    append_element(&mut out, 0x30_u8, elements);
+    out
+}
+
+/// DER BIT STRING containing whole octets (zero unused bits).
+public fn encode_bit_octets(bits: &[Byte]) -> List<Byte> {
+    let mut content: List<Byte> = [0_u8];
+    content.extend_from_slice(bits);
+    let mut out: List<Byte> = [];
+    append_element(&mut out, TAG_BIT_STRING as Byte, content.as_slice());
+    out
+}
+
+fn append_oid_arc(out: &mut List<Byte>, arc: UInt64) {
+    let mut shift: Int = 0;
+    let mut high = arc;
+    while high >= 128_u64 { high = high >> 7; shift = shift + 7; }
+    while shift > 0 {
+        out.push((((arc >> shift) & 127_u64) | 128_u64) as Byte);
+        shift = shift - 7;
+    }
+    out.push((arc & 127_u64) as Byte);
+}
+
+/// DER OBJECT IDENTIFIER with canonical base-128 sub-identifiers (X.690 §8.19).
+public fn encode_oid(arcs: &[UInt32]) -> Result<List<Byte>, DerError> {
+    if arcs.len() < 2 || arcs[0] > 2_u32 || (arcs[0] < 2_u32 && arcs[1] >= 40_u32) {
+        return Result.Err(err(DerErrorKind.InvalidOid, 0, "invalid leading OID arcs"));
+    }
+    let mut content: List<Byte> = [];
+    append_oid_arc(&mut content, (arcs[0] as UInt64) * 40_u64 + (arcs[1] as UInt64));
+    for i in 2..arcs.len() { append_oid_arc(&mut content, arcs[i] as UInt64); }
+    let mut out: List<Byte> = [];
+    append_element(&mut out, TAG_OID as Byte, content.as_slice());
+    Result.Ok(out)
 }
