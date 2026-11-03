@@ -108,3 +108,14 @@ fn a_clean_project_reports_nothing() {
         "a project with no type errors must report none, got {found}"
     );
 }
+
+#[test]
+fn a_project_name_starting_with_core_still_checks_function_bodies() {
+    let root = tempfile::tempdir().unwrap();
+    write(&root.path().join("Verum.toml"), "[cog]\nname = \"corelab\"\nversion = \"0.1.0\"\n");
+    write(
+        &root.path().join("src/bad.vr"),
+        "module corelab.bad; public fn compute() -> Int { let value: Int = \"wrong\"; value }",
+    );
+    assert_eq!(errors_for(root.path()), 1);
+}

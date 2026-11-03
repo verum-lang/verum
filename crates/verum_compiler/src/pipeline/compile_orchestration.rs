@@ -959,16 +959,12 @@ impl<'s> CompilationPipeline<'s> {
         self.current_pass = CompilerPass::Pass2Expansion;
         info!("Pass 2: Staged compilation with caching");
 
-        // Collect module paths to avoid borrowing issues
-        let module_paths: List<Text> = self.modules.keys().cloned().collect();
+        // Each discovered source, including installed cog sources, owns a body to check.
+        // The spelling of its module name has no bearing on that obligation.
         let mut total_cache_hits = 0u64;
         let mut total_meta_executions = 0u64;
 
-        for path in &module_paths {
-            // Skip stdlib modules - they don't need macro expansion in check mode
-            if path.as_str().starts_with("core") {
-                continue;
-            }
+        for path in sources.keys() {
             debug!("  Staged compilation for: {}", path.as_str());
 
             if let Some(module_rc) = self.modules.get(path).cloned() {
@@ -1030,7 +1026,7 @@ impl<'s> CompilationPipeline<'s> {
 
         info!(
             "  Staged compilation complete: {} modules, {} cache hits, {} meta executions",
-            module_paths.len(),
+            sources.len(),
             total_cache_hits,
             total_meta_executions
         );
@@ -1038,17 +1034,14 @@ impl<'s> CompilationPipeline<'s> {
         // PASS 2.5: Compute Item Hashes for Incremental Compilation
         // This enables fine-grained change detection (signature vs body changes).
         // Incremental: item-level hashes distinguish signature vs body changes.
-        for path in &module_paths {
-            if let Some(module_rc) = self.modules.get(path) {
-                let hashes = compute_item_hashes_from_module(module_rc.as_ref());
-                let file_path = PathBuf::from(path.as_str());
-                self.incremental_compiler
-                    .update_item_hashes(file_path, hashes);
-            }
+        for (path, module_rc) in &self.modules {
+            let hashes = compute_item_hashes_from_module(module_rc.as_ref());
+            let file_path = PathBuf::from(path.as_str());
+            self.incremental_compiler.update_item_hashes(file_path, hashes);
         }
         debug!(
             "  Computed item hashes for {} modules (incremental: {} cached)",
-            module_paths.len(),
+            self.modules.len(),
             self.incremental_compiler.stats().item_hashes_cached
         );
 
@@ -1068,15 +1061,24 @@ impl<'s> CompilationPipeline<'s> {
         // across all modules regardless of compilation order.
         let shared_inherent_methods = Shared::new(parking_lot::RwLock::new(Map::new()));
 
-        for path in &module_paths {
-            // Skip stdlib modules from full type checking - they only need their
-            // declarations registered (done via stdlib_modules below), not their
-            // bodies checked. Checking stdlib bodies produces false errors because
-            // the stdlib has known internal issues that don't affect user code.
-            if path.as_str().starts_with("core") {
-                continue;
-            }
+        // Sort for deterministic iteration (self.modules is a HashMap).
+        // Shallower (fewer-dot) module keys come first so top-level stdlib
+        // functions beat nested-module helpers when short names collide.
+        let mut stdlib_entries: Vec<_> = self
+            .modules
+            .iter()
+            .filter(|(path, _)| !sources.contains_key(*path))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        stdlib_entries.sort_by(|(a, _), (b, _)| {
+            let depth_a = a.as_str().matches('.').count();
+            let depth_b = b.as_str().matches('.').count();
+            depth_a
+                .cmp(&depth_b)
+                .then_with(|| a.as_str().cmp(b.as_str()))
+        });
 
+        for path in sources.keys() {
             debug!("  Type checking: {}", path.as_str());
             // Clone Arc (cheap) to release borrow before calling mutable method
             let module_rc = self.modules.get(path).map(Arc::clone);
@@ -1292,23 +1294,6 @@ impl<'s> CompilationPipeline<'s> {
                 // Without this, the TypeChecker only has built-in primitives and
                 // cannot resolve stdlib types referenced in user code.
                 // ═══════════════════════════════════════════════════════════════
-                // Sort for deterministic iteration (self.modules is a HashMap).
-                // Shallower (fewer-dot) module keys come first so top-level stdlib
-                // functions beat nested-module helpers when short names collide.
-                let mut stdlib_entries: Vec<_> = self
-                    .modules
-                    .iter()
-                    .filter(|(k, _)| k.as_str().starts_with("core"))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                stdlib_entries.sort_by(|(a, _), (b, _)| {
-                    let depth_a = a.as_str().matches('.').count();
-                    let depth_b = b.as_str().matches('.').count();
-                    depth_a
-                        .cmp(&depth_b)
-                        .then_with(|| a.as_str().cmp(b.as_str()))
-                });
-
                 // Preserve the user-file module path so we can restore it after
                 // stdlib registration transiently rebinds it per-module.
                 let saved_module_path = checker.current_module_path().clone();
