@@ -134,15 +134,18 @@ fn probe() -> Int {
 
 #[test]
 fn an_unrelated_generic_record_is_not_an_index_carrier() {
-    let error = compile(
-        r#"
+    let body = r#"
 type Heap<T> is { marker: Int, value: T };
 fn probe() -> Int { let g: Heap<List<Int>> = Heap { marker: 99, value: [1] }; g[0] }
-"#,
-    )
+"#;
+    let error = compile(body)
     .err()
     .expect("foreign Heap spelling cannot supply an indexing declaration");
     assert!(error.to_string().contains("index"), "{error}");
+    let source = format!("{ENV}\n{body}");
+    let span = error.span.expect("index refusal identifies the receiver");
+    assert_eq!(&source[span.start as usize..span.end as usize], "g");
+    assert_eq!(span.start as usize, source.rfind("g[0]").unwrap());
 }
 
 #[test]

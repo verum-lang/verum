@@ -46,6 +46,18 @@ fn alias_target_requires_a_declared_nominal() {
 }
 
 #[test]
+fn deferred_field_error_retains_the_originating_callable() {
+    let error = compile(r#"
+        type Cell is { value: Int };
+        fn invalid(cell: Cell) -> Int { cell.absent }
+        fn later() -> Int { 7 }
+    "#).expect_err("an absent field cannot acquire another record's layout");
+    assert!(matches!(error.kind,
+        verum_vbc::codegen::CodegenErrorKind::MissingRecordField { .. }), "{error}");
+    assert!(error.context.as_deref().is_some_and(|context| context.contains("invalid")), "{error:?}");
+}
+
+#[test]
 fn function_parameter_requires_a_declared_nominal() {
     refuses("fn inspect(value: Missing) -> Int { 0 }");
 }

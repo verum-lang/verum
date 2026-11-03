@@ -3,13 +3,34 @@ use crate::types::{TypeParamId, TypeRef};
 
 fn codegen() -> VbcCodegen {
     let ast = verum_fast_parser::Parser::new(
-        "type Payload is { value: Int }; type Owner<A, B> is { a: A, b: B };",
+        r#"type Payload is { value: Int }; type Owner<A, B> is { a: A, b: B };
+        implement<A, B> Owner<A, B> {
+            fn first(&self) -> A { self.a }
+            fn unbound<Output>(&self) -> Output { panic("no witness") }
+        }"#,
     )
     .parse_module()
     .expect("parse");
     let mut codegen = VbcCodegen::with_config(super::super::CodegenConfig::new("callable_owner"));
     codegen.compile_module(&ast).expect("compile");
     codegen
+}
+
+#[test]
+fn method_result_distinguishes_caller_parameters_from_unbound_callee_slots() {
+    let mut codegen = codegen();
+    // The caller deliberately has the same numeric slot as the method's
+    // Output. Membership in the caller scope alone cannot bind that output.
+    codegen.ctx.current_generic_param_ids.insert("Caller".into(), 2);
+    codegen.ctx.generic_type_params.insert("Caller".into());
+    assert_eq!(
+        codegen.declared_method_result_type("Owner<Caller, Bool>", "first", &Default::default()),
+        Some(TypeRef::Generic(TypeParamId(2))),
+    );
+    assert_eq!(
+        codegen.declared_method_result_type("Owner<Caller, Bool>", "unbound", &Default::default()),
+        None,
+    );
 }
 
 #[test]

@@ -17,6 +17,16 @@ pub(super) fn join_result_types(left: Maybe<TypeRef>, right: Maybe<TypeRef>) -> 
 }
 
 impl VbcCodegen {
+    /// A bound name's display and emission queries share its active declaration.
+    /// A nested pattern need not publish a second, textual type hint.
+    pub(super) fn declared_binding_type_name(&self, expression: &Expr) -> Maybe<verum_common::Text> {
+        if !matches!(Self::normalized_place(expression).kind, ExprKind::Path(_)) {
+            return None;
+        }
+        let ty = self.expand_declared_alias(self.declared_expression_result(expression, None, 0, 0)?)?;
+        self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids))
+    }
+
     /// Resolve a carried declaration in the active callable's binder scope.
     /// Undeclared names never become positional generic placeholders.
     pub(super) fn semantic_type_in_current_scope(&self, name: &str) -> Maybe<TypeRef> {

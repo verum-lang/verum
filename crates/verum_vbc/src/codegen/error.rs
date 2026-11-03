@@ -9,7 +9,7 @@ use verum_ast::Span;
 pub type CodegenResult<T> = Result<T, CodegenError>;
 
 /// Errors that can occur during VBC code generation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CodegenError {
     /// The kind of error.
     pub kind: CodegenErrorKind,

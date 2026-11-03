@@ -828,7 +828,7 @@ pub struct VbcCodegen {
 
     /// Void archive-import APIs defer this fatal error to publication. Once a
     /// declaration conflict is observed, later imports cannot clear it.
-    source_declaration_error: Option<CodegenErrorKind>,
+    source_declaration_error: Option<CodegenError>,
 
     /// `TypeId` → index into [`Self::types`].
     ///
@@ -7339,15 +7339,24 @@ impl VbcCodegen {
 
     fn check_source_declaration_error(&self) -> CodegenResult<()> {
         match &self.source_declaration_error {
-            Some(kind) => Err(CodegenError::new(kind.clone())),
+            Some(error) => Err(error.clone()),
             None => Ok(()),
         }
     }
 
-    fn reject_source_declaration(&mut self, message: Text) -> CodegenResult<()> {
+    /// Deferred validation must retain the originating callable and location,
+    /// not attribute an earlier failure to whichever declaration is checked last.
+    fn record_source_declaration_error(&mut self, mut error: CodegenError) {
         if self.source_declaration_error.is_none() {
-            self.source_declaration_error = Some(CodegenErrorKind::InvalidSourceSignature(message.into_string()));
+            if error.context.is_none() {
+                error.context = self.ctx.current_function.as_ref().map(|name| format!("in function {name}"));
+            }
+            self.source_declaration_error = Some(error);
         }
+    }
+
+    fn reject_source_declaration(&mut self, message: Text) -> CodegenResult<()> {
+        self.record_source_declaration_error(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())));
         self.check_source_declaration_error()
     }
 
@@ -13657,9 +13666,9 @@ impl VbcCodegen {
             // This can happen for functions defined in other modules not yet compiled
         }
         if !invalid_mounts.is_empty() {
-            self.source_declaration_error.get_or_insert_with(|| {
-                CodegenErrorKind::InvalidSourceMount(invalid_mounts.into_iter().collect())
-            });
+            self.record_source_declaration_error(CodegenError::new(
+                CodegenErrorKind::InvalidSourceMount(invalid_mounts.into_iter().collect()),
+            ));
         }
     }
 
@@ -16358,25 +16367,9 @@ impl VbcCodegen {
                 // breaking positional substitution at use sites
                 // (e.g. `Maybe<Int>.unwrap_or(0)` failed to bind T
                 // → Int because T wasn't recorded).
-                let mut sum_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
-                    smallvec::SmallVec::new();
-                let mut sum_generic_param_map: std::collections::HashMap<String, u16> =
-                    std::collections::HashMap::new();
-                for (idx, gp) in type_decl.generics.iter().enumerate() {
-                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
-                        let gname_id = StringId(self.ctx.intern_string_raw(gname.name.as_str()));
-                        sum_type_params.push(crate::types::TypeParamDescriptor {
-                            name: gname_id,
-                            id: crate::types::TypeParamId(idx as u16),
-                            bounds: smallvec::SmallVec::new(),
-                            default: None,
-                            variance: crate::types::Variance::Invariant,
-                            type_bounds: smallvec::SmallVec::new(),
-                        });
-                        sum_generic_param_map
-                            .insert(gname.name.to_string(), idx as u16);
-                    }
-                }
+                let generics = self.declared_generic_parameters(type_id, type_decl)?;
+                let sum_type_params = generics.parameters;
+                let sum_generic_param_map = generics.scope;
                 let mut sum_desc = TypeDescriptor {
                     resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
@@ -16620,55 +16613,9 @@ impl VbcCodegen {
                     })
                 };
 
-                // Build generic type param name → index mapping for field type resolution.
-                // E.g., for `type Pair<A, B>`, maps {"A"→0, "B"→1}.
-                let mut generic_param_map: std::collections::HashMap<String, u16> =
-                    std::collections::HashMap::new();
-                for (idx, generic) in type_decl.generics.iter().enumerate() {
-                    if let verum_ast::ty::GenericParamKind::Type { name, .. } = &generic.kind {
-                        generic_param_map.insert(name.name.to_string(), idx as u16);
-                    }
-                }
-
-                // Also populate type_params on the TypeDescriptor (was only done for protocols)
-                for generic in &type_decl.generics {
-                    if let verum_ast::ty::GenericParamKind::Type {
-                        name,
-                        bounds,
-                        default,
-                    } = &generic.kind
-                    {
-                        let param_name_id =
-                            StringId(self.ctx.intern_string_raw(name.name.as_str()));
-                        let bound_ids: smallvec::SmallVec<[crate::types::ProtocolId; 2]> = bounds
-                            .iter()
-                            .filter_map(|bound| {
-                                if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind
-                                    && let Some(seg) = path.segments.last()
-                                    && let verum_ast::ty::PathSegment::Name(ident) = seg
-                                {
-                                    let bname = ident.name.to_string();
-                                    if let Some(&pid) = self.type_name_to_id.get(&bname) {
-                                        return Some(crate::types::ProtocolId(pid.0));
-                                    }
-                                }
-                                None
-                            })
-                            .collect();
-                        let default_ref = match default {
-                            verum_common::Maybe::Some(ty) => Some(self.resolve_signature_type_ref(ty, &generic_param_map)?),
-                            verum_common::Maybe::None => None,
-                        };
-                        let param_desc = crate::types::TypeParamDescriptor {
-                            name: param_name_id,
-                            id: crate::types::TypeParamId(type_desc.type_params.len() as u16),
-                            bounds: bound_ids,
-                            default: default_ref,
-                            ..Default::default()
-                        };
-                        type_desc.type_params.push(param_desc);
-                    }
-                }
+                let generics = self.declared_generic_parameters(type_id, type_decl)?;
+                let generic_param_map = generics.scope;
+                type_desc.type_params = generics.parameters;
 
                 // Populate fields for drop tracking
                 // NOTE: Field offset must use global field index from intern_field_name,
@@ -17059,29 +17006,9 @@ impl VbcCodegen {
                 // `Result<PTR, StreamError>` and the typechecker's
                 // alias expansion produced `Result<PTR, …>` at
                 // every IoResult<X> site.
-                let mut generic_param_map: std::collections::HashMap<String, u16> =
-                    std::collections::HashMap::new();
-                for (idx, gp) in type_decl.generics.iter().enumerate() {
-                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
-                        generic_param_map.insert(gname.name.to_string(), idx as u16);
-                    }
-                }
-                // Generic params (T, K, V, …) on the alias signature.
-                let mut alias_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
-                    smallvec::SmallVec::new();
-                for (idx, gp) in type_decl.generics.iter().enumerate() {
-                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
-                        let gname_id = StringId(self.intern_string(gname.name.as_str()));
-                        alias_type_params.push(crate::types::TypeParamDescriptor {
-                            name: gname_id,
-                            id: crate::types::TypeParamId(idx as u16),
-                            bounds: smallvec::SmallVec::new(),
-                            default: None,
-                            variance: crate::types::Variance::Invariant,
-                            type_bounds: smallvec::SmallVec::new(),
-                        });
-                    }
-                }
+                let generics = self.declared_generic_parameters(type_id, type_decl)?;
+                let generic_param_map = generics.scope;
+                let alias_type_params = generics.parameters;
                 // Alias targets are declaration witnesses. The ABI pointer used for
                 // an unresolved type cannot establish ownership at a destructor.
                 self.resolve_signature_type_ref(target_type, &generic_param_map)?;
@@ -18611,9 +18538,7 @@ impl VbcCodegen {
                         // positional `Generic`, so the callsite witness
                         // layer can still recover it by index.
                         verum_ast::ty::GenericArg::Const(expr) => {
-                            Self::render_const_generic_arg(expr)
-                                .and_then(|s| s.parse::<i64>().ok())
-                                .map(TypeRef::ConstValue)
+                            Self::closed_const_generic_argument(expr).map(TypeRef::ConstValue)
                         }
                         _ => None,
                         }))
@@ -21903,7 +21828,7 @@ impl VbcCodegen {
         let resolved = match self.resolve_record_type_key(&stripped) {
             Ok(resolved) => resolved,
             Err(error) => {
-                self.source_declaration_error.get_or_insert(error.kind);
+                self.record_source_declaration_error(error);
                 return;
             }
         };
@@ -22556,11 +22481,11 @@ impl VbcCodegen {
             Some(name) => match self.method_receiver_declaration_name(name) {
                 Some(owner) => Some(owner),
                 None => {
-                    self.source_declaration_error.get_or_insert_with(|| {
+                    self.record_source_declaration_error(CodegenError::new(
                         CodegenErrorKind::InvalidSourceSignature(format!(
                             "cannot resolve field owner '{name}' for '{field_name}'"
                         ))
-                    });
+                    ));
                     return (0, true);
                 }
             },
@@ -22581,7 +22506,7 @@ impl VbcCodegen {
                     Ok(Some(q)) => return self.resolve_field_index_impl(Some(&q), field_name),
                     Ok(None) => {},
                     Err(error) => {
-                        self.source_declaration_error.get_or_insert(error.kind);
+                        self.record_source_declaration_error(error);
                         return (0, true);
                     }
                 }
@@ -22711,9 +22636,9 @@ impl VbcCodegen {
                 if declared_missing || td.declared_layout.is_some() || !td.fields.is_empty() {
                     let owner = self.type_declaration_identity(td)
                         .map(|owner| owner.into_string()).unwrap_or_else(|| tn.to_owned());
-                    self.source_declaration_error.get_or_insert(CodegenErrorKind::MissingRecordField {
+                    self.record_source_declaration_error(CodegenError::new(CodegenErrorKind::MissingRecordField {
                         owner, field: field_name.to_owned(),
-                    });
+                    }));
                     return (0, true);
                 }
             }

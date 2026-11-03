@@ -390,10 +390,10 @@ impl VbcCodegen {
                 .index_operand_declaration(base)
                 .and_then(|owner| self.declaration_type_name(&owner, 0))
                 .unwrap_or_else(|| "receiver with unavailable declaration".into());
-            CodegenError::new(CodegenErrorKind::TypeInference(format!(
+            CodegenError::with_span(CodegenErrorKind::TypeInference(format!(
                 "cannot index {owner}: no declared {} projection",
                 if mutable { "mutable" } else { "read" },
-            )))
+            )), base.span)
         })?;
         let mut value = self
             .compile_expr(base)?

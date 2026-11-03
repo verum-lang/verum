@@ -7,6 +7,14 @@ use verum_ast::{FunctionDecl, FunctionParamKind};
 use verum_common::List;
 
 impl VbcCodegen {
+    /// A closed integer argument carries a checked value, never a guessed
+    /// generic slot. Declaration-bound names are handled by the scoped mapper.
+    pub(super) fn closed_const_generic_argument(expr: &verum_ast::Expr) -> Option<i64> {
+        verum_ast::checked_const::evaluate::<std::convert::Infallible>(
+            expr, 0, &mut |_, _| Ok(None),
+        ).ok().and_then(verum_ast::checked_const::Scalar::as_i64)
+    }
+
     /// Resolve the target in the actual impl declaration, before any inherited
     /// method changes lexical scope. Method-local binders cannot define Self.
     pub(super) fn resolve_impl_receiver(
@@ -350,6 +358,7 @@ impl VbcCodegen {
                         && args.iter().all(|arg| {
                             match arg {
                                 GenericArg::Type(ty) => supported(ty, depth + 1, budget, cg, scope),
+                                GenericArg::Const(expr) => VbcCodegen::closed_const_generic_argument(expr).is_some(),
                                 GenericArg::Lifetime(_) => true,
                                 _ => false,
                             }

@@ -65,16 +65,22 @@ impl VbcCodegen {
     /// binders and complete arguments without reparsing a displayed type name.
     pub(in crate::codegen) fn expand_declared_alias(&self, mut witness: TypeRef) -> Maybe<TypeRef> {
         let mut seen = Set::new();
+        let mut references = smallvec::SmallVec::<[(crate::types::CbgrTier, crate::types::Mutability); 2]>::new();
         loop {
+            if let TypeRef::Reference { inner, tier, mutability } = witness {
+                references.push((tier, mutability));
+                witness = *inner;
+                continue;
+            }
             let (base, args) = match &witness {
                 TypeRef::Concrete(id) => (*id, &[][..]),
                 TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
-                _ => return Some(witness),
+                _ => break,
             };
             let Some(descriptor) = self.type_by_id(base)
                 .filter(|ty| ty.kind == crate::types::TypeKind::Alias)
             else {
-                return Some(witness);
+                break;
             };
             if !seen.insert(base) || args.len() != descriptor.type_params.len() {
                 return None;
@@ -82,6 +88,10 @@ impl VbcCodegen {
             witness = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
                 .apply(descriptor.alias_target.as_ref()?).ok()?;
         }
+        for (tier, mutability) in references.into_iter().rev() {
+            witness = TypeRef::Reference { inner: Box::new(witness), tier, mutability };
+        }
+        Some(witness)
     }
 
     fn callable_result_name(&self, ty: &TypeRef) -> Maybe<Text> {

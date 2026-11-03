@@ -755,9 +755,7 @@ impl VbcCodegen {
             }
             for (parameter, argument) in descriptor.type_params.iter().zip(args.iter()) {
                 if let verum_ast::GenericArg::Type(ty) = argument
-                    && let Some(actual) = self.semantic_type_in_current_scope(
-                        &Self::render_field_type_name(ty, true),
-                    )
+                    && let Some(actual) = self.source_type_in_current_scope(ty)
                 {
                     substitution.bind(parameter.id, actual);
                 } else {
@@ -17433,8 +17431,13 @@ impl VbcCodegen {
         method: &str,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> Option<crate::types::TypeRef> {
-        let result = self.instantiated_method_result(receiver, method, explicit)?;
-        (!result.is_generic()).then_some(result)
+        let (result, substitution) = self.method_result_substitution(receiver, method, explicit)?;
+        // Callee slots require witnesses before substitution. The witnesses may
+        // themselves contain the caller's declared parameters: those remain
+        // parametric values, not unresolved parameters of the selected method.
+        if !super::constructor_types::fully_bound(result, &substitution) { return None; }
+        let result = substitution.apply(result).ok()?;
+        self.declared_type_in_scope(&result).then_some(result)
     }
 
     /// Unbound method parameters may remain in this intermediate signature.
@@ -17445,6 +17448,16 @@ impl VbcCodegen {
         method: &str,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> Option<crate::types::TypeRef> {
+        let (result, substitution) = self.method_result_substitution(receiver, method, explicit)?;
+        substitution.apply(result).ok()
+    }
+
+    fn method_result_substitution(
+        &self,
+        receiver: &str,
+        method: &str,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> Option<(&crate::types::TypeRef, crate::mono::TypeSubstitution)> {
         let mut owner = self.method_receiver_declaration_name(receiver)?.to_string();
         for _ in 0..self.method_receiver_deref_count(&owner, method) {
             owner = self.user_deref_target_type_name(&owner)?.to_string();
@@ -17460,7 +17473,7 @@ impl VbcCodegen {
             let ty = arg.type_for_declared_slot()?;
             substitution.bind((*id)?, self.explicit_type_witness(&ty, None)?);
         }
-        substitution.apply(return_type).ok()
+        Some((return_type, substitution))
     }
 
     fn resolved_method_return_type_name(
@@ -17470,7 +17483,9 @@ impl VbcCodegen {
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> Option<String> {
         if let Some(result) = self.declared_method_result_type(receiver, method, explicit) {
-            if let Some(name) = self.callable_type_name(&result) { return Some(name.to_string()); }
+            if let Some(name) = self.scoped_callable_type_name(&result, Some(&self.ctx.current_generic_param_ids)) {
+                return Some(name.to_string());
+            }
         }
         let mut receiver = self.method_receiver_declaration_name(receiver)?.to_string();
         for _ in 0..self.method_receiver_deref_count(&receiver, method) {
@@ -28892,6 +28907,12 @@ impl VbcCodegen {
                 if path.segments.len() == 1 {
                     match &path.segments[0] {
                         PathSegment::Name(ident) => {
+                            // The binding's structural declaration survives nested
+                            // patterns even when no legacy display hint was stored.
+                            // Read the active binding identity before consulting names.
+                            if let Some(name) = self.declared_binding_type_name(expr) {
+                                return Some(name.to_string());
+                            }
                             // Check variable_type_names for tracked variables
                             if let Some(type_name) = self.ctx.variable_type_names.get(&*ident.name)
                             {
@@ -29965,6 +29986,9 @@ impl VbcCodegen {
     /// For inline record literals, extracts the type name directly.
     /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
     pub fn infer_expr_type_name(&self, expr: &Expr) -> Option<String> {
+        if let Some(name) = self.declared_binding_type_name(expr) {
+            return Some(name.to_string());
+        }
         if let Some(result) = self.scoped_call_result_type_name(expr) {
             return result;
         }
