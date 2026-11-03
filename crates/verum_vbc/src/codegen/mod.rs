@@ -373,17 +373,10 @@ pub struct BlanketImpl {
     /// Method names explicitly implemented in the blanket-impl body.
     /// These take priority over the derived protocol's default methods.
     pub explicit_methods: std::collections::HashSet<String>,
-    /// The blanket body's own method declarations.  Monomorphised onto every
-    /// concrete implementor of `base_protocol` by
-    /// [`VbcCodegen::generate_default_protocol_methods`] (T0623).  Without
-    /// these, a method supplied SOLELY by the blanket body — e.g.
-    /// `partial_cmp` from `implement<T: Ord> PartialOrd for T` — was emitted
-    /// for no type at all: `explicit_methods` suppressed the derived
-    /// protocol's default (when it had one) and nothing replayed the body.
-    pub body_methods: Vec<verum_ast::FunctionDecl>,
     /// Source-owned binder replaced by the actual implementor, never a new slot.
     pub receiver_parameter: String,
     pub source_module: Option<String>,
+    /// Share the source body across implementors rather than cloning its AST.
     pub declaration: std::sync::Arc<verum_ast::decl::ImplDecl>,
 }
 pub use error::{CodegenError, CodegenErrorKind, CodegenOptionExt, CodegenResult, SkipClass};
@@ -3572,7 +3565,10 @@ impl VbcCodegen {
                 // Emitting through the same register + pending-queue path as a
                 // default method binds `Self`/the type param to `type_name`,
                 // so the body's `self.cmp(other)` dispatches to `Int.cmp`.
-                for body_func in &blanket.body_methods {
+                for body_func in blanket.declaration.items.iter().filter_map(|item| match &item.kind {
+                    verum_ast::decl::ImplItemKind::Function(function) => Some(function),
+                    _ => None,
+                }) {
                     let full_method_name = format!("{}.{}", type_name, body_func.name.name);
                     // An explicit `implement Derived for ThisType` block wins:
                     // same guard the default-method replay uses below.

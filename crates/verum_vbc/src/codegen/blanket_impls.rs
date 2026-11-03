@@ -42,22 +42,18 @@ impl VbcCodegen {
                 }) {
                     continue;
                 }
-                let body_methods: Vec<_> = declaration
+                let explicit_methods = declaration
                     .items
                     .iter()
                     .filter_map(|item| match &item.kind {
-                        ImplItemKind::Function(function) => Some(function.clone()),
+                        ImplItemKind::Function(function) => Some(function.name.name.to_string()),
                         _ => None,
                     })
                     .collect();
                 self.blanket_impls.push(BlanketImpl {
                     base_protocol,
                     derived_protocol,
-                    explicit_methods: body_methods
-                        .iter()
-                        .map(|function| function.name.name.to_string())
-                        .collect(),
-                    body_methods,
+                    explicit_methods,
                     receiver_parameter: receiver_parameter.clone(),
                     source_module: source_module.clone(),
                     declaration: std::sync::Arc::new(declaration.clone()),
