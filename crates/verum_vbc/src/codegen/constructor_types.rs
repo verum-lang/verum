@@ -402,12 +402,19 @@ impl VbcCodegen {
         if info.type_param_ids.is_empty() {
             return None;
         }
-        let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else {
-            return None;
+        // Async, generator and contextual functions do not have an ordinary
+        // synchronous function result. Their source parameter declarations
+        // still bind generic witnesses, independently of the result carrier.
+        let signature = match info.callable_signature.as_ref() {
+            Some(TypeRef::Function { params, return_type, .. }) => Some((params, return_type)),
+            _ => None,
         };
-        if params.len() != count { return None; }
+        let declared = self.ctx.semantic_fn_params.get(&info.id);
+        let parameter = |index| signature.and_then(|(params, _)| params.get(index))
+            .or_else(|| declared?.get(index).and_then(Option::as_ref));
+        if info.param_count as usize != count { return None; }
         let mut bindings = TypeSubstitution::empty();
-        if let Some(expected) = self.ctx.expected_value_type.as_ref() {
+        if let (Some((_, return_type)), Some(expected)) = (signature, self.ctx.expected_value_type.as_ref()) {
             // A surrounding call can have a different result than this operand.
             // A failed structural match contributes no partial substitutions.
             let mut result_bindings = TypeSubstitution::empty();
@@ -415,7 +422,8 @@ impl VbcCodegen {
                 bindings = result_bindings;
             }
         }
-        for (index, (formal, arg)) in params.iter().zip(args).enumerate() {
+        for (index, arg) in args.enumerate() {
+            let formal = parameter(index)?;
             if !formal.is_generic() { continue; }
             let actual = if fully_bound(formal, &bindings) && matches!(
                 Self::normalized_place(arg).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }

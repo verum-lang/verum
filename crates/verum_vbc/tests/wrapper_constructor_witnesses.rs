@@ -73,37 +73,43 @@ fn dereferenced_arguments_forward_the_declared_protocol_target() {
         type Measure is protocol { fn measure(&self) -> Int; };
         type Payload is { value: Int };
         implement Measure for Payload { fn measure(&self) -> Int { self.value } }
-        fn inner<X, Y: Measure>(stream: &mut X, value: &Y) -> Int { value.measure() }
-        fn forward<T, S: Measure>(mut stream: T, app: Project<Int, S>) -> Int {
-            inner(&mut stream, &*app)
-        }
-        fn probe() -> Int { forward(7, Project { context: 12, item: Payload { value: 37 } }) }
     "#;
-    let ast = Parser::new(source).parse_module().unwrap();
-    for bootstrap in [false, true] {
-        let mut compiler = VbcCodegen::with_config(CodegenConfig::new("core.base.protocols"));
-        let compiled = if bootstrap {
-            compiler.collect_unit_declarations(&[&ast]).unwrap();
-            compiler.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap();
-            compiler.finalize_module_from_state().unwrap()
-        } else {
-            compiler.compile_module(&ast).unwrap()
-        };
-        let module = verum_vbc::deserialize::deserialize_module(
-            &verum_vbc::serialize::serialize_module(&compiled).unwrap(),
-        ).unwrap();
-        let inner = module.find_function_by_name("core.base.protocols.inner").unwrap();
-        let forward = module.find_function_by_name("core.base.protocols.forward").unwrap();
-        let function = module.get_function(forward).unwrap();
-        let start = function.bytecode_offset as usize;
-        let end = start + function.bytecode_length as usize;
-        let instructions = decode_instructions(&module.bytecode[start..end]).unwrap();
-        let expected: Vec<_> = function.type_params.iter().map(|param| TypeRef::Generic(param.id)).collect();
-        assert!(instructions.iter().any(|instruction| matches!(instruction,
-            Instruction::CallG { func_id, type_args, .. } if *func_id == inner.0 && type_args.as_slice() == expected
-        )), "bootstrap={bootstrap}: {instructions:?}");
-        let probe = module.find_function_by_name("core.base.protocols.probe").unwrap();
-        let result = Interpreter::new(Arc::new(module)).execute_function(probe).unwrap();
-        assert_eq!(result.as_i64(), 37, "bootstrap={bootstrap}");
+    for (async_fn, wait) in [("", ""), ("async ", ".await")] {
+        let source = format!(r#"{source}
+            {async_fn}fn inner<X, Y: Measure>(stream: &mut X, value: &Y) -> Int {{ value.measure() }}
+            {async_fn}fn forward<T, S: Measure>(mut stream: T, app: Project<Int, S>) -> Int {{
+                inner(&mut stream, &*app){wait}
+            }}
+            {async_fn}fn probe() -> Int {{
+                forward(7, Project {{ context: 12, item: Payload {{ value: 37 }} }}){wait}
+            }}
+        "#);
+        let ast = Parser::new(&source).parse_module().unwrap();
+        for bootstrap in [false, true] {
+            let mut compiler = VbcCodegen::with_config(CodegenConfig::new("core.base.protocols"));
+            let compiled = if bootstrap {
+                compiler.collect_unit_declarations(&[&ast]).unwrap();
+                compiler.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap();
+                compiler.finalize_module_from_state().unwrap()
+            } else {
+                compiler.compile_module(&ast).unwrap()
+            };
+            let module = verum_vbc::deserialize::deserialize_module(
+                &verum_vbc::serialize::serialize_module(&compiled).unwrap(),
+            ).unwrap();
+            let inner = module.find_function_by_name("core.base.protocols.inner").unwrap();
+            let forward = module.find_function_by_name("core.base.protocols.forward").unwrap();
+            let function = module.get_function(forward).unwrap();
+            let start = function.bytecode_offset as usize;
+            let end = start + function.bytecode_length as usize;
+            let instructions = decode_instructions(&module.bytecode[start..end]).unwrap();
+            let expected: Vec<_> = function.type_params.iter().map(|param| TypeRef::Generic(param.id)).collect();
+            assert!(instructions.iter().any(|instruction| matches!(instruction,
+                Instruction::CallG { func_id, type_args, .. } if *func_id == inner.0 && type_args.as_slice() == expected
+            )), "bootstrap={bootstrap}: {instructions:?}");
+            let probe = module.find_function_by_name("core.base.protocols.probe").unwrap();
+            let result = Interpreter::new(Arc::new(module)).execute_function(probe).unwrap();
+            assert_eq!(result.as_i64(), 37, "bootstrap={bootstrap}");
+        }
     }
 }
