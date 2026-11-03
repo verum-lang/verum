@@ -27,7 +27,7 @@
 )
 module core.cli.error;
 
-mount core.{Maybe, Result, List, Text, Int, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Eq, Default};
 mount core.base.string_distance;
 

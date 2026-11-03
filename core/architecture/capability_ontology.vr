@@ -40,7 +40,7 @@
 )
 module core.architecture.capability_ontology;
 
-mount core.prelude.{Bool, Text};
+mount core.prelude.{Text};
 
 /// Schema for a registered custom capability. Carries metadata
 /// the kernel uses to validate declared usages.

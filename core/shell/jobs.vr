@@ -32,7 +32,7 @@
 )
 module core.shell.jobs;
 
-mount core.{List, Text, Bool, Int};
+mount core.{List, Text};
 mount core.base.{Maybe, Result};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.async.task.{JoinHandle, JoinError, spawn};

@@ -28,7 +28,7 @@
 )
 module core.shell.glob;
 
-mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.base.glob.{GlobPattern, GlobError};
 // `mount X as Y` rename-alias doesn't surface to AOT codegen (task #11).

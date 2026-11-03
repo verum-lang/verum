@@ -64,7 +64,7 @@
 )
 module core.cli.derive;
 
-mount core.{Maybe, Result, List, Text, Char, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.cli.spec.{
     CommandSpec, ArgSpec, FlagSpec, Arity, RefinementHandle,
     InteractivePolicy, CompletionSource, HandlerRef,

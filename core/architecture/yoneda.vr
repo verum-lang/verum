@@ -48,7 +48,7 @@
 )
 module core.architecture.yoneda;
 
-mount core.prelude.{Bool, Int, List, Text};
+mount core.prelude.{List, Text};
 mount super.types.{Capability, CveClosure, Foundation, Lifecycle, MsfsStratum, Tier};
 mount super.mtac.Observer;
 

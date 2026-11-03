@@ -44,7 +44,7 @@
 )
 module core.architecture.phase;
 
-mount core.prelude.{Bool, Int, Maybe, List, Text};
+mount core.prelude.{Maybe, List, Text};
 mount super.types.ModuleShape;
 mount super.anti_patterns.{AntiPatternCode, AntiPatternViolation};
 mount super.parse.ArchParseError;

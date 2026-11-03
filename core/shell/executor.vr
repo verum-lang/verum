@@ -28,7 +28,7 @@
 )
 module core.shell.executor;
 
-mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.time.duration.{Duration};
 mount core.async.timer.{sleep};

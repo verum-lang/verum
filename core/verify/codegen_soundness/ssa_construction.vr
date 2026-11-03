@@ -28,8 +28,6 @@
 )
 module core.verify.codegen_soundness.ssa_construction;
 
-mount core.prelude.{Bool};
-
 /// **Kernel-discharge bridge: SSA construction preserves operational
 /// semantics.**
 ///

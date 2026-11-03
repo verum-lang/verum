@@ -29,7 +29,7 @@
 )
 module core.shell.permissions;
 
-mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.glob.{GlobPattern};
 // `mount X as Y` rename-alias doesn't surface to AOT codegen (task #11).
 // Use fully-qualified `core.base.glob.compile` at call sites.

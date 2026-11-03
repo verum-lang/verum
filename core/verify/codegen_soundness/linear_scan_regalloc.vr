@@ -28,8 +28,6 @@
 )
 module core.verify.codegen_soundness.linear_scan_regalloc;
 
-mount core.prelude.{Bool};
-
 /// **Kernel-discharge bridge: linear-scan regalloc preserves
 /// observable behaviour AND the live-range monotonicity invariant.**
 ///

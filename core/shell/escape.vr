@@ -40,7 +40,7 @@
 )
 module core.shell.escape;
 
-mount core.{Maybe, Result, List, Text, Byte, Char, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.text.format.{Formatter, FormatError};
 

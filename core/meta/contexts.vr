@@ -104,7 +104,7 @@
 )
 module core.meta.contexts;
 
-mount core.{Result, Text, List, Maybe, Byte, Map};
+mount core.{Result, Text, List, Maybe, Map};
 mount meta.span.{MetaSpan, SourceLocation};
 mount meta.token.{TokenStream};
 mount meta.reflection.{

@@ -24,7 +24,7 @@
 )
 module core.shell.builtins;
 
-mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.env.{var_opt, temp_dir, args, exit};
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{

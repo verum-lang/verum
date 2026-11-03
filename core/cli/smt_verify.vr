@@ -47,7 +47,7 @@
 )
 module core.cli.smt_verify;
 
-mount core.{Maybe, Result, List, Map, Set, Text, Int, Bool};
+mount core.{Maybe, Result, List, Map, Set, Text};
 mount core.cli.spec.{CommandSpec, FlagSpec, ArgGroup, GroupKind};
 mount core.cli.sat.{
     BoolFormula, SatResult, EvalResult,

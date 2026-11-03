@@ -25,7 +25,7 @@
 )
 module core.shell.verify;
 
-mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.text.regex.{Regex};
 mount core.text.format.{Formatter};

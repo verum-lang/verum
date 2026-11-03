@@ -28,7 +28,7 @@
 )
 module core.cli.verify;
 
-mount core.{Maybe, Result, List, Set, Text, Char, Int, Bool};
+mount core.{Maybe, Result, List, Set, Text};
 mount core.cli.spec.{CommandSpec, ArgSpec, FlagSpec, GroupKind};
 
 // =============================================================================

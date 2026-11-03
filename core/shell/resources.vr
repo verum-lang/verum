@@ -34,7 +34,7 @@
 )
 module core.shell.resources;
 
-mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Drop};
 mount core.base.memory.{Shared};
 mount core.io.path.{Path, PathBuf};

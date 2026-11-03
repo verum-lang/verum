@@ -21,7 +21,7 @@
 )
 module core.shell.interactive;
 
-mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display};
 mount core.io.stdio.{stdin, print, println, read_line};
 mount core.shell.result.{ShellError};

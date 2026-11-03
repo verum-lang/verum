@@ -41,8 +41,6 @@
 )
 module core.verify.separation_soundness.separation_logic_alignment;
 
-mount core.prelude.{Bool};
-
 /// **Kernel-discharge bridge: .vr↔kernel separation-logic surface
 /// alignment.**
 ///

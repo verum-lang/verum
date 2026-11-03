@@ -41,7 +41,7 @@
 )
 module core.cli.parser;
 
-mount core.{Maybe, Result, List, Map, Set, Text, Char, Int, Bool};
+mount core.{Maybe, Result, List, Map, Set, Text};
 mount core.cli.spec.{
     CommandSpec, ArgSpec, FlagSpec, GroupKind, Arity,
     TopicSeparator, CommandSettings,

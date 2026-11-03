@@ -95,7 +95,7 @@
 )
 module core.logic.separation;
 
-mount core.prelude.{Bool, Heap, Maybe, Text};
+mount core.prelude.{Heap, Maybe, Text};
 mount core.logic.linear.{LinForm};
 
 // =============================================================================

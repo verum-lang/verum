@@ -27,7 +27,7 @@
 )
 module core.shell.script;
 
-mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.env.{
     args as env_args,
     arg as env_arg,

@@ -34,7 +34,6 @@ module core.sys.process_ops;
 // consequence for ring 0 and the same remedy (T1064).
 mount core.base.maybe.{Maybe};
 mount core.base.result.{Result};
-mount core.base.primitives.{Byte};
 mount core.collections.list.{List};
 mount core.text.text.{Text};
 // Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed

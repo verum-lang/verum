@@ -26,7 +26,7 @@
 )
 module core.cli.builder;
 
-mount core.{Maybe, Result, List, Text, Char, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.cli.spec.{
     CommandSpec, ArgSpec, FlagSpec, ArgGroup, GroupKind, Arity, Example,
     CommandSettings, RefinementHandle, CompletionSource, InteractivePolicy,

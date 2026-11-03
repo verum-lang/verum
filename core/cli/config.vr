@@ -24,7 +24,7 @@
 )
 module core.cli.config;
 
-mount core.{Maybe, Result, List, Map, Text, Int, Bool};
+mount core.{Maybe, Result, List, Map, Text};
 mount core.base.env;
 mount core.cli.spec.{CommandSpec, FlagSpec, ArgSpec};
 mount core.cli.parser.{ParseOutcome, CapturedFlag, CapturedArg};

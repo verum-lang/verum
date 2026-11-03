@@ -28,7 +28,7 @@
 )
 module core.cli.repl;
 
-mount core.{Maybe, Result, List, Text, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.io.stdio;
 mount core.cli.spec.CommandSpec;
 mount core.cli.parser.parse_argv;

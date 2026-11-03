@@ -30,7 +30,7 @@
 )
 module core.cli.derive_example;
 
-mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.cli.spec.CommandSpec;
 mount core.cli.runtime.{App, HandlerContext};
 mount core.cli.error.ExitCode;

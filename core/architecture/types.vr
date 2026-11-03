@@ -120,7 +120,7 @@
 )
 module core.architecture.types;
 
-mount core.prelude.{Bool, Int, Maybe, List, Text};
+mount core.prelude.{Maybe, List, Text};
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
 mount core.io.{File};

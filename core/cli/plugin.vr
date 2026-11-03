@@ -29,7 +29,7 @@
 )
 module core.cli.plugin;
 
-mount core.{Maybe, Result, List, Text, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.base.env;
 mount core.cli.spec.CommandSpec;
 

@@ -33,7 +33,7 @@
 )
 module core.cli.types;
 
-mount core.{Maybe, Result, List, Text, Char, Int, Float, Bool, Byte, Heap};
+mount core.{Maybe, Result, List, Text, Heap};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.cli.error.{ParseError, ParseErrorKind};
 

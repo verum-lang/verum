@@ -36,7 +36,7 @@
 )
 module core.cli.frontmatter;
 
-mount core.{Maybe, Result, List, Map, Text, Int, Bool};
+mount core.{Maybe, Result, List, Map, Text};
 
 // =============================================================================
 // Frontmatter — parsed value

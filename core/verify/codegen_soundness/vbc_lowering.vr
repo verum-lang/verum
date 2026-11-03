@@ -29,8 +29,6 @@
 )
 module core.verify.codegen_soundness.vbc_lowering;
 
-mount core.prelude.{Bool};
-
 /// **Kernel-discharge bridge: TypedAST → VBC lowering preserves
 /// operational semantics.**
 ///

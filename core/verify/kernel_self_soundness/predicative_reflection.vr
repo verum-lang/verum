@@ -65,8 +65,6 @@
 )
 module core.verify.kernel_self_soundness.predicative_reflection;
 
-mount core.prelude.{Bool};
-
 /// **REF^0 — Base footprint.**
 ///
 /// Per-rule enumeration over ZFC + 2·κ. The base level has no

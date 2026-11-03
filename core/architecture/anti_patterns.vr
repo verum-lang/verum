@@ -110,7 +110,7 @@
 
 module core.architecture.anti_patterns;
 
-mount core.prelude.{Bool, Int, Maybe, List, Text};
+mount core.prelude.{Maybe, List, Text};
 
 // =============================================================================
 // AntiPatternCode — stable RFC code, 40-pattern canonical roster

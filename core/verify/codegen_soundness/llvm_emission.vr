@@ -28,8 +28,6 @@
 )
 module core.verify.codegen_soundness.llvm_emission;
 
-mount core.prelude.{Bool};
-
 /// **Kernel-discharge bridge: LLVM IR emission preserves operational
 /// semantics.**
 ///

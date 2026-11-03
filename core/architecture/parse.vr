@@ -33,7 +33,7 @@
 )
 module core.architecture.parse;
 
-mount core.prelude.{Bool, Maybe, Text};
+mount core.prelude.{Maybe, Text};
 
 // =============================================================================
 // ArchParseError — 5 canonical variants
@@ -107,7 +107,7 @@ public fn arch_module_canonical_fields() -> List<Text> {
     ]
 }
 
-mount core.prelude.{Int, List};
+mount core.prelude.{List};
 
 /// **Pin**: exactly 13 canonical fields in `@arch_module(...)`.
 /// Adding a 14th requires kernel parser update + this pin bump +

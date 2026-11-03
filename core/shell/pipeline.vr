@@ -30,7 +30,7 @@
 )
 module core.shell.pipeline;
 
-mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.io.process.{Command, Child, ExitStatus, Stdio};
 mount core.time.instant.{Instant};

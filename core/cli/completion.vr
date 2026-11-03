@@ -35,7 +35,7 @@
 )
 module core.cli.completion;
 
-mount core.{Maybe, Result, List, Text, Char, Int, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.text.builder.TextBuilder;
 mount core.cli.spec.{
     CommandSpec, ArgSpec, FlagSpec, CompletionSource,

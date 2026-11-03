@@ -24,7 +24,7 @@
 )
 module core.cli.json_schema;
 
-mount core.{Maybe, Result, List, Text, Int, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.text.builder.TextBuilder;
 mount core.cli.spec.{
     CommandSpec, ArgSpec, FlagSpec, ArgGroup, GroupKind, Arity,

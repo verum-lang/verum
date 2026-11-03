@@ -29,7 +29,7 @@
 )
 module core.cli.testing;
 
-mount core.{Maybe, Result, List, Text, Int, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.cli.spec.CommandSpec;
 mount core.cli.parser.{parse_argv, ParseOutcome};
 mount core.cli.help.{render_help, HelpStyle};

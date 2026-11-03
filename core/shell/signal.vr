@@ -30,7 +30,7 @@
 )
 module core.shell.signal;
 
-mount core.{Maybe, Result, Bool};
+mount core.{Maybe, Result};
 mount core.base.protocols.{Drop};
 mount core.sys.signal.{
     Signal, SignalError,

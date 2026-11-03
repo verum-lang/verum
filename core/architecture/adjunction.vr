@@ -54,7 +54,7 @@
 )
 module core.architecture.adjunction;
 
-mount core.prelude.{Bool, Int, List, Text};
+mount core.prelude.{List, Text};
 mount super.types.ModuleShape;
 mount super.mtac.{AdjunctionWitness, ArchProposition};
 

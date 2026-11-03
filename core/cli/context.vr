@@ -27,7 +27,7 @@
 )
 module core.cli.context;
 
-mount core.{Maybe, Result, List, Map, Text, Bool};
+mount core.{Maybe, Result, List, Map, Text};
 mount core.cli.spec.{CommandSpec, FlagSpec};
 mount core.cli.parser.{ParseOutcome, CapturedFlag};
 

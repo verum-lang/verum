@@ -46,7 +46,7 @@
 )
 module core.shell.transducer;
 
-mount core.{Maybe, Result, List, Bool, Int, Text};
+mount core.{Maybe, Result, List, Text};
 mount core.base.cell.{Cell};
 mount core.base.protocols.{Clone};
 

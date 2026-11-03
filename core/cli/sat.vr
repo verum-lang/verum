@@ -48,7 +48,7 @@
 )
 module core.cli.sat;
 
-mount core.{Maybe, Result, List, Map, Set, Text, Int, Bool};
+mount core.{Maybe, Result, List, Map, Set, Text};
 
 // =============================================================================
 // BoolFormula — propositional formula AST

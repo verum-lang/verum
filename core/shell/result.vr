@@ -31,7 +31,7 @@
 )
 module core.shell.result;
 
-mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.base.iterator.{Iterator, IntoIterator};
 mount core.text.format.{Formatter, FormatError};

@@ -22,7 +22,7 @@
 )
 module core.cli.example;
 
-mount core.{Maybe, Result, List, Text, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.io.stdio;
 mount core.cli.spec.{
     CommandSpec, ArgSpec, FlagSpec, GroupKind, Arity, Example,

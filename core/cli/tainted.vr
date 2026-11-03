@@ -32,7 +32,7 @@
 )
 module core.cli.tainted;
 
-mount core.{Maybe, Result, List, Text, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.cli.error.ParseError;
 
 // =============================================================================

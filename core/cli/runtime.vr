@@ -39,7 +39,7 @@
 )
 module core.cli.runtime;
 
-mount core.{Maybe, Result, List, Map, Text, Int, Bool, Heap, Unit};
+mount core.{Maybe, Result, List, Map, Text, Heap};
 mount core.base.env;
 mount core.io.stdio;
 mount core.text.builder.TextBuilder;

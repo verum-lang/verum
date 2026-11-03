@@ -59,7 +59,7 @@
 )
 module core.architecture.composition;
 
-mount core.prelude.{Bool, Int, List, Text};
+mount core.prelude.{List, Text};
 mount super.types.ModuleShape;
 mount super.anti_patterns.AntiPatternViolation;
 

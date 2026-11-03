@@ -27,7 +27,7 @@
 )
 module core.cli.permissions;
 
-mount core.{Maybe, Result, List, Text, Bool};
+mount core.{Maybe, Result, List, Text};
 mount core.cli.spec.CommandSpec;
 mount core.cli.error.{ParseError, ExitCode, ParseErrorKind};
 

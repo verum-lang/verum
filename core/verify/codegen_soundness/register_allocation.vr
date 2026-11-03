@@ -29,8 +29,6 @@
 )
 module core.verify.codegen_soundness.register_allocation;
 
-mount core.prelude.{Bool};
-
 /// **Kernel-discharge bridge: register allocation preserves observable
 /// behaviour.**
 ///

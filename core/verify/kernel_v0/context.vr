@@ -53,7 +53,7 @@
 )
 module core.verify.kernel_v0.context;
 
-mount core.prelude.{Heap, Int, List, Maybe};
+mount core.prelude.{Heap, List, Maybe};
 mount super.core_term.{CoreTerm};
 
 /// **Typing context** — innermost-first stack of variable types.

@@ -87,7 +87,7 @@
 )
 module core.math.gpu;
 
-mount core.types.{USize, U8, U16, U32, U64, Int, Float, F64, Bool, Text};
+mount core.text.text.Text;
 mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.{List};
 mount core.base.protocols.{Ord, Eq, Drop};

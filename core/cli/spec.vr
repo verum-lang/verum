@@ -40,7 +40,7 @@
 )
 module core.cli.spec;
 
-mount core.{Maybe, Result, List, Map, Set, Text, Char, Int, Bool, Heap};
+mount core.{Maybe, Result, List, Map, Set, Text, Heap};
 mount core.base.protocols.{Debug, Display, Clone, Eq, Default};
 
 // =============================================================================
