@@ -441,7 +441,7 @@ impl VbcCodegen {
         &mut self,
         pattern: &verum_ast::Pattern,
         ty: &crate::types::TypeRef,
-        borrow: Option<crate::types::Mutability>,
+        borrow: Option<(crate::types::Mutability, crate::types::CbgrTier)>,
     ) {
         use verum_ast::PatternKind;
         match (&pattern.kind, ty) {
@@ -452,9 +452,9 @@ impl VbcCodegen {
             }
             (PatternKind::Ident { name, by_ref: false, subpattern: None, .. }, _) => {
                 if let Some(reg) = self.ctx.lookup_var(name.name.as_str()).map(|var| var.reg) {
-                    let binding = if let Some(mutability) = borrow {
+                    let binding = if let Some((mutability, tier)) = borrow {
                         self.ctx.reference_bindings.insert(name.name.to_string());
-                        crate::types::TypeRef::reference(ty.clone(), mutability, crate::types::CbgrTier::Tier0)
+                        crate::types::TypeRef::reference(ty.clone(), mutability, tier)
                     } else {
                         ty.clone()
                     };

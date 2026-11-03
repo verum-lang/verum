@@ -83,8 +83,9 @@ impl VbcCodegen {
 
     /// A for-loop on a source nominal uses its selected IntoIterator.Item
     /// declaration, instantiated with the arguments of that value.
-    pub(super) fn into_iterator_item(&self, ty: &TypeRef) -> Option<TypeRef> {
-        use verum_common::well_known_types::WellKnownProtocol;
+    pub(super) fn iterator_protocol_item(
+        &self, ty: &TypeRef, protocol: verum_common::well_known_types::WellKnownProtocol,
+    ) -> Option<TypeRef> {
         let (id, args) = match ty {
             TypeRef::Concrete(id) => (*id, &[][..]),
             TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
@@ -92,7 +93,6 @@ impl VbcCodegen {
         };
         let owner = self.type_by_id(id)?;
         if owner.type_params.len() != args.len() { return None; }
-        let protocol = WellKnownProtocol::IntoIterator;
         let implementations = owner.protocols.iter().filter(|implementation| {
             let Some(declaration) = self.type_by_id(crate::types::TypeId(implementation.protocol.0)) else {
                 return false;

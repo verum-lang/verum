@@ -19056,6 +19056,9 @@ impl VbcCodegen {
         let iter_val = self
             .compile_expr(iter)?
             .or_internal("for iter has no value")?;
+        let item = self.source_expression_declaration(iter, None, 0).and_then(|ty| {
+            self.iterator_protocol_item(&ty, verum_common::well_known_types::WellKnownProtocol::Iterator)
+        });
         let iter_reg = self.ctx.define_var("__for_iter", true);
         self.ctx.emit(Instruction::Mov {
             dst: iter_reg,
@@ -19131,9 +19134,12 @@ impl VbcCodegen {
 
         self.ctx.free_temp(tag_reg);
 
-        // Bind pattern
         self.ctx.enter_scope();
-        self.compile_pattern_bind(pattern, elem_reg)?;
+        if let Some(item) = item {
+            self.bind_loop_element(pattern, elem_reg, &item, None)?;
+        } else {
+            self.compile_pattern_bind(pattern, elem_reg)?;
+        }
 
         // Compile body
         self.compile_block_with_demand(body, ResultDemand::Discarded)?;
@@ -19162,6 +19168,25 @@ impl VbcCodegen {
         let result = self.ctx.alloc_temp();
         self.ctx.emit(Instruction::LoadUnit { dst: result });
         Ok(Some(result))
+    }
+
+    /// A protocol's Item includes its reference mode. Keep the source owner as
+    /// the pattern's pointee while recording the borrow once for ownership.
+    fn bind_loop_element(
+        &mut self, pattern: &verum_ast::Pattern, reg: Reg, item: &crate::types::TypeRef,
+        implicit_borrow: Option<crate::types::Mutability>,
+    ) -> CodegenResult<()> {
+        let (pointee, borrow) = match item {
+            crate::types::TypeRef::Reference { inner, mutability, tier } if implicit_borrow.is_none() =>
+                (inner.as_ref(), Some((*mutability, *tier))),
+            _ => (item, implicit_borrow.map(|mutability| (mutability, CbgrTier::Tier0))),
+        };
+        let mode = borrow.map_or(PatternBindingMode::Value, |(mutability, tier)| {
+            PatternBindingMode::Borrowed(mutability, tier)
+        });
+        self.compile_pattern_bind_mode(pattern, reg, &mode)?;
+        self.bind_pattern_declaration(pattern, pointee, borrow);
+        Ok(())
     }
 
     /// Compiles a for expression.
@@ -19222,14 +19247,15 @@ impl VbcCodegen {
             },
             _ => (None, None),
         };
-        let item_type = if matches!(
+        let iterable = self.source_expression_declaration(iter, None, 0);
+        let native_item = || if matches!(
             pattern.kind,
             verum_ast::PatternKind::Ident { .. } | verum_ast::PatternKind::Tuple(_)
         ) {
             use crate::types::{TypeId, TypeRef};
-            let container = container_for_element.unwrap_or(iter);
-            let declared = self.source_expression_declaration(container, None, 0);
-            let mut owner = declared.as_ref();
+            let container = container_for_element
+                .and_then(|expr| self.source_expression_declaration(expr, None, 0));
+            let mut owner = if container_for_element.is_some() { container.as_ref() } else { iterable.as_ref() };
             while let Some(TypeRef::Reference { inner, .. }) = owner {
                 owner = Some(inner);
             }
@@ -19239,19 +19265,23 @@ impl VbcCodegen {
                         args.first().cloned()
                     }
                 Some(TypeRef::Array { element, .. } | TypeRef::Slice(element)) => Some(element.as_ref().clone()),
-                Some(ty) if container_for_element.is_none() => self.into_iterator_item(ty),
                 _ => None,
             }
         } else {
             None
         };
+        // For a declared iterator or adapter, the actual return value owns Item.
+        // The container fallback applies only when the native iterator has no declaration.
+        let declared_item = iterable.as_ref().and_then(|ty| {
+            self.iterator_protocol_item(ty, verum_common::well_known_types::WellKnownProtocol::IntoIterator)
+        });
+        let (item_type, borrow) = match declared_item {
+            Some(item) => (Some(item), None),
+            None => (native_item(), borrow),
+        };
         self.ctx.enter_scope();
         if let Some(item) = &item_type {
-            let mode = borrow.map_or(PatternBindingMode::Value, |mutability| {
-                PatternBindingMode::Borrowed(mutability, CbgrTier::Tier0)
-            });
-            self.compile_pattern_bind_mode(pattern, elem_reg, &mode)?;
-            self.bind_pattern_declaration(pattern, item, borrow);
+            self.bind_loop_element(pattern, elem_reg, item, borrow)?;
         } else {
             self.compile_pattern_bind(pattern, elem_reg)?;
         }

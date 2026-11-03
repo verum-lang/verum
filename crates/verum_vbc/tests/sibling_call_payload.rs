@@ -109,3 +109,47 @@ fn iterator_binds_the_declared_element_of_a_qualified_call_result() {
         }
     }
 }
+
+#[test]
+fn a_returned_iterator_keeps_its_borrowed_item_across_sibling_scopes() {
+    let sources = [
+        r#"module core.base.iterator; public type Maybe<T> is None | Some(T);
+public type Iterator is protocol { type Item; fn next(&mut self) -> Maybe<Self.Item>; }
+public type IntoIterator is protocol { type Item; }"#,
+        r#"module core.unit.values;
+mount core.base.iterator.{Iterator,IntoIterator,Maybe};
+public type Stage is Cancel | Save(Int);
+public type Decoy is Save(Int) | Cancel;
+public type Cursor<T> is { current: T, done: Bool };
+implement<T> Iterator for Cursor<T> {
+    type Item = &T;
+    fn next(&mut self) -> Maybe<&T> {
+        if self.done { return Maybe.None; }
+        self.done = true; Maybe.Some(&self.current)
+    }
+}
+implement<T> IntoIterator for Cursor<T> { type Item = &T; }
+public type Container<A,B> is { selected: A, unrelated: B };
+implement<A,B> Container<A,B> { public fn iter(&self) -> Cursor<A> { Cursor { current: self.selected, done: false } } }"#,
+        r#"module core.unit.consumer; mount core.unit.values.{Stage,Decoy,Container};
+public fn run(rows: Container<Stage, Decoy>) -> Int {
+    for stage in rows.iter() {
+        match stage { Save(x) => return *x, Cancel => return 3 }
+    }
+    0
+}
+public fn probe() -> Int { assert_eq(run(Container { selected: Stage.Save(41), unrelated: Decoy.Cancel }),41); assert_eq(run(Container{selected:Stage.Cancel,unrelated: Decoy.Save(98)}),3); 1 }"#,
+    ];
+    let modules: Vec<_> = sources.iter().map(|source| Parser::new(source).parse_module().unwrap()).collect();
+    let files: Vec<_> = modules.iter().collect();
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("core.unit"));
+    cg.collect_unit_declarations(&files).unwrap();
+    cg.resolve_pending_imports();
+    cg.compile_unit_items(&files, ItemFailurePolicy::Strict).unwrap();
+    let module = cg.finalize_module().unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    for module in [module, verum_vbc::deserialize::deserialize_module(&wire).unwrap()] {
+        let entry = module.find_function_by_name("core.unit.consumer.probe").unwrap();
+        assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), 1);
+    }
+}
