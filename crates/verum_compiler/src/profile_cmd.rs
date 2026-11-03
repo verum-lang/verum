@@ -1,26 +1,14 @@
-//! CBGR Profiling Command
-//!
-//! P0 Feature for v1.0: Profile CBGR overhead and suggest optimizations
-//!
-//! # Example Output
-//!
-//! ```text
-//! $ verum profile --memory app.vr
-//!
-//! Performance Report:
-//!  hot_loop(): 15% time in CBGR checks
-//!  → Convert to %T for zero-cost: `fn hot_loop(data: %List<Int>)`
-//!
-//!  safe_parse(): 0.1% CBGR overhead
-//!  → Keep &T, overhead negligible
-//! ```
+//! Static CBGR source profiling. Reference annotations are counted from the
+//! syntax tree. The cost model assigns explicit weights to potential accesses
+//! and loop iterations. Only executing the program can establish its runtime cost.
 
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::path::Path;
 use tracing::{debug, info};
 use verum_ast::decl::ItemKind;
-use verum_ast::{Expr, ExprKind, FunctionDecl, FunctionParamKind, Module, Type, TypeKind};
+use verum_ast::visitor::{Visitor, walk_expr, walk_type};
+use verum_ast::{Expr, ExprKind, FunctionDecl, Module, Type, TypeKind};
 use verum_common::{List, Map, Text, ToText};
 
 use crate::pipeline::CompilationPipeline;
@@ -60,57 +48,12 @@ impl<'s> ProfileCommand<'s> {
 
     /// Set profiling mode
     pub fn with_mode(mut self, mode: ProfilingMode) -> Self {
-        // Phase-not-realised tracing: `ProfileCommand::with_mode`
-        // selects between `Static` (AST-based estimation) and
-        // `Runtime` (requires execution sampling). The CLI
-        // `verum profile --memory <file>` entry point at
-        // commands/file.rs:1474 calls `ProfileCommand::new` which
-        // defaults to Static — no caller threads `--memory` into
-        // a Runtime selection. This builder exists for embedders
-        // but the CLI surface doesn't expose mode selection yet.
-        // Surface a debug trace when the user picks Runtime so
-        // the gap is visible (Static stays quiet — that's the
-        // default already).
-        if matches!(mode, ProfilingMode::Runtime) {
-            tracing::debug!(
-                "ProfileCommand::with_mode(Runtime) — Runtime mode requires \
-                 execution sampling, but the CLI's `verum profile` command \
-                 doesn't yet expose a mode selector. The default Static path \
-                 (AST-based estimation) runs regardless of the --memory flag. \
-                 Forward-looking: hook this builder into a future \
-                 `verum profile --runtime` flag."
-            );
-        }
         self.mode = mode;
         self
     }
 
     /// Run CBGR profiling
     pub fn run(&mut self, output: Option<&Path>, suggest: bool) -> Result<()> {
-        // Phase-not-realised: `CompilerOptions.profile_memory`
-        // (default false) is set by `verum profile --memory <file>`
-        // at commands/file.rs:1466 but neither `run_static` nor
-        // `run_runtime` consults `session.options().profile_memory`.
-        // The CLI also routes `--memory` through a separate
-        // post-collection path (`commands/profile.rs::profile_memory`,
-        // line 729) that operates on already-collected ProfileData,
-        // so the per-session flag never enters the profile_module
-        // walk. Surface the gap when the embedder sets
-        // `profile_memory = true` so they see that no memory-
-        // specific instrumentation runs in this path. The CBGR
-        // profile (allocation counts via reference-tier walk) runs
-        // unconditionally as part of profile_module regardless.
-        if self.session.options().profile_memory {
-            tracing::warn!(
-                "ProfileCommand::run: profile_memory=true is set on the session \
-                 but neither the Static nor Runtime profiling path consults it. \
-                 Memory-specific instrumentation (allocation counts, peak RSS) \
-                 is not yet plumbed through profile_module — only the CBGR \
-                 reference-tier walk runs. The `verum profile --memory` flag \
-                 currently routes through a separate post-collection path. \
-                 Forward-looking knob."
-            );
-        }
         match self.mode {
             ProfilingMode::Static => self.run_static(output, suggest),
             ProfilingMode::Runtime => self.run_runtime(output, suggest),
@@ -137,7 +80,7 @@ impl<'s> ProfileCommand<'s> {
             .ok_or_else(|| anyhow::anyhow!("Module not found"))?;
 
         // Profile CBGR usage
-        let report = self.profile_module(&module)?;
+        let report = ProfileReport::estimate(&module, self.session.options().hot_path_threshold)?;
 
         // Display report
         self.display_report(&report);
@@ -160,39 +103,22 @@ impl<'s> ProfileCommand<'s> {
     /// This mode executes the program with profiling enabled and collects
     /// actual runtime statistics using sampling.
     fn run_runtime(&mut self, _output: Option<&Path>, _suggest: bool) -> Result<()> {
-        println!("{}", "=== Runtime CBGR Profiling ===".bold());
-        println!("Mode: Sampling-based (1% default)");
-        println!();
-
-        // Note: This requires runtime integration which would be implemented
-        // in the actual execution tier. For now, we provide a placeholder.
-        println!(
-            "{}",
-            "Note: Runtime profiling requires execution tier integration.".yellow()
-        );
-        println!("Use static mode for compile-time analysis:");
-        println!("  $ verum profile --memory <file>");
-        println!();
-        println!("For runtime profiling, use:");
-        println!("  $ verum run --profile-cbgr <file>");
-
-        Err(anyhow::anyhow!(
-            "Runtime profiling not yet implemented in this command. Use 'verum run --profile-cbgr' instead."
-        ))
+        anyhow::bail!("Runtime sampling is unavailable in the static CBGR profiler")
     }
+}
 
+impl ProfileReport {
     /// Profile CBGR usage in module
-    fn profile_module(&mut self, module: &Module) -> Result<ProfileReport> {
+    pub fn estimate(module: &Module, threshold: f64) -> Result<ProfileReport> {
         let mut report = ProfileReport::new();
-        let threshold = self.session.options().hot_path_threshold;
 
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
                 debug!("Profiling function: {}", func.name);
-                let stats = self.profile_function(func)?;
+                let stats = Self::profile_function(func)?;
 
                 // Calculate overhead percentage
-                let overhead_pct = self.calculate_overhead(&stats);
+                let overhead_pct = Self::calculate_overhead(&stats);
 
                 report.add_function(
                     func.name.as_str().to_text(),
@@ -215,38 +141,18 @@ impl<'s> ProfileCommand<'s> {
     /// - Checked references (&checked T)
     /// - Unsafe references (&unsafe T)
     /// - Ownership references (%T)
-    fn profile_function(&self, func: &FunctionDecl) -> Result<CbgrStats> {
+    fn profile_function(func: &FunctionDecl) -> Result<CbgrStats> {
         let mut stats = RefStats::default();
+        stats.visit_function(func);
 
-        // Analyze parameter types
-        for param in &func.params {
-            if let FunctionParamKind::Regular { pattern: _, ty, .. } = &param.kind {
-                self.analyze_type(ty, &mut stats);
-            }
-        }
-
-        // Analyze return type
-        if let Some(ref ret_ty) = func.return_type {
-            self.analyze_type(ret_ty, &mut stats);
-        }
-
-        // Analyze function body if available
-        if let Some(ref body) = func.body {
-            self.analyze_body(body, &mut stats);
-        }
-
-        // Calculate estimated checks and timing
-        // Each CBGR ref access requires ~1 check, loops multiply this
-        let estimated_checks = stats.cbgr_refs * stats.estimated_loop_factor.max(1);
-
-        // CBGR check overhead: ~15ns per check
-        const CBGR_CHECK_NS: u64 = 15;
-        let cbgr_time_ns = (estimated_checks as u64) * CBGR_CHECK_NS;
-
-        // Estimate total time: base + CBGR overhead
-        // Base: 100ns per expression (rough estimate)
-        let base_time_ns = (stats.total_expressions as u64) * 100;
-        let total_time_ns = base_time_ns + cbgr_time_ns;
+        let model = CbgrCostModel::DEFAULT;
+        let (estimated_checks, cbgr_time_ns, total_time_ns) =
+            model.estimate_costs(&stats).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "CBGR cost estimate exceeds the report range for {}",
+                    func.name
+                )
+            })?;
 
         Ok(CbgrStats {
             num_cbgr_refs: stats.cbgr_refs,
@@ -257,236 +163,19 @@ impl<'s> ProfileCommand<'s> {
         })
     }
 
-    /// Analyze a type for reference categories
-    fn analyze_type(&self, ty: &Type, stats: &mut RefStats) {
-        match &ty.kind {
-            // CBGR managed reference (&T, &mut T)
-            TypeKind::Reference { inner, .. } => {
-                stats.cbgr_refs += 1;
-                self.analyze_type(inner, stats);
-            }
-            // Checked reference (&checked T) - no CBGR overhead
-            TypeKind::CheckedReference { inner, .. } => {
-                stats.checked_refs += 1;
-                self.analyze_type(inner, stats);
-            }
-            // Unsafe reference (&unsafe T) - no CBGR overhead
-            TypeKind::UnsafeReference { inner, .. } => {
-                stats.unsafe_refs += 1;
-                self.analyze_type(inner, stats);
-            }
-            // Ownership (%T) - no CBGR overhead
-            TypeKind::Ownership { inner, .. } => {
-                stats.ownership_refs += 1;
-                self.analyze_type(inner, stats);
-            }
-            // Generic types - analyze type arguments
-            TypeKind::Generic { args, .. } => {
-                for arg in args {
-                    if let verum_ast::ty::GenericArg::Type(t) = arg {
-                        self.analyze_type(t, stats);
-                    }
-                }
-            }
-            // Tuple types
-            TypeKind::Tuple(types) => {
-                for t in types {
-                    self.analyze_type(t, stats);
-                }
-            }
-            // Function types
-            TypeKind::Function {
-                params,
-                return_type,
-                ..
-            } => {
-                for p in params {
-                    self.analyze_type(p, stats);
-                }
-                self.analyze_type(return_type, stats);
-            }
-            // Array types
-            TypeKind::Array { element, .. } => {
-                self.analyze_type(element, stats);
-            }
-            // Slice types
-            TypeKind::Slice(inner) => {
-                self.analyze_type(inner, stats);
-            }
-            _ => {}
-        }
-    }
-
-    /// Analyze function body for expressions and loop factors
-    fn analyze_body(&self, body: &verum_ast::FunctionBody, stats: &mut RefStats) {
-        match body {
-            verum_ast::FunctionBody::Block(block) => {
-                self.analyze_block(block, stats, 1);
-            }
-            verum_ast::FunctionBody::Expr(expr) => {
-                self.analyze_expr(expr, stats, 1);
-            }
-        }
-    }
-
-    /// Analyze a block for expressions
-    fn analyze_block(&self, block: &verum_ast::Block, stats: &mut RefStats, loop_depth: usize) {
-        for stmt in &block.stmts {
-            self.analyze_stmt(stmt, stats, loop_depth);
-        }
-        if let Some(ref expr) = block.expr {
-            self.analyze_expr(expr, stats, loop_depth);
-        }
-    }
-
-    /// Analyze a statement
-    fn analyze_stmt(&self, stmt: &verum_ast::Stmt, stats: &mut RefStats, loop_depth: usize) {
-        use verum_ast::StmtKind;
-        match &stmt.kind {
-            StmtKind::Let { value, ty, .. } => {
-                if let Some(t) = ty {
-                    self.analyze_type(t, stats);
-                }
-                if let Some(v) = value {
-                    self.analyze_expr(v, stats, loop_depth);
-                }
-            }
-            StmtKind::Expr { expr, .. } => {
-                self.analyze_expr(expr, stats, loop_depth);
-            }
-            _ => {}
-        }
-    }
-
-    /// Analyze an expression for CBGR operations
-    fn analyze_expr(&self, expr: &Expr, stats: &mut RefStats, loop_depth: usize) {
-        stats.total_expressions += 1;
-
-        // Update loop factor if we're in a loop
-        if loop_depth > 1 {
-            // Estimate 10 iterations per loop level
-            let factor = 10_usize.pow((loop_depth - 1) as u32);
-            stats.estimated_loop_factor = stats.estimated_loop_factor.max(factor);
-        }
-
-        match &expr.kind {
-            // Unary operations - check for dereference
-            ExprKind::Unary { op, expr: inner } => {
-                // Deref (*) triggers a CBGR check
-                if matches!(op, verum_ast::UnOp::Deref) {
-                    stats.cbgr_refs += loop_depth;
-                }
-                self.analyze_expr(inner, stats, loop_depth);
-            }
-            // Field access on reference
-            ExprKind::Field { expr: object, .. } => {
-                self.analyze_expr(object, stats, loop_depth);
-            }
-            // Index access - triggers bounds check + CBGR check
-            ExprKind::Index {
-                expr: object,
-                index,
-            } => {
-                stats.cbgr_refs += loop_depth; // CBGR check on container
-                self.analyze_expr(object, stats, loop_depth);
-                self.analyze_expr(index, stats, loop_depth);
-            }
-            // Loop constructs increase loop depth
-            ExprKind::For { iter, body, .. } => {
-                self.analyze_expr(iter, stats, loop_depth);
-                self.analyze_block(body, stats, loop_depth + 1);
-            }
-            ExprKind::While {
-                condition, body, ..
-            } => {
-                self.analyze_expr(condition, stats, loop_depth + 1);
-                self.analyze_block(body, stats, loop_depth + 1);
-            }
-            ExprKind::Loop { body, .. } => {
-                self.analyze_block(body, stats, loop_depth + 1);
-            }
-            // Recursively analyze subexpressions
-            ExprKind::Block(block) => {
-                self.analyze_block(block, stats, loop_depth);
-            }
-            ExprKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                // condition is IfCondition, we just analyze the branches
-                self.analyze_block(then_branch, stats, loop_depth);
-                if let Some(e) = else_branch {
-                    self.analyze_expr(e, stats, loop_depth);
-                }
-            }
-            ExprKind::Match {
-                expr: scrutinee,
-                arms,
-            } => {
-                self.analyze_expr(scrutinee, stats, loop_depth);
-                for arm in arms {
-                    self.analyze_expr(&arm.body, stats, loop_depth);
-                }
-            }
-            ExprKind::Call { func, args, .. } => {
-                self.analyze_expr(func, stats, loop_depth);
-                for arg in args {
-                    self.analyze_expr(arg, stats, loop_depth);
-                }
-            }
-            ExprKind::MethodCall { receiver, args, .. } => {
-                self.analyze_expr(receiver, stats, loop_depth);
-                for arg in args {
-                    self.analyze_expr(arg, stats, loop_depth);
-                }
-            }
-            ExprKind::Binary { left, right, .. } => {
-                self.analyze_expr(left, stats, loop_depth);
-                self.analyze_expr(right, stats, loop_depth);
-            }
-            ExprKind::Tuple(exprs) => {
-                for e in exprs {
-                    self.analyze_expr(e, stats, loop_depth);
-                }
-            }
-            ExprKind::Array(array_expr) => match array_expr {
-                verum_ast::ArrayExpr::List(exprs) => {
-                    for e in exprs {
-                        self.analyze_expr(e, stats, loop_depth);
-                    }
-                }
-                verum_ast::ArrayExpr::Repeat { value, count } => {
-                    self.analyze_expr(value, stats, loop_depth);
-                    self.analyze_expr(count, stats, loop_depth);
-                }
-            },
-            ExprKind::Cast { expr: inner, .. } => {
-                self.analyze_expr(inner, stats, loop_depth);
-            }
-            ExprKind::Return(maybe_inner) => {
-                if let Some(inner) = maybe_inner {
-                    self.analyze_expr(inner, stats, loop_depth);
-                }
-            }
-            ExprKind::Await(inner) => {
-                self.analyze_expr(inner, stats, loop_depth);
-            }
-            _ => {}
-        }
-    }
-
     /// Calculate overhead percentage
-    fn calculate_overhead(&self, stats: &CbgrStats) -> f64 {
+    fn calculate_overhead(stats: &CbgrStats) -> f64 {
         if stats.total_time_ns == 0 {
             return 0.0;
         }
         (stats.cbgr_time_ns as f64 / stats.total_time_ns as f64) * 100.0
     }
+}
 
-    /// Display profiling report
+impl ProfileCommand<'_> {
+    /// Display the static CBGR estimate.
     fn display_report(&self, report: &ProfileReport) {
-        println!("{}", "\nCBGR Performance Report:".bold());
+        println!("{}", "\nStatic CBGR cost estimates:".bold());
         println!("{}", "=".repeat(60));
 
         // Sort by overhead (highest first)
@@ -508,14 +197,14 @@ impl<'s> ProfileCommand<'s> {
             };
 
             println!(
-                "  {} {}: {} CBGR overhead",
+                "  {} {}: {} modeled CBGR overhead",
                 if profile.is_hot { "🔥" } else { " " },
                 name.as_str().bold(),
                 colored_overhead
             );
 
             println!(
-                "      {} CBGR refs, {} ownership refs, {} checks",
+                "      {} CBGR refs, {} ownership refs, {} modeled checks",
                 profile.stats.num_cbgr_refs,
                 profile.stats.num_ownership_refs,
                 profile.stats.num_checks
@@ -523,7 +212,7 @@ impl<'s> ProfileCommand<'s> {
 
             if profile.is_hot {
                 println!(
-                    "      {} Hot path detected! Consider optimization",
+                    "      {} Function exceeds the model threshold",
                     "⚠".yellow()
                 );
             }
@@ -531,7 +220,7 @@ impl<'s> ProfileCommand<'s> {
 
         println!();
         println!(
-            "Total: {} functions, {} hot paths",
+            "Total: {} functions, {} above the model threshold",
             report.functions.len(),
             report.num_hot_paths()
         );
@@ -539,47 +228,12 @@ impl<'s> ProfileCommand<'s> {
 
     /// Display optimization suggestions
     fn display_suggestions(&self, report: &ProfileReport) {
-        let hot_functions: List<_> = report.functions.iter().filter(|(_, p)| p.is_hot).collect();
-
-        if hot_functions.is_empty() {
+        for (name, profile) in report.functions.iter().filter(|(_, p)| p.is_hot) {
             println!(
-                "{}",
-                "\n✓ No hot paths detected. CBGR overhead is minimal.".green()
-            );
-            return;
-        }
-
-        println!("{}", "\nOptimization Suggestions:".bold());
-        println!("{}", "=".repeat(60));
-
-        for (name, profile) in hot_functions {
-            println!(
-                "\n  {} {}: {:.1}% overhead",
-                "•".yellow(),
-                name.as_str().bold(),
+                "  {name}: benchmark the reference accesses behind the {:.1}% estimate",
                 profile.overhead_pct
             );
-
-            if profile.stats.num_cbgr_refs > 0 {
-                println!("    {} Convert CBGR refs to ownership:", "→".cyan());
-                println!(
-                    "      {}",
-                    format!("fn {}(data: %T) instead of &T", name).cyan()
-                );
-                println!("      Benefit: {:.1}% → 0% overhead", profile.overhead_pct);
-            }
-
-            if profile.stats.num_checks > 100 {
-                println!("    {} Reduce reference checks:", "→".cyan());
-                println!("      - Cache references outside loops");
-                println!("      - Use raw pointers in trusted code");
-            }
         }
-
-        println!(
-            "\n{}",
-            "For more details, run: verum profile --help".dimmed()
-        );
     }
 
     /// Write report to file
@@ -596,21 +250,92 @@ impl<'s> ProfileCommand<'s> {
     }
 }
 
+/// Assumptions of the static cost model, published with its estimates.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct CbgrCostModel {
+    pub assumed_check_ns: u64,
+    pub assumed_expression_ns: u64,
+    pub assumed_iterations_per_loop: usize,
+}
+
+impl CbgrCostModel {
+    pub const DEFAULT: Self = Self {
+        assumed_check_ns: 15,
+        assumed_expression_ns: 100,
+        assumed_iterations_per_loop: 10,
+    };
+
+    fn estimate_costs(self, stats: &RefStats) -> Option<(usize, u64, u64)> {
+        let checks =
+            stats
+                .access_sites_by_depth
+                .iter()
+                .try_fold(0usize, |sum, (&depth, &sites)| {
+                    let iterations = self
+                        .assumed_iterations_per_loop
+                        .checked_pow(depth.try_into().ok()?)?;
+                    sum.checked_add(sites.checked_mul(iterations)?)
+                })?;
+        let cbgr_ns = u64::try_from(checks)
+            .ok()?
+            .checked_mul(self.assumed_check_ns)?;
+        let expression_ns = u64::try_from(stats.total_expressions)
+            .ok()?
+            .checked_mul(self.assumed_expression_ns)?;
+        Some((checks, cbgr_ns, expression_ns.checked_add(cbgr_ns)?))
+    }
+}
+
 /// Internal statistics for AST analysis
 #[derive(Debug, Default)]
 struct RefStats {
     /// Count of CBGR managed references (&T, &mut T)
     cbgr_refs: usize,
-    /// Count of checked references (&checked T)
-    checked_refs: usize,
-    /// Count of unsafe references (&unsafe T)
-    unsafe_refs: usize,
     /// Count of ownership references (%T)
     ownership_refs: usize,
     /// Total expression count for timing estimates
     total_expressions: usize,
-    /// Estimated loop factor for hot path detection
-    estimated_loop_factor: usize,
+    loop_depth: usize,
+    access_sites_by_depth: std::collections::BTreeMap<usize, usize>,
+}
+
+impl Visitor for RefStats {
+    fn visit_type(&mut self, ty: &Type) {
+        match ty.kind {
+            TypeKind::Reference { .. } => self.cbgr_refs += 1,
+            TypeKind::Ownership { .. } => self.ownership_refs += 1,
+            _ => {}
+        }
+        walk_type(self, ty);
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) {
+        self.total_expressions += 1;
+        // Each dereference or index is a potential check. An unused reference
+        // is still a source annotation, with no corresponding access site.
+        if matches!(
+            expr.kind,
+            ExprKind::Unary {
+                op: verum_ast::UnOp::Deref,
+                ..
+            } | ExprKind::Index { .. }
+        ) {
+            *self
+                .access_sites_by_depth
+                .entry(self.loop_depth)
+                .or_default() += 1;
+        }
+        let nested = matches!(
+            expr.kind,
+            ExprKind::Loop { .. }
+                | ExprKind::While { .. }
+                | ExprKind::For { .. }
+                | ExprKind::ForAwait { .. }
+        );
+        self.loop_depth += usize::from(nested);
+        walk_expr(self, expr);
+        self.loop_depth -= usize::from(nested);
+    }
 }
 
 /// CBGR statistics for a function

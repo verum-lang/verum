@@ -87,3 +87,40 @@ fn test_function_profile_hot_path_detection() {
     assert!(!cold_profile.is_hot);
     assert!(cold_profile.overhead_pct < 5.0);
 }
+
+#[test]
+fn static_model_counts_reference_declarations_separately_from_possible_accesses() {
+    let source = r#"
+        fn unused(n: &Int) -> Int { 1 }
+        fn accessed(n: &Int) -> Int { match true { true => *n, false => 0 } }
+        fn looped(n: &Int) -> Int { while false { let x = *n; } *n }
+    "#;
+    let module = verum_fast_parser::Parser::new(source)
+        .parse_module()
+        .unwrap();
+    let report = ProfileReport::estimate(&module, 5.0).unwrap();
+    for (name, checks) in [("unused", 0), ("accessed", 1), ("looped", 11)] {
+        let profile = report.functions.get(&Text::from(name)).unwrap();
+        assert_eq!(profile.stats.num_cbgr_refs, 1, "{name}");
+        assert_eq!(profile.stats.num_checks, checks, "{name}");
+    }
+}
+
+#[test]
+fn unrepresentable_loop_cost_is_explicit() {
+    let source = format!(
+        "fn nested(n: &Int) {{ {} let value = *n; {} }}",
+        "while false { ".repeat(35),
+        "}".repeat(35)
+    );
+    let module = verum_fast_parser::Parser::new(&source)
+        .parse_module()
+        .unwrap();
+    let error = ProfileReport::estimate(&module, 5.0).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("exceeds the report range for nested"),
+        "{error}"
+    );
+}
