@@ -56,15 +56,29 @@ struct AnalysisReceipt {
 pub struct ImportTopology {
     inspected_modules: usize,
     unresolved_mounts: usize,
+    failures: Vec<ImportFailure>,
     edges: Vec<ImportEdge>,
+}
+
+#[derive(Clone, Serialize)]
+struct ImportSite {
+    importer: Text,
+    location: Location,
+    source: Text,
+}
+
+#[derive(Serialize)]
+struct ImportFailure {
+    #[serde(flatten)]
+    site: ImportSite,
+    reason: Text,
 }
 
 #[derive(Serialize)]
 struct ImportEdge {
-    importer: Text,
+    #[serde(flatten)]
+    site: ImportSite,
     provider: Text,
-    location: Location,
-    source: Text,
     names: Vec<Text>,
 }
 
@@ -146,9 +160,18 @@ impl ProjectContext {
                     let ItemKind::Mount(decl) = &item.kind else { continue };
                     if !self.cfg.should_include_item(item) { continue; }
                     control.check()?;
-                    let Ok(import) = resolver.resolve_import(decl, id, &self.exports, &self.module_paths) else {
-                        graph.unresolved_mounts += 1;
-                        continue;
+                    let span = item.span.start as usize..item.span.end as usize;
+                    let site = ImportSite {
+                        importer: source.owner.to_string().into(),
+                        location: Location::new(uri.clone(), ast_span_to_range(&item.span, &source.text)),
+                        source: source.text.get(span).context("Import span outside captured source")?.into(),
+                    };
+                    let import = match resolver.resolve_import(decl, id, &self.exports, &self.module_paths) {
+                        Ok(import) => import,
+                        Err(error) => {
+                            graph.failures.push(ImportFailure { site, reason: error.to_string().into() });
+                            continue;
+                        }
                     };
                     let mut providers = std::collections::BTreeMap::<Text, Vec<Text>>::new();
                     for binding in import.items {
@@ -156,21 +179,17 @@ impl ProjectContext {
                             .context("Resolved binding has no registered module")?;
                         providers.entry(provider.to_string().into()).or_default().push(binding.name);
                     }
-                    let span = item.span.start as usize..item.span.end as usize;
-                    let spelling = source.text.get(span).context("Import span outside captured source")?;
                     for (provider, mut names) in providers {
                         names.sort();
-                        graph.edges.push(ImportEdge {
-                            importer: source.owner.to_string().into(), provider, names,
-                            location: Location::new(uri.clone(), ast_span_to_range(&item.span, &source.text)),
-                            source: spelling.into(),
-                        });
+                        graph.edges.push(ImportEdge { site: site.clone(), provider, names });
                     }
                 }
             }
-            graph.edges.sort_by(|a, b| a.importer.cmp(&b.importer)
-                .then_with(|| a.location.range.start.cmp(&b.location.range.start))
-                .then_with(|| a.provider.cmp(&b.provider)));
+            let site_order = |a: &ImportSite, b: &ImportSite| a.importer.cmp(&b.importer)
+                .then_with(|| a.location.range.start.cmp(&b.location.range.start));
+            graph.edges.sort_by(|a, b| site_order(&a.site, &b.site).then_with(|| a.provider.cmp(&b.provider)));
+            graph.failures.sort_by(|a, b| site_order(&a.site, &b.site));
+            graph.unresolved_mounts = graph.failures.len();
             control.check()?;
             self.topology = Some(graph);
         }
