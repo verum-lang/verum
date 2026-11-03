@@ -17,7 +17,6 @@ use crate::ui;
 use verum_compiler::{
     options::{CompilerOptions, OutputFormat, VerifyMode, VerifyStrategy},
     pipeline::CompilationPipeline,
-    profile_cmd::ProfileCommand,
     repl::Repl,
     session::Session,
     verify_cmd::VerifyCommand,
@@ -1972,45 +1971,6 @@ pub fn verify(
         .map_err(|e| CliError::VerificationFailed(e.to_string()))?;
 
     ui::success("Verification complete");
-    Ok(())
-}
-
-/// Profile CBGR overhead in single file
-pub fn profile(
-    file: &str,
-    memory: bool,
-    hot_threshold: f64,
-    output: Option<&str>,
-    suggest: bool,
-) -> Result<(), CliError> {
-    ui::step(&format!("Profiling {}", file));
-
-    let input = PathBuf::from(file);
-    if !input.exists() {
-        return Err(CliError::FileNotFound(file.to_string()));
-    }
-
-    let language_features = crate::feature_overrides::scratch_features()?;
-    let options = CompilerOptions {
-        input,
-        profile_memory: memory,
-        hot_path_threshold: hot_threshold,
-        output_format: OutputFormat::Human,
-        language_features,
-        ..Default::default()
-    };
-
-    let mut session = Session::new(options);
-    let mut profile_cmd = ProfileCommand::new(&mut session);
-
-    let output_path = output.map(PathBuf::from);
-    let output_ref = output_path.as_deref();
-
-    profile_cmd
-        .run(output_ref, suggest)
-        .map_err(|e| CliError::ProfilingFailed(e.to_string()))?;
-
-    ui::success("Profiling complete");
     Ok(())
 }
 

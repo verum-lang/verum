@@ -301,6 +301,11 @@ impl<'s> CompilationPipeline<'s> {
         self.load_project_modules()
     }
 
+    /// Source modules retained by checking, with their resolved module paths.
+    pub fn checked_modules(&self) -> impl Iterator<Item = (&str, &verum_ast::Module)> {
+        self.modules.iter().map(|(path, module)| (path.as_str(), module.as_ref()))
+    }
+
     /// Test hook: every module the pipeline holds, with its AST.
     ///
     /// `check_project` reported zero errors for a file that
@@ -358,6 +363,7 @@ impl<'s> CompilationPipeline<'s> {
         // --framework-axioms`, full-corpus tooling):
         //   * `VERUM_FULL_STDLIB=1` env var (debug + CI)
         //   * `[build].full-stdlib` manifest key (per-project)
+        let stdlib_started = Instant::now();
         let full_stdlib = std::env::var("VERUM_FULL_STDLIB").is_ok();
         let reachable = if full_stdlib {
             None
@@ -369,6 +375,7 @@ impl<'s> CompilationPipeline<'s> {
         // This populates `self.modules` but does NOT yet register them in
         // the session's ModuleRegistry — registration happens below.
         self.load_stdlib_modules_scoped(reachable.as_ref())?;
+        self.session.record_phase_metrics("Stdlib Loading", stdlib_started.elapsed(), 0);
 
         // Load sibling project modules (enables cross-file mount imports).
         // These are user-side files — always registered regardless of the

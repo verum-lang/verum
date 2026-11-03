@@ -664,8 +664,10 @@ impl<'s> CompilationPipeline<'s> {
         let external_sources = self.external_cog_sources()?;
         let mut prescan_files = project_files.clone();
         prescan_files.extend(external_sources.iter().map(|(_, path)| path.clone()));
+        let stdlib_started = Instant::now();
         let prescan_scope = prescan_stdlib_scope(&prescan_files);
         self.load_stdlib_modules_scoped(prescan_scope.as_ref())?;
+        self.session.record_phase_metrics("Stdlib Loading", stdlib_started.elapsed(), 0);
 
         info!("Found {} .vr file(s) to check", project_files.len());
 

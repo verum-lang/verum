@@ -848,42 +848,43 @@ enum Commands {
     #[clap(subcommand)]
     Package(PackageCommands),
 
-    /// Profile performance
+    /// Measure compiler work and inspect the static CBGR cost model
     #[command(display_order = 106)]
     Profile {
- /// Optional .vr file to profile
+        /// Check this source file, or the current cog when omitted
         #[clap(value_name = "FILE")]
         file: Option<Text>,
+        /// Estimate CBGR costs of source functions
         #[clap(long)]
         memory: bool,
+        /// Measure elapsed compiler time and recorded phases
         #[clap(long)]
         cpu: bool,
+        /// Inspect the compiler's retained CBGR analysis entries
         #[clap(long)]
         cache: bool,
- /// Profile compilation pipeline phases
+        /// Include compiler phase measurements
         #[clap(long)]
         compilation: bool,
- /// Profile everything — memory, cpu, cache, compilation — in one run.
- /// Equivalent to `--memory --cpu --cache --compilation` and produces
- /// the unified dashboard described in docs/detailed/25-developer-tooling.md §6.
+        /// Include all available sections from a single check
         #[clap(long, conflicts_with_all = ["memory", "cpu", "cache", "compilation"])]
         all: bool,
+        /// Percentage of modeled CBGR cost used to flag a function
         #[clap(long, default_value = "5.0")]
         hot_threshold: f64,
- /// Sampling rate for CBGR profiling, as a percentage (0.0–100.0).
- /// Lower values reduce overhead; 1.0 is a safe default for hot paths.
-        #[clap(long, value_name = "PERCENT", default_value = "1.0")]
-        sample_rate: f64,
- /// Comma-separated list of function names to restrict profiling to.
- /// When set, only samples from these functions are reported.
+        /// Select source functions by exact bare or qualified name
         #[clap(long, value_name = "NAMES", value_delimiter = ',')]
         functions: Vec<Text>,
- /// Timing precision: `us` (microseconds, default) or `ns` (RDTSC-based,
- /// more expensive but distinguishes sub-microsecond checks).
-        #[clap(long, value_name = "UNIT", default_value = "us")]
-        precision: Text,
-        #[clap(short, long)]
-        output: Option<Text>,
+        /// Display unit for compiler timings
+        #[clap(long, value_enum, default_value = "us")]
+        precision: commands::profile::TimeUnit,
+        /// Write the JSON report to a file
+        #[clap(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        /// Emit a single JSON document on stdout
+        #[clap(long)]
+        json: bool,
+        /// Highlight functions whose modeled cost exceeds the threshold
         #[clap(long)]
         suggest: bool,
     },
@@ -3616,82 +3617,17 @@ fn run_command(cli: Cli) -> Result<()> {
             PackageCommands::Search { query, limit } => cog::search(query.as_str(), limit),
             PackageCommands::Install { name, version } => cog::install(name.as_str(), version),
         },
-        Commands::Profile {
-            file,
-            memory,
-            cpu,
-            cache,
-            compilation,
-            all,
-            hot_threshold,
-            sample_rate,
-            functions,
-            precision,
-            output,
-            suggest,
-        } => {
- // Validate sampling knobs at the CLI boundary so the rest of the
- // profiler can trust its inputs.
-            if !(0.0..=100.0).contains(&sample_rate) {
-                eprintln!(
-                    "{} --sample-rate must be in [0, 100], got {}",
-                    "error:".red().bold(),
-                    sample_rate
-                );
-                process::exit(2);
-            }
-            let precision_kind = match precision.as_str() {
-                "us" | "micro" | "microseconds" => commands::profile::PrecisionKind::Microseconds,
-                "ns" | "nano" | "nanoseconds" => commands::profile::PrecisionKind::Nanoseconds,
-                other => {
-                    eprintln!(
-                        "{} unknown --precision '{}' (use `us` or `ns`)",
-                        "error:".red().bold(),
-                        other
-                    );
-                    process::exit(2);
-                }
-            };
-            let function_filter: Vec<String> = functions
-                .iter()
-                .map(|t| t.as_str().trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-
- // `--all` expands to every slice — spec §6 unified dashboard.
-            let (memory, cpu, cache, compilation) = if all {
-                (true, true, true, true)
-            } else {
-                (memory, cpu, cache, compilation)
-            };
-
-            let sampling = commands::profile::SamplingConfig {
-                sample_rate_percent: sample_rate,
-                function_filter,
-                precision: precision_kind,
-            };
-
-            if let Some(file_path) = file {
- // Profile single file
-                commands::file::profile(
-                    file_path.as_str(),
-                    memory,
-                    hot_threshold,
-                    output.as_ref().map(|s| s.as_str()),
-                    suggest,
-                )
-            } else {
- // Profile project
-                let output_str = output.as_ref().map(|s| s.as_str()).unwrap_or("text");
-                commands::profile::execute_with_sampling(
-                    memory,
-                    cpu,
-                    cache,
-                    compilation,
-                    output_str,
-                    sampling,
-                )
-            }
+        Commands::Profile { file, memory, cpu, cache, compilation, all, hot_threshold,
+            functions, precision, output, json, suggest } => {
+            let default_sections = !(memory || cpu || cache || compilation || all);
+            commands::profile::execute(commands::profile::Request {
+                file: file.as_ref().map(|f| std::path::Path::new(f.as_str())),
+                memory: memory || all || default_sections || suggest,
+                timing: cpu || compilation || all || default_sections,
+                cache: cache || all || default_sections,
+                hot_threshold, functions: &functions, precision, suggest, json,
+                output: output.as_deref(),
+            })
         }
         Commands::Verify {
             file,
