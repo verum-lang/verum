@@ -408,9 +408,7 @@ fn cargo_rechecks_auto_precompile_policy_on_environment_changes() {
         target: env!("VERUM_BAKE_TARGET"),
         source: bake_receipt::source_digests(CORE.iter().copied()),
     };
-    fs::write(cache.join("runtime.vbca.receipt"), inputs.encode(
-        blake3::hash(b"policy-control sentinel; not an archive")
-    )).unwrap();
+    inputs.record(&cache.join("runtime.vbca"), blake3::hash(b"policy-control sentinel; not an archive")).unwrap();
     fs::write(
         cache.join("runtime.vbca.checksum"),
         expected_key.to_hex().as_str(),
@@ -586,6 +584,27 @@ fn main() {{
             );
         }
     }
+
+    // A present but unrelated index must force a refresh. With the baker
+    // unavailable, the ordinary build must fail before any bytes can be embedded.
+    fs::write(cache.join("runtime.core_metadata"), b"another producer's metadata").unwrap();
+    let rejected = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "cargo_rechecks_auto_precompile_policy_on_environment_changes", "--nocapture"])
+        .env("VERUM_CACHE_POLICY_CHILD", "1")
+        .env_remove("VERUM_NO_AUTO_PRECOMPILE")
+        .env_remove("DOCS_RS")
+        .env_remove("VERUM_ALLOW_STALE_STDLIB")
+        .env("TARGET", env!("VERUM_BAKE_TARGET"))
+        .env("CARGO_MANIFEST_DIR", manifest.parent().unwrap())
+        .env("CARGO_TARGET_DIR", &target)
+        .env("OUT_DIR", last_out.unwrap())
+        .env("PATH", root.path().join("no-executables"))
+        .current_dir(root.path())
+        .output().unwrap();
+    assert!(!rejected.status.success());
+    let log = String::from_utf8(rejected.stdout).unwrap();
+    assert!(log.contains("Refreshing stdlib precompile artefacts"), "{log}");
+    assert!(!log.contains("Stdlib precompile cache HIT"), "{log}");
 }
 
 #[test]
@@ -606,11 +625,9 @@ fn receipt_requires_the_producer_target_and_unambiguous_source_boundaries() {
         }
     };
     let original = inputs("producer-a", "first-target", false);
-    fs::write(
-        bake_receipt::path(&archive),
-        original.encode(blake3::hash(b"archive bytes")),
-    )
-    .unwrap();
+    fs::write(archive.with_extension("core_metadata"), b"stable metadata").unwrap();
+    fs::write(archive.with_extension("symbol_graph"), b"stable graph").unwrap();
+    original.record(&archive, blake3::hash(b"archive bytes")).unwrap();
     original.verify_file(&archive).unwrap();
     let merged = inputs("producer-a", "first-target", true);
     assert_eq!(original.source.sdk, merged.source.sdk);
@@ -621,4 +638,37 @@ fn receipt_requires_the_producer_target_and_unambiguous_source_boundaries() {
     ] {
         assert!(mismatch.verify_file(&archive).is_err());
     }
+}
+
+#[test]
+fn sidecar_replacement_cannot_pass_cache_or_embedding_verification() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("runtime.vbca");
+    let copy = root.path().join("embedded.vbca");
+    let inputs = bake_receipt::Inputs {
+        producer: "producer",
+        target: "target",
+        source: bake_receipt::source_digests(CORE.iter().copied()),
+    };
+    for path in [&source, &copy] {
+        fs::write(path, b"bytecode").unwrap();
+        fs::write(path.with_extension("core_metadata"), b"metadata").unwrap();
+        fs::write(path.with_extension("symbol_graph"), b"graph").unwrap();
+    }
+    inputs.record(&source, blake3::hash(b"bytecode")).unwrap();
+    inputs.verify_copy(&source, &copy).unwrap();
+    for (ext, valid) in [("core_metadata", b"metadata".as_slice()), ("symbol_graph", b"graph")] {
+        for path in [&source, &copy] {
+            fs::write(path.with_extension(ext), b"from a different build").unwrap();
+            assert!(inputs.verify_copy(&source, path).is_err());
+            fs::write(path.with_extension(ext), b"").unwrap();
+            assert!(inputs.verify_copy(&source, path).is_err());
+            fs::write(path.with_extension(ext), valid).unwrap();
+        }
+    }
+    let receipt_path = bake_receipt::path(&source);
+    let v2 = fs::read_to_string(&receipt_path).unwrap();
+    let v1 = v2.split("metadata=").next().unwrap().replace("bake-v2", "bake-v1");
+    fs::write(&receipt_path, v1).unwrap();
+    assert!(inputs.verify_file(&source).is_err(), "unbound legacy sidecars");
 }

@@ -101,7 +101,17 @@ fn source_attested_sidecars_require_the_exact_full_bake() {
         verbose: false,
     })
     .unwrap();
+    let bytes = std::fs::read(&archive).unwrap();
+    std::fs::remove_file(archive.with_extension("core_metadata")).unwrap();
+    std::fs::write(archive.with_extension("symbol_graph"), b"stale graph").unwrap();
     regenerate_stdlib_sidecars(&archive, &root, false).expect("source and original VBC");
+    assert_eq!(std::fs::read(&archive).unwrap(), bytes);
+    let receipt = std::fs::read_to_string(archive.with_added_extension("receipt")).unwrap();
+    for (field, ext) in [("metadata", "core_metadata"), ("symbols", "symbol_graph")] {
+        let repaired = std::fs::read(archive.with_extension(ext)).unwrap();
+        assert!(!repaired.is_empty() && repaired != b"stale graph");
+        assert!(receipt.lines().any(|line| line == format!("{field}={}", blake3::hash(&repaired))));
+    }
 
     let metadata = archive.with_extension("core_metadata");
     std::fs::write(&metadata, b"preserve on refusal").unwrap();

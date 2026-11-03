@@ -77,31 +77,97 @@ pub(crate) fn path(archive: &Path) -> PathBuf {
     archive.with_added_extension("receipt")
 }
 
+pub(crate) fn file_digest(path: &Path) -> io::Result<blake3::Hash> {
+    Ok(blake3::Hasher::new()
+        .update_reader(fs::File::open(path)?)?
+        .finalize())
+}
+
+struct Sidecars {
+    metadata: blake3::Hash,
+    symbols: blake3::Hash,
+}
+
+impl Sidecars {
+    fn read(archive: &Path) -> io::Result<Self> {
+        Ok(Self {
+            metadata: file_digest(&archive.with_extension("core_metadata"))?,
+            symbols: file_digest(&archive.with_extension("symbol_graph"))?,
+        })
+    }
+}
+
 impl Inputs<'_> {
-    pub(crate) fn encode(&self, archive: blake3::Hash) -> String {
+    fn encode(&self, archive: blake3::Hash, sidecars: &Sidecars) -> String {
         format!(
-            "verum-stdlib-bake-v1\nproducer={}\ntarget={}\nsource={}\nsdk={}\narchive={}\n",
-            self.producer, self.target, self.source.fingerprint, self.source.sdk, archive
+            "verum-stdlib-bake-v2\nproducer={}\ntarget={}\nsource={}\nsdk={}\narchive={}\nmetadata={}\nsymbols={}\n",
+            self.producer,
+            self.target,
+            self.source.fingerprint,
+            self.source.sdk,
+            archive,
+            sidecars.metadata,
+            sidecars.symbols,
         )
     }
 
-    pub(crate) fn verify(&self, archive: &Path, digest: blake3::Hash) -> io::Result<()> {
-        if fs::read(path(archive))? != self.encode(digest).as_bytes() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "stdlib bake receipt does not match producer, target, source or archive: {}",
-                    archive.display()
-                ),
-            ));
+    pub(crate) fn record(&self, archive: &Path, digest: blake3::Hash) -> io::Result<()> {
+        fs::write(path(archive), self.encode(digest, &Sidecars::read(archive)?))
+    }
+
+    fn attested_sidecars(&self, archive: &Path, digest: blake3::Hash) -> io::Result<Sidecars> {
+        let receipt = fs::read_to_string(path(archive))?;
+        let mut lines = receipt.lines().rev();
+        let symbols = lines
+            .next()
+            .and_then(|line| line.strip_prefix("symbols="))
+            .and_then(|hex| blake3::Hash::from_hex(hex).ok());
+        let metadata = lines
+            .next()
+            .and_then(|line| line.strip_prefix("metadata="))
+            .and_then(|hex| blake3::Hash::from_hex(hex).ok());
+        if let (Some(symbols), Some(metadata)) = (symbols, metadata) {
+            let recorded = Sidecars { metadata, symbols };
+            if self.encode(digest, &recorded) == receipt {
+                return Ok(recorded);
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "stdlib bake receipt does not match producer, target, source or archive: {}",
+                archive.display()
+            ),
+        ))
+    }
+
+    /// Sidecar repair can start from a valid archive even if an index is missing.
+    pub(crate) fn verify_archive(&self, archive: &Path, digest: blake3::Hash) -> io::Result<()> {
+        self.attested_sidecars(archive, digest).map(|_| ())
+    }
+
+    /// Check the bytes in a candidate or copied bundle against one receipt.
+    pub(crate) fn verify_copy(&self, archive: &Path, copy: &Path) -> io::Result<()> {
+        let recorded = self.attested_sidecars(archive, file_digest(copy)?)?;
+        let actual = Sidecars::read(copy)?;
+        for (extension, expected, found) in [
+            ("core_metadata", recorded.metadata, actual.metadata),
+            ("symbol_graph", recorded.symbols, actual.symbols),
+        ] {
+            if expected != found {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "stdlib bake receipt expected {expected} for {}, found {found}",
+                        copy.with_extension(extension).display()
+                    ),
+                ));
+            }
         }
         Ok(())
     }
 
     pub(crate) fn verify_file(&self, archive: &Path) -> io::Result<()> {
-        let digest = blake3::Hasher::new()
-            .update_reader(fs::File::open(archive)?)?
-            .finalize();
-        self.verify(archive, digest)
+        self.verify_copy(archive, archive)
     }
 }

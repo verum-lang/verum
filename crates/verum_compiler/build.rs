@@ -18,6 +18,8 @@ use std::path::Path;
 
 #[path = "build_support/stdlib_cache.rs"]
 mod stdlib_cache;
+// The shared receipt also exposes producer-only publication and repair methods.
+#[allow(dead_code)]
 #[path = "build_support/bake_receipt.rs"]
 mod bake_receipt;
 
@@ -417,8 +419,6 @@ pub(crate) fn main() {
     }
     let cache_matches = || {
         fs::read_to_string(&checksum_path).is_ok_and(|hash| hash.trim() == current_hash)
-            && precompile_archive.with_extension("core_metadata").is_file()
-            && precompile_archive.with_extension("symbol_graph").is_file()
             && inputs.verify_file(&precompile_archive).is_ok()
     };
 
@@ -545,8 +545,6 @@ pub(crate) fn main() {
                     // did not know about it.
                     let staged_receipt = bake_receipt::path(&staged_vbca);
                     let published = inputs.verify_file(&staged_vbca).is_ok()
-                        && staged_graph.is_file()
-                        && staged_meta.is_file()
                         && std::fs::rename(&staged_meta, &publish_meta).is_ok()
                         && std::fs::rename(&staged_vbca, &precompile_archive).is_ok()
                         && std::fs::rename(&staged_graph, &publish_graph).is_ok()
@@ -609,13 +607,25 @@ pub(crate) fn main() {
     let runtime_vbc_path = Path::new(&out_dir).join("stdlib_runtime.vbca");
     let runtime_metadata_path = Path::new(&out_dir).join("stdlib_runtime.core_metadata");
     let runtime_symbol_graph_path = Path::new(&out_dir).join("stdlib_runtime.symbol_graph");
+    if !auto_precompile_disabled && !stale_stdlib_fallback_allowed() {
+        // Verify the exact private OUT_DIR copy consumed by include_bytes!.
+        // A concurrent cache replacement cannot substitute an index after this check.
+        for (source, destination, variable) in [
+            (&precompile_archive, &runtime_vbc_path, "STDLIB_RUNTIME_VBC_PATH"),
+            (&precompile_metadata, &runtime_metadata_path, "STDLIB_RUNTIME_CORE_METADATA_PATH"),
+            (&precompile_symbol_graph, &runtime_symbol_graph_path, "STDLIB_SYMBOL_GRAPH_PATH"),
+        ] {
+            fs::copy(source, destination).unwrap_or_else(|e| panic!("copy {}: {e}", source.display()));
+            println!("cargo:rerun-if-changed={}", source.display());
+            println!("cargo:rustc-env={variable}={}", destination.display());
+        }
+        inputs.verify_copy(&precompile_archive, &runtime_vbc_path)
+            .expect("copied stdlib archive, metadata and symbol graph must match one bake");
+        return;
+    }
     if precompile_archive.is_file() {
         match fs::read(&precompile_archive) {
             Ok(bytes) => {
-                if !auto_precompile_disabled && !stale_stdlib_fallback_allowed() {
-                    inputs.verify(&precompile_archive, blake3::hash(&bytes))
-                        .expect("stdlib archive changed before embedding");
-                }
                 fs::write(&runtime_vbc_path, &bytes).expect("write verified stdlib archive");
                 println!(
                     "cargo:rustc-env=STDLIB_RUNTIME_VBC_PATH={}",

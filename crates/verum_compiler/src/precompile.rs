@@ -187,10 +187,7 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         cfg.verbose,
     )?;
     write_symbol_graph_alongside_archive(&staged_archive, &archive, cfg.verbose)?;
-    std::fs::write(
-        bake_receipt::path(&staged_archive),
-        inputs.encode(blake3::hash(&archive_bytes)),
-    )?;
+    inputs.record(&staged_archive, blake3::hash(&archive_bytes))?;
     for ext in ["core_metadata", "symbol_graph"] {
         std::fs::rename(
             staged_archive.with_extension(ext),
@@ -202,6 +199,7 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         bake_receipt::path(&staged_archive),
         bake_receipt::path(&cfg.output_path),
     )?;
+    inputs.verify_file(&cfg.output_path)?;
     result.output_path = cfg.output_path.clone();
     Ok(result)
 }
@@ -445,16 +443,21 @@ pub fn regenerate_stdlib_sidecars(
     let bytes = std::fs::read(archive_path)?;
     let digest = blake3::hash(&bytes);
     inputs
-        .verify(archive_path, digest)
+        .verify_archive(archive_path, digest)
         .context("cannot regenerate source-attested sidecars; a matching full bake is required")?;
     let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes))?;
     let staged = stage.path().join("runtime.vbca");
     write_core_metadata_alongside_archive(&staged, &archive, &source, inputs.source.sdk, verbose)?;
     write_symbol_graph_alongside_archive(&staged, &archive, verbose)?;
-    inputs.verify_file(archive_path)?;
+    inputs.record(&staged, digest)?;
+    anyhow::ensure!(bake_receipt::file_digest(archive_path)? == digest,
+        "stdlib archive changed while regenerating sidecars");
+    inputs.verify_archive(archive_path, digest)?;
     for ext in ["core_metadata", "symbol_graph"] {
         std::fs::rename(staged.with_extension(ext), archive_path.with_extension(ext))?;
     }
+    std::fs::rename(bake_receipt::path(&staged), bake_receipt::path(archive_path))?;
+    inputs.verify_file(archive_path)?;
     Ok(())
 }
 
