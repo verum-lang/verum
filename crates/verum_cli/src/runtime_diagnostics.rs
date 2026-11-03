@@ -10,9 +10,11 @@ use std::{
 };
 use verum_common::{
     Text,
-    runtime_diagnostics::{RuntimeObservation, RuntimeReport, RuntimeReportSchema},
+    runtime_diagnostics::{RuntimeExportLoss, RuntimeObservation, RuntimeReport, RuntimeReportSchema},
 };
 use verum_compiler::Session;
+
+mod transport;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct RuntimeReportArgs {
@@ -139,7 +141,8 @@ impl ReportFile {
             None => (None, None, None),
         };
         let body = RuntimeReport {
-            schema: RuntimeReportSchema::V1,
+            schema: RuntimeReportSchema::V2,
+            export_loss: Some(RuntimeExportLoss::default()),
             run_id: self.request.run_id.as_str().into(),
             source_sha256: self.request.source_sha256.as_str().into(),
             prepared_source_sha256: self.prepared_source_sha256.as_str().into(),
@@ -155,8 +158,7 @@ impl ReportFile {
             method_dispatch,
             async_tasks,
         };
-        let bytes =
-            serde_json::to_vec(&body).map_err(|error| CliError::Custom(error.to_string()))?;
+        let bytes = transport::encode_bounded(body).map_err(CliError::Custom)?;
         // A killed writer leaves an incomplete file, which consumers reject.
         // No old report is reused: creation is exclusive for each invocation.
         self.file

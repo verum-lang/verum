@@ -56,7 +56,7 @@ fn absent_malformed_unsupported_and_inconsistent_evidence_never_becomes_empty_su
     let path = dir.path().join("runtime.json");
     assert!(read_report(&path, "current", &"a".repeat(64)).is_err());
     for (pointer, value) in [
-        ("/schema", json!("verum.runtime-report/2")),
+        ("/schema", json!("verum.runtime-report/999")),
         ("/cbgr/schema", json!("other")),
         ("/observation", json!("unavailable")),
         ("/cbgr", Value::Null),
@@ -86,6 +86,30 @@ fn absent_malformed_unsupported_and_inconsistent_evidence_never_becomes_empty_su
         let link = dir.path().join("link.json");
         std::os::unix::fs::symlink(&path, &link).unwrap();
         assert!(read_report(&link, "current", &"a".repeat(64)).is_err());
+    }
+}
+
+#[test]
+fn versioned_export_losses_are_distinct_from_capture_losses_and_require_valid_accounting() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("runtime.json");
+    let mut body = report();
+    body["schema"] = json!("verum.runtime-report/2");
+    body["export_loss"] = json!({"cbgr_events":255,"method_sites":0,"task_rows":0});
+    std::fs::write(&path, serde_json::to_vec(&body).unwrap()).unwrap();
+    let observed = read_report(&path, "current", &"a".repeat(64)).unwrap();
+    assert_eq!(observed.export_loss.unwrap().cbgr_events, 255);
+    assert_eq!(observed.cbgr.unwrap().events.len(), 1);
+    for (pointer, value) in [
+        ("/schema", json!("verum.runtime-report/1")),
+        ("/export_loss", Value::Null),
+        ("/export_loss/cbgr_events", json!(256)),
+        ("/export_loss/task_rows", json!(1)),
+    ] {
+        let mut bad = body.clone();
+        *bad.pointer_mut(pointer).unwrap() = value;
+        std::fs::write(&path, serde_json::to_vec(&bad).unwrap()).unwrap();
+        assert!(read_report(&path, "current", &"a".repeat(64)).is_err(), "{pointer}");
     }
 }
 
