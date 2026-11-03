@@ -179,7 +179,7 @@ public fn db_error_from_conn(e: ConnectionError) -> SqliteApiDbError {
         NotAdmin             => DbAuthDenied,
         TxAlreadyActive      => DbMisuse("transaction already active".clone()),
         TxNotActive          => DbMisuse("no active transaction".clone()),
-        IoFailure(ref msg)   => DbIoFailure(msg.clone()),
+        IoFailure(ref msg)   => DbIoError(msg.clone()),
     }
 }
 
