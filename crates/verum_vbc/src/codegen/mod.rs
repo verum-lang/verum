@@ -1702,15 +1702,11 @@ impl VbcCodegen {
     /// Used for the `Wrapper(x)` / `Wrapper::new(x)` call patterns which only apply
     /// to allocating wrappers.
     pub fn is_allocating_wrapper(&self, name: &str) -> bool {
-        // Allocating wrappers are the transparent wrappers minus Maybe.
-        // Maybe is a sum-type wrapper, not an allocating one.
-        //
-        // The set itself lives with the other well-known-type
-        // predicates: the typechecker needs the same answer to decide
-        // whether a deref must be materialised, and a second
-        // hand-populated copy is how the two layers start disagreeing.
-        verum_common::well_known_types::WellKnownType::name_is_transparent_carrier(name)
-            && name != "Maybe"
+        // Carrier semantics belong to the selected nominal declaration. A
+        // qualified spelling keeps that identity; a user type with the same
+        // leaf name does not inherit the runtime's smart-pointer behaviour.
+        self.nominal_type_id(Self::strip_generic_args(name))
+            .is_some_and(crate::types::TypeId::is_smart_pointer)
     }
 
     /// Returns `true` if `name` is a collection type whose `.new()` constructor
@@ -9507,6 +9503,7 @@ impl VbcCodegen {
     /// have run for every file in the module — one finalize pass
     /// replaces the per-file `build_module + merge` chain.
     pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
+        self.check_source_declaration_error()?;
         mount_cost::report_aliases("finalize_module_from_state");
         // The stdlib bake finalises through THIS one, so the tally that
         // matters for the archive's fanout is reported here.
@@ -22545,67 +22542,24 @@ impl VbcCodegen {
     }
 
     fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> (u32, bool) {
-        // **ALIAS-TO-LAYOUT.** A record literal built through a type
-        // ALIAS (`type IoError is StreamError;` then `IoError { kind,
-        // .. }`) must resolve its fields against the TARGET's layout:
-        // the alias declares no fields of its own, so looking the
-        // alias name up verbatim missed every table and fell to the
-        // global interner — a guessed index, and since T0723 a
-        // FIELD-GUESS-HARD-1 refusal (measured: net_udp's IoError
-        // literals, the fixture red the unit tier tripped over).
-        // `resolve_type_alias` chases the chain to its fixpoint with a
-        // cycle guard.
-        let resolved_alias_target;
-        let type_name = match type_name {
-            Some(tn) => {
-                // Two alias channels, one hop: mount aliases live in
-                // `type_aliases` (chased to a fixpoint by
-                // resolve_type_alias); DECLARED aliases live on their
-                // TypeDescriptor as `alias_target_name` (the T0533
-                // identity carry).
-                let via_mount = self.resolve_type_alias(tn);
-                let mut current = via_mount;
-                let mut hops = 0u8;
-                while hops < 8 {
-                    let next = self
-                        .type_name_to_id
-                        .get(&current)
-                        .and_then(|&tid| self.type_by_id(tid))
-                        .filter(|td| matches!(td.kind, crate::types::TypeKind::Alias))
-                        .and_then(|td| td.alias_target_name)
-                        .and_then(|sid| self.ctx.strings.get(sid.0 as usize))
-                        .map(|s| s.to_string());
-                    match next {
-                        Some(t) if t != current => {
-                            current = t;
-                            hops += 1;
-                        }
-                        _ => break,
-                    }
+        // Field layout and method dispatch share declaration-owned alias
+        // expansion, including references, generic substitution and cycle checks.
+        // A field name in some other record cannot repair an unresolved alias.
+        let resolved_owner = match type_name {
+            Some(name) => match self.method_receiver_declaration_name(name) {
+                Some(owner) => Some(owner),
+                None => {
+                    self.source_declaration_error.get_or_insert_with(|| {
+                        CodegenErrorKind::InvalidSourceSignature(format!(
+                            "cannot resolve field owner '{name}' for '{field_name}'"
+                        ))
+                    });
+                    return (0, true);
                 }
-                resolved_alias_target = current;
-                Some(resolved_alias_target.as_str())
-            }
+            },
             None => None,
         };
-        // **TUPLE-POSITIONAL-FIELD-1 (B1 root).** `_N` field names are
-        // positional BY CONSTRUCTION — the parser synthesizes them for
-        // tuple records and newtypes (`FileDesc(x)` ⇒ field `_0`).
-        // Their index is their name; no layout table needed. Pre-fix,
-        // when the owner's layout wasn't visible at the consumer's
-        // compile (cross-module bake order), `FileDesc._0` fell to the
-        // GLOBAL intern table (idx 4) and the baked ctor wrote field 4
-        // into a 1-slot allocation — the runtime
-        // "field write index 4 … exceeds object data size 8 type_id=0"
-        // panic in sys.darwin.libsystem.safe_socket that gated the
-        // whole net family (register B1; dump witness bakeAF).
-        if let Some(rest) = field_name.strip_prefix('_')
-            && !rest.is_empty()
-            && rest.bytes().all(|b| b.is_ascii_digit())
-            && let Ok(idx) = rest.parse::<u32>()
-        {
-            return (idx, false);
-        }
+        let type_name = resolved_owner.as_deref();
         if let Some(tn) = type_name {
             // META-GROUP-XMODULE-1: when the simple name is NOT an
             // authoritative record key (lost the cross-module
@@ -22736,20 +22690,20 @@ impl VbcCodegen {
                         return (idx as u32, false);
                     }
                 }
-                // Fallback ONLY when the descriptor's field-name strings
-                // are not present in `ctx.strings` (archive-loaded
-                // descriptors whose StringIds index a foreign table).
-                // Numeric id match is unsound (see above) but is better
-                // than falling through to the global-intern fallback when
-                // no string is available; gated behind the string-miss so
-                // it can never override a correct string match.
-                let field_id = self.field_name_indices.get(field_name).copied();
-                for (idx, fd) in td.fields.iter().enumerate() {
-                    if self.ctx.strings.get(fd.name.0 as usize).is_none()
-                        && Some(fd.name.0) == field_id
-                    {
-                        return (idx as u32, false);
-                    }
+                // A completed record owns its entire field set. A miss is an
+                // error even if another record has a field with this spelling.
+                // Declaration-only forward records are completed by later passes.
+                let declared_missing = td.source_declaration.as_ref().is_some_and(|declaration| {
+                    matches!(&declaration.body, verum_ast::decl::TypeDeclBody::Record(fields)
+                        if !fields.iter().any(|field| field.name.name.as_str() == field_name))
+                });
+                if declared_missing || td.declared_layout.is_some() || !td.fields.is_empty() {
+                    let owner = self.type_declaration_identity(td)
+                        .map(|owner| owner.into_string()).unwrap_or_else(|| tn.to_owned());
+                    self.source_declaration_error.get_or_insert(CodegenErrorKind::MissingRecordField {
+                        owner, field: field_name.to_owned(),
+                    });
+                    return (0, true);
                 }
             }
             // Qualified variant `Parent.Variant`: resolve the field index from
@@ -22941,6 +22895,24 @@ impl VbcCodegen {
                     self.ctx.current_function.as_deref().unwrap_or("?")
                 );
             }
+        }
+        // **TUPLE-POSITIONAL-FIELD-1 (B1 root).** `_N` field names are
+        // positional BY CONSTRUCTION — the parser synthesizes them for
+        // tuple records and newtypes (`FileDesc(x)` ⇒ field `_0`).
+        // Their index is their name; no layout table needed. Pre-fix,
+        // when the owner's layout wasn't visible at the consumer's
+        // compile (cross-module bake order), `FileDesc._0` fell to the
+        // GLOBAL intern table (idx 4) and the baked ctor wrote field 4
+        // into a 1-slot allocation — the runtime
+        // "field write index 4 … exceeds object data size 8 type_id=0"
+        // panic in sys.darwin.libsystem.safe_socket that gated the
+        // whole net family (register B1; dump witness bakeAF).
+        if let Some(rest) = field_name.strip_prefix('_')
+            && !rest.is_empty()
+            && rest.bytes().all(|b| b.is_ascii_digit())
+            && let Ok(idx) = rest.parse::<u32>()
+        {
+            return (idx, false);
         }
         // type_name is None or didn't match — search all registered types.
         // Collect ALL types that have this field name, with their positional indices.

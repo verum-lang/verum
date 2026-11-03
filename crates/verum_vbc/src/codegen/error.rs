@@ -86,6 +86,14 @@ pub enum CodegenErrorKind {
         owners: verum_common::List<verum_common::Text>,
     },
 
+    /// A known record declaration does not contain the selected field.
+    MissingRecordField {
+        /// Source-owned record.
+        owner: String,
+        /// Field selected by the program.
+        field: String,
+    },
+
     /// Cannot infer type.
     TypeInference(String),
 
@@ -379,6 +387,7 @@ impl CodegenError {
             // `SkipClass::Fatal`.
             CodegenErrorKind::StaticAssertionFailed { .. }
             | CodegenErrorKind::AmbiguousConstructor { .. }
+            | CodegenErrorKind::MissingRecordField { .. }
             | CodegenErrorKind::InvalidSourceSignature(_)
             | CodegenErrorKind::InvalidSourceMount(_) => SkipClass::Fatal,
             _ => SkipClass::BugClass,
@@ -478,6 +487,8 @@ impl fmt::Display for CodegenErrorKind {
             Self::TypeMismatch { expected, found } => {
                 write!(f, "type mismatch: expected {}, found {}", expected, found)
             }
+            Self::MissingRecordField { owner, field } =>
+                write!(f, "record '{owner}' has no field '{field}'"),
             Self::AmbiguousConstructor { name, owners } => write!(f,
                 "E431: bare constructor '{}' is ambiguous between {}; qualify the owning type",
                 name, owners.iter().map(verum_common::Text::as_str).collect::<verum_common::List<_>>().join(", ")),
