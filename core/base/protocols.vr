@@ -1124,31 +1124,31 @@ public type Unpin is protocol {};
 // =============================================================================
 
 /// Protocol for addition.
-public type Add<Rhs> is protocol {
+public type Add<Rhs = Self> is protocol {
     type Output;
     fn add(self, rhs: Rhs) -> Self.Output;
 };
 
 /// Protocol for subtraction.
-public type Sub<Rhs> is protocol {
+public type Sub<Rhs = Self> is protocol {
     type Output;
     fn sub(self, rhs: Rhs) -> Self.Output;
 };
 
 /// Protocol for multiplication.
-public type Mul<Rhs> is protocol {
+public type Mul<Rhs = Self> is protocol {
     type Output;
     fn mul(self, rhs: Rhs) -> Self.Output;
 };
 
 /// Protocol for division.
-public type Div<Rhs> is protocol {
+public type Div<Rhs = Self> is protocol {
     type Output;
     fn div(self, rhs: Rhs) -> Self.Output;
 };
 
 /// Protocol for remainder.
-public type Rem<Rhs> is protocol {
+public type Rem<Rhs = Self> is protocol {
     type Output;
     fn rem(self, rhs: Rhs) -> Self.Output;
 };
@@ -1160,19 +1160,19 @@ public type Neg is protocol {
 };
 
 /// Protocol for bitwise AND.
-public type BitAnd<Rhs> is protocol {
+public type BitAnd<Rhs = Self> is protocol {
     type Output;
     fn bitand(self, rhs: Rhs) -> Self.Output;
 };
 
 /// Protocol for bitwise OR.
-public type BitOr<Rhs> is protocol {
+public type BitOr<Rhs = Self> is protocol {
     type Output;
     fn bitor(self, rhs: Rhs) -> Self.Output;
 };
 
 /// Protocol for bitwise XOR.
-public type BitXor<Rhs> is protocol {
+public type BitXor<Rhs = Self> is protocol {
     type Output;
     fn bitxor(self, rhs: Rhs) -> Self.Output;
 };
@@ -1184,13 +1184,13 @@ public type Not is protocol {
 };
 
 /// Protocol for left shift.
-public type Shl<Rhs> is protocol {
+public type Shl<Rhs = Self> is protocol {
     type Output;
     fn shl(self, rhs: Rhs) -> Self.Output;
 };
 
 /// Protocol for right shift.
-public type Shr<Rhs> is protocol {
+public type Shr<Rhs = Self> is protocol {
     type Output;
     fn shr(self, rhs: Rhs) -> Self.Output;
 };
@@ -1625,52 +1625,52 @@ public type BorrowMut<Borrowed> is protocol extends Borrow<Borrowed> {
 // =============================================================================
 
 /// Protocol for addition assignment (+=).
-public type AddAssign<Rhs> is protocol {
+public type AddAssign<Rhs = Self> is protocol {
     fn add_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for subtraction assignment (-=).
-public type SubAssign<Rhs> is protocol {
+public type SubAssign<Rhs = Self> is protocol {
     fn sub_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for multiplication assignment (*=).
-public type MulAssign<Rhs> is protocol {
+public type MulAssign<Rhs = Self> is protocol {
     fn mul_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for division assignment (/=).
-public type DivAssign<Rhs> is protocol {
+public type DivAssign<Rhs = Self> is protocol {
     fn div_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for remainder assignment (%=).
-public type RemAssign<Rhs> is protocol {
+public type RemAssign<Rhs = Self> is protocol {
     fn rem_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for bitwise AND assignment (&=).
-public type BitAndAssign<Rhs> is protocol {
+public type BitAndAssign<Rhs = Self> is protocol {
     fn bitand_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for bitwise OR assignment (|=).
-public type BitOrAssign<Rhs> is protocol {
+public type BitOrAssign<Rhs = Self> is protocol {
     fn bitor_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for bitwise XOR assignment (^=).
-public type BitXorAssign<Rhs> is protocol {
+public type BitXorAssign<Rhs = Self> is protocol {
     fn bitxor_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for left shift assignment (<<=).
-public type ShlAssign<Rhs> is protocol {
+public type ShlAssign<Rhs = Self> is protocol {
     fn shl_assign(&mut self, rhs: Rhs);
 };
 
 /// Protocol for right shift assignment (>>=).
-public type ShrAssign<Rhs> is protocol {
+public type ShrAssign<Rhs = Self> is protocol {
     fn shr_assign(&mut self, rhs: Rhs);
 };
 
