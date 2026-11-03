@@ -218,6 +218,7 @@ public mount runtime.text.{
 
 // --- From runtime/sync ---
 public mount runtime.sync.{
+    compiler_fence,
     spin_loop_hint,
     spin_hint,
 };

@@ -19,7 +19,7 @@
 )
 module core.sync.once;
 mount super.atomic.*;
-mount core.intrinsics.compiler_fence;
+mount core.intrinsics.atomic.{compiler_fence, MemoryOrder};
 mount core.intrinsics.spin_hint;
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
@@ -195,7 +195,7 @@ implement Once {
                 }
                 Result.Err(_) => {
                     // Unexpected state, retry
-                    compiler_fence(MemoryOrdering.SeqCst);
+                    compiler_fence(MemoryOrder.SeqCst);
                 }
             }
         }
@@ -275,7 +275,7 @@ implement Once {
                     // or INCOMPLETE if the winning thread surrendered).
                 }
                 Result.Err(_) => {
-                    compiler_fence(MemoryOrdering.SeqCst);
+                    compiler_fence(MemoryOrder.SeqCst);
                 }
             }
         }
@@ -316,13 +316,13 @@ implement Once {
                 Result.Err(RUNNING) => {
                     // Wait for current attempt to finish
                     while self.state.load(MemoryOrdering.Acquire) == RUNNING {
-                        compiler_fence(MemoryOrdering.SeqCst);
+                        compiler_fence(MemoryOrder.SeqCst);
                     }
                     // Then retry
                 }
                 Result.Err(_) => {
                     // Retry
-                    compiler_fence(MemoryOrdering.SeqCst);
+                    compiler_fence(MemoryOrder.SeqCst);
                 }
             }
         }
@@ -518,7 +518,7 @@ implement<T> OnceLock<T> {
                 }
                 continue;
             }
-            compiler_fence(MemoryOrdering.SeqCst);
+            compiler_fence(MemoryOrder.SeqCst);
         }
     }
 
@@ -603,7 +603,7 @@ implement<T> OnceLock<T> {
                 continue;
             }
             // Unexpected state — fence and retry.
-            compiler_fence(MemoryOrdering.SeqCst);
+            compiler_fence(MemoryOrder.SeqCst);
         }
     }
 }

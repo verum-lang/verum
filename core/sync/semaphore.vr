@@ -19,7 +19,6 @@
 )
 module core.sync.semaphore;
 mount super.atomic.*;
-mount core.intrinsics.compiler_fence;
 
 // Cross-platform futex for blocking acquire
 @cfg(target_os = "linux")

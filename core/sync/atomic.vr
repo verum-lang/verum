@@ -40,7 +40,7 @@ module core.sync.atomic;
 
 // Import typed atomic intrinsics from stdlib.intrinsics
 mount core.intrinsics.atomic.{
-    compiler_fence,
+    compiler_fence, MemoryOrder,
     // Typed atomic load intrinsics
     atomic_load_u8, atomic_load_u16, atomic_load_u32, atomic_load_u64,
     // Typed atomic store intrinsics
@@ -192,9 +192,6 @@ public fn fence(order: MemoryOrdering) {
         }
     }
 }
-
-// NOTE: compiler_fence is available via stdlib.intrinsics.compiler_fence
-// Import it directly where needed for explicit dependency tracking.
 
 // =============================================================================
 // AtomicInt
@@ -1285,7 +1282,7 @@ implement SpinLock {
     public fn lock(&self) {
         while !self.try_lock() {
             // Spin - in real code, use CPU pause instruction
-            compiler_fence(MemoryOrdering.SeqCst);
+            compiler_fence(MemoryOrder.SeqCst);
         }
     }
 

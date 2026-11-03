@@ -42,6 +42,7 @@ extern "C" fn unexpected_print(_text: *const u8) -> i32 {
 
 const CALLER: &str = r#"
     type MemoryOrdering is Relaxed | Acquire | Release | AcqRel | SeqCst;
+    type MemoryOrder is Relaxed | Acquire | Release | AcqRel | SeqCst;
     type AtomicInt is { value: Int };
     implement AtomicInt {
         fn new(value: Int) -> AtomicInt { AtomicInt { value } }
@@ -60,7 +61,7 @@ const CALLER: &str = r#"
     fn record_root(lock: &OnceLock<RecordCell>) -> &RecordCell { record_accessor(lock) }
     fn record_name(lock: &OnceLock<RecordCell>) -> Int { record_root(lock).read() }
     fn spin_hint() {}
-    fn compiler_fence(order: MemoryOrdering) {}
+    fn compiler_fence(order: MemoryOrder) {}
     type Cell is { value: Int };
     fn make_once() -> Once { Once.new() }
     fn once_run(once: &Once, cell: &mut Cell, add: Int) { once.call_once(|| { cell.value += add; }); }
