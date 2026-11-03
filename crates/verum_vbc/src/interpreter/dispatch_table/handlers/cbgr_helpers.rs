@@ -24,7 +24,7 @@
 //! (with its soundness hole) for A/B differential comparison ONLY.
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
-use crate::value::Value;
+use crate::value::{Capabilities, Value};
 use std::sync::OnceLock;
 
 /// Sentinel generation value that disables generation checks on deref.
@@ -251,6 +251,25 @@ fn reference_value_slot(
         }
     }
     None
+}
+
+/// Check the capability carried by a heap reference before a store or writeback.
+pub(super) fn require_reference_write(reference: Value) -> InterpreterResult<()> {
+    let actual = if reference.is_thin_ref() {
+        reference.as_thin_ref().capabilities()
+    } else if reference.is_fat_ref() {
+        reference.as_fat_ref().capabilities()
+    } else {
+        return Ok(());
+    };
+    if actual.has(Capabilities::WRITE) {
+        Ok(())
+    } else {
+        Err(InterpreterError::CapabilityDenied {
+            required: u64::from(Capabilities::WRITE),
+            actual: u64::from(actual.0),
+        })
+    }
 }
 
 /// Select a method receiver's current value and its writeback reference.
@@ -535,7 +554,8 @@ pub(super) unsafe fn variant_record_inner(ptr: *mut u8) -> InterpreterResult<*mu
 /// Returns `true` if the value was written through a reference; `false` if
 /// `slot_val` is not a reference (the caller should then store into the local
 /// register directly — the same-frame `&mut local` case where the source
-/// register already IS the origin scalar slot).
+/// register already IS the origin scalar slot). A capability denial is an
+/// error, so callers cannot interpret it as permission to try another store.
 ///
 /// FFI-WRITEBACK-THRU-REF-1 (#25): the previous write-back unconditionally
 /// did `set_reg(source_reg)`, which for a `&mut` OUT-param passed through a
@@ -548,19 +568,20 @@ pub(in super::super) fn write_through_ref(
     state: &mut super::super::super::state::InterpreterState,
     slot_val: Value,
     value: Value,
-) -> bool {
+) -> InterpreterResult<bool> {
+    require_reference_write(slot_val)?;
     if is_cbgr_ref(&slot_val) {
         let (abs_index, _gen) = decode_cbgr_ref(slot_val);
         state.registers.set_absolute(abs_index, value);
-        return true;
+        return Ok(true);
     }
     if let Some(slot) = reference_value_slot(state, slot_val) {
         // SAFETY: the reference carrier establishes a writable Value slot;
         // bridge data was excluded before considering interior-slot tracking.
         unsafe { *slot = value };
-        return true;
+        return Ok(true);
     }
-    false
+    Ok(false)
 }
 
 /// FFI-WRITEBACK-THRU-REF-1 (#25): normalize `&mut` scalar OUT-param args

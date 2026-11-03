@@ -165,7 +165,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // heap-string OBJECT header, which record readers misread
             // as a bytes pointer).
             let new_val = alloc_text_capacity_record(state, &bytes, new_cap)?;
-            if !write_through_ref(state, target, new_val) {
+            if !write_through_ref(state, target, new_val)? {
                 state.registers.set(caller_base, Reg(args_start_reg), new_val);
             }
             Ok(Some(Value::unit()))
@@ -491,7 +491,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 _ => unreachable!(),
             }
             let new_value = alloc_text_bytes_value(state, &current_bytes)?;
-            if !write_through_ref(state, target, new_value) {
+            if !write_through_ref(state, target, new_value)? {
                 state.registers.set(caller_base, Reg(args_start_reg), new_value);
             }
             Ok(Some(Value::unit()))

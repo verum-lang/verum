@@ -1006,6 +1006,7 @@ pub(super) fn store_referent(
     ref_val: Value,
     value: Value,
 ) -> InterpreterResult<DispatchResult> {
+    super::cbgr_helpers::require_reference_write(ref_val)?;
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePtrwrite) {
         let addr = if ref_val.is_ptr() {
             ref_val.as_ptr::<u8>() as usize

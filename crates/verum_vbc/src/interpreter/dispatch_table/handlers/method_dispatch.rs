@@ -1020,7 +1020,7 @@ pub(super) fn handle_bound_method(
             _ => unreachable!(),
         };
         let new_value = alloc_string_value(state, &current_text)?;
-        if !write_through_ref(state, text_target, new_value) {
+        if !write_through_ref(state, text_target, new_value)? {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         // Return value depends on method:
@@ -1159,7 +1159,7 @@ pub(super) fn handle_bound_method(
             _ => unreachable!(),
         }
         let new_value = alloc_text_bytes_value(state, &current_bytes)?;
-        if !write_through_ref(state, text_target, new_value) {
+        if !write_through_ref(state, text_target, new_value)? {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         state.set_reg(dst, Value::unit());
@@ -1210,7 +1210,7 @@ pub(super) fn handle_bound_method(
         state.record_allocation();
         let new_value = Value::from_ptr(obj.as_ptr() as *mut u8);
         // Replace the original receiver slot, including borrowed record fields.
-        if !write_through_ref(state, text_target, new_value) {
+        if !write_through_ref(state, text_target, new_value)? {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         state.set_reg(dst, Value::unit());

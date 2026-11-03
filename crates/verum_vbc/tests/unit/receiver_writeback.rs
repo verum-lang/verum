@@ -30,7 +30,7 @@ fn ordinary_register_store_replaces_reference_value_without_following_it() {
     state.registers.set_absolute(1, inner);
     let outer = encode_cbgr_ref_mut(1, 1);
     let replacement = encode_cbgr_ref_mut(2, 1);
-    assert!(write_through_ref(&mut state, outer, replacement));
+    assert!(write_through_ref(&mut state, outer, replacement).unwrap());
     assert_eq!(state.registers.get_absolute(1).bits(), replacement.bits());
     assert_eq!(state.registers.get_absolute(0).bits(), origin.bits());
 }
@@ -50,7 +50,7 @@ fn ordinary_pointer_store_replaces_reference_value_without_following_it() {
             thin(&mut slot)
         };
         let replacement = encode_cbgr_ref_mut(2, 1);
-        assert!(write_through_ref(&mut state, reference, replacement));
+        assert!(write_through_ref(&mut state, reference, replacement).unwrap());
         assert_eq!(slot.bits(), replacement.bits());
         assert_eq!(state.registers.get_absolute(0).bits(), origin.bits());
     }
@@ -65,7 +65,7 @@ fn receiver_register_chain_keeps_original_register_target() {
     let (current, target) = resolve_receiver_place(&state, encode_cbgr_ref_mut(1, 1)).unwrap();
     assert_eq!(current.as_i64(), 17);
     assert_eq!(target.bits(), original.bits());
-    assert!(write_through_ref(&mut state, target, Value::from_i64(23)));
+    assert!(write_through_ref(&mut state, target, Value::from_i64(23)).unwrap());
     assert_eq!(state.registers.get_absolute(0).as_i64(), 23);
     assert_eq!(state.registers.get_absolute(1).bits(), original.bits());
 }
@@ -86,7 +86,7 @@ fn receiver_register_chain_keeps_pointer_target_and_alias() {
         let (current, target) = resolve_receiver_place(&state, encode_cbgr_ref_mut(0, 1)).unwrap();
         assert_eq!(current.as_i64(), 17);
         assert_eq!(target.bits(), reference.bits());
-        assert!(write_through_ref(&mut state, target, Value::from_i64(23)));
+        assert!(write_through_ref(&mut state, target, Value::from_i64(23)).unwrap());
         assert_eq!(slot.as_i64(), 23);
         assert_eq!(state.registers.get_absolute(0).bits(), reference.bits());
         assert_eq!(resolve_arg_value(&state, reference).as_i64(), 23);
@@ -104,7 +104,7 @@ fn bridge_extent_wins_over_interior_slot_tracking() {
     state.cbgr_mutable_ptrs.insert(address as usize);
     let reference = Value::from_ptr(slot);
     let observed = resolve_arg_value(&state, reference);
-    let written = write_through_ref(&mut state, reference, Value::from_i64(23));
+    let written = write_through_ref(&mut state, reference, Value::from_i64(23)).unwrap();
     // SAFETY: same live allocation; deallocate only after taking the snapshot.
     let contents = unsafe { slot.read() };
     state.cbgr_mutable_ptrs.remove(&(address as usize));
@@ -120,7 +120,7 @@ fn untracked_and_unaligned_addresses_do_not_authorize_slot_access() {
     let mut slot = Value::from_i64(17);
     let pointer = Value::from_ptr(&mut slot as *mut Value);
     assert_eq!(resolve_arg_value(&state, pointer).bits(), pointer.bits());
-    assert!(!write_through_ref(&mut state, pointer, Value::from_i64(23)));
+    assert!(!write_through_ref(&mut state, pointer, Value::from_i64(23)).unwrap());
     let misaligned = (&mut slot as *mut Value).cast::<u8>().wrapping_add(1);
     state.cbgr_mutable_ptrs.insert(misaligned as usize);
     for reference in [
@@ -135,7 +135,7 @@ fn untracked_and_unaligned_addresses_do_not_authorize_slot_access() {
             &mut state,
             reference,
             Value::from_i64(23)
-        ));
+        ).unwrap());
     }
     assert_eq!(slot.as_i64(), 17);
 }
@@ -158,4 +158,26 @@ fn out_of_bounds_receiver_ref_is_an_operand_error() {
         resolve_receiver_place(&state, encode_cbgr_ref_mut(state.registers.top() as u32, 1)),
         Err(InterpreterError::InvalidOperand { .. })
     ));
+}
+
+#[test]
+fn readonly_heap_references_reject_both_store_paths() {
+    let mut state = state();
+    let mut slot = Value::from_i64(17);
+    let ptr = (&mut slot as *mut Value).cast();
+    let value = Value::from_i64(23);
+    for reference in [
+        Value::from_thin_ref(ThinRef::new(ptr, 1, 0, Capabilities::READ_ONLY)),
+        Value::from_fat_ref(crate::value::FatRef::new(ptr, 1, 0, Capabilities::READ_ONLY, 1)),
+    ] {
+        assert!(matches!(
+            write_through_ref(&mut state, reference, value),
+            Err(InterpreterError::CapabilityDenied { .. })
+        ));
+        assert!(matches!(
+            super::super::cbgr::store_referent(&mut state, reference, value),
+            Err(InterpreterError::CapabilityDenied { .. })
+        ));
+        assert_eq!(slot.as_i64(), 17);
+    }
 }

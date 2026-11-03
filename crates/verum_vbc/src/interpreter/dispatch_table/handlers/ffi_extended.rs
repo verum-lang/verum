@@ -1258,7 +1258,7 @@ fn ffi_extended_body(
                 // back to a direct register write.
                 for (reg_idx, new_val) in writebacks {
                     let slot_val = state.get_reg(Reg(reg_idx));
-                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val) {
+                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val)? {
                         state.set_reg(Reg(reg_idx), new_val);
                     }
                 }
@@ -1572,7 +1572,7 @@ fn ffi_extended_body(
                 // reference to its origin — see the CallFfiC writeback loop.
                 for (reg_idx, new_val) in writebacks {
                     let slot_val = state.get_reg(Reg(reg_idx));
-                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val) {
+                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val)? {
                         state.set_reg(Reg(reg_idx), new_val);
                     }
                 }
@@ -1749,7 +1749,7 @@ fn ffi_extended_body(
                 // reference to its origin — see the CallFfiC writeback loop.
                 for (reg_idx, new_val) in writebacks {
                     let slot_val = state.get_reg(Reg(reg_idx));
-                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val) {
+                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val)? {
                         state.set_reg(Reg(reg_idx), new_val);
                     }
                 }
