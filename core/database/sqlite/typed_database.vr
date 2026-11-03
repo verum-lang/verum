@@ -85,7 +85,7 @@ mount core.database.common.pool_impl.{PooledConnection, ReleaseKind, Healthy, Di
 
 mount core.database.sqlite.pool.SqlitePool;
 mount core.database.sqlite.connection.{SqliteConnection, SqliteValue};
-mount core.database.sqlite.native.l7_api.transaction.Transaction;
+mount core.database.sqlite.native.l7_api.transaction.SqliteTransaction as Transaction;
 
 // -----------------------------------------------------------------------------
 // Read-bound surface — DbRead / DbReadWriteTx / DbAdmin / DbUnsafe.

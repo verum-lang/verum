@@ -102,10 +102,8 @@ public mount .blob.{
     blob_open, blob_bytes, blob_read, blob_write, blob_reopen, blob_close,
 };
 
-public mount .capability.{
-    ReadCap, WriteCap, AdminCap,
-    Capability, CanRead, CanWrite, CanDdl,
-};
+public mount .capability.{ReadCap, WriteCap, AdminCap};
+public mount core.database.common.capability.{Capability, CanRead, CanWrite, CanDdl};
 
 public mount .typed_connection.{
     TypedConnection,

@@ -48,12 +48,15 @@ public mount .engine.{
 
 public mount .op.{UpdateOp, UoInsert, UoUpdate, UoDelete};
 
+public mount core.database.sqlite.native.ext.hooks.{
+    CommitDecision, CdAllow, CdAbort, AuthDecision, AdAllow, AdDeny, AdIgnore,
+};
+public mount core.database.sqlite.native.progress.handler.{
+    ProgressDecision, PdContinue, PdInterrupt,
+};
 public mount .dispatcher.{
     ExtendedHooksEngine, ConnectionHooks,
     new_extended_engine, new_connection_hooks,
-    CommitDecision, CdAllow, CdAbort,
-    AuthDecision, AdAllow, AdDeny, AdIgnore,
-    ProgressDecision, PdContinue, PdInterrupt,
     UpdateHookCtx, PreUpdateHookCtx, AuthorizerCtx, TraceHookCtx,
     TraceEventKind, TeStmtPrepared, TeStmtRow, TeStmtClose, TeProfile,
     fire_commit_hook, fire_rollback_hook,

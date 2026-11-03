@@ -51,10 +51,15 @@ public mount .connection.{
     SqliteConnection, SqliteValue, SqliteCapability,
     SvNull, SvInt, SvReal, SvText, SvBlob,
     ScRead, ScReadWrite, ScAdmin,
-    Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
-    BackupSession, BackupOutcome, BackupStepRequest,
-    PragmaValue, PvNull, PvInt, PvText, PvBool,
-    PragmaKind,
+};
+public mount .native.l7_api.{
+    SqliteTransaction as Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
+    BackupSession, PragmaValue, PvNull, PvInt, PvText, PvBool,
+};
+public mount .native.backup_api.outcome.BackupOutcome;
+public mount .native.backup_api.request.BackupStepRequest;
+public mount .native.pragmas.registry.PragmaKind;
+public mount .native.ext.hooks.{
     CommitHook, RollbackHook, UpdateHook, PreUpdateHook,
     AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
 };
