@@ -12,7 +12,7 @@ use crate::{
 };
 use verum_ast::{FunctionDecl, ty::GenericParamKind};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct SourceTypeSubstitution {
     bindings: BTreeMap<String, ImplReceiverWitness>,
 }
@@ -30,6 +30,10 @@ impl SourceTypeSubstitution {
 
     pub(super) fn get(&self, name: &str) -> Option<&ImplReceiverWitness> {
         self.bindings.get(name)
+    }
+
+    pub(super) fn insert(&mut self, name: String, witness: ImplReceiverWitness) {
+        self.bindings.insert(name, witness);
     }
 
     /// Function-owned binders shadow only the corresponding lexical binding.

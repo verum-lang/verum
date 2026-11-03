@@ -480,8 +480,8 @@ impl VbcCodegen {
             // dependencies from the declaring file, even if the implementor
             // never names them.
             if ty.kind == TypeKind::Protocol
-                && let Some((owner, name)) = key.rsplit_once('.')
-                && let Some(protocol) = self.protocol_registry.get(name)
+                && let Some((owner, _)) = key.rsplit_once('.')
+                && let Some(protocol) = self.protocol_registry.get(&key)
                 && protocol.source_module == owner && !protocol.default_methods.is_empty()
             {
                 let mounts = module.declaration_type_bindings.get(&Text::from(owner));

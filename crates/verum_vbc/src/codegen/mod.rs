@@ -68,6 +68,7 @@ mod value_uses;
 mod place_copies;
 mod formal_parameters;
 mod source_substitution;
+mod protocol_applications;
 mod blanket_impls;
 mod protocol_results;
 mod constructor_types;
@@ -308,10 +309,13 @@ pub struct ProtocolInfo {
     pub name: String,
     /// Lexical scope of this protocol's signatures and default bodies.
     pub source_module: String,
+    /// The declaration's ordered binders; applications substitute these names
+    /// rather than adding them to the implementing method's witness roster.
+    pub generics: std::sync::Arc<verum_common::List<verum_ast::ty::GenericParam>>,
     /// Default method implementations: maps method name to its FunctionDecl.
-    pub default_methods: std::collections::HashMap<String, verum_ast::FunctionDecl>,
-    /// Superprotocol names this protocol extends.
-    pub super_protocols: Vec<String>,
+    pub default_methods: std::sync::Arc<std::collections::HashMap<String, verum_ast::FunctionDecl>>,
+    /// Source applications, including their arguments and declaration spans.
+    pub super_protocols: std::sync::Arc<verum_common::List<verum_ast::Type>>,
 }
 
 #[derive(Debug, Clone)]
@@ -322,7 +326,7 @@ struct DefaultConstraintScope {
 }
 
 /// The exact impl target and whether its source form establishes ownership evidence.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ImplReceiverWitness {
     ty: TypeRef,
     semantic: bool,
@@ -2862,7 +2866,7 @@ impl VbcCodegen {
             // Reserve the defining module's key before importing declaration
             // layouts. The later descriptor and the local impl row must resolve
             // to the same consumer-pool ID, even across a bare-name collision.
-            let owner_key = crate::module::qualify_module_name(&info.source_module, name);
+            let owner_key = crate::module::qualify_module_name(&info.source_module, &info.name);
             if !self.type_name_to_id.contains_key(&owner_key) {
                 let type_id = self.alloc_user_type_id();
                 // TYPEBIND (T1108): `type_name_to_id` is written from nine
@@ -2875,8 +2879,8 @@ impl VbcCodegen {
                     eprintln!("[typebind] site=protocol_stub name={name} id={}", type_id.0);
                 }
                 self.type_name_to_id.insert(owner_key, type_id);
-                self.type_name_to_id.entry(name.clone()).or_insert(type_id);
-                let name_sid = StringId(self.ctx.intern_string_raw(name));
+                self.type_name_to_id.entry(info.name.clone()).or_insert(type_id);
+                let name_sid = StringId(self.ctx.intern_string_raw(&info.name));
                 let stub = crate::types::TypeDescriptor {
                     id: type_id,
                     name: name_sid,
@@ -2911,29 +2915,7 @@ impl VbcCodegen {
                 let protocol_name = type_decl.name.name.to_string();
                 let mut default_methods = std::collections::HashMap::new();
 
-                // Extract superprotocol names from extends clause
-                let super_protocols: Vec<String> = protocol_body
-                    .extends
-                    .iter()
-                    .filter_map(|ty| {
-                        // Extract protocol name from type (e.g., Named { path: "PartialEq", .. })
-                        if let verum_ast::ty::Type {
-                            kind: verum_ast::ty::TypeKind::Path(path),
-                            ..
-                        } = ty
-                        {
-                            path.segments.last().and_then(|seg| {
-                                if let verum_ast::ty::PathSegment::Name(ident) = seg {
-                                    Some(ident.name.to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                let super_protocols = protocol_body.extends.clone();
 
                 // Extract default method implementations
                 for protocol_item in &protocol_body.items {
@@ -2975,16 +2957,19 @@ impl VbcCodegen {
                 // default-method emission for empty protocols, which
                 // is correct (nothing to emit).
                 if !default_methods.is_empty() || !super_protocols.is_empty() {
-                    self.protocol_registry.insert(
-                        protocol_name.clone(),
-                        ProtocolInfo {
-                            name: protocol_name,
-                            source_module: self.source_file_owner(module, &self.config.module_name)
-                                .unwrap_or_else(|| self.config.module_name.clone()),
-                            default_methods,
-                            super_protocols,
-                        },
-                    );
+                    let info = ProtocolInfo {
+                        name: protocol_name.clone(),
+                        source_module: self.source_file_owner(module, &self.config.module_name)
+                            .unwrap_or_else(|| self.config.module_name.clone()),
+                        generics: std::sync::Arc::new(type_decl.generics.clone()),
+                        default_methods: std::sync::Arc::new(default_methods),
+                        super_protocols: std::sync::Arc::new(super_protocols),
+                    };
+                    let owner = crate::module::qualify_module_name(&info.source_module, &protocol_name);
+                    // The bare key remains a compatibility view; inherited
+                    // applications select the exact declaration-owned entry.
+                    self.protocol_registry.insert(owner, info.clone());
+                    self.protocol_registry.insert(protocol_name, info);
                 }
             }
 
@@ -3499,7 +3484,6 @@ impl VbcCodegen {
     /// `Eq for Point` will also generate default methods from `PartialEq` (like `ne`).
     fn generate_default_protocol_methods(
         &mut self,
-        protocol_name: &str,
         type_name: &str,
         implementation: &verum_ast::decl::ImplDecl,
         instance: Option<&ConcreteImplType>,
@@ -3514,8 +3498,22 @@ impl VbcCodegen {
         });
         // Collect all protocols to check (this protocol + all superprotocols
         // + any blanket-impl derived protocol whose base is in the chain).
-        let mut protocols_to_check = vec![protocol_name.to_string()];
-        let mut checked = std::collections::HashSet::new();
+        let verum_ast::decl::ImplKind::Protocol { protocol, protocol_args, for_type } = &implementation.kind else {
+            return Err(CodegenError::internal("protocol method generation requires an implementation application"));
+        };
+        let scope: HashMap<_, _> = declaration.ordered_generics.iter().enumerate()
+            .map(|(index, name)| u16::try_from(index).map(|index| (name.clone(), index)))
+            .collect::<Result<_, _>>().map_err(|_| CodegenError::with_span(
+                CodegenErrorKind::InvalidSourceSignature("implementation binder roster exceeds VBC index space".into()), implementation.span))?;
+        let receiver = self.resolve_impl_receiver(for_type, &scope, &declaration.ordered_generics)?;
+        let declared_ids = Self::ordered_generic_param_ids(&scope, &Default::default());
+        let application = self.with_protocol_source_scope(
+            declaration.owner.clone(), self.current_source_substitution.clone(), Some(receiver.clone()),
+            |cg| cg.resolve_protocol_application(protocol, protocol_args, &scope, &declared_ids),
+        )?;
+        let root_application = application.key.clone();
+        let mut protocols_to_check = vec![application];
+        let mut checked: HashMap<String, source_substitution::SourceTypeSubstitution> = HashMap::new();
 
         // Shadowed per-protocol override: blanket-impl entries carry their
         // own `explicit_methods` set that takes priority over the derived
@@ -3524,20 +3522,25 @@ impl VbcCodegen {
             String,
             std::collections::HashSet<String>,
         > = std::collections::HashMap::new();
-        per_proto_overrides.insert(protocol_name.to_string(), implemented_methods.clone());
+        per_proto_overrides.insert(root_application, implemented_methods.clone());
 
-        while let Some(proto_name) = protocols_to_check.pop() {
-            if checked.contains(&proto_name) {
+        while let Some(application) = protocols_to_check.pop() {
+            if let Some(previous) = checked.get(&application.key) {
+                if previous != &application.substitution {
+                    return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        format!("conflicting inherited protocol application '{}'", application.key)), implementation.span));
+                }
                 continue;
             }
-            checked.insert(proto_name.clone());
+            checked.insert(application.key.clone(), application.substitution.clone());
+            let proto_name = &application.name;
 
             // Enqueue any blanket-impl derived protocols whose base is
             // the one we're about to process. This is the monomorphization
             // step — `implement<B: Base> Derived for B {}` flows Derived's
             // default methods down to every concrete implementor of Base.
             let pending_derivations: Vec<_> = self.blanket_impls.iter()
-                .filter(|blanket| blanket.base_protocol == proto_name).cloned().collect();
+                .filter(|blanket| blanket.base_protocol == *proto_name).cloned().collect();
             for blanket in pending_derivations {
                 for parameter in &blanket.declaration.generics {
                     use verum_ast::ty::GenericParamKind;
@@ -3550,7 +3553,16 @@ impl VbcCodegen {
                         ), parameter.span));
                     }
                 }
-                let derived = &blanket.derived_protocol;
+                let verum_ast::decl::ImplKind::Protocol { protocol, protocol_args, .. } = &blanket.declaration.kind else {
+                    return Err(CodegenError::internal("retained blanket declaration is not a protocol implementation"));
+                };
+                let blanket_substitution = source_substitution::SourceTypeSubstitution::receiver(
+                    blanket.receiver_parameter.clone(), receiver.clone(),
+                );
+                let derived = self.with_protocol_source_scope(
+                    blanket.source_module.clone(), blanket_substitution.clone(), Some(receiver.clone()),
+                    |cg| cg.resolve_protocol_application(protocol, protocol_args, &HashMap::new(), &declared_ids),
+                )?;
                 // T0623: monomorphise the blanket impl's OWN BODY onto this
                 // concrete implementor.  The loop further down replays only
                 // the DERIVED PROTOCOL's default bodies, and `overrides`
@@ -3582,29 +3594,27 @@ impl VbcCodegen {
                         body_func, type_name, implementation, &declaration,
                         blanket.source_module.clone(), None,
                     )?;
-                    method.implementation.source_substitution =
-                        source_substitution::SourceTypeSubstitution::receiver(
-                            blanket.receiver_parameter.clone(), method.implementation.receiver.clone(),
-                        ).for_function(body_func);
+                    method.implementation.source_substitution = blanket_substitution.for_function(body_func);
                     self.pending_default_registrations.push(method);
                 }
                 per_proto_overrides
-                    .entry(derived.clone())
+                    .entry(derived.key.clone())
                     .or_insert(blanket.explicit_methods.clone());
-                if !checked.contains(derived) {
-                    protocols_to_check.push(derived.clone());
-                }
+                protocols_to_check.push(derived);
             }
 
-            if let Some(protocol_info) = self.protocol_registry.get(&proto_name).cloned() {
-                for super_proto in &protocol_info.super_protocols {
-                    if !checked.contains(super_proto) {
-                        protocols_to_check.push(super_proto.clone());
-                    }
+            if let Some(protocol_info) = self.protocol_registry.get(&application.key).cloned() {
+                for super_proto in protocol_info.super_protocols.iter() {
+                    let (path, args) = Self::protocol_application_parts(super_proto)?;
+                    let parent = self.with_protocol_source_scope(
+                        Some(protocol_info.source_module.clone()), application.substitution.clone(), Some(receiver.clone()),
+                        |cg| cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids),
+                    )?;
+                    protocols_to_check.push(parent);
                 }
 
                 let empty = std::collections::HashSet::new();
-                let overrides = per_proto_overrides.get(&proto_name).unwrap_or(&empty);
+                let overrides = per_proto_overrides.get(&application.key).unwrap_or(&empty);
 
                 // Iterate default methods in a deterministic order. Without
                 // the sort, HashMap iteration order leaks Rust's per-process
@@ -3636,23 +3646,26 @@ impl VbcCodegen {
                     // claims the unsuffixed dispatch slot; the default
                     // only fills slots still empty after the whole
                     // collect phase.
-                    let constraints = default_func.generic_where_clause.as_ref().and_then(|_| {
-                        let receiver = self.nominal_type_id(type_name)?;
-                        let owner = crate::module::qualify_module_name(
-                            &protocol_info.source_module,
-                            &proto_name,
-                        );
-                        let protocol = self.nominal_type_id(&owner)?;
+                    let constraints = if default_func.generic_where_clause.is_some() {
+                        let receiver_id = match &receiver.ty {
+                            TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => *id,
+                            _ => return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                                "conditional default requires a nominal implementation receiver".into()), default_func.span)),
+                        };
+                        let protocol = application.protocol.ok_or_else(|| CodegenError::with_span(
+                            CodegenErrorKind::InvalidSourceSignature(
+                                "conditional default has no selected protocol identity".into()), default_func.span))?;
                         Some(DefaultConstraintScope {
-                            receiver,
+                            receiver: receiver_id,
                             instance: instance.cloned(),
                             protocol: crate::types::ProtocolId(protocol.0),
                         })
-                    });
-                    let method = self.deferred_default_method(
+                    } else { None };
+                    let mut method = self.deferred_default_method(
                         default_func, type_name, implementation, &declaration,
                         Some(protocol_info.source_module.clone()), constraints,
                     )?;
+                    method.implementation.source_substitution = application.substitution.for_function(default_func);
                     self.pending_default_registrations.push(method);
                 }
             }
@@ -3833,26 +3846,21 @@ impl VbcCodegen {
             if self.ctx.lookup_function(&full_method_name).is_some() {
                 continue;
             }
-            if let (Some(constraints), Some(owner)) = (&method.constraints, &method.lexical_owner) {
-                let previous_module = self.ctx.current_source_module.replace(owner.clone());
-                let contradicts = self.default_binding_contradicts(
-                    &default_func,
-                    &type_name,
-                    constraints.receiver,
-                    constraints.protocol,
-                    constraints.instance.as_ref(),
-                );
-                self.ctx.current_source_module = previous_module;
-                if contradicts {
-                    continue;
-                }
+            if let Some(constraints) = &method.constraints {
+                let contradicts = self.with_deferred_method_scope(&method, |codegen| {
+                    Ok(codegen.default_binding_contradicts(
+                        default_func, type_name, constraints.receiver,
+                        constraints.protocol, constraints.instance.as_ref(),
+                    ))
+                })?;
+                if contradicts { continue; }
             }
             // Registration elaborates the same inherited signature as body
             // compilation. Its names belong to the protocol's lexical source,
             // independently of the receiver or the file draining this queue.
             self.with_deferred_method_scope(&method, |codegen| {
                 codegen.register_impl_function(default_func, type_name, &method.implementation.declaration.ordered_generics)
-            })?;
+            }).map_err(|error| error.with_context(format!("in inherited signature {full_method_name}")))?;
             self.pending_default_methods.push(method);
         }
 
@@ -10299,7 +10307,7 @@ impl VbcCodegen {
                         // Generate default methods from protocol
                         let instance = self.record_concrete_impl_bindings(impl_decl);
                         self.generate_default_protocol_methods(
-                            &pn, ty_name, impl_decl, instance.as_ref(), &implemented_methods,
+                            ty_name, impl_decl, instance.as_ref(), &implemented_methods,
                         )?;
 
                         // Populate TypeDescriptor.protocols for vtable-based dispatch.
@@ -16830,9 +16838,12 @@ impl VbcCodegen {
 
                 // Encode super-protocols in the protocols field
                 // For protocol types, protocols[] means "extends these protocols"
-                if let Some(proto_info) = self.protocol_registry.get(&type_name) {
-                    for super_name in &proto_info.super_protocols {
-                        if let Some(&super_id) = self.type_name_to_id.get(super_name) {
+                let protocol_owner = crate::module::qualify_module_name(self.lexical_type_scope(), &type_name);
+                if let Some(proto_info) = self.protocol_registry.get(&protocol_owner) {
+                    for application in proto_info.super_protocols.iter() {
+                        let (path, _) = Self::protocol_application_parts(application)?;
+                        let super_name = Self::format_type_path(path);
+                        if let Some(super_id) = self.nominal_type_id(&super_name) {
                             type_desc.protocols.push(crate::types::ProtocolImpl {
                                 protocol: crate::types::ProtocolId(super_id.0),
                                 methods: Vec::new(),

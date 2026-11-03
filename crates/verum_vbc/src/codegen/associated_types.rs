@@ -76,8 +76,8 @@ impl VbcCodegen {
             for item in &file.items {
                 let ItemKind::Type(ty) = &item.kind else { continue };
                 if !matches!(ty.body, TypeDeclBody::Protocol(_)) { continue; }
-                let Some(protocol) = self.protocol_registry.get(ty.name.name.as_str())
-                    .filter(|info| info.source_module == owner) else { continue };
+                let protocol_owner = crate::module::qualify_module_name(&owner, ty.name.name.as_str());
+                let Some(protocol) = self.protocol_registry.get(&protocol_owner) else { continue };
                 let parent_names: Vec<_> = ty.generics.iter().filter_map(|parameter| {
                     use verum_ast::ty::GenericParamKind;
                     match &parameter.kind {
