@@ -11902,6 +11902,44 @@ impl VbcCodegen {
         ))
     }
 
+    /// An explicit constructor qualifier denotes a single nominal sum in the
+    /// source file's scope, including a renamed mount. A variant of a different
+    /// type can never provide its tag, payload count, or heap identity.
+    fn declared_constructor(
+        &self,
+        qualifier: &str,
+        member: &str,
+        argument_count: usize,
+    ) -> CodegenResult<Option<(String, u32)>> {
+        let Some(sum) = self.nominal_type_id(qualifier).and_then(|id| self.type_by_id(id))
+            .filter(|ty| ty.kind == crate::types::TypeKind::Sum && !ty.variants.is_empty())
+        else {
+            return Ok(None);
+        };
+        let Some(owner) = self.type_declaration_identity(sum) else {
+            return Ok(None);
+        };
+        let name = |v: &crate::types::VariantDescriptor| self.ctx.strings.get(v.name.0 as usize);
+        let Some(variant) = sum.variants.iter().find(|v| name(v).map(String::as_str) == Some(member)) else {
+            return Err(CodegenError::new(CodegenErrorKind::UnknownVariantConstructor {
+                type_name: owner.to_string(),
+                variant: member.to_owned(),
+                available: sum.variants.iter().filter_map(name).cloned().collect::<Vec<_>>().join(", "),
+            }));
+        };
+        let arity = match variant.kind {
+            crate::types::VariantKind::Unit => 0,
+            crate::types::VariantKind::Tuple => usize::from(variant.arity),
+            crate::types::VariantKind::Record => variant.fields.len(),
+        };
+        if arity != argument_count {
+            return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                function: format!("{owner}.{member}"), expected: arity, found: argument_count,
+            }));
+        }
+        Ok(Some((owner.to_string(), variant.tag)))
+    }
+
     /// Sibling of `compile_variant_constructor` that accepts an
     /// `explicit_parent: Option<&str>` hint.  Callers reaching this
     /// helper from a `TypeName.Variant(...)` expression (the static-
@@ -11966,10 +12004,21 @@ impl VbcCodegen {
                     .as_ref()
                     .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
             });
-        let selected = self.select_colliding_constructor(
-            name, Some(args.len()), context_type.as_deref(), verum_ast::Span::dummy(),
-        )?.cloned();
-        let context_type = selected.as_ref().and_then(|info| info.parent_type_name.clone()).or(context_type);
+        let member = name.rsplit('.').next().unwrap_or(name);
+        let declared = match explicit_parent {
+            Some(owner) => self.declared_constructor(Self::strip_generic_args(owner), member, args.len())?,
+            None => None,
+        };
+        let selected = if let Some((owner, _)) = &declared {
+            self.ctx.functions.get(&format!("{owner}.{member}")).cloned()
+        } else {
+            self.select_colliding_constructor(
+                name, Some(args.len()), context_type.as_deref(), verum_ast::Span::dummy(),
+            )?.cloned()
+        };
+        let context_type = declared.as_ref().map(|(owner, _)| owner.clone())
+            .or_else(|| selected.as_ref().and_then(|info| info.parent_type_name.clone()))
+            .or(context_type);
         let direct_tag = self.ctx.lookup_function_in_scope(name).and_then(|info| {
             // Only accept the direct hit when we lack a context type or
             // when the parent matches it; otherwise fall through to the
@@ -12016,7 +12065,8 @@ impl VbcCodegen {
         } else {
             None
         };
-        let tag = selected.as_ref().and_then(|info| info.variant_tag).or(direct_tag)
+        let tag = declared.map(|(_, tag)| tag)
+            .or_else(|| selected.as_ref().and_then(|info| info.variant_tag)).or(direct_tag)
             .or(context_aware_tag)
             .or_else(|| self.ctx.find_variant_by_suffix_and_args(name, args.len()))
             .or_else(|| {
@@ -12072,9 +12122,7 @@ impl VbcCodegen {
         // ~10832 (commit `90b94e68b`).  Save/restore around each arg
         // so siblings start from the same outer return-type context.
         if !args.is_empty() {
-            let payload_types: Option<Vec<String>> = self
-                .ctx
-                .lookup_function_in_scope(name)
+            let payload_types = selected.as_ref().or_else(|| self.ctx.lookup_function_in_scope(name))
                 .and_then(|info| info.variant_payload_types.clone())
                 .or_else(|| {
                     // When the bare lookup picked a different type's
@@ -13646,6 +13694,13 @@ impl VbcCodegen {
             ExprKind::TypeExpr(ty) => self.extract_base_type_name(ty),
             _ => None,
         };
+
+        if let Some(owner) = &static_receiver_type
+            && method.name.chars().next().is_some_and(char::is_uppercase)
+            && self.declared_constructor(owner, method.name.as_str(), args.len())?.is_some()
+        {
+            return self.compile_variant_constructor_hinted(method.name.as_str(), args, Some(owner));
+        }
 
         // Packed storage belongs to the canonical byte declaration. The
         // lexical leaf `Byte` can also denote a user record or a caller's
@@ -23762,19 +23817,11 @@ impl VbcCodegen {
             let type_name = type_ident.name.to_string();
             let qualified_verum = format!("{}.{}", type_name, field);
             let qualified_rust = format!("{}::{}", type_name, field);
-            if let Some(func_info) = self
-                .ctx
-                .lookup_qualified_function(&qualified_verum)
+            if self.ctx.lookup_qualified_function(&qualified_verum)
                 .or_else(|| self.ctx.lookup_qualified_function(&qualified_rust))
-                .cloned()
-                && let Some(tag) = func_info.variant_tag
+                .is_some_and(|info| info.variant_tag.is_some())
             {
-                return self.compile_variant_constructor_with_tag_named_and_parent(
-                    Some(field),
-                    tag,
-                    &verum_common::List::new(),
-                    Some(type_name.as_str()),
-                );
+                return self.compile_variant_constructor_hinted(field, &verum_common::List::new(), Some(&type_name));
             }
         }
 
@@ -24040,7 +24087,12 @@ impl VbcCodegen {
                 if let Some(func_info) = self.ctx.lookup_function_in_scope(field).cloned() {
                     // If it's a variant constructor, emit MakeVariant instead of Call
                     if func_info.variant_tag.is_some() {
-                        return self.compile_variant_constructor(field, &verum_common::List::new());
+                        let qualifier = match parts.as_slice() {
+                            [owner, _] if self.nominal_type_id(owner).is_some()
+                                && self.ctx.get_var_reg(owner).is_err() => Some(owner.as_str()),
+                            _ => None,
+                        };
+                        return self.compile_variant_constructor_hinted(field, &verum_common::List::new(), qualifier);
                     }
                     let dest = self.ctx.alloc_temp();
                     if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
