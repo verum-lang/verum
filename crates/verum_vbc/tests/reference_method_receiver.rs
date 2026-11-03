@@ -232,3 +232,28 @@ fn probe() -> Int {
         "{operations:?}"
     );
 }
+
+#[test]
+fn erased_receivers_use_their_declared_text_conversion() {
+    check(
+        r#"
+type FormatLabel is protocol { fn to_text(&self) -> Text; }
+type Source is Flag | File;
+type Other is Flag | File;
+implement FormatLabel for Source { fn to_text(&self) -> Text { "cli" } }
+implement FormatLabel for Other { fn to_text(&self) -> Text { "other" } }
+type Entry is { source: Source };
+fn render<T: FormatLabel>(x: &T) -> Text { x.to_text() }
+fn probe() -> Int {
+    assert_eq(render(&Other.Flag), "other");
+    let rows = [(0, Entry { source: Source.Flag })];
+    for (_, entry) in rows.iter() {
+        assert_eq(entry.source.to_text(), "cli");
+        return 7;
+    }
+    0
+}
+"#,
+        Some(7),
+    );
+}

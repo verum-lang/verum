@@ -5,7 +5,9 @@
 // `core/cli/config.vr` — CLI config-resolution source tracking.
 // =============================================================================
 
-mount core.cli.config.{SourceTag, ConfigSource};
+mount core.cli.config.{SourceTag, ConfigSource, ConfigResolver};
+mount core.cli.parser.{parse_argv};
+mount core.cli.spec.{CommandSpec, FlagSpec};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -107,6 +109,21 @@ fn test_config_source_default_source_disjoint() {
     let c: ConfigSource = ConfigSource.DefaultSource;
     assert(!(c is ConfigSource.CliSource));
     assert(!(c is ConfigSource.EnvSource));
+}
+
+@test
+fn test_resolved_config_borrows_the_entry_and_renders_its_provenance() {
+    let cmd = CommandSpec.new("client".to_text(), "Database client".to_text())
+        .add_flag(FlagSpec.value("host".to_text(), "Database host".to_text()));
+    let outcome = parse_argv(&cmd, ["client".to_text(), "--host".to_text(), "db".to_text()]).unwrap();
+    let config = ConfigResolver.new().add_source(ConfigSource.CliSource).resolve(&cmd, &outcome).unwrap();
+    let key = "host".to_text();
+    assert(config.get(&key) is Maybe.Some);
+    assert_eq(config.get_text(&key), Maybe.Some("db".to_text()));
+    let missing = "absent".to_text();
+    assert(config.get(&missing) is Maybe.None);
+    assert(config.get_text(&missing) is Maybe.None);
+    assert_eq(config.debug_render(), "Config resolved:\n  host = db  (CLI)\n");
 }
 
 fn main() {}

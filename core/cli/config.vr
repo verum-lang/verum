@@ -84,11 +84,14 @@ public type ResolvedConfig is {
 
 implement ResolvedConfig {
     public fn get(&self, key: &Text) -> Maybe<&ResolvedValue> {
-        self.values.get(key)
+        match self.values.get_key_value(key) {
+            Maybe.Some(entry) => Maybe.Some(entry.1),
+            Maybe.None => Maybe.None,
+        }
     }
 
     public fn get_text(&self, key: &Text) -> Maybe<Text> {
-        match self.values.get(key) {
+        match self.get(key) {
             Maybe.Some(rv) => Maybe.Some(rv.value.clone()),
             Maybe.None => Maybe.None,
         }
@@ -96,27 +99,17 @@ implement ResolvedConfig {
 
     /// Render `--debug-config`-style breakdown for stderr.
     public fn debug_render(&self) -> Text {
-        let mut b = core.text.builder.TextBuilder.new();
-        b.push("Config resolved:\n");
-        let keys = self.values.keys();
-        let mut i: Int = 0;
-        while i < keys.len() {
-            let k = &keys[i];
-            match self.values.get(k) {
-                Maybe.Some(rv) => {
-                    b.push("  ");
-                    b.push(k);
-                    b.push(" = ");
-                    b.push(&rv.value);
-                    b.push("  (");
-                    b.push(&rv.source.to_text());
-                    b.push(")\n");
-                },
-                Maybe.None => {},
-            }
-            i = i + 1;
+        let mut output = "Config resolved:\n".to_text();
+        for (key, rv) in self.values.iter() {
+            output.push_str("  ");
+            output.push_str(&key);
+            output.push_str(" = ");
+            output.push_str(&rv.value);
+            output.push_str("  (");
+            output.push_str(&rv.source.to_text());
+            output.push_str(")\n");
         }
-        b.build()
+        output
     }
 }
 

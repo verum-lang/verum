@@ -6183,7 +6183,27 @@ pub(super) fn dispatch_primitive_method(
     // route through the same allocator as `to_string` so every primitive
     // reports a real `Text` value instead of hitting the generic method-
     // not-found fall-through.
-    if method == "to_string" || method == "to_text" {
+    if args.count == 0 && matches!(method, "to_string" | "to_text") {
+        // An erased receiver can still carry a declared conversion. Let normal
+        // method dispatch bind its receiver and generic witnesses.
+        if receiver.is_regular_ptr() && state.heap.contains(receiver.as_ptr()) {
+            // SAFETY: contains checks membership at the exact allocation base.
+            let owner = unsafe { (*receiver.as_ptr::<heap::ObjectHeader>()).type_id };
+            if state
+                .module
+                .function_indices_by_last_segment(method)
+                .iter()
+                .any(|&index| {
+                    let function = &state.module.functions[index as usize];
+                    function.parent_type == Some(owner)
+                        && function.has_source_body
+                        && matches!(function.params.as_slice(), [param]
+                            if state.module.get_string(param.name) == Some("self"))
+                })
+            {
+                return Ok(None);
+            }
+        }
         let string_repr = format_value_for_print(state, *receiver);
         if let Some(small_str_value) = Value::from_small_string(&string_repr) {
             return Ok(Some(small_str_value));
