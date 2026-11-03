@@ -1069,7 +1069,8 @@ implement AsyncRuntime {
     /// yet been called for this `block_on` cycle, else the
     /// configured worker count.
     public fn worker_pool_size(&self) -> Int {
-        match *self.worker_pool.lock() {
+        let guard = self.worker_pool.lock().unwrap_or_else(|poison| poison.into_inner());
+        match *guard {
             Maybe.Some(ref pool) => pool.size(),
             Maybe.None => 0,
         }
