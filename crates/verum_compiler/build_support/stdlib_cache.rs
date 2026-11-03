@@ -1,8 +1,11 @@
 //! Automatic stdlib archive identity shared by the build script and its controls.
 //! The caller supplies core files in relative-path order; producer files use
-//! the fixed order below. Dependency reporting remains independent of baking.
+//! sorted checkout-relative paths. Dependency reporting remains independent of baking.
 
-use std::path::Path;
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 #[cfg(test)]
 pub(crate) fn compute_archive_key<'a>(
@@ -21,30 +24,11 @@ pub(crate) fn producer_hasher(
     mut report_dependency: impl FnMut(&Path),
 ) -> blake3::Hasher {
     let mut hasher = blake3::Hasher::new();
-    // Mix the schema-version tag in first so any wire-format bump
-    // forces a full re-precompile even when source hasn't changed.
-    hasher.update(b"schema:");
-    hasher.update(schema.as_bytes());
-    hasher.update(b"\0");
-    // Mix in the codegen-path source files so a Rust-side change to
-    // VBC codegen / intrinsic dispatch invalidates the precompile
-    // cache. Without this, a change to e.g.
-    // `crates/verum_vbc/src/intrinsics/mod.rs::lookup_intrinsic` —
-    // which determines how `@intrinsic("ctlz", ...)` lowers to
-    // bytecode — produces a fresh `verum` binary that embeds a
-    // STALE `runtime.vbca` compiled by an older codegen. The
-    // resulting cross-tier divergence is invisible at the cargo
-    // dependency level (cargo sees verum_vbc as a dep of
-    // verum_compiler and rebuilds them; build.rs sees no `.vr`
-    // source changes and reuses the cached vbca). Discovered via
-    // `core-tests/mem/size_class/property_test::law_round_trip_full_table_exhaustive`
-    // — a fix to `lookup_intrinsic` was correctly in the binary but
-    // not reflected in the embedded stdlib.
-    //
-    // The mixed-in files MUST be the source-of-truth for codegen
-    // strategies, intrinsic dispatch, and lowering — anything that
-    // affects what the stdlib precompiler emits.
-    let codegen_paths: &[&str] = &[
+    hasher.update(b"verum-stdlib-producer");
+    hash_part(&mut hasher, schema.as_bytes());
+    // These inputs live in crates shared with runtime-only tooling. AST traversal
+    // and source lowering have dedicated source trees, discovered below.
+    let producer_files = [
         // The bootstrap path consumes this parser's declaration, expression,
         // type and normalization semantics before emitting any descriptor or
         // body. Parser-only changes therefore invalidate the same archive.
@@ -73,18 +57,7 @@ pub(crate) fn producer_hasher(
         // Actual array storage evidence, callable conversions, and declared
         // element semantics all shape the bytecode emitted into the archive.
         "crates/verum_vbc/src/array_storage.rs",
-        "crates/verum_vbc/src/codegen/array_coercions.rs",
-        "crates/verum_vbc/src/codegen/array_elements.rs",
-        "crates/verum_vbc/src/codegen/expressions.rs",
-        // Selection and protocol-await lowering share this producer module.
-        "crates/verum_vbc/src/codegen/select.rs",
-        "crates/verum_vbc/src/codegen/protocol_results.rs",
-        "crates/verum_vbc/src/codegen/constructor_types.rs",
         "crates/verum_vbc/src/mono/method_calls.rs",
-        "crates/verum_vbc/src/codegen/statements.rs",
-        // Error classification decides whether invalid source becomes a baked
-        // panic stub or refuses compilation (including constructor ownership).
-        "crates/verum_vbc/src/codegen/error.rs",
         // `well_known_types.rs` owns `has_runtime_inline_dispatch` —
         // the predicate that decides whether codegen DEVIRTUALISES a
         // method call to a static `Call` or keeps it on `CallM` for the
@@ -95,28 +68,10 @@ pub(crate) fn producer_hasher(
         // invalidate the precompiled `runtime.vbca` like the other
         // codegen sources do.
         "crates/verum_common/src/well_known_types.rs",
-        // `mod.rs` carries the function-registration / TypeRef-resolution
-        // logic (`register_function`, `register_impl_function`,
-        // `resolve_field_type_ref`, …) — changes here affect what
-        // `FunctionDescriptor` shape the precompile pass emits into
-        // `runtime.vbca`, so it must invalidate the cache like the other
-        // codegen sources do.  Pre-fix a change to `mod.rs` rebuilt the
-        // user_compiler crate but reused the stale precompile archive,
-        // making in-source codegen fixes invisible at every cross-module
-        // call site that consults the archived FunctionInfo.
-        "crates/verum_vbc/src/codegen/mod.rs",
-        "crates/verum_vbc/src/codegen/bootstrap_types.rs",
-        "crates/verum_vbc/src/codegen/declaration_interface.rs",
-        "crates/verum_vbc/src/codegen/parsed_field_types.rs",
-        "crates/verum_vbc/src/codegen/value_uses.rs",
-        "crates/verum_vbc/src/codegen/place_copies.rs",
-        "crates/verum_vbc/src/codegen/formal_parameters.rs",
         "crates/verum_vbc/src/value_use.rs",
         "crates/verum_vbc/src/resource_discipline.rs",
         "crates/verum_common/src/value_use.rs",
-        "crates/verum_vbc/src/codegen/associated_types.rs",
         "crates/verum_vbc/src/type_layout.rs",
-        "crates/verum_vbc/src/codegen/context.rs",
         // The precompile pass itself: `scan_module_reexports` /
         // `inject_decl_spans` / glob-expansion shape ALL live in
         // precompile.rs, and archive_metadata.rs owns the Pass-2
@@ -160,27 +115,6 @@ pub(crate) fn producer_hasher(
         // never run.
         "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs",
         "crates/verum_compiler/src/core_compiler.rs",
-        // `@cfg` PREDICATE SEMANTICS. `TargetConfig::is_set` / `matches` /
-        // `CfgPredicate::evaluate` decide what every `@cfg(...)` in `core/`
-        // MEANS, and the bake picks one arm of 45 multi-arm stdlib functions
-        // by asking them — platform syscall wrappers (`sys_open`, `do_fork`,
-        // `spawn_child`), architecture branches (`context_switch`), and the
-        // debug-assertion family among them.
-        //
-        // Measured 2026-08-15: T0750 taught `is_set` the `debug` predicate,
-        // and every bake afterwards was a cache HIT, so the shipped archive
-        // kept the arms chosen when `debug` was still silently false —
-        // `debug_assert_eq` and `debug_assert_ne` remained no-ops in a
-        // binary whose own evaluator said otherwise. A compiler that
-        // believes one thing and an archive built when it believed another
-        // is the exact failure this list exists to prevent, and the file
-        // defining the belief was not on it.
-        "crates/verum_ast/src/cfg.rs",
-        // Shared checked scalar rules change folded array counts in the archive.
-        "crates/verum_ast/src/checked_const.rs",
-        // Declaration field policies and canonical scopes shape archived access.
-        "crates/verum_ast/src/visibility.rs",
-        "crates/verum_vbc/src/codegen/field_visibility.rs",
         "crates/verum_types/src/core_metadata.rs",
         // `TypeId::well_known_name` (T0190) — the reserved-TypeId →
         // canonical-surface-name table `archive_metadata` renders every
@@ -207,17 +141,6 @@ pub(crate) fn producer_hasher(
         // kept dying "method not found" through THREE rebuilds.
         "crates/verum_compiler/src/archive_ctx_loader.rs",
         "crates/verum_compiler/src/symbol_graph_baked.rs",
-        // T0711 (measured trap, 2026-08-03): the VBC WIRE layer itself.
-        // v2.10 PARAMNAME-CARRY changed serialize/deserialize/module/
-        // format — none were in this list, so FOUR writer commits
-        // produced fresh compilers that silently embedded the b63-era
-        // sidecar ("cache HIT" while the wire format had moved; the
-        // declared_ty carry read as EMPTY at every consumer until a
-        // manual artefact delete forced a re-bake).  format.rs also
-        // carries VERSION_MINOR, so wire-version bumps invalidate
-        // automatically — no manual PRECOMPILE_SCHEMA_VERSION bump to
-        // forget.
-        "crates/verum_ast/src/method_dispatch.rs",
         "crates/verum_vbc/src/serialize.rs",
         "crates/verum_vbc/src/deserialize.rs",
         "crates/verum_vbc/src/module.rs",
@@ -233,30 +156,68 @@ pub(crate) fn producer_hasher(
         "crates/verum_modules/src/lib.rs",
         "crates/verum_modules/src/exports.rs",
     ];
-    hasher.update(b"codegen:");
-    for rel in codegen_paths {
-        let abs = project_root.join(rel);
-        // Tell cargo to rerun build.rs when ANY of these files change —
-        // belt-and-braces alongside the hash invalidation, since cargo
-        // already rebuilds the crate but doesn't re-run a build script
-        // for upstream-only changes.
-        report_dependency(&abs);
-        match std::fs::read(&abs) {
+    let mut paths: Vec<PathBuf> = producer_files.iter().map(PathBuf::from).collect();
+    for tree in ["crates/verum_ast/src", "crates/verum_vbc/src/codegen"] {
+        // Cargo watches directory membership, including newly added lowering modules.
+        report_dependency(&project_root.join(tree));
+        collect_rust_sources(project_root, Path::new(tree), &mut paths)
+            .unwrap_or_else(|e| panic!("cannot enumerate producer sources in {tree}: {e}"));
+    }
+    paths.sort_unstable();
+    for relative in paths {
+        let absolute = project_root.join(&relative);
+        report_dependency(&absolute);
+        let name = relative
+            .to_str()
+            .expect("UTF-8 producer input path")
+            .replace('\\', "/");
+        hash_part(&mut hasher, name.as_bytes());
+        match std::fs::read(&absolute) {
             Ok(bytes) => {
-                hasher.update(rel.as_bytes());
-                hasher.update(b"\0");
-                hasher.update(&bytes);
-                hasher.update(b"\0");
+                hasher.update(b"present");
+                hash_part(&mut hasher, &bytes);
             }
-            Err(_) => {
-                // File missing — record the path so the cache invalidates
-                // when the file is added.
-                hasher.update(rel.as_bytes());
-                hasher.update(b":missing\0");
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                hasher.update(b"missing");
             }
+            Err(error) => panic!("cannot read producer input {name}: {error}"),
         }
     }
     hasher
+}
+
+fn hash_part(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn collect_rust_sources(root: &Path, relative: &Path, paths: &mut Vec<PathBuf>) -> io::Result<()> {
+    let mut directories = vec![relative.to_owned()];
+    while let Some(directory) = directories.pop() {
+        let entries = match std::fs::read_dir(root.join(&directory)) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound && directory == relative => {
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let entry = entry?;
+            let path = directory.join(entry.file_name());
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                directories.push(path);
+            } else if kind.is_symlink() && entry.path().is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("symlinked producer directory {}", path.display()),
+                ));
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                paths.push(path);
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn finish_archive_key<'a>(

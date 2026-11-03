@@ -107,6 +107,40 @@ fn forward_declaration_witnesses_invalidate_the_archive_without_schema_changes()
 }
 
 #[test]
+fn ast_and_lowering_source_trees_invalidate_on_edits_additions_and_removals() {
+    for (tree, file) in [
+        ("crates/verum_ast/src", "visitor.rs"),
+        ("crates/verum_vbc/src/codegen", "registers.rs"),
+        ("crates/verum_vbc/src/codegen", "nested/new_lowering.rs"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let (missing, watched) = key(root.path(), SCHEMA, CORE);
+        assert!(watched.contains(&root.path().join(tree)), "Cargo must detect future files in {tree}");
+        let source = &format!("{tree}/{file}");
+        write(root.path(), source, b"original");
+        let (original, dependencies) = key(root.path(), SCHEMA, CORE);
+        assert_ne!(original, missing, "adding {source}");
+        assert_eq!(dependencies.iter().filter(|path| **path == root.path().join(source)).count(), 1);
+        write(root.path(), source, b"changed");
+        assert_ne!(key(root.path(), SCHEMA, CORE).0, original, "editing {source}");
+        fs::remove_file(root.path().join(source)).unwrap();
+        assert_eq!(key(root.path(), SCHEMA, CORE).0, missing, "removing {source}");
+    }
+}
+
+#[test]
+fn producer_content_cannot_impersonate_a_second_source_file() {
+    let root = tempfile::tempdir().unwrap();
+    let first = "crates/verum_ast/src/a.rs";
+    let second = "crates/verum_ast/src/b.rs";
+    write(root.path(), first, format!("first\0{second}\0last"));
+    let single = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), first, "first");
+    write(root.path(), second, "last");
+    assert_ne!(single, key(root.path(), SCHEMA, CORE).0);
+}
+
+#[test]
 fn selection_ownership_semantics_invalidate_the_archive_without_schema_changes() {
     const PATH: &str = "crates/verum_vbc/src/codegen/select.rs";
     const SOURCE: &str = include_str!("../../verum_vbc/src/codegen/select.rs");
@@ -343,6 +377,8 @@ fn cargo_rechecks_auto_precompile_policy_on_environment_changes() {
     let target = root.path().join("target");
     write(root.path(), "core/mod.vr", CORE[0].1);
     write(root.path(), PARSER_DECLARATIONS, PARSER_SOURCE);
+    write(root.path(), "crates/verum_ast/src/visitor.rs", b"// fixture AST traversal");
+    write(root.path(), "crates/verum_vbc/src/codegen/mod.rs", b"// fixture lowering");
     // An absent rerun-if-changed input makes every Cargo invocation dirty and
     // would hide the missing environment dependency. Materialize the complete
     // reported roster before computing the fixture's stable cache key.
