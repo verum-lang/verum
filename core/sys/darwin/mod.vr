@@ -339,7 +339,7 @@ public mount .thread.{
     DarwinOnce,
     // Functions
     spawn,
-    current_thread,
+    current_thread as current_pthread,
     current_tid,
     // Constants
     ONCE_INIT,
