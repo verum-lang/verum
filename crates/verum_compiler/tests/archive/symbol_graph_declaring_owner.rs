@@ -115,7 +115,7 @@ fn assert_exact_beta_closure(graph: &SymbolGraph, archive: &VbcArchive) {
 fn scan_retains_declaring_owner_and_existing_descriptor_spellings() {
     for reverse in [false, true] {
         let archive = sibling_archive(reverse);
-        let graph = SymbolGraph::build(&archive);
+        let graph = SymbolGraph::build(&archive).expect("valid archive");
         for (owner, entry) in [
             ("alpha.owner.Counter.new", "alpha"),
             ("beta.owner.Counter.new", "beta"),
@@ -151,14 +151,14 @@ fn scan_retains_declaring_owner_and_existing_descriptor_spellings() {
 fn exact_declaring_owner_carries_its_transitive_call_edges_in_both_orders() {
     for reverse in [false, true] {
         let archive = sibling_archive(reverse);
-        assert_exact_beta_closure(&SymbolGraph::build(&archive), &archive);
+        assert_exact_beta_closure(&SymbolGraph::build(&archive).expect("valid archive"), &archive);
     }
 }
 
 #[test]
 fn encoded_sidecar_roundtrip_keeps_the_declaring_owner_and_edges() {
     let archive = sibling_archive(false);
-    let encoded = SymbolGraph::scan_and_encode(&archive);
+    let encoded = SymbolGraph::scan_and_encode(&archive).expect("valid archive");
     let decoded = crate::symbol_graph_baked::BakedSymbolGraph::from_bytes(Cow::Owned(
         encoded.as_bytes().to_owned(),
     ))
@@ -188,7 +188,7 @@ fn two_declarers_in_one_umbrella_keep_distinct_edges() {
             );
         }
         let archive = archive(&[umbrella]);
-        let graph = SymbolGraph::build(&archive);
+        let graph = SymbolGraph::build(&archive).expect("valid archive");
         for owner in owners {
             let name = format!("{owner}.Counter.new");
             let index = graph
@@ -207,7 +207,7 @@ fn two_declarers_in_one_umbrella_keep_distinct_edges() {
 #[test]
 fn absent_origin_keeps_legacy_entry_qualification() {
     let archive = archive(&[module("legacy", "Counter.new", None, None)]);
-    let graph = SymbolGraph::build(&archive);
+    let graph = SymbolGraph::build(&archive).expect("valid archive");
     assert!(graph.has_symbol("Counter.new"));
     assert_eq!(
         graph.defining_entry("legacy.Counter.new", &archive),
@@ -227,7 +227,7 @@ fn promoted_names_preserve_overlapping_module_segments_once() {
             None,
         ),
     ]);
-    let graph = SymbolGraph::build(&archive);
+    let graph = SymbolGraph::build(&archive).expect("valid archive");
     assert_eq!(
         graph.defining_entry("beta.owner.Counter.new", &archive),
         Some("beta")

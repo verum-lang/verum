@@ -128,30 +128,73 @@ pub(crate) mod loadcost {
     }
 }
 
-/// Errors raised while loading the archive into codegen ctx.  Best-
-/// effort: the loader skips per-entry failures with a `tracing::warn!`
-/// and only returns `Err` on archive-level decode failures that make
-/// further iteration impossible.
-#[derive(Debug)]
+/// A required archive module could not be decoded. The original decoder error
+/// and both wire schemas remain available to compiler and IDE diagnostics.
+#[derive(Debug, Clone)]
 pub enum CtxLoadError {
-    /// One or more modules in the archive failed to decode.  Carries
-    /// the first decode error's message.  The loader continues past
-    /// per-module decode failures (logging a warning); this variant
-    /// is reserved for "archive itself is corrupt" — rare.
-    ArchiveDecodeFailed(String),
+    ModuleDecode {
+        module: String,
+        archive_schema: (u16, u16),
+        module_schema: Option<(u16, u16)>,
+        source: std::sync::Arc<verum_vbc::VbcError>,
+    },
 }
 
 impl std::fmt::Display for CtxLoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ArchiveDecodeFailed(msg) => {
-                write!(f, "archive ctx load: {}", msg)
+            Self::ModuleDecode { module, archive_schema, module_schema, source } => {
+                write!(f, "archive module `{module}` (VBCA {}.{}", archive_schema.0, archive_schema.1)?;
+                if let Some((major, minor)) = module_schema {
+                    write!(f, ", VBC {major}.{minor}")?;
+                }
+                write!(f, "): {source}")
             }
         }
     }
 }
 
-impl std::error::Error for CtxLoadError {}
+impl std::error::Error for CtxLoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self { Self::ModuleDecode { source, .. } => Some(source.as_ref()) }
+    }
+}
+
+/// Every decode route uses the same fallible boundary. Header inspection is
+/// diagnostic only; compatibility and validation belong to the VBC decoder.
+fn decode_archive_module(archive: &VbcArchive, index: usize) -> Result<VbcModule, CtxLoadError> {
+    archive.load_module_by_index(index).map_err(|source| {
+        let data = archive.get_module_data(index);
+        let decompressed = data.filter(|_| archive.is_compressed())
+            .and_then(|bytes| verum_vbc::archive::decompress_data(bytes).ok());
+        let bytes = if archive.is_compressed() { decompressed.as_deref() } else { data };
+        let module_schema = bytes.and_then(|bytes| {
+            let header = bytes.get(..8)?;
+            (header[..4] == verum_vbc::format::MAGIC).then(|| (
+                u16::from_le_bytes([header[4], header[5]]),
+                u16::from_le_bytes([header[6], header[7]]),
+            ))
+        });
+        CtxLoadError::ModuleDecode {
+            module: archive.index[index].name.clone(),
+            archive_schema: (archive.header.version_major, archive.header.version_minor),
+            module_schema,
+            source: std::sync::Arc::new(source),
+        }
+    })
+}
+
+/// Decode first, publish only after the entire requested batch is valid.
+fn decode_archive_entries(archive: &VbcArchive, entries: &[(usize, String)])
+    -> Result<Vec<(String, VbcModule)>, CtxLoadError>
+{
+    use rayon::prelude::*;
+    // Preserve archive order (including which error is reported) despite
+    // parallel decoding. No success is dropped by an Option/filter_map.
+    entries.par_iter().map(|(index, name)| {
+        decode_archive_module(archive, *index).map(|module| (name.clone(), module))
+    }).collect::<Vec<_>>().into_iter().collect()
+}
 
 /// Stats returned by [`populate_ctx_from_archive`].  Used by callers
 /// that want to log perf / sanity-check the archive coverage.
@@ -165,10 +208,6 @@ pub struct LoadStats {
     /// Number of variant-constructor entries enriched with a
     /// `variant_tag` and `parent_type_name`.
     pub variant_ctors_resolved: usize,
-    /// Number of per-module decode failures that were skipped with
-    /// a warning.  Non-zero indicates an archive integrity issue
-    /// worth investigating.
-    pub modules_skipped: usize,
 }
 
 /// Merge an archive entry's `module_name` with a function's
@@ -319,7 +358,9 @@ fn merge_module_and_simple_name(module_name: &str, simple_name: &str) -> String 
 /// Idempotent under repeated calls: every `register_function` honours
 /// first-wins-on-collision when `prefer_existing_functions` is set
 /// (which the caller MUST set before calling this fn — mirrors the
-/// existing stdlib-load flow at `pipeline/vbc_codegen.rs`).
+/// existing stdlib-load flow at `pipeline/vbc_codegen.rs`). On decode failure,
+/// the compilation must discard `ctx` and its ID allocator; partial imports are
+/// never a valid result. [`ArchiveCtxCache`] publishes only complete tables.
 pub fn populate_ctx_from_archive(
     archive: &VbcArchive,
     ctx: &mut CodegenContext,
@@ -327,19 +368,11 @@ pub fn populate_ctx_from_archive(
 ) -> Result<LoadStats, CtxLoadError> {
     let mut stats = LoadStats::default();
 
-    for entry in &archive.index {
-        let module = match archive.load_module(&entry.name) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!(
-                    target: "archive_ctx_loader",
-                    "skip module {}: decode failed ({:?})",
-                    entry.name, e
-                );
-                stats.modules_skipped += 1;
-                continue;
-            }
-        };
+    // Stream modules to bound memory independently of archive size. On error
+    // callers discard this compilation context; cache construction uses a
+    // private staging context and publishes only a completely valid table.
+    for (index, entry) in archive.index.iter().enumerate() {
+        let module = decode_archive_module(archive, index)?;
         register_module(&module, &entry.name, ctx, &mut stats, next_id);
         stats.modules_loaded += 1;
     }
@@ -1594,28 +1627,28 @@ impl SymbolGraph {
     /// immutable archive bytes, perfectly parallelisable, and the
     /// several hundred milliseconds this file exists to stop paying at
     /// every compiler start.
-    fn build(archive: &VbcArchive) -> Self {
-        Self {
-            baked: Self::scan_and_encode(archive),
-        }
+    fn build(archive: &VbcArchive) -> Result<Self, CtxLoadError> {
+        Ok(Self {
+            baked: Self::scan_and_encode(archive)?,
+        })
     }
 
     /// The scan, kept separate so the bake can call it to PRODUCE the
     /// sidecar without constructing a graph it will not use.
     pub(crate) fn scan_and_encode(
         archive: &VbcArchive,
-    ) -> crate::symbol_graph_baked::BakedSymbolGraph {
+    ) -> Result<crate::symbol_graph_baked::BakedSymbolGraph, CtxLoadError> {
         use crate::symbol_graph_baked::{BakedSymbolGraph, EncodedFunction};
         use rayon::prelude::*;
 
         let per_module: Vec<(u32, ModuleSymbolView)> = (0..archive.index.len())
             .into_par_iter()
-            .filter_map(|idx| {
-                let module = archive.load_module_by_index(idx).ok()?;
-                let view = scan_module_symbols(&module);
-                Some((idx as u32, view))
+            .map(|idx| {
+                let module = decode_archive_module(archive, idx)?;
+                Ok((idx as u32, scan_module_symbols(&module)))
             })
-            .collect();
+            .collect::<Vec<Result<_, CtxLoadError>>>()
+            .into_iter().collect::<Result<_, _>>()?;
 
         let entries: Vec<String> =
             archive.index.iter().map(|e| e.name.clone()).collect();
@@ -1713,7 +1746,7 @@ impl SymbolGraph {
         }
         let leaf_rows: Vec<(String, Vec<String>)> = leaf_index.into_iter().collect();
         let prefix_rows: Vec<(String, Vec<String>)> = prefix_index.into_iter().collect();
-        BakedSymbolGraph::from_parts(&entries, &funcs, &leaf_rows, &prefix_rows)
+        Ok(BakedSymbolGraph::from_parts(&entries, &funcs, &leaf_rows, &prefix_rows))
     }
 
     /// True when SOME archive symbol is spelled exactly `name`.
@@ -2333,11 +2366,11 @@ pub struct ArchiveCtxCache {
     /// One-shot lazily-built table: qualified name → FunctionInfo.
     /// Holds both qualified (`module.simple`) and simple-name keys
     /// after first build.
-    table: OnceLock<HashMap<String, FunctionInfo>>,
+    table: OnceLock<Result<HashMap<String, FunctionInfo>, CtxLoadError>>,
     /// Archive-wide call-graph index. Built lazily on first
     /// `apply_lazy_with_types` call; subsequent compilations within
     /// the process reuse the cached graph (~free).
-    graph: OnceLock<SymbolGraph>,
+    graph: OnceLock<Result<SymbolGraph, CtxLoadError>>,
 }
 
 impl ArchiveCtxCache {
@@ -2353,7 +2386,7 @@ impl ArchiveCtxCache {
     /// from `CallM` / `Call` / `TailCall` edges). Cached for the
     /// process lifetime — first call pays the full archive decode
     /// (~250ms on a 12 MB archive), every later call is free.
-    pub(crate) fn graph(&self, archive: &VbcArchive) -> &SymbolGraph {
+    pub(crate) fn graph(&self, archive: &VbcArchive) -> Result<&SymbolGraph, CtxLoadError> {
         self.graph
             .get_or_init(|| {
                 loadcost::timed("symbol_graph_load", || {
@@ -2361,9 +2394,9 @@ impl ArchiveCtxCache {
                     // scan below is what a compiler built without a bake
                     // still has to do, so both must stay exercised.
                     SymbolGraph::from_embedded(archive)
-                        .unwrap_or_else(|| SymbolGraph::build(archive))
+                        .map(Ok).unwrap_or_else(|| SymbolGraph::build(archive))
                 })
-            })
+            }).as_ref().map_err(Clone::clone)
     }
 
     /// Lazily build the cache from `archive` (idempotent — first call
@@ -2372,7 +2405,7 @@ impl ArchiveCtxCache {
     pub fn get_or_build(
         &self,
         archive: &VbcArchive,
-    ) -> &HashMap<String, FunctionInfo> {
+    ) -> Result<&HashMap<String, FunctionInfo>, CtxLoadError> {
         self.table.get_or_init(|| {
             let mut staging = CodegenContext::new();
             // Local id allocator for the staging path.  This call site
@@ -2382,18 +2415,19 @@ impl ArchiveCtxCache {
             // best-effort placeholders that downstream `apply_lazy`
             // re-allocates against the live codegen counter.
             let mut next_id: u32 = 0;
-            let _ = populate_ctx_from_archive(archive, &mut staging, &mut next_id);
-            staging.export_functions()
-        })
+            populate_ctx_from_archive(archive, &mut staging, &mut next_id)?;
+            Ok(staging.export_functions())
+        }).as_ref().map_err(Clone::clone)
     }
 
     /// Apply the cached function table to a fresh `ctx` via
     /// [`CodegenContext::import_functions`].  Equivalent to running
     /// `populate_ctx_from_archive` but ~30× faster on the
     /// second+later calls because the conversion only happens once.
-    pub fn apply(&self, archive: &VbcArchive, ctx: &mut CodegenContext) {
-        let table = self.get_or_build(archive);
+    pub fn apply(&self, archive: &VbcArchive, ctx: &mut CodegenContext) -> Result<(), CtxLoadError> {
+        let table = self.get_or_build(archive)?;
         ctx.import_functions(table);
+        Ok(())
     }
 
     /// T2-extended-perf: lazy variant of [`apply`].  Walks the
@@ -2420,7 +2454,7 @@ impl ArchiveCtxCache {
         ctx: &mut CodegenContext,
         user_module: &verum_ast::Module,
         next_id: &mut u32,
-    ) {
+    ) -> Result<(), CtxLoadError> {
         let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut harvest);
@@ -2457,7 +2491,7 @@ impl ArchiveCtxCache {
             );
         }
         if wanted.is_empty() {
-            return;
+            return Ok(());
         }
         // Module-name prefix gate: archive `index[i].name` is the
         // dotted module path (`core.io.stdio`).  A wanted qualified
@@ -2542,7 +2576,7 @@ impl ArchiveCtxCache {
         // downstream can reach the module that DECLARES it — walk
         // the re-export edges the dep graph already records.
         expand_prefixes_through_reexports(archive, &wanted, &mut wanted_module_prefixes);
-        for entry in &archive.index {
+        for (index, entry) in archive.index.iter().enumerate() {
             // Skip decode unless this module name matches a
             // qualified-name prefix from the wanted set.  Bare
             // simple names with no qualified counterpart fall
@@ -2551,10 +2585,7 @@ impl ArchiveCtxCache {
             if !is_target_module {
                 continue;
             }
-            let module = match archive.load_module(&entry.name) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
+            let module = decode_archive_module(archive, index)?;
             // Legacy `apply_lazy` path — only registers metadata, no
             // body merge (the body-merge surface needs `&mut VbcCodegen`,
             // not just `&mut CodegenContext`). Production callers go
@@ -2568,7 +2599,7 @@ impl ArchiveCtxCache {
         // declaration), walk the rest of the archive looking only
         // at simple-name matches.  Most stdlib symbols come in via
         // mounts so this branch typically processes nothing.
-        let symbol_graph = self.graph(archive);
+        let symbol_graph = self.graph(archive)?;
         let unqualified_wanted: std::collections::HashSet<String> = wanted
             .iter()
             .filter(|n| !n.contains('.'))
@@ -2587,14 +2618,11 @@ impl ArchiveCtxCache {
             // is typically tiny for real scripts.  If perf
             // matters, callers should add explicit mount
             // declarations to bring symbols in scope.
-            for entry in &archive.index {
+            for (index, entry) in archive.index.iter().enumerate() {
                 if wanted_module_prefixes.contains(&entry.name) {
                     continue; // already processed above
                 }
-                let module = match archive.load_module(&entry.name) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
+                let module = decode_archive_module(archive, index)?;
                 // Cheap pre-check: scan module's strings table for any of
                 // the unqualified wanted names BEFORE doing the full
                 // descriptor walk.  If none of the wanted simple-names
@@ -2609,6 +2637,7 @@ impl ArchiveCtxCache {
                 let _ = register_module_filtered(&module, &entry.name, ctx, &unqualified_wanted, next_id);
             }
         }
+        Ok(())
     }
 }
 
@@ -2637,7 +2666,7 @@ impl ArchiveCtxCache {
         archive: &VbcArchive,
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
-    ) -> usize {
+    ) -> Result<usize, CtxLoadError> {
         let mut harvest = Harvest::default();
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut harvest);
@@ -2645,7 +2674,7 @@ impl ArchiveCtxCache {
         let mut wanted: std::collections::HashSet<String> =
             std::mem::take(&mut harvest.names);
         if wanted.is_empty() {
-            return 0;
+            return Ok(0);
         }
         // Up to 2-hop ancestor walk (mirrors apply_lazy) — same
         // grandparent-bundling shape: e.g. `core/io/path.vr` declares
@@ -2666,21 +2695,18 @@ impl ArchiveCtxCache {
         // the re-export edges the dep graph already records.
         expand_prefixes_through_reexports(archive, &wanted, &mut wanted_module_prefixes);
         let mut imported = 0usize;
-        for entry in &archive.index {
+        for (index, entry) in archive.index.iter().enumerate() {
             if !wanted_module_prefixes.contains(&entry.name) {
                 continue;
             }
-            let module = match archive.load_module(&entry.name) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
+            let module = decode_archive_module(archive, index)?;
             if module.types.is_empty() {
                 continue;
             }
             codegen.import_archive_module_types(&module);
             imported += 1;
         }
-        imported
+        Ok(imported)
     }
 
     /// Combined function- AND type-table import in a single archive
@@ -2708,9 +2734,9 @@ impl ArchiveCtxCache {
         archive: &VbcArchive,
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         extra_wanted: std::collections::HashSet<String>,
-    ) -> usize {
+    ) -> Result<usize, CtxLoadError> {
         if extra_wanted.is_empty() {
-            return 0;
+            return Ok(0);
         }
         // Names already resolvable in ctx (registered AND with a merged
         // body, or an intrinsic intercept) don't need supplemental work.
@@ -2719,9 +2745,9 @@ impl ArchiveCtxCache {
             .filter(|n| codegen.ctx_mut().lookup_function(n).is_none())
             .collect();
         if unresolved.is_empty() {
-            return 0;
+            return Ok(0);
         }
-        let graph = self.graph(archive);
+        let graph = self.graph(archive)?;
         // No AST here — `extra_wanted` arrives as bare names that could
         // NOT be resolved in ctx, so their provenance is unknown and the
         // seed cap must not apply: this path exists precisely to find
@@ -2759,20 +2785,9 @@ impl ArchiveCtxCache {
         // unaffected. Sorting by index reproduces that order here.
         target_entries.sort_unstable_by_key(|(idx, _)| *idx);
         if target_entries.is_empty() {
-            return 0;
+            return Ok(0);
         }
-        let decoded: Vec<(String, VbcModule)> = {
-            use rayon::prelude::*;
-            target_entries
-                .par_iter()
-                .filter_map(|(idx, name)| {
-                    archive
-                        .load_module_by_index(*idx)
-                        .ok()
-                        .map(|m| (name.clone(), m))
-                })
-                .collect()
-        };
+        let decoded = decode_archive_entries(archive, &target_entries)?;
         if let Ok(f) = std::env::var("VERUM_TRACE_WANTED")
             && f != "1"
         {
@@ -2825,7 +2840,7 @@ impl ArchiveCtxCache {
                     "[wanted/filter '{}'] in wanted: {:?}",
                     filter, hits
                 );
-                let g = self.graph(archive);
+                let g = self.graph(archive)?;
                 for h in hits {
                     let reg = codegen.ctx_mut().lookup_function(h).is_some();
                     let in_graph = g.baked.module_of(h.as_str());
@@ -2852,7 +2867,7 @@ impl ArchiveCtxCache {
                 );
             }
         }
-        merged_entries
+        Ok(merged_entries)
     }
 
     /// `sibling_modules` — T1126. The cog's OTHER files. They are not
@@ -2869,7 +2884,7 @@ impl ArchiveCtxCache {
         codegen: &mut verum_vbc::codegen::VbcCodegen,
         user_module: &verum_ast::Module,
         sibling_modules: &[std::sync::Arc<verum_ast::Module>],
-    ) -> (usize, usize) {
+    ) -> Result<(usize, usize), CtxLoadError> {
         let t_load = std::time::Instant::now();
         // **ONE-authority alias seeding** (T0695/T0692): every codegen
         // that loads the embedded archive gets the DECLARED type
@@ -2931,7 +2946,7 @@ impl ArchiveCtxCache {
         }
         if wanted.is_empty() {
             loadcost::report("apply_lazy_with_types (empty wanted)", t_load.elapsed());
-            return (0, 0);
+            return Ok((0, 0));
         }
         expand_wanted_through_module_edges(archive, &mut wanted);
         // FORMAT-SITE-NAMES-FMT-1 (T1487) — see `apply_lazy` for the
@@ -3070,7 +3085,7 @@ impl ArchiveCtxCache {
         // qualified-name set into `wanted` + the defining-module set
         // into `wanted_module_prefixes`. Every cross-module dependency
         // surfaces by construction — no hardcoded entries.
-        let graph = self.graph(archive);
+        let graph = self.graph(archive)?;
         let (reached_qualified, reached_module_idxs) =
             loadcost::timed("bfs_reachable", || {
                 graph.reachable(&wanted, &bare_method_seeds)
@@ -3245,18 +3260,9 @@ impl ArchiveCtxCache {
                 target_entries.iter().map(|(_, n)| n).collect::<Vec<_>>(),
             );
         }
-        let decoded: Vec<(String, VbcModule)> = loadcost::timed("decode_entries", || {
-            use rayon::prelude::*;
-            target_entries
-                .par_iter()
-                .filter_map(|(idx, name)| {
-                    archive
-                        .load_module_by_index(*idx)
-                        .ok()
-                        .map(|m| (name.clone(), m))
-                })
-                .collect()
-        });
+        let decoded = loadcost::timed("decode_entries", || {
+            decode_archive_entries(archive, &target_entries)
+        })?;
         // Split borrows: ctx and next_func_id are separate fields, but
         // both need &mut from VbcCodegen.  Re-using the same raw-ptr
         // round-trip discipline as the apply_lazy call site in
@@ -3531,7 +3537,7 @@ impl ArchiveCtxCache {
         // `carries_simple_name` is a hash lookup on the symbol graph, which
         // these runs have already built for the reachability step — the
         // filter is free where the scan it prevents is not.
-        let graph_for_names = self.graph(archive);
+        let graph_for_names = self.graph(archive)?;
         // A MOUNT PATH SEGMENT IS NOT A FUNCTION NAME (T0753).
         //
         // `collect_mount_names` inserts a Path mount's last segment as a
@@ -3614,22 +3620,16 @@ impl ArchiveCtxCache {
                 .filter(|(_, e)| !wanted_module_prefixes.contains(&e.name))
                 .map(|(i, e)| (i, e.name.clone()))
                 .collect();
-            let matched_modules: Vec<(String, VbcModule)> = {
+            let matched_modules: Vec<_> = {
                 use rayon::prelude::*;
-                candidate_indices
-                    .par_iter()
-                    .filter_map(|(idx, name)| {
-                        let module = archive.load_module_by_index(*idx).ok()?;
-                        let any_match = unqualified_wanted.iter().any(|w| {
-                            module.strings.iter().any(|(s, _)| s == w)
-                        });
-                        if any_match {
-                            Some((name.clone(), module))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
+                candidate_indices.par_iter().map(|(index, name)| {
+                    let module = decode_archive_module(archive, *index)?;
+                    let matches = unqualified_wanted.iter()
+                        .any(|w| module.strings.iter().any(|(s, _)| s == w));
+                    Ok(matches.then(|| (name.clone(), module)))
+                }).collect::<Vec<Result<_, CtxLoadError>>>()
+                    .into_iter().collect::<Result<Vec<_>, _>>()?
+                    .into_iter().flatten().collect()
             };
             let mut matched_modules = matched_modules;
             // STUB-STAGE-INSUITE-1 phase split — mirror the primary
@@ -3848,7 +3848,7 @@ impl ArchiveCtxCache {
                 codegen.function_count()
             );
         }
-        (fn_modules, type_modules)
+        Ok((fn_modules, type_modules))
     }
 }
 
@@ -7892,7 +7892,7 @@ mod tests {
         wanted.insert("print".to_string());
 
         let cache = ArchiveCtxCache::new();
-        let graph = cache.graph(archive);
+        let graph = cache.graph(archive).expect("valid archive");
 
         // Step 1: graph must have Text.new in qualified_to_module.
         let text_new_module_idx = graph
@@ -7962,7 +7962,7 @@ mod tests {
             None => return, // bootstrap-phase build, no archive
         };
         let cache = ArchiveCtxCache::new();
-        let graph = cache.graph(archive);
+        let graph = cache.graph(archive).expect("valid archive");
         // Quick sanity: graph indexes some functions.
         assert!(
             graph.baked.function_count() > 0,
@@ -8021,7 +8021,7 @@ mod tests {
             std::borrow::Cow::Borrowed(bytes),
         )
         .expect("embedded sidecar must be readable by the format version that embedded it");
-        let scanned = SymbolGraph::scan_and_encode(archive);
+        let scanned = SymbolGraph::scan_and_encode(archive).expect("valid archive");
 
         assert_eq!(
             baked.entry_count(),
@@ -8099,12 +8099,12 @@ mod tests {
         };
         let cache = ArchiveCtxCache::new();
         let mut ctx_first = CodegenContext::new();
-        cache.apply(archive, &mut ctx_first);
+        cache.apply(archive, &mut ctx_first).expect("valid archive");
         let first_count = ctx_first.export_functions().len();
         assert!(first_count > 0);
 
         let mut ctx_second = CodegenContext::new();
-        cache.apply(archive, &mut ctx_second);
+        cache.apply(archive, &mut ctx_second).expect("valid archive");
         let second_count = ctx_second.export_functions().len();
         assert_eq!(
             first_count, second_count,
@@ -8397,3 +8397,7 @@ mod declared_function_bodies;
 #[cfg(test)]
 #[path = "../tests/archive/supplemental_function_identity.rs"]
 mod supplemental_function_identity;
+
+#[cfg(test)]
+#[path = "../tests/archive/decode_failures.rs"]
+mod decode_failures;

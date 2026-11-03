@@ -565,7 +565,7 @@ fn execute(archive: &verum_vbc::archive::VbcArchive, source: &str) -> i64 {
         &mut codegen,
         &app,
         &[],
-    );
+    ).expect("valid archive");
     codegen.collect_unit_declarations(&[&app]).unwrap();
     codegen.resolve_pending_imports();
     codegen

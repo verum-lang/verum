@@ -476,7 +476,7 @@ fn compile_from_archive(source: &str) -> verum_vbc::module::VbcModule {
     let archive = read_archive_from_file(archive).unwrap();
     let app = Parser::new(source).parse_module().unwrap();
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("app"));
-    ArchiveCtxCache::new().apply_lazy_with_types(&archive, &mut codegen, &app, &[]);
+    ArchiveCtxCache::new().apply_lazy_with_types(&archive, &mut codegen, &app, &[]).expect("valid archive");
     codegen.collect_unit_declarations(&[&app]).unwrap();
     codegen.resolve_pending_imports();
     codegen

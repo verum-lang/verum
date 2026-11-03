@@ -99,7 +99,7 @@ fn lazy_replay_keeps_exact_declaration_owner_in_both_entry_orders() {
             .unwrap();
         let mut codegen = VbcCodegen::new();
         let cache = verum_compiler::archive_ctx_loader::ArchiveCtxCache::new();
-        let (functions, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &ast, &[]);
+        let (functions, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &ast, &[]).expect("valid archive");
         assert!(
             functions >= 2,
             "both source entries must reach the public loader"
@@ -152,7 +152,7 @@ fn foreign_reexport_cannot_select_an_unrelated_same_number_local_function() {
             &mut codegen,
             &ast,
             &[],
-        );
+        ).expect("valid archive");
         let ctx = codegen.ctx_mut();
         let actual = ctx.lookup_function("alpha.reexport").unwrap().id;
         assert_eq!(actual, ctx.lookup_function("beta.chosen").unwrap().id);

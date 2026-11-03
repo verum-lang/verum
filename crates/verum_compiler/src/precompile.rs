@@ -216,7 +216,7 @@ fn write_symbol_graph_alongside_archive(
     archive: &verum_vbc::archive::VbcArchive,
     verbose: bool,
 ) -> Result<()> {
-    let baked = crate::archive_ctx_loader::SymbolGraph::scan_and_encode(archive);
+    let baked = crate::archive_ctx_loader::SymbolGraph::scan_and_encode(archive)?;
     let out_path = archive_path.with_extension("symbol_graph");
     std::fs::write(&out_path, baked.as_bytes())
         .with_context(|| format!("write symbol graph sidecar {}", out_path.display()))?;

@@ -82,7 +82,7 @@ pub fn compile_module_with_stdlib(
             // T1126: a single-module compile has no siblings by
             // definition — the whole point of this entry point.
             &[],
-        );
+        )?;
     }
 
     // T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE

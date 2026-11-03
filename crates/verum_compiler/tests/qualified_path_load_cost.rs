@@ -43,7 +43,7 @@ fn modules_loaded(code: &str) -> usize {
         // module's qualified paths, and an empty slice is what the call
         // did before 658e30c9c gave the method a fourth parameter.
         &[],
-    );
+    ).expect("valid archive");
     fn_modules
 }
 

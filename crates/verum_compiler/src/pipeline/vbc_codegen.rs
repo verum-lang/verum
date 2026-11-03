@@ -450,7 +450,7 @@ impl<'s> CompilationPipeline<'s> {
             &mut codegen,
             module,
             &siblings,
-        );
+        )?;
         tracing::debug!(
             target: "compile_ast_to_vbc",
             "archive lazy apply (combined): {} fn-modules + {} type-modules in {:.2}ms",
@@ -558,7 +558,7 @@ impl<'s> CompilationPipeline<'s> {
             let extra = codegen.collect_post_codegen_dispatch_names();
             if !extra.is_empty() {
                 let merged =
-                    CTX_CACHE.apply_lazy_supplemental(archive, &mut codegen, extra);
+                    CTX_CACHE.apply_lazy_supplemental(archive, &mut codegen, extra)?;
                 if merged > 0 {
                     step_mark!("supplemental archive merge");
                 }

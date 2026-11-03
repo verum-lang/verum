@@ -47,7 +47,7 @@ fn primary(cache: &ArchiveCtxCache, archive: &VbcArchive, body: &str, offset: u3
         .expect("parse archive consumer");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
     *codegen.next_func_id_mut() += offset;
-    let (modules, _) = cache.apply_lazy_with_types(archive, &mut codegen, &ast, &[]);
+    let (modules, _) = cache.apply_lazy_with_types(archive, &mut codegen, &ast, &[]).expect("valid archive");
     assert!(modules > 0, "primary must import the real archive");
     codegen
 }
@@ -63,7 +63,7 @@ fn supplement(cache: &ArchiveCtxCache, archive: &VbcArchive, codegen: &mut VbcCo
     );
     // A new name may refer to a body already copied by an earlier wave.
     // Registration, stable identity and execution are the success oracles.
-    cache.apply_lazy_supplemental(archive, codegen, [name.to_owned()].into_iter().collect());
+    cache.apply_lazy_supplemental(archive, codegen, [name.to_owned()].into_iter().collect()).expect("valid archive");
     assert!(
         codegen.ctx_mut().lookup_function(name).is_some(),
         "requested declaration {name}"
@@ -237,7 +237,7 @@ fn later_supplemental_waves_reuse_the_same_call_closure() {
             &archive,
             &mut codegen,
             ["alpha.latest".to_owned()].into_iter().collect()
-        ),
+        ).expect("valid archive"),
         0
     );
     assert_eq!(*codegen.next_func_id_mut(), next);
@@ -328,7 +328,7 @@ fn a_later_name_registration_preserves_remapped_nominal_signatures() {
     // Import an unrelated declared record first, so consumer IDs cannot
     // accidentally equal the archive-local Parcel ID.
     codegen.import_archive_module_types(&source("occupier", 99));
-    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]);
+    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]).expect("valid archive");
     assert!(modules > 0);
     supplement(&cache, &archive, &mut codegen, "alpha.make");
     let expected = codegen
@@ -351,7 +351,7 @@ fn a_later_name_registration_preserves_remapped_nominal_signatures() {
         &archive,
         &mut codegen,
         ["alpha.echo".to_owned()].into_iter().collect(),
-    );
+    ).expect("valid archive");
     for name in ["alpha.make", "make", "alpha.echo", "echo"] {
         let info = codegen.ctx_mut().lookup_function(name).expect(name);
         assert_eq!(
@@ -397,7 +397,7 @@ fn resetting_the_same_codegen_starts_a_new_archive_identity_space() {
     let consumer = Parser::new("fn main() -> Int { original() }")
         .parse_module()
         .expect("parse new consumer");
-    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]);
+    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]).expect("valid archive");
     assert!(modules > 0);
     let current = id(&mut codegen, "alpha.original");
     assert!(current.0 >= 1000, "reset must use the new allocator space");
