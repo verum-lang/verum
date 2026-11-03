@@ -28,6 +28,16 @@ impl VbcCodegen {
                     .collect::<Option<Vec<_>>>()?;
                 Some(format!("{owner}<{}>", args.join(", ")))
             }
+            TypeRef::Reference { inner, mutability, tier } => {
+                use crate::types::{CbgrTier, Mutability};
+                let tier = match tier {
+                    CbgrTier::Tier0 => "",
+                    CbgrTier::Tier1 => "checked ",
+                    CbgrTier::Tier2 => "unsafe ",
+                };
+                let access = if *mutability == Mutability::Mutable { "mut " } else { "" };
+                Some(format!("&{tier}{access}{}", self.declaration_type_name(inner, depth + 1)?))
+            }
             TypeRef::Tuple(parts) => Some(format!(
                 "({})",
                 parts

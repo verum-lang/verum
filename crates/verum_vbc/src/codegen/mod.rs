@@ -11404,7 +11404,7 @@ impl VbcCodegen {
             .iter()
             .filter_map(|p| {
                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                    let name = Self::render_scheme_type_name(ty, &|path| self.declared_dyn_path(path));
+                    let name = Self::render_scheme_type_name(ty, false, &|path| self.declared_dyn_path(path));
                     if !name.is_empty() && name != "()" {
                         Some(name)
                     } else {
@@ -23705,30 +23705,26 @@ impl VbcCodegen {
     /// `other: &Shared<T>` as `Shared<__generic_0>`, and every
     /// `a.ptr_eq(&b)` failed E400 (expected the value type, found the
     /// reference's peel). Top-level `&` family preserved verbatim in the
-    /// exact spellings `parse_descriptor_type_string` decodes; inner
-    /// rendering delegates unchanged.
+    /// spellings decoded by the checker, including reference arguments of
+    /// aggregate types.
     pub fn extract_scheme_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
-        Self::render_scheme_type_name(ty, &Self::format_type_path)
+        Self::render_scheme_type_name(ty, false, &Self::format_type_path)
     }
 
     fn render_scheme_type_name(
         ty: &verum_ast::ty::Type,
+        qualified_paths: bool,
         bound_path: &impl Fn(&verum_ast::Path) -> String,
     ) -> String {
         use verum_ast::ty::TypeKind;
-        match &ty.kind {
-            TypeKind::Reference { inner, mutable } => format!(
-                "&{}{}",
-                if *mutable { "mut " } else { "" },
-                Self::render_type_name(inner, false, bound_path)
-            ),
-            TypeKind::CheckedReference { inner, mutable } => format!(
-                "&checked {}{}",
-                if *mutable { "mut " } else { "" },
-                Self::render_type_name(inner, false, bound_path)
-            ),
-            _ => Self::render_type_name(ty, false, bound_path),
-        }
+        let (tier, mutable, inner) = match &ty.kind {
+            TypeKind::Reference { inner, mutable } => ("", mutable, inner),
+            TypeKind::CheckedReference { inner, mutable } => ("checked ", mutable, inner),
+            TypeKind::UnsafeReference { inner, mutable } => ("unsafe ", mutable, inner),
+            _ => return Self::render_type_name(ty, qualified_paths, bound_path),
+        };
+        let inner = Self::render_scheme_type_name(inner, qualified_paths, bound_path);
+        format!("&{tier}{}{inner}", if *mutable { "mut " } else { "" })
     }
 
     /// Canonical FIELD-CARRIER type-name render (see the scheme-facing
@@ -23839,7 +23835,7 @@ impl VbcCodegen {
             // the AST type directly, never this carrier string.
             TypeKind::Refined { base, .. } => Self::render_type_name(base, qualified_paths, bound_path),
             TypeKind::Slice(inner) => {
-                format!("[{}]", Self::render_type_name(inner, qualified_paths, bound_path))
+                format!("[{}]", Self::render_scheme_type_name(inner, qualified_paths, bound_path))
             }
             // Fixed array `[T; N]` — render as `[T]` (the size is irrelevant
             // for type-name / element-type resolution; `extract_element_type`
@@ -23852,7 +23848,7 @@ impl VbcCodegen {
             // slot index (cap_audit_ring's `slot.state` read the wrong field
             // → garbage seq → SIGSEGV at scale).
             TypeKind::Array { element, .. } => {
-                format!("[{}]", Self::render_type_name(element, qualified_paths, bound_path))
+                format!("[{}]", Self::render_scheme_type_name(element, qualified_paths, bound_path))
             }
             // Tuple `(A, B, …)` — render the canonical parenthesised form so
             // downstream tuple-element inference can recover the element

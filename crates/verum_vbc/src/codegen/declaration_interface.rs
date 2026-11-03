@@ -97,7 +97,7 @@ impl VbcCodegen {
                 type_ref,
                 type_name: declared
                     .map(|ty| {
-                        let name = Self::render_scheme_type_name(ty, &|path| self.declared_dyn_path(path));
+                        let name = Self::render_scheme_type_name(ty, false, &|path| self.declared_dyn_path(path));
                         StringId(self.intern_string(&name))
                     })
                     .unwrap_or(StringId::EMPTY),

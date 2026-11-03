@@ -74,3 +74,15 @@ fn associated_projection_keeps_its_qualified_base() {
         "Carrier<::Item<domain.iterator.Stream>>",
     );
 }
+
+#[test]
+fn borrowed_generic_arguments_retain_their_access_and_tier() {
+    assert_signature(
+        "type Boxed<T> is { value: T }; fn probe(x: Boxed<&mut domain.Cell>) -> Boxed<&mut domain.Cell> { x }",
+        "Boxed<&mut domain.Cell>",
+    );
+    assert_signature(
+        "type Boxed<T> is { value: T }; fn probe(x: Boxed<&checked domain.Cell>) -> Boxed<&checked domain.Cell> { x }",
+        "Boxed<&checked domain.Cell>",
+    );
+}
