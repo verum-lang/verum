@@ -1527,6 +1527,13 @@ a {
 .topology-project-failures > .topology-edge { margin-inline-start: var(--space-2); }
 .topology-gaps { border-block-start: 1px solid var(--subtle-border); margin-block-end: var(--space-3); }
 .topology-gaps > summary { color: var(--warning); }
+.topology-dependents { border-block-start: 1px solid var(--subtle-border); margin-block-start: var(--space-3); }
+.topology-dependents > .topology-edge { margin-inline-start: var(--space-2); }
+.topology-distance { color: var(--muted); font-size: var(--font-size-caption); white-space: nowrap; }
+.topology-path { margin-block: var(--space-1); padding-inline-start: 2.5em; }
+.topology-path > li { padding-block: var(--space-2); padding-inline-start: var(--space-1); }
+.topology-path > li::marker { color: var(--muted); font-size: var(--font-size-caption); }
+.topology-path-edge { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
 .architecture-receipt { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .project-inspector > summary { display: flex; align-items: center; gap: var(--space-2); list-style: none; }
 .project-inspector > summary::-webkit-details-marker { display: none; }

@@ -14,7 +14,7 @@ import { installPanels } from './panels';
 import { installExplorer } from './explorer';
 import { icon, installIcons, type IconName } from './icons';
 import { installTooltips } from './tooltips';
-import { moduleNeighborhood, type ProjectAnalysis, type ImportSite, type ImportFailure } from './topology';
+import { moduleNeighborhood, importDependencyPath, type ProjectAnalysis, type ImportSite, type ImportFailure } from './topology';
 import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
 import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type SourceLocation, type Range } from './language';
@@ -429,6 +429,41 @@ function drawTopology() {
     : m('Modules inspected: {inspected} / {indexed} · unresolved imports: {unresolved}',
       { inspected: graph.coverage.inspected_modules, indexed: graph.indexed, unresolved: graph.coverage.unresolved_mounts });
   view.append(center, lanes);
+  if (graph.dependents) {
+    const indirect = [...graph.dependents].filter(([, link]) => link.distance > 1)
+      .sort(([a, x], [b, y]) => x.distance - y.distance || a.localeCompare(b));
+    const section = node('details', 'topology-edge topology-dependents');
+    const title = node('summary');
+    title.append(icon('chevronRight'), node('span', '', m('Indirect import dependents')),
+      node('span', 'topology-count', String(indirect.length)));
+    section.append(title);
+    section.addEventListener('toggle', () => {
+      if (!section.open || section.childElementCount > 1) return;
+      section.append(node('p', 'topology-coverage', m('One shortest resolved import path per module. Import reachability does not prove behavioral impact; unresolved imports and unindexed sources can hide other paths.')));
+      if (!indirect.length) section.append(node('p', 'muted', m('No indirect dependents in this snapshot.')));
+      for (const [module, link] of indirect) {
+        const branch = node('details', 'topology-edge');
+        const heading = node('summary');
+        heading.append(icon('chevronRight'), moduleName(module),
+          node('span', 'topology-distance', m('{count} imports', { count: link.distance })));
+        branch.append(heading);
+        branch.addEventListener('toggle', () => {
+          if (!branch.open || branch.childElementCount > 1) return;
+          const path = node('ol', 'topology-path');
+          for (const edge of importDependencyPath(graph.dependents!, module)) {
+            const step = node('li');
+            const from = node('div', 'topology-path-edge');
+            from.append(moduleName(edge.importer), node('span', 'muted', '→'), moduleName(edge.provider));
+            step.append(from, button(edge.source, () => navigateDefinition(edge.location, analysis.project_revision), 'topology-site'));
+            path.append(step);
+          }
+          branch.append(path);
+        });
+        section.append(branch);
+      }
+    });
+    view.append(section);
+  }
   function failureRow(site: { source: string; location: SourceLocation }, reason?: string) {
     const row = node('div', 'topology-detail');
     const entry = workspaceFilePath(site.location.uri, root) === null

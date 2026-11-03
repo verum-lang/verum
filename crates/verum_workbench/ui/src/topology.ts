@@ -13,6 +13,43 @@ export type ProjectAnalysis = {
 };
 export type ImportSite = { source: string; location: SourceLocation; names: Array<{ name: string; definition?: SourceLocation | null }> };
 type ModuleLinks = Map<string, ImportSite[]>;
+type ImportTopology = NonNullable<ProjectAnalysis['import_topology']>;
+type ImportEdge = ImportTopology['edges'][number];
+export type ImportDependent = { distance: number; edge: ImportEdge };
+
+/** One shortest witness per reachable importer, not a claim of behavioral impact.
+ * Keep a predecessor tree instead of duplicating paths: O(modules + mounts).
+ * The server's resolver owns every edge, including aliases and reexports.
+ */
+function importDependents(topology: ImportTopology, owner: string): Map<string, ImportDependent> {
+  const incoming = new Map<string, ImportEdge[]>();
+  for (const edge of topology.edges) {
+    const links = incoming.get(edge.provider) ?? [];
+    links.push(edge); incoming.set(edge.provider, links);
+  }
+  const result = new Map<string, ImportDependent>();
+  const queue = [owner];
+  for (let head = 0; head < queue.length; head++) {
+    const provider = queue[head];
+    const distance = (result.get(provider)?.distance ?? 0) + 1;
+    for (const edge of incoming.get(provider) ?? []) {
+      if (edge.importer === owner || result.has(edge.importer)) continue;
+      result.set(edge.importer, { distance, edge });
+      queue.push(edge.importer);
+    }
+  }
+  return result;
+}
+
+export function importDependencyPath(dependents: Map<string, ImportDependent>, importer: string): ImportEdge[] {
+  const path: ImportEdge[] = [];
+  let link = dependents.get(importer);
+  while (link) {
+    path.push(link.edge);
+    link = dependents.get(link.edge.provider);
+  }
+  return path;
+}
 
 /** All relationships come from the resolver that populated this generation's binding table. */
 export function moduleNeighborhood(project: ProjectAnalysis, uri: string, digest: string) {
@@ -62,5 +99,7 @@ export function moduleNeighborhood(project: ProjectAnalysis, uri: string, digest
       incoming.set(edge.importer, sites);
     }
   }
-  return { owner, incoming, outgoing, gaps, coverage: topology, analyzed: docs.length, indexed: sources.size };
+  return { owner, incoming, outgoing, gaps, coverage: topology,
+    dependents: topology ? importDependents(topology, owner) : null,
+    analyzed: docs.length, indexed: sources.size };
 }
