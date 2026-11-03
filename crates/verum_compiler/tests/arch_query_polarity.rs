@@ -4,6 +4,8 @@
 //!
 //! (Design §8 discipline, applied to the tool itself.)
 
+use verum_compiler::arch_query::PinComparison;
+
 const ESCALATING: &str = r#"
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
@@ -59,6 +61,7 @@ fn transitive_escalation_is_caught() {
          transitively; inferred = {:?}",
         report.inferred
     );
+    assert_eq!(report.comparison, PinComparison::GroundDifference);
     let esc = report.escalations.expect("pin present ⟹ judgment runs");
     assert!(
         esc.iter().any(|a| a.atom.contains("Network")),
@@ -84,6 +87,7 @@ fn transitive_escalation_is_caught() {
 fn innocent_twin_judges_clean() {
     let report = verum_compiler::arch_query::arch_query_source(INNOCENT)
         .expect("fixture parses");
+    assert_eq!(report.comparison, PinComparison::GroundMatch);
     let esc = report.escalations.expect("pin present");
     let dead = report.dead_rights.expect("pin present");
     assert!(
@@ -106,6 +110,7 @@ fn f() { core.net.tcp.connect("h", 1); }
 "#;
     let report =
         verum_compiler::arch_query::arch_query_source(src).expect("parses");
+    assert_eq!(report.comparison, PinComparison::Unpinned);
     assert!(report.pinned.is_none());
     assert!(report.escalations.is_none());
     assert!(report.inferred.iter().any(|a| a.atom.contains("Network")));
@@ -172,4 +177,19 @@ public fn entry() {
         "the mounted callee must surface QUALIFIED in unresolved; got {:?}",
         report.unresolved_calls
     );
+}
+
+#[test]
+fn unresolved_surface_cannot_establish_a_clean_pin_or_dead_right() {
+    let source = r#"
+@arch_module(requires: [Capability.Read(ResourceTag.Logger)])
+module fixtures.partial;
+mount fixtures.provider.{external};
+public fn run() { external(); core.net.tcp.connect("host", 443); }
+"#;
+    let report = verum_compiler::arch_query::arch_query_source(source).unwrap();
+    assert_eq!(report.comparison, PinComparison::Partial);
+    assert!(!report.unresolved_calls.is_empty());
+    assert!(report.dead_rights.is_none());
+    assert!(report.escalations.unwrap().iter().any(|a| a.atom.contains("Network")));
 }

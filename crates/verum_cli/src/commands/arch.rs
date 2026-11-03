@@ -40,20 +40,22 @@ pub fn query(path: &std::path::Path, json: bool) -> Result<()> {
             }
             let esc = report.escalations.as_deref().unwrap_or(&[]);
             let dead = report.dead_rights.as_deref().unwrap_or(&[]);
-            if esc.is_empty() && dead.is_empty() {
-                println!("\njudgment: clean — code and pin agree");
-            } else {
-                if !esc.is_empty() {
-                    println!("\nESCALATIONS (code exceeds the pin):");
-                    for a in esc {
-                        println!("  {}  [{}]", a.atom, a.evidence);
-                    }
+            use verum_compiler::arch_query::PinComparison;
+            match report.comparison {
+                PinComparison::Partial => println!("\ncomparison incomplete: the inferred surface has unresolved dependencies"),
+                PinComparison::GroundMatch => println!("\nextracted capability facts match the pin"),
+                _ => {}
+            }
+            if !esc.is_empty() {
+                println!("\nESCALATIONS (inferred beyond the pin):");
+                for a in esc {
+                    println!("  {}  [{}]", a.atom, a.evidence);
                 }
-                if !dead.is_empty() {
-                    println!("\nDEAD RIGHTS (pinned, never exercised):");
-                    for a in dead {
-                        println!("  {a}");
-                    }
+            }
+            if !dead.is_empty() {
+                println!("\nPINNED RIGHTS ABSENT FROM THE EXTRACTED FACTS:");
+                for a in dead {
+                    println!("  {a}");
                 }
             }
         }

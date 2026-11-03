@@ -39,6 +39,21 @@ pub struct ReportedSummary {
     pub open_over: Vec<String>,
 }
 
+/// Comparison of the inferred ground facts with a declared pin. The
+/// single-file query cannot certify the executable's complete behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PinComparison {
+    /// No declared pin.
+    Unpinned,
+    /// A callee or a capability-bearing parameter remains unresolved.
+    Partial,
+    /// The extracted ground facts agree with the pin.
+    GroundMatch,
+    /// The extracted ground facts differ from the pin.
+    GroundDifference,
+}
+
 /// The full answer to `verum arch query --at <file>`.
 ///
 /// Field discipline: APPEND-ONLY. Agents parse this; a removed or
@@ -46,6 +61,8 @@ pub struct ReportedSummary {
 /// AP-codes learnable.)
 #[derive(Debug, Serialize)]
 pub struct ArchQueryReport {
+    /// Scope and outcome of this comparison.
+    pub comparison: PinComparison,
     /// Module path as declared (`module a.b.c;`), if any.
     pub module: Option<String>,
     /// The inferred module surface (transitive, row-solved).
@@ -57,7 +74,7 @@ pub struct ArchQueryReport {
     /// the pin. `None` when there is no pin to judge against.
     pub escalations: Option<Vec<ReportedAtom>>,
     /// Judgment, pinned vs inferred: declared rights nothing
-    /// exercises (dead-right candidates feeding the rot law).
+    /// exercises in the extracted graph. Unknown when the surface is open.
     pub dead_rights: Option<Vec<String>>,
     /// Per-function summaries (the audit detail behind `inferred`).
     pub functions: Vec<ReportedSummary>,
@@ -86,10 +103,19 @@ pub fn arch_query_module(module: &Module) -> ArchQueryReport {
     let surface = solved.module_surface();
 
     let pinned = pinned_capabilities_of_module(module);
-    let (escalations, dead_rights) = match &pinned {
+    let partial = !surface.is_closed() || !solved.unresolved.is_empty();
+    let (comparison, escalations, dead_rights) = match &pinned {
         Some(pin_row) => {
             let (esc, dead) = surface.judge_against(pin_row);
+            let comparison = if partial {
+                PinComparison::Partial
+            } else if esc.is_empty() && dead.is_empty() {
+                PinComparison::GroundMatch
+            } else {
+                PinComparison::GroundDifference
+            };
             (
+                comparison,
                 Some(
                     esc.iter()
                         .map(|f| ReportedAtom {
@@ -105,13 +131,14 @@ pub fn arch_query_module(module: &Module) -> ArchQueryReport {
                         })
                         .collect(),
                 ),
-                Some(dead.iter().map(|f| f.atom.to_string()).collect()),
+                (!partial).then(|| dead.iter().map(|f| f.atom.to_string()).collect()),
             )
         }
-        None => (None, None),
+        None => (PinComparison::Unpinned, None, None),
     };
 
     ArchQueryReport {
+        comparison,
         module: module_declared_path(module),
         inferred: report_row_atoms(&surface),
         pinned: pinned
