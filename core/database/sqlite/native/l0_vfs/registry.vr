@@ -258,7 +258,7 @@ implement VfsRegistry {
 // Small text helpers (local — avoids introducing new core/text APIs)
 // -----------------------------------------------------------------------------
 
-fn starts_with_bytes(text: &Text, prefix: &str) -> Bool {
+fn starts_with_bytes(text: &Text, prefix: &Text) -> Bool {
     let raw = text.as_bytes();
     let p = prefix.as_bytes();
     if raw.len() < p.len() { return false; }

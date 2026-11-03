@@ -12,7 +12,7 @@ module core.database.sqlite.native.l5_sql.planner;
 // Spec: sqlite-native.md §13
 //
 
-// The planner turns a parsed `Statement` into a `PlanNode` tree that
+// The planner turns a parsed `SqlStatement` into a `PlanNode` tree that
 // the codegen walks into VDBE opcodes. In the loom v1 this is a
 // minimal *structural* planner — no index selection, no join
 // reordering, no subquery flattening. It exists so the compile
@@ -45,7 +45,7 @@ module core.database.sqlite.native.l5_sql.planner;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
-    Statement, Expr, SqlLiteral, BinOp,
+    SqlStatement, Expr, SqlLiteral, BinOp,
     SelectStmt, SelectKind, SimpleSelect, CompoundOp,
     ResultColumnItem, FromItem, SqlJoinKind, JoinClause,
     OrderTerm, LimitClause, OrderDirection,
@@ -163,7 +163,7 @@ public type TxAction is
 // Planning top-level
 // -----------------------------------------------------------------------------
 
-public fn plan_statement(stmt: &Statement) -> Result<PlanNode, PlanError> {
+public fn plan_statement(stmt: &SqlStatement) -> Result<PlanNode, PlanError> {
     match stmt {
         SSelect(sel)        => plan_select(sel),
         SInsert(ins)        => plan_insert(ins),
@@ -615,7 +615,7 @@ mount core.database.sqlite.native.l5_sql.resolver.{
 /// For non-SELECT statements the schema cache is consulted only for
 /// validation hooks; the rest falls through to plain `plan_statement`.
 public fn plan_statement_with_schema(
-    stmt: &Statement,
+    stmt: &SqlStatement,
     schema: &SchemaCache,
 ) -> Result<PlanNode, PlanError> {
     match stmt {

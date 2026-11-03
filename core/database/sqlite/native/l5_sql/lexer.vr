@@ -140,7 +140,7 @@ public fn lookup_keyword(s: &Text) -> Maybe<SqlKeyword> {
     lookup_folded(&folded)
 }
 
-fn eq_literal(buf: &List<Byte>, lit: &str) -> Bool {
+fn eq_literal(buf: &List<Byte>, lit: &Text) -> Bool {
     let lb = lit.as_bytes();
     if buf.len() != lb.len() { return false; }
     let mut i: Int = 0;

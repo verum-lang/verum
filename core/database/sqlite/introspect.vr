@@ -312,7 +312,7 @@ fn itoa(n: Int) -> Text {
     Text.from_bytes(&out).unwrap_or("0".clone())
 }
 
-fn render_pragma(name: &str, arg: &Text) -> Text {
+fn render_pragma(name: &Text, arg: &Text) -> Text {
     let mut out: Text = "PRAGMA ".clone();
     out.push_str(name);
     out.push_str(&"(\"".clone());

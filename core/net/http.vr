@@ -1188,7 +1188,7 @@ implement HttpPoolConfig {
     }
 }
 
-implement Clone for PoolConfig {
+implement Clone for HttpPoolConfig {
     fn clone(&self) -> HttpPoolConfig {
         HttpPoolConfig {
             max_idle: self.max_idle,
@@ -1199,9 +1199,9 @@ implement Clone for PoolConfig {
     }
 }
 
-implement Debug for PoolConfig {
+implement Debug for HttpPoolConfig {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"PoolConfig {{ max_idle: {self.max_idle}, max_per_host: {self.max_per_host}, idle_timeout_ms: {self.idle_timeout_ms} }}")
+        f.write_str(f"HttpPoolConfig {{ max_idle: {self.max_idle}, max_per_host: {self.max_per_host}, idle_timeout_ms: {self.idle_timeout_ms} }}")
     }
 }
 
@@ -1272,7 +1272,7 @@ public type ClientConfig is {
     /// Whether to follow redirects automatically.
     follow_redirects: Bool,
     /// Connection pool configuration.
-    pool_config: PoolConfig,
+    pool_config: HttpPoolConfig,
     /// Default headers to include in every request.
     default_headers: Headers,
     /// User-Agent header value.
@@ -1314,7 +1314,7 @@ implement ClientConfig {
     }
 
     /// Set the connection pool configuration.
-    public fn with_pool(self, pool: PoolConfig) -> ClientConfig {
+    public fn with_pool(self, pool: HttpPoolConfig) -> ClientConfig {
         ClientConfig { pool_config: pool, ..self }
     }
 

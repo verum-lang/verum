@@ -598,7 +598,7 @@ fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, SqlParseErr
     Result.Ok(TableRef { schema: "".clone(), name: first, alias: "".clone() })
 }
 
-fn text_eq_ci(a: &Text, lit: &str) -> Bool {
+fn text_eq_ci(a: &Text, lit: &Text) -> Bool {
     let ab = a.as_bytes();
     let lb = lit.as_bytes();
     if ab.len() != lb.len() { return false; }

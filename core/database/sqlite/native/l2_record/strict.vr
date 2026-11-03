@@ -137,7 +137,7 @@ public fn strict_type_from_text(declared: &Text) -> Result<StrictType, StrictCon
     Result.Err(StrictConstraintError.UnknownType(declared.clone()))
 }
 
-fn is_ascii_literal(raw: &[Byte], start: Int, n: Int, lit: &str) -> Bool {
+fn is_ascii_literal(raw: &[Byte], start: Int, n: Int, lit: &Text) -> Bool {
     let lb = lit.as_bytes();
     if n != lb.len() { return false; }
     let mut i: Int = 0;

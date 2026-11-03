@@ -33,7 +33,7 @@ module core.database.sqlite.native.l5_sql.compile;
 
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l5_sql.lexer.{lex, SqlLexError as LexError};
-mount core.database.sqlite.native.l5_sql.ast.Statement;
+mount core.database.sqlite.native.l5_sql.ast.SqlStatement;
 mount core.database.sqlite.native.l5_sql.parser.{
     stream_new, parse_one, SqlParseError,
 };

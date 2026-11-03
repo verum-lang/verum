@@ -44,7 +44,7 @@ public type Affinity is
     | Numeric;
 
 /// ASCII-case-insensitive substring search.
-fn contains_ascii_nocase(hay: &Text, needle: &str) -> Bool {
+fn contains_ascii_nocase(hay: &Text, needle: &Text) -> Bool {
     let folded = fold_text_ascii(hay);
     let hb = folded.as_bytes();
     let nb = needle.as_bytes();
