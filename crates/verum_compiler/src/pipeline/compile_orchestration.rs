@@ -1061,6 +1061,14 @@ impl<'s> CompilationPipeline<'s> {
         // across all modules regardless of compilation order.
         let shared_inherent_methods = Shared::new(parking_lot::RwLock::new(Map::new()));
 
+        // All module checkers inspect the same immutable release metadata.
+        // Prepare declaration ownership and lookup indexes once for this check.
+        let library = self.stdlib_metadata.get().map(|metadata| {
+            verum_types::CoreMetadataSnapshot::prepare(
+                metadata.clone(), &verum_types::AnalysisControl::default(),
+            )
+        }).transpose()?;
+
         // Sort for deterministic iteration (self.modules is a HashMap).
         // Shallower (fewer-dot) module keys come first so top-level stdlib
         // functions beat nested-module helpers when short names collide.
@@ -1113,8 +1121,9 @@ impl<'s> CompilationPipeline<'s> {
                 // `MethodNotFound` despite the method's body being in the
                 // precompiled archive — the lookup bucket is empty
                 // because the lazy load never fires.
-                if let Some(metadata) = self.stdlib_metadata.get() {
-                    checker.set_core_metadata(std::sync::Arc::clone(metadata));
+                if let Some(library) = &library {
+                    checker.set_core_snapshot(library);
+                    let metadata = library.metadata();
                     // T0865: the single-file path pre-registers the
                     // stdlib types this module names AND the stdlib
                     // VARIANT CONSTRUCTORS (`register_stdlib_types_for_module`
