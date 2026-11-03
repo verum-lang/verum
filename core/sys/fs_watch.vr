@@ -83,56 +83,27 @@ implement FsWatcher {
     /// Open a fresh watcher. Returns Err on platforms where the native
     /// backend is unavailable or could not be initialised.
     public fn new() -> Result<FsWatcher, Text> {
-        @cfg(target_os = "macos")
-        {
-            return match KqueueBackend.new() {
-                Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Kqueue(b) }),
-                Result.Err(e) => Result.Err(e),
-            };
-        }
-        @cfg(target_os = "linux")
-        {
-            return match InotifyBackend.new() {
-                Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Inotify(b) }),
-                Result.Err(e) => Result.Err(e),
-            };
-        }
-        @cfg(target_os = "windows")
-        {
-            return match RdcwBackend.new() {
-                Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Rdcw(b) }),
-                Result.Err(e) => Result.Err(e),
-            };
+        match FsWatcherImpl.new() {
+            Result.Ok(inner) => Result.Ok(FsWatcher { inner }),
+            Result.Err(error) => Result.Err(error),
         }
     }
 
     /// Add a path to the watch set. The same path may be added more than
     /// once; events fire once per registration.
     public fn add(&mut self, path: &Text) -> Result<(), Text> {
-        match &mut self.inner {
-            FsWatcherImpl.Kqueue(b)   => b.add(path),
-            FsWatcherImpl.Inotify(b)  => b.add(path),
-            FsWatcherImpl.Rdcw(b)     => b.add(path),
-        }
+        self.inner.add(path)
     }
 
     /// Remove a previously-added watch.
     public fn remove(&mut self, path: &Text) -> Result<(), Text> {
-        match &mut self.inner {
-            FsWatcherImpl.Kqueue(b)   => b.remove(path),
-            FsWatcherImpl.Inotify(b)  => b.remove(path),
-            FsWatcherImpl.Rdcw(b)     => b.remove(path),
-        }
+        self.inner.remove(path)
     }
 
     /// Wait for the next event(s). Returns an empty list on timeout.
     /// Timeout in milliseconds; -1 = block forever.
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
-        match &mut self.inner {
-            FsWatcherImpl.Kqueue(b)   => b.wait(timeout_ms),
-            FsWatcherImpl.Inotify(b)  => b.wait(timeout_ms),
-            FsWatcherImpl.Rdcw(b)     => b.wait(timeout_ms),
-        }
+        self.inner.wait(timeout_ms)
     }
 }
 
@@ -146,10 +117,15 @@ implement Drop for FsWatcher {
 // Internal backend dispatch
 // =============================================================================
 
-type FsWatcherImpl is
-    | Kqueue(KqueueBackend)
-    | Inotify(InotifyBackend)
-    | Rdcw(RdcwBackend);
+// Exactly one native backend exists in a target's type graph.
+@cfg(target_os = "macos")
+type FsWatcherImpl is KqueueBackend;
+
+@cfg(target_os = "linux")
+type FsWatcherImpl is InotifyBackend;
+
+@cfg(target_os = "windows")
+type FsWatcherImpl is RdcwBackend;
 
 // =============================================================================
 // macOS — kqueue / EVFILT_VNODE

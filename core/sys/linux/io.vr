@@ -34,7 +34,7 @@ mount core.intrinsics.{
     ORDERING_ACQUIRE, ORDERING_RELEASE,
 };
 mount sys.io_engine.{
-    IOEngine, CompletionOp, CompletionResult, Duration,
+    IOEngine, CompletionOp, CompletionResult, EngineDuration,
     ValidFd, Fd, RawSocketAddr, TimeSpec, MsgHdr,
     EngineIoError,
 };
@@ -1482,7 +1482,7 @@ implement IOEngine for IoUringDriver {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         let timeout_ns = match timeout {
             Maybe.Some(d) => d.as_nanos(),
@@ -1641,7 +1641,7 @@ implement IOEngine for EpollDriver {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         let timeout_ms = match timeout {
             Maybe.Some(d) => d.as_millis() as Int,
@@ -1735,7 +1735,7 @@ implement IOEngine for LinuxIoDriver {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         match self {
             Uring(d) => d.wait(results, min_complete, timeout),

@@ -31,7 +31,7 @@ module core.sys.windows.io;
 
 mount sys.common.{OSError, FileDesc};
 mount sys.io_engine.{
-    IOEngine, CompletionOp, CompletionResult, Duration,
+    IOEngine, CompletionOp, CompletionResult, EngineDuration,
     ValidFd, Fd, TimeSpec, MsgHdr,
     EngineIoError,
     WAKE_TOKEN,
@@ -774,7 +774,7 @@ implement IOEngine for IocpDriver {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         if !self.open {
             return Result.Err(EngineIoError.Closed);
@@ -933,7 +933,7 @@ implement IOEngine for WindowsIoDriver {
         &mut self,
         results: &mut [CompletionResult],
         min_complete: UInt32,
-        timeout: Maybe<Duration>,
+        timeout: Maybe<EngineDuration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         self.iocp.wait(results, min_complete, timeout)
     }
