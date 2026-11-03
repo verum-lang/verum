@@ -51,7 +51,8 @@
 //! on). When the feature is off the type does not exist and the
 //! `BackendRegistry` reverts to the per-dtype scalar fallback path.
 
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -268,6 +269,8 @@ pub struct MlirJitBackend {
  context: Mutex<ContextHolder>,
  /// Compiled kernel cache. Lock-free reads on the hot path.
  cache: DashMap<JitKey, Arc<EngineHolder>>,
+ /// Chosen once for this backend; kernels never reread process-global settings.
+ cache_dir: Option<PathBuf>,
 }
 
 /// Context lives on the heap behind a Mutex; mark it Send so the
@@ -288,6 +291,10 @@ impl MlirJitBackend {
  /// backend construction; subsequent kernel compiles reuse the
  /// already-loaded dialects.
  pub fn new() -> Self {
+ Self::with_cache_dir(jit_cache_dir())
+ }
+
+ fn with_cache_dir(cache_dir: Option<PathBuf>) -> Self {
  // Pass registration is a process-wide one-shot. Idempotent
  // via `Once` inside `register_all_passes`, so safe to call
  // even when other parts of the program (e.g. verum_codegen
@@ -316,6 +323,7 @@ impl MlirJitBackend {
  allocated_bytes: AtomicUsize::new(0),
  context: Mutex::new(ContextHolder { context }),
  cache: DashMap::new(),
+ cache_dir,
  }
  }
 
@@ -531,7 +539,7 @@ impl MlirJitBackend {
  if let Some(entry) = self.cache.get(&key) {
  return Some(entry.value().clone());
  }
- let engine = compile_kernel(&guard.context, kind, dtype)?;
+ let engine = compile_kernel(&guard.context, kind, dtype, self.cache_dir.as_deref())?;
  let holder = Arc::new(EngineHolder { engine });
  self.cache.insert(key, holder.clone());
  Some(holder)
@@ -2507,30 +2515,40 @@ fn try_load_cached_kernel(
  if !module.as_operation().verify() {
  return None;
  }
- Some(ExecutionEngine::new(&module, /* opt_level */ 2, &[], /* dump */ false))
+ let engine = ExecutionEngine::new(&module, /* opt_level */ 2, &[], /* dump */ false);
+ // Empty text is valid MLIR, but it is not a compiled kernel. A cache
+ // hit must provide the entry point used by every invocation below.
+ if engine.lookup("kernel").is_null() {
+ return None;
+ }
+ Some(engine)
 }
 
 /// Persist the post-lowering MLIR text for a successfully compiled
 /// kernel. Best-effort: write failures are logged at trace level
 /// and otherwise ignored.
-fn write_cached_kernel(cache_path: &std::path::Path, lowered_text: &str) {
- if let Some(parent) = cache_path.parent() {
- if let Err(e) = std::fs::create_dir_all(parent) {
- tracing::trace!(
- "MLIR-JIT: cache directory create failed at {}: {}",
- parent.display(),
- e
- );
- return;
+fn write_cached_kernel(cache_path: &Path, lowered_text: &str) {
+ if let Err(error) = publish_cached_kernel(cache_path, |file| {
+ file.write_all(lowered_text.as_bytes())
+ }) {
+ tracing::trace!("MLIR-JIT: cache write failed at {}: {}", cache_path.display(), error);
  }
- }
- if let Err(e) = std::fs::write(cache_path, lowered_text.as_bytes()) {
- tracing::trace!(
- "MLIR-JIT: cache write failed at {}: {}",
- cache_path.display(),
- e
- );
- }
+}
+
+/// Only publish complete files. Readers retain the previous inode until the
+/// same-directory rename, including when staging or publication fails. This is
+/// an atomic visibility guarantee, not a durable-storage/fsync guarantee.
+fn publish_cached_kernel(
+ cache_path: &Path,
+ write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+ let parent = cache_path.parent().filter(|path| !path.as_os_str().is_empty())
+ .unwrap_or_else(|| Path::new("."));
+ std::fs::create_dir_all(parent)?;
+ let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+ write(staged.as_file_mut())?;
+ staged.persist(cache_path).map_err(|error| error.error)?;
+ Ok(())
 }
 
 /// Compile a kernel text into a JIT engine.
@@ -2546,6 +2564,7 @@ fn compile_kernel(
  context: &Context,
  kind: KernelKind,
  dtype: DType,
+ cache_dir: Option<&Path>,
 ) -> Option<ExecutionEngine> {
  let text = match kind {
  KernelKind::Binop(op) => build_binop_kernel_text(op, dtype)?,
@@ -2589,7 +2608,7 @@ fn compile_kernel(
  // conversion pass and go straight from cached lowered-module text
  // to an `ExecutionEngine`. Misses fall through and write back
  // the lowered text after compile.
- let cache_path = jit_cache_dir().map(|d| d.join(format!("{}.mlir", jit_cache_key(&text))));
+ let cache_path = cache_dir.map(|d| d.join(format!("{}.mlir", jit_cache_key(&text))));
  if let Some(p) = &cache_path {
  if let Some(engine) = try_load_cached_kernel(context, p) {
  return Some(engine);
@@ -3476,55 +3495,6 @@ mod tests {
  // A future iteration coverage: persistent on-disk JIT cache
  // -----------------------------------------------------------------
 
- /// Serialises every test that points `VERUM_JIT_CACHE` somewhere.
- ///
- /// T0740, caught 2026-08-15 after the flake had twice been seen as
- /// "1348 passed; 1 failed" with the failing name lost both times. It is
- /// `cache_writes_lowered_module_on_first_compile`, panicking with
- /// "cache dir not created".
- ///
- /// `VERUM_JIT_CACHE` is read from a PROCESS-GLOBAL (`std::env::var`, in
- /// `jit_cache_dir`), and two tests each set it to their own fresh
- /// directory and `remove_var` it at the end. Run in parallel — which is
- /// what `cargo test` does by default, and therefore what CI's
- /// `cargo test --workspace --lib --bins` does — the second test's
- /// `set_var` redirects the first test's backend, and either test's
- /// `remove_var` drops the other back to the default cache directory.
- /// The asserting test then looks in a directory nothing ever wrote to.
- ///
- /// The premise in the old comment — "tests are single-threaded for
- /// env_var purposes by virtue of `--test-threads=1` in CI" — was untrue;
- /// CI passes no such flag. A per-test unique directory
- /// (`isolated_jit_cache_dir`) cannot help either: the collision is on the
- /// ONE variable that points at the directory, not on the directories.
- ///
- /// Holding this lock for the whole body of such a test makes ownership of
- /// the variable exclusive — the property these tests always assumed and
- /// never had. Poisoning is recovered from rather than propagated: one
- /// panicking test must not turn its sibling's failure from "flaky" into
- /// "always poisoned", which would hide the next defect behind this one.
- static JIT_CACHE_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
- fn lock_jit_cache_env() -> std::sync::MutexGuard<'static, ()> {
-  JIT_CACHE_ENV
-   .lock()
-   .unwrap_or_else(|poisoned| poisoned.into_inner())
- }
-
- fn isolated_jit_cache_dir() -> std::path::PathBuf {
- // Per-test-process scratch directory. Each test that touches
- // the cache must point `VERUM_JIT_CACHE` at a fresh subdir to
- // avoid clobbering between tests run in parallel.
- let pid = std::process::id();
- let counter = std::sync::atomic::AtomicU64::new(0);
- let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
- let nanos = std::time::SystemTime::now()
- .duration_since(std::time::UNIX_EPOCH)
- .map(|d| d.as_nanos())
- .unwrap_or(0);
- std::env::temp_dir().join(format!("verum-jit-cache-test-{}-{}-{}", pid, n, nanos))
- }
-
  #[test]
  fn cache_key_changes_with_kernel_text() {
  let k1 = jit_cache_key("module { llvm.func @kernel() { llvm.return } }");
@@ -3548,17 +3518,8 @@ mod tests {
 
  #[test]
  fn cache_writes_lowered_module_on_first_compile() {
-  let _env = lock_jit_cache_env();
- let dir = isolated_jit_cache_dir();
- // SAFETY: `lock_jit_cache_env` above makes this test the sole
- // owner of `VERUM_JIT_CACHE` for its whole body. The note that
- // stood here claimed the tests were single-threaded because CI
- // passes `--test-threads=1`; CI passes no such flag, and that
- // false premise is the whole of T0740.
- unsafe {
- std::env::set_var("VERUM_JIT_CACHE", &dir);
- }
- let backend = MlirJitBackend::new();
+ let dir = tempfile::tempdir().unwrap();
+ let backend = MlirJitBackend::with_cache_dir(Some(dir.path().join(JIT_CACHE_VERSION)));
  let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
  let b = TensorHandle::zeros(&[4], DType::F32).unwrap();
  fill_f32(&a, &[1.0, 2.0, 3.0, 4.0]);
@@ -3567,7 +3528,7 @@ mod tests {
 
  // After one binop compile, the cache directory should
  // contain at least one .mlir file.
- let v1 = dir.join(JIT_CACHE_VERSION);
+ let v1 = dir.path().join(JIT_CACHE_VERSION);
  assert!(v1.exists(), "cache dir not created at {}", v1.display());
  let entries: Vec<_> = std::fs::read_dir(&v1)
  .unwrap()
@@ -3582,24 +3543,16 @@ mod tests {
  v1.display()
  );
 
- unsafe {
- std::env::remove_var("VERUM_JIT_CACHE");
- }
- let _ = std::fs::remove_dir_all(&dir);
  }
 
  #[test]
  fn cache_hit_produces_correct_results() {
-  let _env = lock_jit_cache_env();
  // Pre-populate the cache by compiling once; then construct
  // a fresh backend pointing at the same cache and verify the
  // compute output is bit-equivalent.
- let dir = isolated_jit_cache_dir();
- unsafe {
- std::env::set_var("VERUM_JIT_CACHE", &dir);
- }
-
- let warm_backend = MlirJitBackend::new();
+ let dir = tempfile::tempdir().unwrap();
+ let cache_dir = dir.path().join(JIT_CACHE_VERSION);
+ let warm_backend = MlirJitBackend::with_cache_dir(Some(cache_dir.clone()));
  let a = TensorHandle::zeros(&[3], DType::F32).unwrap();
  let b = TensorHandle::zeros(&[3], DType::F32).unwrap();
  fill_f32(&a, &[1.5, 2.5, 3.5]);
@@ -3611,15 +3564,117 @@ mod tests {
  // Fresh backend → in-memory cache empty, but on-disk cache
  // has the lowered module. Compile path should hit the
  // file and skip lowering.
- let cold_backend = MlirJitBackend::new();
+ let cold_backend = MlirJitBackend::with_cache_dir(Some(cache_dir));
  let cold = cold_backend.binop(&a, &b, TensorBinaryOp::Add).unwrap();
  let cold_vals = read_f32(&cold, 3);
  assert_eq!(warm_vals, cold_vals);
 
- unsafe {
- std::env::remove_var("VERUM_JIT_CACHE");
  }
- let _ = std::fs::remove_dir_all(&dir);
+
+ #[test]
+ fn cache_failed_staging_preserves_visible_entry() {
+ let dir = tempfile::tempdir().unwrap();
+ let target = dir.path().join("kernel.mlir");
+ for previous in [None, Some("complete previous module")] {
+ if let Some(previous) = previous {
+ std::fs::write(&target, previous).unwrap();
+ }
+ let error = publish_cached_kernel(&target, |file| {
+ file.write_all(b"incomplete replacement")?;
+ Err(std::io::Error::other("interrupted staging"))
+ }).unwrap_err();
+ assert_eq!(error.kind(), std::io::ErrorKind::Other);
+ match previous {
+ Some(previous) => assert_eq!(std::fs::read_to_string(&target).unwrap(), previous),
+ None => assert!(!target.exists()),
+ }
+ assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), usize::from(previous.is_some()));
+ }
+ }
+
+ #[test]
+ fn cache_publication_never_exposes_staged_prefix() {
+ let dir = tempfile::tempdir().unwrap();
+ let target = dir.path().join("kernel.mlir");
+ for previous in [None, Some("complete previous module")] {
+ if let Some(previous) = previous {
+ std::fs::write(&target, previous).unwrap();
+ } else if target.exists() {
+ std::fs::remove_file(&target).unwrap();
+ }
+ let (staged_tx, staged_rx) = std::sync::mpsc::channel();
+ let (publish_tx, publish_rx) = std::sync::mpsc::channel();
+ let observed = std::thread::scope(|scope| {
+ let writer_target = &target;
+ let writer = scope.spawn(move || publish_cached_kernel(writer_target, |file| {
+ file.write_all(b"complete ")?;
+ staged_tx.send(()).unwrap();
+ publish_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+ file.write_all(b"replacement")
+ }));
+ staged_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+ let observed = std::fs::read_to_string(&target);
+ publish_tx.send(()).unwrap();
+ writer.join().unwrap().unwrap();
+ observed
+ });
+ match previous {
+ Some(previous) => assert_eq!(observed.unwrap(), previous),
+ None => assert_eq!(observed.unwrap_err().kind(), std::io::ErrorKind::NotFound),
+ }
+ assert_eq!(std::fs::read_to_string(&target).unwrap(), "complete replacement");
+ assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+ }
+ }
+
+ #[test]
+ fn cache_without_kernel_is_recompiled_before_matmul() {
+ let dir = tempfile::tempdir().unwrap();
+ let cache_dir = dir.path().join(JIT_CACHE_VERSION);
+ let target = cache_dir.join(format!("{}.mlir", jit_cache_key(&build_matmul_kernel_text(DType::F32).unwrap())));
+ let a = TensorHandle::zeros(&[3, 3], DType::F32).unwrap();
+ let b = TensorHandle::zeros(&[3, 2], DType::F32).unwrap();
+ fill_f32(&a, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+ fill_f32(&b, &[2.0, 3.0, 5.0, 7.0, 11.0, 13.0]);
+ std::fs::create_dir_all(&cache_dir).unwrap();
+ for unusable in ["", "module {}"] {
+ std::fs::write(&target, unusable).unwrap();
+ let backend = MlirJitBackend::with_cache_dir(Some(cache_dir.clone()));
+ {
+ let context = backend.context.lock();
+ assert!(try_load_cached_kernel(&context.context, &target).is_none());
+ }
+ let output = backend.matmul(&a, &b).expect("unusable cache must trigger real JIT compilation");
+ assert_eq!(read_f32(&output, 6), vec![2.0, 3.0, 5.0, 7.0, 11.0, 13.0]);
+ assert!(!std::fs::read_to_string(&target).unwrap().is_empty());
+ }
+ }
+
+ #[test]
+ fn cache_concurrent_backends_execute_complete_kernels() {
+ let dir = tempfile::tempdir().unwrap();
+ let cache_dir = dir.path().join(JIT_CACHE_VERSION);
+ let ready = std::sync::Barrier::new(4);
+ std::thread::scope(|scope| {
+ let workers: Vec<_> = (1..=4).map(|worker| {
+ let cache_dir = &cache_dir;
+ let ready = &ready;
+ scope.spawn(move || {
+ let backend = MlirJitBackend::with_cache_dir(Some(cache_dir.clone()));
+ let a = TensorHandle::zeros(&[3, 3], DType::F32).unwrap();
+ let b = TensorHandle::zeros(&[3, 2], DType::F32).unwrap();
+ let expected: Vec<f32> = (1..=6).map(|value| (value * worker) as f32).collect();
+ fill_f32(&a, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+ fill_f32(&b, &expected);
+ ready.wait();
+ let output = backend.matmul(&a, &b).expect("concurrent cache publication cannot disable a kernel");
+ assert_eq!(read_f32(&output, 6), expected);
+ })
+ }).collect();
+ for worker in workers {
+ worker.join().unwrap();
+ }
+ });
  }
 
  #[test]

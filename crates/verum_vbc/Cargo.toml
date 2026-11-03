@@ -80,6 +80,7 @@ verum_mlir = { workspace = true, optional = true }
 # `parking_lot::Mutex` over the MLIR Context inside `MlirJitBackend`.
 dashmap = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 # Unix-only syscall surface for the interpreter runtime handlers
 # (setsockopt / getpeername / getsockname / close in net_runtime, plus
@@ -128,7 +129,7 @@ parallel = ["dep:rayon"] # Enable parallel scans and monomorphization
 metal = ["dep:metal", "dep:objc", "dep:block", "dep:foreign-types-shared"] # Metal GPU backend (macOS)
 ffi = ["dep:libloading", "dep:libffi"] # FFI runtime support for interpreter
 tokenizers = ["dep:tokenizers"] # HuggingFace tokenizers for BPE/SentencePiece
-mlir-jit = ["dep:verum_mlir", "dep:dashmap", "dep:parking_lot"] # MLIR JIT compute backend for Tier 0 interpreter
+mlir-jit = ["dep:verum_mlir", "dep:dashmap", "dep:parking_lot", "dep:tempfile"] # MLIR JIT compute backend for Tier 0 interpreter
 # Note: cbgr-integration feature removed - verum_cbgr is now always included for industrial quality
 
 [[bench]]
