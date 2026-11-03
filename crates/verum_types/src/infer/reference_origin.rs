@@ -132,6 +132,169 @@ impl TypeChecker {
         }
     }
 
+    /// Only value-bearing positions can keep a loan alive. A function's
+    /// parameter and result types, for example, do not borrow their referents.
+    pub(super) fn carries_stored_loan(&self, ty: &Type) -> bool {
+        fn visit(
+            checker: &TypeChecker,
+            ty: &Type,
+            owners: &mut std::collections::HashSet<verum_common::Text>,
+        ) -> bool {
+            match ty {
+                Type::Reference { .. }
+                | Type::CheckedReference { .. }
+                | Type::UnsafeReference { .. } => true,
+                Type::Tuple(parts) => parts.iter().any(|part| visit(checker, part, owners)),
+                Type::Record(fields)
+                | Type::Variant(fields)
+                | Type::ExtensibleRecord { fields, .. } => {
+                    fields.values().any(|field| visit(checker, field, owners))
+                }
+                Type::Array { element, .. }
+                | Type::Slice { element }
+                | Type::Tensor { element, .. } => visit(checker, element, owners),
+                Type::Refined { base, .. } | Type::CapabilityRestricted { base, .. } => {
+                    visit(checker, base, owners)
+                }
+                Type::Ownership { inner, .. } | Type::Quantified { inner, .. } => {
+                    visit(checker, inner, owners)
+                }
+                Type::Named { .. } | Type::Generic { .. } => {
+                    let Some((name, args)) = checker.conversion_nominal_head(ty) else {
+                        return false;
+                    };
+                    if args.iter().any(|arg| visit(checker, arg, owners)) {
+                        return true;
+                    }
+                    if !owners.insert(name.clone()) {
+                        return false;
+                    }
+                    let Some(body) = checker.ctx.lookup_type(&name) else {
+                        return false;
+                    };
+                    visit(checker, body, owners)
+                }
+                _ => false,
+            }
+        }
+        visit(self, ty, &mut std::collections::HashSet::new())
+    }
+
+    pub(super) fn aggregate_origins(&mut self, value: &Expr, ty: &Type) -> Vec<RecordReceiver> {
+        let mut found = Vec::new();
+        if !self.carries_stored_loan(ty) {
+            return found;
+        }
+        match (&unparen(value).kind, ty) {
+            (ExprKind::Tuple(values), Type::Tuple(types)) if values.len() == types.len() => {
+                for (value, ty) in values.iter().zip(types) {
+                    for origin in self.aggregate_origins(value, ty) {
+                        if !found.contains(&origin) {
+                            found.push(origin);
+                        }
+                    }
+                }
+            }
+            (ExprKind::Record { fields, base, .. }, _)
+                if let Ok(types) = self.extract_record_fields(ty) =>
+            {
+                for field in fields {
+                    let nested = if let (Some(field_type), Some(value)) =
+                        (types.get(&field.name.name), &field.value)
+                    {
+                        self.aggregate_origins(value, field_type)
+                    } else {
+                        self.ctx.env.reference_candidates(&field.name.name)
+                    };
+                    for origin in nested {
+                        if !found.contains(&origin) {
+                            found.push(origin);
+                        }
+                    }
+                }
+                if let Some(base) = base {
+                    self.collect_reference_candidates(base, &mut found);
+                }
+            }
+            _ => self.collect_reference_candidates(value, &mut found),
+        }
+        found
+    }
+
+    pub(super) fn check_borrowed_move(
+        &self,
+        name: &verum_common::Text,
+        ty: &Type,
+        span: verum_ast::Span,
+    ) -> crate::Result<()> {
+        if let Some(borrow) = self.borrow_tracker.overlapping_borrow(name, None, true)
+            && !self.protocol_checker.read().implements_protocol(
+                ty,
+                verum_common::well_known_types::WellKnownProtocol::Copy.as_str(),
+            )
+        {
+            return Err(crate::TypeError::MoveWhileBorrowed {
+                var: name.clone(),
+                move_span: span,
+                borrow_span: borrow.span,
+            });
+        }
+        Ok(())
+    }
+
+    pub(super) fn bind_aggregate_result(
+        &mut self,
+        value: &Expr,
+        ty: &Type,
+    ) -> crate::Result<Option<ReferenceOrigin>> {
+        if self.reference_mode(ty, value.span)?.is_some() {
+            return Ok(None);
+        }
+        let sources = self.aggregate_origins(value, ty);
+        for source in &sources {
+            self.retain_origin(source, None, value.span)?;
+        }
+        Ok((!sources.is_empty()).then(|| ReferenceOrigin::Candidates(sources.into())))
+    }
+
+    pub(super) fn check_aggregate_escape(
+        &mut self,
+        expr: &Expr,
+        ty: &Type,
+        returning: bool,
+    ) -> crate::Result<()> {
+        if self.reference_mode(ty, expr.span)?.is_some() {
+            return Ok(());
+        }
+        for source in self.aggregate_origins(expr, ty) {
+            if let Some(var) = self
+                .ctx
+                .env
+                .dropping_loan_storage(source.binding, returning)
+            {
+                return Err(crate::TypeError::DanglingReference {
+                    var,
+                    ref_span: expr.span,
+                    drop_span: expr.span,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_return_value_loans(
+        &mut self,
+        expr: &Expr,
+        ty: &Type,
+        span: verum_ast::Span,
+    ) -> crate::Result<()> {
+        if self.reference_mode(ty, span)?.is_some() {
+            self.check_return_lifetime(expr, span)
+        } else {
+            self.check_aggregate_escape(expr, ty, true)
+        }
+    }
+
     /// Unlike a witness identity, a lifetime restriction may conservatively
     /// retain several input loans when a callee can choose its return value.
     pub(super) fn bind_reference_result(
@@ -174,6 +337,31 @@ impl TypeChecker {
                         add(found, origin);
                     }
                 }
+            }
+            ExprKind::Tuple(values) | ExprKind::Array(verum_ast::expr::ArrayExpr::List(values)) => {
+                for value in values {
+                    self.collect_reference_candidates(value, found);
+                }
+            }
+            ExprKind::Array(verum_ast::expr::ArrayExpr::Repeat { value, .. }) => {
+                self.collect_reference_candidates(value, found)
+            }
+            ExprKind::Record { fields, base, .. } => {
+                for field in fields {
+                    if let Some(value) = &field.value {
+                        self.collect_reference_candidates(value, found);
+                    } else {
+                        for origin in self.ctx.env.reference_candidates(&field.name.name) {
+                            add(found, origin);
+                        }
+                    }
+                }
+                if let Some(base) = base {
+                    self.collect_reference_candidates(base, found);
+                }
+            }
+            ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
+                self.collect_reference_candidates(expr, found)
             }
             ExprKind::Call { args, .. } => {
                 for arg in args {
@@ -256,7 +444,7 @@ impl TypeChecker {
         }
     }
 
-    fn retain_origin(
+    pub(super) fn retain_origin(
         &mut self,
         origin: &RecordReceiver,
         holder: Option<&str>,

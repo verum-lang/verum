@@ -10191,22 +10191,9 @@ impl TypeChecker {
             }
 
             // Extract the variable name from the argument expression
-            let var_name = match &arg.kind {
-                ExprKind::Path(path) => {
-                    if path.segments.len() == 1 {
-                        if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                            Some(ident.name.clone())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
-
-            if let Some(name) = var_name {
+            if let ExprKind::Path(path) = &arg.kind && let Some(ident) = path.as_ident() {
+                let name = &ident.name;
+                self.check_borrowed_move(name, &resolved_param, arg.span)?;
                 // Check if this variable is affine and consume it
                 if self.affine_tracker.is_affine_binding(name.as_str()) {
                     self.affine_tracker.use_value(name.as_str(), arg.span)?;

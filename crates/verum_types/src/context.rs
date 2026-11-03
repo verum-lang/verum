@@ -1351,6 +1351,20 @@ impl TypeEnv {
         self.record_source(name, true).into_iter().collect()
     }
 
+    /// A stored loan can cross a block if its owner is outside that
+    /// block, and a function if it comes from an incoming reference.
+    pub(crate) fn dropping_loan_storage(&self, id: u64, returning: bool) -> Option<Text> {
+        let mut scope = self;
+        loop {
+            if let Some((name, place)) = scope.record_places.iter().find(|(_, place)| place.id == Some(id)) {
+                return (!returning || !matches!(place.reference, Some(ReferenceOrigin::Parameter)))
+                    .then(|| name.clone());
+            }
+            if !returning { return None; }
+            scope = scope.parent.as_deref()?;
+        }
+    }
+
     pub(crate) fn record_storage_name(&self, id: u64) -> Option<Text> {
         let mut scope = Some(self);
         while let Some(env) = scope {

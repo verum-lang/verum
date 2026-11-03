@@ -968,8 +968,19 @@ impl BorrowTracker {
         mutable: bool,
         span: Span,
     ) -> Option<TypeError> {
+        let conflict = self.overlapping_borrow(target, projection, mutable)?;
+        Some(TypeError::BorrowConflict {
+            var: target.into(),
+            existing_borrow_span: conflict.span,
+            existing_is_mut: conflict.is_mutable,
+            new_borrow_span: span,
+            new_is_mut: mutable,
+        })
+    }
+
+    pub(crate) fn overlapping_borrow(&self, target: &str, projection: Option<&str>, mutable: bool) -> Option<&Borrow> {
         let key = Text::from(target);
-        let conflict = self.active_mut_borrows.get(&key).and_then(|loans| loans.first())
+        self.active_mut_borrows.get(&key).and_then(|loans| loans.first())
             .or_else(|| self.active_immut_borrows.get(&key).and_then(|loans|
                 if mutable { loans.first() } else { None }))
             // Each reader owns a distinct loan, including two readers of
@@ -984,14 +995,8 @@ impl BorrowTracker {
                 // Field/index labels never contain dots. Zipping until either
                 // path ends treats an ancestor/descendant pair as overlapping.
                 write.split('.').zip(borrow.as_str().split('.')).all(|(a, b)| a == b)
-            }))?;
-        Some(TypeError::BorrowConflict {
-            var: key,
-            existing_borrow_span: conflict.span,
-            existing_is_mut: conflict.is_mutable,
-            new_borrow_span: span,
-            new_is_mut: mutable,
-        })
+            }))
+
     }
 
     /// Clone the tracker for branch analysis

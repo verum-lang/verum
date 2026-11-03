@@ -716,6 +716,7 @@ impl TypeChecker {
                 // exhaustiveness see the concrete payload (`Poll<Unit>`).
                 let applied = self.unifier.apply(&scrutinee_ty);
                 let scrutinee_ty = self.resolve_assoc_projections_deep(&applied);
+                let sources = self.aggregate_origins(scrutinee, &scrutinee_ty);
                 // The arms are ALTERNATIVES — the same rule, and the same
                 // code, as the arm loop in `infer_match_expr`. A `match` has
                 // TWO walkers, one per direction, exactly as `if` does; a fix
@@ -733,7 +734,7 @@ impl TypeChecker {
                 let mut affine_per_arm: Vec<crate::affine::AffineAlternatives> = Vec::new();
                 for arm in arms.iter() {
                     self.affine_tracker.restore_alternatives(&affine_at_match);
-                    let arm_result = self.infer_scoped_match_arm(arm, &scrutinee_ty, None, Some(expected))?;
+                    let arm_result = self.infer_scoped_match_arm(arm, &scrutinee_ty, None, Some(expected), &sources)?;
                     // An arm that diverges never reaches the code after the
                     // match, so what it consumed cannot reach it either.
                     if !self.is_never_type(&arm_result.ty) {
@@ -5752,9 +5753,11 @@ impl TypeChecker {
         scrutinee_ty: &Type,
         scrutinee_name: Option<&Text>,
         expected: Option<&Type>,
+        sources: &[crate::ty::RecordReceiver],
     ) -> Result<InferResult> {
         let bindings = self.collect_pattern_bindings(&arm.pattern, scrutinee_ty)?;
-        let ownership = self.affine_tracker.enter_pattern_scope(bindings.into_iter().map(|(name, _)| name));
+        let ownership = self.affine_tracker.enter_pattern_scope(bindings.iter().map(|(name, _)| name.clone()));
+        self.borrow_tracker.enter_scope();
         self.ctx.enter_scope();
         self.refinement_evidence.push_scope();
         let result = (|| {
@@ -5762,6 +5765,15 @@ impl TypeChecker {
                 self.add_pattern_evidence(&arm.pattern, name.clone(), arm.pattern.span);
             }
             self.bind_pattern(&arm.pattern, scrutinee_ty)?;
+            if !sources.is_empty() {
+                for (name, ty) in &bindings {
+                    if self.carries_stored_loan(ty) {
+                        for source in sources { self.retain_origin(source, None, arm.pattern.span)?; }
+                        self.ctx.env.set_reference_origin(name,
+                            crate::context::ReferenceOrigin::Candidates(sources.into()));
+                    }
+                }
+            }
             if let Some(guard) = &arm.guard {
                 self.check_expr(guard, &Type::bool())?;
                 self.refinement_evidence.add_evidence_from_condition(guard, guard.span);
@@ -5773,6 +5785,7 @@ impl TypeChecker {
         })();
         let linear_errors = self.affine_tracker.exit_pattern_scope(ownership, arm.body.span);
         self.refinement_evidence.pop_scope();
+        self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
         // Restore lexical state even when the arm failed. Outer consumption
         // remains in the tracker; only arm-owned pattern names leave scope.
@@ -5800,6 +5813,7 @@ impl TypeChecker {
                     // and exhaustiveness see the concrete payload.
                     let __applied = self.unifier.apply(&scrut_result.ty);
                     let scrut_ty = self.resolve_assoc_projections_deep(&__applied);
+                    let sources = self.aggregate_origins(scrutinee, &scrut_ty);
 
                     // Auto-deref scrutinee for match expressions:
                     // When matching &T where T is a variant/generic type, auto-deref to T.
@@ -5877,7 +5891,7 @@ impl TypeChecker {
                         self.affine_tracker.restore_alternatives(&affine_at_match);
                         let resolved_scrut_ty = self.unifier.apply(&scrut_ty);
                         let arm_result = self.infer_scoped_match_arm(
-                            arm, &resolved_scrut_ty, scrutinee_var.as_ref(), None,
+                            arm, &resolved_scrut_ty, scrutinee_var.as_ref(), None, &sources,
                         )?;
                         let is_arm_never = self.is_never_type(&arm_result.ty);
 
@@ -10827,9 +10841,7 @@ impl TypeChecker {
             // ============================================================
             // Check if we're returning a reference to a local variable.
             // This would create a dangling reference when the function returns.
-            if self.is_reference_type(&val_result.ty) {
-                self.check_return_lifetime(v, expr.span)?;
-            }
+            self.check_return_value_loans(v, &val_result.ty, expr.span)?;
         }
         // `return` is a scope end for an exactly-once obligation — AFTER
         // the returned expression is walked, because `return close(s)`
@@ -15021,8 +15033,10 @@ impl TypeChecker {
             InferResult::new(Type::unit())
         };
 
+        let validation = block.expr.as_ref().map(|tail| self.check_aggregate_escape(tail, &result.ty, false));
         self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
+        validation.transpose()?;
         Ok(result)
     }
 
@@ -15163,8 +15177,10 @@ impl TypeChecker {
             }
         };
 
+        let validation = block.expr.as_ref().map(|tail| self.check_aggregate_escape(tail, &result.ty, false));
         self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
+        validation.transpose()?;
         Ok(result)
     }
 }

@@ -10116,6 +10116,11 @@ impl TypeChecker {
                     // quantified over, causing instantiate() to create new fresh variables
                     // that lose the unification information.
                     let resolved_ty = self.unifier.apply(&actual_ty);
+                    if let ExprKind::Path(path) = &val.kind && let Some(ident) = path.as_ident()
+                        && !self.is_reference_type(&resolved_ty)
+                    {
+                        self.check_borrowed_move(&ident.name, &resolved_ty, val.span)?;
+                    }
 
                     // =====================================================================
                     // E320: Check stack allocation size
@@ -10227,9 +10232,12 @@ impl TypeChecker {
 
                     // Resolve an alias while its initializer's lexical bindings
                     // are still visible (the new pattern may shadow one).
-                    let origin = if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
-                        && self.is_shared_reference_head(&scheme.ty, val.span)? {
-                        self.bind_reference_result(val, &name.name)?
+                    let origin = if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                        if self.is_shared_reference_head(&scheme.ty, val.span)? {
+                            self.bind_reference_result(val, &name.name)?
+                        } else {
+                            self.bind_aggregate_result(val, &scheme.ty)?
+                        }
                     } else { None };
                     self.bind_pattern_scheme(pattern, scheme.clone())?;
                     if let (Some(origin), verum_ast::PatternKind::Ident { name, .. }) = (origin, &pattern.kind) {

@@ -12722,10 +12722,8 @@ impl TypeChecker {
                         // Check if we're returning a reference to a local variable.
                         // This would create a dangling reference when the function returns.
                         // Skip lifetime check for generators - they yield, not return references
-                        if !func.is_generator && self.is_reference_type(&expected_return) {
-                            if let Some(ref trailing_expr) = block.expr {
-                                self.check_return_lifetime(trailing_expr, span)?;
-                            }
+                        if !func.is_generator && let Some(ref tail) = block.expr {
+                            self.check_return_value_loans(tail, &expected_return, span)?;
                         }
                     }
                     FunctionBody::Expr(expr) => {
@@ -12737,8 +12735,8 @@ impl TypeChecker {
                         // Check if we're returning a reference to a local variable.
                         // This would create a dangling reference when the function returns.
                         // Skip lifetime check for generators - they yield, not return references
-                        if !func.is_generator && self.is_reference_type(&expected_return) {
-                            self.check_return_lifetime(expr, span)?;
+                        if !func.is_generator {
+                            self.check_return_value_loans(expr, &expected_return, span)?;
                         }
                     }
                 };
@@ -12764,10 +12762,8 @@ impl TypeChecker {
                         // Spec: L0-critical/reference_system/access_rules/ref_escaping_fail
                         // ============================================================
                         // Check if we're returning a reference to a local variable.
-                        if self.is_reference_type(&result.ty) {
-                            if let Some(ref trailing_expr) = block.expr {
-                                self.check_return_lifetime(trailing_expr, span)?;
-                            }
+                        if let Some(ref tail) = block.expr {
+                            self.check_return_value_loans(tail, &result.ty, span)?;
                         }
                         result
                     }
@@ -12778,9 +12774,7 @@ impl TypeChecker {
                         // Spec: L0-critical/reference_system/access_rules/ref_escaping_fail
                         // ============================================================
                         // Check if we're returning a reference to a local variable.
-                        if self.is_reference_type(&result.ty) {
-                            self.check_return_lifetime(expr, span)?;
-                        }
+                        self.check_return_value_loans(expr, &result.ty, span)?;
                         result
                     }
                 };
