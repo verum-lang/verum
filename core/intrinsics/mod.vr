@@ -74,48 +74,48 @@ module core.intrinsics;
 // =============================================================================
 
 /// Arithmetic intrinsics: add, sub, mul, div, checked_*, wrapping_*, saturating_*
-public mount arithmetic.*;
+public mount .arithmetic.*;
 
 /// Bitwise intrinsics: and, or, xor, shift, rotate, clz, ctz, popcnt
-public mount bitwise.*;
+public mount .bitwise.*;
 
 /// Floating-point intrinsics: sqrt, sin, cos, exp, log, fma, classification
-public mount float.*;
+public mount .float.*;
 
 /// Memory intrinsics: memcpy, memmove, memset, ptr_read, ptr_write
-public mount memory.*;
+public mount .memory.*;
 
 /// Atomic intrinsics: atomic_load, atomic_store, atomic_cmpxchg, fence
-public mount atomic.*;
+public mount .atomic.*;
 
 /// Type information intrinsics: size_of, align_of, type_id, type_name
-public mount type_info.*;
+public mount .type_info.*;
 
 /// Conversion intrinsics: int_to_float, bitcast, transmute, byte conversions
-public mount conversion.*;
+public mount .conversion.*;
 
 /// Control flow intrinsics: trap, unreachable, assume, likely, prefetch
-public mount control.*;
+public mount .control.*;
 
 /// Platform intrinsics: target detection, CPU features
-public mount platform.*;
+public mount .platform.*;
 
 /// SIMD intrinsics: simd_extract, simd_insert, simd_shuffle, simd_reduce_*
-public mount simd.*;
+public mount .simd.*;
 
 /// Tensor intrinsics: tensor_new, tensor_matmul, tensor_reduce, etc.
-public mount tensor.*;
+public mount .tensor.*;
 
 /// GPU intrinsics: gpu_malloc, gpu_memcpy, gpu_stream_create, etc.
-public mount gpu.*;
+public mount .gpu.*;
 
 // =============================================================================
 // RUNTIME INTRINSICS (requires runtime support)
 // =============================================================================
 
 /// Runtime-dependent intrinsics (async, TLS, syscall, CBGR, etc.)
-public mount runtime.*;
-public mount runtime;
+public mount .runtime.*;
+public module runtime;
 
 // =============================================================================
 // LOW-LEVEL INTRINSICS (@llvm_only)
@@ -123,8 +123,8 @@ public mount runtime;
 
 /// Low-level, architecture-specific intrinsics (x86_64, aarch64, kernel)
 /// Most functions in this module are @llvm_only and cannot run in interpreter.
-public mount lowlevel.*;
-public mount lowlevel;
+public mount .lowlevel.*;
+public module lowlevel;
 
 // =============================================================================
 // EXPLICIT RE-EXPORTS
@@ -135,7 +135,7 @@ public mount lowlevel;
 // =============================================================================
 
 // --- From runtime/time ---
-public mount runtime.time.{
+public mount .runtime.time.{
     monotonic_nanos,
     realtime_secs,
     realtime_nanos,
@@ -145,7 +145,7 @@ public mount runtime.time.{
 };
 
 // --- From runtime/async_ops ---
-public mount runtime.async_ops.{
+public mount .runtime.async_ops.{
     RawJoinHandleOpaque,
     RawExecutorHandle,
     RawFutureHandle,
@@ -178,7 +178,7 @@ public mount runtime.async_ops.{
 };
 
 // --- From runtime/tls ---
-public mount runtime.tls.{
+public mount .runtime.tls.{
     tls_get_base,
     tls_slot_get,
     tls_slot_set,
@@ -195,7 +195,7 @@ public mount runtime.tls.{
 };
 
 // --- From runtime/text ---
-public mount runtime.text.{
+public mount .runtime.text.{
     text_from_static,
     utf8_decode_char,
     utf8_decode_char_len,
@@ -217,29 +217,29 @@ public mount runtime.text.{
 };
 
 // --- From runtime/sync ---
-public mount runtime.sync.{
+public mount .runtime.sync.{
     compiler_fence,
     spin_loop_hint,
     spin_hint,
 };
 
 // --- From runtime/syscall ---
-public mount runtime.syscall.{
+public mount .runtime.syscall.{
     syscall6,
 };
 
 // --- From runtime/cbgr ---
-public mount runtime.cbgr.*;
+public mount .runtime.cbgr.*;
 
 // --- From atomic (resolve generic overload ambiguity) ---
-public mount atomic.{
+public mount .atomic.{
     atomic_load,
     atomic_store,
     MemoryOrder,
 };
 
 // --- From memory (resolve generic overload ambiguity) ---
-public mount memory.{
+public mount .memory.{
     slice_as_ptr,
     slice_as_mut_ptr,
     slice_get_unchecked,
@@ -252,7 +252,7 @@ public mount memory.{
 };
 
 // --- From type_info (resolve generic overload ambiguity) ---
-public mount type_info.{
+public mount .type_info.{
     align_of,
     size_of,
     type_id,
