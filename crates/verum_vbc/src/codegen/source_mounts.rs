@@ -169,30 +169,33 @@ impl VbcCodegen {
             .source_module_owners
             .member(written, scope, self.source_module_root())?;
         let (owner, name) = path.rsplit_once('.')?;
-        let source = self.source_callable_exports.modules.get(owner)?;
+        let Some(source) = self.source_callable_exports.modules.get(owner) else {
+            return self
+                .type_name_to_id
+                .contains_key(path.as_str())
+                .then(|| path.into_string());
+        };
         let named_callable = source.declarations.contains_key(name)
-            || (!source.values.contains(name)
-                && !self.type_name_to_id.contains_key(path.as_str())
-                && [name, alias].into_iter().any(|leaf| {
-                    self.source_callable_exports.declared_names.contains(leaf)
-                        || self.ctx.functions.get(leaf).is_some_and(|info| {
-                            info.variant_tag.is_some()
-                                || info.has_source_body
-                                    && info.parent_type_name.is_none()
-                                    && !info.is_const
-                                    && info.param_names.first().is_none_or(|first| first != "self")
-                        })
-                }));
+            || [name, alias].into_iter().any(|leaf| {
+                self.source_callable_exports.declared_names.contains(leaf)
+                    || self.ctx.functions.get(leaf).is_some_and(|info| {
+                        info.variant_tag.is_some()
+                            || info.has_source_body
+                                && info.parent_type_name.is_none()
+                                && !info.is_const
+                                && info.param_names.first().is_none_or(|first| first != "self")
+                    })
+            });
         named_callable.then(|| path.into_string())
     }
 
-    pub(super) fn resolve_source_callable_export(
-        &self,
-        path: &str,
-    ) -> Result<(String, FunctionInfo), String> {
+    /// Follow public export edges once for both nominal IDs and callable bindings.
+    /// Only selections which converge on one declaration identify a symbol.
+    fn source_export_candidates(&self, path: &str) -> (BTreeSet<String>, HashSet<String>) {
         let mut pending = vec![(path.to_owned(), true)];
         let mut visited = HashSet::new();
         let mut declarations = BTreeSet::new();
+        let mut values = HashSet::new();
         while let Some((path, includes_declarations)) = pending.pop() {
             if !visited.insert((path.clone(), includes_declarations)) {
                 continue;
@@ -201,8 +204,12 @@ impl VbcCodegen {
                 continue;
             };
             let Some(source) = self.source_callable_exports.modules.get(owner) else {
-                // An earlier archive can witness an exact external declaration.
-                if self.ctx.functions.contains_key(&path) {
+                // Imported nominal IDs and callable descriptors are independent
+                // witnesses. A constructor elsewhere cannot turn a type into a call.
+                if self.type_name_to_id.contains_key(&path) {
+                    values.insert(path.clone());
+                    declarations.insert(path);
+                } else if self.ctx.functions.contains_key(&path) {
                     declarations.insert(path);
                 }
                 continue;
@@ -215,6 +222,9 @@ impl VbcCodegen {
             };
             if includes_declarations && let Some(targets) = source.declarations.get(name) {
                 declarations.extend(targets.iter().cloned());
+            } else if includes_declarations && source.values.contains(name) {
+                values.insert(path.clone());
+                declarations.insert(path);
             } else if let Some(targets) = source.named.get(name) {
                 pending.extend(targets.iter().map(|target| (anchored(target), true)));
             } else {
@@ -234,18 +244,47 @@ impl VbcCodegen {
                 );
             }
         }
+        (declarations, values)
+    }
+
+    pub(super) fn source_export_type_id(
+        &self,
+        path: &str,
+        scope: &str,
+    ) -> Option<crate::types::TypeId> {
+        let path = self
+            .source_module_owners
+            .member(path, scope, self.source_module_root())?;
+        let (mut declarations, values) = self.source_export_candidates(&path);
+        if declarations.len() != 1 {
+            return None;
+        }
+        let key = declarations.pop_first()?;
+        values
+            .contains(&key)
+            .then(|| self.type_name_to_id.get(&key).copied())
+            .flatten()
+    }
+
+    pub(super) fn resolve_source_callable_export(
+        &self,
+        path: &str,
+    ) -> Result<Option<(String, FunctionInfo)>, String> {
+        let (mut declarations, values) = self.source_export_candidates(path);
         if declarations.len() > 1 {
             return Err(format!(
                 "ambiguous callable mount `{path}`: {}",
                 declarations.into_iter().collect::<Vec<_>>().join(", ")
             ));
         }
-        let selected = declarations.pop_first().and_then(|key| {
-            self.ctx
-                .lookup_function(&key)
-                .cloned()
-                .map(|info| (key, info))
-        });
-        selected.ok_or_else(|| format!("no callable declaration for mount `{path}`"))
+        if let Some(key) = declarations.pop_first() {
+            if let Some(info) = self.ctx.lookup_function(&key) {
+                return Ok(Some((key, info.clone())));
+            }
+            if values.contains(&key) {
+                return Ok(None);
+            }
+        }
+        Err(format!("no callable declaration for mount `{path}`"))
     }
 }

@@ -279,9 +279,12 @@ impl VbcCodegen {
                 .or_insert(Some(key.clone()));
         }
         let mut names = BTreeSet::new();
-        for source in sources {
+        let mut scopes: Vec<_> = sources.iter().map(|source| {
             let owner = Self::resolve_full_module_path(source, &self.config.module_name)
                 .unwrap_or_else(|| self.config.module_name.clone());
+            (owner, source.items.as_slice())
+        }).collect();
+        while let Some((owner, items)) = scopes.pop() {
             let qualify = |written: String| {
                 // Path's Relative segment renders as `.::`, hence `..`
                 // after the same separator normalization used by mounts.
@@ -295,8 +298,13 @@ impl VbcCodegen {
             };
             let mut bindings = HashMap::new();
             let mut globs = Vec::new();
-            for item in &source.items {
+            for item in items {
                 if !self.should_compile_item(item) { continue; }
+                if let ItemKind::Module(child) = &item.kind && let Some(items) = &child.items {
+                    let scope = crate::module::qualify_module_name(&owner, child.name.name.as_str());
+                    scopes.push((scope, items.as_slice()));
+                    continue;
+                }
                 paths.visit_item(item);
                 if let ItemKind::Mount(decl) = &item.kind {
                     visit_named_mounts(&decl.tree, "", decl.alias.as_ref(), &mut |alias, target| {
@@ -777,7 +785,8 @@ impl VbcCodegen {
         };
         if binding == Some(&None) { return None; }
         if let Some(mounted) = self.mounted_type_path(name) {
-            return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")));
+            return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")))
+                .or_else(|| self.source_export_type_id(mounted, owner));
         }
         lookup(name)
     }

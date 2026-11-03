@@ -334,3 +334,87 @@ fn a_foreign_mount_selects_its_declared_link_symbol_in_either_order() {
         );
     }
 }
+
+#[test]
+fn an_imported_record_keeps_its_namespace_through_a_public_facade() {
+    let sources = [
+        "module graph.entities; public type Node is { value: Int }",
+        "module graph.other; public type Token is End | Node(Int);",
+        "module graph.surface; public mount graph.entities.{Node as Item};",
+        "module graph.client; mount graph.surface.{Item}; public fn read(item: Item)->Int { item.value }",
+    ].map(|s| Parser::new(s).parse_module().unwrap());
+    for order in [[0, 1, 2, 3], [3, 2, 1, 0]] {
+        let files = order.map(|i| &sources[i]);
+        let mut cg = VbcCodegen::new();
+        cg.collect_unit_declarations(&files).unwrap();
+        cg.resolve_pending_imports();
+        cg.compile_unit_items(&files, ItemFailurePolicy::Strict)
+            .unwrap();
+        assert!(
+            cg.export_functions().get("graph.surface.Item").is_none(),
+            "{:?}",
+            cg.export_functions().get("graph.surface.Item")
+        );
+        let module = cg.finalize_module().unwrap();
+        let wire = verum_vbc::deserialize::deserialize_module(
+            &verum_vbc::serialize::serialize_module(&module).unwrap(),
+        )
+        .unwrap();
+        let f = wire.find_function_by_name("graph.client.read").unwrap();
+        let function = wire.get_function(f).unwrap();
+        let param = function.semantic_params.as_ref().unwrap()[0]
+            .as_ref()
+            .unwrap();
+        let declared = wire.get_type(param.base_type_id().unwrap()).unwrap();
+        assert_eq!(wire.get_string(declared.name), Some("Node"));
+        assert_eq!(
+            declared.origin_module.and_then(|id| wire.get_string(id)),
+            Some("graph.entities")
+        );
+    }
+}
+
+#[test]
+fn an_inline_facade_imports_its_reexported_type_from_a_separate_header() {
+    let provider = Parser::new("module graph.entities; public type Node is { value: Int }")
+        .parse_module()
+        .unwrap();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("graph.entities"));
+    let interface = producer
+        .collect_declaration_interface(&[&provider])
+        .unwrap();
+    let header = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&interface).unwrap(),
+    )
+    .unwrap();
+    let sources = [
+        "module graph; public module surface { public mount super.entities.{Node as Item}; }",
+        "module graph.client; mount graph.surface.Item; public type Token is End | Node(Int); public fn read(item: Item)->Int { item.value }",
+    ].map(|source| Parser::new(source).parse_module().unwrap());
+    let files = [&sources[0], &sources[1]];
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("graph"));
+    assert_eq!(
+        cg.import_bootstrap_nominal_dependencies(&files, &[&header])
+            .unwrap(),
+        1
+    );
+    cg.collect_unit_declarations(&files).unwrap();
+    cg.resolve_pending_imports();
+    cg.compile_unit_items(&files, ItemFailurePolicy::Strict)
+        .unwrap();
+    assert!(
+        cg.export_functions().get("graph.surface.Item").is_none(),
+        "{:?}",
+        cg.export_functions().get("graph.surface.Item")
+    );
+    let wire = cg.finalize_module().unwrap();
+    let read = wire
+        .get_function(wire.find_function_by_name("graph.client.read").unwrap())
+        .unwrap();
+    let ty = read.semantic_params.as_ref().unwrap()[0].as_ref().unwrap();
+    let node = wire.get_type(ty.base_type_id().unwrap()).unwrap();
+    assert_eq!(
+        node.origin_module.and_then(|id| wire.get_string(id)),
+        Some("graph.entities")
+    );
+}

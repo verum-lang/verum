@@ -12742,10 +12742,10 @@ impl VbcCodegen {
                 // source callable only after all declarations and export edges
                 // exist. No bare or shortened spelling establishes its owner.
                 if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name, self.lexical_type_scope()) {
-                    if let Ok((key, info)) = self.resolve_source_callable_export(&target) {
-                        self.bind_mounted_function(&alias_name, &func_name, &key, info);
-                    } else {
-                        self.defer_named_mount(full_path, alias_name);
+                    match self.resolve_source_callable_export(&target) {
+                        Ok(Some((key, info))) => self.bind_mounted_function(&alias_name, &func_name, &key, info),
+                        Ok(None) => {}
+                        Err(_) => self.defer_named_mount(full_path, alias_name),
                     }
                     return Ok(());
                 }
@@ -13419,9 +13419,10 @@ impl VbcCodegen {
 
             if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name, owning_module.as_deref().unwrap_or_default()) {
                 match self.resolve_source_callable_export(&target) {
-                    Ok((key, info)) => self.bind_deferred_mounted_function(
+                    Ok(Some((key, info))) => self.bind_deferred_mounted_function(
                         &alias_name, &func_name, &key, info, owning_module.as_deref(),
                     ),
+                    Ok(None) => {}
                     Err(message) => {
                         self.source_declaration_error.get_or_insert(CodegenErrorKind::InvalidSourceMount(message));
                     }
