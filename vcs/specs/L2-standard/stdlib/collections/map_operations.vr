@@ -102,12 +102,9 @@ fn test_map_insertion() {
     extended.extend([("b", 2), ("c", 3)]);
     assert(extended.len() == 3);
 
-    // Commented out: OccupiedError type not found
-    // let mut try_map: Map<Text, Int> = Map.from([("exists", 1)]);
-    // let result1: Result<&mut Int, OccupiedError<Text, Int>> = try_map.try_insert("exists", 2);
-    // assert(result1.is_err());
-    // let result2: Result<&mut Int, OccupiedError<Text, Int>> = try_map.try_insert("new", 2);
-    // assert(result2.is_ok());
+    let mut only_new: Map<Text, Int> = Map.from([("exists", 1)]);
+    assert(only_new.insert_if_absent("exists", 2).is_err());
+    assert(only_new.insert_if_absent("new", 2).is_ok());
 }
 
 /// Test map retrieval operations

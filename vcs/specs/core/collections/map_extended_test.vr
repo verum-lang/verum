@@ -771,7 +771,7 @@ fn test_map_into_values_empty() {
 }
 
 // =============================================================================
-// Section: get_or_insert / get_or_insert_with / get_or_default
+// Section: get_or_insert / get_or_insert_with / get_or_insert_default
 // =============================================================================
 
 @test
@@ -816,9 +816,9 @@ fn test_map_get_or_insert_with_existing() {
 }
 
 @test
-fn test_map_get_or_default() {
+fn test_map_get_or_insert_default() {
     let mut m: Map<Text, Int> = Map.new();
-    let val = m.entry("count").or_default();
+    let val = m.get_or_insert_default("count");
     assert_eq(*val, 0); // Int default is 0
     *val = *val + 5;
     assert_eq(*m.get(&"count").unwrap(), 5);
@@ -1372,11 +1372,11 @@ fn test_map_get_or_insert_chained_mutations() {
 }
 
 @test
-fn test_map_get_or_default_multiple_keys() {
+fn test_map_get_or_insert_default_multiple_keys() {
     let mut m: Map<Text, Int> = Map.new();
-    *m.entry("a").or_default() = 1;
-    *m.entry("b").or_default() = 2;
-    *m.entry("c").or_default() = 3;
+    *m.get_or_insert_default("a") = 1;
+    *m.get_or_insert_default("b") = 2;
+    *m.get_or_insert_default("c") = 3;
     assert_eq(m.len(), 3);
     assert_eq(*m.get(&"a").unwrap(), 1);
     assert_eq(*m.get(&"b").unwrap(), 2);

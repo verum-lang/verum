@@ -55,7 +55,7 @@ Test coverage for Verum's collection types.
 | `consistency_conversion_test.vr` | `collections/*` | Deque.into_list, BTreeMap.keys_list/values_list, Heap.to_list | 19 |
 | `map_utils_test.vr` | `collections/map` | get_or_default, filter_map | 18 |
 | `heap_peek_mut_test.vr` | `collections/heap` | BinaryHeap.peek_mut(), PeekMut guard, Slice.fill_default | 18 |
-| `map_tryinsert_test.vr` | `collections/map` | Map.try_insert | 17 |
+| `map_tryinsert_test.vr` | `collections/map` | Map.insert_if_absent | 17 |
 | `list_flat_map_test.vr` | `collections/list` | List.flat_map | 15 |
 | `list_chunk_by_test.vr` | `collections/list` | chunk_by with various predicates | 15 |
 | `set_conversion_test.vr` | `collections/set` | Set conversion methods | 14 |
@@ -121,7 +121,7 @@ Hash-based key-value mapping.
 **Mutation:**
 - `insert(key, value)`, `remove(key)`, `clear()`, `update(key, f)`, `pop_entry(key)`
 - `entry(key)` — Entry API (or_insert, or_insert_with, or_default, and_modify)
-- `extract_if(pred)`, `merge(other, resolve)`, `filter_map(f)`, `try_insert(key, value)`
+- `extract_if(pred)`, `merge(other, resolve)`, `filter_map(f)`, `insert_if_absent(key, value)`, `try_insert(key, value)`
 
 **Iteration:**
 - `keys()`, `values()`, `iter()`, `iter_mut()` with DoubleEndedIterator support

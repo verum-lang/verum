@@ -1,73 +1,87 @@
 // =============================================================================
-// map_tryinsert_test.vr - Tests for Map try_insert and contains_value
+// map_tryinsert_test.vr - Tests for Map insert_if_absent and contains_value
 // =============================================================================
-// @test: typecheck-pass
+// @test
+fn test_fallible_insert_returns_previous_value() {
+    let mut m: Map<Int, Int> = Map.new();
+    match m.try_insert(3, 17) {
+        Result.Ok(Maybe.None) => {},
+        _ => assert(false),
+    }
+    match m.try_insert(3, 41) {
+        Result.Ok(Maybe.Some(previous)) => assert_eq(previous, 17),
+        _ => assert(false),
+    }
+    assert_eq(*m.get(&3).unwrap(), 41);
+}
+
+@test: typecheck-pass
 // @level: L1
 // @tier: 0
-// @tags: collections, map, try_insert, contains_value, core
-// @description: Tests for Map try_insert and contains_value methods
+// @tags: collections, map, insert_if_absent, contains_value, core
+// @description: Tests for Map insert_if_absent and contains_value methods
 // =============================================================================
 
 mount core.collections.map.Map;
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
-// Section 1: try_insert - basic
+// Section 1: insert_if_absent - basic
 // =============================================================================
 
 @test
-fn test_try_insert_vacant() {
+fn test_insert_if_absent_vacant() {
     let mut m: Map<Text, Int> = Map.new();
-    let result = m.try_insert("a", 1);
+    let result = m.insert_if_absent("a", 1);
     assert(result.is_ok());
     assert_eq(m.len(), 1);
     assert_eq(*m.get(&"a").unwrap(), 1);
 }
 
 @test
-fn test_try_insert_occupied() {
+fn test_insert_if_absent_occupied() {
     let mut m: Map<Text, Int> = Map.new();
     m.insert("a", 1);
-    let result = m.try_insert("a", 2);
+    let result = m.insert_if_absent("a", 2);
     assert(result.is_err());
     // Original value should be unchanged
     assert_eq(*m.get(&"a").unwrap(), 1);
 }
 
 @test
-fn test_try_insert_multiple_vacant() {
+fn test_insert_if_absent_multiple_vacant() {
     let mut m: Map<Text, Int> = Map.new();
-    assert(m.try_insert("a", 1).is_ok());
-    assert(m.try_insert("b", 2).is_ok());
-    assert(m.try_insert("c", 3).is_ok());
+    assert(m.insert_if_absent("a", 1).is_ok());
+    assert(m.insert_if_absent("b", 2).is_ok());
+    assert(m.insert_if_absent("c", 3).is_ok());
     assert_eq(m.len(), 3);
 }
 
 @test
-fn test_try_insert_err_returns_value() {
+fn test_insert_if_absent_err_returns_value() {
     let mut m: Map<Text, Int> = Map.new();
     m.insert("a", 1);
-    match m.try_insert("a", 99) {
+    match m.insert_if_absent("a", 99) {
         Err(val) => assert_eq(val, 99),
         Ok(_) => assert(false),
     }
 }
 
 @test
-fn test_try_insert_then_get() {
+fn test_insert_if_absent_then_get() {
     let mut m: Map<Int, Int> = Map.new();
-    m.try_insert(1, 10);
-    m.try_insert(2, 20);
-    m.try_insert(3, 30);
+    m.insert_if_absent(1, 10);
+    m.insert_if_absent(2, 20);
+    m.insert_if_absent(3, 30);
     assert_eq(*m.get(&1).unwrap(), 10);
     assert_eq(*m.get(&2).unwrap(), 20);
     assert_eq(*m.get(&3).unwrap(), 30);
 }
 
 @test
-fn test_try_insert_empty_map() {
+fn test_insert_if_absent_empty_map() {
     let mut m: Map<Int, Text> = Map.new();
-    assert(m.try_insert(1, "hello").is_ok());
+    assert(m.insert_if_absent(1, "hello").is_ok());
     assert_eq(m.len(), 1);
 }
 
@@ -130,25 +144,25 @@ fn test_contains_value_text() {
 }
 
 // =============================================================================
-// Section 3: try_insert combined with other operations
+// Section 3: insert_if_absent combined with other operations
 // =============================================================================
 
 @test
-fn test_try_insert_after_remove() {
+fn test_insert_if_absent_after_remove() {
     let mut m: Map<Text, Int> = Map.new();
     m.insert("a", 1);
     m.remove(&"a");
     // Now "a" is vacant again
-    assert(m.try_insert("a", 2).is_ok());
+    assert(m.insert_if_absent("a", 2).is_ok());
     assert_eq(*m.get(&"a").unwrap(), 2);
 }
 
 @test
-fn test_try_insert_many() {
+fn test_insert_if_absent_many() {
     let mut m: Map<Int, Int> = Map.new();
     let mut successes = 0;
     for i in range(0, 50) {
-        if m.try_insert(i, i * 10).is_ok() {
+        if m.insert_if_absent(i, i * 10).is_ok() {
             successes = successes + 1;
         }
     }
@@ -157,14 +171,14 @@ fn test_try_insert_many() {
 }
 
 @test
-fn test_try_insert_all_occupied() {
+fn test_insert_if_absent_all_occupied() {
     let mut m: Map<Int, Int> = Map.new();
     for i in range(0, 10) {
         m.insert(i, i);
     }
     let mut failures = 0;
     for i in range(0, 10) {
-        if m.try_insert(i, i * 100).is_err() {
+        if m.insert_if_absent(i, i * 100).is_err() {
             failures = failures + 1;
         }
     }

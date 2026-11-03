@@ -1119,33 +1119,18 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     /// Get a mutable reference to the value for `key`, inserting `V.default()` if not present.
-    public fn get_or_default(&mut self, key: K) -> &mut V
+    public fn get_or_insert_default(&mut self, key: K) -> &mut V
     where V: Default
     {
         self.entry(key).or_default()
     }
 
-    /// Try to insert a key-value pair. Returns Err with the existing value
-    /// if the key already exists, or Ok with a mutable reference to the
-    /// newly inserted value.
-    ///
-
-    /// # Example
-    ///
-
-    /// ```verum
-    /// let mut m: Map<Text, Int> = Map.new();
-    /// assert(m.try_insert("a", 1).is_ok());
-    /// assert(m.try_insert("a", 2).is_err());
-    /// ```
-    public fn try_insert(&mut self, key: K, value: V) -> Result<&mut V, V> {
+    /// Insert only when the key is absent. Success borrows the inserted value.
+    /// An occupied key preserves the existing value and returns the supplied value.
+    public fn insert_if_absent(&mut self, key: K, value: V) -> Result<&mut V, V> {
         match self.entry(key) {
-            Occupied(entry) => {
-                Result.Err(value)
-            }
-            Vacant(entry) => {
-                Result.Ok(entry.insert(value))
-            }
+            Occupied(_) => Result.Err(value),
+            Vacant(entry) => Result.Ok(entry.insert(value)),
         }
     }
 
