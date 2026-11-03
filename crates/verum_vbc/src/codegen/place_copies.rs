@@ -81,6 +81,7 @@ impl VbcCodegen {
                 self.ctx.declared_result_types.get(&then_branch.span).cloned().flatten(),
                 else_branch.as_ref().map_or(Some(TypeRef::Concrete(crate::types::TypeId::UNIT)), |branch| nested(branch, None)),
             ),
+            ExprKind::Closure { .. } => self.compiled_callable_signature(expr).cloned(),
             ExprKind::Path(path) => {
                 let name = match path.segments.as_slice() {
                     [verum_ast::PathSegment::Name(name)] => name.name.as_str(),

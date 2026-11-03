@@ -8467,7 +8467,7 @@ impl VbcCodegen {
     }
 
     /// Read the semantic signature produced for this exact closure body.
-    fn compiled_callable_signature(&self, expr: &Expr) -> Option<&crate::types::TypeRef> {
+    pub(super) fn compiled_callable_signature(&self, expr: &Expr) -> Option<&crate::types::TypeRef> {
         match &expr.kind {
             ExprKind::Paren(inner) => self.compiled_callable_signature(inner),
             ExprKind::Closure { async_: false, contexts, .. } if contexts.is_empty() => {

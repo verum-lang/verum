@@ -156,3 +156,25 @@ fn probe() -> Int {
 }
 "#);
 }
+
+#[test]
+fn inferred_local_factory_forwards_its_return_type_as_an_ownership_witness() {
+    run(r#"
+type Source<T> is { label: Int };
+implement<T> Source<T> {
+    fn acquire(factory: fn() -> T) {
+        let value: T = factory();
+        let owned: T = value;
+        drop(owned);
+    }
+}
+fn probe() -> Int {
+    let mut count = Count { value: 0 };
+    let counter = &mut count;
+    let factory = || -> Ticket { Ticket { count: counter } };
+    let create = factory;
+    Source.acquire(create);
+    count.value
+}
+"#);
+}
