@@ -89,6 +89,20 @@ fn run(body: &str, expected: i64) {
 }
 
 #[test]
+fn missing_drop_witness_identifies_the_type_and_source_frame() {
+    for bootstrap in [false, true] {
+        let module = compile("", bootstrap);
+        let dispose = module.find_function_by_name("drop_runtime.dispose").unwrap();
+        let error = Interpreter::new(Arc::new(module))
+            .execute_function_with_args(dispose, &[verum_vbc::Value::from_i64(42)])
+            .expect_err("a runtime value cannot supply the generic destructor witness");
+        let message = error.to_string();
+        assert!(message.contains("unresolved declaration witnesses for T0"), "{message}");
+        assert!(message.contains("drop_runtime.dispose"), "{message}");
+    }
+}
+
+#[test]
 fn generic_maybe_destroys_its_owned_payload_once() {
     run(
         r#"

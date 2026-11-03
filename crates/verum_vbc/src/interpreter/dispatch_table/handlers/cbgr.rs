@@ -1334,8 +1334,15 @@ pub(in super::super) fn handle_drop_typed(state: &mut InterpreterState) -> Inter
     let src = read_reg(state)?;
     let ty = read_type_ref(state)?;
     let ty = state.resolve_generic_witness(&ty);
-    let plan = crate::drop_plan::build(&state.module, &ty)
-        .map_err(|message| InterpreterError::Panic { message: message.to_string() })?;
+    let plan = crate::drop_plan::build(&state.module, &ty).map_err(|message| {
+        InterpreterError::Panic {
+            message: format!(
+                "{message} for {} in {}",
+                state.module.display_type_ref(&ty),
+                state.call_stack.frame_names(&state.module, 8),
+            ),
+        }
+    })?;
     let value = state.get_reg(src);
     validate_typed_drop(state, value, &plan)?;
     // Consume the owner before a destructor can reenter the interpreter.
