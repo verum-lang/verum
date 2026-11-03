@@ -51,6 +51,7 @@ mount sys.time_ops.{sleep_ms as sleep_millis};
 mount core.time.{Duration};
 mount core.time.instant.{Instant};
 mount core.sync.{Mutex, AtomicInt, AtomicBool};
+mount core.sync.atomic.FutexLock;
 
 @cfg(target_os = "windows")
 mount sys.windows.thread.{
