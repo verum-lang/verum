@@ -1628,8 +1628,14 @@ impl SymbolGraph {
         let mut seen: HashSet<String> = HashSet::new();
         let mut leaf_index: HashMap<String, Vec<String>> = HashMap::new();
         let mut prefix_index: HashMap<String, Vec<String>> = HashMap::new();
+        let mut aliases = std::collections::BTreeMap::<String, (u32, Option<String>)>::new();
 
         for (idx, view) in per_module {
+            for (alias, target) in view.qualified_aliases {
+                aliases.entry(alias).and_modify(|(_, existing)| {
+                    if existing.as_ref() != Some(&target) { *existing = None; }
+                }).or_insert((idx, Some(target)));
+            }
             let entry_name: &str = archive
                 .index
                 .get(idx as usize)
@@ -1697,6 +1703,14 @@ impl SymbolGraph {
             }
         }
 
+        // A qualified mount can be the user's only path to a body in another
+        // archive entry. Make it an exact edge without widening bare-method
+        // lookup. Real declarations precede aliases; ambiguous rows add no edge.
+        for (alias, (module, target)) in aliases {
+            if let Some(target) = target && seen.insert(alias.clone()) {
+                funcs.push(EncodedFunction { name: alias, module, callees: vec![target] });
+            }
+        }
         let leaf_rows: Vec<(String, Vec<String>)> = leaf_index.into_iter().collect();
         let prefix_rows: Vec<(String, Vec<String>)> = prefix_index.into_iter().collect();
         BakedSymbolGraph::from_parts(&entries, &funcs, &leaf_rows, &prefix_rows)
@@ -2142,6 +2156,7 @@ struct ModuleFunction {
 
 struct ModuleSymbolView {
     functions: Vec<ModuleFunction>,
+    qualified_aliases: Vec<(String, String)>,
 }
 
 /// Decode each function's bytecode and harvest its call edges.
@@ -2305,7 +2320,13 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
             .map(Text::from);
         functions.push(ModuleFunction { name, origin_module, callees });
     }
-    ModuleSymbolView { functions }
+    let qualified_aliases = module.mount_aliases.iter().filter_map(|(alias, _, target)| {
+        let alias = module.get_string(*alias)?;
+        let target = module.get_string(*target)?;
+        (alias.contains('.') && target.contains('.') && alias != target)
+            .then(|| (alias.to_owned(), target.to_owned()))
+    }).collect();
+    ModuleSymbolView { functions, qualified_aliases }
 }
 
 pub struct ArchiveCtxCache {

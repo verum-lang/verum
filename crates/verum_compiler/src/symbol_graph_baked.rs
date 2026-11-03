@@ -63,10 +63,10 @@ use std::borrow::Cow;
 /// Section offsets and counts, in `u32` slots.
 const MAGIC: &[u8; 4] = b"VSG1";
 
-/// Bump when the layout below changes.  The bake mixes this into the
-/// precompile schema version, so a stale sidecar is regenerated rather
-/// than misread.
-pub const FORMAT_VERSION: u32 = 1;
+/// Identifies the graph layout and its reachability semantics. Version 2
+/// includes exact edges for qualified re-exports. Readers rebuild older
+/// graphs from the archive.
+pub const FORMAT_VERSION: u32 = 2;
 
 const H_MAGIC: usize = 0;
 const H_VERSION: usize = 1;

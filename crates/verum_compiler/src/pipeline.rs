@@ -940,6 +940,7 @@ pub struct CompilationPipeline<'s> {
     global_function_registry: std::collections::HashMap<String, verum_vbc::codegen::FunctionInfo>,
     /// Source-owned native ABI tables for cross-module stdlib calls.
     global_foreign_interfaces: std::sync::Arc<verum_vbc::codegen::ForeignInterfaces>,
+    global_source_exports: std::sync::Arc<verum_vbc::codegen::SourceExports>,
 
     /// Global record field-layout registry for cross-module field-index
     /// resolution in stdlib bootstrap (defect D2b).  Accumulates
@@ -1263,6 +1264,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_resolver: None,
             global_function_registry: std::collections::HashMap::new(),
             global_foreign_interfaces: Default::default(),
+            global_source_exports: Default::default(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_field_name_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
@@ -1381,6 +1383,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_resolver: Some(resolver),
             global_function_registry: std::collections::HashMap::new(),
             global_foreign_interfaces: Default::default(),
+            global_source_exports: Default::default(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_field_name_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),

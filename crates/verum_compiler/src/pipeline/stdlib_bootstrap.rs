@@ -1419,6 +1419,7 @@ one module and therefore never seeded",
         target: &verum_ast::cfg::TargetConfig,
     ) -> Result<Vec<verum_vbc::VbcModule>> {
         let mut foreign = ForeignInterfaces::default();
+        let mut source_exports = verum_vbc::codegen::SourceExports::default();
         let mut next_method = self.global_function_registry.values()
             .map(|info| info.id.0)
             .filter(|id| verum_vbc::stub_ranges::in_stage1(*id))
@@ -1476,6 +1477,7 @@ one module and therefore never seeded",
                         self.global_function_registry.insert(key, forward);
                         next_method -= 1;
                     }
+                    declarations.publish_source_exports(&mut source_exports);
                 }
                 resolved.push(interface);
             }
@@ -1484,6 +1486,7 @@ one module and therefore never seeded",
         let nominal_interfaces = collect(&[])?;
         let resolved = collect(&nominal_interfaces.iter().collect::<Vec<_>>())?;
         self.global_foreign_interfaces = Arc::new(foreign);
+        self.global_source_exports = Arc::new(source_exports);
         Ok(resolved)
     }
 
@@ -2347,6 +2350,7 @@ one module and therefore never seeded",
 
         let mut codegen = VbcCodegen::with_config(codegen_config);
         codegen.set_foreign_interfaces(self.global_foreign_interfaces.clone());
+        codegen.set_source_exports(self.global_source_exports.clone());
 
         // Import functions and protocols from previously compiled modules
         codegen.import_functions(&self.global_function_registry);

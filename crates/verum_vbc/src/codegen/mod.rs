@@ -56,6 +56,7 @@ pub mod registers;
 
 mod bootstrap_types;
 mod source_mounts;
+pub use source_mounts::SourceExports;
 mod expressions;
 mod array_coercions;
 mod array_elements;
@@ -1095,7 +1096,9 @@ pub struct VbcCodegen {
     /// through body compilation, which revisits each source after collection.
     // None is an ambiguous glob binding, not permission to use a bare alias.
     source_type_mounts: Map<Text, Map<Text, Option<Text>>>,
-    source_callable_exports: source_mounts::CallableExports,
+    source_exports: SourceExports,
+    source_callable_names: std::collections::HashSet<String>,
+    dependency_source_exports: Option<std::sync::Arc<SourceExports>>,
 
     /// Imported declaration scopes are immutable receipts, separate from a
     /// source unit's incrementally collected mounts until finalization.
@@ -2403,7 +2406,9 @@ impl VbcCodegen {
             current_protocol_bounds: Default::default(),
             current_impl_semantic_target: None,
             source_type_mounts: Map::new(),
-            source_callable_exports: Default::default(),
+            source_exports: Default::default(),
+            source_callable_names: Default::default(),
+            dependency_source_exports: None,
             imported_declaration_type_bindings: Map::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
@@ -9663,7 +9668,8 @@ impl VbcCodegen {
         self.ffi_contract_exprs.clear();
         // Clear pending imports
         self.pending_imports.clear();
-        self.source_callable_exports = Default::default();
+        self.source_exports = Default::default();
+        self.source_callable_names.clear();
         self.mount_aliases_buffer.clear();
         self.mount_installed_qualified_keys.clear();
         self.decl_installed_qualified_keys.clear();

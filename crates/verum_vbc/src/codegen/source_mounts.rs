@@ -49,10 +49,11 @@ pub(super) fn visit_named_mounts(
     }
 }
 
+/// Source declaration owners and public re-export edges. The index contains
+/// no module-local function or type IDs and can be shared by other VBC units.
 #[derive(Default)]
-pub(super) struct CallableExports {
+pub struct SourceExports {
     modules: HashMap<String, ModuleExports>,
-    declared_names: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -73,6 +74,27 @@ struct ExportCandidates {
     inaccessible: bool,
 }
 
+impl SourceExports {
+    fn merge_module(&mut self, owner: String, exports: ModuleExports) {
+        use std::collections::hash_map::Entry;
+        let scope = match self.modules.entry(owner) {
+            Entry::Vacant(entry) => { entry.insert(exports); return; }
+            Entry::Occupied(entry) => entry.into_mut(),
+        };
+        for (name, targets) in exports.declarations {
+            scope.declarations.entry(name).or_default().extend(targets);
+        }
+        scope.non_functions.extend(exports.non_functions);
+        scope.visibility.extend(exports.visibility);
+        for (alias, targets) in exports.named {
+            scope.named.entry(alias).or_default().extend(targets);
+        }
+        scope.globs.extend(exports.globs);
+        scope.lexical_globs.extend(exports.lexical_globs);
+        scope.public_children.extend(exports.public_children);
+    }
+}
+
 impl ExportCandidates {
     fn nominal(&self) -> Option<&String> {
         let name = self.declarations.first()?;
@@ -81,6 +103,26 @@ impl ExportCandidates {
 }
 
 impl VbcCodegen {
+    /// Publish the completed declaration pass without copying bodies or
+    /// interpreting function IDs from another compilation unit.
+    pub fn publish_source_exports(&mut self, index: &mut SourceExports) {
+        let unit = std::mem::take(&mut self.source_exports);
+        for (owner, exports) in unit.modules {
+            index.merge_module(owner, exports);
+        }
+    }
+
+    /// Resolve external facades through their original source declarations.
+    pub fn set_source_exports(&mut self, index: std::sync::Arc<SourceExports>) {
+        self.dependency_source_exports = Some(index);
+    }
+
+    fn source_export_scope(&self, owner: &str) -> Option<&ModuleExports> {
+        self.source_exports.modules.get(owner).or_else(|| {
+            self.dependency_source_exports.as_ref()?.modules.get(owner)
+        })
+    }
+
     pub(super) fn collect_callable_exports(&mut self, owner: &str, items: &[Item]) {
         let mut exports = ModuleExports::default();
         for item in items {
@@ -166,31 +208,15 @@ impl VbcCodegen {
                 _ => {}
             }
         }
-        self.source_callable_exports
-            .declared_names
+        self.source_callable_names
             .extend(exports.declarations.keys().cloned());
-        let scope = self
-            .source_callable_exports
-            .modules
-            .entry(owner.to_owned())
-            .or_default();
-        for (name, targets) in exports.declarations {
-            scope.declarations.entry(name).or_default().extend(targets);
-        }
-        scope.non_functions.extend(exports.non_functions);
-        scope.visibility.extend(exports.visibility);
-        for (alias, targets) in exports.named {
-            scope.named.entry(alias).or_default().extend(targets);
-        }
-        scope.globs.extend(exports.globs);
-        scope.lexical_globs.extend(exports.lexical_globs);
-        scope.public_children.extend(exports.public_children);
+        self.source_exports.merge_module(owner.to_owned(), exports);
     }
 
     /// Constructors and foreign calls acquire a canonical callable identity
     /// during declaration registration, after target and ABI selection.
     pub(super) fn record_declared_callable(&mut self, owner: &str, name: &str, key: &str) {
-        let Some(source) = self.source_callable_exports.modules.get_mut(owner) else {
+        let Some(source) = self.source_exports.modules.get_mut(owner) else {
             return;
         };
         source
@@ -198,8 +224,7 @@ impl VbcCodegen {
             .entry(name.to_owned())
             .or_default()
             .insert(key.to_owned());
-        self.source_callable_exports
-            .declared_names
+        self.source_callable_names
             .insert(name.to_owned());
     }
 
@@ -272,15 +297,15 @@ impl VbcCodegen {
             .source_module_owners
             .member(written, scope, self.source_module_root())?;
         let (owner, name) = path.rsplit_once('.')?;
-        let Some(source) = self.source_callable_exports.modules.get(owner) else {
+        let Some(source) = self.source_export_scope(owner) else {
             return self
                 .type_name_to_id
                 .contains_key(path.as_str())
                 .then(|| path.into_string());
         };
-        let named_callable = source.declarations.contains_key(name)
+        let named_callable = source.declarations.contains_key(name) || source.named.contains_key(name)
             || [name, alias].into_iter().any(|leaf| {
-                self.source_callable_exports.declared_names.contains(leaf)
+                self.source_callable_names.contains(leaf)
                     || self.ctx.functions.get(leaf).is_some_and(|info| {
                         info.variant_tag.is_some()
                             || info.has_source_body
@@ -310,7 +335,7 @@ impl VbcCodegen {
             let Some((owner, name)) = path.rsplit_once('.') else {
                 continue;
             };
-            let Some(source) = self.source_callable_exports.modules.get(owner) else {
+            let Some(source) = self.source_export_scope(owner) else {
                 // Imported nominal IDs and callable descriptors are independent
                 // witnesses. A constructor elsewhere cannot turn a type into a call.
                 if let Some(id) = self.type_name_to_id.get(&path) {
@@ -344,20 +369,19 @@ impl VbcCodegen {
                     .map(|key| key.into_string())
                     .unwrap_or_else(|| written.to_owned())
             };
-            if includes_declarations
-                && let Some(consumer) = glob_consumer
-                && let Some(visibility) = source.visibility.get(name)
-            {
-                // A direct wildcard uses the importer's visibility. A public
-                // re-export cannot widen the declaration's access.
-                let visible = if path == root {
+            if includes_declarations && let Some(visibility) = source.visibility.get(name) {
+                // A direct wildcard uses the importer's visibility. Every
+                // public re-export edge preserves the declaration's access.
+                let visible = if path != root {
+                    visibility.is_public()
+                } else if let Some(consumer) = glob_consumer {
                     if matches!(visibility, verum_ast::Visibility::PublicIn(_)) {
                         visibility.resolve_declared_scope(owner).is_ok_and(|policy| policy.visible_from(owner.split('.'), consumer.split('.')))
                     } else {
                         visibility.visible_from(owner.split('.'), consumer.split('.'))
                     }
                 } else {
-                    visibility.is_public()
+                    true
                 };
                 if !visible {
                     found.inaccessible = true;
@@ -402,7 +426,7 @@ impl VbcCodegen {
             return None;
         }
         let roots = &self
-            .source_callable_exports
+            .source_exports
             .modules
             .get(scope)?
             .lexical_globs;

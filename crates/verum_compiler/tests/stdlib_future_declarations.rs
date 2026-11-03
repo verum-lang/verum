@@ -48,6 +48,54 @@ fn inline_reexport_matches_the_declaring_generic_sum_after_bootstrap() {
 }
 
 #[test]
+fn transitive_callable_facades_cross_units_without_losing_the_declaring_body() {
+    for (public_mount, public_function) in [(true, true), (false, true), (true, false)] {
+        let root = tempfile::tempdir().unwrap();
+        let core = root.path().join("core");
+        for (file, source) in [
+            ("mod.vr", "module core; public module work;"),
+            ("work/mod.vr", "module core.work; public module app; public module decoy;
+                 public mount .app.{publish as run};
+                 public module prelude { public mount super.run; }"),
+            ("work/decoy.vr", "module core.work.decoy;
+                 public fn run() -> Int { 17 } public fn publish() -> Int { 19 }"),
+            ("work/app/mod.vr", if public_mount {
+                 "module core.work.app; public module engine; public mount .engine.{actual as publish};"
+             } else {
+                 "module core.work.app; public module engine; mount .engine.{actual as publish};"
+             }),
+            ("work/app/engine.vr", if public_function {
+                 "module core.work.app.engine; public fn actual() -> Int { 41 }"
+             } else {
+                 "module core.work.app.engine; fn actual() -> Int { 41 }"
+             }),
+        ] {
+            let path = core.join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, source).unwrap();
+        }
+        if public_mount && public_function {
+            let archive = bootstrap(&core);
+            let module = archive.load_module("core.work").unwrap();
+            for path in ["core.work.run", "core.work.prelude.run"] {
+                let targets: std::collections::BTreeSet<_> = module.mount_aliases.iter()
+                    .filter(|(alias, _, _)| module.get_string(*alias) == Some(path))
+                    .map(|(_, _, target)| module.get_string(*target).unwrap())
+                    .collect();
+                assert_eq!(targets, ["core.work.app.engine.actual"].into_iter().collect(), "{path}");
+            }
+            assert_eq!(
+                execute(&archive, "module app; mount core.work.prelude.run; fn main() -> Int { run() }"),
+                41
+            );
+        } else {
+            let error = format!("{:#}", try_bootstrap(&core).unwrap_err());
+            assert!(error.contains("invalid source mount") && error.contains("core.work.app.publish"), "{error}");
+        }
+    }
+}
+
+#[test]
 fn an_owning_unit_completes_its_source_with_the_declared_prelude_owner() {
     for origin in ["model/origin.vr", "model/origin/mod.vr"] {
         let root = tempfile::tempdir().unwrap();
