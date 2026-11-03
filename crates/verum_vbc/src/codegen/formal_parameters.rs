@@ -196,6 +196,10 @@ impl VbcCodegen {
         if path.is_single() && scope.contains_key(&name) {
             return true;
         }
+        if path.is_single() && self.current_source_substitution.get(&name)
+            .is_some_and(|witness| witness.semantic) {
+            return true;
+        }
         if Self::ast_type_is_bare_self(ast) {
             // The source mapper consumes exactly this retained witness, then
             // lifts it under local quantifiers. Flat owner names and template
@@ -294,13 +298,15 @@ impl VbcCodegen {
             ty: &verum_ast::Type,
             scope: &std::collections::HashMap<String, u16>,
             depth: usize,
+            cg: &VbcCodegen,
         ) -> bool {
             if depth > 64 { return false; }
             match &ty.kind {
-                TypeKind::Path(path) => path.is_single() && scope.contains_key(&path.to_string()),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1),
+                TypeKind::Path(path) => path.is_single() && (scope.contains_key(&path.to_string())
+                    || cg.current_source_substitution.get(&path.to_string()).is_some_and(|witness| witness.semantic)),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1),
+                    && generic_projection_base(self_ty, scope, depth + 1, cg),
                 _ => false,
             }
         }
@@ -324,9 +330,9 @@ impl VbcCodegen {
                 | TypeKind::Unit
                 | TypeKind::Never => true,
                 TypeKind::Path(_) => cg.semantic_formal_path_is_declared(ty, scope),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1),
+                    && generic_projection_base(self_ty, scope, depth + 1, cg),
                 TypeKind::Reference { inner, .. }
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. }

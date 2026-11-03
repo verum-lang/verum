@@ -67,6 +67,8 @@ mod statements;
 mod value_uses;
 mod place_copies;
 mod formal_parameters;
+mod source_substitution;
+mod blanket_impls;
 mod protocol_results;
 mod constructor_types;
 mod declaration_interface;
@@ -332,6 +334,7 @@ struct ImplReceiverWitness {
 #[derive(Debug, Clone)]
 struct DeferredImplScope {
     receiver: ImplReceiverWitness,
+    source_substitution: source_substitution::SourceTypeSubstitution,
     dense: HashMap<String, u16>,
     shadow: HashMap<String, u16>,
     declaration: std::sync::Arc<DeferredImplDeclaration>,
@@ -378,6 +381,10 @@ pub struct BlanketImpl {
     /// for no type at all: `explicit_methods` suppressed the derived
     /// protocol's default (when it had one) and nothing replayed the body.
     pub body_methods: Vec<verum_ast::FunctionDecl>,
+    /// Source-owned binder replaced by the actual implementor, never a new slot.
+    pub receiver_parameter: String,
+    pub source_module: Option<String>,
+    pub declaration: std::sync::Arc<verum_ast::decl::ImplDecl>,
 }
 pub use error::{CodegenError, CodegenErrorKind, CodegenOptionExt, CodegenResult, SkipClass};
 pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnapshot};
@@ -1192,6 +1199,7 @@ pub struct VbcCodegen {
     current_protocol_bounds: std::collections::HashMap<crate::types::TypeParamId, Vec<TypeRef>>,
     /// Exact resolved source impl target, shared by ABI and semantic lowering.
     current_impl_receiver: Option<ImplReceiverWitness>,
+    current_source_substitution: source_substitution::SourceTypeSubstitution,
     current_deferred_impl: Option<DeferredImplScope>,
 
     /// TypeIds claimed by ARCHIVE-imported descriptors
@@ -2444,6 +2452,7 @@ impl VbcCodegen {
             current_impl_where_clause: None,
             current_protocol_bounds: Default::default(),
             current_impl_receiver: None,
+            current_source_substitution: Default::default(),
             current_deferred_impl: None,
             source_type_mounts: Map::new(),
             source_exports: Default::default(),
@@ -3534,24 +3543,21 @@ impl VbcCodegen {
             // the one we're about to process. This is the monomorphization
             // step — `implement<B: Base> Derived for B {}` flows Derived's
             // default methods down to every concrete implementor of Base.
-            #[allow(clippy::type_complexity)]
-            let pending_derivations: Vec<(
-                String,
-                std::collections::HashSet<String>,
-                Vec<verum_ast::FunctionDecl>,
-            )> = self
-                .blanket_impls
-                .iter()
-                .filter(|b| b.base_protocol == proto_name)
-                .map(|b| {
-                    (
-                        b.derived_protocol.clone(),
-                        b.explicit_methods.clone(),
-                        b.body_methods.clone(),
-                    )
-                })
-                .collect();
-            for (derived, overrides, body_methods) in pending_derivations {
+            let pending_derivations: Vec<_> = self.blanket_impls.iter()
+                .filter(|blanket| blanket.base_protocol == proto_name).cloned().collect();
+            for blanket in pending_derivations {
+                for parameter in &blanket.declaration.generics {
+                    use verum_ast::ty::GenericParamKind;
+                    if !matches!(&parameter.kind,
+                        GenericParamKind::Type { name, .. } if name.name.as_str() == blanket.receiver_parameter)
+                        && !matches!(&parameter.kind, GenericParamKind::Lifetime { .. })
+                    {
+                        return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                            "blanket implementation has an uninstantiated parameter other than its receiver".into(),
+                        ), parameter.span));
+                    }
+                }
+                let derived = &blanket.derived_protocol;
                 // T0623: monomorphise the blanket impl's OWN BODY onto this
                 // concrete implementor.  The loop further down replays only
                 // the DERIVED PROTOCOL's default bodies, and `overrides`
@@ -3566,7 +3572,7 @@ impl VbcCodegen {
                 // Emitting through the same register + pending-queue path as a
                 // default method binds `Self`/the type param to `type_name`,
                 // so the body's `self.cmp(other)` dispatches to `Int.cmp`.
-                for body_func in &body_methods {
+                for body_func in &blanket.body_methods {
                     let full_method_name = format!("{}.{}", type_name, body_func.name.name);
                     // An explicit `implement Derived for ThisType` block wins:
                     // same guard the default-method replay uses below.
@@ -3576,16 +3582,21 @@ impl VbcCodegen {
                     // T0701: deferred like the plain default-method
                     // materialisation below — explicit bodies from
                     // LATER blocks must win the unsuffixed slot.
-                    let method = self.deferred_default_method(
-                        body_func, type_name, implementation, &declaration, None, None,
+                    let mut method = self.deferred_default_method(
+                        body_func, type_name, implementation, &declaration,
+                        blanket.source_module.clone(), None,
                     )?;
+                    method.implementation.source_substitution =
+                        source_substitution::SourceTypeSubstitution::receiver(
+                            blanket.receiver_parameter.clone(), method.implementation.receiver.clone(),
+                        ).for_function(body_func);
                     self.pending_default_registrations.push(method);
                 }
                 per_proto_overrides
                     .entry(derived.clone())
-                    .or_insert(overrides);
-                if !checked.contains(&derived) {
-                    protocols_to_check.push(derived);
+                    .or_insert(blanket.explicit_methods.clone());
+                if !checked.contains(derived) {
+                    protocols_to_check.push(derived.clone());
                 }
             }
 
@@ -3677,6 +3688,7 @@ impl VbcCodegen {
             constraints,
             implementation: DeferredImplScope {
                 receiver,
+                source_substitution: Default::default(),
                 dense,
                 shadow,
                 declaration: declaration.clone(),
@@ -3696,6 +3708,7 @@ impl VbcCodegen {
         let previous_lexical = std::mem::replace(&mut self.default_body_type_scope, method.lexical_owner.clone());
         let previous_impl = self.current_deferred_impl.replace(scope.clone());
         let previous_receiver = self.current_impl_receiver.replace(scope.receiver.clone());
+        let previous_substitution = std::mem::replace(&mut self.current_source_substitution, scope.source_substitution.clone());
         let previous_impl_name = self.ctx.current_impl_type_name.clone();
         let previous_ast = self.current_impl_ast_generics.replace(scope.declaration.ast_generics.clone());
         let previous_where = std::mem::replace(&mut self.current_impl_where_clause, scope.declaration.where_clause.clone());
@@ -3708,6 +3721,7 @@ impl VbcCodegen {
         self.default_body_type_scope = previous_lexical;
         self.current_deferred_impl = previous_impl;
         self.current_impl_receiver = previous_receiver;
+        self.current_source_substitution = previous_substitution;
         self.ctx.current_impl_type_name = previous_impl_name;
         self.current_impl_ast_generics = previous_ast;
         self.current_impl_where_clause = previous_where;
@@ -5167,54 +5181,12 @@ impl VbcCodegen {
     /// without a pre-pass `Int` never receives `partial_cmp` and the method
     /// panics "not found" at runtime.
     pub fn collect_blanket_impls(&mut self, module: &Module) {
-        for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            if let ItemKind::Impl(impl_decl) = &item.kind
-                && let verum_ast::decl::ImplKind::Protocol {
-                    protocol, for_type, ..
-                } = &impl_decl.kind
-                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                    _ => None,
-                })
-                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
+        let owner = self.source_file_owner(module, &self.config.module_name);
+        for item in &module.items {
+            if self.should_compile_item(item)
+                && let ItemKind::Impl(declaration) = &item.kind
             {
-                for g in impl_decl.generics.iter() {
-                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
-                        && name.name.as_str() == param_name
-                    {
-                        for b in bounds.iter() {
-                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
-                                let body_methods: Vec<verum_ast::FunctionDecl> = impl_decl
-                                    .items
-                                    .iter()
-                                    .filter_map(|item| match &item.kind {
-                                        verum_ast::decl::ImplItemKind::Function(f) => {
-                                            Some(f.clone())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect();
-                                let explicit_methods: std::collections::HashSet<String> =
-                                    body_methods.iter().map(|f| f.name.name.to_string()).collect();
-                                let already_present = self.blanket_impls.iter().any(|b| {
-                                    b.base_protocol == base_name
-                                        && b.derived_protocol == derived_name
-                                });
-                                if !already_present {
-                                    self.blanket_impls.push(BlanketImpl {
-                                        base_protocol: base_name,
-                                        derived_protocol: derived_name.clone(),
-                                        explicit_methods,
-                                        body_methods,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
+                self.record_blanket_impl(declaration, owner.clone());
             }
         }
     }
@@ -10155,69 +10127,7 @@ impl VbcCodegen {
                     self.ensure_structural_impl_target_type(impl_decl, tn);
                 }
 
-                // Detect blanket impls: `implement<T: Base> Derived for T {}`.
-                // Deferred monomorphization — when a concrete type later
-                // `implement Base for Concrete`, we replay the blanket impl
-                // onto Concrete. Without this, the default method bodies
-                // register under the generic-param name and runtime
-                // dispatch panics with "method not found on value".
-                if let verum_ast::decl::ImplKind::Protocol {
-                    protocol, for_type, ..
-                } = &impl_decl.kind
-                {
-                    let derived_name = protocol.segments.last().and_then(|s| match s {
-                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                        _ => None,
-                    });
-                    let for_type_name = Self::for_type_generic_param_name(for_type);
-                    if let (Some(derived_name), Some(param_name)) = (derived_name, for_type_name) {
-                        for g in impl_decl.generics.iter() {
-                            if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } =
-                                &g.kind
-                                && name.name.as_str() == param_name
-                            {
-                                for b in bounds.iter() {
-                                    if let Some(base_name) = Self::type_bound_protocol_name(b) {
-                                        let body_methods: Vec<verum_ast::FunctionDecl> =
-                                            impl_decl
-                                                .items
-                                                .iter()
-                                                .filter_map(|item| match &item.kind {
-                                                    verum_ast::decl::ImplItemKind::Function(f) => {
-                                                        Some(f.clone())
-                                                    }
-                                                    _ => None,
-                                                })
-                                                .collect();
-                                        let explicit_methods: std::collections::HashSet<String> =
-                                            body_methods
-                                                .iter()
-                                                .map(|f| f.name.name.to_string())
-                                                .collect();
-                                        // Skip if `collect_all_declarations`'s
-                                        // blanket-impl pre-pass already
-                                        // registered this (base, derived)
-                                        // pair — keeps the linear-scan
-                                        // walks O(unique blanket impls)
-                                        // instead of O(file occurrences).
-                                        let already_present = self.blanket_impls.iter().any(|b| {
-                                            b.base_protocol == base_name
-                                                && b.derived_protocol == derived_name
-                                        });
-                                        if !already_present {
-                                            self.blanket_impls.push(BlanketImpl {
-                                                base_protocol: base_name,
-                                                derived_protocol: derived_name.clone(),
-                                                explicit_methods,
-                                                body_methods,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                self.record_blanket_impl(impl_decl, self.ctx.current_source_module.clone());
 
                 // For protocol impls, inherent methods take priority.
                 // If "AppConfig.new" already exists from inherent impl,
@@ -11402,6 +11312,14 @@ impl VbcCodegen {
     }
 
     fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
+        let shadowed = self.current_source_substitution.for_function(func);
+        let outer = std::mem::replace(&mut self.current_source_substitution, shadowed);
+        let result = self.register_function_in_source_scope(func);
+        self.current_source_substitution = outer;
+        result
+    }
+
+    fn register_function_in_source_scope(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
         let source_signature = verum_ast::source_signature::source_signature(func, false)
             .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let base_name = func.name.name.to_string();
@@ -14154,7 +14072,11 @@ impl VbcCodegen {
             .iter()
             .filter_map(|p| {
                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                    let name = Self::extract_type_name_from_ast(ty);
+                    let name = if self.current_source_substitution.is_empty() {
+                        Self::extract_type_name_from_ast(ty)
+                    } else {
+                        self.extract_type_name(ty).unwrap_or_default()
+                    };
                     // **Self → concrete substitution** so default-method
                     // monomorphisations (`Ord.max(self, other: Self)`
                     // monomorphised onto `Amount`) record the concrete
@@ -18648,7 +18570,9 @@ impl VbcCodegen {
         array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
     ) -> CodegenResult<TypeRef> {
         let self_type = self.impl_self_type_ref(generic_param_map);
-        self.resolve_type_ref_in_scope(ty, generic_param_map, preserve_refs, declaration_scope, array_count, self_type.as_ref())
+        self.current_source_substitution.elaborate(generic_param_map, |scope| {
+            self.resolve_type_ref_in_scope(ty, scope, preserve_refs, declaration_scope, array_count, self_type.as_ref())
+        })
     }
 
     fn resolve_type_ref_in_scope(
@@ -19349,6 +19273,20 @@ impl VbcCodegen {
                 ty.kind.primitive_name().map(|n| n.to_string())
             }
             TypeKind::Path(path) => {
+                if path.is_single()
+                    && let Some(witness) = self.current_source_substitution.get(&path.to_string())
+                {
+                    let scope = self.current_deferred_impl.as_ref().map(|scope| &scope.dense)
+                        .unwrap_or(&self.ctx.current_generic_param_ids);
+                    // A receiver slot can have the blanket binder's spelling.
+                    // Rendering it under that spelling would be re-substituted
+                    // if a name consumer parses it. Keep the exact TypeRef and
+                    // omit an ambiguous textual hint instead.
+                    let render_scope = scope.iter()
+                        .filter(|(name, _)| self.current_source_substitution.get(name).is_none())
+                        .map(|(name, id)| (name.clone(), *id)).collect();
+                    return self.scoped_callable_type_name(&witness.ty, Some(&render_scope)).map(|name| name.to_string());
+                }
                 // T1505: this spelling crosses the archive boundary into
                 // callable type schemes. Keep the complete nominal path:
                 // taking its first segment turned Carrier<domain.Flag>
@@ -19668,7 +19606,10 @@ impl VbcCodegen {
         impl_type_name: Option<&String>,
     ) -> CodegenResult<()> {
         let outer_bounds = std::mem::take(&mut self.current_protocol_bounds);
+        let shadowed = self.current_source_substitution.for_function(func);
+        let outer_substitution = std::mem::replace(&mut self.current_source_substitution, shadowed);
         let result = self.compile_function_body(func, impl_type_name);
+        self.current_source_substitution = outer_substitution;
         self.current_protocol_bounds = outer_bounds;
         result
     }

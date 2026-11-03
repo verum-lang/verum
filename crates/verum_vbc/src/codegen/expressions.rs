@@ -2001,6 +2001,13 @@ impl VbcCodegen {
                     return Ok(Some(reg));
                 }
 
+                if let Some(witness) = self.current_source_substitution.get(name.as_str()) {
+                    let type_ref = witness.ty.clone();
+                    let dst = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadT { dst, type_ref });
+                    return Ok(Some(dst));
+                }
+
                 // Check if this is a @thread_local static variable
                 if let Some(slot) = self.ctx.is_thread_local(name) {
                     let dest = self.ctx.alloc_temp();
@@ -9152,6 +9159,9 @@ impl VbcCodegen {
             }
             _ => {
                 let name = Self::extract_type_name_from_ast(ty);
+                if let Some(witness) = self.current_source_substitution.get(&name) {
+                    return Some(witness.ty.clone());
+                }
                 if self.ctx.generic_type_params.contains(&name) {
                     self.ctx.current_generic_param_ids.get(&name)
                         .map(|id| TypeRef::Generic(TypeParamId(*id)))
@@ -9168,6 +9178,9 @@ impl VbcCodegen {
     /// Returns None when the base name is unknown or a bare type parameter.
     fn type_name_to_type_ref_mono(&self, name: &str) -> Option<crate::types::TypeRef> {
         let name = name.trim();
+        if let Some(witness) = self.current_source_substitution.get(name) {
+            return Some(witness.ty.clone());
+        }
         if name == "()" {
             return Some(crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT));
         }
@@ -13465,21 +13478,25 @@ impl VbcCodegen {
         if let ExprKind::Path(recv_path) = &receiver.kind
             && recv_path.segments.len() == 1
             && let PathSegment::Name(recv_ident) = &recv_path.segments[0]
-            && let Some(param_id) = self.ctx.current_generic_param_id(recv_ident.name.as_str())
+            && self.ctx.get_var_reg(recv_ident.name.as_str()).is_err()
+            && let Some(type_ref) = self.current_source_substitution.get(recv_ident.name.as_str())
+                .map(|witness| witness.ty.clone())
+                .or_else(|| self.ctx.current_generic_param_id(recv_ident.name.as_str())
+                    .map(crate::types::TypeRef::Generic))
         {
             if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
                 eprintln!(
-                    "[tpcall] T1214 witness: recv={} method={} idx={} args={}",
+                    "[tpcall] T1214 witness: recv={} method={} type={:?} args={}",
                     recv_ident.name.as_str(),
                     method.name.as_str(),
-                    param_id.0,
+                    type_ref,
                     args.len()
                 );
             }
             let recv_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadT {
                 dst: recv_reg,
-                type_ref: crate::types::TypeRef::Generic(param_id),
+                type_ref,
             });
             crate::codegen::bare_method::record("<witness>", method.name.as_str());
             // Arguments go in a contiguous block, as every CallM expects.
