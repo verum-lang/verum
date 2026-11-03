@@ -55,7 +55,7 @@ use serde::{Deserialize, Serialize};
 /// attached at the call site via existing `@quantity(0|1|omega)`
 /// attribute — see spec §17.1. This enum carries only the kind,
 /// not the substructural-logic discipline.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Capability {
     /// Read from a resource — file, db, network endpoint, etc.
     Read {
@@ -129,7 +129,7 @@ impl Capability {
 }
 
 /// Resource identifier — what's being read/written.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ResourceTag {
     /// Database table or whole connection.
     Database {
@@ -160,7 +160,7 @@ pub enum ResourceTag {
 }
 
 /// Target of an `Exec` capability — what the cog can invoke.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ExecTarget {
     /// Foreign-function-interface call into a dynamic library.
     Ffi {
@@ -185,7 +185,7 @@ pub enum ExecTarget {
 
 /// Privilege realm for `Capability::Escalate` — what escalated boundary
 /// is crossed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum PrivilegeRealm {
     /// Administrative privilege.
     Admin,
@@ -198,7 +198,7 @@ pub enum PrivilegeRealm {
 }
 
 /// Supervision lifetime of a spawned task.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum TaskLifetime {
     /// Bounded by parent scope (structured concurrency).
     ScopedToParent,
@@ -212,7 +212,7 @@ pub enum TaskLifetime {
 }
 
 /// Expiration policy for `Capability::TimeBound`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ExpirationPolicy {
     /// Capability expires at a specific Unix-epoch timestamp.
     AtUnixTime {
@@ -232,7 +232,7 @@ pub enum ExpirationPolicy {
 }
 
 /// Medium that backs a `Capability::Persist`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum PersistenceMedium {
     /// Local disk path.
     Disk {
@@ -263,7 +263,7 @@ pub enum PersistenceMedium {
 /// Auditors check capability declarations against the actual deployed
 /// stack — a cog claiming `Http2` but binding HTTP/1 (or vice versa)
 /// triggers `AP-016 WireEncodingMismatch`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum NetProtocol {
     /// Plain TCP.
     Tcp,
@@ -293,7 +293,7 @@ pub enum NetProtocol {
 }
 
 /// Traffic direction for a `Capability::Network`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum NetDirection {
     /// Inbound only — the cog accepts but does not initiate.
     Inbound,
@@ -305,7 +305,7 @@ pub enum NetDirection {
 
 /// Schema for custom capabilities — declared once in the ontology
 /// registry, referenced by tag thereafter.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct CapabilitySchema {
     /// Human-readable description.
     pub description: String,

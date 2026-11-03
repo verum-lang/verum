@@ -49,7 +49,7 @@ pub struct RowVar {
 /// Equality and ordering are BY ATOM ONLY (see `Row::join`): two
 /// facts about one atom merge by provenance-meet rather than
 /// coexisting, so a row never holds two rows for one atom.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtomFact {
     /// The capability.
     pub atom: Capability,
@@ -59,11 +59,13 @@ pub struct AtomFact {
 }
 
 /// Provenance meet: `Computed ⊓ x = x`, `Cited ⊓ _ = Cited` (the
-/// first citation wins as the named source; what matters for the
-/// lattice is that the result is not `Computed`).
+/// least cited source is retained as a deterministic representative).
 fn evidence_meet(a: &Evidence, b: &Evidence) -> Evidence {
     match (a, b) {
         (Evidence::Computed, Evidence::Computed) => Evidence::Computed,
+        (Evidence::Cited { source: a }, Evidence::Cited { source: b }) => Evidence::Cited {
+            source: a.min(b).clone(),
+        },
         (Evidence::Cited { source }, _) => Evidence::Cited {
             source: source.clone(),
         },
@@ -80,26 +82,13 @@ fn evidence_meet(a: &Evidence, b: &Evidence) -> Evidence {
 /// representation keys atoms by their `Capability` so join is a
 /// per-atom provenance merge, never a duplicate label — the algebra
 /// has no duplicates by construction, not by discipline.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Row {
     /// Ground atoms, keyed by capability (BTreeMap for deterministic
     /// iteration — judgments print, and printed sets must be stable).
-    atoms: BTreeMap<CapabilityKey, AtomFact>,
+    atoms: BTreeMap<Capability, AtomFact>,
     /// Open-row variables, each traceable to a named parameter.
     vars: Vec<RowVar>,
-}
-
-/// `Capability` is `Hash + Eq` but not `Ord`; judgments and diffs
-/// need deterministic ordering, so rows key atoms by their canonical
-/// debug rendering. One rendering, one key — the map stays free of
-/// duplicate atoms and iterates stably.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct CapabilityKey(String);
-
-impl CapabilityKey {
-    fn of(atom: &Capability) -> Self {
-        CapabilityKey(format!("{atom:?}"))
-    }
 }
 
 impl Row {
@@ -144,13 +133,12 @@ impl Row {
     /// Add one fact, merging provenance by meet if the atom is
     /// already present (§6).
     pub fn add(&mut self, fact: AtomFact) {
-        let key = CapabilityKey::of(&fact.atom);
-        match self.atoms.get_mut(&key) {
+        match self.atoms.get_mut(&fact.atom) {
             Some(existing) => {
                 existing.evidence = evidence_meet(&existing.evidence, &fact.evidence);
             }
             None => {
-                self.atoms.insert(key, fact);
+                self.atoms.insert(fact.atom.clone(), fact);
             }
         }
     }
@@ -158,8 +146,8 @@ impl Row {
     /// Open this row by a variable (a capability-bearing parameter
     /// the body may call or hand onward — `mix(r̄)`, §3).
     pub fn open_over(&mut self, var: RowVar) {
-        if !self.vars.contains(&var) {
-            self.vars.push(var);
+        if let Err(index) = self.vars.binary_search(&var) {
+            self.vars.insert(index, var);
         }
     }
 
@@ -264,13 +252,17 @@ impl Summary {
 
     /// Instantiate this summary at a call site: substitute each
     /// bound variable with the argument row supplied for its
-    /// parameter (missing arguments instantiate to `⟨∅⟩` — a
-    /// non-capability-bearing argument brings nothing).
+    /// parameter. Only an explicitly supplied empty row discharges a
+    /// parameter as pure. Unresolved and foreign variables stay open.
     pub fn instantiate(&self, args: &BTreeMap<String, Row>) -> Row {
         let mut row = self.row.clone();
-        for var in self.row.variables().to_vec() {
-            let replacement = args.get(&var.param).cloned().unwrap_or_else(Row::empty);
-            row.instantiate(&var, &replacement);
+        row.vars.retain(|var| var.owner != self.function || !args.contains_key(&var.param));
+        // Substitute simultaneously: variables in an actual argument belong
+        // to the caller and must survive substitution of the other formals.
+        for var in self.row.variables().iter().filter(|v| v.owner == self.function) {
+            if let Some(actual) = args.get(&var.param) {
+                row.join(actual);
+            }
         }
         row
     }
@@ -297,7 +289,7 @@ pub fn atoms_dying_at_boundary<'a>(
         .filter(|f| {
             !allow_dst
                 .atoms
-                .contains_key(&CapabilityKey::of(&f.atom))
+                .contains_key(&f.atom)
         })
         .collect()
 }
@@ -453,15 +445,9 @@ impl ModuleFacts {
                             }
                         }
                     }
-                    let prev = summaries.get(&name);
-                    let grew = match prev {
-                        None => true,
-                        Some(p) => {
-                            row.atom_count() > p.atom_count()
-                                || row.variables().len() > p.variables().len()
-                        }
-                    };
-                    if grew {
+                    // The fixed point includes provenance. A recursive edge can
+                    // introduce a citation without introducing another atom.
+                    if summaries.get(&name) != Some(&row) {
                         summaries.insert(name, row);
                         changed = true;
                     }

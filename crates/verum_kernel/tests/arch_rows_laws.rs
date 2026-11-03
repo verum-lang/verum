@@ -188,3 +188,62 @@ fn join_is_idempotent() {
     row.join(&snapshot);
     assert_eq!(row.atom_count(), before);
 }
+
+#[test]
+fn recursive_summaries_propagate_citations_for_an_existing_atom() {
+    use verum_kernel::arch_rows::{FnFacts, ModuleFacts};
+
+    let mut module = ModuleFacts::default();
+    for (name, callee, own) in [
+        ("a", "b", Row::cited([net_out()], "foreign boundary")),
+        ("b", "c", Row::computed([net_out()])),
+        ("c", "a", Row::computed([net_out()])),
+    ] {
+        module.functions.insert(name.into(), FnFacts {
+            own, callees: vec![callee.into()], ..Default::default()
+        });
+    }
+    let result = module.solve();
+    for (name, row) in &result.summaries {
+        assert_eq!(row.facts().next().unwrap().evidence,
+            Evidence::Cited { source: "foreign boundary".into() }, "{name}");
+    }
+}
+
+#[test]
+fn substitution_preserves_unknown_and_foreign_parameters() {
+    let param = |owner: &str| RowVar { owner: owner.to_owned(), param: "callback".into() };
+    let mut body = Row::empty();
+    body.open_over(param("outer"));
+    body.open_over(param("inner"));
+    let summary = Summary::install("outer", body);
+    assert_eq!(summary.instantiate(&BTreeMap::new()).variables().len(), 2);
+    let args = BTreeMap::from([("callback".into(), Row::empty())]);
+    assert_eq!(summary.instantiate(&args).variables(), &[param("inner")]);
+}
+
+#[test]
+fn row_substitution_is_simultaneous() {
+    let formal = |param: &str| RowVar { owner: "invoke".into(), param: param.to_owned() };
+    let mut body = Row::empty();
+    body.open_over(formal("first"));
+    body.open_over(formal("second"));
+    let mut first = Row::empty();
+    first.open_over(formal("second"));
+    let args = BTreeMap::from([("first".into(), first), ("second".into(), Row::empty())]);
+    let instantiated = Summary::install("invoke", body).instantiate(&args);
+    assert_eq!(instantiated.variables(), &[formal("second")]);
+}
+
+#[test]
+fn citation_selection_is_stable_across_traversal_orders() {
+    let first = Row::cited([net_out()], "first source");
+    let second = Row::cited([net_out()], "second source");
+    let mut forward = first.clone();
+    forward.join(&second);
+    let mut reverse = second;
+    reverse.join(&first);
+    assert_eq!(forward, reverse);
+    assert_eq!(forward.facts().next().unwrap().evidence,
+        Evidence::Cited { source: "first source".into() });
+}
