@@ -1496,8 +1496,10 @@ pub enum TypeError {
     ImportModuleNotFound {
         /// Path of the module that was not found
         module_path: Text,
-        /// Similar module paths (for suggestions)
-        similar_modules: List<Text>,
+        /// Candidate module paths, ranked only when rendering a diagnostic.
+        available_modules: List<Text>,
+        /// Resolution context, separate from module-name candidates.
+        notes: List<Text>,
         /// Span of the import statement
         span: verum_ast::span::Span,
     },
@@ -3877,7 +3879,8 @@ impl TypeError {
 
             ImportModuleNotFound {
                 module_path,
-                similar_modules,
+                available_modules,
+                notes,
                 span,
             } => {
                 let mut builder = DiagnosticBuilder::error()
@@ -3886,15 +3889,10 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
-                // `similar_modules` carries two kinds of entry, and folding
-                // them together produced a "did you mean one of these
-                // modules?" line whose suggestion was a paragraph of prose
-                // (T1008). A name never contains a space; an explanation
-                // always does, so the split needs no extra field on the
-                // error and no change at any producer.
-                let (names, notes): (Vec<&Text>, Vec<&Text>) = similar_modules
-                    .iter()
-                    .partition(|s| !s.as_str().contains(' '));
+                // Resolution may try several source and archive routes. A
+                // failed attempt needs its error, not an eagerly ranked list
+                // of spelling suggestions that is discarded on later success.
+                let names = find_similar_names(module_path.as_str(), available_modules);
                 if !names.is_empty() {
                     builder = builder.help(format!(
                         "did you mean one of these modules? {}",

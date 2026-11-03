@@ -1775,7 +1775,8 @@ impl TypeChecker {
         self.check_analysis_control()?;
         let Err(TypeError::ImportModuleNotFound {
             module_path,
-            mut similar_modules,
+            available_modules,
+            mut notes,
             span,
         }) = outcome
         else {
@@ -1793,19 +1794,20 @@ impl TypeChecker {
             verum_ast::ty::PathSegment::SelfValue => Some("self"),
             _ => None,
         }) {
-            similar_modules.push(Text::from(format!(
+            notes.push(Text::from(format!(
                 "the path opened with `{}`, which is a path keyword and not a module name; it rewrites the path before resolution, so the name reported above is shorter than the one written",
                 kw
             )));
             if kw == "cog" {
-                similar_modules.push(Text::from(
+                notes.push(Text::from(
                     "`core/cog/` is a stdlib directory that shares the keyword's spelling; reach it as `core.cog....`",
                 ));
             }
         }
         Err(TypeError::ImportModuleNotFound {
             module_path,
-            similar_modules,
+            available_modules,
+            notes,
             span,
         })
     }
@@ -2244,7 +2246,8 @@ impl TypeChecker {
                     // mount and never reaches here.
                     return Err(TypeError::ImportModuleNotFound {
                         module_path: full_normalized.clone(),
-                        similar_modules: List::new(),
+                        available_modules: List::new(),
+                        notes: List::new(),
                         span: import.tree.span,
                     });
                 }
@@ -4138,19 +4141,16 @@ impl TypeChecker {
                         span,
                     });
                 }
-                // Collect similar module names for suggestions
-                let all_modules: Vec<Text> = registry
+                // Preserve the diagnostic surface without ranking speculative misses.
+                let available_modules = registry
                     .all_modules()
                     .map(|(_, info)| Text::from(info.path.to_string()))
                     .collect();
-                let similar = crate::find_similar_names(module_path.as_str(), &all_modules)
-                    .into_iter()
-                    .map(Text::from)
-                    .collect::<List<Text>>();
 
                 return Err(TypeError::ImportModuleNotFound {
                     module_path: module_path.clone(),
-                    similar_modules: similar,
+                    available_modules,
+                    notes: List::new(),
                     span,
                 });
             }
@@ -10484,17 +10484,14 @@ impl TypeChecker {
             && !known_reexports
             && self.metadata_known_module_items(module_path.as_str()).is_none()
         {
-            let all_modules: Vec<Text> = registry
+            let available_modules = registry
                 .all_modules()
                 .map(|(_, info)| Text::from(info.path.to_string()))
                 .collect();
-            let similar = crate::find_similar_names(module_path.as_str(), &all_modules)
-                .into_iter()
-                .map(Text::from)
-                .collect::<List<Text>>();
             return Err(TypeError::ImportModuleNotFound {
                 module_path: module_path.clone(),
-                similar_modules: similar,
+                available_modules,
+                notes: List::new(),
                 span: verum_ast::span::Span::dummy(),
             });
         }
