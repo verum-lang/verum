@@ -34,8 +34,8 @@ pub struct TypeId(pub u32);
 impl TypeId {
     /// Reserved runtime identity of a record declared at its canonical source path.
     pub(crate) fn for_declared_record(name: &str, owner: Option<&str>) -> Option<Self> {
-        let carrier = verum_common::well_known_types::WellKnownType::Text;
-        (name == carrier.as_str() && owner == carrier.canonical_archive_modules().first().copied())
+        use verum_common::well_known_types::WellKnownType;
+        (WellKnownType::from_declaration(name, owner?) == Some(WellKnownType::Text))
             .then_some(Self::TEXT)
     }
 

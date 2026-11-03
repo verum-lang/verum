@@ -17,6 +17,8 @@ pub enum DropPlan {
     Glue {
         /// Exact nominal receiver.
         owner: TypeId,
+        /// Concrete arguments of the declaring receiver, in declaration order.
+        owner_args: List<TypeRef>,
         /// Declared Drop body.
         function: FunctionId,
         /// Witnesses in the body's declared parameter order.
@@ -26,6 +28,8 @@ pub enum DropPlan {
     Record {
         /// Exact nominal record, or the canonical structural tuple carrier.
         owner: TypeId,
+        /// Concrete arguments of the declaration (empty for a structural tuple).
+        owner_args: List<TypeRef>,
         /// Payload slots in declaration order.
         fields: List<DropPlan>,
     },
@@ -105,6 +109,7 @@ fn build_inner(
             active.pop();
             return fields.map(|fields| DropPlan::Record {
                 owner: TypeId::TUPLE,
+                owner_args: List::new(),
                 fields,
             });
         }
@@ -157,6 +162,7 @@ fn build_inner(
         }
         return Ok(DropPlan::Glue {
             owner,
+            owner_args: args.iter().cloned().collect(),
             function,
             type_args,
         });
@@ -175,9 +181,11 @@ fn build_inner(
             .collect()
     };
     let result = match declaration.kind {
-        TypeKind::Record => {
-            fields(&declaration.fields).map(|fields| DropPlan::Record { owner, fields })
-        }
+        TypeKind::Record => fields(&declaration.fields).map(|fields| DropPlan::Record {
+            owner,
+            owner_args: args.iter().cloned().collect(),
+            fields,
+        }),
         TypeKind::Sum => declaration
             .variants
             .iter()

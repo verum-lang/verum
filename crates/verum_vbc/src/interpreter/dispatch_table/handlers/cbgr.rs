@@ -1354,7 +1354,7 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
     let (owner, record, variants) = match plan {
         DropPlan::Ignore => return Ok(None),
         DropPlan::Glue { owner, .. } => (*owner, None, None),
-        DropPlan::Record { owner, fields } => (*owner, Some(fields.as_slice()), None),
+        DropPlan::Record { owner, fields, .. } => (*owner, Some(fields.as_slice()), None),
         DropPlan::Sum { owner, variants } => (*owner, None, Some(variants)),
     };
     if !value.is_regular_ptr() {
@@ -1396,6 +1396,20 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
 fn validate_typed_drop(state: &InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
     -> InterpreterResult<()>
 {
+    if let Some(entry) = super::flat_map::entry_plans(state, value, plan)? {
+        let table = super::flat_map::FlatMap::checked(state, value)?;
+        let mut occupied = 0;
+        for pair in table.occupied() {
+            for (element, declared) in pair.into_iter().zip(entry.iter()) {
+                validate_typed_drop(state, element, declared)?;
+            }
+            occupied += 1;
+        }
+        if occupied != table.len {
+            return Err(InterpreterError::Panic { message: "Map live entry count disagrees with its backing".into() });
+        }
+        return Ok(());
+    }
     if let Some((payload, fields)) = typed_drop_fields(state, value, plan)? {
         for (index, field) in fields.iter().enumerate() {
             // SAFETY: typed_drop_fields checked the entire declared extent.
@@ -1410,6 +1424,16 @@ fn execute_typed_drop(state: &mut InterpreterState, value: Value, plan: &crate::
 {
     use crate::drop_plan::DropPlan;
     if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(()); }
+    if let Some(entry) = super::flat_map::entry_plans(state, value, plan)? {
+        let retain = entry.iter().any(|plan| !matches!(plan, DropPlan::Ignore));
+        let entries = super::flat_map::take_entries(state, value, retain)?;
+        for pair in entries {
+            for (element, declared) in pair.into_iter().zip(entry.iter()) {
+                execute_typed_drop(state, element, declared)?;
+            }
+        }
+        return Ok(());
+    }
     if let DropPlan::Glue { function, type_args, .. } = plan {
         super::super::call_function_sync_with_witnesses(state, *function, &[value],
             (!type_args.is_empty()).then(|| type_args.clone().into_boxed_slice()))?;

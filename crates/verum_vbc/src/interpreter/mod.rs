@@ -772,17 +772,7 @@ impl Interpreter {
     ///
     /// Layout: `[field_0: Value, field_1: Value, …]` at `data_ptr()`.
     pub fn alloc_tuple(&mut self, fields: &[Value]) -> InterpreterResult<Value> {
-        let data_size = (fields.len() * std::mem::size_of::<Value>()).max(8);
-        let obj = self
-            .state
-            .heap
-            .alloc(crate::types::TypeId::TUPLE, data_size)?;
-        self.state.record_allocation();
-        let data_ptr = obj.data_ptr() as *mut Value;
-        for (i, v) in fields.iter().enumerate() {
-            unsafe { *data_ptr.add(i) = *v; }
-        }
-        Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+        self.state.alloc_tuple(fields)
     }
 
     // =========================================================================

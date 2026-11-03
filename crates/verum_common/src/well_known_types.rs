@@ -144,6 +144,20 @@ impl WellKnownType {
         name == self.as_str()
     }
 
+    /// Resolve a type by its defining file module and exact declaration name.
+    /// Archive bundle parents and same-spelled foreign declarations provide no
+    /// runtime representation authority. A promoted name must agree with its
+    /// separately recorded declaring module.
+    pub fn from_declaration(name: &str, owner: &str) -> Option<Self> {
+        let bare = match name.rsplit_once('.') {
+            Some((prefix, bare)) if prefix == owner => bare,
+            Some(_) => return None,
+            None => name,
+        };
+        let ty = Self::from_name(bare)?;
+        (ty.canonical_archive_modules().first().copied() == Some(owner)).then_some(ty)
+    }
+
     /// Check if this type is a collection (List, Map, Set, Deque, BTreeMap, BTreeSet, BinaryHeap).
     pub const fn is_collection(self) -> bool {
         matches!(

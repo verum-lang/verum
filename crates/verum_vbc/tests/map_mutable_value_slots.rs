@@ -68,6 +68,15 @@ fn read_control() -> Int {
     read_int(&values, "codec") * 100 + read_int(&values, "other")
 }
 
+fn borrowed_entry() -> Int {
+    let values: Map<Int, Int> = { 1: 7, 17: 19 };
+    assert(values.get_key_value(&33) is Maybe.None);
+    match values.get_key_value(&17) {
+        Maybe.Some(entry) => *entry.0 * 100 + *entry.1,
+        Maybe.None => -1,
+    }
+}
+
 fn direct_write_through() -> Int {
     let mut values: Map<Text, Int> = { "codec": 7 };
     values.insert("other", 19);
@@ -243,6 +252,54 @@ fn record_values_and_fresh_empty_iterators() -> Int {
     40426
 }
 
+
+type DropCounter is { count: &mut Int };
+implement Drop for DropCounter {
+    fn drop(&mut self) { *self.count = *self.count + 1; }
+}
+type NestedCounter is { inner: DropCounter };
+type OwnedKey is { id: Int, guard: DropCounter };
+implement Eq for OwnedKey {
+    fn eq(&self, other: &OwnedKey) -> Bool { self.id == other.id }
+}
+implement Hash for OwnedKey {
+    fn hash(&self, hasher: &mut Hasher) { hasher.write_int(self.id); }
+}
+
+fn destroy_owned_entries(count: &mut Int) {
+    let values: Map<Int, NestedCounter> = {
+        1: NestedCounter { inner: DropCounter { count: count } },
+        17: NestedCounter { inner: DropCounter { count: count } },
+    };
+}
+
+fn destroy_borrowed_entry(value: &DropCounter) {
+    let values: Map<Int, &DropCounter> = { 1: value };
+}
+
+fn borrowed_entry_survives() -> Int {
+    let mut count = 0;
+    let guard = DropCounter { count: &mut count };
+    destroy_borrowed_entry(&guard);
+    count
+}
+
+fn destroy_owned_key(count: &mut Int) {
+    let key = OwnedKey { id: 1, guard: DropCounter { count: count } };
+    let values: Map<OwnedKey, Int> = { (key): 19 };
+}
+
+fn owned_key_dropped_once() -> Int {
+    let mut count = 0;
+    destroy_owned_key(&mut count);
+    count
+}
+
+fn owned_entries_dropped_once() -> Int {
+    let mut count = 0;
+    destroy_owned_entries(&mut count);
+    count
+}
 "#;
 
 fn source() -> Arc<VbcModule> {
@@ -401,6 +458,10 @@ fn existing_owned_lookup_control() {
     check("read_control", 719);
 }
 #[test]
+fn shared_entry_lookup_reads_both_stored_slots() {
+    check("borrowed_entry", 1719);
+}
+#[test]
 fn keys_and_values_preserve_the_source_iterator_contract() {
     check("key_and_value_iterators", 1830);
 }
@@ -448,4 +509,20 @@ fn scalar_with_shared_type_bits_is_still_a_value_slot() {
 #[test]
 fn growth_after_the_borrow_ends_preserves_prior_writes() {
     check("grow_after_borrow_ends", 211);
+}
+
+
+#[test]
+fn flat_map_runs_nested_value_destructors_once() {
+    check("owned_entries_dropped_once", 2);
+}
+
+#[test]
+fn flat_map_runs_owned_key_destructor_once() {
+    check("owned_key_dropped_once", 1);
+}
+
+#[test]
+fn flat_map_leaves_borrowed_values_alive() {
+    check("borrowed_entry_survives", 0);
 }

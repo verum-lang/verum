@@ -307,3 +307,32 @@ fn nominal_primitive_metadata_cannot_silently_authorize_discarding_owned_fields(
         );
     }
 }
+
+#[test]
+fn foreign_map_declaration_cannot_claim_the_vm_table() {
+    for bootstrap in [false, true] {
+        let module = compile(
+            r#"
+            type Map<K, V> is { len: Int, cap: Int, entries: &unsafe V, tombstones: Int };
+            fn corruptible(value: Map<Int, Int>) { dispose<Map<Int, Int>>(value); }
+        "#,
+            bootstrap,
+        );
+        let entry = module
+            .find_function_by_name("drop_runtime.corruptible")
+            .unwrap();
+        let mut interpreter = Interpreter::new(Arc::new(module));
+        let foreign = interpreter
+            .state
+            .heap
+            .alloc(verum_vbc::types::TypeId::MAP, 32)
+            .unwrap();
+        let error = interpreter
+            .execute_function_with_args(entry, &[verum_vbc::Value::from_ptr(foreign.as_ptr())])
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("nominal owner mismatch"),
+            "bootstrap={bootstrap}: {error}"
+        );
+    }
+}

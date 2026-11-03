@@ -2,7 +2,7 @@
 //!
 //! These are direct lookup-helper controls. They do not establish arbitrary raw
 //! receiver safety for the earlier generic CallM dispatch probes.
-use super::{map_value_slot, value_hash};
+use super::{map_entry_slots, value_hash};
 use crate::interpreter::{error::InterpreterError, heap, state::InterpreterState};
 use crate::{module::VbcModule, types::TypeId, value::Value};
 use std::sync::Arc;
@@ -31,6 +31,15 @@ fn backing(state: &mut InterpreterState, id: TypeId, slots: usize) -> Value {
         }
     }
     Value::from_ptr(object.as_ptr())
+}
+
+fn buckets(state: &mut InterpreterState, capacity: usize) -> Value {
+    let table = state.heap.alloc_hash_buckets(capacity).unwrap();
+    for slot in 0..capacity * 2 {
+        // SAFETY: each writable cell belongs to this freshly allocated table.
+        unsafe { *table.data_ptr().cast::<Value>().add(slot) = Value::unit() };
+    }
+    Value::from_ptr(table.as_ptr())
 }
 
 fn header(
@@ -78,7 +87,7 @@ fn pair(entries: Value, index: usize, key: i64, value: i64) -> *mut Value {
 }
 
 fn refuse(state: &InterpreterState, receiver: Value, reason: &str) {
-    match map_value_slot(state, receiver, Value::from_i64(1)) {
+    match map_entry_slots(state, receiver, Value::from_i64(1)) {
         Err(InterpreterError::Panic { message }) => assert!(message.contains(reason), "{message}"),
         outcome => panic!("expected storage refusal {reason:?}, got {outcome:?}"),
     }
@@ -91,29 +100,28 @@ fn refuse(state: &InterpreterState, receiver: Value, reason: &str) {
 #[test]
 fn all_existing_flat_header_and_backing_forms_return_the_actual_slot() {
     for slots in [3, 4] {
-        for id in [TypeId::UNIT, TypeId::MAP] {
-            let mut state = state();
-            let entries = backing(&mut state, id, 32);
-            let index = value_hash(Value::from_i64(1), &state) % 16;
-            let expected = pair(entries, index, 1, 520);
-            let map = header(
-                &mut state,
-                slots,
-                Value::from_i64(1),
-                Value::from_i64(16),
-                entries,
-            );
-            let slot = map_value_slot(&state, map, Value::from_i64(1))
-                .unwrap()
-                .unwrap();
-            assert_eq!(slot, expected);
-            // SAFETY: the helper proved the exact owned Value slot; write-through
-            // distinguishes a slot address from either a copied or loaded value.
-            unsafe {
-                *slot = Value::from_i64(43);
-            }
-            assert_eq!(unsafe { *expected }.as_i64(), 43);
+        let mut state = state();
+        let entries = buckets(&mut state, 16);
+        let index = value_hash(Value::from_i64(1), &state) % 16;
+        let expected = pair(entries, index, 1, 520);
+        let map = header(
+            &mut state,
+            slots,
+            Value::from_i64(1),
+            Value::from_i64(16),
+            entries,
+        );
+        let [stored_key, slot] = map_entry_slots(&state, map, Value::from_i64(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(slot, expected);
+        assert_eq!(unsafe { *stored_key }, Value::from_i64(1));
+        // SAFETY: the helper proved the exact owned Value slot; write-through
+        // distinguishes a slot address from either a copied or loaded value.
+        unsafe {
+            *slot = Value::from_i64(43);
         }
+        assert_eq!(unsafe { *expected }.as_i64(), 43);
     }
 }
 
@@ -129,12 +137,16 @@ fn empty_source_constructor_encodings_return_none_without_a_backing_read() {
             absent,
         );
         assert!(
-            map_value_slot(&state, map, Value::from_i64(1))
+            map_entry_slots(&state, map, Value::from_i64(1))
                 .unwrap()
                 .is_none()
         );
         let copy = super::super::memory_collections::value_copy(&mut state, map).unwrap();
-        assert!(map_value_slot(&state, copy, Value::from_i64(1)).unwrap().is_none());
+        assert!(
+            map_entry_slots(&state, copy, Value::from_i64(1))
+                .unwrap()
+                .is_none()
+        );
     }
     let mut state = state();
     let entries = backing(&mut state, TypeId::UNIT, 0);
@@ -248,6 +260,8 @@ fn incompatible_backing_type_and_exact_extent_are_refused() {
     let mut state = state();
     for (id, slots) in [
         (TypeId::LIST, 32),
+        (TypeId::UNIT, 32),
+        (TypeId::MAP, 32),
         (TypeId::UNIT, 31),
         (TypeId::UNIT, 33),
         (TypeId::UNIT, 64),
@@ -280,7 +294,7 @@ fn collision_fixtures_pin_real_hash_buckets_and_the_last_value_cell() {
     assert_eq!(key_bucket(1), key_bucket(17));
     assert_eq!(key_bucket(1), key_bucket(33));
     assert_eq!(key_bucket(10), 15);
-    let entries = backing(&mut state, TypeId::MAP, 32);
+    let entries = buckets(&mut state, 16);
     let last = pair(entries, 15, 10, 520);
     let map = header(
         &mut state,
@@ -290,7 +304,9 @@ fn collision_fixtures_pin_real_hash_buckets_and_the_last_value_cell() {
         entries,
     );
     assert_eq!(
-        map_value_slot(&state, map, Value::from_i64(10)).unwrap(),
+        map_entry_slots(&state, map, Value::from_i64(10))
+            .unwrap()
+            .map(|[_, value]| value),
         Some(last)
     );
 }
@@ -298,7 +314,7 @@ fn collision_fixtures_pin_real_hash_buckets_and_the_last_value_cell() {
 #[test]
 fn a_full_table_missing_key_terminates_without_mutation() {
     let mut state = state();
-    let entries = backing(&mut state, TypeId::UNIT, 4);
+    let entries = buckets(&mut state, 2);
     let first = pair(entries, 0, 1, 7);
     let second = pair(entries, 1, 17, 19);
     let map = header(
@@ -309,7 +325,7 @@ fn a_full_table_missing_key_terminates_without_mutation() {
         entries,
     );
     assert!(
-        map_value_slot(&state, map, Value::from_i64(33))
+        map_entry_slots(&state, map, Value::from_i64(33))
             .unwrap()
             .is_none()
     );

@@ -3235,6 +3235,20 @@ impl InterpreterState {
         }
     }
 
+    /// Allocate a runtime tuple with its fields in declaration order.
+    pub(super) fn alloc_tuple(&mut self, fields: &[Value]) -> InterpreterResult<Value> {
+        let data_size = std::mem::size_of_val(fields).max(std::mem::size_of::<Value>());
+        let obj = self
+            .heap
+            .alloc(crate::types::TypeId::TUPLE, data_size)?;
+        self.record_allocation();
+        let data_ptr = obj.data_ptr() as *mut Value;
+        for (i, v) in fields.iter().enumerate() {
+            unsafe { *data_ptr.add(i) = *v; }
+        }
+        Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+    }
+
     /// Records an allocation.
     #[inline]
     pub fn record_allocation(&mut self) {

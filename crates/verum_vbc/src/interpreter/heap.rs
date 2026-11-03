@@ -622,6 +622,8 @@ bitflags! {
         /// Allocation has the variant tag/count prefix. Set by alloc_variant,
         /// independent of nominal/synthetic TypeId (T1571).
         const VARIANT = 0b1_0000_0000;
+        /// Backing allocation created for the VM's flat key/value hash table.
+        const HASH_BUCKETS = 0b10_0000_0000;
     }
 }
 
@@ -1264,6 +1266,16 @@ impl Heap {
         })?;
         // SAFETY: fresh tracked object; no references have escaped.
         unsafe { (*object.as_ptr()).flags.insert(ObjectFlags::VARIANT) };
+        Ok(object)
+    }
+
+    /// Allocate a flat Map/Set table. The caller initializes the key/value
+    /// slots before publishing the buffer. Role is independent of byte extent.
+    pub(crate) fn alloc_hash_buckets(&mut self, capacity: usize) -> InterpreterResult<Object> {
+        let bytes = capacity.checked_mul(std::mem::size_of::<[Value; 2]>())
+            .ok_or(InterpreterError::AllocationTooLarge { requested: usize::MAX, max_allowed: MAX_ALLOCATION_SIZE })?;
+        let mut object = self.alloc(TypeId::UNIT, bytes)?;
+        object.header_mut().flags.insert(ObjectFlags::HASH_BUCKETS);
         Ok(object)
     }
 

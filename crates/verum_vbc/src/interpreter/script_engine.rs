@@ -1198,7 +1198,7 @@ fn build_map_value(
         Err(_) => return Value::unit(),
     };
     interp.state.record_allocation();
-    let entries_obj = match interp.state.heap.alloc_array(TypeId::UNIT, cap * 2) {
+    let entries_obj = match interp.state.heap.alloc_hash_buckets(cap) {
         Ok(e) => e,
         Err(_) => return Value::unit(),
     };

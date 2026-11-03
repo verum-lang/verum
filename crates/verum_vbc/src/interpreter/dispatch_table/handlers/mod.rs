@@ -17,6 +17,7 @@ pub(super) mod string_helpers;
 // `wrap_in_variant` / `extract_byte_slice` / `extract_text_arg` /
 // `is_record_typed_as` / `lookup_type_id_by_name` etc.
 pub(super) mod heap_helpers;
+mod flat_map;
 // `pub(crate)` rather than `pub(super)` so sibling interpreter
 // modules (notably `interpreter::io_engine::async_accept`) can
 // reach `net_runtime::NET_STATUS_*` constants for reactor

@@ -2469,7 +2469,7 @@ pub(super) fn handle_bound_method(
             state.record_allocation();
             let header_ptr =
                 unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            let entries = state.heap.alloc_array(TypeId::UNIT, DEFAULT_CAP * 2)?;
+            let entries = state.heap.alloc_hash_buckets(DEFAULT_CAP)?;
             state.record_allocation();
             let entries_ptr = entries.as_ptr() as *mut u8;
             let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -2570,7 +2570,7 @@ pub(super) fn handle_bound_method(
             state.record_allocation();
             let header_ptr =
                 unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            let entries = state.heap.alloc_array(TypeId::UNIT, actual_cap * 2)?;
+            let entries = state.heap.alloc_hash_buckets(actual_cap)?;
             state.record_allocation();
             let entries_ptr = entries.as_ptr() as *mut u8;
             let entries_data =
@@ -5496,85 +5496,21 @@ fn map_entries_data(header_ptr: *const Value, capacity: usize) -> *mut Value {
     std::ptr::null_mut()
 }
 
-/// Locate a value in the interpreter's flat Map carrier (T1196).
+/// Locate the stored key and value in the interpreter's flat Map carrier.
 ///
 /// This is the shared lookup authority for owned and borrowed access. The
 /// declared `Slot<K, V>` body has a different layout; raw buffers or a four-Value
 /// Slot table must not be read as this allocator-owned key/value array.
-/// The returned address is valid only while the caller preserves table shape,
-/// as required by the public `Map.get_mut` borrow contract.
-fn map_value_slot(
+/// Both slots remain valid for the duration of the map borrow.
+fn map_entry_slots(
     state: &InterpreterState,
     receiver: Value,
     key: Value,
-) -> InterpreterResult<verum_common::Maybe<*mut Value>> {
-    let invalid = |detail: &str| InterpreterError::Panic {
-        message: format!("invalid Map lookup storage: {detail}"),
-    };
-    if !receiver.is_regular_ptr()
-        || receiver.is_nil()
-        || !state.heap.contains(receiver.as_ptr::<heap::ObjectHeader>())
-    {
-        return Err(invalid("receiver is not an owned object"));
-    }
-    // SAFETY: exact heap membership establishes a live ObjectHeader.
-    let header = unsafe { &*receiver.as_ptr::<heap::ObjectHeader>() };
-    let value_size = std::mem::size_of::<Value>();
-    if header.type_id != TypeId::MAP
-        || !header.is_valid()
-        || header.flags.contains(heap::ObjectFlags::VARIANT)
-        || (header.size as usize != 3 * value_size && header.size as usize != 4 * value_size)
-    {
-        return Err(invalid("receiver does not have a flat Map header"));
-    }
-    // SAFETY: both supported runtime headers contain these three Value slots.
-    let fields = unsafe {
-        receiver.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE).cast::<Value>()
-    };
-    // SAFETY: the same three-slot extent was established above.
-    let (length, capacity, backing) = unsafe { (*fields, *fields.add(1), *fields.add(2)) };
-    if !length.is_int() || !capacity.is_int() || length.as_i64() < 0 || capacity.as_i64() < 0 {
-        return Err(invalid("length and capacity must be nonnegative integers"));
-    }
-    let capacity = usize::try_from(capacity.as_i64())
-        .map_err(|_| invalid("capacity exceeds the address space"))?;
-    if length.as_i64() as u64 > capacity as u64 {
-        return Err(invalid("length exceeds capacity"));
-    }
-    if capacity == 0 {
-        // The source constructor uses integer zero; runtime constructors may
-        // use nil. Neither authorizes a header read from an absent allocation.
-        if backing.is_nil() || (backing.is_int() && backing.as_i64() == 0) {
-            return Ok(None);
-        }
-        return Err(invalid("zero capacity has a backing allocation"));
-    }
-    let bytes = capacity.checked_mul(2)
-        .and_then(|slots| slots.checked_mul(value_size))
-        .ok_or_else(|| invalid("capacity byte size overflows"))?;
-    if !backing.is_regular_ptr()
-        || backing.is_nil()
-        || !state.heap.contains(backing.as_ptr::<heap::ObjectHeader>())
-    {
-        return Err(invalid("backing is not an owned object"));
-    }
-    // SAFETY: exact heap membership establishes the backing header. The two
-    // TypeIds are emitted by static Map.new and NewMap respectively; both
-    // allocate precisely two Values per bucket, unlike the declared Slot body.
-    let backing_header = unsafe { &*backing.as_ptr::<heap::ObjectHeader>() };
-    if !matches!(backing_header.type_id, TypeId::UNIT | TypeId::MAP)
-        || !backing_header.is_valid()
-        || backing_header.flags.contains(heap::ObjectFlags::VARIANT)
-        || backing_header.size as usize != bytes
-    {
-        return Err(invalid("backing does not match the flat key/value extent"));
-    }
-    // SAFETY: the validated allocation contains exactly capacity key/value
-    // pairs. Probing is finite even for a full table, and no user callback or
-    // table mutation occurs during the existing semantic hash/equality checks.
-    let entries = unsafe {
-        backing.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE).cast::<Value>()
-    };
+) -> InterpreterResult<verum_common::Maybe<[*mut Value; 2]>> {
+    let table = super::flat_map::FlatMap::checked(state, receiver)?;
+    let capacity = table.capacity;
+    if capacity == 0 { return Ok(None); }
+    let entries = table.entries;
     let mut index = value_hash(key, state) % capacity;
     for _ in 0..capacity {
         // SAFETY: index is below capacity and the complete pair extent is owned.
@@ -5584,7 +5520,7 @@ fn map_value_slot(
         }
         if value_eq(entry_key, key, state) {
             // SAFETY: the value follows the checked key in the same pair.
-            return Ok(Some(unsafe { entries.add(index * 2 + 1) }));
+            return Ok(Some(unsafe { [entries.add(index * 2), entries.add(index * 2 + 1)] }));
         }
         index = (index + 1) % capacity;
     }
@@ -7373,20 +7309,7 @@ pub(super) fn dispatch_primitive_method(
                                         entry_key
                                     } else {
                                         let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
-                                        let tuple_obj = state.heap.alloc(
-                                            TypeId::TUPLE,
-                                            2 * std::mem::size_of::<Value>(),
-                                        )?;
-                                        let tuple_data = unsafe {
-                                            (tuple_obj.as_ptr() as *mut u8)
-                                                .add(heap::OBJECT_HEADER_SIZE)
-                                                as *mut Value
-                                        };
-                                        unsafe {
-                                            *tuple_data = entry_key;
-                                            *tuple_data.add(1) = entry_val;
-                                        }
-                                        Value::from_ptr(tuple_obj.as_ptr() as *mut u8)
+                                        state.alloc_tuple(&[entry_key, entry_val])?
                                     };
                                     return Ok(Some(make_some_value(state, element)?));
                                 }
@@ -7906,7 +7829,7 @@ pub(super) fn dispatch_primitive_method(
                     if capacity == 0 {
                         const BOOTSTRAP_CAP: usize = 16;
                         let new_entries =
-                            state.heap.alloc_array(TypeId::UNIT, BOOTSTRAP_CAP * 2)?;
+                            state.heap.alloc_hash_buckets(BOOTSTRAP_CAP)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
@@ -7927,7 +7850,7 @@ pub(super) fn dispatch_primitive_method(
                     // Resize if load factor >= 75%
                     if count * 4 >= capacity * 3 {
                         let new_cap = capacity * 2;
-                        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                        let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
@@ -8051,7 +7974,7 @@ pub(super) fn dispatch_primitive_method(
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let old_cap = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
 
-                    let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
                     state.record_allocation();
                     let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                     let new_entries_data =
@@ -8126,7 +8049,7 @@ pub(super) fn dispatch_primitive_method(
                     if capacity == 0 {
                         const BOOTSTRAP_CAP: usize = 16;
                         let new_entries =
-                            state.heap.alloc_array(TypeId::UNIT, BOOTSTRAP_CAP * 2)?;
+                            state.heap.alloc_hash_buckets(BOOTSTRAP_CAP)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
@@ -8151,7 +8074,7 @@ pub(super) fn dispatch_primitive_method(
                     // Resize if load factor >= 75%
                     if count * 4 >= capacity * 3 {
                         let new_cap = capacity * 2;
-                        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                        let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
@@ -8228,16 +8151,23 @@ pub(super) fn dispatch_primitive_method(
                     };
                     return Ok(Some(result));
                 }
-                "get" | "get_mut" if is_map => {
-                    // Both methods use the same key normalization and finite
-                    // lookup. get owns a Value; get_mut carries the address of
-                    // that Value slot through Maybe, never a copied payload.
+                "get" | "get_mut" | "get_key_value" if is_map => {
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
                     let key = resolve_arg_value(state, key_raw);
-                    let result = match map_value_slot(state, *receiver, key)? {
+                    let result = match map_entry_slots(state, *receiver, key)? {
                         None => make_none_value(state)?,
-                        Some(slot) if method == "get_mut" => {
+                        Some(slots) if method == "get_key_value" => {
+                            let refs = slots.map(|slot| Value::from_thin_ref(ThinRef::new(
+                                slot.cast(),
+                                state.cbgr_epoch as u32,
+                                state.cbgr_epoch as u16,
+                                Capabilities::READ_ONLY,
+                            )));
+                            let pair = state.alloc_tuple(&refs)?;
+                            make_some_value(state, pair)?
+                        }
+                        Some([_, slot]) if method == "get_mut" => {
                             // Existing returned-reference convention shared by
                             // RefField/RefListElement. The map borrow forbids
                             // shape changes; address membership does not enforce
@@ -8245,8 +8175,8 @@ pub(super) fn dispatch_primitive_method(
                             state.cbgr_mutable_ptrs.insert(slot as usize);
                             make_some_value(state, Value::from_ptr(slot))?
                         }
-                        Some(slot) => {
-                            // SAFETY: map_value_slot checked the owned extent.
+                        Some([_, slot]) => {
+                            // SAFETY: map_entry_slots checked the owned extent.
                             make_some_value(state, unsafe { *slot })?
                         }
                     };
@@ -8262,7 +8192,7 @@ pub(super) fn dispatch_primitive_method(
                     // Handle initial capacity (0 means uninitialized)
                     if capacity == 0 {
                         const INITIAL_CAP: usize = 16;
-                        let new_entries = state.heap.alloc_array(TypeId::UNIT, INITIAL_CAP * 2)?;
+                        let new_entries = state.heap.alloc_hash_buckets(INITIAL_CAP)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
@@ -8283,7 +8213,7 @@ pub(super) fn dispatch_primitive_method(
                     if count * 4 >= capacity * 3 {
                         let new_cap = capacity * 2;
                         let entries_data = map_entries_data(header_ptr, capacity);
-                        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                        let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
@@ -8488,7 +8418,7 @@ pub(super) fn dispatch_primitive_method(
                         // did not, so `get_or_insert` on a fresh map was a
                         // different failure of the same cause.
                         let new_cap = if capacity == 0 { 16 } else { capacity * 2 };
-                        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                        let new_entries = state.heap.alloc_hash_buckets(new_cap)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
@@ -8705,7 +8635,7 @@ pub(super) fn dispatch_primitive_method(
                         .heap
                         .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
-                    let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    let new_backing = state.heap.alloc_hash_buckets(new_cap)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
@@ -8803,7 +8733,7 @@ pub(super) fn dispatch_primitive_method(
                         .heap
                         .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
-                    let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    let new_backing = state.heap.alloc_hash_buckets(new_cap)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
@@ -8899,7 +8829,7 @@ pub(super) fn dispatch_primitive_method(
                         .heap
                         .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
-                    let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    let new_backing = state.heap.alloc_hash_buckets(new_cap)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
@@ -9127,7 +9057,7 @@ pub(super) fn dispatch_primitive_method(
                         .heap
                         .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
-                    let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    let new_backing = state.heap.alloc_hash_buckets(new_cap)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
@@ -9407,7 +9337,7 @@ pub(super) fn dispatch_primitive_method(
                         .heap
                         .alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
-                    let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    let new_backing = state.heap.alloc_hash_buckets(new_cap)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
@@ -9595,7 +9525,7 @@ pub(super) fn dispatch_primitive_method(
                         .heap
                         .alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
-                    let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    let new_backing = state.heap.alloc_hash_buckets(new_cap)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
@@ -10975,7 +10905,7 @@ pub(super) fn build_set_from_values(
         .heap
         .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
-    let backing = state.heap.alloc_array(TypeId::UNIT, initial_cap * 2)?;
+    let backing = state.heap.alloc_hash_buckets(initial_cap)?;
     state.record_allocation();
     let backing_ptr = backing.as_ptr() as *mut u8;
     let data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };

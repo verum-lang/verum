@@ -1632,7 +1632,7 @@ pub(in super::super) fn handle_set_index(
         // Check load factor and grow if needed (> 70% full)
         if count * 10 >= capacity * 7 {
             let new_capacity = capacity * 2;
-            let new_entries = state.heap.alloc_array(TypeId::UNIT, new_capacity * 2)?;
+            let new_entries = state.heap.alloc_hash_buckets(new_capacity)?;
             state.record_allocation();
             let new_entries_ptr = new_entries.as_ptr() as *mut u8;
             let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -2626,7 +2626,7 @@ pub(in super::super) fn handle_new_map(
         unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Allocate entries array: capacity * 2 Values (key, value pairs)
-    let entries = state.heap.alloc_array(TypeId::MAP, DEFAULT_CAP * 2)?;
+    let entries = state.heap.alloc_hash_buckets(DEFAULT_CAP)?;
     state.record_allocation();
     let entries_ptr = entries.as_ptr() as *mut u8;
 
@@ -2734,7 +2734,7 @@ pub(in super::super) fn handle_map_set(
     // Check load factor and grow if needed (> 70% full)
     if count * 10 >= capacity * 7 {
         let new_capacity = capacity * 2;
-        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_capacity * 2)?;
+        let new_entries = state.heap.alloc_hash_buckets(new_capacity)?;
         state.record_allocation();
         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
 
@@ -3145,6 +3145,9 @@ pub(crate) fn copy_container_spine(
         }
         let pointer = backing.as_ptr::<u8>();
         let header = unsafe { &*pointer.cast::<heap::ObjectHeader>() };
+        if matches!(type_id, TypeId::MAP | TypeId::SET) && !header.flags.contains(heap::ObjectFlags::HASH_BUCKETS) {
+            return Err(InterpreterError::InvalidOperand { message: "container copy lacks a hash table backing".into() });
+        }
         if copy_slots > header.size as usize / slot_size {
             return Err(InterpreterError::InvalidOperand { message: "container copy exceeds backing allocation".into() });
         }
@@ -3156,7 +3159,11 @@ pub(crate) fn copy_container_spine(
     state.record_allocation();
     let new_data =
         unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    let backing = state.heap.alloc(backing_type, allocation_bytes)?;
+    let backing = if matches!(type_id, TypeId::MAP | TypeId::SET) {
+        state.heap.alloc_hash_buckets(backing_alloc / 2)?
+    } else {
+        state.heap.alloc(backing_type, allocation_bytes)?
+    };
     state.record_allocation();
     // SAFETY: fresh allocations of the exact sizes above; the source is
     // a validated container object; backing arrays are header-carrying
@@ -3220,7 +3227,7 @@ pub(in super::super) fn handle_new_set(
     // Allocate entries array: capacity * 2 Values (key, dummy-value pairs)
     // Set uses the same [key, value] slot layout as Map to share the insert/contains
     // code paths. Each slot pair is 2 Values.
-    let entries = state.heap.alloc_array(TypeId::UNIT, DEFAULT_CAP * 2)?;
+    let entries = state.heap.alloc_hash_buckets(DEFAULT_CAP)?;
     state.record_allocation();
     let entries_ptr = entries.as_ptr() as *mut u8;
 
@@ -3275,7 +3282,7 @@ pub(in super::super) fn handle_set_insert(
         // `new_capacity` alone would re-introduce the flat layout this
         // handler used to write with, and half the elements would again be
         // invisible to iteration (T0658).
-        let new_entries = state.heap.alloc_array(TypeId::UNIT, new_capacity * 2)?;
+        let new_entries = state.heap.alloc_hash_buckets(new_capacity)?;
         state.record_allocation();
         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
 
@@ -3687,7 +3694,7 @@ mod value_copy_contract {
         for (type_id, headers) in [(TypeId::MAP, 3), (TypeId::MAP, 4), (TypeId::SET, 3)] {
             let mut st = state();
             let source = st.heap.alloc(type_id, headers * 8).unwrap();
-            let backing = st.heap.alloc_array(TypeId::UNIT, 4).unwrap();
+            let backing = st.heap.alloc_hash_buckets(2).unwrap();
             unsafe {
                 let head = source.data_ptr() as *mut Value;
                 *head = Value::from_i64(1);
@@ -3714,7 +3721,7 @@ mod value_copy_contract {
         for (headers, capacity, backing_length) in [(2, 2, 4), (3, 3, 4), (3, -1, 4)] {
             let mut st = state();
             let source = st.heap.alloc(TypeId::MAP, headers * 8).unwrap();
-            let backing = st.heap.alloc_array(TypeId::UNIT, backing_length).unwrap();
+            let backing = st.heap.alloc_hash_buckets(backing_length / 2).unwrap();
             unsafe {
                 let head = source.data_ptr() as *mut Value;
                 *head = Value::from_i64(1);
