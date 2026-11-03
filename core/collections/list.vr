@@ -29,6 +29,8 @@
     lifecycle: Lifecycle.Definition
 )
 module core.collections.list;
+
+mount core.mem.allocator.AllocError;
 mount core.base.coercion.{IntCoercible, Indexable, ArrayCoercible};
 // Allocator primitives for typed-OOM (#65, #68). `mount core.*`
 // alone doesn't surface these because the glob expansion currently

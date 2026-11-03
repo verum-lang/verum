@@ -41,6 +41,8 @@
 )
 module core.intrinsics.lowlevel.x86_64;
 
+mount core.simd.{Vec4f, Vec4i, Vec2l, Vec16b, Vec8f, Vec8i, Vec16f, Vec16i};
+
 // =============================================================================
 // CPU FEATURE DETECTION
 // =============================================================================

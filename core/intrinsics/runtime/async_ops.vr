@@ -19,6 +19,8 @@
 )
 module core.intrinsics.runtime.async_ops;
 
+mount core.base.result.Error;
+
 // =============================================================================
 // SECTION 1: Opaque Handle Types
 // =============================================================================

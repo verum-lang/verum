@@ -25,6 +25,8 @@
     lifecycle: Lifecycle.Definition
 )
 module core.collections.set;
+
+mount core.mem.allocator.AllocError;
 mount super.map.*;
 
 // =============================================================================
