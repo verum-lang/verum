@@ -125,11 +125,14 @@ fn build_inner(
     if declaration.type_params.len() != args.len() {
         return Err("typed destruction generic arity does not match its declaring owner".into());
     }
-    if let Some(function) = declaration.drop_fn {
-        let function = FunctionId(function);
+    if let Some(reference) = declaration.drop_fn {
+        let function = module.resolved_function_id(reference);
         let descriptor = module
             .get_function(function)
-            .ok_or_else(|| Text::from("typed destruction refers to a missing Drop body"))?;
+            .ok_or_else(|| {
+                let name = module.get_string(declaration.name).unwrap_or("<unnamed>");
+                Text::from(format!("typed destruction of {name} refers to missing Drop function {reference}"))
+            })?;
         let receiver = descriptor
             .semantic_parameter_types()
             .and_then(|params| (params.len() == 1).then(|| params[0].as_ref()).flatten())

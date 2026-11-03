@@ -324,3 +324,17 @@ fn destruction_is_a_mutating_optimizer_boundary_and_call_like_escape() {
         Some(&CbgrTier::Tier0)
     );
 }
+
+#[test]
+fn typed_destruction_uses_the_linked_declaration_for_external_drop_references() {
+    use verum_vbc::drop_plan::{self, DropPlan};
+    let mut module = generic_destructor_module();
+    let owner = module.types.iter_mut().find(|ty| ty.id == TypeId(7001)).unwrap();
+    let reference = 0x2000_0022;
+    owner.drop_fn = Some(reference);
+    let ty = owner_type(TypeRef::Concrete(TypeId::INT));
+    assert!(drop_plan::build(&module, &ty).is_err());
+    module.resolved_band_map.insert(reference, FunctionId(1));
+    let plan = drop_plan::build(&module, &ty).unwrap();
+    assert!(matches!(plan, DropPlan::Glue { function: FunctionId(1), .. }));
+}
