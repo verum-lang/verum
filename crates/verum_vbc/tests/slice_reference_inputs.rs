@@ -128,3 +128,21 @@ fn probe() -> Int {{ let values = [11, 42, 99]; length(&values) }}
         assert!(error.to_string().contains("slice"), "{error}");
     }
 }
+
+#[test]
+fn subslices_of_projected_fixed_arrays_use_the_selected_container() {
+    let value = run(r#"
+        fn read(a: &[Byte;4], b: &[Byte;4]) -> Int {
+            let left = &a[1..4];
+            let right = &b[..];
+            (left[2] as Int) * 10 + right[3] as Int
+        }
+        fn from_rows(rows: &List<[Byte;4]>) -> Int { read(&rows[0], &rows[1]) }
+        fn probe() -> Int {
+            let mut rows: List<[Byte;4]> = [];
+            rows.push([3_u8;4]); rows.push([5_u8;4]);
+            from_rows(&rows)
+        }
+    "#).expect("borrowed rows");
+    assert_eq!(value.as_i64(), 35);
+}

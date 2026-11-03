@@ -2616,6 +2616,12 @@ fn cbgr_extended_body(
                 src = state.registers.get_absolute(abs_index);
                 remaining_hops -= 1;
             }
+            // An element or field borrow holds the container in a Value slot.
+            // Load that slot before interpreting the array header. Raw-address
+            // and FatRef slices retain their own data/stride representation.
+            if src.is_regular_ptr() {
+                src = super::cbgr_helpers::resolve_arg_value(state, src)?;
+            }
             let start_value = state.get_reg(start_reg).as_i64();
             let len_value = state.get_reg(len_reg).as_i64();
             if start_value < 0 || len_value < 0 {
