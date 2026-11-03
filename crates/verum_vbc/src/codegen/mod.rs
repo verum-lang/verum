@@ -8860,10 +8860,12 @@ impl VbcCodegen {
                 .or_default();
             if let Some(path) = &owner {
                 self.unit_module_paths.insert(path.clone());
-                self.collect_callable_exports(path, &module.items);
                 self.source_module_owners.declare(path);
             }
             let owner = owner.unwrap_or_else(|| self.source_module_root().to_owned());
+            // Headerless units still own their inline modules and visibility
+            // declarations. Publish the same graph before resolving signatures.
+            self.collect_callable_exports(&owner, &module.items);
             // The first named bodiless declaration is the file header selected
             // by extract_source_module_name, already published above. Later or
             // nested forward declarations still introduce child owners.

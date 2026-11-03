@@ -2,7 +2,7 @@
 #![cfg(feature = "codegen")]
 
 use verum_fast_parser::Parser;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::{CodegenConfig, CodegenError, CodegenErrorKind, VbcCodegen};
 use verum_vbc::module::{FunctionDescriptor, VbcModule};
 use verum_vbc::types::{TypeId, TypeParamId, TypeRef};
 
@@ -23,6 +23,13 @@ fn bootstrap(source: &str) -> VbcModule {
 }
 
 fn bootstrap_with_prior(source: &str, available: &[&VbcModule]) -> VbcModule {
+    try_bootstrap_with_prior(source, available).unwrap()
+}
+
+fn try_bootstrap_with_prior(
+    source: &str,
+    available: &[&VbcModule],
+) -> Result<VbcModule, CodegenError> {
     let ast = Parser::new(source)
         .parse_module()
         .expect("parse bootstrap source");
@@ -42,14 +49,12 @@ fn bootstrap_with_prior(source: &str, available: &[&VbcModule]) -> VbcModule {
     codegen.import_functions(&declarations.export_functions());
     codegen.register_stdlib_intrinsics();
     codegen.register_runtime_io_functions();
-    codegen
-        .import_bootstrap_nominal_dependencies(&[&ast], available)
-        .unwrap();
-    codegen.collect_unit_declarations(&[&ast]).unwrap();
+    codegen.import_bootstrap_nominal_dependencies(&[&ast], available)?;
+    codegen.collect_unit_declarations(&[&ast])?;
     codegen.resolve_pending_imports();
-    codegen.compile_pending_default_methods().unwrap();
-    codegen.compile_items_into_state(&ast).unwrap();
-    codegen.finalize_module_from_state().unwrap()
+    codegen.compile_pending_default_methods()?;
+    codegen.compile_items_into_state(&ast)?;
+    codegen.finalize_module_from_state()
 }
 
 fn function<'a>(module: &'a VbcModule, name: &str) -> &'a FunctionDescriptor {
@@ -143,25 +148,17 @@ fn actual_control_source_uses_the_bootstrap_contract() {
 
 #[test]
 fn foreign_sum_mounts_do_not_fall_back_to_builtin_leaf_names() {
-    for (owner, diagnostic) in [
-        ("result", "declaration must return"),
-        ("maybe", "error descriptor must declare"),
-    ] {
+    for (owner, name) in [("result", "Result"), ("maybe", "Maybe")] {
         let source = SOURCE.replace(
             &format!("mount core.base.{owner}"),
             &format!("mount foreign.base.{owner}"),
         );
-        let module = bootstrap(&source);
-        let function = function(&module, "fence");
-        let mut pc = function.bytecode_offset as usize;
-        let op = verum_vbc::bytecode::decode_instruction(&module.bytecode, &mut pc).unwrap();
-        let verum_vbc::instruction::Instruction::Panic { message_id } = op else {
-            panic!("foreign {owner} must fail the intrinsic contract, got {op:?}");
-        };
-        let message = module
-            .get_string(verum_vbc::types::StringId(message_id))
-            .unwrap();
-        assert!(message.contains(diagnostic), "{owner}: {message}");
+        let error = try_bootstrap_with_prior(&source, &[]).unwrap_err();
+        assert!(
+            matches!(&error.kind, CodegenErrorKind::InvalidSourceSignature(message)
+            if message.contains(&format!("unresolved nominal type '{name}'"))),
+            "{error}"
+        );
     }
 }
 
@@ -196,8 +193,11 @@ fn bootstrap_intrinsic_uses_qualified_constructors_after_bare_variant_collision(
 
 #[test]
 fn imported_canonical_sum_descriptor_owns_intrinsic_variants() {
-    let result = sum_module("core.base.result", "type Result<T, E> is Ok(T) | Err(E);");
-    let maybe = sum_module("core.base.maybe", "type Maybe<T> is None | Some(T);");
+    let result = sum_module(
+        "core.base.result",
+        "public type Result<T, E> is Ok(T) | Err(E);",
+    );
+    let maybe = sum_module("core.base.maybe", "public type Maybe<T> is None | Some(T);");
     let source = SOURCE.replace(
         "type Location",
         "type Other is Err(Int) | Ok(Int); type Location",
@@ -209,10 +209,36 @@ fn imported_canonical_sum_descriptor_owns_intrinsic_variants() {
 fn imported_foreign_result_cannot_claim_the_reserved_sum_id() {
     let foreign = sum_module(
         "foreign.base.result",
-        "type Result<T, E> is Ok(T) | Err(E);",
+        "public type Result<T, E> is Ok(T) | Err(E);",
     );
     let source = SOURCE.replace("mount core.base.result", "mount foreign.base.result");
     let module = bootstrap_with_prior(&source, &[&foreign]);
     assert!(matches!(&function(&module, "fence").return_type,
         TypeRef::Instantiated { base, .. } if *base != TypeId::RESULT));
+}
+
+#[test]
+fn imported_private_sum_descriptors_do_not_gain_bootstrap_visibility() {
+    for private in ["Result", "Maybe"] {
+        let result = sum_module(
+            "core.base.result",
+            &format!(
+                "{}type Result<T, E> is Ok(T) | Err(E);",
+                if private == "Result" { "" } else { "public " }
+            ),
+        );
+        let maybe = sum_module(
+            "core.base.maybe",
+            &format!(
+                "{}type Maybe<T> is None | Some(T);",
+                if private == "Maybe" { "" } else { "public " }
+            ),
+        );
+        let error = try_bootstrap_with_prior(SOURCE, &[&result, &maybe]).unwrap_err();
+        assert!(
+            matches!(&error.kind, CodegenErrorKind::InvalidSourceSignature(message)
+            if message.contains(&format!("unresolved nominal type '{private}'"))),
+            "{error}"
+        );
+    }
 }

@@ -768,24 +768,18 @@ impl VbcCodegen {
     /// A selected source binding is authoritative even when it cannot resolve.
     /// Walk actual lexical parents, never namespace prefixes or sibling aliases.
     pub(super) fn source_nominal_type_id(&self, name: &str) -> Option<Option<TypeId>> {
-        if name.contains('.') { return None; }
+        if let Some((head, tail)) = name.split_once('.') {
+            return Some(self.qualified_source_type_id(name, head, tail));
+        }
         let mut owner = self.lexical_type_scope();
-        let name_key = Text::from(name);
         loop {
             if let Some(local) = self.type_name_to_id.get(&format!("{owner}.{name}")) {
                 return Some(Some(*local));
             }
-            let owner_key = Text::from(owner);
-            let binding = match self.source_type_mounts.get(&owner_key) {
-                Some(scope) => scope.get(&name_key),
-                None => self.imported_declaration_type_bindings.get(&owner_key)
-                    .and_then(Option::as_ref).and_then(|scope| scope.get(&name_key)),
-            };
+            let binding = self.source_type_binding(owner, name);
             if let Some(binding) = binding {
                 return Some(binding.as_deref().and_then(|mounted|
-                    self.exact_nominal_type_id(mounted)
-                        .or_else(|| self.exact_nominal_type_id(&format!("core.{mounted}")))
-                        .or_else(|| self.source_export_type_id(mounted, owner))));
+                    self.source_export_type_id(mounted, owner)));
             }
             if let Some(selected) = self.source_glob_type_id(name, owner) { return Some(selected); }
             owner = match self.lexical_type_parent(owner)? {
@@ -793,6 +787,45 @@ impl VbcCodegen {
                 None => return Some(None),
             };
         }
+    }
+
+    fn source_type_binding(&self, owner: &str, name: &str) -> Option<&Option<Text>> {
+        let owner = Text::from(owner);
+        let name = Text::from(name);
+        match self.source_type_mounts.get(&owner) {
+            Some(scope) => scope.get(&name),
+            None => self.imported_declaration_type_bindings.get(&owner)
+                .and_then(Option::as_ref).and_then(|scope| scope.get(&name)),
+        }
+    }
+
+    /// A qualified use selects its written namespace before following exports.
+    /// Imported namespace aliases and real lexical children are authoritative;
+    /// an unbound relative head cannot borrow a sibling under the cog root.
+    fn qualified_source_type_id(&self, name: &str, head: &str, tail: &str) -> Option<TypeId> {
+        let scope = self.lexical_type_scope();
+        let mut owner = scope;
+        loop {
+            if let Some(binding) = self.source_type_binding(owner, head) {
+                return binding.as_deref().and_then(|mounted|
+                    self.source_export_type_id(&format!("{mounted}.{tail}"), scope));
+            }
+            let namespace = crate::module::qualify_module_name(owner, head);
+            match self.declared_namespace_mount(&namespace, owner) {
+                Ok(true) => return self.source_export_type_id(&format!("{namespace}.{tail}"), scope),
+                Err(_) => return None,
+                Ok(false) => {}
+            }
+            owner = match self.lexical_type_parent(owner) {
+                Some(Some(parent)) => parent,
+                Some(None) => return None,
+                None => break,
+            };
+        }
+        // The export graph and imported descriptors already carry exact owners,
+        // including inline modules and bootstrap dependencies. No namespace
+        // prefix may be invented for an otherwise unbound qualified spelling.
+        self.canonical_source_export_type_id(name, scope)
     }
 
     fn exact_nominal_type_id(&self, name: &str) -> Option<TypeId> {
@@ -809,8 +842,7 @@ impl VbcCodegen {
         if let Some(selected) = self.source_nominal_type_id(name) { return selected; }
         let owner = self.lexical_type_scope();
         if let Some(mounted) = self.mounted_type_path(name) {
-            return self.exact_nominal_type_id(mounted).or_else(|| self.exact_nominal_type_id(&format!("core.{mounted}")))
-                .or_else(|| self.source_export_type_id(mounted, owner));
+            return self.source_export_type_id(mounted, owner);
         }
         if let Some(selected) = self.source_glob_type_id(name, owner) { return selected; }
         // A language scalar spelling has declaration authority in every scope.

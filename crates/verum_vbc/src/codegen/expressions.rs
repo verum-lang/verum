@@ -660,9 +660,25 @@ impl VbcCodegen {
         self.ctx.lookup_function_in_scope(path)
     }
 
-    fn scrutinee_sum_descriptor(&self) -> Option<&crate::types::TypeDescriptor> {
+    /// An inferred value may carry a private type from another declaration.
+    /// Its canonical owner remains authoritative even where that type cannot
+    /// be named in source. Never accept a flat compatibility alias as evidence
+    /// of this identity; written pattern qualifiers still use normal lookup.
+    fn inferred_scrutinee_descriptor(&self) -> Option<&crate::types::TypeDescriptor> {
         let ty = Self::strip_wrapper_type(self.ctx.match_scrutinee_type.as_deref()?);
-        let declaration = self.type_by_id(self.nominal_type_id(Self::strip_generic_args(ty))?)?;
+        let name = Self::strip_generic_args(ty);
+        if let Some(declaration) = self.type_name_to_id.get(name)
+            .and_then(|id| self.type_by_id(*id))
+            && self.type_declaration_identity(declaration)
+                .is_some_and(|identity| identity.as_str() == name)
+        {
+            return Some(declaration);
+        }
+        self.type_by_id(self.nominal_type_id(name)?)
+    }
+
+    fn scrutinee_sum_descriptor(&self) -> Option<&crate::types::TypeDescriptor> {
+        let declaration = self.inferred_scrutinee_descriptor()?;
         (declaration.kind == crate::types::TypeKind::Sum && !declaration.variants.is_empty())
             .then_some(declaration)
     }
@@ -692,7 +708,10 @@ impl VbcCodegen {
 
     /// Resolve a qualified constructor within its named owner. Bare patterns may use the scrutinee.
     fn pattern_variant_tag(&self, path: &str) -> Option<u32> {
-        if let Some(descriptor) = self.scrutinee_sum_descriptor() {
+        if let Some(descriptor) = self.inferred_scrutinee_descriptor() {
+            if descriptor.kind != crate::types::TypeKind::Sum || descriptor.variants.is_empty() {
+                return None;
+            }
             return self.scrutinee_variant(descriptor, path).map(|variant| variant.tag);
         }
         if let Some((owner, member)) = path.rsplit_once('.') {
@@ -727,9 +746,7 @@ impl VbcCodegen {
         field: usize,
     ) -> Option<Option<String>> {
         let scrutinee = Self::strip_wrapper_type(self.ctx.match_scrutinee_type.as_deref()?);
-        let base = Self::strip_generic_args(scrutinee);
-        let owner = self.nominal_type_id(base)?;
-        let descriptor = self.type_by_id(owner)?;
+        let descriptor = self.inferred_scrutinee_descriptor()?;
         if descriptor.kind != crate::types::TypeKind::Sum {
             return None;
         }

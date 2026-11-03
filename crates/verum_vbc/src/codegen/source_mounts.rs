@@ -232,7 +232,7 @@ impl VbcCodegen {
                         .declarations
                         .entry(name.to_owned())
                         .or_default()
-                        .insert(format!("{owner}.{name}"));
+                        .insert(crate::module::qualify_module_name(owner, name));
                 }
                 ItemKind::Type(declaration) => {
                     non_function(&declaration.name, &declaration.visibility);
@@ -432,6 +432,13 @@ impl VbcCodegen {
                 // Imported nominal IDs and callable descriptors are independent
                 // witnesses. A constructor elsewhere cannot turn a type into a call.
                 if let Some(id) = self.type_name_to_id.get(&path) {
+                    // Compatibility aliases in the flat ID table are not module
+                    // declarations. Qualified lookup retains the actual owner.
+                    if !self.type_by_id(*id).and_then(|ty| self.type_declaration_identity(ty))
+                        .is_some_and(|identity| identity.as_str() == path)
+                    {
+                        continue;
+                    }
                     if let Some(consumer) = glob_consumer {
                         let visible = self.type_by_id(*id).is_some_and(|descriptor| {
                             use crate::types::Visibility;
@@ -564,11 +571,39 @@ impl VbcCodegen {
         path: &str,
         scope: &str,
     ) -> Option<crate::types::TypeId> {
-        let path = self
+        let resolved = self
             .source_module_owners
-            .member(path, scope, self.source_module_root())?;
-        let candidates = self.source_export_candidates(&path, None);
-        self.type_name_to_id.get(candidates.nominal()?).copied()
+            .member(path, scope, self.source_module_root());
+        self.canonical_source_export_type_id(resolved.as_deref().unwrap_or(path), scope)
+    }
+
+    /// Resolve an already selected canonical path without rewriting its owner.
+    pub(super) fn canonical_source_export_type_id(
+        &self,
+        path: &str,
+        scope: &str,
+    ) -> Option<crate::types::TypeId> {
+        let (owner, name) = path.rsplit_once('.')?;
+        // The language's reserved sums exist before their source bundle is
+        // baked. Once a source scope or descriptor exists, its declaration and
+        // visibility are authoritative; this cannot override a refusal.
+        if let Some(id) = Self::canonical_sum_type_id(owner, name)
+            && self.source_export_scope(owner).is_none()
+            && self.type_by_id(id).is_none()
+            && self.type_name_to_id.get(path).is_none_or(|selected| *selected == id)
+        {
+            return Some(id);
+        }
+        let mut consumer = scope;
+        loop {
+            let candidates = self.source_export_candidates(path, Some(consumer));
+            if !candidates.inaccessible {
+                return self.type_name_to_id.get(candidates.nominal()?).copied();
+            }
+            // Inline lexical children share their enclosing declaration scope;
+            // dotted module names in separate files do not grant that access.
+            consumer = self.lexical_type_parent(consumer)??;
+        }
     }
 
     pub(super) fn resolve_source_callable_export(

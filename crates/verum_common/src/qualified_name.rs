@@ -12,6 +12,12 @@ pub fn declaration_priority(unit: &str, owner: &str, name: &str) -> u8 {
 /// Join an owner and a descriptor name, preserving the longest shared suffix.
 /// A descriptor may already be promoted fully or relative to its module.
 pub fn qualify_module_name(module_name: &str, name: &str) -> Text {
+    // The anonymous source root contributes no path segment. In particular,
+    // inline declarations and their exports must share `alpha.Token`, never
+    // split their identity between `alpha.Token` and `.alpha.Token`.
+    if module_name.is_empty() {
+        return name.into();
+    }
     if name.contains('.') {
         let owner: List<&str> = module_name.split('.').collect();
         let parts: List<&str> = name.split('.').collect();
