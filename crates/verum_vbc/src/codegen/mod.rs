@@ -15994,13 +15994,8 @@ impl VbcCodegen {
                             tid
                         };
                         let name_id = StringId(self.intern_string(&type_name));
-                        let target_ref: crate::types::TypeRef = self
-                            .type_name_to_id
-                            .get(&target)
-                            .map(|tid| crate::types::TypeRef::Concrete(*tid))
-                            .unwrap_or(crate::types::TypeRef::Concrete(
-                                crate::types::TypeId(0),
-                            ));
+                        let target_ref = self.semantic_type_in_current_scope(&target);
+                        let target_name = StringId(self.intern_string(&target));
                         let origin_module = self.current_origin_module_sid();
                         let type_desc = crate::types::TypeDescriptor {
                             resource_discipline: type_decl.resource_discipline(),
@@ -16017,7 +16012,8 @@ impl VbcCodegen {
                             clone_fn: None,
                             protocols: smallvec::SmallVec::new(),
                             visibility: crate::types::Visibility::Public,
-                            alias_target: Some(target_ref),
+                            alias_target: target_ref,
+                            alias_target_name: Some(target_name),
                             ..Default::default()
                         };
                         self.push_declared_type(type_desc);
@@ -17043,10 +17039,6 @@ impl VbcCodegen {
                         generic_param_map.insert(gname.name.to_string(), idx as u16);
                     }
                 }
-                let target_ref = self.resolve_signature_type_ref(target_type, &generic_param_map);
-                if std::env::var("VERUM_TRACE_RTC").is_ok() && type_name == "IoResult" {
-                    eprintln!("[RTC-emit] IoResult id={} target_ref={:?}", type_id.0, target_ref);
-                }
                 // Generic params (T, K, V, …) on the alias signature.
                 let mut alias_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
                     smallvec::SmallVec::new();
@@ -17063,6 +17055,10 @@ impl VbcCodegen {
                         });
                     }
                 }
+                // Alias targets are declaration witnesses. The ABI pointer used for
+                // an unresolved type cannot establish ownership at a destructor.
+                let ids: Vec<_> = alias_type_params.iter().map(|parameter| parameter.id).collect();
+                let target_ref = self.semantic_formal_type(target_type, &generic_param_map, &ids);
                 let origin_module = self.current_origin_module_sid();
                 let type_desc = crate::types::TypeDescriptor {
                     resource_discipline: type_decl.resource_discipline(),
@@ -17079,7 +17075,7 @@ impl VbcCodegen {
                     clone_fn: None,
                     protocols: smallvec::SmallVec::new(),
                     visibility: crate::types::Visibility::Public,
-                    alias_target: Some(target_ref),
+                    alias_target: target_ref,
                     // T0533 — carry the source-verbatim target NAME.  A
                     // cross-module alias target (this alias is in
                     // core/io/mod.vr; `StreamError` is declared in

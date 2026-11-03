@@ -212,6 +212,21 @@ fn build_inner(
             .collect()
     };
     let result = match declaration.kind {
+        TypeKind::Alias => {
+            let target = declaration.alias_target.as_ref().ok_or_else(|| {
+                Text::from("typed destruction alias has no resolved declaration target")
+            })?;
+            // Older producers used a pointer or Unit as the stand-in for an
+            // unresolved alias. A written scalar target must attest these two
+            // ambiguous encodings before either can authorize an empty drop.
+            if matches!(target, TypeRef::Concrete(TypeId::UNIT | TypeId::PTR)) {
+                let spelling = declaration.alias_target_name.and_then(|name| module.get_string(name));
+                if spelling.and_then(TypeId::from_well_known_scalar_name) != target.base_type_id() {
+                    return Err("typed destruction alias target lacks scalar declaration evidence".into());
+                }
+            }
+            build_inner(module, &substitution.apply(target), active, budget)
+        }
         TypeKind::Record => fields(&declaration.fields).map(|fields| DropPlan::Record {
             owner,
             owner_args: args.iter().cloned().collect(),
@@ -239,9 +254,11 @@ fn build_inner(
         TypeKind::Primitive => {
             Err("typed destruction nominal primitive lacks an owned declaration".into())
         }
-        _ => Err(
-            "typed destruction requires a record, sum, tuple or explicit Drop declaration".into(),
-        ),
+        _ => Err(format!(
+            "typed destruction requires a record, sum, tuple or explicit Drop declaration; found {:?} {}",
+            declaration.kind,
+            module.get_string(declaration.name).unwrap_or("<unnamed>"),
+        ).into()),
     };
     active.pop();
     result

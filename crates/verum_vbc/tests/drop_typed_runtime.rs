@@ -398,3 +398,19 @@ fn native_list_destruction_uses_the_declared_element_and_owner() {
         }
     }
 }
+
+#[test]
+fn transparent_aliases_keep_owned_arguments_and_refuse_erased_targets() {
+    use verum_vbc::{drop_plan::{build, DropPlan}, types::{TypeId, TypeRef}};
+    let mut module = compile("type Collection<T> is Maybe<T>;", true);
+    let id = |name: &str| module.types.iter().find(|ty| module.get_string(ty.name) == Some(name)).unwrap().id;
+    let alias = id("Collection");
+    let guard = id("Guard");
+    let ty = TypeRef::Instantiated { base: alias, args: vec![TypeRef::Concrete(guard)] };
+    let DropPlan::Sum { variants, .. } = build(&module, &ty).unwrap() else { panic!("alias lost the underlying sum"); };
+    assert!(variants.iter().any(|(_, fields)| matches!(fields.as_slice(), [DropPlan::Glue { owner, .. }] if *owner == guard)));
+    for target in [None, Some(TypeRef::Concrete(TypeId::UNIT)), Some(TypeRef::Concrete(TypeId::PTR))] {
+        module.types.iter_mut().find(|ty| ty.id == alias).unwrap().alias_target = target;
+        assert!(build(&module, &ty).is_err(), "erased alias must not authorize destruction");
+    }
+}

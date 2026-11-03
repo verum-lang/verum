@@ -972,7 +972,7 @@ fn register_module_metadata(
                 // `IoError` -> "StreamError", which
                 // `parse_descriptor_type_string` turns into a rigid
                 // `Type::Named` instead of a fresh var — closing the hole.
-                let target = if target.as_str().contains("__opaque_type_") {
+                let target = if ty.alias_target.is_none() || target.as_str().contains("__opaque_type_") {
                     match ty.alias_target_name.and_then(|sid| module.strings.get(sid)) {
                         Some(carried) => Text::from(carried),
                         None => target,
