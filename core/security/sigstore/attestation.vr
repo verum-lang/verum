@@ -1,0 +1,76 @@
+// Content binding for canonical Rekor v1 DSSE and in-toto entries.
+// Callers must authenticate the entry body, signer and checkpoint separately.
+module core.security.sigstore.attestation;
+
+mount core.encoding.json.JsonValue;
+mount core.encoding.base64;
+mount core.encoding.pem.encode_block;
+mount core.security.sigstore.types.{digest_sha256_hex, validate_digest};
+
+fn json_field(value: &JsonValue, key: &Text) -> Maybe<JsonValue> {
+    let object = value.as_object()?;
+    object.get(key)
+}
+
+fn string_field(value: &JsonValue, key: &Text) -> Maybe<Text> {
+    let field = json_field(value, key)?;
+    field.as_string()
+}
+
+/// Compare the signature verified over DSSE PAE and the leaf certificate
+/// against a single Rekor signer record, never against different signers.
+fn logged_signer_matches(record: &JsonValue, is_intoto: Bool,
+    signature: &Text, verifier_b64: &Text) -> Maybe<Bool> {
+    let sig_field = if is_intoto { "sig" } else { "signature" };
+    let key_field = if is_intoto { "publicKey" } else { "verifier" };
+    let mut sig = string_field(record, &sig_field)?;
+    // intoto v0.0.2 stores the base64 signature string in a JSON byte field.
+    if is_intoto {
+        let ascii = base64.decode(&sig).ok()?;
+        sig = Text.from_utf8(ascii.as_slice()).ok()?;
+    }
+    if sig != *signature { return Maybe.Some(false); }
+    Maybe.Some(string_field(record, &key_field)? == *verifier_b64)
+}
+
+/// Only registered canonical Rekor record fields carry attestation evidence.
+/// envelopeHash covers the originally submitted JSON octets. The bundle
+/// carries a structured DSSE envelope, so verify its actual PAE signature,
+/// decoded payload hash and signing certificate instead of reserializing it.
+public fn matches_logged_dsse(body: &JsonValue, payload_type: &Text, payload_hash: &Text,
+    signature: &Text, cert_der: &List<Byte>) -> Bool {
+    logged_dsse_body(body, payload_type, payload_hash, signature, cert_der).unwrap_or(false)
+}
+
+fn logged_dsse_body(body: &JsonValue, payload_type: &Text, payload_hash: &Text,
+    signature: &Text, cert_der: &List<Byte>) -> Maybe<Bool> {
+    let kind = string_field(body, &"kind")?;
+    let version = string_field(body, &"apiVersion")?;
+    let is_intoto = kind == "intoto" && version == "0.0.2";
+    if !is_intoto && !(kind == "dsse" && version == "0.0.1") { return Maybe.Some(false); }
+    let spec = json_field(body, &"spec")?;
+    let content = if is_intoto { json_field(&spec, &"content")? } else { spec };
+    let envelope_hash_key = if is_intoto { "hash" } else { "envelopeHash" };
+    let envelope_hash = json_field(&content, &envelope_hash_key)?;
+    let envelope_hex = string_field(&envelope_hash, &"value")?;
+    if string_field(&envelope_hash, &"algorithm")? != "sha256"
+        || validate_digest(&digest_sha256_hex(envelope_hex)).is_err() { return Maybe.Some(false); }
+    let hash = json_field(&content, &"payloadHash")?;
+    if string_field(&hash, &"algorithm")? != "sha256"
+        || string_field(&hash, &"value")? != *payload_hash { return Maybe.Some(false); }
+    let signed = if is_intoto {
+        let envelope = json_field(&content, &"envelope")?;
+        if string_field(&envelope, &"payloadType")? != *payload_type { return Maybe.Some(false); }
+        envelope
+    } else { content };
+    // Canonical Rekor x509 verifier material is a PEM certificate encoded
+    // as standard base64. Compare the exact DER under its certificate label.
+    let certificate = encode_block(&"CERTIFICATE", cert_der.as_slice());
+    let verifier_b64 = base64.encode(certificate.as_bytes());
+    let list = json_field(&signed, &"signatures")?;
+    let records = list.as_array()?;
+    for record in records.iter() {
+        if logged_signer_matches(record, is_intoto, signature, &verifier_b64)? { return Maybe.Some(true); }
+    }
+    Maybe.Some(false)
+}

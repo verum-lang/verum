@@ -87,4 +87,63 @@ fn test_identity_matcher_domain_payload_round_trip() {
     }
 }
 
+// The content check receives a verified signature and opaque certificate DER.
+// These fixed byte fixtures exercise exact binding independently of PKI.
+const PAYLOAD_DIGEST: Text = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const ENVELOPE_DIGEST: Text = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+const VERIFIER: Text = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1BQT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=";
+
+fn matches_record(json: &Text) -> Bool {
+    let body = core.encoding.json.decode_bytes_strict(json.as_bytes(), json.len()).unwrap();
+    let mut der: List<Byte> = List.new();
+    der.push(48_u8);
+    der.push(0_u8);
+    core.security.sigstore.attestation.matches_logged_dsse(&body, &"application/vnd.in-toto+json",
+        &PAYLOAD_DIGEST, &"AQI=", &der)
+}
+
+fn digest_field(hex: &Text) -> Text {
+    f"{{\"algorithm\":\"sha256\",\"value\":\"{hex}\"}}"
+}
+
+fn dsse_record(kind: &Text, version: &Text, digest: &Text, signer: &Text) -> Text {
+    let envelope = digest_field(&ENVELOPE_DIGEST);
+    let payload = digest_field(digest);
+    let unrelated = digest_field(&PAYLOAD_DIGEST);
+    f"{{\"kind\":\"{kind}\",\"apiVersion\":\"{version}\",\"spec\":{{\"envelopeHash\":{envelope},\"payloadHash\":{payload},\"signatures\":[{signer}]}},\"unrelated\":{unrelated}}}"
+}
+
+fn signer() -> Text {
+    f"{{\"signature\":\"AQI=\",\"verifier\":\"{VERIFIER}\"}}"
+}
+
+fn intoto_record(payload_type: &Text) -> Text {
+    let envelope = digest_field(&ENVELOPE_DIGEST);
+    let payload = digest_field(&PAYLOAD_DIGEST);
+    let pair = f"{{\"sig\":\"QVFJPQ==\",\"publicKey\":\"{VERIFIER}\"}}";
+    let signed = f"{{\"payloadType\":\"{payload_type}\",\"signatures\":[{pair}]}}";
+    f"{{\"kind\":\"intoto\",\"apiVersion\":\"0.0.2\",\"spec\":{{\"content\":{{\"envelope\":{signed},\"hash\":{envelope},\"payloadHash\":{payload}}}}}}}"
+}
+
+@test
+fn test_registered_content_paths() {
+    assert(matches_record(&dsse_record(&"dsse", &"0.0.1", &PAYLOAD_DIGEST, &signer())));
+    assert(matches_record(&intoto_record(&"application/vnd.in-toto+json")));
+}
+
+@test
+fn test_unrelated_fields_and_unsupported_schemas_do_not_bind() {
+    assert(!matches_record(&dsse_record(&"dsse", &"0.0.1", &ENVELOPE_DIGEST, &signer())));
+    assert(!matches_record(&dsse_record(&"hashedrekord", &"0.0.1", &PAYLOAD_DIGEST, &signer())));
+    assert(!matches_record(&dsse_record(&"dsse", &"0.0.9", &PAYLOAD_DIGEST, &signer())));
+    assert(!matches_record(&intoto_record(&"text/plain")));
+}
+
+@test
+fn test_different_signer_records_cannot_supply_one_signature_and_key() {
+    let first = "{\"signature\":\"AQI=\",\"verifier\":\"AQ==\"}";
+    let second = f"{{\"signature\":\"AwQ=\",\"verifier\":\"{VERIFIER}\"}}";
+    assert(!matches_record(&dsse_record(&"dsse", &"0.0.1", &PAYLOAD_DIGEST, &f"{first},{second}")));
+}
+
 fn main() {}
