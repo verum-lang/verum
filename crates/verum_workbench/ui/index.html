@@ -27,12 +27,14 @@
 <a class="skip-link" href="#editor-pane">Skip to editor</a>
   <header class="topbar">
     <div class="brand" aria-label="Verum Studio"><img class="brand-mark" src="__VERUM_BRAND_URI__" alt="" width="28" height="28"></div>
-    <button id="command-palette" class="icon-button" aria-label="Command palette" title="Command palette"><span data-icon="keyboard"></span></button>
-    <div class="topbar-end" role="toolbar" aria-label="Workspace layout">
-      <button class="icon-button" data-toggle-panel="files" aria-label="Toggle explorer" title="Toggle explorer"><span data-icon="files"></span></button>
-      <button class="icon-button" data-toggle-panel="results" aria-label="Toggle results" title="Toggle results"><span data-icon="results"></span></button>
-      <button class="icon-button" data-toggle-panel="agent" aria-label="Toggle collaborator" title="Toggle collaborator"><span data-icon="agent"></span></button>
+    <div class="topbar-end" role="toolbar" aria-label="Workspace actions">
+      <div class="toolbar-group" role="group" aria-label="Workspace layout">
+        <button class="icon-button" data-toggle-panel="files" aria-label="Toggle explorer" title="Toggle explorer"><span data-icon="files"></span></button>
+        <button class="icon-button" data-toggle-panel="results" aria-label="Toggle results" title="Toggle results"><span data-icon="results"></span></button>
+        <button class="icon-button" data-toggle-panel="agent" aria-label="Toggle collaborator" title="Toggle collaborator"><span data-icon="agent"></span></button>
+      </div>
       <span class="toolbar-divider" aria-hidden="true"></span>
+      <button id="command-palette" class="icon-button" aria-label="Command palette" title="Command palette"><span data-icon="commands"></span></button>
       <button id="theme" class="icon-button" aria-label="Change color theme" title="Change color theme"><span data-icon="theme"></span></button>
       <button id="settings" class="icon-button" aria-label="Settings" title="Settings"><span data-icon="settings"></span></button>
     </div>

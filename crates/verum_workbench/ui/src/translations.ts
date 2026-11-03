@@ -165,6 +165,7 @@ export const translations = {
   'Settings': 'Настройки',
   'Close settings': 'Закрыть настройки',
   'Workspace layout': 'Панели рабочей области',
+  'Workspace actions': 'Действия рабочей области',
   'Source actions': 'Действия с кодом',
   'Execution options': 'Параметры выполнения',
   'Find a project file · ⌘/Ctrl P': 'Найти файл проекта · ⌘/Ctrl P',

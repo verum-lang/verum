@@ -193,7 +193,7 @@ kbd {
   height: 28px;
   object-fit: contain;
 }
-.topbar-end {
+.topbar-end, .toolbar-group {
   display: flex;
   gap: var(--space-1);
   align-items: center;
