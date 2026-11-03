@@ -169,7 +169,18 @@ public mount .env.{
     ConcurrencyContext,
     ExecutionTier,
     RuntimeRestartPolicy,
-    IsolationLevel,
+    EnvIsolationLevel,
+};
+
+mount .env.{
+    EnvFlags,
+    SharedRegistry,
+    GenTracker,
+    MiddlewareChain,
+    ParallelismConfig,
+    CpuAffinity,
+    EnvTaskId,
+    TaskLocalStorage,
 };
 
 // Recovery strategies
@@ -315,7 +326,7 @@ public fn is_initialized() -> Bool {
 ///  print(f"CBGR tier: {env.memory.cbgr_tier}");
 /// }
 /// ```
-public fn init() -> Result<(), InitError> {
+public fn init() -> Result<(), RuntimeInitError> {
     @cfg(runtime = "full")
     {
         match FullRuntime.init() {
@@ -371,7 +382,7 @@ public fn init() -> Result<(), InitError> {
 ///  // ...
 /// }
 /// ```
-public fn init_with<R: RuntimeConfig>() -> Result<(), InitError> {
+public fn init_with<R: RuntimeConfig>() -> Result<(), RuntimeInitError> {
     let runtime = R.init()?;
     install_runtime(runtime)
 }
@@ -426,7 +437,7 @@ fn monotonic_ns() -> UInt64 {
 }
 
 /// Install a configured runtime into thread-local storage
-fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), InitError> {
+fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), RuntimeInitError> {
     // Build ExecutionEnv from runtime configuration
     let env = ExecutionEnv {
         id: next_env_id(),
@@ -457,9 +468,9 @@ fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), InitError> {
             executor: runtime.executor_handle(),
             @cfg(feature = "io")
             io_driver: runtime.io_driver_ref(),
-            isolation: IsolationLevel.Shared,
+            isolation: EnvIsolationLevel.Shared,
             parallelism: detect_parallelism(),
-            task_id: TaskId.main(),
+            task_id: EnvTaskId.main(),
             // T1367 — `restart_policy` and `task_locals` were omitted here
             // while `ExecutionEnv.new` in core/runtime/env.vr sets both.
             // Two construction sites of one type disagreeing about its
