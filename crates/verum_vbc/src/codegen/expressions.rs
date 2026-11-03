@@ -44801,7 +44801,7 @@ impl VbcCodegen {
         if name.contains('.') {
             // Selecting an owner commits the lookup, including a missing member.
             // Never send checked count paths through the general suffix ladder.
-            if let Some(key) = self.count_module_owners.member(name, scope.unwrap_or_default(), self.count_root()) {
+            if let Some(key) = self.source_module_owners.member(name, scope.unwrap_or_default(), self.source_module_root()) {
                 return exact(key.as_str());
             }
             let (head, tail) = name.split_once('.')?;
@@ -44875,7 +44875,7 @@ impl VbcCodegen {
         let layout_operand = match &expr.kind {
             ExprKind::Field { expr: base, field } => {
                 let module_operand = Self::constant_integer_name(base).is_some_and(|name| {
-                    self.count_module_owners.is_module(&name, scope.unwrap_or_default(), self.count_root())
+                    self.source_module_owners.is_module(&name, scope.unwrap_or_default(), self.source_module_root())
                 });
                 if module_operand { None } else {
                     verum_ast::TypeProperty::from_str(field.name.as_str())

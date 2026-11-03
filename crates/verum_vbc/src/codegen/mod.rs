@@ -55,6 +55,7 @@ pub mod error;
 pub mod registers;
 
 mod bootstrap_types;
+mod source_mounts;
 mod expressions;
 mod array_coercions;
 mod array_elements;
@@ -734,7 +735,7 @@ pub struct VbcCodegen {
 
     /// Void archive-import APIs defer this fatal error to publication. Once a
     /// declaration conflict is observed, later imports cannot clear it.
-    source_declaration_error: Maybe<Text>,
+    source_declaration_error: Option<CodegenErrorKind>,
 
     /// `TypeId` → index into [`Self::types`].
     ///
@@ -1023,8 +1024,8 @@ pub struct VbcCodegen {
     >,
     /// Module declarations are stable even when a local const shadows a name.
     module_constant_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
-    /// Checked counts preserve the full declaration scope through nested modules.
-    count_module_owners: verum_ast::checked_const::ModuleOwners,
+    /// Select module heads lexically before resolving a member in that namespace.
+    source_module_owners: verum_ast::checked_const::ModuleOwners,
     count_module_scope: Option<verum_common::Text>,
     declared_count_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
     /// Successfully selected imports retain their actual lexical count scope.
@@ -1051,6 +1052,7 @@ pub struct VbcCodegen {
     /// through body compilation, which revisits each source after collection.
     // None is an ambiguous glob binding, not permission to use a bare alias.
     source_type_mounts: Map<Text, Map<Text, Option<Text>>>,
+    source_callable_exports: source_mounts::CallableExports,
 
     /// Imported declaration scopes are immutable receipts, separate from a
     /// source unit's incrementally collected mounts until finalization.
@@ -2333,7 +2335,7 @@ impl VbcCodegen {
             lexical_constant_scopes: Vec::new(),
             constant_initializers: verum_common::Map::new(),
             module_constant_bindings: verum_common::Map::new(),
-            count_module_owners: Default::default(),
+            source_module_owners: Default::default(),
             count_module_scope: None,
             declared_count_bindings: verum_common::Map::new(),
             scoped_count_imports: verum_common::Map::new(),
@@ -2357,6 +2359,7 @@ impl VbcCodegen {
             current_protocol_bounds: Default::default(),
             current_impl_semantic_target: None,
             source_type_mounts: Map::new(),
+            source_callable_exports: Default::default(),
             imported_declaration_type_bindings: Map::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
@@ -7191,16 +7194,14 @@ impl VbcCodegen {
 
     fn check_source_declaration_error(&self) -> CodegenResult<()> {
         match &self.source_declaration_error {
-            Some(message) => Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
-                message.to_string(),
-            ))),
+            Some(kind) => Err(CodegenError::new(kind.clone())),
             None => Ok(()),
         }
     }
 
     fn reject_source_declaration(&mut self, message: Text) -> CodegenResult<()> {
         if self.source_declaration_error.is_none() {
-            self.source_declaration_error = Some(message);
+            self.source_declaration_error = Some(CodegenErrorKind::InvalidSourceSignature(message.into_string()));
         }
         self.check_source_declaration_error()
     }
@@ -8567,6 +8568,10 @@ impl VbcCodegen {
         files: &[&Module],
         policy: ItemFailurePolicy,
     ) -> CodegenResult<()> {
+        // Source imports must be settled before any entry point can emit
+        // bodies, including the single-module compiler with inline modules.
+        self.resolve_pending_imports();
+        self.check_source_declaration_error()?;
         let mut first_error: Option<CodegenError> = None;
         for module in files {
             let previous_scope = self.ctx.current_source_module.take();
@@ -8607,31 +8612,31 @@ impl VbcCodegen {
         }
     }
 
-    fn count_root(&self) -> &str {
+    fn source_module_root(&self) -> &str {
         if self.config.module_name == "main" { "" } else { &self.config.module_name }
     }
 
     fn current_count_module_scope(&self) -> Option<&str> {
         self.count_module_scope.as_ref().map(|scope| scope.as_str())
             .or(self.ctx.current_source_module.as_deref())
-            .or_else(|| Some(self.count_root()))
+            .or_else(|| Some(self.source_module_root()))
     }
 
     fn child_count_module_scope(&self, name: &str) -> verum_common::Text {
-        let parent = self.current_count_module_scope().unwrap_or_else(|| self.count_root());
+        let parent = self.current_count_module_scope().unwrap_or_else(|| self.source_module_root());
         if parent.is_empty() { verum_common::Text::from(name) }
         else { verum_common::Text::from(format!("{parent}.{name}")) }
     }
 
-    fn collect_count_module_owners(&mut self, items: &[Item], parent: &str) {
+    fn collect_source_module_owners(&mut self, items: &[Item], parent: &str) {
         for item in items {
             if !self.should_compile_item(item) { continue; }
             if let ItemKind::Module(module) = &item.kind {
                 let owner = if parent.is_empty() { module.name.name.to_string() }
                     else { format!("{parent}.{}", module.name.name) };
-                self.count_module_owners.declare(&owner);
+                self.source_module_owners.declare(&owner);
                 if let Some(items) = &module.items {
-                    self.collect_count_module_owners(items, &owner);
+                    self.collect_source_module_owners(items, &owner);
                 }
             }
         }
@@ -8663,9 +8668,10 @@ impl VbcCodegen {
                 .or_default();
             if let Some(path) = &owner {
                 self.unit_module_paths.insert(path.clone());
-                self.count_module_owners.declare(path);
+                self.collect_callable_exports(path, &module.items);
+                self.source_module_owners.declare(path);
             }
-            let owner = owner.unwrap_or_else(|| self.count_root().to_owned());
+            let owner = owner.unwrap_or_else(|| self.source_module_root().to_owned());
             // The first named bodiless declaration is the file header selected
             // by extract_source_module_name, already published above. Later or
             // nested forward declarations still introduce child owners.
@@ -8677,7 +8683,7 @@ impl VbcCodegen {
                     header_seen = true;
                     continue;
                 }
-                self.collect_count_module_owners(std::slice::from_ref(item), &owner);
+                self.collect_source_module_owners(std::slice::from_ref(item), &owner);
             }
         }
         // Protocols first: a blanket impl monomorphises onto a concrete
@@ -9596,6 +9602,7 @@ impl VbcCodegen {
         self.ffi_contract_exprs.clear();
         // Clear pending imports
         self.pending_imports.clear();
+        self.source_callable_exports = Default::default();
         self.mount_aliases_buffer.clear();
         self.mount_installed_qualified_keys.clear();
         self.decl_installed_qualified_keys.clear();
@@ -9614,7 +9621,7 @@ impl VbcCodegen {
         self.lexical_constant_scopes.clear();
         self.constant_initializers.clear();
         self.module_constant_bindings.clear();
-        self.count_module_owners = Default::default();
+        self.source_module_owners = Default::default();
         self.count_module_scope = None;
         self.declared_count_bindings.clear();
         self.scoped_count_imports.clear();
@@ -12728,6 +12735,18 @@ impl VbcCodegen {
                 // mounts (`mount X.*`) deliberately keep first-wins to
                 // preserve the FFI-raw / safe-wrapper precedence rule.
 
+                // The files of this unit can arrive in any order. Resolve a
+                // source callable only after all declarations and export edges
+                // exist. No bare or shortened spelling establishes its owner.
+                if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name, self.lexical_type_scope()) {
+                    if let Ok((key, info)) = self.resolve_source_callable_export(&target) {
+                        self.bind_mounted_function(&alias_name, &func_name, &key, info);
+                    } else {
+                        self.defer_named_mount(full_path, alias_name);
+                    }
+                    return Ok(());
+                }
+
                 // First try Verum-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
                     self.bind_mounted_function(&alias_name, &func_name, &qualified_verum, func_info);
@@ -13141,80 +13160,7 @@ impl VbcCodegen {
                     }
                 }
 
-                // Function not found - store for deferred resolution
-                // This handles intra-module imports where the constant/function
-                // from another file in the same module hasn't been registered yet
-                //
-                // **Stage-5 seed**: also record alias -> FULL qualified path in
-                // the codegen context. If the deferred pass ALSO misses (the
-                // producing module compiles later in the bake and the simple
-                // name is not globally unique, so no stage-1..4 stub exists),
-                // `compile_call`'s miss path synthesizes a stage-5 stub with
-                // the call site's arity bound to this qualified spelling — the
-                // archive name-remap then chases it unambiguously.
-                self.ctx
-                    .pending_mount_aliases
-                    .insert(alias_name.clone(), full_path.join("."));
-                let owning_module = self.ctx.current_source_module.clone();
-                // PENDING-MOUNT-ALIAS-CARRY-1 (task #17 QUALIFIED-CALL-2):
-                // an unresolved re-export must still leave its INTENT in
-                // the archive's `mount_aliases` channel.  A stage-5 stub
-                // synthesized against this alias records the RE-EXPORT
-                // spelling (`core.intrinsics.num_cpus`); no suffix chase
-                // can bridge the elided intermediate segments
-                // (`runtime.time`) to the producing module's decl-rooted
-                // key (`core.intrinsics.runtime.time.num_cpus`) — the
-                // mount row is the ONLY carrier of that mapping.  Emit
-                // name-authoritative rows (fid = u32::MAX, deliberately
-                // never same-entry-mappable) under the re-exporter's
-                // qualified alias:
-                //   * the owner-ANCHORED target for RELATIVE mount paths
-                //     (`runtime.time.num_cpus` inside `core.intrinsics`
-                //     → `core.intrinsics.runtime.time.num_cpus`), and
-                //   * the AS-WRITTEN path (alias→alias chains such as
-                //     `core.time.sleep_ns` → `core.intrinsics.sleep_ns`;
-                //     `install_mount_alias_archive_names` resolves
-                //     chains to fixpoint, first-wins, and drops rows
-                //     whose target never materialises).
-                // Gate: only genuinely QUALIFIED paths (>= 2 segments)
-                // carry intent rows — a single-segment `mount foo;`
-                // pending has no re-export elision to bridge, and a
-                // bare-name target row would reintroduce the
-                // first-wins-stranger bind at load.
-                if full_path.len() >= 2
-                    && let Some(owner) = owning_module
-                        .as_deref()
-                        .filter(|m| !m.is_empty() && *m != "main")
-                {
-                    let qualified_alias = format!("{}.{}", owner, alias_name);
-                    let written = full_path.join(".");
-                    let placeholder = crate::module::FunctionId(u32::MAX);
-                    if full_path.first().map(|s| s.as_str()) != Some("core") {
-                        // T0612: anchor on the dot-stripped tail — the
-                        // verbatim `written` keeps any leading `.`
-                        // segment and would produce `owner..path`, a
-                        // target that never materialises (the row was
-                        // silently dropped at fixpoint).
-                        let anchored =
-                            format!("{}.{}", owner, Self::mount_relative_tail(&full_path));
-                        self.mount_aliases_buffer.push((
-                            qualified_alias.clone(),
-                            placeholder,
-                            anchored,
-                            qualified_alias.clone(),
-                        ));
-                    }
-                    if qualified_alias != written {
-                        self.mount_aliases_buffer.push((
-                            qualified_alias.clone(),
-                            placeholder,
-                            written,
-                            qualified_alias,
-                        ));
-                    }
-                }
-                self.pending_imports
-                    .push((full_path, alias_name, owning_module));
+                self.defer_named_mount(full_path, alias_name);
                 Ok(())
             }
             MountTreeKind::Glob(glob_path) => {
@@ -13350,6 +13296,46 @@ impl VbcCodegen {
             .join(".")
     }
 
+    fn defer_named_mount(&mut self, full_path: Vec<String>, alias_name: String) {
+        // A future dependency has no local ID. Carry its written identity to
+        // final linking so the call cannot acquire an unrelated bare name.
+        self.ctx
+            .pending_mount_aliases
+            .insert(alias_name.clone(), full_path.join("."));
+        let owning_module = self.ctx.current_source_module.clone();
+        // Archive entries rehome IDs independently. Re-export edges carry
+        // their target names and a nonlocal sentinel until the producer loads.
+        if full_path.len() >= 2
+            && let Some(owner) = owning_module
+                .as_deref()
+                .filter(|m| !m.is_empty() && *m != "main")
+        {
+            let qualified_alias = format!("{}.{}", owner, alias_name);
+            let written = full_path.join(".");
+            let placeholder = crate::module::FunctionId(u32::MAX);
+            if full_path.first().map(|s| s.as_str()) != Some("core") {
+                let anchored =
+                    format!("{}.{}", owner, Self::mount_relative_tail(&full_path));
+                self.mount_aliases_buffer.push((
+                    qualified_alias.clone(),
+                    placeholder,
+                    anchored,
+                    qualified_alias.clone(),
+                ));
+            }
+            if qualified_alias != written {
+                self.mount_aliases_buffer.push((
+                    qualified_alias.clone(),
+                    placeholder,
+                    written,
+                    qualified_alias,
+                ));
+            }
+        }
+        self.pending_imports
+            .push((full_path, alias_name, owning_module));
+    }
+
     /// Drains `pending_imports` and registers each deferred
     /// cross-module import now that every module's declarations are
     /// collected (two-phase mount resolution — see the queueing site
@@ -13426,6 +13412,18 @@ impl VbcCodegen {
                     func_name,
                     probe(&func_name),
                 );
+            }
+
+            if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name, owning_module.as_deref().unwrap_or_default()) {
+                match self.resolve_source_callable_export(&target) {
+                    Ok((key, info)) => self.bind_deferred_mounted_function(
+                        &alias_name, &func_name, &key, info, owning_module.as_deref(),
+                    ),
+                    Err(message) => {
+                        self.source_declaration_error.get_or_insert(CodegenErrorKind::InvalidSourceMount(message));
+                    }
+                }
+                continue;
             }
 
             // First try Verum-style qualified name (e.g., sys.intrinsics.ORDERING_ACQUIRE)
@@ -16236,14 +16234,14 @@ impl VbcCodegen {
                     // type. Publish the same constructor under that identity so
                     // expected-type resolution cannot fall back to a sibling's
                     // bare variant or reject a known field owner as ambiguous.
-                    if let Some(owner) = self.ctx.current_source_module.as_deref() {
+                    if let Some(owner) = self.ctx.current_source_module.clone() {
                         let parent = format!("{owner}.{type_name}");
                         let mut qualified = info.clone();
                         qualified.parent_type_name = Some(parent.clone());
                         qualified.return_type_name = Some(parent.clone());
-                        self.ctx.register_function(
-                            format!("{parent}.{variant_name}"), qualified,
-                        );
+                        let key = format!("{parent}.{variant_name}");
+                        self.record_source_constructor(&owner, &variant_name, &key);
+                        self.ctx.register_function(key, qualified);
                     }
 
                     // 2. Handle simple name registration with collision detection.

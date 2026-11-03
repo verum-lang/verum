@@ -7,7 +7,8 @@ use super::{
 use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
 use crate::types::{TypeDescriptor, TypeId, TypeKind, TypeRef};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use verum_ast::{ItemKind, MountTree, MountTreeKind, Visitor};
+use verum_ast::{ItemKind, Visitor};
+use super::source_mounts::{visit_named_mounts, mount_path_parts};
 use verum_common::{Map, Text};
 
 pub(super) fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String> {
@@ -149,41 +150,6 @@ fn function_identity(module: &VbcModule, function: &FunctionDescriptor) -> Optio
     Some(crate::module::qualify_module_name(owner, name))
 }
 
-fn mounts(
-    tree: &MountTree,
-    prefix: &str,
-    outer_alias: Option<&verum_ast::ty::Ident>,
-    bindings: &mut HashMap<String, String>,
-) {
-    let path = |path: &verum_ast::Path| {
-        let path = path.to_string().replace("::", ".");
-        if prefix.is_empty() {
-            path
-        } else {
-            format!("{prefix}.{path}")
-        }
-    };
-    match &tree.kind {
-        MountTreeKind::Path(target) => {
-            let full = path(target);
-            let alias = tree
-                .alias
-                .as_ref()
-                .or(outer_alias)
-                .map(|id| id.name.as_str())
-                .unwrap_or_else(|| full.rsplit('.').next().unwrap());
-            bindings.insert(alias.to_owned(), full);
-        }
-        MountTreeKind::Nested { prefix, trees } => {
-            let prefix = path(prefix);
-            for tree in trees {
-                mounts(tree, &prefix, None, bindings);
-            }
-        }
-        MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
-    }
-}
-
 struct SourceNames<'a> {
     names: BTreeSet<String>,
     codegen: Option<&'a VbcCodegen>,
@@ -319,12 +285,7 @@ impl VbcCodegen {
             let qualify = |written: String| {
                 // Path's Relative segment renders as `.::`, hence `..`
                 // after the same separator normalization used by mounts.
-                let parts: verum_common::List<String> = if let Some(tail) = written.strip_prefix("..") {
-                    std::iter::once(".".to_owned())
-                        .chain(tail.split('.').map(str::to_owned)).collect()
-                } else {
-                    written.split('.').map(str::to_owned).collect()
-                };
+                let parts = mount_path_parts(&written);
                 Self::resolve_module_path_head_in_scope(&parts, &owner)
                     .map(|parts| parts.join(".")).unwrap_or(written)
             };
@@ -338,7 +299,9 @@ impl VbcCodegen {
                 if !self.should_compile_item(item) { continue; }
                 paths.visit_item(item);
                 if let ItemKind::Mount(decl) = &item.kind {
-                    mounts(&decl.tree, "", decl.alias.as_ref(), &mut bindings);
+                    visit_named_mounts(&decl.tree, "", decl.alias.as_ref(), &mut |alias, target| {
+                        bindings.insert(alias.to_owned(), target);
+                    });
                     globs.extend(Self::extract_glob_mount_paths(&decl.tree, &[])
                         .into_iter().map(|parts| {
                             Self::resolve_module_path_head_in_scope(&parts, &owner)

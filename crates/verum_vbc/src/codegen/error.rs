@@ -205,6 +205,8 @@ pub enum CodegenErrorKind {
 
     /// Declaration evidence cannot be erased even in lenient bootstrap mode.
     InvalidSourceSignature(String),
+    /// A qualified source mount has no unique declaring callable.
+    InvalidSourceMount(String),
 }
 
 impl CodegenError {
@@ -377,7 +379,8 @@ impl CodegenError {
             // `SkipClass::Fatal`.
             CodegenErrorKind::StaticAssertionFailed { .. }
             | CodegenErrorKind::AmbiguousConstructor { .. }
-            | CodegenErrorKind::InvalidSourceSignature(_) => SkipClass::Fatal,
+            | CodegenErrorKind::InvalidSourceSignature(_)
+            | CodegenErrorKind::InvalidSourceMount(_) => SkipClass::Fatal,
             _ => SkipClass::BugClass,
         }
     }
@@ -552,6 +555,7 @@ impl fmt::Display for CodegenErrorKind {
             }
             Self::Internal(msg) => write!(f, "internal compiler error: {}", msg),
             Self::NotImplemented(feature) => write!(f, "not yet implemented: {}", feature),
+            Self::InvalidSourceMount(message) => write!(f, "invalid source mount: {message}"),
             Self::InvalidSourceSignature(message) => write!(f, "invalid source signature: {message}"),
         }
     }
