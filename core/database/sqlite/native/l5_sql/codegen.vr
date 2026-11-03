@@ -1278,12 +1278,12 @@ fn emit_having_expr(
                     }
                     Result.Ok(())
                 }
-                BEq | BNe | BLt | BLe | BGt | BGe => {
+                BEq | BNeq | BLt | BLe | BGt | BGe => {
                     // Use the same Eq-builder pattern as regular emit_binary.
                     let _ = st.program.emit(Integer(0, dst));
                     let op_idx = match op {
                         BEq => st.program.emit(Eq(ra, rb, 0)),
-                        BNe => st.program.emit(Ne(ra, rb, 0)),
+                        BNeq => st.program.emit(Ne(ra, rb, 0)),
                         BLt => st.program.emit(Lt(ra, rb, 0)),
                         BLe => st.program.emit(Le(ra, rb, 0)),
                         BGt => st.program.emit(Gt(ra, rb, 0)),
@@ -1296,7 +1296,7 @@ fn emit_having_expr(
                     let after = st.program.instruction_count();
                     match op {
                         BEq => st.program.replace(op_idx, Eq(ra, rb, set_true)),
-                        BNe => st.program.replace(op_idx, Ne(ra, rb, set_true)),
+                        BNeq => st.program.replace(op_idx, Ne(ra, rb, set_true)),
                         BLt => st.program.replace(op_idx, Lt(ra, rb, set_true)),
                         BLe => st.program.replace(op_idx, Le(ra, rb, set_true)),
                         BGt => st.program.replace(op_idx, Gt(ra, rb, set_true)),
@@ -2979,10 +2979,10 @@ fn emit_binary(
             st.program.replace(jump_idx + 1, Goto(after));
             Result.Ok(())
         }
-        BNe | BLt | BLe | BGt | BGe => {
+        BNeq | BLt | BLe | BGt | BGe => {
             let _ = st.program.emit(Integer(0, dst));
             let jump_idx = match op {
-                BNe => st.program.emit(Ne(ra, rb, 0)),
+                BNeq => st.program.emit(Ne(ra, rb, 0)),
                 BLt => st.program.emit(Lt(ra, rb, 0)),
                 BLe => st.program.emit(Le(ra, rb, 0)),
                 BGt => st.program.emit(Gt(ra, rb, 0)),
@@ -2994,7 +2994,7 @@ fn emit_binary(
             let _ = st.program.emit(Integer(1, dst));
             let after = st.program.instruction_count();
             match op {
-                BNe => st.program.replace(jump_idx, Ne(ra, rb, set_true)),
+                BNeq => st.program.replace(jump_idx, Ne(ra, rb, set_true)),
                 BLt => st.program.replace(jump_idx, Lt(ra, rb, set_true)),
                 BLe => st.program.replace(jump_idx, Le(ra, rb, set_true)),
                 BGt => st.program.replace(jump_idx, Gt(ra, rb, set_true)),
