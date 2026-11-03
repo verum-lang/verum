@@ -277,6 +277,11 @@ implement AsyncRuntimeConfig {
         self
     }
 
+    /// Number of worker threads requested by the runtime configuration.
+    public fn configured_worker_threads(&self) -> Int {
+        self.async_worker_threads
+    }
+
     /// Enable || disable work stealing.
     public fn work_stealing(mut self, enabled: Bool) -> AsyncRuntimeConfig {
         self.enable_work_stealing = enabled;
@@ -1098,7 +1103,7 @@ implement AsyncRuntime {
     /// (libffi pthread limitations under interpretation) and the
     /// runtime degrades silently to single-threaded behaviour.
     public fn start_worker_pool(&self) -> Int {
-        let configured = self.config.async_worker_threads;
+        let configured = self.config.configured_worker_threads();
         if configured <= 0 {
             return 0;
         }

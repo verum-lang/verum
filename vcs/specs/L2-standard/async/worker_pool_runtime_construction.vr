@@ -21,7 +21,7 @@ mount core.async.executor.{AsyncRuntime, AsyncRuntimeConfig};
 fn main() {
     // Default config: zero workers — `worker_pool_size()` must be 0.
     let cfg = AsyncRuntimeConfig.default();
-    assert_eq(cfg.async_worker_threads, 0);
+    assert_eq(cfg.configured_worker_threads(), 0);
 
     // Constructing the runtime via the inherent constructor must
     // not trigger the Default-impl recursion, and the runtime-
