@@ -95,7 +95,7 @@ public mount .waitgroup.WaitGroup;
 
 // NOTE: Send and Sync protocols are defined in core/base/protocols.vr (canonical source).
 // We re-export them here for convenience.
-mount core.base.protocols.{Send, Sync};
+public mount core.base.protocols.{Send, Sync};
 
 // All primitive types implement Send && Sync
 implement Send for Int {}
