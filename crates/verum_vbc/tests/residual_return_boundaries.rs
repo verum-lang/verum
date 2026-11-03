@@ -43,7 +43,11 @@ fn accept(value: Maybe<Int>) -> Int {
 
 fn value(body: &str, expected: i64) {
     let source: Text = format!("{DECLARATIONS}\n{body}").into();
-    let ast = Parser::new(source.as_str())
+    source_value(source.as_str(), expected);
+}
+
+fn source_value(source: &str, expected: i64) {
+    let ast = Parser::new(source)
         .parse_module()
         .expect("source grammar");
     let module = VbcCodegen::with_config(CodegenConfig::new("residual_boundaries"))
@@ -66,6 +70,122 @@ fn value(body: &str, expected: i64) {
         .expect("source must execute");
     assert!(actual.is_int(), "expected Int, got {actual:?}");
     assert_eq!(actual.as_i64(), expected);
+}
+
+#[test]
+fn qualified_result_preserves_the_exact_error_declaration() {
+    source_value(r#"
+module core.base.result;
+type Result<T, E> is Ok(T) | Err(E);
+type Failure<T> is { value: T };
+implement<T, E> Result<T, E> {
+    fn from_residual(residual: Result<Never, E>) -> Result<T, E> {
+        match residual {
+            Result.Err(error) => Result.Err(error),
+            Result.Ok(_) => panic("uninhabited success"),
+        }
+    }
+}
+fn missing() -> core.base.result.Result<Int, core.base.result.Failure<Int>> {
+    Result.Err(Failure { value: 47 })
+}
+fn build() -> Result<Bool, Failure<Int>> {
+    let value = missing()?;
+    Result.Ok(value == 0)
+}
+fn probe() -> Int { match build() { Result.Ok(_) => 0, Result.Err(error) => error.value } }
+"#, 47);
+}
+
+#[test]
+fn residual_conversion_carries_the_callable_result_witness() {
+    source_value(r#"
+type Failure is { code: Int };
+implement Failure { fn default() -> Failure { Failure { code: 89 } } }
+implement<T, E> Result<T, E> {
+    fn from_residual(_residual: Maybe<Never>) -> Result<T, E> { Result.Err(E.default()) }
+}
+fn absent() -> Maybe<Int> { Maybe.None }
+fn build() -> Result<Bool, Failure> { let value = absent()?; Result.Ok(value == 0) }
+fn probe() -> Int { match build() { Result.Ok(_) => 0, Result.Err(error) => error.code } }
+"#, 89);
+}
+
+#[test]
+fn distinct_error_instantiations_require_the_declared_conversion() {
+    source_value(r#"
+type Failure<T> is { value: T };
+implement Failure<Bool> {
+    fn from(error: Failure<Int>) -> Failure<Bool> { Failure { value: error.value == 0 } }
+}
+fn missing() -> Result<Int, Failure<Int>> { Result.Err(Failure { value: 47 }) }
+fn build() -> Result<Int, Failure<Bool>> { let value = missing()?; Result.Ok(value) }
+fn probe() -> Int {
+    match build() {
+        Result.Ok(_) => 0,
+        Result.Err(error) => if error.value { 101 } else { 102 },
+    }
+}
+"#, 102);
+}
+
+#[test]
+fn residual_conversion_forwards_the_enclosing_generic_binder() {
+    source_value(r#"
+type Failure is { code: Int };
+implement Failure { fn default() -> Failure { Failure { code: 97 } } }
+implement<T, E> Result<T, E> {
+    fn from_residual(_residual: Maybe<Never>) -> Result<T, E> { Result.Err(E.default()) }
+}
+fn absent() -> Maybe<Int> { Maybe.None }
+fn build<Error>() -> Result<Bool, Error> { let value = absent()?; Result.Ok(value == 0) }
+fn probe() -> Int { match build<Failure>() { Result.Ok(_) => 0, Result.Err(error) => error.code } }
+"#, 97);
+}
+
+#[test]
+fn residual_aliases_retain_their_instantiated_arguments() {
+    source_value(r#"
+type Failure is { code: Int };
+type Wire<T> is Result<T, Failure>;
+implement<T, E> Result<T, E> {
+    fn from_residual(residual: Result<Never, E>) -> Result<T, E> {
+        match residual {
+            Result.Err(error) => Result.Err(error),
+            Result.Ok(_) => panic("uninhabited success"),
+        }
+    }
+}
+fn missing() -> Wire<Int> { Result.Err(Failure { code: 103 }) }
+fn build() -> Wire<Bool> { let value = missing()?; Result.Ok(value == 0) }
+fn probe() -> Int { match build() { Result.Ok(_) => 0, Result.Err(error) => error.code } }
+"#, 103);
+}
+
+#[test]
+fn residual_target_belongs_to_the_selected_module_function() {
+    source_value(r#"
+module codec;
+implement<T, E> Result<T, E> {
+    fn from_residual(residual: Result<Never, E>) -> Result<T, E> {
+        match residual {
+            Result.Err(error) => Result.Err(error),
+            Result.Ok(_) => panic("uninhabited success"),
+        }
+    }
+}
+module alpha {
+    public type Failure is { public code: Int };
+    fn missing() -> Result<Int, Failure> { Result.Err(Failure { code: 107 }) }
+    public fn decode_array() -> Result<Int, Failure> { let value = missing()?; Result.Ok(value) }
+}
+module beta {
+    public fn decode_array() -> Maybe<Int> { Maybe.None }
+}
+fn probe() -> Int {
+    match alpha.decode_array() { Result.Ok(_) => 0, Result.Err(error) => error.code }
+}
+"#, 107);
 }
 
 #[test]

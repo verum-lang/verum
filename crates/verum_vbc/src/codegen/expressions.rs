@@ -26803,6 +26803,20 @@ impl VbcCodegen {
         // conversion (`from_residual` lookup) silently mis-routed for
         // the Err arm.
         let type_name = self.extract_expr_type_name(inner);
+        // Residual compatibility belongs to nominal declarations, not their
+        // displayed spelling. In particular, imported Result/Maybe names are
+        // qualified and aliases retain their complete type arguments.
+        let declared = self.declared_expression_result(
+                inner, Some(inner_reg), start, self.ctx.instructions.len())
+            .and_then(|ty| self.expand_declared_alias(ty))
+            .or_else(|| type_name.as_deref()
+            .and_then(|name| self.method_receiver_declaration_name(name))
+            .and_then(|name| self.semantic_type_in_current_scope(&name)));
+        let nominal = |ty: &crate::types::TypeRef| match ty {
+            crate::types::TypeRef::Concrete(id)
+            | crate::types::TypeRef::Instantiated { base: id, .. } => Some(*id),
+            _ => None,
+        };
         let base_name_owned: Option<String> = type_name.as_deref().map(|n| {
             let stripped = n.split('<').next().unwrap_or(n).trim();
             let resolved = self.resolve_type_alias(stripped);
@@ -26811,8 +26825,8 @@ impl VbcCodegen {
         let base_name: Option<&str> = base_name_owned.as_deref();
 
         // Three-way classification: Maybe, Result, or user-defined Try type.
-        let mut is_maybe_type = base_name.is_some_and(|n| WKT::Maybe.matches(n));
-        let is_result_type = base_name.is_some_and(|n| WKT::Result.matches(n));
+        let mut is_maybe_type = declared.as_ref().and_then(nominal) == Some(crate::types::TypeId::MAYBE);
+        let is_result_type = declared.as_ref().and_then(nominal) == Some(crate::types::TypeId::RESULT);
 
         // **Iterator-protocol `?` keystone** (closes ADAPTER-TRY-NEXT-1, the
         // bug that left every iterator adapter body — `let item =
@@ -26879,9 +26893,6 @@ impl VbcCodegen {
         };
 
         if span.start < span.end {
-            let declared = self.declared_expression_result(
-                inner, Some(inner_reg), start, self.ctx.instructions.len(),
-            );
             let projected = declared.as_ref().and_then(|ty| self.try_success_payload(ty, success_tag))
                 .or_else(|| {
                     // An unmapped error parameter does not erase a closed success type.
@@ -26950,14 +26961,9 @@ impl VbcCodegen {
                     VbcCodegen::strip_generic_args(&resolved).to_string()
                 });
 
-            // #49 — same BASE is not same TYPE: `Result<Int, Inner>?`
-            // inside `fn -> Result<Int, Outer>` matched the Result→Result
-            // fast-path by base name alone and returned the inner result
-            // VERBATIM (tags coincide, payload is the WRONG error type —
-            // `e.where_msg` then reads OOB on the one-field Inner). The
-            // error ARGUMENT must agree too (alias-resolved, generic-
-            // stripped); unknown args preserve the fast-path (exactly
-            // today's behaviour — no regression surface).
+            // Names select conversion declarations below. They do not prove
+            // residual compatibility: that requires the complete TypeRef,
+            // including nested error arguments and their nominal owners.
             let err_arg_of = |full: Option<&str>| -> Option<String> {
                 full.map(|t| self.extract_inner_types(t))
                     .and_then(|args| args.get(1).cloned())
@@ -26973,19 +26979,38 @@ impl VbcCodegen {
             };
             let outer_err_arg: Option<String> =
                 err_arg_of(self.ctx.function_return_type_name.as_deref());
-            let result_err_args_agree = match (&inner_err_arg, &outer_err_arg) {
-                (Some(a), Some(b)) => a == b,
-                _ => true,
+            let outer_declared = self.ctx.function_return_declaration.clone()
+                .and_then(|ty| self.expand_declared_alias(ty))
+                .or_else(|| self.ctx.function_return_type_name.as_deref()
+                .and_then(|name| self.method_receiver_declaration_name(name))
+                .and_then(|name| self.semantic_type_in_current_scope(&name)));
+            let error_type = |ty: &crate::types::TypeRef| match ty {
+                crate::types::TypeRef::Instantiated { base, args }
+                    if *base == crate::types::TypeId::RESULT => args.get(1).cloned(),
+                _ => None,
             };
-
-            let same_type = match (&outer_base.as_deref(), is_maybe_type, is_result_type) {
-                (Some(o), true, _) => WKT::Maybe.matches(o),
-                (Some(o), _, true) => WKT::Result.matches(o) && result_err_args_agree,
+            let result_err_args_agree = match (
+                declared.as_ref().and_then(error_type),
+                outer_declared.as_ref().and_then(error_type),
+            ) {
+                (Some(inner), Some(outer)) => inner == outer,
                 _ => false,
             };
+            let outer_nominal = outer_declared.as_ref().and_then(nominal);
+            let same_type = (is_maybe_type && outer_nominal == Some(crate::types::TypeId::MAYBE))
+                || (is_result_type && outer_nominal == Some(crate::types::TypeId::RESULT)
+                    && result_err_args_agree);
+            // A closure without an explicit or contextual result can infer
+            // only the carrier from its success constructor before its body is
+            // lowered. Its residual has no conversion target yet: preserve the
+            // incoming error instead of selecting an unrelated FromResidual
+            // implementation. An annotated result never takes this path.
+            let inferred_result_residual = self.ctx.return_type.is_none()
+                && outer_declared == Some(crate::types::TypeRef::Concrete(crate::types::TypeId::RESULT))
+                && is_result_type && declared.as_ref().and_then(error_type).is_some();
             if std::env::var("VERUM_TRACE_PAT").is_ok() {
                 eprintln!(
-                    "[try-trace] fn={:?} inner_ty={:?} outer_rtn={:?} outer_base={:?} is_res={} is_maybe={} err_args=({:?},{:?}) same={}",
+                    "[try-trace] fn={:?} inner_ty={:?} outer_rtn={:?} outer_base={:?} is_res={} is_maybe={} err_args=({:?},{:?}) declarations=({:?},{:?}) same={}",
                     self.ctx.current_function,
                     type_name,
                     self.ctx.function_return_type_name,
@@ -26994,6 +27019,8 @@ impl VbcCodegen {
                     is_maybe_type,
                     inner_err_arg,
                     outer_err_arg,
+                    declared,
+                    outer_declared,
                     same_type
                 );
             }
@@ -27001,10 +27028,10 @@ impl VbcCodegen {
             let emit_residual_return = |codegen: &mut Self, value| {
                 codegen.emit_lexical_return(Some(value), Some(inner_reg), true, true);
             };
-            if same_type {
+            if same_type || inferred_result_residual {
                 emit_residual_return(self, inner_reg);
             } else if is_result_type
-                && outer_base.as_deref().is_some_and(|o| WKT::Result.matches(o))
+                && outer_nominal == Some(crate::types::TypeId::RESULT)
                 && let (Some(inner_err), Some(outer_err)) =
                     (inner_err_arg.as_deref(), outer_err_arg.as_deref())
             {
@@ -27121,11 +27148,20 @@ impl VbcCodegen {
 
                 let from_residual_ret = self.ctx.alloc_temp();
                 if let Some(fid) = from_residual_id {
-                    self.ctx.emit(Instruction::Call {
-                        dst: from_residual_ret,
-                        func_id: fid,
-                        args: crate::instruction::RegRange::new(inner_reg, 1),
-                    });
+                    // This synthesized call returns from the callable, so its
+                    // expected type is the callable result, never a surrounding
+                    // record field or let-binding hint.
+                    let prior = std::mem::replace(&mut self.ctx.expected_value_type, outer_declared);
+                    let witnesses = self.record_generic_instantiation(fid, None, std::slice::from_ref(inner));
+                    self.ctx.expected_value_type = prior;
+                    let args = crate::instruction::RegRange::new(inner_reg, 1);
+                    if let Some(call) = witnesses {
+                        self.ctx.emit(Instruction::CallG {
+                            dst: from_residual_ret, func_id: fid, args, type_args: call.arguments,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::Call { dst: from_residual_ret, func_id: fid, args });
+                    }
                     emit_residual_return(self, from_residual_ret);
                 } else {
                     // from_residual not yet registered (stdlib not loaded yet or

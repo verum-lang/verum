@@ -180,6 +180,10 @@ pub struct CodegenContext {
     /// Nested callable compilation saves/restores this independently of hints.
     pub function_return_type_name: verum_common::Maybe<verum_common::Text>,
 
+    /// Semantic result of the selected source callable. A repeated lookup by
+    /// short name could select a different module's declaration.
+    pub(super) function_return_declaration: Option<TypeRef>,
+
     /// Expected expression type (initially the function's return type).
     /// When a variant name collides with a stdlib variant (e.g., "Lt" exists in both
     /// user-defined "Ordering" and stdlib "GeneralCategory"), this is used to prefer
@@ -1008,6 +1012,8 @@ pub struct ClosureCompilationContext {
     pub(super) array_result_facts: super::array_coercions::ArrayResultFacts,
     /// The enclosing callable's residual target, independent of expression hints.
     pub function_return_type_name: verum_common::Maybe<verum_common::Text>,
+    /// Exact selected callable result, restored with the enclosing boundary.
+    pub(super) function_return_declaration: Option<TypeRef>,
     /// Recovery handlers belong to the enclosing callable's instruction stream.
     pub try_recover_depth: u32,
     /// T0701: the let-annotation / return-context stash.  Closure
@@ -1690,6 +1696,7 @@ impl CodegenContext {
             in_function: false,
             return_type: None,
             function_return_type_name: None,
+            function_return_declaration: None,
             current_return_type_name: None,
             current_return_type_full: None,
             expected_value_type: None,
@@ -2830,6 +2837,7 @@ impl CodegenContext {
         self.return_type = return_type;
         self.function_return_type_name = self.lookup_function(name)
             .and_then(|function| function.return_type_name.clone()).map(Into::into);
+        self.function_return_declaration = None;
         // T1689: a nested callable cannot throw through its creator's handler.
         self.try_recover_depth = 0;
         self.current_impl_type_name = None;
@@ -2849,6 +2857,7 @@ impl CodegenContext {
         self.in_function = false;
         self.return_type = None;
         self.function_return_type_name = None;
+        self.function_return_declaration = None;
         self.try_recover_depth = 0;
         self.current_return_type_name = None;
         self.current_return_type_full = None;
@@ -4809,6 +4818,7 @@ impl CodegenContext {
             declared_result_types: self.declared_result_types.clone(),
             array_result_facts: self.array_result_facts.clone(),
             function_return_type_name: self.function_return_type_name.clone(),
+            function_return_declaration: self.function_return_declaration.clone(),
             try_recover_depth: self.try_recover_depth,
             current_return_type_name: self.current_return_type_name.clone(),
             current_return_type_full: self.current_return_type_full.clone(),
@@ -4830,6 +4840,7 @@ impl CodegenContext {
     pub fn restore_closure_context(&mut self, saved: ClosureCompilationContext) {
         self.label_counter = saved.label_counter;
         self.function_return_type_name = saved.function_return_type_name;
+        self.function_return_declaration = saved.function_return_declaration;
         self.try_recover_depth = saved.try_recover_depth;
         self.current_return_type_name = saved.current_return_type_name;
         self.current_return_type_full = saved.current_return_type_full;
@@ -4967,6 +4978,7 @@ impl CodegenContext {
         self.in_function = false;
         self.return_type = None;
         self.function_return_type_name = None;
+        self.function_return_declaration = None;
         self.try_recover_depth = 0;
         self.closure_return_type_hints.clear();
         self.constants.clear();

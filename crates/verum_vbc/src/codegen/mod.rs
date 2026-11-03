@@ -19914,6 +19914,10 @@ impl VbcCodegen {
             impl_type_name.map_or_else(|| name.clone(), |owner|
                 Self::substitute_self_in_type_name(name, owner)).into()
         });
+        self.ctx.function_return_declaration = match func_info.callable_signature.as_ref() {
+            Some(crate::types::TypeRef::Function { return_type, .. }) => Some((**return_type).clone()),
+            _ => None,
+        };
         // Inner generics of the return type drive variant disambiguation
         // for `Err(InnerVariant(...))` inside `Result<_, E>` returners
         // and the equivalent `Some(InnerVariant(...))` inside

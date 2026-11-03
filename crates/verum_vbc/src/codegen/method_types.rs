@@ -22,7 +22,7 @@ pub(super) struct ExpressionTypes {
 impl VbcCodegen {
     /// Expand the selected alias declaration structurally, retaining type and
     /// const arguments. Unknown owners remain unknown; cyclic aliases refuse.
-    pub(super) fn method_receiver_declaration_name(&self, name: &str) -> Maybe<Text> {
+    pub(in crate::codegen) fn method_receiver_declaration_name(&self, name: &str) -> Maybe<Text> {
         let name = Self::method_receiver_type_name(name);
         let base = Self::strip_generic_args(name);
         let Some(alias) = self
@@ -43,7 +43,7 @@ impl VbcCodegen {
         let ast = verum_fast_parser::Parser::new(name).parse_type().ok()?;
         // The scoped nominal lookup above selects the alias. Do not re-enter
         // the ambient bare-alias cache while recovering its instantiation.
-        let mut witness = match &ast.kind {
+        let witness = match &ast.kind {
             verum_ast::ty::TypeKind::Generic { .. } => {
                 let TypeRef::Instantiated { args, .. } = self.explicit_type_witness(&ast, None)?
                 else {
@@ -56,17 +56,24 @@ impl VbcCodegen {
             }
             _ => TypeRef::Concrete(alias.id),
         };
+        self.expand_declared_alias(witness).and_then(|ty| self.callable_result_name(&ty))
+    }
+
+    /// Expand only the selected nominal alias declaration, preserving caller
+    /// binders and complete arguments without reparsing a displayed type name.
+    pub(in crate::codegen) fn expand_declared_alias(&self, mut witness: TypeRef) -> Maybe<TypeRef> {
         let mut seen = Set::new();
         loop {
             let (base, args) = match &witness {
                 TypeRef::Concrete(id) => (*id, &[][..]),
                 TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
-                _ => return self.callable_result_name(&witness),
+                _ => return Some(witness),
             };
-            let descriptor = self.type_by_id(base)?;
-            if descriptor.kind != crate::types::TypeKind::Alias {
-                return self.callable_result_name(&witness);
-            }
+            let Some(descriptor) = self.type_by_id(base)
+                .filter(|ty| ty.kind == crate::types::TypeKind::Alias)
+            else {
+                return Some(witness);
+            };
             if !seen.insert(base) || args.len() != descriptor.type_params.len() {
                 return None;
             }
