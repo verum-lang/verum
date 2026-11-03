@@ -16,7 +16,7 @@ use verum_compiler::Session;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct RuntimeReportArgs {
-    /// Write bounded CBGR errors and measured VBC method dispatch for interpreted code.
+    /// Write bounded CBGR errors, VBC method measurements and async task outcomes.
     #[arg(long, value_name = "FILE", requires = "interp")]
     pub runtime_report: Option<PathBuf>,
     /// Invocation identity returned in the runtime report (generated if omitted).
@@ -134,7 +134,10 @@ impl ReportFile {
         report: Option<verum_compiler::session::RuntimeMeasurements>,
         entry_source_path: Option<Text>,
     ) -> Result<(), CliError> {
-        let (cbgr, method_dispatch) = report.map(|report| (report.cbgr, report.method_dispatch)).unzip();
+        let (cbgr, method_dispatch, async_tasks) = match report {
+            Some(report) => (Some(report.cbgr), Some(report.method_dispatch), Some(report.async_tasks)),
+            None => (None, None, None),
+        };
         let body = RuntimeReport {
             schema: RuntimeReportSchema::V1,
             run_id: self.request.run_id.as_str().into(),
@@ -150,6 +153,7 @@ impl ReportFile {
             },
             cbgr,
             method_dispatch,
+            async_tasks,
         };
         let bytes =
             serde_json::to_vec(&body).map_err(|error| CliError::Custom(error.to_string()))?;

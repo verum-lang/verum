@@ -55,6 +55,7 @@ mod autodiff_record;
 mod cbgr_heap;
 pub mod diagnostics;
 mod method_profile;
+mod task_diagnostics;
 mod dispatch_table;
 mod error;
 pub mod gpu_simulator;

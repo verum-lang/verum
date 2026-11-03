@@ -56,3 +56,16 @@ test('method site ranking preserves 64-bit nanosecond measurements and receipt o
   assert.deepEqual(rankMethodSites(profile).map(row => row.pc), [9, 4]);
   assert.deepEqual(rows.map(row => row.pc), [4, 9]);
 });
+
+test('task summaries count only retained actual statuses and preserve full task IDs', async () => {
+  const { taskSnapshotCounts } = await import('../src/runtime.ts');
+  const rows = (['pending', 'running', 'suspended', 'completed', 'failed'] as const).map((status, index) => ({
+    task_id: (9007199254740992n + BigInt(index)).toString(), function_id: 7, module: 'app',
+    function: 'worker', entered: true, status, error: status === 'failed' ? 'original failure' : null,
+    error_truncated: false,
+  }));
+  const report = { schema: 'verum.async-tasks/1' as const, capacity: 5, omitted_tasks: '18446744073709551615', rows };
+  assert.deepEqual(taskSnapshotCounts(report), { pending: 1, running: 1, suspended: 1, completed: 1, failed: 1 });
+  assert.equal(report.rows[4].task_id, '9007199254740996');
+  assert.equal(report.omitted_tasks, '18446744073709551615');
+});

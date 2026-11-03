@@ -19,6 +19,7 @@ fn report() -> RuntimeReport {
         compiler_version: "0.1.0".into(),
         observation: RuntimeObservation::Captured,
         method_dispatch: None,
+        async_tasks: None,
         cbgr: Some(CbgrReport {
             schema: CbgrSchema::DispatchV1,
             capacity: 1,
@@ -53,6 +54,44 @@ fn identical_source_does_not_authorize_another_runs_observations() {
             .validate_binding("current-run", &"c".repeat(64))
             .is_err()
     );
+}
+
+#[test]
+fn task_snapshots_refuse_impossible_outcomes_and_oversized_payloads() {
+    use verum_common::runtime_diagnostics::*;
+    let mut report = report();
+    report.async_tasks = Some(AsyncTaskReport {
+        schema: AsyncTaskSchema::V1, capacity: 1, omitted_tasks: u64::MAX,
+        rows: [AsyncTaskRow {
+            task_id: u64::MAX, function_id: Some(1), module: Some("app".into()),
+            function: Some("worker".into()), entered: true, status: AsyncTaskStatus::Failed,
+            error: Some("original failure".into()), error_truncated: false,
+        }].into_iter().collect(),
+    });
+    let valid = |r: &RuntimeReport| r.validate_binding("current-run", &"a".repeat(64)).is_ok();
+    assert!(valid(&report));
+    assert!(!report.validate_binding("previous-run", &"a".repeat(64)).is_ok());
+    let mutations: [fn(&mut AsyncTaskRow); 5] = [
+        |row| row.status = AsyncTaskStatus::Completed,
+        |row| row.error = None,
+        |row| row.entered = false,
+        |row| row.function_id = None,
+        |row| row.error = Some("x".repeat(MAX_TASK_ERROR_BYTES + 1).into()),
+    ];
+    for mutate in mutations {
+        let mut bad = report.clone();
+        mutate(&mut bad.async_tasks.as_mut().unwrap().rows[0]);
+        assert!(!valid(&bad));
+    }
+    let mut bad = report.clone();
+    bad.async_tasks.as_mut().unwrap().rows.clear();
+    assert!(!valid(&bad));
+    let mut bad = report.clone();
+    bad.async_tasks.as_mut().unwrap().capacity = MAX_ASYNC_TASK_ROWS + 1;
+    assert!(!valid(&bad));
+    report.cbgr = None;
+    report.observation = RuntimeObservation::Unavailable;
+    assert!(!valid(&report));
 }
 
 #[test]

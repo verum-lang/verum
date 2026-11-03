@@ -242,6 +242,7 @@ pub struct Session {
 pub struct RuntimeMeasurements {
     pub cbgr: verum_common::runtime_diagnostics::CbgrReport,
     pub method_dispatch: verum_common::runtime_diagnostics::MethodDispatchReport,
+    pub async_tasks: verum_common::runtime_diagnostics::AsyncTaskReport,
 }
 
 impl Session {

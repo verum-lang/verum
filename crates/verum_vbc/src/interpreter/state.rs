@@ -1519,7 +1519,7 @@ pub struct Task {
     /// Task result (if completed).
     pub result: Option<Value>,
     /// Original execution failure for observers that arrive after a scheduler turn.
-    error: Option<Box<InterpreterError>>,
+    pub(super) error: Option<Box<InterpreterError>>,
     /// Deferred argument values (for cooperative scheduling).
     /// Stored at spawn time, consumed when the task is actually executed.
     pub arg_values: Vec<Value>,
@@ -1575,6 +1575,7 @@ pub struct TaskId(pub u64);
 /// plug into `steal_ready` without touching the local path.
 #[derive(Debug, Clone, Default)]
 pub struct TaskQueue {
+    pub(super) diagnostics: Option<super::task_diagnostics::TaskCapture>,
     /// All tasks by ID.
     tasks: HashMap<TaskId, Task>,
     /// Next task ID to assign.
@@ -1588,6 +1589,7 @@ impl TaskQueue {
     pub fn new() -> Self {
         Self {
             tasks: HashMap::new(),
+            diagnostics: None,
             next_id: 0,
             ready: std::collections::VecDeque::new(),
         }
@@ -1613,6 +1615,7 @@ impl TaskQueue {
 
         self.tasks.insert(id, task);
         self.ready.push_back(id);
+        self.observe_spawn(id, Some(func_id));
         id
     }
 
@@ -1648,6 +1651,7 @@ impl TaskQueue {
 
         self.tasks.insert(id, task);
         self.ready.push_back(id);
+        self.observe_spawn(id, Some(func_id));
         id
     }
 
@@ -1681,6 +1685,7 @@ impl TaskQueue {
 
         self.tasks.insert(id, task);
         self.ready.push_back(id);
+        self.observe_spawn(id, None);
         id
     }
 
@@ -1794,6 +1799,7 @@ impl TaskQueue {
     /// Clears all tasks.
     pub fn clear(&mut self) {
         self.tasks.clear();
+        self.diagnostics = None;
         self.ready.clear();
         self.next_id = 0;
     }

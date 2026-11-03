@@ -121,6 +121,10 @@ fn actual_cli_reports_exact_stdin_identity_and_refuses_reusing_output() {
         assert_eq!(report.wrapper_lines, 1);
         assert!(report.cbgr.unwrap().events.is_empty());
         let methods = report.method_dispatch.unwrap();
+        let tasks = report.async_tasks.unwrap();
+        assert!(tasks.validate());
+        assert!(tasks.rows.is_empty());
+        assert_eq!(tasks.omitted_tasks, 0);
         assert!(methods.rows.iter().any(|site| site.selector.as_deref() == Some("Int.clone")
             && site.count == 1 && site.function.is_some()));
         let retained = std::fs::read(&path).unwrap();
@@ -142,6 +146,7 @@ fn compiler_refusal_leaves_unavailable_observation_and_cli_rejects_invalid_ident
     assert_eq!(report.observation, RuntimeObservation::Unavailable);
     assert!(report.cbgr.is_none());
     assert!(report.method_dispatch.is_none());
+    assert!(report.async_tasks.is_none());
     let rejected = dir.path().join("invalid.json");
     assert!(!run("print(1);", &rejected, "invalid/id").status.success());
     assert!(!rejected.exists());

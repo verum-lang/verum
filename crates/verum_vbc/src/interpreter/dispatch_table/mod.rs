@@ -831,6 +831,7 @@ fn run_sync_frame(
     let pending_witness = state.pending_call_witness.take();
     let result = (|| {
         let base = state.call_stack.push_frame(function, register_count, return_pc, Reg(0))?;
+        state.tasks.observe_task_entry(&state.module, function);
         state.registers.try_push_frame(register_count)
             .map_err(|new_top| InterpreterError::StackOverflow {
                 depth: new_top, max_depth: crate::interpreter::registers::MAX_SIZE,
@@ -974,11 +975,13 @@ pub(crate) fn execute_pending_task(
             }
         }
 
+        let previous_task = state.tasks.begin_diagnostic_task(Some(task_id));
         let result = if let Some(closure) = closure_val {
             call_closure_sync(state, closure, &args)
         } else {
             call_function_sync(state, func_id, &args)
         };
+        state.tasks.begin_diagnostic_task(previous_task);
 
         match result {
             Ok(value) => {

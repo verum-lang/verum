@@ -29,6 +29,28 @@ fn reports_are_bound_to_invocation_and_source_with_lossless_counters() {
 }
 
 #[test]
+fn async_failures_survive_transport_and_cannot_be_relabelled_as_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("runtime.json");
+    let mut body = report();
+    body["async_tasks"] = json!({
+        "schema":"verum.async-tasks/1", "capacity":1, "omitted_tasks":"9007199254740993",
+        "rows":[{"task_id":"9007199254740994", "function_id":7, "module":"app", "function":"handler",
+            "entered":true, "status":"failed", "error":"original failure", "error_truncated":false}]
+    });
+    std::fs::write(&path, serde_json::to_vec(&body).unwrap()).unwrap();
+    let observed = read_report(&path, "current", &"a".repeat(64)).unwrap();
+    let tasks = observed.async_tasks.unwrap();
+    assert_eq!(tasks.rows[0].task_id, 9007199254740994);
+    assert_eq!(serde_json::to_value(&tasks).unwrap()["rows"][0]["task_id"], "9007199254740994");
+    assert_eq!(tasks.rows[0].error.as_deref(), Some("original failure"));
+    assert!(read_report(&path, "other", &"a".repeat(64)).is_err());
+    body["async_tasks"]["rows"][0]["status"] = json!("completed");
+    std::fs::write(&path, serde_json::to_vec(&body).unwrap()).unwrap();
+    assert!(read_report(&path, "current", &"a".repeat(64)).is_err());
+}
+
+#[test]
 fn absent_malformed_unsupported_and_inconsistent_evidence_never_becomes_empty_success() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("runtime.json");

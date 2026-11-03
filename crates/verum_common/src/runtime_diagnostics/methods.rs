@@ -80,7 +80,7 @@ impl MethodDispatchReport {
 }
 
 // Decimal strings retain full precision across JSON/JavaScript consumers.
-mod decimal {
+pub(super) mod decimal {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
     pub fn serialize<S: Serializer>(v: &u64, s: S) -> Result<S::Ok, S::Error> {
         s.collect_str(v)

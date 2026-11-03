@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 mod methods;
 pub use methods::*;
+mod tasks;
+pub use tasks::*;
 
 pub const MAX_CBGR_EVENTS: usize = 256;
 pub const MAX_RUNTIME_REPORT_BYTES: u64 = 1024 * 1024;
@@ -85,6 +87,8 @@ pub struct RuntimeReport {
     pub cbgr: Option<CbgrReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method_dispatch: Option<MethodDispatchReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub async_tasks: Option<AsyncTaskReport>,
 }
 
 impl RuntimeReport {
@@ -119,6 +123,10 @@ impl RuntimeReport {
         if self.method_dispatch.as_ref().is_some_and(|report|
             self.observation != RuntimeObservation::Captured || !report.validate()) {
             return Err("Invalid runtime method dispatch profile");
+        }
+        if self.async_tasks.as_ref().is_some_and(|report|
+            self.observation != RuntimeObservation::Captured || !report.validate()) {
+            return Err("Invalid runtime async task snapshot");
         }
         if let Some(report) = &self.cbgr {
             if report.capacity > MAX_CBGR_EVENTS || report.events.len() > report.capacity {

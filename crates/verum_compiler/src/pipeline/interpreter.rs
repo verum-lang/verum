@@ -137,6 +137,8 @@ impl<'s> CompilationPipeline<'s> {
                 verum_vbc::interpreter::diagnostics::MAX_CBGR_EVENTS)?;
             interpreter.state.enable_method_dispatch_profile(
                 verum_common::runtime_diagnostics::MAX_METHOD_DISPATCH_SITES)?;
+            interpreter.state.tasks.enable_diagnostics(
+                verum_common::runtime_diagnostics::MAX_ASYNC_TASK_ROWS)?;
         }
         let result = (|| {
             let main = self.find_main_function_id(&interpreter.state.module, entry_name)?;
@@ -156,8 +158,9 @@ impl<'s> CompilationPipeline<'s> {
         })();
         if let Some(cbgr) = interpreter.state.cbgr_report()
             && let Some(method_dispatch) = interpreter.state.method_dispatch_report()
+            && let Some(async_tasks) = interpreter.state.tasks.diagnostics_report()
         {
-            self.session.record_runtime_report(crate::session::RuntimeMeasurements { cbgr, method_dispatch });
+            self.session.record_runtime_report(crate::session::RuntimeMeasurements { cbgr, method_dispatch, async_tasks });
         }
         result
     }

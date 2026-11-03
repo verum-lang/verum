@@ -17,6 +17,19 @@ export type MethodDispatchReport = {
   schema: 'verum.method-dispatch/1'; capacity: number; dropped_calls: string; rows: MethodDispatchRow[];
 };
 
+export type AsyncTaskStatus = 'pending' | 'running' | 'suspended' | 'completed' | 'failed';
+export type AsyncTaskReport = {
+  schema: 'verum.async-tasks/1'; capacity: number; omitted_tasks: string;
+  rows: { task_id: string; function_id: number | null; module: string | null; function: string | null;
+    entered: boolean; status: AsyncTaskStatus; error: string | null; error_truncated: boolean }[];
+};
+
+export function taskSnapshotCounts(report: AsyncTaskReport) {
+  const counts: Record<AsyncTaskStatus, number> = { pending: 0, running: 0, suspended: 0, completed: 0, failed: 0 };
+  for (const row of report.rows) counts[row.status] += 1;
+  return counts;
+}
+
 export function rankMethodSites(report: MethodDispatchReport) {
   return [...report.rows].sort((a, b) => {
     const left = BigInt(a.inclusive_ns), right = BigInt(b.inclusive_ns);
@@ -29,6 +42,7 @@ export type RuntimeReport = {
   prepared_source_sha256: string; wrapper_lines: number; entry_source_path: string | null;
   compiler_version: string; observation: 'captured' | 'unavailable';
   method_dispatch?: MethodDispatchReport | null;
+  async_tasks?: AsyncTaskReport | null;
   cbgr: { schema: 'verum.cbgr.dispatch/1'; capacity: number; checks_enabled_at_start: boolean; truncated: boolean; events: CbgrEvent[] } | null;
 };
 

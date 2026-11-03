@@ -137,3 +137,31 @@ fn new_requests_cannot_reuse_prior_observations() {
     );
     assert!(session.take_runtime_report().is_none());
 }
+
+#[test]
+fn actual_entry_retains_a_detached_task_failure_in_the_same_measurement_capture() {
+    use verum_common::runtime_diagnostics::AsyncTaskStatus;
+    use verum_vbc::RegRange;
+    let mut module = VbcModule::new("detached".into());
+    let selector = module.intern_string("missing_child_method").0;
+    let child = add_function(&mut module, "child", &[
+        Instruction::LoadSmallI { dst: Reg(0), value: 7 },
+        Instruction::CallM { dst: Reg(1), receiver: Reg(0), method_id: selector, args: RegRange::new(Reg(0), 0) },
+        Instruction::Ret { value: Reg(1) },
+    ]);
+    add_function(&mut module, "main", &[
+        Instruction::Spawn { dst: Reg(1), func_id: child.0, args: RegRange::new(Reg(0), 0) },
+        Instruction::AsyncYield,
+        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::Ret { value: Reg(0) },
+    ]);
+    let mut session = Session::new(CompilerOptions { runtime_diagnostics: true, ..Default::default() });
+    CompilationPipeline::new(&mut session).run_compiled_vbc(Arc::new(module), List::new()).unwrap();
+    assert_eq!(session.take_exit_code(), Some(0));
+    let report = session.take_runtime_measurements().unwrap();
+    assert!(report.async_tasks.validate());
+    assert_eq!(report.async_tasks.rows[0].status, AsyncTaskStatus::Failed);
+    assert_eq!(report.async_tasks.rows[0].function.as_deref(), Some("child"));
+    assert!(report.async_tasks.rows[0].error.as_deref().unwrap().contains("missing_child_method"));
+    assert!(session.take_runtime_measurements().is_none());
+}

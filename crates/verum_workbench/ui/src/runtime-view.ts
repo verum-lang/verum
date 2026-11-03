@@ -1,5 +1,5 @@
 import type { Receipt } from './model';
-import { rankMethodSites, type CbgrEvent, type MethodDispatchReport, type MethodOutcome } from './runtime';
+import { rankMethodSites, taskSnapshotCounts, type AsyncTaskReport, type AsyncTaskStatus, type CbgrEvent, type MethodDispatchReport, type MethodOutcome } from './runtime';
 import { m, setText, setAttribute, type Content } from './i18n';
 
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: Content) => {
@@ -44,6 +44,37 @@ function methodView(report: MethodDispatchReport) {
   return details;
 }
 
+function taskStatus(status: AsyncTaskStatus): Content {
+  switch (status) {
+    case 'pending': return m('Pending');
+    case 'running': return m('Running');
+    case 'suspended': return m('Suspended');
+    case 'completed': return m('Completed');
+    case 'failed': return m('Failed');
+  }
+}
+
+function taskView(report: AsyncTaskReport) {
+  const details = element('details'); details.dataset.key = 'async-tasks';
+  const counts = taskSnapshotCounts(report);
+  details.open = counts.failed > 0;
+  const summary = element('summary', m('Task queue · {count} retained · {failed} failed',
+    { count: report.rows.length, failed: counts.failed }));
+  summary.dataset.focusKey = 'async-tasks'; details.append(summary);
+  details.append(element('p', m('Snapshot of recent cooperative tasks, including detached tasks. Nursery jobs and native worker threads are outside this capture. A completed task may return an application error value; completion is not a correctness proof.')));
+  if (report.omitted_tasks !== '0') details.append(element('p', m('{count} older tasks omitted. Their outcomes are not shown.', { count: report.omitted_tasks })));
+  for (const row of report.rows) {
+    const item = element('article');
+    item.append(element('code', `#${row.task_id} · ${row.module ? `${row.module} · ` : ''}${row.function ?? (row.function_id === null ? '—' : `#${row.function_id}`)}`),
+      element('p', taskStatus(row.status)));
+    if (!row.entered) item.append(element('p', m('No task entry frame observed.')));
+    if (row.error) item.append(element('pre', row.error));
+    if (row.error_truncated) item.append(element('p', m('Error text truncated for this report. The task retains its original failure.')));
+    details.append(item);
+  }
+  return details;
+}
+
 export function runtimeView(receipt: Receipt, canNavigate: (event: CbgrEvent) => boolean, navigate: (event: CbgrEvent) => void) {
   if (!receipt.runtime_diagnostics) return null;
   const section = element('section'); section.className = 'runtime-diagnostics';
@@ -56,6 +87,7 @@ export function runtimeView(receipt: Receipt, canNavigate: (event: CbgrEvent) =>
     return section;
   }
   if (report.method_dispatch) section.append(methodView(report.method_dispatch));
+  if (report.async_tasks) section.append(taskView(report.async_tasks));
   const cbgr = report.cbgr;
   if (!cbgr.checks_enabled_at_start) section.append(element('p', m('CBGR checks were disabled when capture started.')));
   section.append(element('p', m(cbgr.events.length ? '{count} dispatch observations' : 'No CBGR failures observed in this capture.', { count: cbgr.events.length })));
