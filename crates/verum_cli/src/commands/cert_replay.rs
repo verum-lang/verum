@@ -4,8 +4,8 @@
 use crate::error::{CliError, Result};
 use std::path::PathBuf;
 use verum_verification::cert_replay::{
-    CertFormat, CertReplayEngine, KernelOnlyReplayEngine, MockReplayEngine, ReplayBackend,
-    ReplayVerdict, SmtCertificate, cross_check, engine_for,
+    CertFormat, ReplayBackend, ReplayVerdict, SmtCertificate, cross_check_backends,
+    replay_with_backend,
 };
 
 fn parse_format(s: &str) -> Result<CertFormat> {
@@ -95,17 +95,11 @@ pub fn run_replay(
     // Always run the kernel-only check first as the structural
     // baseline — even when the user asks for a specific backend.
     // Structural inspection does not remove the solver from the TCB.
-    let kernel = KernelOnlyReplayEngine::new();
-    let kernel_v = kernel
-        .replay(&cert)
-        .map_err(|e| CliError::VerificationFailed(format!("kernel replay: {}", e)))?;
+    let kernel_v = replay_with_backend(&cert, ReplayBackend::KernelOnly);
     let chosen_v = if backend == ReplayBackend::KernelOnly {
         kernel_v.clone()
     } else {
-        let engine = engine_for(backend);
-        engine.replay(&cert).map_err(|e| {
-            CliError::VerificationFailed(format!("{} replay: {}", backend.name(), e))
-        })?
+        replay_with_backend(&cert, backend)
     };
 
     match output {
@@ -129,9 +123,9 @@ pub fn run_replay(
         };
         return Err(CliError::VerificationFailed(message.into()));
     }
-    if !chosen_v.is_accepted() && !matches!(chosen_v, ReplayVerdict::ToolMissing { .. }) {
+    if !chosen_v.is_accepted() {
         return Err(CliError::VerificationFailed(format!(
-            "{} replay rejected the cert",
+            "{} replay did not establish proof authority",
             backend.name()
         )));
     }
@@ -183,7 +177,7 @@ fn print_verdict(prefix: &str, v: &ReplayVerdict) {
             println!("{}  reason: {}", prefix, reason.as_str());
         }
         ReplayVerdict::ToolMissing { .. } => {
-            println!("{}— tool missing (V0 stub for this backend)", prefix);
+            println!("{}— tool missing; replay did not run", prefix);
         }
         ReplayVerdict::Error { message, .. } => {
             println!("{}! error: {}", prefix, message.as_str());
@@ -283,18 +277,7 @@ pub fn run_cross_check(
             .collect::<Result<Vec<_>>>()?
     };
 
-    // ships kernel-only as the always-available baseline; for
-    // every requested external backend we use a mock that's
-    // configured to "accept" (so a CI script demonstrating the
-    // protocol shape doesn't fail just because cvc5 isn't on
-    // PATH). V1+ swaps in real per-tool runners.
-    let engines: Vec<Box<dyn CertReplayEngine>> = parsed_backends
-        .iter()
-        .filter(|b| **b != ReplayBackend::KernelOnly)
-        .map(|b| Box::new(MockReplayEngine::new(*b)) as Box<dyn CertReplayEngine>)
-        .collect();
-
-    let verdict = cross_check(&cert, &engines);
+    let verdict = cross_check_backends(&cert, &parsed_backends);
 
     match output {
         "plain" => emit_cross_plain(&cert, &verdict),
@@ -303,6 +286,23 @@ pub fn run_cross_check(
         _ => unreachable!(),
     }
 
+    // A report, a structural check, or an unavailable requested adapter cannot
+    // authorize success, even when full consensus was not requested.
+    if !verdict
+        .per_backend
+        .iter()
+        .any(|v| v.backend() == ReplayBackend::KernelOnly && v.is_accepted())
+        || verdict.per_backend.iter().any(|v| {
+            matches!(
+                v,
+                ReplayVerdict::Error { .. } | ReplayVerdict::ToolMissing { .. }
+            )
+        })
+    {
+        return Err(CliError::VerificationFailed(
+            "cross-check did not establish proof authority for the requested replay".into(),
+        ));
+    }
     if require_consensus && !verdict.all_available_accept() {
         return Err(CliError::VerificationFailed(format!(
             "cross-check consensus broken: {} accepted, {} rejected, {} missing",
@@ -449,15 +449,15 @@ pub fn run_backends(output: &str) -> Result<()> {
     let backends = ReplayBackend::all();
     match output {
         "plain" => {
-            println!("Supported replay backends ({}):", backends.len());
+            println!("Recognized replay backends ({}):", backends.len());
             for b in backends {
                 println!(
                     "  {:<14} {}",
                     b.name(),
                     if b.is_intrinsic() {
-                        "(always available — kernel-only)"
+                        "(structural inspection only)"
                     } else {
-                        "(V0: stub returning ToolMissing; V1+: production wiring)"
+                        "(inference replay adapter not implemented)"
                     }
                 );
             }
@@ -479,7 +479,7 @@ pub fn run_backends(output: &str) -> Result<()> {
             println!("{}", out);
         }
         "markdown" => {
-            println!("# Supported replay backends\n");
+            println!("# Recognized replay backends\n");
             println!("| Backend | Intrinsic |");
             println!("|---|---|");
             for b in backends {
@@ -573,7 +573,7 @@ mod tests {
     // ----- run_replay -----
 
     #[test]
-    fn run_replay_kernel_only_inline_smoke() {
+    fn run_replay_structure_cannot_authorize_success() {
         let r = run_replay(
             "kernel_only",
             None,
@@ -583,13 +583,11 @@ mod tests {
             "(step 1 ...) (qed)",
             "plain",
         );
-        assert!(r.is_ok());
+        assert!(matches!(r, Err(CliError::VerificationFailed(_))));
     }
 
     #[test]
-    fn run_replay_external_backend_v0_tool_missing() {
-        // Z3 backend in V0 returns ToolMissing — kernel-only check
-        // still accepts → exit 0.
+    fn run_replay_unimplemented_backend_cannot_authorize_success() {
         let r = run_replay(
             "z3",
             None,
@@ -599,7 +597,7 @@ mod tests {
             "(step 1 ...) (qed)",
             "json",
         );
-        assert!(r.is_ok());
+        assert!(matches!(r, Err(CliError::VerificationFailed(_))));
     }
 
     #[test]
@@ -639,9 +637,6 @@ mod tests {
 
     #[test]
     fn run_cross_check_default_runs_all_external_backends() {
-        // No --backend → run every external backend. V0 returns
-        // ToolMissing for each + kernel-only accepts → consensus
-        // achieved (missing tools count as NotRun).
         let r = run_cross_check(
             &[],
             None,
@@ -652,7 +647,7 @@ mod tests {
             false,
             "json",
         );
-        assert!(r.is_ok());
+        assert!(matches!(r, Err(CliError::VerificationFailed(_))));
     }
 
     #[test]
@@ -667,7 +662,7 @@ mod tests {
             false,
             "plain",
         );
-        assert!(r.is_ok());
+        assert!(matches!(r, Err(CliError::VerificationFailed(_))));
     }
 
     #[test]

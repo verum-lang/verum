@@ -19,17 +19,17 @@ fn run(args: &[&str]) -> Output {
 // Well-formed ALETHE body — decomposes to one `assume` + one
 // `la_generic` step, both of which resolve in the canonical
 // kernel-rule registry.
-const VALID_BODY: &str =
+const STRUCTURAL_BODY: &str =
     "(assume h1 (>= x 0))\n(step t1 (cl (>= (+ x 1) 1)) :rule la_generic :premises (h1))";
 const VALID_THEORY: &str = "QF_LIA";
-const VALID_CONCLUSION: &str = "(>= x 0)";
+const CLAIMED_CONCLUSION: &str = "(>= x 0)";
 
 // ─────────────────────────────────────────────────────────────────────
 // replay
 // ─────────────────────────────────────────────────────────────────────
 
 #[test]
-fn replay_kernel_only_inline_accepts_well_formed_cert() {
+fn replay_kernel_only_inline_reports_structure_without_acceptance() {
     let out = run(&[
         "cert-replay",
         "replay",
@@ -40,25 +40,23 @@ fn replay_kernel_only_inline_accepts_well_formed_cert() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
     ]);
     assert!(
-        out.status.success(),
+        !out.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("✓ accepted"));
+    assert!(!stdout.contains("✓ accepted"));
+    assert!(stdout.contains("structural inspection"));
     assert!(stdout.contains("Kernel-only check"));
 }
 
 #[test]
-fn replay_external_backend_tool_missing_v0_still_succeeds() {
-    // V0 stub for Z3 returns ToolMissing — kernel-only still
-    // accepts → exit 0 with "tool missing" output for the
-    // backend section.
+fn replay_external_backend_reports_unimplemented_adapter() {
     let out = run(&[
         "cert-replay",
         "replay",
@@ -69,14 +67,14 @@ fn replay_external_backend_tool_missing_v0_still_succeeds() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
     ]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Backend `z3`"));
-    assert!(stdout.contains("tool missing"));
+    assert!(stdout.contains("inference replay adapter for z3 is not implemented"));
 }
 
 #[test]
@@ -91,9 +89,9 @@ fn replay_unknown_theory_fails() {
         "--theory",
         "BOGUS",
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
     ]);
     assert!(!out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -113,9 +111,9 @@ fn replay_rejects_unknown_backend() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
     ]);
     assert!(!out.status.success());
 }
@@ -132,21 +130,21 @@ fn replay_json_well_formed() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
         "--output",
         "json",
     ]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     assert_eq!(parsed["schema_version"], 1);
     let cert = &parsed["certificate"];
     assert_eq!(cert["theory"], VALID_THEORY);
-    assert_eq!(cert["conclusion"], VALID_CONCLUSION);
+    assert_eq!(cert["conclusion"], CLAIMED_CONCLUSION);
     let kernel = &parsed["kernel_verdict"];
-    assert_eq!(kernel["kind"], "Accepted");
+    assert_eq!(kernel["kind"], "StructuralOnly");
 }
 
 #[test]
@@ -161,17 +159,18 @@ fn replay_markdown_format() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
         "--output",
         "markdown",
     ]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("# Certificate replay"));
     assert!(stdout.contains("## Kernel-only check"));
-    assert!(stdout.contains("✓ accepted"));
+    assert!(!stdout.contains("✓ accepted"));
+    assert!(stdout.contains("structural inspection"));
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -187,9 +186,9 @@ fn replay_loads_cert_from_file() {
     let cert = serde_json::json!({
         "format": "cvc5_alethe",
         "theory": VALID_THEORY,
-        "conclusion": VALID_CONCLUSION,
-        "body": VALID_BODY,
-        "body_hash": hex_blake3(VALID_BODY),
+        "conclusion": CLAIMED_CONCLUSION,
+        "body": STRUCTURAL_BODY,
+        "body_hash": hex_blake3(STRUCTURAL_BODY),
         "source_solver": serde_json::Value::Null,
     });
     fs::write(&path, serde_json::to_string_pretty(&cert).unwrap()).unwrap();
@@ -202,7 +201,7 @@ fn replay_loads_cert_from_file() {
         path.to_str().unwrap(),
     ]);
     assert!(
-        out.status.success(),
+        !out.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -232,7 +231,7 @@ fn replay_rejects_tampered_cert_file() {
             "source_solver": null
         }}"#,
         VALID_THEORY,
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         hex_blake3("ORIGINAL UNMODIFIED")
     );
     fs::write(&path, body).unwrap();
@@ -273,6 +272,52 @@ fn replay_rejects_invalid_cert_file_json() {
 // ─────────────────────────────────────────────────────────────────────
 
 #[test]
+fn false_conclusion_never_gets_mock_acceptance_or_success_exit() {
+    for backend in ["kernel_only", "z3", "cvc5", "verit", "open_smt", "mathsat"] {
+        for command in ["replay", "cross-check"] {
+            let out = run(&[
+                "cert-replay",
+                command,
+                "--backend",
+                backend,
+                "--format",
+                "cvc5_alethe",
+                "--theory",
+                VALID_THEORY,
+                "--conclusion",
+                "false",
+                "--body",
+                "(assume h1 (>= x 0))",
+                "--output",
+                "json",
+            ]);
+            assert!(
+                !out.status.success(),
+                "{command}/{backend} must not authorize success"
+            );
+            let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            let verdicts = if command == "replay" {
+                vec![&parsed["kernel_verdict"], &parsed["backend_verdict"]]
+            } else {
+                assert_eq!(parsed["accept_count"], 0);
+                assert_eq!(parsed["all_available_accept"], false);
+                parsed["verdict"]["per_backend"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .collect()
+            };
+            assert!(verdicts.iter().all(|v| v["kind"] != "Accepted"));
+            assert!(verdicts.iter().any(|v| v["kind"] == "StructuralOnly"));
+            if backend != "kernel_only" {
+                assert!(verdicts.iter().any(|v| v["kind"] == "Error"));
+            }
+            assert!(!String::from_utf8_lossy(&out.stdout).contains("mock"));
+        }
+    }
+}
+
+#[test]
 fn cross_check_default_runs_kernel_plus_external_backends() {
     let out = run(&[
         "cert-replay",
@@ -282,13 +327,13 @@ fn cross_check_default_runs_kernel_plus_external_backends() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
         "--output",
         "json",
     ]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     let verdict = &parsed["verdict"];
@@ -311,21 +356,22 @@ fn cross_check_explicit_backends() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
         "--output",
         "json",
     ]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     let verdict = &parsed["verdict"];
     let per = verdict["per_backend"].as_array().unwrap();
-    // Kernel-only + Z3 + CVC5 = 3. Mock engines accept by
-    // default → all_available_accept = true.
+    // Structural inspection and two absent adapters grant no proof authority.
     assert_eq!(per.len(), 3);
-    assert_eq!(parsed["all_available_accept"], true);
+    assert_eq!(parsed["all_available_accept"], false);
+    assert_eq!(per[0]["kind"], "StructuralOnly");
+    assert!(per[1..].iter().all(|v| v["kind"] == "Error"));
 }
 
 #[test]
@@ -344,7 +390,7 @@ fn cross_check_kernel_rejection_blocks_consensus() {
             "source_solver": null
         }}"#,
         VALID_THEORY,
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         hex_blake3("original")
     );
     fs::write(&path, body).unwrap();
@@ -356,8 +402,8 @@ fn cross_check_kernel_rejection_blocks_consensus() {
         "--output",
         "json",
     ]);
-    // Exit 0 without --require-consensus. But the all_available_accept
-    // flag should be false.
+    // Even without --require-consensus, an invalid certificate cannot succeed.
+    assert!(!out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     assert_eq!(parsed["all_available_accept"], false);
@@ -377,7 +423,7 @@ fn cross_check_require_consensus_fails_on_kernel_rejection() {
             "source_solver": null
         }}"#,
         VALID_THEORY,
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         hex_blake3("original")
     );
     fs::write(&path, body).unwrap();
@@ -406,13 +452,13 @@ fn cross_check_markdown_format() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
         "--output",
         "markdown",
     ]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("# Cross-backend cert verdict"));
     assert!(stdout.contains("**Consensus:**"));
@@ -462,7 +508,7 @@ fn replay_rejects_empty_body() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
         "",
     ]);
@@ -481,9 +527,9 @@ fn replay_rejects_empty_theory() {
         "--theory",
         "",
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
     ]);
     assert!(!out.status.success());
 }
@@ -500,9 +546,9 @@ fn replay_rejects_unknown_format() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
     ]);
     assert!(!out.status.success());
 }
@@ -519,9 +565,9 @@ fn replay_rejects_unknown_output() {
         "--theory",
         VALID_THEORY,
         "--conclusion",
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         "--body",
-        VALID_BODY,
+        STRUCTURAL_BODY,
         "--output",
         "yaml",
     ]);
@@ -535,9 +581,8 @@ fn replay_rejects_unknown_output() {
 #[test]
 fn task_81_kernel_check_is_unbypassable_trust_anchor() {
     // Pin the contract: the kernel-only check rejects a tampered
-    // cert even when the user requested an external backend that
-    // would (in V0) return ToolMissing. This is what makes SMT
-    // solvers external to the TCB.
+    // cert even when the user requested an unimplemented external adapter.
+    // Integrity rejection is necessary, but alone cannot remove solvers from the TCB.
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cert.json");
     let body = format!(
@@ -550,7 +595,7 @@ fn task_81_kernel_check_is_unbypassable_trust_anchor() {
             "source_solver": "z3-evil"
         }}"#,
         VALID_THEORY,
-        VALID_CONCLUSION,
+        CLAIMED_CONCLUSION,
         hex_blake3("original-body")
     );
     fs::write(&path, body).unwrap();

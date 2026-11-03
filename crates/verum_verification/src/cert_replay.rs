@@ -266,6 +266,7 @@ impl ReplayVerdict {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReplayError {
+    UnsupportedBackend(ReplayBackend),
     UnsupportedFormat(CertFormat),
     Transport(Text),
     Other(Text),
@@ -274,6 +275,11 @@ pub enum ReplayError {
 impl std::fmt::Display for ReplayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UnsupportedBackend(backend) => write!(
+                f,
+                "certificate inference replay adapter for {} is not implemented",
+                backend.name()
+            ),
             Self::UnsupportedFormat(c) => {
                 write!(f, "unsupported cert format: {}", c.name())
             }
@@ -1295,15 +1301,17 @@ impl CertReplayEngine for KernelOnlyReplayEngine {
 
 /// Mock replay engine. Configured with a backend tag + an "accept"
 /// flag. Every replay returns a corresponding canned verdict.
-/// Used by tests + the CLI's `--mock` mode.
+/// Available only to this crate's unit tests; never a production adapter.
+#[cfg(test)]
 #[derive(Debug, Clone)]
-pub struct MockReplayEngine {
+struct MockReplayEngine {
     pub backend: ReplayBackend,
     pub accept: bool,
     pub available: bool,
     pub supported_formats: Vec<CertFormat>,
 }
 
+#[cfg(test)]
 impl MockReplayEngine {
     pub fn new(backend: ReplayBackend) -> Self {
         Self {
@@ -1330,6 +1338,7 @@ impl MockReplayEngine {
     }
 }
 
+#[cfg(test)]
 impl CertReplayEngine for MockReplayEngine {
     fn backend(&self) -> ReplayBackend {
         self.backend
@@ -1392,9 +1401,8 @@ impl CrossBackendVerdict {
     }
 
     /// True iff every available (non-`ToolMissing`) backend
-    /// accepted the cert. This is the @verify(certified)-style
-    /// multi-solver gate: the proof is committed only when every
-    /// available solver agrees.
+    /// accepted the cert. This diagnostic summary deliberately excludes missing
+    /// tools; callers requiring specific backends must also reject missing tools.
     pub fn all_available_accept(&self) -> bool {
         let available: Vec<&ReplayVerdict> = self
             .per_backend
@@ -1456,21 +1464,16 @@ pub fn cross_check(
     let mut verdicts: Vec<ReplayVerdict> = Vec::new();
     // Kernel-only baseline.
     let kernel = KernelOnlyReplayEngine::new();
-    if let Ok(v) = kernel.replay(cert) {
-        verdicts.push(v);
-    }
+    verdicts.push(replay_result(
+        ReplayBackend::KernelOnly,
+        kernel.replay(cert),
+    ));
     for e in engines {
         // Skip the kernel-only path if a caller passed it again.
         if e.backend() == ReplayBackend::KernelOnly {
             continue;
         }
-        match e.replay(cert) {
-            Ok(v) => verdicts.push(v),
-            Err(e_err) => verdicts.push(ReplayVerdict::Error {
-                backend: e.backend(),
-                message: Text::from(format!("{}", e_err)),
-            }),
-        }
+        verdicts.push(replay_result(e.backend(), e.replay(cert)));
     }
     CrossBackendVerdict::new(cert, verdicts)
 }
@@ -1479,16 +1482,48 @@ pub fn cross_check(
 // engine_for — per-backend reference engines
 // =============================================================================
 
-/// Return a reference engine for a backend. The kernel-only
-/// engine is always returned for `KernelOnly`. For external
-/// backends the V0 reference is a `MockReplayEngine` that returns
-/// `ToolMissing` (V1+ swaps in production wiring that runs `coqc`
-/// / `cvc5` / `verit` etc).
-pub fn engine_for(backend: ReplayBackend) -> Box<dyn CertReplayEngine> {
+/// Resolve an implemented adapter. An absent adapter is distinct from a
+/// missing external executable; neither can provide proof authority.
+pub fn engine_for(backend: ReplayBackend) -> Result<Box<dyn CertReplayEngine>, ReplayError> {
     match backend {
-        ReplayBackend::KernelOnly => Box::new(KernelOnlyReplayEngine::new()),
-        other => Box::new(MockReplayEngine::new(other).unavailable()),
+        ReplayBackend::KernelOnly => Ok(Box::new(KernelOnlyReplayEngine::new())),
+        other => Err(ReplayError::UnsupportedBackend(other)),
     }
+}
+
+fn replay_result(
+    backend: ReplayBackend,
+    result: Result<ReplayVerdict, ReplayError>,
+) -> ReplayVerdict {
+    result.unwrap_or_else(|error| ReplayVerdict::Error {
+        backend,
+        message: Text::from(error.to_string()),
+    })
+}
+
+/// Replay using the production adapter registry, retaining failures in reports.
+pub fn replay_with_backend(cert: &SmtCertificate, backend: ReplayBackend) -> ReplayVerdict {
+    replay_result(
+        backend,
+        engine_for(backend).and_then(|engine| engine.replay(cert)),
+    )
+}
+
+/// Cross-check requested production backends, always retaining the kernel result.
+pub fn cross_check_backends(
+    cert: &SmtCertificate,
+    backends: &[ReplayBackend],
+) -> CrossBackendVerdict {
+    let verdicts = std::iter::once(ReplayBackend::KernelOnly)
+        .chain(
+            backends
+                .iter()
+                .copied()
+                .filter(|b| *b != ReplayBackend::KernelOnly),
+        )
+        .map(|backend| replay_with_backend(cert, backend))
+        .collect();
+    CrossBackendVerdict::new(cert, verdicts)
 }
 
 #[cfg(test)]
@@ -1498,8 +1533,8 @@ mod tests {
     fn fixture_cert() -> SmtCertificate {
         // Minimal well-formed ALETHE body: an `assume` introducing a
         // hypothesis, plus a `step` whose `:rule` is in the canonical
-        // kernel-rule registry. The kernel-only replay decomposes
-        // both lines into typed `InferenceStep`s and accepts.
+        // kernel-rule registry. The kernel-only replay inspects their structure;
+        // this does not establish the inference or the stated conclusion.
         SmtCertificate::new(
             CertFormat::Cvc5Alethe,
             "QF_LIA",
@@ -1687,12 +1722,12 @@ mod tests {
 
     #[test]
     fn engine_for_kernel_only_is_available() {
-        let e = engine_for(ReplayBackend::KernelOnly);
+        let e = engine_for(ReplayBackend::KernelOnly).unwrap();
         assert!(e.is_available());
     }
 
     #[test]
-    fn engine_for_external_backend_v0_unavailable() {
+    fn engine_for_external_backend_refuses_unimplemented_adapter() {
         for b in [
             ReplayBackend::Z3,
             ReplayBackend::Cvc5,
@@ -1700,16 +1735,50 @@ mod tests {
             ReplayBackend::OpenSmt,
             ReplayBackend::Mathsat,
         ] {
-            let e = engine_for(b);
             assert!(
-                !e.is_available(),
-                "{} should be unavailable in V0",
-                b.name()
+                matches!(engine_for(b), Err(ReplayError::UnsupportedBackend(found)) if found == b)
+            );
+            assert!(
+                matches!(replay_with_backend(&fixture_cert(), b), ReplayVerdict::Error { backend, .. } if backend == b)
             );
         }
     }
 
     // ----- CrossBackendVerdict -----
+
+    #[test]
+    fn production_cross_check_never_substitutes_mock_acceptance() {
+        let mut cert = fixture_cert();
+        cert.conclusion = Text::from("false");
+        let verdict = cross_check_backends(&cert, &ReplayBackend::all());
+        assert_eq!(verdict.per_backend.len(), ReplayBackend::all().len());
+        assert_eq!(verdict.accept_count(), 0);
+        assert!(!verdict.all_available_accept());
+        assert!(matches!(
+            verdict.per_backend[0],
+            ReplayVerdict::StructuralOnly { .. }
+        ));
+        for result in &verdict.per_backend[1..] {
+            assert!(matches!(result, ReplayVerdict::Error { message, .. }
+                if message.as_str().contains("inference replay adapter")));
+        }
+    }
+
+    #[test]
+    fn production_cross_check_preserves_integrity_rejection_and_adapter_failures() {
+        let mut cert = fixture_cert();
+        cert.body = Text::from("tampered");
+        let verdict = cross_check_backends(&cert, &[ReplayBackend::Z3]);
+        assert!(matches!(
+            verdict.per_backend[0],
+            ReplayVerdict::Rejected { .. }
+        ));
+        assert!(matches!(
+            verdict.per_backend[1],
+            ReplayVerdict::Error { .. }
+        ));
+        assert_eq!(verdict.accept_count(), 0);
+    }
 
     #[test]
     fn cross_check_kernel_only_baseline_always_runs() {
