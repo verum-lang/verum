@@ -12650,7 +12650,10 @@ impl VbcCodegen {
                 // An exact declared module is a namespace even when it has
                 // only types or a single path segment. Publish this intent
                 // before item/function fallbacks can bind the same spelling.
-                if self.unit_module_paths.contains(&full_path.join(".")) {
+                let written = full_path.join(".");
+                if self.declared_namespace_mount(&written, source_owner)?
+                    || self.unit_module_paths.contains(&written)
+                {
                     self.ctx.module_aliases.insert(alias_name, full_path);
                     return Ok(());
                 }

@@ -66,6 +66,7 @@ struct ModuleExports {
     globs: BTreeSet<String>,
     lexical_globs: BTreeSet<String>,
     public_children: BTreeSet<String>,
+    namespaces: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -97,6 +98,7 @@ impl SourceExports {
         scope.globs.extend(exports.globs);
         scope.lexical_globs.extend(exports.lexical_globs);
         scope.public_children.extend(exports.public_children);
+        scope.namespaces.extend(exports.namespaces);
     }
 }
 
@@ -138,6 +140,26 @@ impl VbcCodegen {
         self.source_exports.modules.get(owner).or_else(|| {
             self.dependency_source_exports.as_ref()?.modules.get(owner)
         })
+    }
+
+    /// A namespace binding requires its declaration in the parent and the loaded child scope.
+    pub(super) fn declared_namespace_mount(&self, path: &str, consumer: &str) -> super::CodegenResult<bool> {
+        let Some((owner, name)) = path.rsplit_once('.') else { return Ok(false) };
+        let Some(parent) = self.source_export_scope(owner) else { return Ok(false) };
+        if !parent.namespaces.contains(name) || self.source_export_scope(path).is_none() {
+            return Ok(false);
+        }
+        let visible = parent.visibility.get(name).is_some_and(|policy| {
+            policy.resolve_declared_scope(owner).is_ok_and(|policy| {
+                policy.visible_from(owner.split('.'), consumer.split('.'))
+            })
+        });
+        if !visible {
+            return Err(super::CodegenError::new(super::CodegenErrorKind::InvalidSourceMount(vec![
+                format!("module `{path}` is inaccessible from `{consumer}`"),
+            ])));
+        }
+        Ok(true)
     }
 
     pub(super) fn collect_callable_exports(&mut self, owner: &str, items: &[Item]) {
@@ -214,12 +236,18 @@ impl VbcCodegen {
                         },
                     );
                 }
-                ItemKind::Module(module) if module.items.is_some() => {
-                    let child =
-                        crate::module::qualify_module_name(owner, module.name.name.as_str());
-                    self.collect_callable_exports(&child, module.items.as_ref().unwrap());
-                    if module.visibility.is_public() {
-                        exports.public_children.insert(child);
+                ItemKind::Module(module) => {
+                    let name = module.name.name.as_str();
+                    let child = crate::module::qualify_module_name(owner, name);
+                    if child != owner {
+                        exports.namespaces.insert(name.to_owned());
+                        exports.visibility.insert(name.to_owned(), module.visibility.clone());
+                    }
+                    if let Some(items) = &module.items {
+                        self.collect_callable_exports(&child, items);
+                        if module.visibility.is_public() {
+                            exports.public_children.insert(child);
+                        }
                     }
                 }
                 _ => {}
@@ -407,6 +435,13 @@ impl VbcCodegen {
             }
             if includes_declarations && let Some(targets) = source.declarations.get(name) {
                 found.declarations.extend(targets.iter().cloned());
+            } else if includes_declarations && source.namespaces.contains(name) {
+                // An external declaration denotes a namespace only if its module
+                // was actually loaded. It cannot borrow an unrelated callable.
+                if self.source_export_scope(&path).is_some() {
+                    found.non_functions.insert(path.clone());
+                    found.declarations.insert(path);
+                }
             } else if includes_declarations && source.non_functions.contains(name) {
                 found.non_functions.insert(path.clone());
                 found.declarations.insert(path);

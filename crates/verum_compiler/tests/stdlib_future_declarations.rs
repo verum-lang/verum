@@ -761,3 +761,28 @@ fn empty_collection_borrows_only_the_declared_element_type() {
     );
     assert_eq!(calls, expected);
 }
+
+#[test]
+fn file_namespace_mounts_execute_the_declared_child_under_its_local_name() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        ("mod.vr", "module core; public module reader; public module model; public module rival;"),
+        ("model/mod.vr", "module core.model; public module control;"),
+        ("model/control.vr", "module core.model.control; public fn read() -> Int { 41 }"),
+        ("rival/mod.vr", "module core.rival; public fn control() -> Int { 17 } public fn read() -> Int { 99 }"),
+        ("reader/mod.vr", "module core.reader; mount core.model.control as operations;
+            public fn entry() -> Int { operations.read() }"),
+    ] {
+        let path = core.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+
+    let caller = "module app; mount core.reader.entry; fn main() -> Int { entry() }";
+    assert_eq!(execute(&bootstrap(&core), caller), 41);
+
+    fs::write(core.join("model/mod.vr"), "module core.model; module control;").unwrap();
+    let error = format!("{:#}", try_bootstrap(&core).unwrap_err());
+    assert!(error.contains("core.model.control") && error.contains("inaccessible"), "{error}");
+}
