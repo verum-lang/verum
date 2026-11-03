@@ -94,8 +94,10 @@ async fn compiled_scalar_methods_keep_their_array_extents() {
     let (_workspace, studio) = release_studio();
     for (source, expected_error) in [
         ("fn bytes(n: UInt64) -> [Byte; 8] { let bits = n * 8_u64; bits.to_be_bytes() }", None),
-        ("fn wrong(n: UInt16) -> Bool { n.to_le_bytes() }", Some("[UInt8; 2]")),
-        ("fn wrong(n: UInt64) -> [Byte; 7] { n.to_be_bytes() }", Some("expected 7, found 8")),
+        ("fn bytes(n: UInt16) -> [Byte; 2] { n.to_le_bytes() }", None),
+        ("fn bytes(n: UInt16) -> [UInt8; 2] { n.to_le_bytes() }", None),
+        ("fn wrong(n: UInt16) -> Bool { n.to_le_bytes() }", Some(("E400", "found '[Byte; 2]'"))),
+        ("fn wrong(n: UInt64) -> [Byte; 7] { n.to_be_bytes() }", Some(("E413", "expected 7, found 8"))),
     ] {
         let analysis = studio
             .call("language.request", json!({"path":"main.vr", "source":source}))
@@ -110,10 +112,11 @@ async fn compiled_scalar_methods_keep_their_array_extents() {
             .collect();
         match expected_error {
             None => assert!(errors.is_empty(), "{source}: {errors:?}"),
-            Some(message) => assert!(
-                errors.iter().any(|d| d["message"].as_str().is_some_and(|m| m.contains(message))),
-                "{source}: {errors:?}"
-            ),
+            Some((code, message)) => {
+                assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+                assert_eq!(errors[0]["code"], code, "{source}: {errors:?}");
+                assert!(errors[0]["message"].as_str().unwrap().contains(message), "{source}: {errors:?}");
+            }
         }
     }
 }
