@@ -117,36 +117,17 @@ public const SOCKET_ENV: &'static Text = "SPIFFE_ENDPOINT_SOCKET";
 /// Resolve the Workload API socket path from the environment, falling
 /// back to the default. Strips the "unix://" prefix if present.
 public fn endpoint_socket() -> Result<Text, WorkloadApiError> {
-    match env.var(&SOCKET_ENV.into()) {
+    match env.var_opt(SOCKET_ENV) {
         Maybe.Some(raw) => {
-            let trimmed = strip_unix_scheme(&raw);
-            if trimmed.is_empty() { return Result.Err(WorkloadApiError.NoEndpointConfigured); }
-            Result.Ok(trimmed)
-        }
-        Maybe.None => Result.Ok(DEFAULT_SOCKET.into()),
-    }
-}
-
-fn strip_unix_scheme(s: &Text) -> Text {
-    let prefix: &'static Text = "unix://";
-    if s.len() >= prefix.len() {
-        let head = s.as_bytes();
-        let pb = prefix.as_bytes();
-        let mut i = 0;
-        let mut ok = true;
-        while i < pb.len() {
-            if head[i] != pb[i] { ok = false; break; }
-            i = i + 1;
-        }
-        if ok {
-            let tail = &head[pb.len()..];
-            match Text.from_utf8(tail) {
-                Result.Ok(t) => return t,
-                Result.Err(_) => return s.clone(),
+            let path = raw.strip_prefix("unix://").unwrap_or(raw);
+            if path.is_empty() {
+                Result.Err(WorkloadApiError.NoEndpointConfigured)
+            } else {
+                Result.Ok(path)
             }
-        }
+        },
+        Maybe.None => Result.Ok(DEFAULT_SOCKET.to_text()),
     }
-    s.clone()
 }
 
 // =============================================================================
