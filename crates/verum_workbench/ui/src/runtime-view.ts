@@ -1,6 +1,6 @@
 import type { Receipt } from './model';
-import type { CbgrEvent } from './runtime';
-import { m, setText, type Content } from './i18n';
+import { rankMethodSites, type CbgrEvent, type MethodDispatchReport, type MethodOutcome } from './runtime';
+import { m, setText, setAttribute, type Content } from './i18n';
 
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: Content) => {
   const node = document.createElement(tag);
@@ -8,17 +8,54 @@ const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: Conten
   return node;
 };
 
+function methodOutcome(outcome: MethodOutcome): Content {
+  switch (outcome.kind) {
+    case 'entered_frame': return m('Entered function #{id}', { id: outcome.function_id });
+    case 'completed_inline': return m('Completed inline');
+    case 'retried': return m('Retried');
+    case 'returned': return m('Returned');
+    case 'yielded': return m('Yielded');
+    case 'failed': return m('Failed');
+  }
+}
+
+function methodView(report: MethodDispatchReport) {
+  const details = element('details'); details.dataset.key = 'method-profile';
+  const summary = element('summary', m('Method dispatch measurements'));
+  summary.dataset.focusKey = 'method-profile';
+  details.append(summary);
+  if (report.rows.length) {
+    details.append(element('p', m('Sorted by inclusive handler time. Synchronous nested calls can overlap.')));
+    for (const row of rankMethodSites(report)) {
+      const item = element('article');
+      const caller = row.function ?? `#${row.function_id}`, selector = row.selector ?? `#${row.selector_id}`;
+      item.append(element('code', `${row.module ?? `#${row.module_instance}`} · ${caller}@${row.pc} → ${selector}`),
+        element('p', methodOutcome(row.outcome)),
+        element('p', m('{calls} calls · {total} ns total · {peak} ns maximum',
+          { calls: row.count, total: row.inclusive_ns, peak: row.max_ns })));
+      details.append(item);
+    }
+  } else {
+    details.append(element('p', m('No retained method dispatch measurements.')));
+  }
+  if (report.dropped_calls !== '0') {
+    details.append(element('p', m('{count} calls exceeded the capture capacity.', { count: report.dropped_calls })));
+  }
+  return details;
+}
+
 export function runtimeView(receipt: Receipt, canNavigate: (event: CbgrEvent) => boolean, navigate: (event: CbgrEvent) => void) {
   if (!receipt.runtime_diagnostics) return null;
   const section = element('section'); section.className = 'runtime-diagnostics';
-  section.setAttribute('aria-label', 'CBGR');
-  section.append(element('h3', m('CBGR runtime observations')));
+  setAttribute(section, 'aria-label', m('Runtime observations'));
+  section.append(element('h3', m('Runtime observations')));
   const report = receipt.runtime;
   if (!report || report.observation !== 'captured' || !report.cbgr) {
     section.append(element('p', m(receipt.status === 'running' ? 'Waiting for runtime observations…' : 'Runtime observations unavailable.')));
     if (receipt.runtime_error) section.append(element('pre', receipt.runtime_error));
     return section;
   }
+  if (report.method_dispatch) section.append(methodView(report.method_dispatch));
   const cbgr = report.cbgr;
   if (!cbgr.checks_enabled_at_start) section.append(element('p', m('CBGR checks were disabled when capture started.')));
   section.append(element('p', m(cbgr.events.length ? '{count} dispatch observations' : 'No CBGR failures observed in this capture.', { count: cbgr.events.length })));

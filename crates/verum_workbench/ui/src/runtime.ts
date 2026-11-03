@@ -6,10 +6,29 @@ export type CbgrEvent = {
   function_id: number | null; function: string | null; pc: number; opcode: number;
   source: { path: string; line: number; column: number } | null;
 };
+export type MethodOutcome = { kind: 'entered_frame'; function_id: number }
+  | { kind: 'completed_inline' | 'retried' | 'returned' | 'yielded' | 'failed' };
+export type MethodDispatchRow = {
+  module_instance: number; module: string | null; function_id: number; function: string | null;
+  pc: number; selector_id: number; selector: string | null; outcome: MethodOutcome;
+  count: string; inclusive_ns: string; max_ns: string;
+};
+export type MethodDispatchReport = {
+  schema: 'verum.method-dispatch/1'; capacity: number; dropped_calls: string; rows: MethodDispatchRow[];
+};
+
+export function rankMethodSites(report: MethodDispatchReport) {
+  return [...report.rows].sort((a, b) => {
+    const left = BigInt(a.inclusive_ns), right = BigInt(b.inclusive_ns);
+    return left > right ? -1 : left < right ? 1 : 0;
+  });
+}
+
 export type RuntimeReport = {
   schema: 'verum.runtime-report/1'; run_id: string; source_sha256: string;
   prepared_source_sha256: string; wrapper_lines: number; entry_source_path: string | null;
   compiler_version: string; observation: 'captured' | 'unavailable';
+  method_dispatch?: MethodDispatchReport | null;
   cbgr: { schema: 'verum.cbgr.dispatch/1'; capacity: number; checks_enabled_at_start: boolean; truncated: boolean; events: CbgrEvent[] } | null;
 };
 

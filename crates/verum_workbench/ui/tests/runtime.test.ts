@@ -43,3 +43,16 @@ test('stale, mismatched, cached and unmapped runtime evidence cannot select curr
     assert.equal(range(receipt, { ...event, source }), null);
   }
 });
+
+test('method site ranking preserves 64-bit nanosecond measurements and receipt order', async () => {
+  const { rankMethodSites } = await import('../src/runtime.ts');
+  const make = (pc: number, inclusive_ns: string) => ({
+    module_instance: 0, module: 'study', function_id: 1, function: 'run', pc,
+    selector_id: 4, selector: 'measure', outcome: { kind: 'completed_inline' as const },
+    count: '1', inclusive_ns, max_ns: inclusive_ns,
+  });
+  const rows = [make(4, '9007199254740992'), make(9, '9007199254740993')];
+  const profile = { schema: 'verum.method-dispatch/1' as const, capacity: 2, dropped_calls: '0', rows };
+  assert.deepEqual(rankMethodSites(profile).map(row => row.pc), [9, 4]);
+  assert.deepEqual(rows.map(row => row.pc), [4, 9]);
+});

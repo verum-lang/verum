@@ -1170,7 +1170,7 @@ const commandRegistry = new CommandRegistry([
   control('reload-source', m('Review the saved file before reloading')), control('refresh-files', m('Refresh files')),
   control('run', m('Run source'), 'Mod+Enter', ['editor']), control('check', m('Check source'), 'Mod+Shift+Enter', ['editor']),
   control('prove', m('Check a declaration'), 'Alt+Shift+Enter', ['editor']),
-  command('run.cbgr', m('Run with CBGR diagnostics'), '', () => startOperation('run', true), ['editor'], () => currentPath.endsWith('.vr') && !starting),
+  command('run.cbgr', m('Run with runtime diagnostics'), '', () => startOperation('run', true), ['editor'], () => currentPath.endsWith('.vr') && !starting),
   control('run-settings', m('Execution options')), control('preview-run', m('Inspect run plan')),
   control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),
   control('language-status', m('Show module diagnostics')), control('theme', m('Change color theme')),
