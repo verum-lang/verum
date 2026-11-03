@@ -502,8 +502,8 @@ fn concrete_impl_receiver_uses_its_source_arguments_in_both_producers() {
                 function(&m, "Container.read")
                     .semantic_parameter_types()
                     .unwrap(),
-                &[Some(expected), None],
-                "regular Self remains unknown until its resolver owns the exact target"
+                &[Some(expected.clone()), Some(expected)],
+                "receiver and regular Self share the exact declared impl target"
             );
             assert_eq!(
                 function(&m, "later").semantic_parameter_types().unwrap(),

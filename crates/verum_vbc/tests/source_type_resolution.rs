@@ -419,3 +419,268 @@ fn unresolved_inline_mount_cannot_fall_back_to_an_outer_declaration() {
     let error = compile("type Token is { value: Int }; module nested { mount missing.Token; fn use_token(token: Token) -> Int { 1 } }").unwrap_err();
     assert!(error.to_string().contains("unresolved nominal type 'Token' in declaration scope 'declaration_probe.nested'"), "{error}");
 }
+
+#[test]
+fn inherited_signature_keeps_the_protocols_result_owner_when_the_caller_shadows_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let core = directory.path().join("core");
+    std::fs::create_dir(&core).unwrap();
+    std::fs::write(core.join("mod.vr"), "module core;").unwrap();
+    std::fs::write(
+        core.join("provider.vr"),
+        r#"
+        module core.provider;
+        public type ByRef<T> is { inner: T };
+        public type Wrapping is protocol {
+            fn wrap(self) -> ByRef<Self> { ByRef { inner: self } }
+        };
+    "#,
+    )
+    .unwrap();
+    let source = r#"
+        module core.consumer;
+        type ByRef<T> is { decoy: T };
+        mount core.provider.Wrapping;
+        type Item is { number: Int };
+        implement Wrapping for Item {}
+    "#;
+    let path = core.join("consumer.vr");
+    std::fs::write(&path, source).unwrap();
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.consumer"));
+    let module = codegen
+        .compile_module_with_mounts(&ast, path.to_str().unwrap(), core.to_str().unwrap())
+        .unwrap();
+    let exports = codegen.export_functions();
+    let registered = exports
+        .get("core.consumer.Item.wrap")
+        .expect("materialized receiver method");
+    let restored = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).unwrap(),
+    )
+    .unwrap();
+    for module in [module, restored] {
+        let wrapper = |owner| {
+            module
+                .types
+                .iter()
+                .find(|ty| {
+                    module.get_string(ty.name) == Some("ByRef")
+                        && ty.origin_module.and_then(|id| module.get_string(id)) == Some(owner)
+                })
+                .unwrap()
+        };
+        let source = wrapper("core.provider").id;
+        let caller = wrapper("core.consumer").id;
+        assert_ne!(source, caller);
+        let inherited = module
+            .functions
+            .iter()
+            .find(|function| {
+                module
+                    .get_string(function.name)
+                    .is_some_and(|name| name.ends_with("Item.wrap"))
+            })
+            .expect("inherited method was compiled");
+        assert_eq!(
+            inherited.origin_module.and_then(|id| module.get_string(id)),
+            Some("core.consumer"),
+            "the materialized method still belongs to its receiver's module",
+        );
+        assert_eq!(
+            registered
+                .return_type
+                .as_ref()
+                .and_then(|ty| ty.base_type_id()),
+            Some(source)
+        );
+        assert_eq!(inherited.return_type.base_type_id(), Some(source));
+        assert_eq!(
+            inherited
+                .semantic_return
+                .as_ref()
+                .and_then(|ty| ty.base_type_id()),
+            Some(source)
+        );
+    }
+}
+
+#[test]
+fn unresolved_record_mount_cannot_capture_a_siblings_layout() {
+    let error = compile(
+        r#"
+        module decoy { type Token is { value: Int }; }
+        module consumer {
+            mount missing.Token;
+            fn make() -> Int { let token = Token { value: 7 }; 0 }
+        }
+    "#,
+    )
+    .expect_err("an explicit unresolved record mount cannot use a flat alias");
+    assert!(
+        matches!(
+            error.kind,
+            verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(_)
+        ),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("source binding 'Token'"),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("declaration_probe.consumer"),
+        "{error}"
+    );
+}
+
+#[test]
+fn declared_and_inherited_self_retain_reordered_impl_binders_without_method_capture() {
+    use verum_vbc::types::{TypeParamId, TypeRef};
+    let directory = tempfile::tempdir().unwrap();
+    let core = directory.path().join("core");
+    std::fs::create_dir(&core).unwrap();
+    std::fs::write(core.join("mod.vr"), "module core;").unwrap();
+    std::fs::write(
+        core.join("provider.vr"),
+        r#"
+        module core.provider;
+        public type Pair<T> is { decoy: T };
+        public type Keeping is protocol {
+            fn keep<X>(self, value: X) -> (Self, X) { (self, value) }
+        };
+    "#,
+    )
+    .unwrap();
+    let source = r#"
+        module core.consumer;
+        mount core.provider.Keeping;
+        type Pair<A, B> is { first: A, second: B };
+        implement<X, Y> Keeping for Pair<Y, X> {}
+        implement<X, Y> Pair<Y, X> {
+            fn direct<X>(self, value: X) -> (Self, X) { (self, value) }
+        }
+    "#;
+    let path = core.join("consumer.vr");
+    std::fs::write(&path, source).unwrap();
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.consumer"));
+    let module = codegen
+        .compile_module_with_mounts(&ast, path.to_str().unwrap(), core.to_str().unwrap())
+        .unwrap();
+    let exports = codegen.export_functions();
+    let restored = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).unwrap(),
+    )
+    .unwrap();
+    for module in [module, restored] {
+        let pair_id = |owner| {
+            module
+                .types
+                .iter()
+                .find(|ty| {
+                    module.get_string(ty.name) == Some("Pair")
+                        && ty.origin_module.and_then(|id| module.get_string(id)) == Some(owner)
+                })
+                .unwrap()
+                .id
+        };
+        let receiver_id = pair_id("core.consumer");
+        assert_ne!(receiver_id, pair_id("core.provider"));
+        for method in ["keep", "direct"] {
+            let qualified = format!("core.consumer.Pair.{method}");
+            let registered = exports
+                .get(&qualified)
+                .expect("declaration-owned receiver method");
+            let inherited = module
+                .functions
+                .iter()
+                .find(|function| {
+                    module
+                        .get_string(function.name)
+                        .is_some_and(|name| name.ends_with(&format!("Pair.{method}")))
+                })
+                .expect("receiver method body");
+            let receiver = TypeRef::Instantiated {
+                base: receiver_id,
+                args: vec![
+                    TypeRef::Generic(TypeParamId(1)),
+                    TypeRef::Generic(TypeParamId(0)),
+                ],
+            };
+            let method_parameter = TypeRef::Generic(TypeParamId(0x8000));
+            let result = TypeRef::Tuple(vec![receiver.clone(), method_parameter.clone()]);
+            assert_eq!(inherited.parent_type, Some(receiver_id));
+            assert_eq!(
+                inherited.origin_module.and_then(|id| module.get_string(id)),
+                Some("core.consumer")
+            );
+            assert_eq!(registered.return_type.as_ref(), Some(&result));
+            assert_eq!(inherited.return_type, result);
+            assert_eq!(inherited.semantic_return.as_ref(), Some(&result));
+            assert_eq!(
+                inherited.semantic_params.as_ref().unwrap().as_slice(),
+                &[Some(receiver), Some(method_parameter)]
+            );
+            assert_eq!(
+                inherited.explicit_type_param_ids,
+                vec![Some(TypeParamId(0x8000))]
+            );
+            assert_eq!(
+                inherited
+                    .type_params
+                    .iter()
+                    .map(|p| p.id)
+                    .collect::<Vec<_>>(),
+                vec![TypeParamId(0), TypeParamId(1), TypeParamId(0x8000)]
+            );
+        }
+    }
+}
+
+#[test]
+fn headerless_late_explicit_override_wins_without_losing_other_defaults() {
+    let source = r#"
+        type Source is protocol {
+            fn changed(self) -> Int { 2 }
+            fn inherited(self) -> Int { 11 }
+        };
+        type Marker is { number: Int };
+        implement Source for Marker {}
+        implement Source for Marker { fn changed(self) -> Int { 7 } }
+        fn main() -> Int {
+            let first = Marker { number: 0 };
+            let second = Marker { number: 0 };
+            first.changed() * 100 + second.inherited()
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let restored = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).unwrap(),
+    )
+    .unwrap();
+    for module in [module, restored] {
+        for method in ["changed", "inherited"] {
+            let key = format!("Marker.{method}");
+            assert_eq!(
+                module
+                    .functions
+                    .iter()
+                    .filter(|function| {
+                        module.get_string(function.name).is_some_and(|name| {
+                            name == key || name.starts_with(&format!("{key}#impl"))
+                        })
+                    })
+                    .count(),
+                1,
+                "one selected body for {key}"
+            );
+        }
+        let entry = module.find_function_by_name("main").unwrap();
+        let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+            .execute_function(entry)
+            .unwrap();
+        assert_eq!(result.try_as_i64(), Some(711));
+    }
+}

@@ -7,6 +7,24 @@ use verum_ast::{FunctionDecl, FunctionParamKind};
 use verum_common::List;
 
 impl VbcCodegen {
+    /// Resolve the target in the actual impl declaration, before any inherited
+    /// method changes lexical scope. Method-local binders cannot define Self.
+    pub(super) fn resolve_impl_receiver(
+        &self,
+        target: &verum_ast::Type,
+        dense: &std::collections::HashMap<String, u16>,
+        impl_names: &[String],
+    ) -> super::CodegenResult<super::ImplReceiverWitness> {
+        let receiver_scope = dense.iter().filter(|(name, _)| impl_names.contains(name))
+            .map(|(name, id)| (name.clone(), *id)).collect();
+        let ty = self.resolve_signature_type_ref(target, &receiver_scope)?;
+        let semantic = self.semantic_formal_type(
+            target, &receiver_scope,
+            &Self::ordered_generic_param_ids(&receiver_scope, &Default::default()),
+        ).as_ref() == Some(&ty);
+        Ok(super::ImplReceiverWitness { ty, semantic })
+    }
+
     /// Registration must reject unresolved annotations even for declarations
     /// with no body, before any executable or interface metadata is emitted.
     pub(super) fn validate_source_parameter_types(
@@ -34,9 +52,12 @@ impl VbcCodegen {
             verum_ast::decl::ImplKind::Inherent(target) => target,
             verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
         };
-        let saved = self.current_impl_semantic_target.replace(target.clone());
+        let names = self.ctx.generic_type_params_ordered.clone();
+        let (dense, _) = self.function_generic_param_maps(function, name.map(String::as_str), &names);
+        let receiver = self.resolve_impl_receiver(target, &dense, &names)?;
+        let saved = self.current_impl_receiver.replace(receiver);
         let result = self.compile_function(function, name);
-        self.current_impl_semantic_target = saved;
+        self.current_impl_receiver = saved;
         result
     }
 
@@ -83,9 +104,11 @@ impl VbcCodegen {
             verum_ast::decl::ImplKind::Inherent(target) => target,
             verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
         };
-        let saved = self.current_impl_semantic_target.replace(target.clone());
+        let (dense, _) = self.function_generic_param_maps(function, Some(name), generics);
+        let receiver = self.resolve_impl_receiver(target, &dense, generics)?;
+        let saved = self.current_impl_receiver.replace(receiver);
         let result = self.register_impl_function(function, name, generics);
-        self.current_impl_semantic_target = saved;
+        self.current_impl_receiver = saved;
         result
     }
 
@@ -114,15 +137,13 @@ impl VbcCodegen {
         &self,
         function: &FunctionDecl,
         scope: &std::collections::HashMap<String, u16>,
-        receiver_scope: &std::collections::HashMap<String, u16>,
+        _receiver_scope: &std::collections::HashMap<String, u16>,
         declared_ids: &[TypeParamId],
     ) -> List<Option<TypeRef>> {
         let values = Self::source_value_binders(function);
-        let receiver = self
-            .current_impl_semantic_target
-            .as_ref()
-            .filter(|_| self.ctx.current_impl_type_name.is_some())
-            .and_then(|target| self.semantic_formal_type(target, receiver_scope, declared_ids))
+        let receiver = self.current_impl_receiver.as_ref()
+            .filter(|receiver| receiver.semantic)
+            .map(|receiver| receiver.ty.clone())
             .filter(|ty| {
                 !matches!(ty, TypeRef::Concrete(id)
                 if self.type_by_id(*id).is_some_and(|desc| !desc.type_params.is_empty()))
@@ -176,10 +197,11 @@ impl VbcCodegen {
             return true;
         }
         if Self::ast_type_is_bare_self(ast) {
-            // A regular `Self` occurrence may be nested in another source
-            // type. Until the common signature resolver takes the exact impl
-            // target, do not recover it from the owner template's generics.
-            return false;
+            // The source mapper consumes exactly this retained witness, then
+            // lifts it under local quantifiers. Flat owner names and template
+            // positions cannot establish a semantic `Self` type.
+            return self.current_impl_receiver.as_ref()
+                .is_some_and(|receiver| receiver.semantic);
         }
         if !path.is_single() {
             return self.nominal_type_id(&name).is_some();

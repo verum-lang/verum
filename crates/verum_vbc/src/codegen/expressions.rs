@@ -4557,14 +4557,10 @@ impl VbcCodegen {
                     .as_deref()
                     .and_then(|bt| {
                         let key = Self::strip_generic_args(Self::strip_wrapper_type(bt));
+                        let resolved = self.resolve_record_type_key(key).ok()?;
+                        let key = resolved.as_deref().unwrap_or(key);
                         self.type_field_type_names
                             .get(&(key.to_string(), field_name.to_string()))
-                            .or_else(|| {
-                                self.resolve_record_type_key(key).and_then(|rk| {
-                                    self.type_field_type_names
-                                        .get(&(rk, field_name.to_string()))
-                                })
-                            })
                     })
                     .map(|ftn| {
                         verum_common::well_known_types::type_names::is_float_type(ftn)
@@ -4579,14 +4575,10 @@ impl VbcCodegen {
                         .as_deref()
                         .and_then(|bt| {
                             let key = Self::strip_generic_args(Self::strip_wrapper_type(bt));
+                            let resolved = self.resolve_record_type_key(key).ok()?;
+                            let key = resolved.as_deref().unwrap_or(key);
                             self.type_field_type_names
                                 .get(&(key.to_string(), field_name.to_string()))
-                                .or_else(|| {
-                                    self.resolve_record_type_key(key).and_then(|rk| {
-                                        self.type_field_type_names
-                                            .get(&(rk, field_name.to_string()))
-                                    })
-                                })
                         })
                         .map(|ftn| Self::type_name_is_text(Some(ftn)))
                         .unwrap_or(false);
@@ -25769,7 +25761,7 @@ impl VbcCodegen {
         let record_key: String = if path_is_qualified {
             variant_name.clone()
         } else {
-            self.resolve_record_type_key(&variant_name)
+            self.resolve_record_type_key(&variant_name)?
                 .unwrap_or_else(|| variant_name.clone())
         };
         let literal_field_names: std::collections::HashSet<&str> = fields
@@ -26404,7 +26396,7 @@ impl VbcCodegen {
         // META-GROUP-XMODULE-1: re-key to the module-qualified
         // registration when the simple name lost the cross-module
         // first-wins race (see `compile_record`).
-        let resolved_key: Option<String> = self.resolve_record_type_key(type_name);
+        let resolved_key: Option<String> = self.resolve_record_type_key(type_name)?;
         let type_name: &str = resolved_key.as_deref().unwrap_or(type_name);
 
         // Resolve TypeId for the New instruction.  Fallback to 0 when
@@ -31771,10 +31763,8 @@ impl VbcCodegen {
         if elem_base.is_empty() {
             return None;
         }
-        let authoritative = self.record_key_is_authoritative(elem_base)
-            || self
-                .resolve_record_type_key(elem_base)
-                .is_some_and(|q| self.record_key_is_authoritative(&q));
+        let resolved = self.resolve_record_type_key(elem_base).ok()?;
+        let authoritative = self.record_key_is_authoritative(resolved.as_deref().unwrap_or(elem_base));
         if !authoritative {
             return None;
         }

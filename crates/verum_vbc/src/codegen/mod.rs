@@ -319,6 +319,43 @@ struct DefaultConstraintScope {
     protocol: crate::types::ProtocolId,
 }
 
+/// The exact impl target and whether its source form establishes ownership evidence.
+#[derive(Debug, Clone)]
+struct ImplReceiverWitness {
+    ty: TypeRef,
+    semantic: bool,
+}
+
+/// Declaration-owned receiver evidence retained across deferred method lowering.
+/// The target is resolved before entering the protocol's lexical scope; parameter
+/// IDs and their roster are the same during registration and body compilation.
+#[derive(Debug, Clone)]
+struct DeferredImplScope {
+    receiver: ImplReceiverWitness,
+    dense: HashMap<String, u16>,
+    shadow: HashMap<String, u16>,
+    declaration: std::sync::Arc<DeferredImplDeclaration>,
+}
+
+#[derive(Debug)]
+struct DeferredImplDeclaration {
+    owner: Option<String>,
+    type_generics: Vec<String>,
+    const_generics: Vec<String>,
+    ordered_generics: Vec<String>,
+    ast_generics: verum_common::List<verum_ast::ty::GenericParam>,
+    where_clause: Option<verum_ast::ty::WhereClause>,
+}
+
+#[derive(Debug, Clone)]
+struct DeferredDefaultMethod {
+    function: FunctionDecl,
+    receiver_name: String,
+    lexical_owner: Option<String>,
+    implementation: DeferredImplScope,
+    constraints: Option<DefaultConstraintScope>,
+}
+
 /// A blanket protocol implementation waiting to be monomorphized onto
 /// every concrete implementor of its bound protocol.
 ///
@@ -1153,8 +1190,9 @@ pub struct VbcCodegen {
     current_impl_where_clause: Option<verum_ast::ty::WhereClause>,
     /// Protocol instantiations guaranteed by the current callable's binder IDs.
     current_protocol_bounds: std::collections::HashMap<crate::types::TypeParamId, Vec<TypeRef>>,
-    /// Exact source impl target, scoped only around its own method compiler.
-    current_impl_semantic_target: Option<verum_ast::Type>,
+    /// Exact resolved source impl target, shared by ABI and semantic lowering.
+    current_impl_receiver: Option<ImplReceiverWitness>,
+    current_deferred_impl: Option<DeferredImplScope>,
 
     /// TypeIds claimed by ARCHIVE-imported descriptors
     /// (`register_archive_type_qualified`).  Carried fact for
@@ -1288,8 +1326,8 @@ pub struct VbcCodegen {
     /// that haven't been registered yet during declaration collection.
     ///
     /// Each body carries its concrete receiver and the lexical owner of its source.
-    pending_default_methods: Vec<(verum_ast::FunctionDecl, String, Option<String>)>,
-    /// Lexical lookup for an inherited body; its function still belongs to the concrete receiver.
+    pending_default_methods: Vec<DeferredDefaultMethod>,
+    /// Lexical lookup for an inherited signature and body; its function still belongs to the concrete receiver.
     default_body_type_scope: Option<String>,
     /// T0701 (default-steals-slot class): default-method
     /// MATERIALISATION registrations, deferred to
@@ -1302,12 +1340,7 @@ pub struct VbcCodegen {
     /// under `#impl10`.  Deferral makes slot assignment
     /// declaration-order-independent: every explicit body registers
     /// first, and a default only fills a still-empty slot.
-    pending_default_registrations: Vec<(
-        verum_ast::FunctionDecl,
-        String,
-        Option<String>,
-        Option<DefaultConstraintScope>,
-    )>,
+    pending_default_registrations: Vec<DeferredDefaultMethod>,
     /// Local associated equalities indexed by the full specialized impl receiver.
     concrete_impl_bindings:
         HashMap<(ConcreteImplType, crate::types::ProtocolId), HashMap<String, ConcreteImplType>>,
@@ -2410,7 +2443,8 @@ impl VbcCodegen {
             current_impl_ast_generics: None,
             current_impl_where_clause: None,
             current_protocol_bounds: Default::default(),
-            current_impl_semantic_target: None,
+            current_impl_receiver: None,
+            current_deferred_impl: None,
             source_type_mounts: Map::new(),
             source_exports: Default::default(),
             source_callable_names: Default::default(),
@@ -3465,9 +3499,17 @@ impl VbcCodegen {
         &mut self,
         protocol_name: &str,
         type_name: &str,
+        implementation: &verum_ast::decl::ImplDecl,
         instance: Option<&ConcreteImplType>,
         implemented_methods: &std::collections::HashSet<String>,
     ) -> CodegenResult<()> {
+        let (type_generics, const_generics, ordered_generics) = self.resolve_impl_generics(implementation);
+        let declaration = std::sync::Arc::new(DeferredImplDeclaration {
+            owner: self.ctx.current_source_module.clone(),
+            type_generics, const_generics, ordered_generics,
+            ast_generics: implementation.generics.clone(),
+            where_clause: implementation.generic_where_clause.clone(),
+        });
         // Collect all protocols to check (this protocol + all superprotocols
         // + any blanket-impl derived protocol whose base is in the chain).
         let mut protocols_to_check = vec![protocol_name.to_string()];
@@ -3534,8 +3576,10 @@ impl VbcCodegen {
                     // T0701: deferred like the plain default-method
                     // materialisation below — explicit bodies from
                     // LATER blocks must win the unsuffixed slot.
-                    self.pending_default_registrations
-                        .push((body_func.clone(), type_name.to_string(), None, None));
+                    let method = self.deferred_default_method(
+                        body_func, type_name, implementation, &declaration, None, None,
+                    )?;
+                    self.pending_default_registrations.push(method);
                 }
                 per_proto_overrides
                     .entry(derived.clone())
@@ -3598,12 +3642,80 @@ impl VbcCodegen {
                             protocol: crate::types::ProtocolId(protocol.0),
                         })
                     });
-                    self.pending_default_registrations
-                        .push((default_func.clone(), type_name.to_string(), Some(protocol_info.source_module.clone()), constraints));
+                    let method = self.deferred_default_method(
+                        default_func, type_name, implementation, &declaration,
+                        Some(protocol_info.source_module.clone()), constraints,
+                    )?;
+                    self.pending_default_registrations.push(method);
                 }
             }
         }
         Ok(())
+    }
+
+    fn deferred_default_method(
+        &self,
+        function: &FunctionDecl,
+        receiver_name: &str,
+        implementation: &verum_ast::decl::ImplDecl,
+        declaration: &std::sync::Arc<DeferredImplDeclaration>,
+        lexical_owner: Option<String>,
+        constraints: Option<DefaultConstraintScope>,
+    ) -> CodegenResult<DeferredDefaultMethod> {
+        let (dense, shadow) = self.function_generic_param_maps(
+            function, Some(receiver_name), &declaration.ordered_generics,
+        );
+        let target = match &implementation.kind {
+            verum_ast::decl::ImplKind::Inherent(target) => target,
+            verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
+        };
+        let receiver = self.resolve_impl_receiver(target, &dense, &declaration.ordered_generics)?;
+        Ok(DeferredDefaultMethod {
+            function: function.clone(),
+            receiver_name: receiver_name.to_owned(),
+            lexical_owner,
+            constraints,
+            implementation: DeferredImplScope {
+                receiver,
+                dense,
+                shadow,
+                declaration: declaration.clone(),
+            },
+        })
+    }
+
+    /// All deferred phases enter the same retained declaration context and
+    /// restore it before success or failure is returned to the caller.
+    fn with_deferred_method_scope<T>(
+        &mut self,
+        method: &DeferredDefaultMethod,
+        lower: impl FnOnce(&mut Self) -> CodegenResult<T>,
+    ) -> CodegenResult<T> {
+        let scope = &method.implementation;
+        let previous_owner = std::mem::replace(&mut self.ctx.current_source_module, scope.declaration.owner.clone());
+        let previous_lexical = std::mem::replace(&mut self.default_body_type_scope, method.lexical_owner.clone());
+        let previous_impl = self.current_deferred_impl.replace(scope.clone());
+        let previous_receiver = self.current_impl_receiver.replace(scope.receiver.clone());
+        let previous_impl_name = self.ctx.current_impl_type_name.clone();
+        let previous_ast = self.current_impl_ast_generics.replace(scope.declaration.ast_generics.clone());
+        let previous_where = std::mem::replace(&mut self.current_impl_where_clause, scope.declaration.where_clause.clone());
+        let previous_types = std::mem::replace(&mut self.ctx.generic_type_params, scope.declaration.type_generics.iter().cloned().collect());
+        let previous_consts = std::mem::replace(&mut self.ctx.const_generic_params, scope.declaration.const_generics.iter().cloned().collect());
+        let previous_order = std::mem::replace(&mut self.ctx.generic_type_params_ordered, scope.declaration.ordered_generics.clone());
+        let previous_ids = std::mem::take(&mut self.ctx.current_generic_param_ids);
+        let result = lower(self);
+        self.ctx.current_source_module = previous_owner;
+        self.default_body_type_scope = previous_lexical;
+        self.current_deferred_impl = previous_impl;
+        self.current_impl_receiver = previous_receiver;
+        self.ctx.current_impl_type_name = previous_impl_name;
+        self.current_impl_ast_generics = previous_ast;
+        self.current_impl_where_clause = previous_where;
+        self.ctx.generic_type_params = previous_types;
+        self.ctx.const_generic_params = previous_consts;
+        self.ctx.generic_type_params_ordered = previous_order;
+        self.ctx.current_generic_param_ids = previous_ids;
+        result
     }
 
     /// If the `for_type` of a protocol impl is a bare path matching one of
@@ -3681,9 +3793,13 @@ impl VbcCodegen {
         // every explicit impl body already owns its unsuffixed slot
         // and a default only fills slots that are still empty.
         let deferred = std::mem::take(&mut self.pending_default_registrations);
-        for (default_func, type_name, source, constraints) in deferred {
-            let full_method_name =
-                format!("{}.{}", type_name, default_func.name.name);
+        for method in deferred {
+            let default_func = &method.function;
+            let type_name = &method.receiver_name;
+            let full_method_name = Self::impl_method_key(
+                method.implementation.declaration.owner.as_deref(),
+                type_name, default_func.name.name.as_str(),
+            );
             // INSTRUMENT (VERUM_TRACE_DEFREG=<substring>): whether a
             // deferred default-method registration RUNS or is SKIPPED
             // because the name is already held. R3's wrong return types
@@ -3707,7 +3823,7 @@ impl VbcCodegen {
             if self.ctx.lookup_function(&full_method_name).is_some() {
                 continue;
             }
-            if let (Some(constraints), Some(owner)) = (constraints, &source) {
+            if let (Some(constraints), Some(owner)) = (&method.constraints, &method.lexical_owner) {
                 let previous_module = self.ctx.current_source_module.replace(owner.clone());
                 let contradicts = self.default_binding_contradicts(
                     &default_func,
@@ -3721,17 +3837,26 @@ impl VbcCodegen {
                     continue;
                 }
             }
-            self.register_impl_function(&default_func, &type_name, &[])?;
-            self.pending_default_methods
-                .push((default_func, type_name, source));
+            // Registration elaborates the same inherited signature as body
+            // compilation. Its names belong to the protocol's lexical source,
+            // independently of the receiver or the file draining this queue.
+            self.with_deferred_method_scope(&method, |codegen| {
+                codegen.register_impl_function(default_func, type_name, &method.implementation.declaration.ordered_generics)
+            })?;
+            self.pending_default_methods.push(method);
         }
 
         // Take ownership of pending methods to avoid borrow conflicts
         let pending = std::mem::take(&mut self.pending_default_methods);
 
-        for (default_func, type_name, source) in pending {
+        for method in pending {
+            let default_func = &method.function;
+            let type_name = &method.receiver_name;
             // Check if the function body was already compiled (e.g., by explicit impl in main module)
-            let full_method_name = format!("{}.{}", type_name, default_func.name.name);
+            let full_method_name = Self::impl_method_key(
+                method.implementation.declaration.owner.as_deref(),
+                type_name, default_func.name.name.as_str(),
+            );
 
             // Check if the function was already compiled by checking if it exists in self.functions.
             // We can't rely on func_info.id being a sentinel because register_impl_function assigns
@@ -3747,43 +3872,9 @@ impl VbcCodegen {
                 }
             }
 
-            // Compile the function body.
-            //
-            // T0701 (LoadT pid desync): the descriptor numbers generics
-            // impl-first ([I#0, F#1, C#2, P#3] on `MappedIter.partition`
-            // — GENERICNAME-CARRY), but this loop cleared the impl
-            // prefix, so `compile_function` numbered the METHOD's own
-            // generics from 0 and the body's `C.default()` emitted
-            // `LoadT(Generic(0))` — reading the I slot of the witness
-            // vector the call site staged against the descriptor's
-            // numbering.  Pre-seed the parent type's own params exactly
-            // as `compile_item` does for real impl blocks
-            // (compile_function APPENDS the method's generics after
-            // them).
-            self.ctx.generic_type_params.clear();
-            self.ctx.generic_type_params_ordered.clear();
-            self.ctx.current_generic_param_ids.clear();
-            self.ctx.const_generic_params.clear();
-            if let Some(&parent_tid) = self.type_name_to_id.get(type_name.as_str()) {
-                let impl_names: Vec<String> = self
-                    .type_by_id(parent_tid)
-                    .map(|td| {
-                        td.type_params
-                            .iter()
-                            .filter_map(|tp| {
-                                self.ctx.strings.get(tp.name.0 as usize).cloned()
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                for n in impl_names {
-                    self.ctx.generic_type_params.insert(n.clone());
-                    self.ctx.generic_type_params_ordered.push(n);
-                }
-            }
-            let previous_source = std::mem::replace(&mut self.default_body_type_scope, source);
-            let body = self.compile_function(&default_func, Some(&type_name));
-            self.default_body_type_scope = previous_source;
+            let body = self.with_deferred_method_scope(&method, |codegen| {
+                codegen.compile_function(default_func, Some(type_name))
+            });
             if let Err(e) = body {
                 // Skip - some default methods may have unresolvable dependencies
                 // (e.g., FFI functions, external symbols not available in VBC).
@@ -10298,7 +10389,7 @@ impl VbcCodegen {
                         // Generate default methods from protocol
                         let instance = self.record_concrete_impl_bindings(impl_decl);
                         self.generate_default_protocol_methods(
-                            &pn, ty_name, instance.as_ref(), &implemented_methods,
+                            &pn, ty_name, impl_decl, instance.as_ref(), &implemented_methods,
                         )?;
 
                         // Populate TypeDescriptor.protocols for vtable-based dispatch.
@@ -13914,6 +14005,11 @@ impl VbcCodegen {
         impl_type_name: Option<&str>,
         fallback_generics: &[String],
     ) -> (std::collections::HashMap<String, u16>, std::collections::HashMap<String, u16>) {
+        if impl_type_name.is_some()
+            && let Some(scope) = &self.current_deferred_impl
+        {
+            return (scope.dense.clone(), scope.shadow.clone());
+        }
         let parent_names: Vec<String> = impl_type_name.and_then(|name| {
             self.ctx.type_generic_params.get(name).cloned().or_else(|| {
                 let descriptor = self.type_by_id(*self.type_name_to_id.get(name)?)?;
@@ -13941,19 +14037,12 @@ impl VbcCodegen {
                 next_id += 1;
             }
         }
-        // The fallback belongs exclusively to the impl scope. Context, const
-        // and other method-owned names must not pre-number later type params.
-        let own: std::collections::HashSet<&str> = func.generics.iter().filter_map(|p| match &p.kind {
-            GenericParamKind::Type { name, .. } | GenericParamKind::Context { name }
-            | GenericParamKind::HigherKinded { name, .. } | GenericParamKind::Const { name, .. }
-            | GenericParamKind::Meta { name, .. } | GenericParamKind::Level { name }
-            | GenericParamKind::KindAnnotated { name, .. } => Some(name.name.as_str()),
-            GenericParamKind::Lifetime { .. } => None,
-        }).collect();
+        // These are actual impl binders, including renamed parameters. A
+        // same-named method binder shadows its slot; it cannot erase it.
         let mut fallback = fallback_generics.to_vec();
         fallback.sort_unstable();
         for name in fallback {
-            if !dense.contains_key(&name) && !own.contains(name.as_str()) {
+            if !dense.contains_key(&name) {
                 dense.insert(name, next_id);
                 next_id += 1;
             }
@@ -14022,8 +14111,12 @@ impl VbcCodegen {
     /// The source declaration owns an impl, even when another module declares
     /// the same type/method spelling or extends the same nominal type.
     fn source_impl_method_key(&self, type_name: &str, method: &str) -> String {
+        Self::impl_method_key(self.ctx.current_source_module.as_deref(), type_name, method)
+    }
+
+    fn impl_method_key(owner: Option<&str>, type_name: &str, method: &str) -> String {
         let local = format!("{type_name}.{method}");
-        self.ctx.current_source_module.as_deref()
+        owner
             .filter(|owner| !owner.is_empty() && *owner != "main")
             .map_or_else(|| local.clone(), |owner| crate::module::qualify_module_name(owner, &local))
     }
@@ -19000,6 +19093,9 @@ impl VbcCodegen {
         &self,
         generic_param_map: &std::collections::HashMap<String, u16>,
     ) -> Option<TypeRef> {
+        if let Some(receiver) = &self.current_impl_receiver {
+            return Some(receiver.ty.clone());
+        }
         let parent_name = self.ctx.current_impl_type_name.as_ref()?;
         let &parent_tid = self.type_name_to_id.get(parent_name.as_str())?;
         let parent_desc = self.type_by_id(parent_tid)?;
@@ -20677,11 +20773,11 @@ impl VbcCodegen {
         // a generic parameter or a trait object) leaves
         // `parent_type` at None, which is the correct fallback.
         if let Some(type_name) = impl_type_name {
-            descriptor.parent_type = self
-                .type_name_to_id
-                .get(type_name.as_str())
-                .copied()
-                .or_else(|| self.get_well_known_type_id(type_name));
+            descriptor.parent_type = match &self.current_impl_receiver {
+                Some(receiver) => receiver.ty.base_type_id(),
+                None => self.type_name_to_id.get(type_name.as_str()).copied()
+                    .or_else(|| self.get_well_known_type_id(type_name)),
+            };
         }
         // Set return type from function info (default is UNIT)
         if let Some(ref ret_type) = func_info.return_type {
@@ -21876,17 +21972,18 @@ impl VbcCodegen {
     ) {
         // Normalize the key like the field-index machinery does.
         let stripped = Self::strip_generic_args(Self::strip_wrapper_type(type_key)).to_string();
+        let resolved = match self.resolve_record_type_key(&stripped) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.source_declaration_error.get_or_insert(error.kind);
+                return;
+            }
+        };
+        let key = resolved.as_deref().unwrap_or(&stripped);
         let info = self
             .type_field_refinements
-            .get(&(stripped.clone(), field_name.to_string()))
-            .cloned()
-            .or_else(|| {
-                self.resolve_record_type_key(&stripped).and_then(|rk| {
-                    self.type_field_refinements
-                        .get(&(rk, field_name.to_string()))
-                        .cloned()
-                })
-            });
+            .get(&(key.to_owned(), field_name.to_string()))
+            .cloned();
         let Some(info) = info else { return };
 
         // Conservative free-var guard: the predicate may reference ONLY
@@ -22435,7 +22532,10 @@ impl VbcCodegen {
     /// `math.algebra.Group` protocol while the literal means
     /// `core.meta.token.Group`).
     ///
-    /// Resolution order:
+    /// A source-owned binding selects its exact descriptor (following declared
+    /// aliases), or returns a diagnostic when unresolved. This includes lexical
+    /// ancestors and inherited protocol scopes; no bare alias can override it.
+    /// Without source authority, legacy archive-only resolution proceeds:
     ///  1. `name` itself is authoritative → `None` (no re-key needed).
     ///  2. The compiling module's explicit mount binding
     ///     (selected by source owner): probe the mount path and its
@@ -22447,24 +22547,32 @@ impl VbcCodegen {
     ///     record key ends in `.<name>` → that key. Ambiguity keeps the
     ///     legacy behaviour (returns `None`) — deterministic, and the
     ///     caller's existing fallback chain still applies.
-    fn resolve_record_type_key(&self, name: &str) -> Option<String> {
+    fn resolve_record_type_key(&self, name: &str) -> CodegenResult<Option<String>> {
         if name.is_empty() || name.contains('.') || name.contains('<') {
-            return None;
+            return Ok(None);
         }
-        // A local declaration outranks imported bare field-layout aliases.
-        // Inline modules can retain a separate early-registration simple key;
-        // the descriptor under the exact source owner is authoritative.
-        if let Some(owner) = self.ctx.current_source_module.as_deref() {
-            let local = format!("{owner}.{name}");
-            if self.type_name_to_id.get(&local)
-                .and_then(|id| self.type_by_id(*id))
-                .is_some_and(|ty| ty.kind == crate::types::TypeKind::Record)
-            {
-                return Some(local);
-            }
+        // Source lookup is authoritative for inherited bodies as well as
+        // ordinary code. A selected invalid mount cannot acquire the caller's
+        // compatible bare layout or another module's same-suffix descriptor.
+        if let Some(selected) = self.source_nominal_type_id(name) {
+            let invalid = || CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
+                "source binding '{name}' does not resolve to a record in declaration scope '{}'",
+                self.lexical_type_scope(),
+            )));
+            let declaration = selected.and_then(|id| self.type_by_id(id)).ok_or_else(invalid)?;
+            let target = if declaration.kind == crate::types::TypeKind::Alias {
+                // The stored alias target already carries its own binders.
+                // Select its nominal head without inventing caller arguments.
+                self.expand_declared_alias(declaration.alias_target.clone().ok_or_else(invalid)?)
+                    .and_then(|target| target.base_type_id())
+                    .and_then(|id| self.type_by_id(id)).ok_or_else(invalid)?
+            } else { declaration };
+            // A sum remains a sum: the constructor caller uses this exact
+            // descriptor to distinguish named variants from plain records.
+            return self.type_declaration_identity(target).map(|key| Some(key.to_string())).ok_or_else(invalid);
         }
         if self.record_key_is_authoritative(name) {
-            return None;
+            return Ok(None);
         }
         // T0525 — ALIAS IDENTITY.  `type Ali is Rec;` records
         // `type_aliases["Ali"] = "Rec"` and emits a
@@ -22481,10 +22589,10 @@ impl VbcCodegen {
         let aliased = self.resolve_type_alias(name);
         if aliased != name {
             if self.record_key_is_authoritative(&aliased) {
-                return Some(aliased);
+                return Ok(Some(aliased));
             }
-            if let Some(q) = self.resolve_record_type_key(&aliased) {
-                return Some(q);
+            if let Some(q) = self.resolve_record_type_key(&aliased)? {
+                return Ok(Some(q));
             }
         }
         if let Some(path) = self.mounted_type_path(name) {
@@ -22494,7 +22602,7 @@ impl VbcCodegen {
                 for parent_len in (1..segs.len()).rev() {
                     let key = format!("{}.{}", segs[..parent_len].join("."), leaf);
                     if self.record_key_is_authoritative(&key) {
-                        return Some(key);
+                        return Ok(Some(key));
                     }
                 }
             }
@@ -22504,12 +22612,12 @@ impl VbcCodegen {
         for key in self.type_name_to_id.keys() {
             if key.ends_with(&suffix) && self.record_key_is_authoritative(key) {
                 if hit.is_some() {
-                    return None; // ambiguous — keep legacy resolution
+                    return Ok(None); // ambiguous archive-only key
                 }
                 hit = Some(key);
             }
         }
-        hit.cloned()
+        Ok(hit.cloned())
     }
 
     fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> (u32, bool) {
@@ -22540,11 +22648,15 @@ impl VbcCodegen {
             // global intern table. The recursion is bounded: the
             // resolved key is authoritative, so the guard fails on
             // re-entry.
-            if !tn.contains('.')
-                && !self.record_key_is_authoritative(tn)
-                && let Some(q) = self.resolve_record_type_key(tn)
-            {
-                return self.resolve_field_index_impl(Some(&q), field_name);
+            if !tn.contains('.') {
+                match self.resolve_record_type_key(tn) {
+                    Ok(Some(q)) => return self.resolve_field_index_impl(Some(&q), field_name),
+                    Ok(None) => {},
+                    Err(error) => {
+                        self.source_declaration_error.get_or_insert(error.kind);
+                        return (0, true);
+                    }
+                }
             }
         }
         if let Some(tn) = type_name {
@@ -23157,13 +23269,7 @@ impl VbcCodegen {
             Some(i) => &type_name[..i],
             None => type_name,
         };
-        let rekeyed: Option<String> = if !stripped.contains('.')
-            && !self.record_key_is_authoritative(stripped)
-        {
-            self.resolve_record_type_key(stripped)
-        } else {
-            None
-        };
+        let rekeyed = self.resolve_record_type_key(stripped).ok()?;
         let key: &str = rekeyed.as_deref().unwrap_or(stripped);
 
         let tid = *self.type_name_to_id.get(key)?;
