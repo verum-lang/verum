@@ -106,8 +106,8 @@ fn check(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker, List<Text>) 
     (checker, errors)
 }
 
-fn assert_registered_owner(checker: &TypeChecker, owner: &str) {
-    let protocol = path("Source");
+fn assert_registered_owner(checker: &TypeChecker, owner: &str, protocol_owner: &str) {
+    let protocol = path(protocol_owner);
     let leaf = owner.rsplit('.').next().expect("owner leaf");
     let registry = checker.protocol_checker.read();
     let bare = registry.find_impl(&named(leaf), &protocol);
@@ -152,15 +152,15 @@ fn check_source_mounts(mounts: &str) {
         eprintln!(
             "registration {owner}: bare={:?}, qualified={:?}",
             registry
-                .find_impl(&named(leaf), &path("Source"))
+                .find_impl(&named(leaf), &path("demo.source.Source"))
                 .map(|entry| format!("{}", entry.for_type)),
             registry
-                .find_impl(&named(owner), &path("Source"))
+                .find_impl(&named(owner), &path("demo.source.Source"))
                 .map(|entry| format!("{}", entry.for_type))
         );
     }
-    assert_registered_owner(&checker, "demo.source.RegistrySource");
-    assert_registered_owner(&checker, "demo.source.GitSource");
+    assert_registered_owner(&checker, "demo.source.RegistrySource", "demo.source.Source");
+    assert_registered_owner(&checker, "demo.source.GitSource", "demo.source.Source");
     assert!(
         errors.is_empty(),
         "bound calls must accept actual source implementations: {errors:?}"
@@ -206,7 +206,10 @@ fn unrelated_same_name_type_does_not_inherit_source_impl() {
             checker
                 .protocol_checker
                 .read()
-                .find_impl(&named("demo.foreign.RegistrySource"), &path("Source"))
+                .find_impl(
+                    &named("demo.foreign.RegistrySource"),
+                    &path("demo.source.Source")
+                )
                 .is_none()
         );
         assert_eq!(
@@ -246,12 +249,15 @@ fn early_source_impl_loading_does_not_reroute_an_explicit_foreign_binding() {
                 ),
             ],
         );
-        assert_registered_owner(&checker, "demo.source.RegistrySource");
+        assert_registered_owner(&checker, "demo.source.RegistrySource", "demo.source.Source");
         assert!(
             checker
                 .protocol_checker
                 .read()
-                .find_impl(&named("demo.foreign.RegistrySource"), &path("Source"))
+                .find_impl(
+                    &named("demo.foreign.RegistrySource"),
+                    &path("demo.source.Source")
+                )
                 .is_none()
         );
         assert_eq!(errors.len(), 1, "reverse={reverse}: {errors:?}");
@@ -269,8 +275,8 @@ fn local_source_impl_keeps_its_owner_before_body_checking() {
     );
     let (checker, errors) = check(&source, &[]);
     assert!(errors.is_empty(), "{errors:?}");
-    assert_registered_owner(&checker, "demo.main.RegistrySource");
-    assert_registered_owner(&checker, "demo.main.GitSource");
+    assert_registered_owner(&checker, "demo.main.RegistrySource", "demo.main.Source");
+    assert_registered_owner(&checker, "demo.main.GitSource", "demo.main.Source");
 }
 
 #[test]
@@ -299,7 +305,7 @@ fn renamed_reexported_target_retains_its_original_declaration_owner() {
         ],
     );
     assert!(errors.is_empty(), "{errors:?}");
-    assert_registered_owner(&checker, "demo.model.RegistrySource");
+    assert_registered_owner(&checker, "demo.model.RegistrySource", "demo.adapter.Source");
     let table = checker.protocol_checker.read();
     for false_owner in [
         "Upstream",
@@ -309,7 +315,7 @@ fn renamed_reexported_target_retains_its_original_declaration_owner() {
     ] {
         assert!(
             table
-                .find_impl(&named(false_owner), &path("Source"))
+                .find_impl(&named(false_owner), &path("demo.adapter.Source"))
                 .is_none(),
             "invented owner {false_owner}"
         );
@@ -339,12 +345,12 @@ fn local_impl_for_imported_alias_or_qualified_target_keeps_foreign_owner() {
             )],
         );
         assert!(errors.is_empty(), "{target}: {errors:?}");
-        assert_registered_owner(&checker, "demo.model.RegistrySource");
+        assert_registered_owner(&checker, "demo.model.RegistrySource", "demo.main.Source");
         assert!(
             checker
                 .protocol_checker
                 .read()
-                .find_impl(&named("demo.main.Mounted"), &path("Source"))
+                .find_impl(&named("demo.main.Mounted"), &path("demo.main.Source"))
                 .is_none()
         );
     }
@@ -373,7 +379,7 @@ fn generic_source_target_keeps_reordered_parameter_bindings() {
     };
     let table = checker.protocol_checker.read();
     let (implementation, substitution) = table
-        .find_impl_with_substitution(&target, &path("Source"))
+        .find_impl_with_substitution(&target, &path("demo.source.Source"))
         .expect("generic implementation");
     let Type::Named { args, .. } = &implementation.for_type else {
         panic!("nominal target required")
@@ -413,8 +419,8 @@ fn source_protocol_argument_identity_is_preserved() {
     assert!(errors.is_empty(), "{errors:?}");
     let table = checker.protocol_checker.read();
     let target = named("demo.source.RegistrySource");
-    assert!(table.implements_instantiation(&target, &path("Source"), &[Type::Int]));
-    assert!(!table.implements_instantiation(&target, &path("Source"), &[Type::Bool]));
+    assert!(table.implements_instantiation(&target, &path("demo.source.Source"), &[Type::Int]));
+    assert!(!table.implements_instantiation(&target, &path("demo.source.Source"), &[Type::Bool]));
 }
 
 #[test]
@@ -430,7 +436,7 @@ fn genuine_blanket_target_remains_a_type_parameter() {
     assert!(errors.is_empty(), "{errors:?}");
     let table = checker.protocol_checker.read();
     let implementation = table
-        .find_impl(&Type::Int, &path("Source"))
+        .find_impl(&Type::Int, &path("demo.source.Source"))
         .expect("blanket applies to Int");
     assert!(matches!(implementation.for_type, Type::Var(_)));
 }
@@ -444,7 +450,10 @@ fn source_registration_does_not_relax_coherence_for_another_declaration() {
     assert!(errors.is_empty(), "{errors:?}");
     let mut table = checker.protocol_checker.write();
     let mut other = table
-        .find_impl(&named("demo.source.RegistrySource"), &path("Source"))
+        .find_impl(
+            &named("demo.source.RegistrySource"),
+            &path("demo.source.Source"),
+        )
         .expect("actual imported implementation")
         .clone();
     other.span = Span::new(other.span.start + 1, other.span.end + 1, other.span.file_id);
@@ -501,13 +510,60 @@ fn dyn_calls_check_arguments_against_the_selected_protocol_method() {
             ("", Some("WrongArgCount")),
             ("1, 2", Some("WrongArgCount")),
         ] {
-            let source = format!("{declarations} fn probe(x: &(dyn Source)) -> Int {{ x.{method}({arguments}) }}");
+            let source = format!(
+                "{declarations} fn probe(x: &(dyn Source)) -> Int {{ x.{method}({arguments}) }}"
+            );
             let (_, errors) = check(&source, &[]);
             let matches = match diagnostic {
                 None => errors.is_empty(),
                 Some(kind) => errors.iter().any(|error| error.contains(kind)),
             };
-            assert!(matches, "x.{method}({arguments}): expected {diagnostic:?}, got {errors:?}");
+            assert!(
+                matches,
+                "x.{method}({arguments}): expected {diagnostic:?}, got {errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn inherited_methods_keep_distinct_same_leaf_protocol_owners() {
+    let modules = [
+        (
+            "demo.alpha",
+            "public type Parent is protocol { fn alpha(&self, value: Int) -> Int; };",
+        ),
+        (
+            "demo.beta",
+            "public type Parent is protocol { fn beta(&self, value: Bool) -> Int; };",
+        ),
+    ];
+    for parents in ["Alpha + Beta", "Beta + Alpha"] {
+        for (method, valid_argument, invalid_argument) in
+            [("alpha", "1", "true"), ("beta", "true", "1")]
+        {
+            for (argument, valid) in [(valid_argument, true), (invalid_argument, false)] {
+                let source = format!(
+                    r#"
+                    mount demo.alpha.{{Parent as Alpha}};
+                    mount demo.beta.{{Parent as Beta}};
+                    type Combined is protocol extends {parents} {{}};
+                    fn probe(value: &(dyn Combined)) -> Int {{ value.{method}({argument}) }}
+                "#
+                );
+                let (_, errors) = check(&source, &modules);
+                if valid {
+                    assert!(
+                        errors.is_empty(),
+                        "{parents}: {method}({argument}): {errors:?}"
+                    );
+                } else {
+                    assert!(
+                        errors.iter().any(|error| error.contains("Mismatch")),
+                        "{parents}: {method}({argument}) must use its owned signature: {errors:?}"
+                    );
+                }
+            }
         }
     }
 }

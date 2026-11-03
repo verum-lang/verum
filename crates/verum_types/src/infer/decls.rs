@@ -2034,6 +2034,11 @@ impl TypeChecker {
                     }
                 }
 
+                let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
+                    &type_decl.generics, &protocol_body.extends,
+                    &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
+                );
+
                 for item in &protocol_body.items {
                     // Extract associated types (e.g., `type Item;` or `type Iterator: Iterator;`)
                     if let ProtocolItemKind::Type {
@@ -2046,7 +2051,7 @@ impl TypeChecker {
                         let assoc_name: Text = name.name.clone();
 
                         let assoc_type = self.elaborate_associated_type(
-                            &type_decl.generics, &item.kind,
+                            &type_decl.generics, &constraint_scope, &item.kind,
                         )?;
                         protocol_assoc_types.insert(assoc_name, assoc_type);
                     }
@@ -2195,49 +2200,10 @@ impl TypeChecker {
                     }
                 }
 
-                // Convert extends clause to super_protocols
-                // This enables protocol inheritance: type Monad is protocol extends Applicative { ... }
-                let super_protocols: List<crate::protocol::ProtocolBound> = protocol_body
-                    .extends
-                    .iter()
-                    .filter_map(|extend_ty| {
-                        // Extract protocol name from the type
-                        match &extend_ty.kind {
-                            verum_ast::ty::TypeKind::Path(path) => {
-                                Some(crate::protocol::ProtocolBound {
-                                    associated_types: Default::default(),
-                                    protocol: path.clone(),
-                                    args: List::new(),
-                                    is_negative: false,
-                                })
-                            }
-                            verum_ast::ty::TypeKind::Generic { base, args } => {
-                                // Handle generic extends like: extends Converter<A, B>
-                                if let verum_ast::ty::TypeKind::Path(path) = &base.kind {
-                                    let type_args: List<Type> = args
-                                        .iter()
-                                        .filter_map(|arg| {
-                                            if let verum_ast::ty::GenericArg::Type(ty) = arg {
-                                                self.ast_to_type(ty).ok()
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect();
-                                    Some(crate::protocol::ProtocolBound {
-                                        associated_types: Default::default(),
-                                        protocol: path.clone(),
-                                        args: type_args,
-                                        is_negative: false,
-                                    })
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    })
-                    .collect();
+                let super_protocols = match declared_supers {
+                    Some(supers) => supers,
+                    None => self.convert_super_protocols(&protocol_body.extends)?,
+                };
 
                 // Create and register Protocol object
                 // Convert AST is_context bool to ProtocolKind:
@@ -2250,9 +2216,8 @@ impl TypeChecker {
                 };
 
                 let protocol = crate::protocol::Protocol {
-                    name: if self.resolving_source_signature {
-                        self.declared_type_key(type_name.as_str())
-                    } else { type_name.clone() },
+                    constraints: constraint_scope,
+                    name: self.declared_type_key(type_name.as_str()),
                     kind,
                     type_params: self.convert_generic_params_to_type_params(&type_decl.generics),
                     methods: protocol_methods.clone(),
@@ -3712,6 +3677,11 @@ impl TypeChecker {
                     }
                 }
 
+                let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
+                    &type_decl.generics, &protocol_body.extends,
+                    &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
+                );
+
                 for item in &protocol_body.items {
                     // Extract associated types (e.g., `type Item;` or `type Iterator: Iterator;`)
                     if let ProtocolItemKind::Type {
@@ -3724,7 +3694,7 @@ impl TypeChecker {
                         let assoc_name: Text = name.name.clone();
 
                         let assoc_type = self.elaborate_associated_type(
-                            &type_decl.generics, &item.kind,
+                            &type_decl.generics, &constraint_scope, &item.kind,
                         )?;
                         protocol_assoc_types.insert(assoc_name, assoc_type);
                     }
@@ -3851,44 +3821,10 @@ impl TypeChecker {
                     }
                 }
 
-                // Convert extends clause to super_protocols (second pass)
-                let super_protocols: List<crate::protocol::ProtocolBound> = protocol_body
-                    .extends
-                    .iter()
-                    .filter_map(|extend_ty| match &extend_ty.kind {
-                        verum_ast::ty::TypeKind::Path(path) => {
-                            Some(crate::protocol::ProtocolBound {
-                                associated_types: Default::default(),
-                                protocol: path.clone(),
-                                args: List::new(),
-                                is_negative: false,
-                            })
-                        }
-                        verum_ast::ty::TypeKind::Generic { base, args } => {
-                            if let verum_ast::ty::TypeKind::Path(path) = &base.kind {
-                                let type_args: List<Type> = args
-                                    .iter()
-                                    .filter_map(|arg| {
-                                        if let verum_ast::ty::GenericArg::Type(ty) = arg {
-                                            self.ast_to_type(ty).ok()
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect();
-                                Some(crate::protocol::ProtocolBound {
-                                    associated_types: Default::default(),
-                                    protocol: path.clone(),
-                                    args: type_args,
-                                    is_negative: false,
-                                })
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    })
-                    .collect();
+                let super_protocols = match declared_supers {
+                    Some(supers) => supers,
+                    None => self.convert_super_protocols(&protocol_body.extends)?,
+                };
 
                 // Create and register Protocol object
                 // Convert AST is_context bool to ProtocolKind
@@ -3899,7 +3835,8 @@ impl TypeChecker {
                 };
 
                 let protocol = crate::protocol::Protocol {
-                    name: type_name.clone(),
+                    constraints: constraint_scope,
+                    name: self.declared_type_key(type_name.as_str()),
                     kind,
                     type_params: self.convert_generic_params_to_type_params(&type_decl.generics),
                     methods: protocol_methods.clone(),
@@ -5051,10 +4988,13 @@ impl TypeChecker {
             }
         }
 
+        let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
+            &proto_decl.generics, &proto_decl.bounds, &[proto_decl.generic_where_clause.as_ref()],
+        );
         let mut associated_types = verum_common::Map::new();
         for item in &proto_decl.items {
             if let verum_ast::decl::ProtocolItemKind::Type { name, .. } = &item.kind {
-                let associated = self.elaborate_associated_type(&proto_decl.generics, &item.kind)?;
+                let associated = self.elaborate_associated_type(&proto_decl.generics, &constraint_scope, &item.kind)?;
                 associated_types.insert(name.name.clone(), associated);
             }
         }
@@ -5068,28 +5008,17 @@ impl TypeChecker {
 
         // Register protocol
         let protocol = crate::protocol::Protocol {
-            name: type_name.clone(),
+            constraints: constraint_scope,
+            name: self.declared_type_key(type_name.as_str()),
             kind,
             type_params: self.convert_generic_params_to_type_params(&proto_decl.generics),
             methods: protocol_methods,
             associated_types,
             associated_consts: verum_common::Map::new(),
-            super_protocols: proto_decl
-                .bounds
-                .iter()
-                .filter_map(|b| {
-                    if let verum_ast::ty::TypeKind::Path(path) = &b.kind {
-                        Some(crate::protocol::ProtocolBound {
-                            associated_types: Default::default(),
-                            protocol: path.clone(),
-                            args: verum_common::List::new(),
-                            is_negative: false,
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
+            super_protocols: match declared_supers {
+                Some(supers) => supers,
+                None => self.convert_super_protocols(&proto_decl.bounds)?,
+            },
             specialization_info: verum_common::Maybe::None,
             defining_crate: verum_common::Maybe::None,
             span: proto_decl.span,
@@ -5207,10 +5136,38 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub fn register_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
-        match self.cfg_filtered_impl(impl_decl) {
-            Some(filtered) => self.register_impl_block_inner(&filtered),
-            None => self.register_impl_block_inner(impl_decl),
+        let filtered = self.cfg_filtered_impl(impl_decl);
+        let declaration = filtered.as_ref().unwrap_or(impl_decl);
+        if matches!(declaration.kind, verum_ast::decl::ImplKind::Protocol { .. })
+            && self.protocol_checker.read().has_source_impl(&self.current_module_path, declaration)?
+        {
+            return Ok(());
         }
+        self.register_impl_block_inner(declaration)
+    }
+
+    pub(super) fn source_impl_specialization(
+        declaration: &verum_ast::decl::ImplDecl,
+    ) -> Result<Maybe<crate::advanced_protocols::SpecializationInfo>> {
+        let Some(attribute) = &declaration.specialize_attr else { return Ok(None); };
+        if attribute.negative || attribute.when_clause.is_some() {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(),
+                msg: "conditional and negative specialization require an implementation constraint carrier".into(),
+                span: attribute.span,
+            });
+        }
+        let mut specialization = crate::advanced_protocols::SpecializationInfo::none();
+        specialization.is_specialized = true;
+        specialization.span = attribute.span;
+        if let Some(rank) = attribute.rank {
+            specialization.specificity_rank = usize::try_from(rank).map_err(|_| TypeError::OtherWithCodeSpanned {
+                code: "E405".into(),
+                msg: "specialization rank must be nonnegative".into(),
+                span: attribute.span,
+            })?;
+        }
+        Ok(Some(specialization))
     }
 
     /// Drop the impl items `@cfg(...)` excludes for this target, or `None`
@@ -5228,7 +5185,7 @@ impl TypeChecker {
     /// downstream, so a single place decides what belongs to this target,
     /// and it asks the same `CfgEvaluator` codegen and the statement
     /// filter ask.
-    fn cfg_filtered_impl(
+    pub(super) fn cfg_filtered_impl(
         &self,
         impl_decl: &verum_ast::decl::ImplDecl,
     ) -> Option<verum_ast::decl::ImplDecl> {
@@ -5402,17 +5359,17 @@ impl TypeChecker {
             }
         }
 
-        match &impl_decl.kind {
-            ImplKind::Inherent(_) => self.register_inherent_impl_methods(impl_decl, &type_param_names)?,
-            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names)?,
-        }
+        let result = match &impl_decl.kind {
+            ImplKind::Inherent(_) => self.register_inherent_impl_methods(impl_decl, &type_param_names),
+            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names),
+        };
 
-        // Clean up type parameters
+        // Restore the binder frame on failed publication as well.
         for param_name in type_param_names {
             self.ctx.remove_type(&param_name);
         }
 
-        Ok(())
+        result
     }
 
     /// Register a function signature without type-checking the body
@@ -6016,6 +5973,8 @@ impl TypeChecker {
         self.check_no_duplicate_impl_items(impl_decl)?;
         let ImplKind::Protocol { protocol, protocol_args, for_type } = &impl_decl.kind
             else { unreachable!() };
+        let protocol_identity = self.resolve_protocol_conformance_identity(protocol)?;
+        let specialization = Self::source_impl_specialization(impl_decl)?;
         let type_param_names = type_param_names.clone();
                 // CRITICAL FIX: Register protocol implementation methods BEFORE type-checking
                 // This enables method calls like `x.cmp(y)` where cmp is defined in
@@ -6430,7 +6389,7 @@ impl TypeChecker {
                     }
 
                     // Look up the protocol to get its default methods
-                    let protocol_text = Text::from(protocol_name);
+                    let protocol_text = protocol_identity.clone();
                     // Get the implementing type for Self substitution BEFORE acquiring the read lock
                     // to avoid borrow checker conflicts
                     let impl_self_type = self
@@ -6695,7 +6654,7 @@ impl TypeChecker {
                     // Protocol default methods like `fn max(self, other: Self) -> Self` need Self replaced
                     // with the actual type (e.g., Int64) so that method lookup returns the correct type.
                     // Without this, calling Int64.max(other) returns Self instead of Int64.
-                    let protocol_text = Text::from(protocol_name);
+                    let protocol_text = protocol_identity.clone();
                     // Get the implementing type for Self substitution - use current_self_type which was set at line 36161
                     let impl_self_type = self.current_self_type.clone().unwrap_or_else(|| {
                         // Fallback: resolve for_type again (shouldn't normally reach here)
@@ -6807,14 +6766,14 @@ impl TypeChecker {
 
                     // Create and register ProtocolImpl
                     let protocol_impl = crate::protocol::ProtocolImpl {
-                        protocol: protocol.clone(),
+                        protocol: Self::text_to_path(&protocol_identity),
                         protocol_args: resolved_protocol_args,
                         for_type: for_type_resolved,
                         where_clauses: impl_where_clauses,
                         methods: methods.clone(),
                         associated_types,
                         associated_consts: Map::new(),
-                        specialization: Maybe::None,
+                        specialization,
                         impl_crate: Maybe::Some(self.current_module_path.clone()),
                         span: impl_decl.span,
                         type_param_fn_bounds: type_param_fn_bounds.clone(),
@@ -6831,13 +6790,11 @@ impl TypeChecker {
                     //  protocol_impl.for_type, protocol_impl.where_clauses);
                     // }
 
-                    // Register with protocol checker (ignore coherence errors)
-                    if let Err(e) = self.protocol_checker.write().register_impl(protocol_impl) {
-                        tracing::debug!("Protocol impl registration warning: {}", e);
-                    }
-
-                    // Restore previous self type
+                    let publication = self.protocol_checker.write().register_source_impl(
+                        &self.current_module_path, impl_decl, protocol_impl,
+                    );
                     self.set_current_self_type(previous_self_type);
+                    publication?;
                 }
         Ok(())
     }
@@ -7505,6 +7462,9 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested impl blocks.
     pub(super) fn check_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
+        if matches!(impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. }) {
+            self.register_impl_block(impl_decl)?;
+        }
         match self.cfg_filtered_impl(impl_decl) {
             Some(filtered) => self.check_impl_block_inner(&filtered),
             None => self.check_impl_block_inner(impl_decl),
@@ -7547,14 +7507,6 @@ impl TypeChecker {
         // This allows T to be resolved in: implement<T> List<T> { fn push(&self, value: T) { ... } }
         let mut type_param_names = List::new();
 
-        // Collect where clauses for ProtocolImpl registration
-        // This enables blanket implementations like `implement<S: Stream> StreamExt for S {}`
-        // to be properly constrained and matched during method lookup.
-        let mut impl_where_clauses: List<crate::protocol::WhereClause> = List::new();
-        // CRITICAL: Collect function type bounds for type parameters.
-        // For `implement<F: fn(Fut.Output) -> T, T> ...`, captures F's TypeVar → fn type.
-        let mut type_param_fn_bounds: Map<TypeVar, Type> = Map::new();
-
         for generic_param in &impl_decl.generics {
             use verum_ast::ty::GenericParamKind;
             match &generic_param.kind {
@@ -7582,45 +7534,6 @@ impl TypeChecker {
                             self.register_type_var_bounds(*tvar, protocol_bounds.clone());
                         }
 
-                        // CRITICAL FIX: Also add to impl_where_clauses for blanket impl resolution
-                        // For `implement<S: Stream> StreamExt for S {}`, the bound `S: Stream`
-                        // must be stored so that method lookup can verify concrete types satisfy it.
-                        //
-
-                        // Use the SAME Type::Var that's used in for_type, so that the substitution
-                        // keys match when apply_substitution is called.
-                        impl_where_clauses.push(crate::protocol::WhereClause {
-                            ty: type_var.clone(),
-                            bounds: protocol_bounds,
-                        });
-
-                        // Also capture function type bounds (e.g., F: fn(Fut.Output) -> T)
-                        for bound in bounds {
-                            match &bound.kind {
-                                verum_ast::ty::TypeBoundKind::Equality(bound_ty) => {
-                                    if let verum_ast::ty::TypeKind::Function { .. } = &bound_ty.kind
-                                    {
-                                        if let Type::Var(tv) = &type_var {
-                                            if let Ok(resolved_fn) = self.ast_to_type(bound_ty) {
-                                                type_param_fn_bounds.insert(*tv, resolved_fn);
-                                            }
-                                        }
-                                    }
-                                }
-                                verum_ast::ty::TypeBoundKind::GenericProtocol(bound_ty) => {
-                                    // Fn/FnOnce/FnMut protocol bounds as function type bounds
-                                    if let verum_ast::ty::TypeKind::Function { .. } = &bound_ty.kind
-                                    {
-                                        if let Type::Var(tv) = &type_var {
-                                            if let Ok(resolved_fn) = self.ast_to_type(bound_ty) {
-                                                type_param_fn_bounds.insert(*tv, resolved_fn);
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
                     }
 
                     type_param_names.push(name_text);
@@ -7717,7 +7630,6 @@ impl TypeChecker {
                                     .with_bounds(protocol_bounds.clone());
                             self.ctx.env.add_type_param(type_param);
 
-                            // CRITICAL: Also store for ProtocolImpl.where_clauses
                             // Convert the constrained type to Type
                             let constrained_ty = self.ast_to_type(ty)?;
 
@@ -7732,41 +7644,6 @@ impl TypeChecker {
                                 self.register_type_var_bounds(*tv, protocol_bounds.clone());
                             }
 
-                            impl_where_clauses.push(crate::protocol::WhereClause {
-                                ty: constrained_ty.clone(),
-                                bounds: protocol_bounds,
-                            });
-
-                            // Extract function type bounds from where clauses for
-                            // associated type resolution (e.g., F: Fn(I.Item) -> U).
-                            for bound in bounds {
-                                match &bound.kind {
-                                    verum_ast::ty::TypeBoundKind::Equality(bound_ty)
-                                    | verum_ast::ty::TypeBoundKind::GenericProtocol(bound_ty) => {
-                                        if let verum_ast::ty::TypeKind::Function { .. } =
-                                            &bound_ty.kind
-                                        {
-                                            if let Type::Var(tv) = &constrained_ty {
-                                                if let Ok(resolved_fn) = self.ast_to_type(bound_ty)
-                                                {
-                                                    type_param_fn_bounds.insert(*tv, resolved_fn);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    verum_ast::ty::TypeBoundKind::Protocol(proto_path) => {
-                                        // Fn/FnOnce/FnMut protocol bounds may be parsed as
-                                        // Protocol with a path that has function-like structure
-                                        if let Some(proto_ident) = proto_path.as_ident() {
-                                            let pn = proto_ident.name.as_str();
-                                            if matches!(pn, "Fn" | "FnOnce" | "FnMut") {
-                                                // Protocol path for Fn - check for generic args
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
                         }
                     }
                     _ => {
@@ -7827,15 +7704,12 @@ impl TypeChecker {
             }
             ImplKind::Protocol {
                 protocol,
-                protocol_args: ast_protocol_args,
                 for_type,
+                ..
             } => {
                 // Protocol impl: register in protocol checker
                 let ty = self.ast_to_type(for_type)?;
-                let protocol_name = protocol
-                    .as_ident()
-                    .map(|i| i.name.clone())
-                    .unwrap_or_else(|| "unknown".into());
+                let protocol_name = self.resolve_protocol_conformance_identity(protocol)?;
 
                 // CRITICAL FIX: Resolve Named types to ensure field access works in method bodies.
                 // When `ty` is a Named type like `Location`, we need to ensure the type's fields
@@ -7873,223 +7747,8 @@ impl TypeChecker {
                 let previous_self_type = self.current_self_type.clone();
                 self.set_current_self_type(Maybe::Some(resolved_ty.clone()));
 
-                // Collect method types from impl block
-                let mut methods: Map<Text, Type> = Map::new();
-                for item in &impl_decl.items {
-                    if let ImplItemKind::Function(func) = &item.kind {
-                        // Build function type from signature
-                        let method_name: Text = func.name.name.as_str().into();
-
-                        // CRITICAL FIX: Register method's generic type params BEFORE processing param types
-                        // This is needed for: fn bimap<E1, T1, E2, T2>(self: Result<T1, E1>, ...) -> Result<T2, E2>
-                        let mut method_type_param_names: List<verum_common::Text> = List::new();
-                        for generic_param in &func.generics {
-                            use verum_ast::ty::GenericParamKind;
-                            match &generic_param.kind {
-                                GenericParamKind::Type { name, .. } => {
-                                    let type_var = Type::Var(TypeVar::fresh());
-                                    let name_text: Text = name.name.clone();
-                                    self.ctx.define_type(name_text.clone(), type_var);
-                                    method_type_param_names.push(name_text);
-                                }
-                                GenericParamKind::HigherKinded { name, arity, .. } => {
-                                    use crate::advanced_protocols::Kind;
-                                    let name_text: Text = name.name.clone();
-                                    let kind = match *arity {
-                                        0 => Kind::type_kind(),
-                                        1 => Kind::unary_constructor(),
-                                        2 => Kind::binary_constructor(),
-                                        n => {
-                                            let mut k = Kind::type_kind();
-                                            for _ in 0..n {
-                                                k = Kind::Arrow(
-                                                    Box::new(Kind::type_kind()),
-                                                    Box::new(k),
-                                                );
-                                            }
-                                            k
-                                        }
-                                    };
-                                    let type_constructor =
-                                        Type::type_constructor(name_text.clone(), *arity, kind);
-                                    self.ctx.define_type(name_text.clone(), type_constructor);
-                                    method_type_param_names.push(name_text);
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        // Build method type EXCLUDING self parameter
-                        // This is consistent with Protocol.methods and inherent_methods conventions.
-                        // The method call handler checks args directly against params (no skip).
-                        let param_types: Result<List<Type>> = func
-                            .params
-                            .iter()
-                            .filter(|p| !p.is_self()) // Exclude self parameter
-                            .filter_map(|p| {
-                                use verum_ast::decl::FunctionParamKind;
-                                match &p.kind {
-                                    FunctionParamKind::Regular { ty, .. } => {
-                                        Some(self.ast_to_type(ty))
-                                    }
-                                    // Self params are filtered out above, these cases shouldn't be reached
-                                    _ => None,
-                                }
-                            })
-                            .collect();
-                        let param_types = param_types?;
-
-                        let return_type = func
-                            .return_type
-                            .as_ref()
-                            .map(|t| self.ast_to_type(t))
-                            .unwrap_or(Ok(Type::Unit))?;
-
-                        // One carrier for signature wrapping — see
-                        // wrap_return_type_for_sig_full (the async law).
-                        let final_return_type = self.wrap_return_type_for_sig_full(
-                            return_type,
-                            &func.throws_clause,
-                            func.is_async,
-                            func.is_generator,
-                        );
-
-                        let method_ty = Type::function(param_types, final_return_type);
-                        methods.insert(method_name.clone(), method_ty);
-                    }
-                }
-
-                // Collect associated type definitions from impl block
-                // This handles: implement Functor for ListFunctor { type F<T> is List<T>; ... }
-                let mut associated_types: Map<Text, Type> = Map::new();
-                for item in &impl_decl.items {
-                    if let ImplItemKind::Type {
-                        name,
-                        type_params,
-                        ty: assoc_ty,
-                    } = &item.kind
-                    {
-                        // For GATs like `type F<T> is List<T>`, register type params temporarily
-                        let mut temp_type_params: List<verum_common::Text> = List::new();
-                        for param in type_params {
-                            use verum_ast::ty::GenericParamKind;
-                            match &param.kind {
-                                GenericParamKind::Type {
-                                    name: param_name, ..
-                                } => {
-                                    let type_var = Type::Var(TypeVar::fresh());
-                                    let param_name_text: Text = param_name.name.clone();
-                                    self.ctx.define_type(param_name_text.clone(), type_var);
-                                    temp_type_params.push(param_name_text);
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        // Convert the associated type's RHS
-                        if let Ok(resolved_ty) = self.ast_to_type(assoc_ty) {
-                            let assoc_name: Text = name.name.clone();
-                            associated_types.insert(assoc_name, self.unifier.normalize_aliases(&resolved_ty));
-                        }
-
-                        // Clean up temporary type params
-                        for param_name in temp_type_params {
-                            self.ctx.remove_type(&param_name);
-                        }
-                    }
-                }
-
-                // CRITICAL FIX: Copy default methods from protocol definition
-                // When `implement Read for File` only provides `read`, we need to also
-                // include default methods like `read_to_string` from the Read protocol.
-                // This enables File.read_to_string() to work via protocol method lookup.
-                // Note: We substitute Self with the implementing type `ty` for correct method signatures.
-                if let Maybe::Some(protocol_def) =
-                    self.protocol_checker.read().get_protocol(&protocol_name)
-                {
-                    for (method_name, protocol_method) in protocol_def.methods.iter() {
-                        // Only add if not already provided by the impl
-                        if !methods.contains_key(method_name) && protocol_method.has_default {
-                            // Copy the default method's type signature with Self substituted
-                            let substituted_method_ty =
-                                self.substitute_self_type(&protocol_method.ty, &ty);
-                            methods.insert(method_name.clone(), substituted_method_ty);
-                            tracing::debug!(
-                                "Added default method {} from protocol {} to impl for {}",
-                                method_name,
-                                protocol_name,
-                                ty
-                            );
-                        }
-                    }
-                }
-
-                // CRITICAL FIX: Resolve protocol type arguments (e.g., Result<Never, E> in FromResidual<Result<Never, E>>)
-                let resolved_protocol_args: List<Type> = ast_protocol_args
-                    .iter()
-                    .filter_map(|arg| {
-                        use verum_ast::ty::GenericArg;
-                        match arg {
-                            GenericArg::Type(ty) => Some(
-                                self.ast_to_type(ty)
-                                    .unwrap_or_else(|_| self.ast_to_type_lenient(ty)),
-                            ),
-                            GenericArg::Const(_)
-                            | GenericArg::Lifetime(_)
-                            | GenericArg::Binding(_) => None,
-                        }
-                    })
-                    .collect();
-                let resolved_protocol_args = resolved_protocol_args.iter()
-                    .map(|arg| self.unifier.normalize_aliases(arg)).collect();
-
-                // Create ProtocolImpl with collected methods and associated types
-                // CRITICAL: Include where_clauses for blanket impl constraint checking
-                let protocol_impl = crate::protocol::ProtocolImpl {
-                    protocol: protocol.clone(),
-                    protocol_args: resolved_protocol_args,
-                    for_type: ty.clone(),
-                    where_clauses: impl_where_clauses.clone(),
-                    methods: methods.clone(),
-                    associated_types,
-                    associated_consts: Map::new(),
-                    specialization: Maybe::None,
-                    impl_crate: Maybe::Some(self.current_module_path.clone()),
-                    span: impl_decl.span,
-                    type_param_fn_bounds: type_param_fn_bounds.clone(),
-                };
-
-                // CRITICAL FIX: Register protocol impl with protocol checker
-                // This enables blanket implementations like `implement<T, U: From<T>> Into<U> for T`
-                // to be found during method lookup. The previous comment was incorrect -
-                // register_impl_block_inner is only called for LOCAL impl blocks (inside function bodies),
-                // not for TOP-LEVEL impl blocks which go through check_impl_block_inner.
-                if let Err(e) = self
-                    .protocol_checker
-                    .write()
-                    .register_impl(protocol_impl.clone())
-                {
-                    tracing::debug!("Protocol impl registration warning: {}", e);
-                }
-
-                // DEBUG: Log Into impl registration
-                let proto_name_str = protocol_impl
-                    .protocol
-                    .as_ident()
-                    .map(|i| i.as_str().to_string())
-                    .unwrap_or_default();
-                if proto_name_str == "Into" {
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG check_impl_block] Registered Into impl, for_type: {:?}, where_clauses: {:?}",
-                    // protocol_impl.for_type, protocol_impl.where_clauses);
-                }
-
-                // NOTE: Protocol methods are already registered in inherent_methods by
-                // register_impl_block_inner (which uses generalize_ordered for correct
-                // type param handling). Do NOT overwrite here — generalize() does not
-                // include method-level type params that are defined in the environment,
-                // resulting in monomorphic schemes that fail for generic methods like
-                // extend<I: Iterator<Item>>(&mut self, iter: I).
+                // The selected source declaration is already published by
+                // register_impl_block. Body checking never creates a second instance.
 
                 // Type-check method bodies
                 let prev_inherent = self.in_inherent_impl;
@@ -8149,6 +7808,67 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Resolve a protocol reference in its declaring lexical scope, before the
+    /// resulting bound or implementation leaves that scope. Forward nominal
+    /// declarations retain their existing owned placeholder key.
+    pub(super) fn resolve_protocol_reference(
+        &mut self,
+        protocol: &verum_ast::Path,
+    ) -> Result<verum_ast::Path> {
+        let (resolved, key) =
+            self.resolve_qualified_type_with_parameter_key(protocol, protocol.span)?;
+        let resolved = self.unifier.normalize_aliases(&resolved);
+        let identity = match &resolved {
+            Type::Named { path, .. } => self.path_to_string(path),
+            Type::Generic { name, .. } => name.clone(),
+            Type::Placeholder { .. } if key.is_some() => key.unwrap(),
+            _ => {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(),
+                    msg: format!("implementation requires a protocol declaration, found `{resolved}`").into(),
+                    span: protocol.span,
+                });
+            }
+        };
+        Ok(verum_ast::Path::new(
+            identity.as_str().split('.').map(|segment| verum_ast::ty::PathSegment::Name(
+                verum_ast::Ident::new(segment, protocol.span),
+            )).collect(),
+            protocol.span,
+        ))
+    }
+
+    /// Conformance requires the actual declaration behind the resolved path.
+    fn resolve_protocol_conformance_identity(
+        &mut self,
+        protocol: &verum_ast::Path,
+    ) -> Result<Text> {
+        let resolved = self.resolve_protocol_reference(protocol)?;
+        let identity = self.path_to_string(&resolved);
+        if !self.protocol_checker.read().has_protocol(&identity) {
+            // Replay an unloaded owned source template through the existing
+            // loader, retaining defaults and binder identities.
+            self.resolve_qualified_source_type_with_parameter_key(&identity, protocol.span)?;
+            if !self.protocol_checker.read().has_protocol(&identity) {
+                let written = self.path_to_string(protocol);
+                if let Some((declaration, owner)) = self.declaring_source_type_declaration(&written) {
+                    self.load_source_type_declaration_with_parameter_key(
+                        &declaration, &owner, protocol.span,
+                    )?;
+                }
+            }
+        }
+        if self.protocol_checker.read().has_protocol(&identity) {
+            Ok(identity)
+        } else {
+            Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(),
+                msg: format!("`{identity}` has no resolved protocol declaration for conformance").into(),
+                span: protocol.span,
+            })
+        }
+    }
+
     /// Report every method an `implement P for T` block owes P and does not
     /// provide.
     ///
@@ -8161,266 +7881,16 @@ impl TypeChecker {
         let ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind else {
             return;
         };
-        let Some(written_ident) = protocol.segments.last().and_then(|s| match s {
-            verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
-            _ => None,
-        }) else {
-            return;
-        };
-        // The path as WRITTEN may be an alias: `mount m.{Shower as S}`
-        // then `implement S for T`. Every check below asks the registry
-        // by this name, and a miss returns no diagnostics — so an alias
-        // silently disabled the arity check, the associated-type bound
-        // check and the signature check at once, on exactly the code
-        // most likely to need them.
-        //
-        // This is the third instance in one day of one rule written for
-        // one of its several spellings: `SelfValue` handled and
-        // `Name("Self")` not (T1087), the protocol's own type parameters
-        // excluded and `Self` not (E427), and now the alias. The
-        // resolver for it already existed — `canonical_alias_target`
-        // walks the alias chain — with a single caller.
-        //
-        // Falls back to the written name when the alias does not
-        // resolve, so an unknown protocol behaves exactly as before.
-        let canonical = self.canonical_alias_target(written_ident.as_str());
-        let proto_ident = {
-            let guard = self.protocol_checker.read();
-            if guard.get_protocol(&canonical).is_some() {
-                canonical
-            } else {
-                written_ident
+        let proto_ident = match self.resolve_protocol_conformance_identity(protocol) {
+            Ok(identity) => identity,
+            Err(error) => {
+                self.push_diagnostic_for(error);
+                return;
             }
         };
 
-        // No lazy-load here, deliberately. The obvious move is to pull the
-        // protocol in before judging, the way the call-site bound check
-        // does — but the answer this check needs was captured when the
-        // declaration was PARSED, so loading would only add a side effect.
-        // It is not a harmless one: triggering a stdlib load from every
-        // `implement` block changed inference elsewhere in the same file.
-        // Measured, `core/database/mysql/typed_row.vr` went from 0 to 13
-        // diagnostics, none of them about conformance.
-
-        // Only judge against a declaration THIS run parsed. The baked
-        // archive does not carry which protocol methods have a default
-        // body, so an archive-loaded protocol reports every method as
-        // required — measured, 109 diagnostics across 13 `core/` files
-        // demanding `fold` and `skip_while` from iterator adaptors that
-        // the protocol supplies itself.
-        // Read the sets captured when this run PARSED the declaration.
-        //
-        // Absence here means the protocol reached us through the baked
-        // archive, which does not record which methods carry a default
-        // body, so every method would read as required. Declining is not
-        // caution about load order — it is refusing to answer from a source
-        // that cannot know.
-        // T1074: the associated-type bound check runs BEFORE the early
-        // return below, because that return is about METHOD
-        // COMPLETENESS and its precondition is narrower than this
-        // check's.  `protocols_with_known_defaults` holds only protocols
-        // whose SOURCE was seen, so an archive-loaded protocol —
-        // `core/database/common/protocol.vr`'s `Adapter`, with
-        // `type Conn: Connection` — left this function before any bound
-        // was judged.  Measured: the reader carries the bound
-        // (`[assoc-read] protocol=Adapter assoc_entries=2 / Conn : 1
-        // bound(s)`) and the violation still compiled clean, through
-        // FIVE earlier layers that each looked like the defect.
-        // T1074: an associated type may carry a protocol BOUND —
-        // `grammar/verum.ebnf:1193` spells it
-        // `'type' , identifier , [ type_params ] , [ ':' , type_bounds ]`
-        // — and nothing checked it, so `type Item: Shower` bound to a type
-        // implementing nothing compiled clean.
-        //
-        // The check for this was already WRITTEN, twice over
-        // (`check_associated_type_conformance` in protocol.rs, and
-        // `check_associated_type_bound` in projection.rs), and neither has
-        // a production caller: `check_full_conformance`, which reaches the
-        // first, is called only from tests.  So the rule lives here, beside
-        // the completeness and signature checks that DO run, rather than in
-        // a third copy elsewhere.
-        //
-        // Same restraint as the checks above: report only when the answer
-        // is knowable.  A bound naming a protocol the registry has never
-        // seen is not a violation, it is an unanswerable question, and
-        // `implements_by_name` would say "no" to it just as loudly as to a
-        // real one.
-        // A/B IN ONE BINARY (T1074 regression triage): the conversion
-        // below is a `&mut self` call on the inference context, so it
-        // can have effects beyond returning a type. Gate it so one
-        // build can be measured both ways instead of two builds being
-        // compared — a second build is a second variable.
-        // A/B in ONE binary: this gate switches the whole
-        // associated-type-bound path off — the collection, the
-        // `&mut self` conversion and the judgement alike — so a
-        // measurement of "did this check cause X" needs one build, not
-        // two. Two builds are two variables.
-        let assoc_check_off = std::env::var_os("VERUM_NO_ASSOC_BOUND_CHECK").is_some();
-        // The AST->Type conversion needs `&mut self`, and the registry
-        // read borrows `self` too — so resolve the bindings FIRST, then
-        // judge them under the guard.
-        // T1073 — a GAT's ARITY, checked here rather than in
-        // `check_associated_type_conformance`, whose `if
-        // assoc_type.is_gat() { }` arm was empty with the note "checked
-        // during actual instantiation" and which is reachable only from
-        // tests (`check_full_conformance` has no production caller).
-        //
-        // Measured before writing this: a protocol declaring
-        // `type Out<T>` and an impl binding `type Out = Int` compiled
-        // with ZERO diagnostics.
-        if std::env::var_os("VERUM_NO_GAT_ARITY_CHECK").is_none() {
-            let arity_errors: Vec<(Text, usize, usize, verum_ast::span::Span)> = {
-                let guard = self.protocol_checker.read();
-                match guard.get_protocol(&proto_ident) {
-                    verum_common::Maybe::Some(protocol) => impl_decl
-                        .items
-                        .iter()
-                        .filter_map(|item| {
-                            let ImplItemKind::Type {
-                                name, type_params, ..
-                            } = &item.kind
-                            else {
-                                return None;
-                            };
-                            let assoc = match protocol.associated_types.get(&name.name) { verum_common::Maybe::Some(a) => a, verum_common::Maybe::None => return None };
-                            let want = assoc.type_params.len();
-                            let got = type_params.len();
-                            (want != got).then(|| (name.name.clone(), want, got, item.span))
-                        })
-                        .collect(),
-                    verum_common::Maybe::None => Vec::new(),
-                }
-            };
-            for (assoc_name, want, got, span) in arity_errors {
-                self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                    code: Text::from("E405"),
-                    msg: Text::from(format!(
-                        "`type {}` takes {} type parameter(s) here, but `{}` \
-                         declares it with {}\n  \
-                         note: a caller behind the bound `{}` instantiates \
-                         this associated type with the PROTOCOL's arity, so \
-                         the mismatch is invisible at the call site",
-                        assoc_name, got, proto_ident, want, proto_ident
-                    )),
-                    span,
-                });
-            }
-        }
-        let assoc_bindings: Vec<(Text, verum_ast::Type, verum_ast::span::Span)> = if assoc_check_off {
-            Vec::new()
-        } else { impl_decl
-            .items
-            .iter()
-            .filter_map(|item| match &item.kind {
-                ImplItemKind::Type { name, ty, .. } => {
-                    Some((name.name.clone(), ty.clone(), item.span))
-                }
-                _ => None,
-            })
-            .collect() };
-        let assoc_bindings: Vec<(Text, crate::ty::Type, verum_ast::span::Span)> = assoc_bindings
-            .into_iter()
-            .filter_map(|(n, ast_ty, span)| {
-                self.ast_to_type(&ast_ty).ok().map(|t| (n, t, span))
-            })
-            .collect();
-        // T1074, the load: the lazy stdlib loader is RECEIVER-DRIVEN —
-        // a type's protocols register when a method is called on it —
-        // and an associated-type BOUND calls nothing. `Adapter` is
-        // loaded (it is mounted), `Connection` is not (only named by
-        // `type Conn: Connection`), so the guard below correctly
-        // declined to judge a protocol the registry genuinely did not
-        // hold. Measured: `Connection` defined=false has_protocol=false.
-        //
-        // Same shape as ITER-LAZY-LOAD (T0701), whose comment says it
-        // outright: a construct that consumes a type without calling a
-        // method on it leaves that type unloaded. Load the bound's
-        // protocol first, then ask.
-        {
-            let bound_protocols: Vec<Text> = {
-                let guard = self.protocol_checker.read();
-                match guard.get_protocol(&proto_ident) {
-                    verum_common::Maybe::Some(protocol) => assoc_bindings
-                        .iter()
-                        .filter_map(|(name, _, _)| protocol.associated_types.get(name))
-                        .flat_map(|a| {
-                            a.bounds
-                                .iter()
-                                .filter_map(|b| b.protocol.as_ident().map(|i| i.name.clone()))
-                                .collect::<Vec<_>>()
-                        })
-                        .collect(),
-                    verum_common::Maybe::None => Vec::new(),
-                }
-            };
-            for bp in bound_protocols {
-                self.ensure_stdlib_type_loaded_transitive(&bp);
-            }
-        }
-        let assoc_violations: Vec<(Text, Text, Text, verum_ast::span::Span)> = {
-            let guard = self.protocol_checker.read();
-            match guard.get_protocol(&proto_ident) {
-                verum_common::Maybe::Some(protocol) => assoc_bindings
-                    .iter()
-                    .filter_map(|(name, bound_ty, span)| {
-                        let assoc = match protocol.associated_types.get(name) {
-                            verum_common::Maybe::Some(a) => a,
-                            verum_common::Maybe::None => return None,
-                        };
-                        for bound in assoc.bounds.iter() {
-                            // ENTRY of the bound loop, before BOTH exits
-                            // below — `as_ident()?` (which returns from the
-                            // whole closure, not just this iteration) and
-                            // the registry `continue`.
-                            let ident = bound.protocol.as_ident();
-                            let bound_name = match ident {
-                                Some(i) => i.name.clone(),
-                                None => continue,
-                            };
-                            let known = guard.get_protocol(&bound_name).is_some();
-                            // The guard's real question is not "is this
-                            // protocol DEFINED here" but "can the registry
-                            // answer about it at all" — a protocol with
-                            // implementations can be judged even when its
-                            // definition was not loaded.
-                            // Ask the IMPL side, not the definition side:
-                            // does any type implement this protocol?
-                            let any_impl = guard.has_protocol(&bound_name);
-                            if !known {
-                                continue;
-                            }
-                            let sat = guard.implements_by_name(bound_ty, bound_name.as_str());
-                            if !sat {
-                                return Some((
-                                    name.clone(),
-                                    bound_name,
-                                    bound_ty.to_text(),
-                                    *span,
-                                ));
-                            }
-                        }
-                        None
-                    })
-                    .collect(),
-                verum_common::Maybe::None => Vec::new(),
-            }
-        };
-        for (assoc_name, bound_name, actual, span) in assoc_violations {
-            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                code: Text::from("E405"),
-                msg: Text::from(format!(
-                    "`type {} = {}` does not satisfy the bound `{}` that `{}` \
-                     declares on it\n  \
-                     help: `{}` must implement `{}`, or the protocol's bound must be relaxed\n  \
-                     note: a caller behind `{}` may use `{}`'s methods on this \
-                     associated type, and without the bound the call is only \
-                     discovered at run time",
-                    assoc_name, actual, bound_name, proto_ident,
-                    actual, bound_name,
-                    proto_ident, bound_name,
-                )),
-                span,
-            });
+        if let Err(error) = self.check_associated_type_obligations(impl_decl, &proto_ident) {
+            self.push_diagnostic_for(error);
         }
 
         // T1078: the SIGNATURE check runs BEFORE the early return
@@ -8560,7 +8030,7 @@ impl TypeChecker {
         }
 
 
-        let Some((required_set, declared)) =
+        let Some((required_set, _declared)) =
             self.protocols_with_known_defaults.get(&proto_ident).cloned()
         else {
             return;
@@ -8579,24 +8049,8 @@ impl TypeChecker {
             })
             .collect();
 
-        // If the block provides a method this protocol does not declare, we
-        // are almost certainly not looking at the protocol the author meant.
-        // The registry is keyed by BARE NAME, so a file that declares its
-        // own `Display` and also mounts the stdlib one has two protocols
-        // under one key and the lookup returns whichever registered last —
-        // measured, that reported `implement Display for Point` as missing
-        // `fmt` when the local Display requires `display` and the block
-        // provides exactly that.
-        //
-        // Declining costs one class: an implementation that names the
-        // method of a DIFFERENT protocol (`Debug` requiring `fmt_debug`,
-        // implemented with `fmt`) is no longer reported here. That is a
-        // wrong-name error and reads better as one — "Debug has no method
-        // fmt" — than as a completeness failure, and `core/`'s instances of
-        // it are covered by scripts/ci/check_protocol_conformance.py.
-        if provided.iter().any(|name| !declared.contains(name)) {
-            return;
-        }
+        // Additional implementation methods cannot discharge or suppress the
+        // obligations of the exact selected protocol declaration.
         // MEASUREMENT ONLY, off by default (T1029). Conformance compares
         // the method NAME and never its SIGNATURE, so an implementation
         // may promise one thing and be another — measured: a generic

@@ -69,6 +69,7 @@ fn create_eq_protocol() -> Protocol {
     );
 
     Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
         type_params: List::new(),
@@ -136,6 +137,7 @@ fn create_ord_protocol() -> Protocol {
     });
 
     Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Ord".into(),
         type_params: List::new(),
@@ -197,6 +199,7 @@ fn create_iterator_protocol() -> Protocol {
     );
 
     Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Iterator".into(),
         type_params: List::new(),
@@ -257,6 +260,7 @@ fn test_transitive_inheritance() {
 
     // Create protocol hierarchy: Show <- Debug <- DetailedDebug
     let show = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Show".into(),
         type_params: List::new(),
@@ -278,6 +282,7 @@ fn test_transitive_inheritance() {
     });
 
     let debug = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Debug".into(),
         type_params: List::new(),
@@ -299,6 +304,7 @@ fn test_transitive_inheritance() {
     });
 
     let detailed_debug = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "DetailedDebug".into(),
         type_params: List::new(),
@@ -505,6 +511,7 @@ fn test_method_override_in_subprotocol() {
     );
 
     let base = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Base".into(),
         type_params: List::new(),
@@ -543,6 +550,7 @@ fn test_method_override_in_subprotocol() {
     });
 
     let derived = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Derived".into(),
         type_params: List::new(),
@@ -983,6 +991,7 @@ fn test_multiple_inheritance_levels() {
 
     // Level 1: Base
     let base = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Base".into(),
         type_params: List::new(),
@@ -1005,6 +1014,7 @@ fn test_multiple_inheritance_levels() {
     });
 
     let middle = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Middle".into(),
         type_params: List::new(),
@@ -1027,6 +1037,7 @@ fn test_multiple_inheritance_levels() {
     });
 
     let top = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Top".into(),
         type_params: List::new(),
@@ -1055,6 +1066,7 @@ fn test_diamond_inheritance_pattern() {
 
     // Base protocol
     let base = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Base".into(),
         type_params: List::new(),
@@ -1077,6 +1089,7 @@ fn test_diamond_inheritance_pattern() {
     });
 
     let left = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Left".into(),
         type_params: List::new(),
@@ -1098,6 +1111,7 @@ fn test_diamond_inheritance_pattern() {
     });
 
     let right = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Right".into(),
         type_params: List::new(),
@@ -1126,6 +1140,7 @@ fn test_diamond_inheritance_pattern() {
     });
 
     let diamond = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Diamond".into(),
         type_params: List::new(),

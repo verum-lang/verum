@@ -79,6 +79,7 @@ fn example_basic_specialization() {
 
     // Create Display protocol
     let _display_protocol = Protocol {
+        constraints: Default::default(),
         name: "Display".into(),
         kind: ProtocolKind::Constraint, // Constraint protocol, not injectable
         type_params: List::new(),

@@ -49,6 +49,7 @@ fn test_object_safe_simple_protocol() {
     );
 
     let draw_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Draw".into(),
         type_params: List::new(),
@@ -103,6 +104,7 @@ fn test_not_object_safe_returns_self() {
     );
 
     let clone_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Clone".into(),
         type_params: List::new(),
@@ -163,6 +165,7 @@ fn test_not_object_safe_generic_method() {
     );
 
     let generic_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Generic".into(),
         type_params: List::new(),
@@ -224,6 +227,7 @@ fn test_not_object_safe_no_self_parameter() {
     );
 
     let static_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Static".into(),
         type_params: List::new(),
@@ -285,6 +289,7 @@ fn test_not_object_safe_takes_self_by_value() {
     );
 
     let consume_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Consume".into(),
         type_params: List::new(),
@@ -350,6 +355,7 @@ fn test_not_object_safe_has_associated_const() {
     );
 
     let const_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "WithConst".into(),
         type_params: List::new(),
@@ -441,6 +447,7 @@ fn test_object_safe_multiple_methods() {
     );
 
     let shape_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Shape".into(),
         type_params: List::new(),
@@ -502,6 +509,7 @@ fn test_object_safe_checked_and_unsafe_references() {
     );
 
     let protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "MultiRef".into(),
         type_params: List::new(),

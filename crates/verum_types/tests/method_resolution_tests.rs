@@ -62,6 +62,7 @@ fn test_simple_method_call_eq() {
 
     // Setup: Register Eq protocol with eq method
     let _eq_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
         type_params: List::new(),

@@ -415,6 +415,7 @@ fn test_protocol_regular_associated_type() {
     );
 
     let protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Iterator".into(),
         type_params: vec![].into(),
@@ -451,6 +452,7 @@ fn test_protocol_gat_associated_type() {
     );
 
     let protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Collection".into(),
         type_params: vec![].into(),

@@ -34,6 +34,7 @@ fn test_default_associated_type_used() {
 
     // Define Container protocol with default Item type
     let container_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Container".into(),
         type_params: List::new(),
@@ -186,6 +187,7 @@ fn test_explicit_associated_type_overrides_default() {
 
     // Define Container protocol with default Item type
     let container_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Container".into(),
         type_params: List::new(),
@@ -279,6 +281,7 @@ fn test_missing_associated_type_no_default_error() {
 
     // Define Container protocol WITHOUT default Item type
     let container_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Container".into(),
         type_params: List::new(),
@@ -366,6 +369,7 @@ fn test_default_type_validates_bounds() {
 
     // Register Clone protocol (simplified)
     let clone_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Clone".into(),
         type_params: List::new(),
@@ -400,6 +404,7 @@ fn test_default_type_validates_bounds() {
 
     // Define Container protocol with bounded default Item type
     let container_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Container".into(),
         type_params: List::new(),

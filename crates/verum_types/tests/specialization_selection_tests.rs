@@ -32,6 +32,7 @@ use verum_types::unify::Unifier;
 
 fn make_protocol(name: &str) -> Protocol {
     Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: name.into(),
         type_params: List::new(),

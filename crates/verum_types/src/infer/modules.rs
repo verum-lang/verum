@@ -5771,7 +5771,33 @@ impl TypeChecker {
         // type_name
         // );
 
-        for impl_decl in impl_blocks {
+        let mut registration_error = None;
+        for original in impl_blocks {
+            let selected = self.cfg_filtered_impl(&original);
+            let impl_decl = selected.as_ref().unwrap_or(&original);
+            let specialization = match Self::source_impl_specialization(impl_decl) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.set_current_module_path(saved_module_path);
+                    self.resolving_source_signature = saved_source_scope;
+                    return Err(error);
+                }
+            };
+            // Resolve the protocol head while its declaring owner is active,
+            // before entering any temporary implementation binder frame.
+            let resolved_protocol = match &impl_decl.kind {
+                verum_ast::decl::ImplKind::Protocol { protocol, .. } => {
+                    match self.resolve_protocol_reference(protocol) {
+                        Ok(protocol) => Some(protocol),
+                        Err(error) => {
+                            self.set_current_module_path(saved_module_path);
+                            self.resolving_source_signature = saved_source_scope;
+                            return Err(error);
+                        }
+                    }
+                }
+                verum_ast::decl::ImplKind::Inherent(_) => None,
+            };
             // Value scopes do not own type definitions. Lazy imports can run
             // inside a generic body, so preserve every name they temporarily bind.
             let impl_type_bindings: List<_> = impl_decl.generics.iter().filter_map(|param| {
@@ -6210,20 +6236,17 @@ impl TypeChecker {
             // protocol implementation itself. This meant implements_protocol() would
             // return false for imported impls like `implement Hasher for DefaultHasher`.
             // ═══════════════════════════════════════════════════════════════
-            if let verum_ast::decl::ImplKind::Protocol {
-                protocol,
+            if let (verum_ast::decl::ImplKind::Protocol {
                 protocol_args: ast_protocol_args,
                 for_type,
-            } = &impl_decl.kind
+                ..
+            }, Some(protocol)) = (&impl_decl.kind, &resolved_protocol)
             {
                 // Build method types for the ProtocolImpl
                 let mut methods: verum_common::Map<verum_common::Text, Type> =
                     verum_common::Map::new();
 
-                let protocol_name_for_debug = protocol
-                    .as_ident()
-                    .map(|i| i.as_str().to_string())
-                    .unwrap_or_default();
+                let protocol_name_for_debug = self.path_to_string(protocol).to_string();
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG import_impl_blocks] Building methods for {} for {}, impl_decl.items.len()={}",
                 // protocol_name_for_debug, type_name, impl_decl.items.len());
@@ -6368,7 +6391,7 @@ impl TypeChecker {
                     methods: methods.clone(),
                     associated_types,
                     associated_consts: verum_common::Map::new(),
-                    specialization: verum_common::Maybe::None,
+                    specialization,
                     impl_crate: verum_common::Maybe::None,
                     span: impl_decl.span,
                     type_param_fn_bounds: verum_common::Map::new(),
@@ -6390,9 +6413,11 @@ impl TypeChecker {
                     // );
                 }
 
-                // Register with protocol checker
-                if let Err(e) = self.protocol_checker.write().register_impl(protocol_impl) {
-                    tracing::debug!("Protocol impl registration during import: {}", e);
+                let publication = self.protocol_checker.write().register_source_impl(
+                    &self.current_module_path, impl_decl, protocol_impl,
+                );
+                if let Err(error) = publication {
+                    registration_error.get_or_insert(error);
                 }
             }
 
@@ -6430,7 +6455,10 @@ impl TypeChecker {
         // the source module into surrounding scope.
         self.set_current_module_path(saved_module_path);
         self.resolving_source_signature = saved_source_scope;
-        Ok(())
+        match registration_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Find a protocol declaration in a module's AST by name.
@@ -9063,11 +9091,15 @@ impl TypeChecker {
             return;
         }
         self.preregistered_modules.insert(protocols_key);
+        let saved_owner = self.current_module_path.clone();
+        let saved_source_scope = self.resolving_source_signature;
+        self.set_current_module_path(module_path);
+        self.resolving_source_signature = true;
 
         for item in &ast.items {
             if let ItemKind::Type(type_decl) = &item.kind {
                 if let TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-                    let type_name: Text = type_decl.name.name.clone();
+                    let type_name = self.declared_type_key(type_decl.name.name.as_str());
 
                     // IMPORTANT: Stdlib-loaded protocols OVERRIDE hardcoded fallbacks.
                     // The hardcoded protocols in register_builtin_protocols are minimal bootstrap
@@ -9128,6 +9160,10 @@ impl TypeChecker {
                     let mut protocol_assoc_types: Map<Text, crate::protocol::AssociatedType> =
                         Map::new();
 
+                    let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
+                        &type_decl.generics, &protocol_body.extends,
+                        &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
+                    );
                     for proto_item in &protocol_body.items {
                         match &proto_item.kind {
                             ProtocolItemKind::Function { decl, default_impl } => {
@@ -9222,7 +9258,7 @@ impl TypeChecker {
                                 self.ctx.exit_scope();
                             }
                             ProtocolItemKind::Type { name, .. } => {
-                                match self.elaborate_associated_type(&type_decl.generics, &proto_item.kind) {
+                                match self.elaborate_associated_type(&type_decl.generics, &constraint_scope, &proto_item.kind) {
                                     Ok(assoc) => { protocol_assoc_types.insert(name.name.clone(), assoc); }
                                     Err(error) => self.push_diagnostic_for(error),
                                 }
@@ -9239,17 +9275,18 @@ impl TypeChecker {
                         }
                     }
 
-                    // Convert extends clause to super_protocols
-                    let super_protocols: List<crate::protocol::ProtocolBound> = protocol_body
-                        .extends
-                        .iter()
-                        .filter_map(|extend_ty| match &extend_ty.kind {
-                            verum_ast::ty::TypeKind::Path(path) => Some(
-                                crate::protocol::ProtocolBound::positive(path.clone(), List::new()),
-                            ),
-                            _ => None,
-                        })
-                        .collect();
+                    let super_protocols = match declared_supers {
+                        Some(supers) => supers,
+                        None => match self.convert_super_protocols(&protocol_body.extends) {
+                            Ok(supers) => supers,
+                            Err(error) => {
+                                self.push_diagnostic_for(error);
+                                self.set_current_self_type(old_self_type);
+                                self.ctx.exit_scope();
+                                continue;
+                            }
+                        },
+                    };
 
                     // Create and register Protocol object
                     // Convert AST is_context bool to ProtocolKind:
@@ -9262,6 +9299,7 @@ impl TypeChecker {
                     };
 
                     let protocol = crate::protocol::Protocol {
+                        constraints: constraint_scope,
                         name: type_name.clone(),
                         kind,
                         type_params: self
@@ -9310,6 +9348,8 @@ impl TypeChecker {
                 }
             }
         }
+        self.set_current_module_path(saved_owner);
+        self.resolving_source_signature = saved_source_scope;
     }
 
     /// Register all blanket protocol implementations from a module.
@@ -9404,6 +9444,11 @@ impl TypeChecker {
         // module_path
         // );
 
+        let saved_owner = self.current_module_path.clone();
+        let saved_source_scope = self.resolving_source_signature;
+        self.set_current_module_path(module_path);
+        self.resolving_source_signature = true;
+
         // Mark as registered BEFORE processing to prevent re-entrancy
         self.blanket_impls_registered_modules
             .insert(module_path.to_string());
@@ -9439,7 +9484,7 @@ impl TypeChecker {
                     if is_blanket {
                         // Create and register the ProtocolImpl
                         if let Err(e) = self.register_blanket_impl_from_ast(impl_decl) {
-                            tracing::debug!("Failed to register blanket impl: {}", e);
+                            self.push_diagnostic_for(e);
                         }
                     } else if is_generic_impl {
                         // CRITICAL FIX: Also register generic protocol impls like:
@@ -9448,7 +9493,7 @@ impl TypeChecker {
 
                         // Use the same registration function as blanket impls
                         if let Err(e) = self.register_blanket_impl_from_ast(impl_decl) {
-                            tracing::debug!("Failed to register generic impl: {}", e);
+                            self.push_diagnostic_for(e);
                         }
                     } else {
                         // Concrete protocol impl: implement Protocol for ConcreteType
@@ -9456,7 +9501,7 @@ impl TypeChecker {
                         // (e.g., Circle -> Drawable when Circle implements Drawable)
 
                         if let Err(e) = self.register_blanket_impl_from_ast(impl_decl) {
-                            tracing::debug!("Failed to register concrete impl: {}", e);
+                            self.push_diagnostic_for(e);
                         }
                     }
                 } else if let ImplKind::Inherent(for_type) = &impl_decl.kind {
@@ -9470,6 +9515,8 @@ impl TypeChecker {
                 }
             }
         }
+        self.set_current_module_path(saved_owner);
+        self.resolving_source_signature = saved_source_scope;
     }
 
     /// Register an inherent blanket impl's methods under a special protocol-keyed entry.
@@ -9916,12 +9963,20 @@ impl TypeChecker {
         use crate::protocol::{ProtocolImpl, WhereClause as ProtocolWhereClause};
         use verum_ast::decl::ImplKind;
 
+        let selected = self.cfg_filtered_impl(impl_decl);
+        let impl_decl = selected.as_ref().unwrap_or(impl_decl);
+        if self.protocol_checker.read().has_source_impl(&self.current_module_path, impl_decl)? {
+            return Ok(());
+        }
+        let specialization = Self::source_impl_specialization(impl_decl)?;
+
         if let ImplKind::Protocol {
             protocol,
             protocol_args,
             for_type,
         } = &impl_decl.kind
         {
+            let protocol = self.resolve_protocol_reference(protocol)?;
             // Enter a scope to handle type parameters
             self.ctx.enter_scope();
 
@@ -10080,7 +10135,7 @@ impl TypeChecker {
                 methods: Map::new(), // Methods come from protocol definition
                 associated_types,
                 associated_consts: Map::new(),
-                specialization: Maybe::None,
+                specialization,
                 impl_crate: Maybe::Some(self.current_module_path.clone()),
                 span: impl_decl.span,
                 type_param_fn_bounds,
@@ -10088,14 +10143,9 @@ impl TypeChecker {
 
             self.ctx.exit_scope();
 
-            // Register with protocol checker
-            if let Err(e) = self
-                .protocol_checker
-                .write()
-                .register_impl(protocol_impl.clone())
-            {
-                tracing::debug!("Blanket impl registration warning: {}", e);
-            }
+            self.protocol_checker.write().register_source_impl(
+                &self.current_module_path, impl_decl, protocol_impl.clone(),
+            )?;
 
             #[cfg(debug_assertions)]
             {

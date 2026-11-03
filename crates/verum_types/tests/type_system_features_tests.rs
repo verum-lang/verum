@@ -733,6 +733,7 @@ mod gats {
         );
 
         let protocol = Protocol {
+            constraints: Default::default(),
             kind: ProtocolKind::Constraint,
             name: "Container".into(),
             type_params: List::new(),
@@ -820,6 +821,7 @@ mod specialization_overlap {
 
     fn make_protocol(name: &str) -> Protocol {
         Protocol {
+            constraints: Default::default(),
             kind: ProtocolKind::Constraint,
             name: name.into(),
             type_params: List::new(),

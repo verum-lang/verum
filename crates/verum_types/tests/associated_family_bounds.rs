@@ -17,7 +17,7 @@ fn declaration(source: &str) -> TypeDecl {
     };
     declaration.clone()
 }
-fn assert_telescope(checker: &TypeChecker, owner: &str, shadowed: bool) {
+fn assert_telescope(checker: &TypeChecker, owner: &str, bound_owner: &str, shadowed: bool) {
     let registry = checker.protocol_checker.read();
     let protocol = registry
         .get_protocol(&owner.into())
@@ -28,7 +28,28 @@ fn assert_telescope(checker: &TypeChecker, owner: &str, shadowed: bool) {
     assert_ne!(associated.binders.owner[0].1, associated.binders.local[0]);
     assert_eq!(associated.bounds.len(), 1);
     let bound = &associated.bounds[0];
-    assert_eq!(bound.protocol.to_string(), "Stream");
+    let actual_owner: Vec<_> = bound
+        .protocol
+        .segments
+        .iter()
+        .map(|segment| {
+            let verum_ast::ty::PathSegment::Name(name) = segment else {
+                panic!("named protocol owner");
+            };
+            name.name.as_str()
+        })
+        .collect();
+    assert_eq!(actual_owner, bound_owner.split('.').collect::<Vec<_>>());
+    let verum_types::protocol::ProtocolConstraints::Declared {
+        self_type,
+        parameters,
+        ..
+    } = &protocol.constraints
+    else {
+        panic!("source declaration must retain its telescope");
+    };
+    assert_eq!(parameters[0], associated.binders.owner[0].1);
+    assert_eq!(associated.binders.self_type, Some(*self_type));
     assert_eq!(
         bound.args[0],
         Type::Var(if shadowed {
@@ -47,9 +68,14 @@ fn source_family_arguments_and_equalities_keep_independent_binders() {
     let mut checker = TypeChecker::new();
     checker.register_primitives();
     checker
+        .register_type_declaration(&declaration(
+            "public type Stream<A> is protocol { type Item = A; };",
+        ))
+        .unwrap();
+    checker
         .register_type_declaration(&declaration(SOURCE))
         .unwrap();
-    assert_telescope(&checker, "Family", false);
+    assert_telescope(&checker, "Family", "Stream", false);
 }
 #[test]
 fn family_parameter_shadows_owner_without_reusing_its_identity() {
@@ -57,10 +83,15 @@ fn family_parameter_shadows_owner_without_reusing_its_identity() {
     checker.register_primitives();
     checker
         .register_type_declaration(&declaration(
+            "public type Stream<A> is protocol { type Item = A; };",
+        ))
+        .unwrap();
+    checker
+        .register_type_declaration(&declaration(
             "type Family<A> is protocol { type Rows<A>: Stream<A, Item = A>; };",
         ))
         .unwrap();
-    assert_telescope(&checker, "Family", true);
+    assert_telescope(&checker, "Family", "Stream", true);
 }
 #[test]
 fn complete_bound_survives_sidecar_and_eager_replay() {
@@ -96,10 +127,20 @@ fn complete_bound_survives_sidecar_and_eager_replay() {
         is_transparent_wrapper: false,
         resource_discipline: verum_common::ResourceDiscipline::Unrestricted,
     };
+    let mut stream = descriptor.clone();
+    stream.name = "Stream".into();
+    stream.source_declaration = verum_ast::source_signature::source_type_declaration(&declaration(
+        "public type Stream<A> is protocol { type Item = A; };",
+    ))
+    .unwrap();
     let mut metadata = CoreMetadata {
         version: CORE_METADATA_VERSION,
         ..Default::default()
     };
+    metadata
+        .type_declaration_order
+        .push("provider.Stream".into());
+    metadata.types.insert("provider.Stream".into(), stream);
     metadata
         .type_declaration_order
         .push("provider.Family".into());
@@ -118,7 +159,7 @@ fn complete_bound_survives_sidecar_and_eager_replay() {
     let mut checker = TypeChecker::new_with_core_eager(Arc::new(restored));
     assert!(checker.take_deferred_errors().is_empty());
     assert!(checker.diagnostics().is_empty());
-    assert_telescope(&checker, "provider.Family", false);
+    assert_telescope(&checker, "provider.Family", "provider.Stream", false);
     let mut stale = bytes;
     stale[8..12].copy_from_slice(&(CORE_METADATA_VERSION - 1).to_le_bytes());
     assert!(decode_metadata(&stale).is_err());

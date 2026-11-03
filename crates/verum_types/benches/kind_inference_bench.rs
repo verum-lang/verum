@@ -144,6 +144,7 @@ fn bench_check_simple_protocol(c: &mut Criterion) {
         );
 
         let protocol = Protocol {
+            constraints: Default::default(),
             kind: verum_types::protocol::ProtocolKind::Constraint,
             name: "Iterator".into(),
             type_params: List::new(),
@@ -180,6 +181,7 @@ fn bench_check_gat_protocol(c: &mut Criterion) {
         );
 
         let protocol = Protocol {
+            constraints: Default::default(),
             kind: verum_types::protocol::ProtocolKind::Constraint,
             name: "Collection".into(),
             type_params: List::new(),
@@ -283,6 +285,7 @@ fn bench_functor_protocol(c: &mut Criterion) {
         );
 
         let protocol = Protocol {
+            constraints: Default::default(),
             kind: verum_types::protocol::ProtocolKind::Constraint,
             name: "Functor".into(),
             type_params: List::new(),
@@ -325,6 +328,7 @@ fn bench_monad_protocol(c: &mut Criterion) {
         );
 
         let protocol = Protocol {
+            constraints: Default::default(),
             kind: verum_types::protocol::ProtocolKind::Constraint,
             name: "Monad".into(),
             type_params: List::new(),

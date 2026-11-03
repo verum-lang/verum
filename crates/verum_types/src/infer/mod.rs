@@ -14,6 +14,7 @@
 
 // Submodules containing impl TypeChecker method groups
 mod associated_type_bounds;
+mod associated_type_obligations;
 mod source_declarations;
 mod source_type_registration;
 mod universe_parameters;

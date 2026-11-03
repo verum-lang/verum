@@ -370,6 +370,7 @@ fn test_protocol_implementation_allows_substitution() {
 
     // Define Eq protocol
     let eq_protocol = Protocol {
+        constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
         type_params: List::new(),

@@ -2622,6 +2622,7 @@ impl TypeChecker {
         let methods = Self::protocol_methods_from_metadata(protocol_desc);
 
         let protocol = Protocol {
+            constraints: Default::default(),
             name: name.clone(),
             kind: crate::protocol::ProtocolKind::Constraint,
             type_params: protocol_desc
@@ -4519,6 +4520,7 @@ impl TypeChecker {
 
             // Create Protocol struct
             let protocol = Protocol {
+                constraints: Default::default(),
                 name: name.clone(),
                 kind: crate::protocol::ProtocolKind::Constraint,
                 type_params: protocol_desc

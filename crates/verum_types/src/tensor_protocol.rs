@@ -334,6 +334,7 @@ pub fn create_from_tensor_literal_protocol() -> Protocol {
     );
 
     Protocol {
+        constraints: Default::default(),
         name: "FromTensorLiteral".into(),
         kind: crate::protocol::ProtocolKind::Constraint,
         type_params: vec![shape_param, element_param].into(),

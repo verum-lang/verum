@@ -13132,6 +13132,15 @@ with .to_float() or .to_int() (at {:?})",
         target
     }
 
+    /// Elaborate super-protocols through the same owned reference transport as bounds.
+    pub(super) fn convert_super_protocols(
+        &mut self,
+        supers: &[verum_ast::Type],
+    ) -> Result<List<crate::protocol::ProtocolBound>> {
+        let bounds = Self::source_super_protocol_bounds(supers)?;
+        self.convert_type_bounds_to_protocol_bounds(&bounds)
+    }
+
     /// Convert AST type bounds to protocol bounds.
     ///
     /// Converts from verum_ast::ty::TypeBound to crate::protocol::ProtocolBound.
@@ -13148,6 +13157,7 @@ with .to_float() or .to_int() (at {:?})",
             use verum_ast::ty::TypeBoundKind;
             match &bound.kind {
                 TypeBoundKind::Protocol(path) => {
+                    let resolved_protocol = self.resolve_protocol_reference(path);
                     // A `context` declared WITHOUT `protocol` is injectable
                     // only: it names a runtime dependency, not a
                     // compile-time constraint.  Those are different
@@ -13210,10 +13220,9 @@ with .to_float() or .to_int() (at {:?})",
                         let is_injectable = self
                             .context_checker
                             .is_declared_context(name.as_str())
-                            && matches!(
-                                self.protocol_checker.read().get_protocol(&name),
-                                verum_common::Maybe::None
-                            );
+                            && resolved_protocol.as_ref().map_or(true, |resolved| {
+                                !self.protocol_checker.read().has_protocol(&self.path_to_string(resolved))
+                            });
                         if is_injectable {
                             return Err(TypeError::Other(verum_common::Text::from(format!(
                                 "context '{}' cannot be used as a type bound; \
@@ -13230,7 +13239,7 @@ with .to_float() or .to_int() (at {:?})",
                     // Simple protocol bound: T: Clone
                     protocol_bounds.push(crate::protocol::ProtocolBound {
                         associated_types: Default::default(),
-                        protocol: path.clone(),
+                        protocol: resolved_protocol?,
                         args: List::new(),
                         is_negative: false,
                     });
@@ -13250,7 +13259,7 @@ with .to_float() or .to_int() (at {:?})",
                     // which only applies to types that are Clone but NOT Copy.
                     protocol_bounds.push(crate::protocol::ProtocolBound {
                         associated_types: Default::default(),
-                        protocol: path.clone(),
+                        protocol: self.resolve_protocol_reference(path)?,
                         args: List::new(),
                         is_negative: true,
                     });
@@ -13294,7 +13303,7 @@ with .to_float() or .to_int() (at {:?})",
                             }
                             protocol_bounds.push(crate::protocol::ProtocolBound {
                                 associated_types,
-                                protocol: path.clone(),
+                                protocol: self.resolve_protocol_reference(path)?,
                                 args: bound_args,
                                 is_negative: false,
                             });
