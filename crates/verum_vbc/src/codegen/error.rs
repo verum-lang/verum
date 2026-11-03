@@ -206,7 +206,7 @@ pub enum CodegenErrorKind {
     /// Declaration evidence cannot be erased even in lenient bootstrap mode.
     InvalidSourceSignature(String),
     /// A qualified source mount has no unique declaring callable.
-    InvalidSourceMount(String),
+    InvalidSourceMount(Vec<String>),
 }
 
 impl CodegenError {
@@ -555,7 +555,7 @@ impl fmt::Display for CodegenErrorKind {
             }
             Self::Internal(msg) => write!(f, "internal compiler error: {}", msg),
             Self::NotImplemented(feature) => write!(f, "not yet implemented: {}", feature),
-            Self::InvalidSourceMount(message) => write!(f, "invalid source mount: {message}"),
+            Self::InvalidSourceMount(messages) => write!(f, "invalid source mount: {}", messages.join("\n  ")),
             Self::InvalidSourceSignature(message) => write!(f, "invalid source signature: {message}"),
         }
     }

@@ -295,6 +295,28 @@ fn ordinary_single_file_with_inline_modules_refuses_an_unowned_mount() {
 }
 
 #[test]
+fn reports_every_unowned_mount_with_its_importing_module() {
+    let source = "module catalog;
+        module a { public fn first() -> Int { 1 } }
+        module b { public fn other() -> Int { 2 } }
+        module c { mount catalog.b.first; }
+        module d { mount catalog.a.other; mount catalog.b.first; }";
+    let ast = Parser::new(source).parse_module().unwrap();
+    let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
+    let verum_vbc::codegen::CodegenErrorKind::InvalidSourceMount(messages) = error.kind else {
+        panic!("expected invalid source mounts, got {error}");
+    };
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    for (target, owner) in [
+        ("catalog.b.first", "catalog.c"),
+        ("catalog.a.other", "catalog.d"),
+        ("catalog.b.first", "catalog.d"),
+    ] {
+        assert!(messages.iter().any(|message| message.contains(target) && message.contains(owner)));
+    }
+}
+
+#[test]
 fn a_foreign_mount_selects_its_declared_link_symbol_in_either_order() {
     let sources = [
         r#"module host.native; extern "C" { @link_name("real_symbol") public fn fetch() -> Int; }"#,

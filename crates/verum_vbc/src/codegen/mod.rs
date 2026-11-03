@@ -13407,6 +13407,7 @@ impl VbcCodegen {
     pub fn resolve_pending_imports(&mut self) {
         // Take ownership of pending imports to avoid borrow issues
         let pending = std::mem::take(&mut self.pending_imports);
+        let mut invalid_mounts = std::collections::BTreeSet::new();
 
         for (full_path, alias_name, owning_module) in pending {
             if full_path.is_empty() {
@@ -13485,7 +13486,11 @@ impl VbcCodegen {
                     ),
                     Ok(None) => {}
                     Err(message) => {
-                        self.source_declaration_error.get_or_insert(CodegenErrorKind::InvalidSourceMount(message));
+                        let message = match owning_module.as_deref() {
+                            Some(owner) => format!("{message} (mounted by `{owner}`)"),
+                            None => message,
+                        };
+                        invalid_mounts.insert(message);
                     }
                 }
                 continue;
@@ -13716,6 +13721,11 @@ impl VbcCodegen {
 
             // Still not found - this is OK, the stub mechanism will handle it at call time
             // This can happen for functions defined in other modules not yet compiled
+        }
+        if !invalid_mounts.is_empty() {
+            self.source_declaration_error.get_or_insert_with(|| {
+                CodegenErrorKind::InvalidSourceMount(invalid_mounts.into_iter().collect())
+            });
         }
     }
 
