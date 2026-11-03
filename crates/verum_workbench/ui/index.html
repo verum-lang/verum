@@ -60,7 +60,7 @@
           <label>Script permissions<select id="run-permissions" aria-describedby="permission-scope"><option value="source">Source / CLI defaults</option><option value="deny-all">Deny all grants</option><option value="allow-all">Allow all grants</option></select></label>
           <p id="proof-target-status" role="status">Waiting for current source analysis…</p>
           <p id="permission-scope">Interpreter permission checks are not OS isolation. Source defaults can permit unrestricted execution. Run trusted code only.</p>
-          <label class="check-option"><input id="runtime-diagnostics" type="checkbox"><span>Capture CBGR dispatch failures</span></label>
+          <label class="check-option"><input id="runtime-diagnostics" type="checkbox"><span>Record runtime diagnostics</span></label>
           <button id="preview-run" class="quiet-button">Inspect run plan</button>
           <details id="execution-plan" hidden open><summary>Execution plan</summary><pre id="execution-plan-content"></pre></details>
           <p>Proof checking applies to the selected declaration and scope. Compiler and runtime correspondence require separate evidence.</p>

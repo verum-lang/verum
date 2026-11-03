@@ -16,7 +16,7 @@ use verum_compiler::Session;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct RuntimeReportArgs {
-    /// Write bounded CBGR diagnostics for an interpreted file, stdin or expression.
+    /// Write bounded CBGR errors and measured VBC method dispatch for interpreted code.
     #[arg(long, value_name = "FILE", requires = "interp")]
     pub runtime_report: Option<PathBuf>,
     /// Invocation identity returned in the runtime report (generated if omitted).

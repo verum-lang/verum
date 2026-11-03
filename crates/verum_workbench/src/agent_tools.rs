@@ -174,7 +174,7 @@ fn define_tools() -> Vec<Tool> {
     let source = json!({"type":"string","description":"Complete Verum source for this revision"});
     let permissions = json!({"type":"string","enum":["source","deny-all","allow-all"],"description":"Script permission mode: source follows CLI/frontmatter defaults; deny-all clears grants; allow-all grants all kinds. Not an OS sandbox."});
     let timeout = json!({"type":"integer","minimum":1,"maximum":300000,"description":"Wall time budget in milliseconds; default 60000"});
-    let runtime_diagnostics = json!({"type":"boolean","description":"Capture bounded CBGR dispatch errors for this execution. Not allocation tracing or a proof of memory safety. Default false."});
+    let runtime_diagnostics = json!({"type":"boolean","description":"Record bounded CBGR errors and VBC method dispatch counts and inclusive handler times, bound to this invocation and source. Capture is limited to interpreter execution. Default false."});
     let proof_profile = json!({"type":"string","enum":verum_source_proof::SourceProfile::ALL,"description":"Source proof scope: logical theorem (default), or closed finite function contracts with proved helper-call obligations. Neither proves native compiler correspondence."});
     [
         (

@@ -36,7 +36,7 @@ export const translations = {
   '{calls} calls · {total} ns total · {peak} ns maximum': 'Вызовов: {calls} · всего {total} нс · максимум {peak} нс',
   'No retained method dispatch measurements.': 'Сохранённых замеров вызовов методов нет.',
   '{count} calls exceeded the capture capacity.': 'Вызовов вне лимита сбора: {count}.',
-  'Capture CBGR dispatch failures': 'Записывать ошибки диспетчера CBGR',
+  'Record runtime diagnostics': 'Записывать диагностику исполнения',
   'Waiting for runtime observations…': 'Ожидание наблюдений за выполнением…',
   'Runtime observations unavailable.': 'Наблюдения за выполнением недоступны.',
   '{count} dispatch observations': 'Наблюдений диспетчера: {count}',
