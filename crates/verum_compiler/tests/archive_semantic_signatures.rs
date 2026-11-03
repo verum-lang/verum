@@ -449,16 +449,17 @@ fn nested_dyn_arguments_keep_the_function_declaration_owner() {
     builder.add_module("core.base.memory", &shared, &[]).unwrap();
     let mut libraries = Vec::new();
     for owner in ["core.alpha", "core.beta"] {
-        let source = format!("module {owner};
+        let source = format!("module {owner}; mount core.base.memory.Shared;
             public type Store is protocol {{ fn load(&self) -> Int; }};
             public fn consume(store: &Shared<dyn Store>) {{}}");
         let ast = Parser::new(&source).parse_module().unwrap();
-        let module = VbcCodegen::with_config(CodegenConfig::new(owner))
-            .collect_declaration_interface(&[&ast]).unwrap();
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new(owner));
+        producer.import_bootstrap_nominal_dependencies(&[&ast], &[&shared]).unwrap();
+        let module = producer.collect_declaration_interface(&[&ast]).unwrap();
         builder.add_module(owner, &module, &[]).unwrap();
         libraries.push(module);
     }
-    let mounted = Parser::new("module core.api; mount core.beta.{Store as Backend};
+    let mounted = Parser::new("module core.api; mount core.beta.{Store as Backend}; mount core.base.memory.Shared;
         public fn read_backend(store: &Shared<dyn Backend>) {}").parse_module().unwrap();
     let mut producer = VbcCodegen::with_config(CodegenConfig::new("core.api"));
     producer.import_bootstrap_nominal_dependencies(&[&mounted], &libraries.iter().collect::<List<_>>()).unwrap();
@@ -468,7 +469,7 @@ fn nested_dyn_arguments_keep_the_function_declaration_owner() {
     let sidecar = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
     let decoded = verum_types::core_metadata::decode_metadata(&sidecar).unwrap();
     for eager in [false, true] {
-        let imports = "mount core.api.{read_backend}; mount core.alpha.{Store as A, consume as take_a};
+        let imports = "mount core.base.memory.Shared; mount core.api.{read_backend}; mount core.alpha.{Store as A, consume as take_a};
             mount core.beta.{Store as B, consume as take_b};";
         let accepted = errors(&decoded, &format!("{imports}
             fn accepted(a: &Shared<dyn A>, b: &Shared<dyn B>) {{ take_a(a); take_b(b); read_backend(b); }}"), eager);

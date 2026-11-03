@@ -255,6 +255,65 @@ impl VbcCodegen {
         selected.map(Some)
     }
 
+    /// Archive readers receive the declaration's selected type environment,
+    /// not import syntax that would need a different module graph to resolve.
+    pub(super) fn declaration_source_type_bindings(
+        &self,
+        owner: &str,
+    ) -> Option<verum_common::OrderedMap<Text, Option<Text>>> {
+        let named = self.source_type_mounts.get(&Text::from(owner))?;
+        let mut bindings: verum_common::OrderedMap<Text, Option<Text>> = named.iter()
+            .filter_map(|(name, binding)| {
+                let selected = self.select_type_mount(binding, owner)?;
+                let canonical = selected.and_then(|target| {
+                    let types = self.source_export_candidates_in(
+                        target, Some(owner), Some(DeclarationNamespace::Type),
+                    );
+                    if types.inaccessible || types.unresolved { return None; }
+                    if let Some(canonical) = types.nominal() { return Some(canonical.clone().into()); }
+                    if !types.declarations.is_empty() { return None; }
+                    let namespaces = self.source_export_candidates_in(
+                        target, Some(owner), Some(DeclarationNamespace::Module),
+                    );
+                    if namespaces.inaccessible || namespaces.unresolved { return None; }
+                    if namespaces.declarations.len() == 1 {
+                        return namespaces.declarations.keys().next().cloned().map(Into::into);
+                    }
+                    if !namespaces.declarations.is_empty() { return None; }
+                    // An unavailable declaration still has an exact selected
+                    // import identity. Preserve it for completion/conflict
+                    // checks; the reader must resolve it before using a type.
+                    Some(target.clone())
+                });
+                Some((name.clone(), canonical))
+            }).collect();
+
+        let Some(exports) = self.source_export_scope(owner) else { return Some(bindings) };
+        let mut pending: Vec<_> = exports.lexical_globs.iter()
+            .map(|path| path.select(self, owner).into_string()).collect();
+        let mut visited = HashSet::new();
+        let mut candidates = BTreeSet::new();
+        while let Some(path) = pending.pop() {
+            if !visited.insert(path.clone()) { continue; }
+            let Some(scope) = self.source_export_scope(&path) else { continue };
+            candidates.extend(scope.declarations.iter().filter(|(_, declarations)|
+                declarations.iter().any(|decl| decl.category == DeclarationCategory::Type))
+                .map(|(name, _)| name.clone()));
+            candidates.extend(scope.named.keys().cloned());
+            pending.extend(scope.globs.iter().map(|edge| edge.select(self, &path).into_string()));
+            pending.extend(scope.public_children.iter().cloned());
+        }
+        for name in candidates {
+            if bindings.contains_key(&Text::from(name.as_str()))
+                || self.type_name_to_id.contains_key(&format!("{owner}.{name}"))
+            { continue; }
+            if let Some(selected) = self.source_glob_type_path(&name, owner) {
+                bindings.insert(name.into(), selected.map(Into::into));
+            }
+        }
+        Some(bindings)
+    }
+
     /// Publish the completed declaration pass without copying bodies or
     /// interpreting function IDs from another compilation unit.
     pub fn publish_source_exports(&mut self, index: &mut SourceExports) {
@@ -631,6 +690,13 @@ impl VbcCodegen {
         name: &str,
         scope: &str,
     ) -> Option<Option<crate::types::TypeId>> {
+        self.source_glob_type_path(name, scope)
+            .map(|selected| selected.and_then(|canonical| self.type_name_to_id.get(&canonical).copied()))
+    }
+
+    /// Preserve the selected declaration path before lowering it to a local
+    /// TypeId; archives need this identity independently of descriptor slots.
+    fn source_glob_type_path(&self, name: &str, scope: &str) -> Option<Option<String>> {
         if name.contains('.') {
             return None;
         }
@@ -641,10 +707,12 @@ impl VbcCodegen {
             .lexical_globs;
         let mut found = None;
         let mut inaccessible = false;
+        let mut unresolved = false;
         for root in roots {
             let path = format!("{}.{name}", root.select(self, scope));
             let candidates = self.source_export_candidates_in(&path, Some(scope), Some(DeclarationNamespace::Type));
             inaccessible |= candidates.inaccessible || candidates.unresolved;
+            unresolved |= candidates.unresolved;
             if candidates.declarations.is_empty() || candidates.only_values() {
                 continue;
             }
@@ -656,8 +724,9 @@ impl VbcCodegen {
             }
             found = Some(nominal.clone());
         }
+        if unresolved { return Some(None); }
         match found {
-            Some(canonical) => Some(self.type_name_to_id.get(&canonical).copied()),
+            Some(canonical) => Some(Some(canonical)),
             None => inaccessible.then_some(None),
         }
     }

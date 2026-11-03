@@ -7311,20 +7311,7 @@ impl VbcCodegen {
         let mut bindings = crate::declaration_bindings_codec::Bindings::new();
         for owner in owners {
             let owner = Text::from(owner);
-            let source: Option<verum_common::OrderedMap<_, _>> = self.source_type_mounts.get(&owner)
-                .map(|names| names.iter().filter_map(|(name, binding)| {
-                    let target = self.select_type_mount(binding, &owner)?;
-                    // A qualified re-export may have a different declaring
-                    // owner. Only the exact registered path and its nominal
-                    // ID can establish that identity; never consult a leaf.
-                    let target = target.map(|target| {
-                        target.contains(".").then(|| self.type_name_to_id.get(target.as_str()))
-                            .flatten().and_then(|id| self.type_by_id(*id))
-                            .and_then(|descriptor| self.type_declaration_identity(descriptor))
-                            .unwrap_or_else(|| target.clone())
-                    });
-                    Some((name.clone(), target))
-                }).collect());
+            let source = self.declaration_source_type_bindings(&owner);
             let imported = self.imported_declaration_type_bindings.get(&owner);
             if source.is_some() && imported.is_some_and(|scope| scope != &source) {
                 return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
