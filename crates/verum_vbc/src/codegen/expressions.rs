@@ -13695,11 +13695,15 @@ impl VbcCodegen {
             _ => None,
         };
 
-        if let Some(owner) = &static_receiver_type
-            && method.name.chars().next().is_some_and(char::is_uppercase)
-            && self.declared_constructor(owner, method.name.as_str(), args.len())?.is_some()
+        // Resolve the complete declared namespace before module-call lookup can
+        // reduce it to a leaf. Dotted and imported owners denote the same sum.
+        if method.name.chars().next().is_some_and(char::is_uppercase)
+            && let Some(owner) = static_receiver_type.clone().or_else(|| {
+                self.try_flatten_module_path_resolved(receiver).map(|parts| parts.join("."))
+            })
+            && self.declared_constructor(&owner, method.name.as_str(), args.len())?.is_some()
         {
-            return self.compile_variant_constructor_hinted(method.name.as_str(), args, Some(owner));
+            return self.compile_variant_constructor_hinted(method.name.as_str(), args, Some(&owner));
         }
 
         // Packed storage belongs to the canonical byte declaration. The
@@ -23830,6 +23834,12 @@ impl VbcCodegen {
         // Use the *resolved* variant so `super` gets translated to the current
         // module's parent before lookup.
         if let Some(mut parts) = self.try_flatten_module_path_resolved(base) {
+            let owner = parts.join(".");
+            if field.chars().next().is_some_and(char::is_uppercase)
+                && self.declared_constructor(&owner, field, 0)?.is_some()
+            {
+                return self.compile_variant_constructor_hinted(field, &verum_common::List::new(), Some(&owner));
+            }
             parts.push(field.to_string());
 
             // #122 progressive-suffix: rewrite `core.`-rooted absolute

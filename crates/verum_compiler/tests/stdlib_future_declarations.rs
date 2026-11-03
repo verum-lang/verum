@@ -104,31 +104,34 @@ fn a_renamed_sum_owns_its_nullary_and_payload_constructors() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, source).unwrap();
     }
-    let archive = bootstrap(&core);
-    let module = archive.load_module("core.reader").unwrap();
-    let id = module.find_function_by_name("core.reader.both").unwrap();
-    let both = module.functions.iter().find(|function| function.id == id).unwrap();
-    let start = both.bytecode_offset as usize;
-    let code = decode_instructions(&module.bytecode[start..start + both.bytecode_length as usize]).unwrap();
-    let constructors: Vec<_> = code.into_iter().filter_map(|op| {
-        let Instruction::MakeVariantTyped { type_id, tag, field_count, .. } = op else { return None };
-        let ty = module.get_type(verum_vbc::types::TypeId(type_id)).unwrap();
-        let owner = ty.origin_module.and_then(|id| module.get_string(id))?;
-        (owner == "core.protocol" && module.get_string(ty.name) == Some("ActualError"))
-            .then_some((tag, field_count))
-    }).collect();
-    assert_eq!(constructors, [(1, 0), (0, 1)]);
-    let caller = "module app; mount core.reader.both; fn main() -> Int { both() }";
-    assert_eq!(execute(&archive, caller), 48);
-
     let path = core.join("reader/mod.vr");
     let source = fs::read_to_string(&path).unwrap();
-    for (valid, invalid, name) in [("ParseError.Partial))", "ParseError.Other))", "Other"),
-        ("ParseError.Corrupt(7)", "ParseError.Extra(7)", "Extra")] {
-        fs::write(&path, source.replace(valid, invalid)).unwrap();
-        let rejection = try_bootstrap(&core).err().unwrap_or_else(|| panic!("accepted {invalid}"));
-        let error = format!("{rejection:#}");
-        assert!(error.contains(name) && error.contains("ActualError"), "{error}");
+    for qualifier in ["ParseError", "core.protocol.ActualError"] {
+        fs::write(&path, source.replace("ParseError.", &format!("{qualifier}."))).unwrap();
+        let archive = bootstrap(&core);
+        let module = archive.load_module("core.reader").unwrap();
+        let id = module.find_function_by_name("core.reader.both").unwrap();
+        let both = module.functions.iter().find(|function| function.id == id).unwrap();
+        let start = both.bytecode_offset as usize;
+        let code = decode_instructions(&module.bytecode[start..start + both.bytecode_length as usize]).unwrap();
+        let constructors: Vec<_> = code.into_iter().filter_map(|op| {
+            let Instruction::MakeVariantTyped { type_id, tag, field_count, .. } = op else { return None };
+            let ty = module.get_type(verum_vbc::types::TypeId(type_id)).unwrap();
+            let owner = ty.origin_module.and_then(|id| module.get_string(id))?;
+            (owner == "core.protocol" && module.get_string(ty.name) == Some("ActualError"))
+                .then_some((tag, field_count))
+        }).collect();
+        assert_eq!(constructors, [(1, 0), (0, 1)]);
+        let caller = "module app; mount core.reader.both; fn main() -> Int { both() }";
+        assert_eq!(execute(&archive, caller), 48);
+
+        for (valid, invalid, name) in [("ParseError.Partial))", "ParseError.Other))", "Other"),
+            ("ParseError.Corrupt(7)", "ParseError.Extra(7)", "Extra")] {
+            fs::write(&path, source.replace(valid, invalid).replace("ParseError.", &format!("{qualifier}."))).unwrap();
+            let rejection = try_bootstrap(&core).err().unwrap_or_else(|| panic!("accepted {invalid}"));
+            let error = format!("{rejection:#}");
+            assert!(error.contains(name) && error.contains("ActualError"), "{error}");
+        }
     }
 }
 
