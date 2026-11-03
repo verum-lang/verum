@@ -67,8 +67,9 @@ mount core.collections.list.{List};
 mount core.collections.deque.{Deque};
 mount core.base.memory.Shared;
 mount core.sync.mutex.Mutex;
-mount core.async.waker.{Waker};
+mount core.async.waker.{Waker, Context};
 mount core.async.poll.{Poll};
+mount core.async.future.Future;
 
 // =============================================================================
 // Internal state

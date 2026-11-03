@@ -62,7 +62,7 @@ mount collections.List;
 mount sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount sync.Mutex;
 mount super.task.{JoinError, JoinHandle};
-mount super.Future;
+mount super.{Future, Poll, Context};
 
 // =============================================================================
 // Error Behavior
