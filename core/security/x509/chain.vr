@@ -53,7 +53,7 @@ module core.security.x509.chain;
 mount core.collections.list.{List};
 mount core.security.x509.certificate.{X509Certificate};
 mount core.security.x509.algorithm.{SignatureAlg, RsaPssHash};
-mount core.security.x509.spki.{SubjectPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
+mount core.security.x509.spki.{Spki, SubjectPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
 mount core.security.x509.time.{is_valid_at};
 mount core.security.x509.ext.{ExtensionSet};
 mount core.security.x509.ext.name_constraints.{NameConstraints};
