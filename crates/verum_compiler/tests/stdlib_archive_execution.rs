@@ -629,16 +629,21 @@ fn archived_select_preserves_both_channel_receiver_witnesses() {
 
 #[test]
 #[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
-fn pool_checkout_passes_the_session_declaration_to_the_error_mapping_call() {
+fn pool_methods_pass_the_session_declaration_to_the_error_mapping_call() {
     use verum_vbc::{bytecode::decode_instructions, instruction::Instruction, types::{TypeId, TypeRef}};
 
     let source = r#"
         module app;
         mount core.database.common.error.DbError;
-        mount core.database.common.pool_impl.ConnectionPool;
+        mount core.database.common.pool_impl.{ConnectionPool, PoolConfig};
         type Failure is Database(DbError);
         type Reader is { pool: ConnectionPool<Int> };
         implement Reader {
+            fn open(limits: PoolConfig) -> Result<Reader, Failure> {
+                let factory = || -> Result<Int, DbError> { Result.Ok(17) };
+                let pool = ConnectionPool.launch(limits, factory).map_err(|error| Failure.Database(error))?;
+                Result.Ok(Reader { pool })
+            }
             fn checkout(&self) -> Result<Int, Failure> {
                 let mut loan = self.pool.acquire().map_err(|error| Failure.Database(error))?;
                 Result.Ok(*loan.conn_mut())
@@ -646,28 +651,57 @@ fn pool_checkout_passes_the_session_declaration_to_the_error_mapping_call() {
         }
     "#;
     let module = compile_from_archive(source);
-    let function = module.functions.iter().find(|function|
-        module.get_string(function.name).is_some_and(|name| name.ends_with("Reader.checkout"))
-    ).unwrap();
-    let start = function.bytecode_offset as usize;
-    let code = decode_instructions(&module.bytecode[start..start + function.bytecode_length as usize]).unwrap();
-    let witnesses = code.windows(2).find_map(|pair| match pair {
-        [Instruction::SetCallWitness { type_args }, Instruction::CallM { method_id, .. }]
-            if module.get_string(verum_vbc::types::StringId(*method_id)) == Some("Result.map_err") => Some(type_args),
-        _ => None,
-    }).expect("witnesses of the actual Result.map_err call");
-    let TypeRef::Instantiated { base, args } = &witnesses[0] else {
-        panic!("PooledConnection<Int> expected, got {:?}", witnesses[0]);
-    };
-    let declared_name = |id| module.get_string(module.get_type(id).unwrap().name).unwrap()
-        .rsplit('.').next().unwrap();
-    assert_eq!(declared_name(*base), "PooledConnection");
-    assert_eq!(args.as_slice(), &[TypeRef::Concrete(TypeId::INT)]);
-    let [_, TypeRef::Concrete(error), TypeRef::Concrete(failure), TypeRef::Function { params, return_type, contexts }] =
-        witnesses.as_slice() else { panic!("incomplete mapping witnesses: {witnesses:?}") };
-    assert_eq!(declared_name(*error), "DbError");
-    assert_eq!(declared_name(*failure), "Failure");
-    assert_eq!(params.as_slice(), &[TypeRef::Concrete(*error)]);
-    assert_eq!(**return_type, TypeRef::Concrete(*failure));
-    assert!(contexts.is_empty());
+    for (caller, container) in [("Reader.checkout", "PooledConnection"), ("Reader.open", "ConnectionPool")] {
+        let function = module.functions.iter().find(|function|
+            module.get_string(function.name).is_some_and(|name| name.ends_with(caller))
+        ).unwrap();
+        let start = function.bytecode_offset as usize;
+        let code = decode_instructions(&module.bytecode[start..start + function.bytecode_length as usize]).unwrap();
+        let witnesses = code.windows(2).find_map(|pair| match pair {
+            [Instruction::SetCallWitness { type_args }, Instruction::CallM { method_id, .. }]
+                if module.get_string(verum_vbc::types::StringId(*method_id)) == Some("Result.map_err") => Some(type_args),
+            _ => None,
+        }).expect("witnesses of the actual Result.map_err call");
+        let TypeRef::Instantiated { base, args } = &witnesses[0] else {
+            panic!("{container}<Int> expected, got {:?}", witnesses[0]);
+        };
+        let declared_name = |id| module.get_string(module.get_type(id).unwrap().name).unwrap()
+            .rsplit('.').next().unwrap();
+        assert_eq!(declared_name(*base), container);
+        assert_eq!(args.as_slice(), &[TypeRef::Concrete(TypeId::INT)]);
+        let [_, TypeRef::Concrete(error), TypeRef::Concrete(failure), TypeRef::Function { params, return_type, contexts }] =
+            witnesses.as_slice() else { panic!("{caller}: incomplete mapping witnesses: {witnesses:?}") };
+        assert_eq!(declared_name(*error), "DbError");
+        assert_eq!(declared_name(*failure), "Failure");
+        assert_eq!(params.as_slice(), &[TypeRef::Concrete(*error)]);
+        assert_eq!(**return_type, TypeRef::Concrete(*failure));
+        assert!(contexts.is_empty());
+    }
+}
+
+#[test]
+#[ignore = "requires the candidate VERUM_TEST_FROZEN_STDLIB archive"]
+fn a_generic_guard_extracted_by_match_is_destroyed_on_early_return() {
+    let source = r#"
+        module app;
+        mount core.sync.mutex.Mutex;
+        type Payload<T> is { item: T };
+        type Slot<Marker, T> is { marker: Marker, gate: Mutex<Payload<T>> };
+        implement<Marker, T> Slot<Marker, T> {
+            fn checkout(&self) -> Bool {
+                loop {
+                    let guard = match self.gate.lock() {
+                        Result.Ok(held) => held,
+                        Result.Err(_) => { return false; }
+                    };
+                    return true;
+                }
+            }
+        }
+        fn main() -> Int {
+            let slot: Slot<Bool, Int> = Slot { marker: false, gate: Mutex.new(Payload { item: 17 }) };
+            if slot.checkout() && slot.gate.try_lock().is_ok() { 17 } else { 0 }
+        }
+    "#;
+    assert_eq!(execute_from_archive(source), 17);
 }

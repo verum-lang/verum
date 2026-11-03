@@ -76,7 +76,7 @@ impl VbcCodegen {
     }
 
     fn callable_result_name(&self, ty: &TypeRef) -> Maybe<Text> {
-        self.callable_type_name(ty)
+        self.scoped_callable_type_name(ty, Some(&self.ctx.current_generic_param_ids))
             .or_else(|| self.type_ref_to_field_name(ty).map(Into::into))
     }
 
@@ -236,15 +236,24 @@ impl VbcCodegen {
         receiver_types: &ExpressionTypes,
     ) -> Maybe<TypeRef> {
         let ExprKind::MethodCall {
+            receiver,
             method,
             type_args,
             args,
-            ..
         } = &expr.kind
         else {
             unreachable!("method expression");
         };
         let carried_receiver = receiver_types.callable.as_ref();
+        // An associated function has no self argument. Its call operands can
+        // specialize the owner, for example through a local factory's return.
+        if carried_receiver.is_none()
+            && self.declared_nominal_receiver_name(receiver).is_some()
+            && !args.is_empty()
+            && let Some(result) = self.source_call_declaration(expr, None, 0)
+        {
+            return Some(result);
+        }
         if carried_receiver.is_none()
             && !args.iter().any(|arg| {
                 let mut arg = arg;
@@ -261,10 +270,7 @@ impl VbcCodegen {
             return self.declared_method_result_type(&owner, method.name.as_str(), type_args);
         }
         let receiver_name = match carried_receiver {
-            Some(ty) => self
-                .callable_type_name(ty)
-                .map(|name| name.to_string())
-                .or_else(|| self.type_ref_to_field_name(ty))?,
+            Some(ty) => self.callable_result_name(ty)?.to_string(),
             None => receiver_types.declared.as_ref()?.to_string(),
         };
         let mut owner = self
@@ -340,7 +346,10 @@ impl VbcCodegen {
                 substitution.bind(*id, ty);
             }
         }
-        Some(substitution.apply(result))
+        // The callee and caller have distinct binder scopes, even when their
+        // numerical slot IDs coincide. Only a bound result can enter the caller.
+        crate::codegen::constructor_types::fully_bound(result, &substitution)
+            .then(|| substitution.apply(result))
     }
 
     fn method_result_name_fallback(
