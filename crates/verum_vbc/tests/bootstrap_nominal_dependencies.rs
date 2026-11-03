@@ -48,6 +48,33 @@ fn named_id(module: &VbcModule, name: &str) -> TypeId {
 }
 
 #[test]
+fn implicit_prelude_uses_the_selected_export_and_respects_explicit_mounts() {
+    let provider = producer("sample.source", "module sample.source; public type Parcel<T> is { value: T };");
+    let decoy = producer("sample.other", "module sample.other; public type Parcel<T> is { other: T };");
+    for (mount, visible) in [("", true), ("mount core.prelude.Other;", false)] {
+        let ast = source(&format!("module consumer; {mount} fn keep<T>(value: Parcel<T>) -> Int {{ 1 }}"));
+        let mut compiler = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        compiler.import_bootstrap_nominal_dependencies_with_resolver(
+            &[&ast], &[&decoy, &provider], |path| {
+                (path == "core.prelude.Parcel").then(|| "sample.source.Parcel".into())
+            },
+        ).unwrap();
+        compiler.collect_unit_declarations(&[&ast]).unwrap();
+        let module = compiler.compile_function_bodies(&ast).unwrap();
+        let keep = module.get_function(module.find_function_by_name("consumer.keep").unwrap()).unwrap();
+        let declared = &keep.semantic_parameter_types().unwrap()[0];
+        if visible {
+            let Some(TypeRef::Instantiated { base, args }) = declared else { panic!("{declared:?}") };
+            assert_eq!(args.as_slice(), &[TypeRef::Generic(keep.type_params[0].id)]);
+            let owner = module.get_type(*base).unwrap().origin_module.unwrap();
+            assert_eq!(module.get_string(owner), Some("sample.source"));
+        } else {
+            assert!(declared.is_none());
+        }
+    }
+}
+
+#[test]
 fn relative_mounts_preserve_the_source_nominal_owner() {
     let owner = producer("core.handles", "module core.handles; public type Handle is { raw: Int };");
     let stranger = producer("unrelated", "module unrelated; public type Handle is { raw: Bool };");

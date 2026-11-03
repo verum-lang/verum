@@ -153,3 +153,78 @@ public fn probe() -> Int { assert_eq(run(Container { selected: Stage.Save(41), u
         assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), 1);
     }
 }
+
+#[test]
+fn lexical_wildcards_preserve_reexported_nominal_witnesses_without_selecting_a_sibling() {
+    use verum_vbc::types::TypeRef;
+
+    let source = [
+        "module sample.storage; public type Parcel<A, B> is { first: A, second: B };
+         type Secret is { value: Int }; public(crate) type Local is { value: Int };",
+        "module sample.other; public type Parcel<T> is { other: T };",
+        "module sample.facade; public mount sample.storage.*;",
+        "module sample.consumer; mount sample.facade.*; mount sample.storage.*;\n\
+         fn forward<T>(item: Parcel<Int, T>) -> Parcel<Int, T> { item }
+         fn restricted(item: Local) -> Int { 1 }
+         fn locked(item: Secret) -> Int { 2 }",
+        "module outside.client; mount sample.facade.*;
+         fn leaked(item: Local) -> Int { 3 }
+         fn hidden(item: Secret) -> Int { 4 }",
+        "module sample.conflict; mount sample.facade.*; mount sample.other.*;\n\
+         fn unresolved<T>(item: Parcel<T>) -> Int { 0 }",
+    ];
+    let files: Vec<_> = source.iter().map(|s| Parser::new(s).parse_module().unwrap()).collect();
+    for reverse in [false, true] {
+        let mut files: Vec<_> = files.iter().collect();
+        if reverse { files.reverse(); }
+        let mut compiler = VbcCodegen::with_config(CodegenConfig::new("sample"));
+        compiler.collect_unit_declarations(&files).unwrap();
+        compiler.compile_unit_items(&files, ItemFailurePolicy::Strict).unwrap();
+        let module = compiler.finalize_module().unwrap();
+        let own_type = module.types.iter().find(|t| {
+            module.get_string(t.name) == Some("Parcel")
+                && t.origin_module.and_then(|name| module.get_string(name)) == Some("sample.storage")
+        }).unwrap().id;
+        let function = |name: &str| module.get_function(module.find_function_by_name(name).unwrap()).unwrap();
+        let forward = function("sample.consumer.forward");
+        let expected = TypeRef::Instantiated { base: own_type, args: vec![
+            TypeRef::Concrete(verum_vbc::types::TypeId::INT), TypeRef::Generic(forward.type_params[0].id),
+        ] };
+        assert_eq!(forward.semantic_parameter_types().unwrap()[0].as_ref(), Some(&expected));
+        assert_eq!(forward.semantic_return.as_ref(), Some(&expected));
+        assert!(function("sample.consumer.restricted").semantic_parameter_types().unwrap()[0].is_some());
+        for denied in ["sample.consumer.locked", "outside.client.hidden", "outside.client.leaked"] {
+            assert!(function(denied).semantic_parameter_types().unwrap()[0].is_none(), "{denied}");
+        }
+        assert!(function("sample.conflict.unresolved").semantic_parameter_types().unwrap()[0].is_none());
+    }
+}
+
+
+#[test]
+fn unmounted_same_leaf_does_not_replace_a_scalar_argument() {
+    use verum_vbc::types::{TypeId, TypeRef};
+    let files = [
+        "module sample.foreign; public type Byte is { foreign: Int };",
+        "module sample.generic; public type Boxed<T> is { value: T };",
+        "module sample.use; mount sample.generic.Boxed;
+         fn implicit(x: Boxed<Byte>) -> Int { 1 }",
+        "module sample.explicit; mount sample.generic.Boxed; mount sample.foreign.Byte;
+         fn named(x: Boxed<Byte>) -> Int { 2 }",
+    ].map(|s| Parser::new(s).parse_module().unwrap());
+    let modules: Vec<_> = files.iter().collect();
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("sample"));
+    compiler.collect_unit_declarations(&modules).unwrap();
+    compiler.compile_unit_items(&modules, ItemFailurePolicy::Strict).unwrap();
+    let module = compiler.finalize_module().unwrap();
+    let argument = |name| {
+        let func = module.get_function(module.find_function_by_name(name).unwrap()).unwrap();
+        let Some(TypeRef::Instantiated { args, .. }) = &func.semantic_parameter_types().unwrap()[0] else {
+            panic!("missing nominal parameter in {name}");
+        };
+        args[0].base_type_id().unwrap()
+    };
+    assert_eq!(argument("sample.use.implicit"), TypeId::BYTE);
+    let explicit = module.get_type(argument("sample.explicit.named")).unwrap();
+    assert_eq!(explicit.origin_module.and_then(|id| module.get_string(id)), Some("sample.foreign"));
+}

@@ -16,18 +16,18 @@
 use crate::decl::{MountDecl, Visibility};
 use crate::span::Span;
 use crate::{Ident, Item, ItemKind, MountTree, MountTreeKind, Path, PathSegment};
-use verum_common::{List, Maybe, Text};
+use verum_common::{Maybe, Text};
 
-/// Prepend the implicit `mount core.prelude.*;` unless the module
+/// Select the implicit `mount core.prelude.*;` unless the module
 /// opted out, the process opted out, or the module already mounts
 /// `core.prelude` itself (idempotence — the explicit declaration
 /// stays the single import site).
-pub fn inject_implicit_prelude_mount(module: &mut crate::Module) {
+pub fn implicit_prelude_path(module: &crate::Module) -> Option<&'static str> {
     if module.has_no_implicit_prelude() {
-        return;
+        return None;
     }
     if std::env::var_os("VERUM_NO_IMPLICIT_PRELUDE").is_some() {
-        return;
+        return None;
     }
     let already_mounted = module.items.iter().any(|item| {
         let ItemKind::Mount(decl) = &item.kind else {
@@ -44,14 +44,20 @@ pub fn inject_implicit_prelude_mount(module: &mut crate::Module) {
         });
         names.next() == Some("core") && names.next() == Some("prelude")
     });
-    if already_mounted {
+    (!already_mounted).then_some("core.prelude")
+}
+
+/// Insert the selected mount for consumers that walk syntax directly.
+pub fn inject_implicit_prelude_mount(module: &mut crate::Module) {
+    let Some(path) = implicit_prelude_path(module) else {
         return;
-    }
+    };
 
     let span = Span::new(0, 0, module.file_id);
-    let mut segments = List::new();
-    segments.push(PathSegment::Name(Ident::new(Text::from("core"), span)));
-    segments.push(PathSegment::Name(Ident::new(Text::from("prelude"), span)));
+    let segments = path
+        .split('.')
+        .map(|part| PathSegment::Name(Ident::new(Text::from(part), span)))
+        .collect();
     let tree = MountTree {
         kind: MountTreeKind::Glob(Path::new(segments, span)),
         alias: Maybe::None,
@@ -63,5 +69,7 @@ pub fn inject_implicit_prelude_mount(module: &mut crate::Module) {
         alias: Maybe::None,
         span,
     };
-    module.items.insert(0, Item::new(ItemKind::Mount(decl), span));
+    module
+        .items
+        .insert(0, Item::new(ItemKind::Mount(decl), span));
 }

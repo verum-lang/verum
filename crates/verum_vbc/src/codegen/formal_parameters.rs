@@ -188,6 +188,9 @@ impl VbcCodegen {
         {
             return true;
         }
+        if let Some(selected) = self.source_glob_type_id(&name, owner) {
+            return selected.is_some();
+        }
         self.nominal_type_id(&name).is_some_and(|id| id.is_builtin()
             || (id.well_known_name() == Some(name.as_str())
                 && (self.is_builtin_ctor_collection(&name)

@@ -528,6 +528,46 @@ pub enum ItemFailurePolicy {
     StubAndContinue,
 }
 
+/// Reachable source files contribute declarations under their own file modules,
+/// including a single-segment root header loaded by a nested consumer.
+struct MountedSourceFiles {
+    modules: Vec<Module>,
+    parents: std::collections::HashMap<verum_ast::FileId, String>,
+    root: Option<(std::path::PathBuf, String)>,
+    next_id: u32,
+}
+
+impl MountedSourceFiles {
+    fn new(root: &str) -> Self {
+        let root = std::fs::canonicalize(root).ok().and_then(|path| {
+            let source = std::fs::read_to_string(path.join("mod.vr")).ok()?;
+            let module = verum_fast_parser::Parser::new(&source).parse_module().ok()?;
+            VbcCodegen::extract_source_module_name(&module).map(|name| (path, name))
+        });
+        Self { modules: Vec::new(), parents: Default::default(), root, next_id: 0 }
+    }
+
+    fn parent_for(&self, file: &str) -> Option<String> {
+        let (root, name) = self.root.as_ref()?;
+        let file = VbcCodegen::canonicalize_memo(file)?;
+        let directory = std::path::Path::new(&file).parent()?.strip_prefix(root).ok()?;
+        let mut parent = name.clone();
+        for part in directory {
+            parent.push('.');
+            parent.push_str(part.to_str()?);
+        }
+        Some(parent)
+    }
+
+    fn register(&mut self, file: &str) -> CodegenResult<verum_ast::FileId> {
+        let id = verum_ast::FileId::new(self.next_id);
+        self.next_id = self.next_id.checked_add(1)
+            .ok_or_else(|| CodegenError::internal("too many mounted source files"))?;
+        if let Some(parent) = self.parent_for(file) { self.parents.insert(id, parent); }
+        Ok(id)
+    }
+}
+
 impl VbcCodegen {
     /// Simple display name of a TypeRef base (archive import leg of
     /// REFINE-FIELD-DYNAMIC-BYPASS-1): enough for CmpF/CmpI selection.
@@ -1026,6 +1066,9 @@ pub struct VbcCodegen {
     module_constant_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
     /// Select module heads lexically before resolving a member in that namespace.
     source_module_owners: verum_ast::checked_const::ModuleOwners,
+    /// Loader-owned parents for the distinct files of a mounted declaration unit.
+    /// Empty for normal projects, whose unit already supplies its canonical parent.
+    mounted_file_parents: std::collections::HashMap<verum_ast::FileId, String>,
     count_module_scope: Option<verum_common::Text>,
     declared_count_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
     /// Successfully selected imports retain their actual lexical count scope.
@@ -2336,6 +2379,7 @@ impl VbcCodegen {
             constant_initializers: verum_common::Map::new(),
             module_constant_bindings: verum_common::Map::new(),
             source_module_owners: Default::default(),
+            mounted_file_parents: Default::default(),
             count_module_scope: None,
             declared_count_bindings: verum_common::Map::new(),
             scoped_count_imports: verum_common::Map::new(),
@@ -2888,7 +2932,7 @@ impl VbcCodegen {
                         protocol_name.clone(),
                         ProtocolInfo {
                             name: protocol_name,
-                            source_module: Self::resolve_full_module_path(module, &self.config.module_name)
+                            source_module: self.source_file_owner(module, &self.config.module_name)
                                 .unwrap_or_else(|| self.config.module_name.clone()),
                             default_methods,
                             super_protocols,
@@ -2963,7 +3007,7 @@ impl VbcCodegen {
         // `super.darwin.tls.ctx_get`.
         let prev = self.ctx.current_source_module.take();
         if let Some(name) =
-            Self::resolve_full_module_path(module, &self.config.module_name)
+            self.source_file_owner(module, &self.config.module_name)
         {
             self.ctx.current_source_module = Some(name);
         }
@@ -3206,6 +3250,11 @@ impl VbcCodegen {
         }
         // Submodule file: prepend the parent path.
         Some(format!("{}.{}", parent_module_name, ast_name))
+    }
+
+    fn source_file_owner(&self, module: &Module, fallback: &str) -> Option<String> {
+        let parent = self.mounted_file_parents.get(&module.file_id).map(String::as_str).unwrap_or(fallback);
+        Self::resolve_full_module_path(module, parent)
     }
 
     /// Marks all type names in a module as user-defined.
@@ -4870,7 +4919,7 @@ impl VbcCodegen {
             }
         }
         let source_module =
-            Self::resolve_full_module_path(module, parent).unwrap_or_else(|| parent.to_owned());
+            self.source_file_owner(module, parent).unwrap_or_else(|| parent.to_owned());
         let mut names = std::collections::HashMap::new();
         for item in &module.items {
             if let ItemKind::Mount(decl) = &item.kind {
@@ -5655,7 +5704,7 @@ impl VbcCodegen {
     pub fn compile_module_items(&mut self, module: &Module) -> CodegenResult<()> {
         let prev = self.ctx.current_source_module.take();
         if let Some(name) =
-            Self::resolve_full_module_path(module, &self.config.module_name)
+            self.source_file_owner(module, &self.config.module_name)
         {
             self.ctx.current_source_module = Some(name);
         }
@@ -5683,7 +5732,7 @@ impl VbcCodegen {
     pub fn compile_module_items_lenient(&mut self, module: &Module) -> CodegenResult<()> {
         let prev = self.ctx.current_source_module.take();
         if let Some(name) =
-            Self::resolve_full_module_path(module, &self.config.module_name)
+            self.source_file_owner(module, &self.config.module_name)
         {
             self.ctx.current_source_module = Some(name);
         }
@@ -8133,7 +8182,7 @@ impl VbcCodegen {
     /// through mounted aliases and compile fine (T0743).
     fn scope_to_own_module(&mut self, module: &Module) -> Option<String> {
         let prev = self.ctx.current_source_module.clone();
-        if let Some(name) = Self::resolve_full_module_path(module, &self.config.module_name) {
+        if let Some(name) = self.source_file_owner(module, &self.config.module_name) {
             self.ctx.current_source_module = Some(name);
         }
         prev
@@ -8401,7 +8450,7 @@ impl VbcCodegen {
             // `unit_module_paths`. The file-id form stays as the
             // fallback for a file with no `module X;` declaration, where
             // it was never ambiguous.
-            let declared_owner = Self::resolve_full_module_path(module, &self.config.module_name);
+            let declared_owner = self.source_file_owner(module, &self.config.module_name);
             if declared_owner.is_none()
                 && (self.config.module_name.is_empty() || self.config.module_name == "main")
             {
@@ -8512,7 +8561,7 @@ impl VbcCodegen {
         self.alias_scope = Some(verum_ast::decl::locally_visible_type_names(
             module.items.as_slice(),
         ));
-        let owner = Self::resolve_full_module_path(module, &self.config.module_name)
+        let owner = self.source_file_owner(module, &self.config.module_name)
             .unwrap_or_else(|| self.config.module_name.clone());
         for item in module.items.iter() {
             if !self.should_compile_item(item) {
@@ -8576,7 +8625,7 @@ impl VbcCodegen {
         for module in files {
             let previous_scope = self.ctx.current_source_module.take();
             if let Some(name) =
-                Self::resolve_full_module_path(module, &self.config.module_name)
+                self.source_file_owner(module, &self.config.module_name)
             {
                 self.ctx.current_source_module = Some(name);
             }
@@ -8662,7 +8711,7 @@ impl VbcCodegen {
         // siblings arrive as separate units today, and the guard needs
         // to know about a sibling collected in an earlier call.
         for module in files {
-            let owner = Self::resolve_full_module_path(module, &self.config.module_name);
+            let owner = self.source_file_owner(module, &self.config.module_name);
             self.source_type_mounts
                 .entry(owner.as_deref().unwrap_or(&self.config.module_name).into())
                 .or_default();
@@ -8702,7 +8751,7 @@ impl VbcCodegen {
             // `super.darwin.tls.ctx_get` resolve through.
             let previous_scope = self.ctx.current_source_module.take();
             if let Some(name) =
-                Self::resolve_full_module_path(module, &self.config.module_name)
+                self.source_file_owner(module, &self.config.module_name)
             {
                 self.ctx.current_source_module = Some(name);
             }
@@ -8717,7 +8766,7 @@ impl VbcCodegen {
             self.ctx.current_source_module = previous_scope;
             result?;
             let fields = self.declared_field_type_names(module, &self.config.module_name);
-            let source_module = Self::resolve_full_module_path(module, &self.config.module_name)
+            let source_module = self.source_file_owner(module, &self.config.module_name)
                 .unwrap_or_else(|| self.config.module_name.clone());
             let prefix = format!("{source_module}.");
             // Keep local bare field names in their declaring scope. Qualified
@@ -8765,11 +8814,13 @@ impl VbcCodegen {
         mount_cost::reset();
         let t0 = std::time::Instant::now();
         // Claim identities across the reachable graph before collecting any declaration.
-        let mut imported = Vec::new();
+        let mut imported = MountedSourceFiles::new(core_root);
         self.resolve_mounts_recursive(module, source_path, core_root, &mut resolved_files, &mut imported)?;
-        let files: Vec<_> = imported.iter().collect();
+        let files: Vec<_> = imported.modules.iter().collect();
         let collect = std::time::Instant::now();
+        let previous = std::mem::replace(&mut self.mounted_file_parents, imported.parents);
         let result = self.collect_unit_declarations(&files);
+        self.mounted_file_parents = previous;
         mount_cost::add_collect(collect.elapsed());
         mount_cost::report(source_path, t0.elapsed());
         result
@@ -8791,7 +8842,7 @@ impl VbcCodegen {
         source_path: &str,
         core_root: &str,
         resolved_files: &mut std::collections::HashSet<String>,
-        imported: &mut Vec<Module>,
+        imported: &mut MountedSourceFiles,
     ) -> CodegenResult<()> {
         let Some((inline_name, parent_segments)) = module_path.split_last() else {
             return Ok(());
@@ -8827,6 +8878,14 @@ impl VbcCodegen {
             let verum_common::Maybe::Some(inline_items) = &inline.items else {
                 return Ok(());
             };
+            // The dependency files carry the targets. The inline module owns
+            // the public export edges that make those targets visible here.
+            let parent_scope = imported.parent_for(&candidate).unwrap_or_else(|| parent_path.join("."));
+            let parent = Self::resolve_full_module_path(&parent_module, &parent_scope)
+                .unwrap_or(parent_scope);
+            let owner = crate::module::qualify_module_name(&parent, inline_name);
+            self.source_module_owners.declare(&owner);
+            self.collect_callable_exports(&owner, inline_items);
             // A synthetic module holding just the inline module's mount
             // declarations — resolve_mounts_recursive does the rest.
             let mut mounts: verum_common::List<verum_ast::Item> = verum_common::List::new();
@@ -8875,7 +8934,7 @@ impl VbcCodegen {
         source_path: &str,
         core_root: &str,
         resolved_files: &mut std::collections::HashSet<String>,
-        imported: &mut Vec<Module>,
+        imported: &mut MountedSourceFiles,
     ) -> CodegenResult<()> {
 
         // Collect all files to parse (avoid borrow issues with recursive calls)
@@ -8986,16 +9045,18 @@ impl VbcCodegen {
                 CodegenError::internal(format!("reading mounted file {file_path}: {error}"))
             })?;
             let t_parse = std::time::Instant::now();
-            let mut parser = verum_fast_parser::Parser::new(&source);
-            let parsed = parser.parse_module();
+            let file_id = imported.register(&file_path)?;
+            let parsed = verum_fast_parser::FastParser::new().parse_module_str(&source, file_id);
             mount_cost::add_parse(source.len(), t_parse.elapsed());
-            let dependency = parsed.map_err(|error| {
+            let mut dependency = parsed.map_err(|error| {
                 CodegenError::internal(format!("parsing mounted file {file_path}: {error:?}"))
             })?;
             self.resolve_mounts_recursive(
                 &dependency, &file_path, core_root, resolved_files, imported,
             )?;
-            imported.push(dependency);
+            // Dependency declarations see the same ambient vocabulary as the entry file.
+            verum_ast::prelude::inject_implicit_prelude_mount(&mut dependency);
+            imported.modules.push(dependency);
         }
         Ok(())
     }

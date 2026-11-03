@@ -220,3 +220,25 @@ fn foreign_same_leaf_maybe_is_not_the_intrinsic_location_contract() {
         .expect_err("foreign Maybe must remain distinct");
     assert!(error.contains("error descriptor must declare"), "{error}");
 }
+
+#[test]
+fn a_nested_consumer_keeps_the_file_mount_roots_inline_exports() {
+    let fixture = Fixture::new("core.base");
+    fixture.write("mod.vr", "module core; public module prelude { public mount super.storage.*; }");
+    fixture.write("storage.vr", "module storage; public type Parcel<T> is { value: T };");
+    let source = "module core.application.worker; mount core.*;
+                  public fn forward<T>(x: Parcel<T>) -> Parcel<T> { x }";
+    fixture.write("application/worker.vr", source);
+    let path = fixture.0.join("application/worker.vr");
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("core.application.worker"))
+        .compile_module_with_mounts(&ast, path.to_str().unwrap(), fixture.0.to_str().unwrap()).unwrap();
+    let function = module.get_function(module.find_function_by_name("core.application.worker.forward").unwrap()).unwrap();
+    let Some(TypeRef::Instantiated { base, args }) = &function.semantic_parameter_types().unwrap()[0] else {
+        panic!("missing source parameter on nested caller");
+    };
+    assert_eq!(args.as_slice(), &[TypeRef::Generic(function.type_params[0].id)]);
+    let parcel = module.get_type(*base).unwrap();
+    assert_eq!(parcel.origin_module.and_then(|id| module.get_string(id)), Some("core.storage"));
+    assert_eq!(function.semantic_parameter_types().unwrap()[0], function.semantic_return);
+}

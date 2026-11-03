@@ -59,9 +59,25 @@ pub(super) struct CallableExports {
 struct ModuleExports {
     declarations: HashMap<String, BTreeSet<String>>,
     values: HashSet<String>,
+    visibility: HashMap<String, verum_ast::Visibility>,
     named: HashMap<String, BTreeSet<String>>,
     globs: BTreeSet<String>,
+    lexical_globs: BTreeSet<String>,
     public_children: BTreeSet<String>,
+}
+
+#[derive(Default)]
+struct ExportCandidates {
+    declarations: BTreeSet<String>,
+    values: HashSet<String>,
+    inaccessible: bool,
+}
+
+impl ExportCandidates {
+    fn nominal(&self) -> Option<&String> {
+        let name = self.declarations.first()?;
+        (self.declarations.len() == 1 && self.values.contains(name)).then_some(name)
+    }
 }
 
 impl VbcCodegen {
@@ -71,9 +87,18 @@ impl VbcCodegen {
             if !self.should_compile_item(item) {
                 continue;
             }
+            let mut value = |name: &verum_ast::Ident, visibility: &verum_ast::Visibility| {
+                exports.values.insert(name.name.to_string());
+                exports
+                    .visibility
+                    .insert(name.name.to_string(), visibility.clone());
+            };
             match &item.kind {
                 ItemKind::Function(declaration) => {
                     let name = declaration.name.name.as_str();
+                    exports
+                        .visibility
+                        .insert(name.to_owned(), declaration.visibility.clone());
                     exports
                         .declarations
                         .entry(name.to_owned())
@@ -81,15 +106,27 @@ impl VbcCodegen {
                         .insert(format!("{owner}.{name}"));
                 }
                 ItemKind::Type(declaration) => {
-                    exports.values.insert(declaration.name.name.to_string());
+                    value(&declaration.name, &declaration.visibility);
                 }
                 ItemKind::Const(declaration) => {
-                    exports.values.insert(declaration.name.name.to_string());
+                    value(&declaration.name, &declaration.visibility);
                 }
                 ItemKind::Static(declaration) => {
-                    exports.values.insert(declaration.name.name.to_string());
+                    value(&declaration.name, &declaration.visibility);
                 }
-                ItemKind::Mount(mount) if mount.visibility.is_public() => {
+                ItemKind::Mount(mount) => {
+                    for parts in Self::extract_glob_mount_paths(&mount.tree, &[]) {
+                        let path = Self::resolve_module_path_head_in_scope(&parts, owner)
+                            .unwrap_or(parts)
+                            .join(".");
+                        if mount.visibility.is_public() {
+                            exports.globs.insert(path.clone());
+                        }
+                        exports.lexical_globs.insert(path);
+                    }
+                    if !mount.visibility.is_public() {
+                        continue;
+                    }
                     visit_named_mounts(
                         &mount.tree,
                         "",
@@ -106,12 +143,6 @@ impl VbcCodegen {
                                 .insert(target);
                         },
                     );
-                    for parts in Self::extract_glob_mount_paths(&mount.tree, &[]) {
-                        let path = Self::resolve_module_path_head_in_scope(&parts, owner)
-                            .unwrap_or(parts)
-                            .join(".");
-                        exports.globs.insert(path);
-                    }
                 }
                 ItemKind::Module(module) if module.items.is_some() => {
                     let child =
@@ -136,10 +167,12 @@ impl VbcCodegen {
             scope.declarations.entry(name).or_default().extend(targets);
         }
         scope.values.extend(exports.values);
+        scope.visibility.extend(exports.visibility);
         for (alias, targets) in exports.named {
             scope.named.entry(alias).or_default().extend(targets);
         }
         scope.globs.extend(exports.globs);
+        scope.lexical_globs.extend(exports.lexical_globs);
         scope.public_children.extend(exports.public_children);
     }
 
@@ -191,11 +224,15 @@ impl VbcCodegen {
 
     /// Follow public export edges once for both nominal IDs and callable bindings.
     /// Only selections which converge on one declaration identify a symbol.
-    fn source_export_candidates(&self, path: &str) -> (BTreeSet<String>, HashSet<String>) {
+    fn source_export_candidates(
+        &self,
+        path: &str,
+        glob_consumer: Option<&str>,
+    ) -> ExportCandidates {
+        let root = path;
+        let mut found = ExportCandidates::default();
         let mut pending = vec![(path.to_owned(), true)];
         let mut visited = HashSet::new();
-        let mut declarations = BTreeSet::new();
-        let mut values = HashSet::new();
         while let Some((path, includes_declarations)) = pending.pop() {
             if !visited.insert((path.clone(), includes_declarations)) {
                 continue;
@@ -206,11 +243,28 @@ impl VbcCodegen {
             let Some(source) = self.source_callable_exports.modules.get(owner) else {
                 // Imported nominal IDs and callable descriptors are independent
                 // witnesses. A constructor elsewhere cannot turn a type into a call.
-                if self.type_name_to_id.contains_key(&path) {
-                    values.insert(path.clone());
-                    declarations.insert(path);
+                if let Some(id) = self.type_name_to_id.get(&path) {
+                    if let Some(consumer) = glob_consumer {
+                        let visible = self.type_by_id(*id).is_some_and(|descriptor| {
+                            use crate::types::Visibility;
+                            match descriptor.visibility {
+                                Visibility::Public => true,
+                                Visibility::Cog => {
+                                    path == root
+                                        && owner.split('.').next() == consumer.split('.').next()
+                                }
+                                Visibility::Private => path == root && owner == consumer,
+                            }
+                        });
+                        if !visible {
+                            found.inaccessible = true;
+                            continue;
+                        }
+                    }
+                    found.values.insert(path.clone());
+                    found.declarations.insert(path);
                 } else if self.ctx.functions.contains_key(&path) {
-                    declarations.insert(path);
+                    found.declarations.insert(path);
                 }
                 continue;
             };
@@ -220,11 +274,31 @@ impl VbcCodegen {
                     .map(|key| key.into_string())
                     .unwrap_or_else(|| written.to_owned())
             };
+            if includes_declarations
+                && let Some(consumer) = glob_consumer
+                && let Some(visibility) = source.visibility.get(name)
+            {
+                // A direct wildcard uses the importer's visibility. A public
+                // re-export cannot widen the declaration's access.
+                let visible = if path == root {
+                    if matches!(visibility, verum_ast::Visibility::PublicIn(_)) {
+                        visibility.resolve_declared_scope(owner).is_ok_and(|policy| policy.visible_from(owner.split('.'), consumer.split('.')))
+                    } else {
+                        visibility.visible_from(owner.split('.'), consumer.split('.'))
+                    }
+                } else {
+                    visibility.is_public()
+                };
+                if !visible {
+                    found.inaccessible = true;
+                    continue;
+                }
+            }
             if includes_declarations && let Some(targets) = source.declarations.get(name) {
-                declarations.extend(targets.iter().cloned());
+                found.declarations.extend(targets.iter().cloned());
             } else if includes_declarations && source.values.contains(name) {
-                values.insert(path.clone());
-                declarations.insert(path);
+                found.values.insert(path.clone());
+                found.declarations.insert(path);
             } else if let Some(targets) = source.named.get(name) {
                 pending.extend(targets.iter().map(|target| (anchored(target), true)));
             } else {
@@ -244,7 +318,51 @@ impl VbcCodegen {
                 );
             }
         }
-        (declarations, values)
+        found
+    }
+
+    /// A lexical wildcard has lower precedence than a declaration or a named
+    /// import. A populated but ambiguous export must block the bare-name path.
+    pub(super) fn source_glob_type_id(
+        &self,
+        name: &str,
+        scope: &str,
+    ) -> Option<Option<crate::types::TypeId>> {
+        if name.contains('.') {
+            return None;
+        }
+        let roots = &self
+            .source_callable_exports
+            .modules
+            .get(scope)?
+            .lexical_globs;
+        let mut found = None;
+        let mut inaccessible = false;
+        for root in roots {
+            let Some(path) = self.source_module_owners.member(
+                &format!("{root}.{name}"),
+                scope,
+                self.source_module_root(),
+            ) else {
+                continue;
+            };
+            let candidates = self.source_export_candidates(&path, Some(scope));
+            inaccessible |= candidates.inaccessible;
+            if candidates.declarations.is_empty() {
+                continue;
+            }
+            let Some(nominal) = candidates.nominal() else {
+                return Some(None);
+            };
+            if found.as_ref().is_some_and(|other| other != nominal) {
+                return Some(None);
+            }
+            found = Some(nominal.clone());
+        }
+        match found {
+            Some(canonical) => Some(self.type_name_to_id.get(&canonical).copied()),
+            None => inaccessible.then_some(None),
+        }
     }
 
     pub(super) fn source_export_type_id(
@@ -255,22 +373,19 @@ impl VbcCodegen {
         let path = self
             .source_module_owners
             .member(path, scope, self.source_module_root())?;
-        let (mut declarations, values) = self.source_export_candidates(&path);
-        if declarations.len() != 1 {
-            return None;
-        }
-        let key = declarations.pop_first()?;
-        values
-            .contains(&key)
-            .then(|| self.type_name_to_id.get(&key).copied())
-            .flatten()
+        let candidates = self.source_export_candidates(&path, None);
+        self.type_name_to_id.get(candidates.nominal()?).copied()
     }
 
     pub(super) fn resolve_source_callable_export(
         &self,
         path: &str,
     ) -> Result<Option<(String, FunctionInfo)>, String> {
-        let (mut declarations, values) = self.source_export_candidates(path);
+        let ExportCandidates {
+            mut declarations,
+            values,
+            ..
+        } = self.source_export_candidates(path, None);
         if declarations.len() > 1 {
             return Err(format!(
                 "ambiguous callable mount `{path}`: {}",

@@ -280,11 +280,11 @@ impl VbcCodegen {
         }
         let mut names = BTreeSet::new();
         let mut scopes: Vec<_> = sources.iter().map(|source| {
-            let owner = Self::resolve_full_module_path(source, &self.config.module_name)
+            let owner = self.source_file_owner(source, &self.config.module_name)
                 .unwrap_or_else(|| self.config.module_name.clone());
-            (owner, source.items.as_slice())
+            (owner, source.items.as_slice(), verum_ast::prelude::implicit_prelude_path(source))
         }).collect();
-        while let Some((owner, items)) = scopes.pop() {
+        while let Some((owner, items, prelude)) = scopes.pop() {
             let qualify = |written: String| {
                 // Path's Relative segment renders as `.::`, hence `..`
                 // after the same separator normalization used by mounts.
@@ -302,7 +302,7 @@ impl VbcCodegen {
                 if !self.should_compile_item(item) { continue; }
                 if let ItemKind::Module(child) = &item.kind && let Some(items) = &child.items {
                     let scope = crate::module::qualify_module_name(&owner, child.name.name.as_str());
-                    scopes.push((scope, items.as_slice()));
+                    scopes.push((scope, items.as_slice(), prelude));
                     continue;
                 }
                 paths.visit_item(item);
@@ -320,11 +320,11 @@ impl VbcCodegen {
             names.extend(bindings.values().cloned().map(&qualify));
             for name in paths.names {
                 let (head, tail) = name.split_once('.').unwrap_or((&name, ""));
-                if !bindings.contains_key(head) && !globs.is_empty() {
+                if !bindings.contains_key(head) && (!globs.is_empty() || prelude.is_some()) {
                     // Resolve only the written glob's public exports. Retain
                     // its source authority so semantic signatures see the
                     // same binding while collecting and compiling this file.
-                    let candidates: BTreeSet<_> = globs.iter().filter_map(|glob| {
+                    let candidates: BTreeSet<_> = globs.iter().map(String::as_str).chain(prelude).filter_map(|glob| {
                         let written = format!("{glob}.{head}");
                         let declared = resolve_export(&written)
                             .or_else(|| resolve_export(&format!("core.{written}")))?;
@@ -348,7 +348,7 @@ impl VbcCodegen {
                         }
                         continue;
                     }
-                    if tail.is_empty() {
+                    if tail.is_empty() && !globs.is_empty() {
                         // A glob miss cannot borrow an unrelated globally
                         // unique leaf. Local declarations are collected later.
                         continue;
@@ -788,7 +788,10 @@ impl VbcCodegen {
             return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")))
                 .or_else(|| self.source_export_type_id(mounted, owner));
         }
-        lookup(name)
+        if let Some(selected) = self.source_glob_type_id(name, owner) { return selected; }
+        // A language scalar spelling has declaration authority in every scope.
+        // An unrelated module's bare compatibility entry cannot shadow it.
+        TypeId::from_well_known_scalar_name(name).or_else(|| lookup(name))
     }
 
     fn bootstrap_function(&self, module: &VbcModule, id: u32) -> Option<&FunctionInfo> {

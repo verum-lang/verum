@@ -69,7 +69,7 @@ impl VbcCodegen {
             }
         }
         for file in files {
-            let owner = Self::resolve_full_module_path(file, &self.config.module_name)
+            let owner = self.source_file_owner(file, &self.config.module_name)
                 .unwrap_or_else(|| self.config.module_name.clone());
             let previous = self.ctx.current_source_module.replace(owner.clone());
             let mut bindings = Map::new();
