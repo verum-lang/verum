@@ -4215,66 +4215,24 @@ impl TypeError {
     }
 }
 
-/// Find similar names using edit distance (for suggestions)
-fn find_similar_names<'a>(target: &str, candidates: &'a [Text]) -> Vec<&'a str> {
+/// Find similar names with exact bounded distances and stable candidate order.
+fn find_similar_names<'a>(target: &str, candidates: &'a [Text]) -> List<&'a str> {
     let target_lower = target.to_lowercase();
-    let mut similar: Vec<(&'a str, usize)> = candidates
-        .iter()
-        .filter_map(|c| {
-            let c_lower = c.to_lowercase();
-            let dist = edit_distance(&target_lower, &c_lower);
-            // Only suggest if edit distance is reasonably small (< 3) or prefix matches
-            if dist < 3
-                || c_lower.starts_with(target_lower.as_str())
-                || target_lower.starts_with(c_lower.as_str())
-            {
-                Some((c.as_str(), dist))
-            } else {
-                None
-            }
-        })
-        .collect();
-    similar.sort_by_key(|(_, d)| *d);
-    similar.into_iter().take(3).map(|(s, _)| s).collect()
-}
-
-/// Simple edit distance calculation for name suggestions
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a_chars: Vec<char> = a.chars().collect();
-    let b_chars: Vec<char> = b.chars().collect();
-    let m = a_chars.len();
-    let n = b_chars.len();
-
-    if m == 0 {
-        return n;
-    }
-    if n == 0 {
-        return m;
-    }
-
-    let mut dp = vec![vec![0usize; n + 1]; m + 1];
-
-    for i in 0..=m {
-        dp[i][0] = i;
-    }
-    for j in 0..=n {
-        dp[0][j] = j;
-    }
-
-    for i in 1..=m {
-        for j in 1..=n {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] {
-                0
-            } else {
-                1
-            };
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
-        }
-    }
-
-    dp[m][n]
+    let target_len = target_lower.chars().count();
+    let mut query = verum_diagnostics::name_distance::EditDistance::new(&target_lower);
+    let mut similar: List<(&'a str, usize)> = candidates.iter().filter_map(|candidate| {
+        let lower = candidate.to_lowercase();
+        // For a prefix, inserting the suffix attains the character-count lower
+        // bound exactly, even when it exceeds the ordinary suggestion threshold.
+        let distance = if lower.starts_with(target_lower.as_str()) || target_lower.starts_with(lower.as_str()) {
+            Some(target_len.abs_diff(lower.chars().count()))
+        } else {
+            query.within(&lower, 2)
+        }?;
+        Some((candidate.as_str(), distance))
+    }).collect();
+    similar.sort_by_key(|(_, distance)| *distance);
+    similar.into_iter().take(3).map(|(name, _)| name).collect()
 }
 
 pub type Result<T> = std::result::Result<T, TypeError>;

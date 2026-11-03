@@ -416,19 +416,12 @@ impl ErrorRecovery {
 
     /// Suggest similar names for undefined identifiers.
     pub fn suggest_similar_names(&self, name: &str, available: &[Text]) -> List<Text> {
-        let mut suggestions = List::new();
-
-        for candidate in available {
-            let distance = levenshtein_distance(name, candidate);
-            if distance <= self.max_edit_distance {
-                suggestions.push(candidate.clone());
-            }
-        }
-
-        // Sort by edit distance
-        let mut suggestions_vec: List<Text> = suggestions.clone();
-        suggestions_vec.sort_by_key(|s: &Text| levenshtein_distance(name, s.as_str()));
-        suggestions_vec
+        let mut query = crate::name_distance::EditDistance::new(name);
+        let mut suggestions: List<(&Text, usize)> = available.iter().filter_map(|candidate| {
+            query.within(candidate, self.max_edit_distance).map(|distance| (candidate, distance))
+        }).collect();
+        suggestions.sort_by_key(|(_, distance)| *distance);
+        suggestions.into_iter().map(|(name, _)| name.clone()).collect()
     }
 
     /// Generate a placeholder type for error recovery.
@@ -1013,46 +1006,7 @@ impl RecoveryAction {
 }
 
 /// Compute Levenshtein distance between two strings.
-fn levenshtein_distance(s1: &str, s2: &str) -> usize {
-    let len1 = s1.chars().count();
-    let len2 = s2.chars().count();
-
-    if len1 == 0 {
-        return len2;
-    }
-    if len2 == 0 {
-        return len1;
-    }
-
-    let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
-
-    for i in 0..=len1 {
-        matrix[i][0] = i;
-    }
-    for j in 0..=len2 {
-        matrix[0][j] = j;
-    }
-
-    let s1_chars: List<char> = s1.chars().collect();
-    let s2_chars: List<char> = s2.chars().collect();
-
-    for i in 1..=len1 {
-        for j in 1..=len2 {
-            let cost = if s1_chars[i - 1] == s2_chars[j - 1] {
-                0
-            } else {
-                1
-            };
-
-            matrix[i][j] = std::cmp::min(
-                std::cmp::min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
-                matrix[i - 1][j - 1] + cost,
-            );
-        }
-    }
-
-    matrix[len1][len2]
-}
+use crate::name_distance::levenshtein_distance;
 
 /// Partial compilation state for error recovery.
 #[derive(Debug, Clone)]
@@ -1208,10 +1162,11 @@ pub fn find_closest_name<'a>(
 ) -> Option<&'a str> {
     let mut best_match: Option<&str> = None;
     let mut best_distance = usize::MAX;
+    let mut query = crate::name_distance::EditDistance::new(name);
 
     for candidate in candidates {
-        let distance = levenshtein_distance(name, candidate);
-        if distance < best_distance && distance <= max_distance {
+        let Some(distance) = query.within(candidate, max_distance.min(best_distance)) else { continue; };
+        if distance < best_distance {
             best_distance = distance;
             best_match = Some(candidate);
         }

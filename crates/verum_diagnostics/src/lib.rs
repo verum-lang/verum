@@ -69,6 +69,7 @@ pub mod diagnostic;
 pub mod emitter;
 pub mod explanations;
 pub mod must_handle_errors;
+pub mod name_distance;
 /// Proof-failure repair-suggestion catalogue — typed
 /// `ProofFailureKind` + `RepairEngine` trait + reference V0 catalogue
 /// + composite engine for adapter chaining.
