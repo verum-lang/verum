@@ -1521,6 +1521,8 @@ a {
 .topology-site { display: block; width: 100%; text-align: start; padding: var(--space-1) 0; color: var(--accent-text); font-family: var(--font-code); }
 .topology-detail > code, .topology-detail > .declaration-name { display: inline-block; margin-inline-end: var(--space-2); }
 .topology-coverage { margin-block: var(--space-3) var(--space-2); color: var(--muted); font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; }
+.topology-project-failures > summary { cursor: pointer; }
+.topology-project-failures > .topology-edge { margin-inline-start: var(--space-2); }
 .topology-gaps { border-block-start: 1px solid var(--subtle-border); margin-block-end: var(--space-3); }
 .topology-gaps > summary { color: var(--warning); }
 .architecture-receipt { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }

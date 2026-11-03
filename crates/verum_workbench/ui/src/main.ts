@@ -13,10 +13,10 @@ import { installPanels } from './panels';
 import { installExplorer } from './explorer';
 import { icon, installIcons, type IconName } from './icons';
 import { installTooltips } from './tooltips';
-import { moduleNeighborhood, type ProjectAnalysis, type ImportSite } from './topology';
+import { moduleNeighborhood, type ProjectAnalysis, type ImportSite, type ImportFailure } from './topology';
 import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
-import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type Range } from './language';
+import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type SourceLocation, type Range } from './language';
 import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribute, type Content, type Locale } from './i18n';
 import { api, initialToken, isConnected, connectSession, onSessionChange } from './api';
 import { SessionAccessError, SessionChangedError } from './session';
@@ -358,18 +358,44 @@ function drawTopology() {
     ? m('Import coverage: {analyzed} analyzed documents · {indexed} indexed sources', { analyzed: graph.analyzed, indexed: graph.indexed })
     : m('Modules inspected: {inspected} / {indexed} · unresolved imports: {unresolved}',
       { inspected: graph.coverage.inspected_modules, indexed: graph.indexed, unresolved: graph.coverage.unresolved_mounts });
-  view.append(center, lanes, node('p', 'topology-coverage', coverage));
+  view.append(center, lanes);
+  function failureRow(site: { source: string; location: SourceLocation }, reason?: string) {
+    const row = node('div', 'topology-detail');
+    const entry = workspaceFilePath(site.location.uri, root) === null
+      ? node('code', 'topology-site', site.source)
+      : button(site.source, () => navigateDefinition(site.location, analysis.project_revision), 'topology-site');
+    row.append(entry, node('span', 'muted', reason || m('Resolution unavailable')));
+    return row;
+  }
+  const failures = graph.coverage?.failures;
+  if (failures?.length) {
+    const all = node('details', 'topology-project-failures');
+    all.append(node('summary', 'topology-coverage', coverage));
+    all.addEventListener('toggle', () => {
+      if (!all.open || all.childElementCount > 1) return;
+      const modules = new Map<string, ImportFailure[]>();
+      for (const failure of failures) {
+        const sites = modules.get(failure.importer);
+        if (sites) sites.push(failure); else modules.set(failure.importer, [failure]);
+      }
+      for (const [owner, sites] of modules) {
+        const group = node('details', 'topology-edge');
+        const title = node('summary');
+        title.append(icon('chevronRight'), moduleName(owner), node('span', 'topology-count', String(sites.length)));
+        group.append(title);
+        group.addEventListener('toggle', () => {
+          if (group.open && group.childElementCount === 1) group.append(...sites.map(s => failureRow(s, s.reason)));
+        });
+        all.append(group);
+      }
+    });
+    view.append(all);
+  } else view.append(node('p', 'topology-coverage', coverage));
   if (graph.gaps.length) {
     const gaps = node('details', 'topology-gaps');
     const summary = node('summary');
     summary.append(icon('chevronRight'), node('span', '', m('Unresolved imports in this module')), node('span', 'topology-count', String(graph.gaps.length)));
-    gaps.append(summary);
-    for (const { site, reason } of graph.gaps) {
-      const row = node('div');
-      row.append(button(site.source, () => navigateDefinition(site.location, analysis.project_revision), 'topology-site'),
-        node('span', 'muted', reason || m('Resolution unavailable')));
-      gaps.append(row);
-    }
+    gaps.append(summary, ...graph.gaps.map(({ site, reason }) => failureRow(site, reason)));
     view.append(gaps);
   }
 }

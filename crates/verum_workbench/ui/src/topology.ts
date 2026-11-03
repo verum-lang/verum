@@ -1,12 +1,13 @@
 import type { Analysis, Binding, SourceLocation } from './language.ts';
 
 export type ProjectSource = { uri: string; module?: string };
+export type ImportFailure = { importer: string; source: string; location: SourceLocation; reason: string };
 export type ProjectAnalysis = {
   project_revision: string;
   sources?: ProjectSource[];
   documents: Array<Analysis & { uri: string }>;
   issues?: string[];
-  import_topology?: { inspected_modules: number; unresolved_mounts: number; edges: Array<{
+  import_topology?: { inspected_modules: number; unresolved_mounts: number; failures?: ImportFailure[]; edges: Array<{
     importer: string; provider: string; location: SourceLocation; source: string; names: string[];
   }> };
 };
