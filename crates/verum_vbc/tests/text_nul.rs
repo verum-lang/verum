@@ -37,6 +37,9 @@ fn controls() -> Int {
     assert_eq(decoded.as_bytes()[0], 0_u8);
     assert_eq(decoded.as_bytes()[1], 65_u8);
     assert_eq(decoded.as_bytes()[2], 0_u8);
+    let invalid: List<Byte> = [65_u8, 0xc3_u8, 0xa9_u8, 0xff_u8];
+    let failure = Text.from_utf8(invalid.as_slice()).unwrap_err();
+    assert_eq(failure.valid_up_to, 3);
     let mut dynamic = Text.new();
     dynamic.push_str(&"a"); dynamic.push_str(&"\0");
     assert_eq(dynamic.len(), 2);
@@ -52,8 +55,12 @@ fn controls() -> Int {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/text/text.vr"),
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../core"))
         .expect("production Text module");
-    let modules = [&maybe, &result, &caller];
+    // A mount brings the declaration into scope. Execution also needs List's destructor body.
+    let list = Parser::new(include_str!("../../../core/collections/list.vr"))
+        .parse_module().expect("List grammar");
+    let modules = [&list, &maybe, &result, &caller];
     codegen.collect_unit_declarations(&modules).expect("declarations");
+    codegen.resolve_pending_imports();
     codegen.compile_unit_items(&modules, ItemFailurePolicy::Strict).expect("bodies");
     let mut module = codegen.finalize_module().expect("bytecode");
     module.resolve_protocol_dispatch();

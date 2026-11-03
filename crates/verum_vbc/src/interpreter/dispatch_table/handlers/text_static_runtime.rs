@@ -32,7 +32,7 @@ use super::super::super::error::InterpreterResult;
 use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::cbgr_helpers::{resolve_arg_value, resolve_receiver_place, write_through_ref};
-use super::heap_helpers::{extract_byte_slice, wrap_in_variant};
+use super::heap_helpers::{alloc_record_n_fields, extract_byte_slice, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
 use crate::instruction::Reg;
 use crate::value::Value;
@@ -209,7 +209,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 }
                 Err(e) => {
                     let valid_up_to = Value::from_i64(e.valid_up_to() as i64);
-                    let utf8_err = wrap_in_variant(state, "Utf8Error", 0, &[valid_up_to])?;
+                    let utf8_err = alloc_record_n_fields(state, "Utf8Error", &[valid_up_to])?;
                     Ok(Some(wrap_in_variant(state, "Result", 1, &[utf8_err])?))
                 }
             }
