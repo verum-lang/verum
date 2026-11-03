@@ -81,6 +81,31 @@ impl VbcCodegen {
         bindings.all(|other| other == first).then_some(first)
     }
 
+    /// A for-loop on a source nominal uses its selected IntoIterator.Item
+    /// declaration, instantiated with the arguments of that value.
+    pub(super) fn into_iterator_item(&self, ty: &TypeRef) -> Option<TypeRef> {
+        use verum_common::well_known_types::WellKnownProtocol;
+        let (id, args) = match ty {
+            TypeRef::Concrete(id) => (*id, &[][..]),
+            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+            _ => return None,
+        };
+        let owner = self.type_by_id(id)?;
+        if owner.type_params.len() != args.len() { return None; }
+        let protocol = WellKnownProtocol::IntoIterator;
+        let implementations = owner.protocols.iter().filter(|implementation| {
+            let Some(declaration) = self.type_by_id(crate::types::TypeId(implementation.protocol.0)) else {
+                return false;
+            };
+            let name = self.ctx.strings.get(declaration.name.0 as usize);
+            let module = declaration.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize));
+            name.is_some_and(|name| protocol.matches(name.rsplit('.').next().unwrap_or(name)))
+                && module.is_some_and(|module| protocol.canonical_archive_modules().contains(&module.as_str()))
+        });
+        let item = self.associated_binding(implementations, "Item")?;
+        Some(TypeSubstitution::new(&owner.type_params, args).apply(item))
+    }
+
     fn future_output_declaration(&self, owner: crate::types::TypeId) -> Option<&TypeRef> {
         let protocol = self.future_implementation_for_type(owner)?.protocol;
         self.associated_binding(

@@ -63,3 +63,49 @@ fn sibling_result_uses_callee_declarations_for_generic_payloads() {
         assert_eq!(result.as_i64(), 26);
     }
 }
+
+#[test]
+fn iterator_binds_the_declared_element_of_a_qualified_call_result() {
+    let sources = [
+        "module core.base.iterator; public type IntoIterator is protocol { type Item; };",
+        "module core.collections.list; mount core.base.iterator.IntoIterator;
+         public type List<T> is { len: Int, cap: Int, ptr: &unsafe T };
+         implement<T> IntoIterator for List<T> { type Item = T; }",
+        "module sample.types; public type Result<T, E> is Ok(T) | Err(E);",
+        "module sample.provider; mount sample.types.Result; mount core.collections.list.List;
+         public type Addr is V4(Int) | V6(Int);
+         public type Other is V6(Int) | V4(Int);
+         public fn addresses(n: Int) -> Result<core.collections.list.List<sample.provider.Addr>, Int> { Result.Err(n) }",
+        "module sample.consumer; mount sample.types.Result; mount sample.provider.addresses;
+         fn total(n: Int) -> Result<Int, Int> {
+             let result = addresses(n)?;
+             let mut total = 0;
+             for address in result { if let V4(value) = address { total = total + value; } }
+             Result.Ok(total)
+         }",
+    ];
+    for (owner, accepted) in [("core.base.iterator", true), ("sample.counterfeit", false)] {
+        let modules: Vec<_> = sources
+            .iter()
+            .map(|source| {
+                Parser::new(&source.replace("core.base.iterator", owner))
+                    .parse_module()
+                    .unwrap()
+            })
+            .collect();
+        let files: Vec<_> = modules.iter().collect();
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("sample"));
+        codegen.collect_unit_declarations(&files).unwrap();
+        let result = codegen.compile_unit_items(&files, ItemFailurePolicy::Strict);
+        if accepted {
+            result.unwrap();
+        } else {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no declared tag for variant pattern 'V4'")
+            );
+        }
+    }
+}

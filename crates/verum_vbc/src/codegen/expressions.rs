@@ -19226,7 +19226,7 @@ impl VbcCodegen {
         ) {
             use crate::types::{TypeId, TypeRef};
             let container = container_for_element.unwrap_or(iter);
-            let declared = self.declared_expression_result(container, None, 0, 0);
+            let declared = self.source_expression_declaration(container, None, 0);
             let mut owner = declared.as_ref();
             while let Some(TypeRef::Reference { inner, .. }) = owner {
                 owner = Some(inner);
@@ -19237,6 +19237,7 @@ impl VbcCodegen {
                         args.first().cloned()
                     }
                 Some(TypeRef::Array { element, .. } | TypeRef::Slice(element)) => Some(element.as_ref().clone()),
+                Some(ty) if container_for_element.is_none() => self.into_iterator_item(ty),
                 _ => None,
             }
         } else {
