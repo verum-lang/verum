@@ -194,11 +194,8 @@ fn resolve_unit_receiver_protocol_impl(
                     .find_function_by_name(&qualified)
                     .filter(|f| has_body(*f))
                     .or_else(|| {
-                        let dotted = format!(".{}.{}", tname, method);
-                        state.module.functions.iter().find_map(|f| {
-                            let n = state.module.strings.get(f.name).unwrap_or("");
-                            (n.ends_with(dotted.as_str()) && f.bytecode_length > 0)
-                                .then_some(f.id)
+                        state.module.functions_with_suffix(&qualified).find_map(|(_, f, name)| {
+                            (name != qualified && f.bytecode_length > 0).then_some(f.id)
                         })
                     });
             }
@@ -1391,10 +1388,8 @@ pub(super) fn handle_bound_method(
     // The `Shared.clone` exception is RETIRED with the rest of the
     // interception (T1159) — nothing owns `Shared` but its own body now.
     if method_name.ends_with(".clone") && args.count == 0 {
-        let concrete = state.module.functions.iter().enumerate().find_map(|(i, f)| {
-            let name = state.module.strings.get(f.name).unwrap_or("");
-            (name == method_name.as_str() && f.params.len() == 1).then_some(FunctionId(i as u32))
-        });
+        let concrete = state.module.functions_named(&method_name)
+            .find(|(_, f)| f.params.len() == 1).map(|(id, _)| id);
         if let Some(fid) = concrete {
             let result = super::super::call_function_sync(state, fid, &[dispatch_receiver])?;
             state.set_reg(dst, result);
@@ -3266,14 +3261,9 @@ pub(super) fn handle_bound_method(
                 // Module-qualified impl spelling ("core.x.Ty.method") —
                 // dotted-suffix pass so a real impl is never shadowed
                 // by the builtin fallback below.
-                let dotted = format!(".{}.{}", ty, method_name);
-                for func in &state.module.functions {
-                    let fname = state.module.strings.get(func.name).unwrap_or("");
-                    if fname.ends_with(&dotted) && func.bytecode_length > 0 {
-                        found_func_id = Some(func.id);
-                        break;
-                    }
-                }
+                found_func_id = state.module.functions_with_suffix(&qualified).find_map(|(_, f, name)| {
+                    (name != qualified && f.bytecode_length > 0).then_some(f.id)
+                });
             }
         }
         // A concrete Clone implementation has priority. Otherwise use the
@@ -3367,11 +3357,8 @@ pub(super) fn handle_bound_method(
                 .module
                 .find_function_by_name("Formatter.write_str")
                 .or_else(|| {
-                    let suffix = ".Formatter.write_str";
-                    state.module.functions.iter().find_map(|f| {
-                        let n = state.module.strings.get(f.name).unwrap_or("");
-                        (n.ends_with(suffix) && f.bytecode_length > 0)
-                            .then_some(f.id)
+                    state.module.functions_with_suffix("Formatter.write_str").find_map(|(_, f, name)| {
+                        (name != "Formatter.write_str" && f.bytecode_length > 0).then_some(f.id)
                     })
                 });
             if let (Some(farg), Some(wfid)) = (formatter_arg, write_fid) {
@@ -3668,19 +3655,11 @@ pub(super) fn handle_bound_method(
                 // Support both qualified registrations (e.g.,
                 // "core.term.layout.FlexItem.min") and bare ones
                 // ("FlexItem.min") — the prefix must end with the type name.
-                let dotted = format!(".{}.{}", ty_name, method_name);
-                let bare = format!("{}.{}", ty_name, method_name);
                 if found_func_id.is_none() {
-                for func in &state.module.functions {
-                    let func_name = state.module.strings.get(func.name).unwrap_or("");
-                    let type_match = func_name == bare || func_name.ends_with(&dotted);
-                    if type_match
-                        && (func.params.len() == expected_param_count || func.register_count > 0)
-                    {
-                        found_func_id = Some(func.id);
-                        break;
-                    }
-                }
+                    let qualified = format!("{ty_name}.{method_name}");
+                    found_func_id = state.module.functions_with_suffix(&qualified).find_map(|(_, f, _)| {
+                        (f.params.len() == expected_param_count || f.register_count > 0).then_some(f.id)
+                    });
                 }
                 // FATREF-DISPATCH-ROUTE-1 (#51): a slice receiver whose
                 // method has no `Slice.<m>` body must NOT fall to the
@@ -3749,19 +3728,10 @@ pub(super) fn handle_bound_method(
                     && actual_name != codegen_qualifier
                     && let Some(bare) = method_name.rsplit('.').next()
                 {
-                    let dotted = format!(".{}.{}", actual_name, bare);
-                    let bare_q = format!("{}.{}", actual_name, bare);
-                    for func in &state.module.functions {
-                        let func_name = state.module.strings.get(func.name).unwrap_or("");
-                        let m = func_name == bare_q || func_name.ends_with(&dotted);
-                        if m
-                            && (func.params.len() == expected_param_count
-                                || func.register_count > 0)
-                        {
-                            found_func_id = Some(func.id);
-                            break;
-                        }
-                    }
+                    let qualified = format!("{actual_name}.{bare}");
+                    found_func_id = state.module.functions_with_suffix(&qualified).find_map(|(_, f, _)| {
+                        (f.params.len() == expected_param_count || f.register_count > 0).then_some(f.id)
+                    });
                 }
             }
 
@@ -3808,8 +3778,7 @@ pub(super) fn handle_bound_method(
                 let receiver_is_primitive =
                     !dispatch_receiver.is_ptr() || dispatch_receiver.is_nil();
 
-                for func in &state.module.functions {
-                    let func_name = state.module.strings.get(func.name).unwrap_or("");
+                for (_, func, func_name) in state.module.functions_with_suffix(&method_name) {
                     // SOUNDNESS (task #io-1 dispatcher leg): syscall /
                     // libsystem free fns CANNOT be invoked as instance
                     // methods even when their qualified name ends with
@@ -4302,23 +4271,6 @@ pub(super) fn handle_bound_method(
         return Ok(DispatchResult::Continue);
     }
 
-    #[cfg(debug_assertions)]
-    if method_name.contains("ensure_capacity") {
-        eprintln!("DEBUG: Looking for method '{}'", method_name);
-        eprintln!("DEBUG: All Map-related functions in module:");
-        for func in &state.module.functions {
-            let func_name = state.module.strings.get(func.name).unwrap_or("");
-            if func_name.contains("Map") || func_name.contains("map") {
-                eprintln!(
-                    "  - {} (id={}, params={})",
-                    func_name,
-                    func.id.0,
-                    func.params.len()
-                );
-            }
-        }
-    }
-
     // Last-chance native variant dispatch — applies when
     // `prefer_user_compiled` short-circuited the early native check
     // (line ~325) AND the user-compiled lookup itself fell through
@@ -4511,14 +4463,9 @@ pub(super) fn handle_bound_method(
                 ];
                 'outer: for prefix in SLICE_LIST_KIND_PREFIXES {
                     let bare_qualified = format!("{}.{}", prefix, bare_method_name);
-                    let dotted_qualified = format!(".{}.{}", prefix, bare_method_name);
-                    for (idx, desc) in state.module.functions.iter().enumerate() {
-                        if let Some(fname) = state.module.strings.get(desc.name)
-                            && (fname == bare_qualified || fname.ends_with(&dotted_qualified))
-                        {
-                            found = Some(crate::module::FunctionId(idx as u32));
-                            break 'outer;
-                        }
+                    if let Some((id, _, _)) = state.module.functions_with_suffix(&bare_qualified).next() {
+                        found = Some(id);
+                        break 'outer;
                     }
                 }
             }
@@ -4903,12 +4850,8 @@ pub(super) fn handle_bound_method(
     // loud panic instead of picking arbitrarily.
     {
         let dotted_bare = format!(".{}", bare);
-        let blanket: Vec<crate::module::FunctionId> = state
-            .module
-            .functions
-            .iter()
-            .filter_map(|f| {
-                let name = state.module.strings.get(f.name).unwrap_or("");
+        let blanket: Vec<crate::module::FunctionId> = state.module.functions_with_suffix(&bare)
+            .filter_map(|(_, f, name)| {
                 let rest = name.strip_suffix(&dotted_bare)?;
                 let single_letter = rest.len() == 1
                     && rest.chars().next().is_some_and(|c| c.is_ascii_uppercase());
@@ -4961,23 +4904,8 @@ pub(super) fn handle_bound_method(
         }
     }
 
-    let suffix_candidates: Vec<(String, usize)> = {
-        let dotted_bare = format!(".{}", bare);
-        state
-            .module
-            .functions
-            .iter()
-            .filter_map(|f| {
-                let name = state.module.strings.get(f.name).unwrap_or("");
-                if name.ends_with(&dotted_bare) || name == bare {
-                    Some((name.to_string(), f.params.len()))
-                } else {
-                    None
-                }
-            })
-            .take(8)
-            .collect()
-    };
+    let suffix_candidates: Vec<_> = state.module.functions_with_suffix(&bare)
+        .take(8).map(|(_, f, name)| (name.to_owned(), f.params.len())).collect();
 
     let receiver_pretty = match &receiver_type_name {
         Some(t) => format!("`{}` ({})", t, receiver_kind),
@@ -5043,10 +4971,8 @@ pub(super) fn handle_bound_method(
     // resolves today changes route.
     if let Some(ty_name) = receiver_type_name.as_deref() {
         let deref_key = format!("{ty_name}.deref");
-        let deref_id = state.module.functions.iter().enumerate().find_map(|(i, f)| {
-            let name = state.module.strings.get(f.name).unwrap_or("");
-            (name == deref_key && f.params.len() == 1).then_some(FunctionId(i as u32))
-        });
+        let deref_id = state.module.functions_named(&deref_key)
+            .find(|(_, f)| f.params.len() == 1).map(|(id, _)| id);
         if let Some(deref_id) = deref_id {
             let inner = super::super::call_function_sync(state, deref_id, &[dispatch_receiver])?;
             if inner != dispatch_receiver {

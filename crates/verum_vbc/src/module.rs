@@ -1046,6 +1046,36 @@ impl VbcModule {
         map.get(seg).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
+    /// Declarations with this exact spelling, in their original table order.
+    pub(crate) fn functions_named<'m>(
+        &'m self,
+        name: &str,
+    ) -> impl Iterator<Item = (FunctionId, &'m FunctionDescriptor)> + 'm {
+        self.function_indices_named(name)
+            .iter()
+            .map(|&slot| (FunctionId(slot), &self.functions[slot as usize]))
+    }
+
+    /// Match the complete spelling or a suffix starting at a namespace boundary.
+    /// The index only narrows candidates; every matching overload is retained.
+    pub(crate) fn functions_with_suffix<'m>(
+        &'m self,
+        suffix: &'m str,
+    ) -> impl Iterator<Item = (FunctionId, &'m FunctionDescriptor, &'m str)> + 'm {
+        self.function_indices_by_last_segment(Self::last_segment(suffix))
+            .iter()
+            .filter_map(move |&slot| {
+                let function = &self.functions[slot as usize];
+                let name = self.get_string(function.name)?;
+                let prefix = name.strip_suffix(suffix)?;
+                (prefix.is_empty() || prefix.ends_with('.')).then_some((
+                    FunctionId(slot),
+                    function,
+                    name,
+                ))
+            })
+    }
+
     /// Gets a function descriptor by ID.
     pub fn get_function(&self, id: FunctionId) -> Option<&FunctionDescriptor> {
         self.functions.get(id.0 as usize)
@@ -1053,6 +1083,10 @@ impl VbcModule {
 
     /// Gets a mutable function descriptor by ID.
     pub fn get_function_mut(&mut self, id: FunctionId) -> Option<&mut FunctionDescriptor> {
+        // A descriptor's name participates in both indexes. A mutable caller
+        // may replace it before the next lookup.
+        self.fn_idx_by_name.take();
+        self.fn_idx_by_last_segment.take();
         self.functions.get_mut(id.0 as usize)
     }
 
@@ -1090,16 +1124,13 @@ impl VbcModule {
     ) -> Option<FunctionId> {
         if let Some(tid) = receiver_tid {
             if std::env::var("VERUM_TRACE_TIEBREAK").is_ok() {
-                for (idx, d) in self.functions.iter().enumerate() {
-                    if self.get_string(d.name) == Some(name) {
-                        eprintln!(
-                            "[tiebreak] '{}' cand idx={} parent={:?} bodied={} (recv_tid={})",
-                            name, idx, d.parent_type,
-                            d.bytecode_length > 0
-                                || d.instructions.as_ref().map(|i| !i.is_empty()).unwrap_or(false),
-                            tid.0,
-                        );
-                    }
+                for (id, d) in self.functions_named(name) {
+                    eprintln!(
+                        "[tiebreak] '{}' cand idx={} parent={:?} bodied={} (recv_tid={})",
+                        name, id.0, d.parent_type,
+                        d.bytecode_length > 0 || d.instructions.as_ref().is_some_and(|i| !i.is_empty()),
+                        tid.0,
+                    );
                 }
             }
             let has_body = |desc: &crate::module::FunctionDescriptor| -> bool {
@@ -1110,30 +1141,10 @@ impl VbcModule {
                         .map(|i| !i.is_empty())
                         .unwrap_or(false)
             };
-            let mut best: Option<(bool, u32)> = None;
-            for (idx, desc) in self.functions.iter().enumerate() {
-                if desc.parent_type != Some(tid) {
-                    continue;
-                }
-                if let Some(fname) = self.get_string(desc.name)
-                    && fname == name
-                {
-                    let bodied = has_body(desc);
-                    let better = match best {
-                        None => true,
-                        Some((b_bodied, b_idx)) => {
-                            (bodied && !b_bodied) || (bodied == b_bodied && (idx as u32) < b_idx)
-                        }
-                    };
-                    if better {
-                        best = Some((bodied, idx as u32));
-                    }
-                }
-            }
-            if let Some((bodied, idx)) = best {
-                if bodied {
-                    return Some(FunctionId(idx));
-                }
+            if let Some((id, _)) = self.functions_named(name)
+                .find(|(_, desc)| desc.parent_type == Some(tid) && has_body(desc))
+            {
+                return Some(id);
             }
         }
         self.find_function_by_name(name)
@@ -1932,7 +1943,6 @@ impl VbcModule {
             Some(stripped) if stripped.contains('.') => stripped,
             _ => name,
         };
-        let suffix = format!(".{}", target);
         let has_body = |desc: &crate::module::FunctionDescriptor| -> bool {
             desc.bytecode_length > 0
                 || desc
@@ -1951,14 +1961,8 @@ impl VbcModule {
                     .unwrap_or(false)
         };
         let mut best: Option<(bool, usize, bool, &str, FunctionId)> = None;
-        for desc in self.functions.iter() {
-            if crate::stub_ranges::is_stub_id(desc.id.0) {
-                continue;
-            }
-            let Some(key) = self.get_string(desc.name) else {
-                continue;
-            };
-            if !key.ends_with(&suffix) {
+        for (_, desc, key) in self.functions_with_suffix(target) {
+            if crate::stub_ranges::is_stub_id(desc.id.0) || key == target {
                 continue;
             }
             let cand = (
@@ -2149,26 +2153,10 @@ impl VbcModule {
                 return Some(id);
             }
         }
-        let suffix = format!(".{}", bare_name);
-        let mut found: Option<FunctionId> = None;
-        for (idx, desc) in self.functions.iter().enumerate() {
-            if let Some(fname) = self.get_string(desc.name) {
-                if is_namespace_shadow(fname) {
-                    continue;
-                }
-                if fname.ends_with(&suffix) {
-                    if found.is_some() {
-                        // Ambiguous — multiple types own a method
-                        // with this simple name.  Refuse the lookup;
-                        // the caller's qualified-form path or a
-                        // type-aware dispatch should disambiguate.
-                        return None;
-                    }
-                    found = Some(FunctionId(idx as u32));
-                }
-            }
-        }
-        found
+        let mut matches = self.functions_with_suffix(bare_name)
+            .filter(|(_, _, name)| *name != bare_name && !is_namespace_shadow(name));
+        let (id, _, _) = matches.next()?;
+        matches.next().is_none().then_some(id)
     }
 
     /// TypeId-aware bare-name lookup for the runtime method-dispatch
@@ -3898,6 +3886,51 @@ mod tests {
         let func = FunctionDescriptor::new(hello_id);
         let func_id = module.add_function(func);
         assert!(module.get_function(func_id).is_some());
+    }
+
+    #[test]
+    fn indexed_method_candidates_preserve_boundaries_order_and_receiver() {
+        fn add(module: &mut VbcModule, name: &str, owner: TypeId, body_length: u32) -> FunctionId {
+            let name = module.intern_string(name);
+            let id = FunctionId(module.functions.len() as u32);
+            module.add_function(FunctionDescriptor {
+                name,
+                id,
+                parent_type: Some(owner),
+                bytecode_length: body_length,
+                ..Default::default()
+            })
+        }
+        let mut module = VbcModule::new("drivers".into());
+        let port = TypeId(1200);
+        let foreign = TypeId(1201);
+        add(&mut module, "net.AirPort.poll", foreign, 1);
+        let first = add(&mut module, "net.Port.poll", port, 0);
+        let other = add(&mut module, "net.Port.poll", foreign, 1);
+        assert_eq!(
+            module.find_function_by_name_for_receiver("net.Port.poll", Some(foreign)),
+            Some(other)
+        );
+        let matches = |module: &VbcModule| {
+            module
+                .functions_with_suffix("Port.poll")
+                .map(|(slot, _, _)| slot)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(matches(&module), [first, other]);
+        let chosen = add(&mut module, "net.Port.poll", port, 1);
+        assert_eq!(matches(&module), [first, other, chosen]);
+        assert_eq!(
+            module.find_function_by_name_for_receiver("net.Port.poll", Some(port)),
+            Some(chosen)
+        );
+        assert_eq!(module.find_function_by_unique_bare_suffix("poll"), None);
+        assert!(module.functions_with_suffix("Port.accept").next().is_none());
+        let renamed = module.intern_string("net.Port.accept");
+        module.get_function_mut(chosen).unwrap().name = renamed;
+        assert_eq!(matches(&module), [first, other]);
+        assert_eq!(module.functions_named("net.Port.accept").next().unwrap().0, chosen);
+        assert_eq!(module.functions_with_suffix("Port.accept").next().unwrap().0, chosen);
     }
 
     #[test]
