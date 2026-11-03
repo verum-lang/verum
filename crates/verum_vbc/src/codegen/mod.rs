@@ -17020,19 +17020,8 @@ impl VbcCodegen {
                 // identity.  Same pattern as the Record / Sum arms.
                 let type_id = self.claim_local_type_id(&type_name);
 
-                // Generic-param map for the inner-type resolution —
-                // `type Wrap<T> is T;` writes a `Generic(0)` slot, and
-                // the consumer side substitutes against the type's
-                // `type_params` to recover `T`'s identity.  Same shape
-                // as the Record arm; empty for the common
-                // non-generic newtype case (`type FileDesc is Int;`).
-                let mut generic_param_map: std::collections::HashMap<String, u16> =
-                    std::collections::HashMap::new();
-                for (idx, gp) in type_decl.generics.iter().enumerate() {
-                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
-                        generic_param_map.insert(gname.name.to_string(), idx as u16);
-                    }
-                }
+                let generics = self.declared_generic_parameters(type_id, type_decl)?;
+                let generic_param_map = generics.scope;
                 let inner_type_ref = self.resolve_field_type_ref(_inner_type, &generic_param_map)?;
                 let inner_field_idx = self.intern_field_name("_0");
 
@@ -17066,6 +17055,7 @@ impl VbcCodegen {
                     kind: crate::types::TypeKind::Record,
                     is_transparent_wrapper: true,
                     origin_module: self.current_origin_module_sid(),
+                    type_params: generics.parameters,
                     ..Default::default()
                 };
                 type_desc.fields.push(crate::types::FieldDescriptor {
@@ -17139,15 +17129,8 @@ impl VbcCodegen {
                 // Allocate / reuse a TypeId — same pattern as the Record arm.
                 let type_id = self.claim_local_type_id(&type_name);
 
-                // Generic-param map for inner type resolution — mirror
-                // of the Newtype arm above.
-                let mut generic_param_map: std::collections::HashMap<String, u16> =
-                    std::collections::HashMap::new();
-                for (idx, gp) in type_decl.generics.iter().enumerate() {
-                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
-                        generic_param_map.insert(gname.name.to_string(), idx as u16);
-                    }
-                }
+                let generics = self.declared_generic_parameters(type_id, type_decl)?;
+                let generic_param_map = generics.scope;
 
                 // Canonical descriptor — flips the transparent flag for
                 // single-element tuples; multi-element tuples remain
@@ -17169,6 +17152,7 @@ impl VbcCodegen {
                     kind: crate::types::TypeKind::Record,
                     is_transparent_wrapper: is_transparent,
                     origin_module: self.current_origin_module_sid(),
+                    type_params: generics.parameters,
                     ..Default::default()
                 };
                 // Push the inner-type fields into `type_desc.fields` —
@@ -17258,6 +17242,7 @@ impl VbcCodegen {
                 // ships to consumers; the bare-value fallback in
                 // compile_simple_path keys on `TypeKind::Unit`.
                 let type_id = self.claim_local_type_id(&type_name);
+                let generics = self.declared_generic_parameters(type_id, type_decl)?;
                 // TYPE-ORIGIN-MODULE: stamp the declaring file, exactly as
                 // the Record and Sum arms do. `..Default::default()` leaves
                 // this `None`, and a `None` origin makes the archive
@@ -17270,6 +17255,7 @@ impl VbcCodegen {
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Unit,
                     origin_module: self.current_origin_module_sid(),
+                    type_params: generics.parameters,
                     ..Default::default()
                 };
                 self.push_declared_type(type_desc);
