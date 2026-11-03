@@ -1266,7 +1266,7 @@ pub(in super::super) fn handle_get_index(
         let start_idx = map_idx;
         loop {
             let entry_key = unsafe { *entries_data.add(map_idx * 2) };
-            if entry_key.is_unit() {
+            if entry_key.is_vacant_hash_key() {
                 state.set_reg(dst, Value::unit());
                 break;
             }
@@ -2559,13 +2559,6 @@ pub(in super::super) fn handle_new_map(
     state.record_allocation();
     let entries_ptr = entries.as_ptr() as *mut u8;
 
-    // Initialize entries with unit (empty marker)
-    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    for i in 0..(DEFAULT_CAP * 2) {
-        unsafe {
-            *entries_data.add(i) = Value::unit();
-        }
-    }
 
     // Initialize header: count=0, capacity, entries_ptr
     unsafe {
@@ -2611,7 +2604,7 @@ pub(in super::super) fn handle_map_get(
     loop {
         let entry_key = unsafe { *entries_data.add(idx * 2) };
 
-        if entry_key.is_unit() {
+        if entry_key.is_vacant_hash_key() {
             // Empty slot - key not found
             // Return 0 (matching AOT sentinel) for interpreter/AOT consistency
             state.set_reg(dst, Value::from_i64(0));
@@ -2686,7 +2679,7 @@ pub(in super::super) fn handle_map_contains(
     loop {
         let entry_key = unsafe { *entries_data.add(idx * 2) };
 
-        if entry_key.is_unit() {
+        if entry_key.is_vacant_hash_key() {
             // Empty slot - key not found
             state.set_reg(dst, Value::from_bool(false));
             return Ok(DispatchResult::Continue);
@@ -3072,13 +3065,6 @@ pub(in super::super) fn handle_new_set(
     state.record_allocation();
     let entries_ptr = entries.as_ptr() as *mut u8;
 
-    // Initialize entries with unit (empty marker)
-    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    for i in 0..(DEFAULT_CAP * 2) {
-        unsafe {
-            *entries_data.add(i) = Value::unit();
-        }
-    }
 
     // Initialize header: count=0, capacity, entries_ptr
     unsafe {
@@ -3129,22 +3115,17 @@ pub(in super::super) fn handle_set_insert(
 
         // Initialize new entries with unit
         let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        for i in 0..(new_capacity * 2) {
-            unsafe {
-                *new_data.add(i) = Value::unit();
-            }
-        }
 
         // Rehash existing entries
         let old_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         for i in 0..capacity {
             let old_elem = unsafe { *old_data.add(i * 2) };
-            if !old_elem.is_unit() {
+            if !old_elem.is_vacant_hash_key() {
                 let hash = value_hash(old_elem, state);
                 let mut idx = hash % new_capacity;
                 loop {
                     let slot = unsafe { *new_data.add(idx * 2) };
-                    if slot.is_unit() {
+                    if slot.is_vacant_hash_key() {
                         unsafe {
                             *new_data.add(idx * 2) = old_elem;
                         }
@@ -3174,7 +3155,7 @@ pub(in super::super) fn handle_set_insert(
     loop {
         let slot = unsafe { *entries_data.add(idx * 2) };
 
-        if slot.is_unit() {
+        if slot.is_vacant_hash_key() {
             // Empty slot - insert new element
             unsafe {
                 *entries_data.add(idx * 2) = elem;
@@ -3235,7 +3216,7 @@ pub(in super::super) fn handle_set_contains(
     loop {
         let slot = unsafe { *entries_data.add(idx * 2) };
 
-        if slot.is_unit() {
+        if slot.is_vacant_hash_key() {
             // Empty slot - element not found
             state.set_reg(dst, Value::from_bool(false));
             return Ok(DispatchResult::Continue);
@@ -3290,7 +3271,7 @@ pub(in super::super) fn handle_set_remove(
     loop {
         let slot = unsafe { *entries_data.add(idx * 2) };
 
-        if slot.is_unit() {
+        if slot.is_vacant_hash_key() {
             // Empty slot - element not found, nothing to remove
             return Ok(DispatchResult::Continue);
         }
@@ -3299,7 +3280,7 @@ pub(in super::super) fn handle_set_remove(
             // Found element - remove it using tombstone-free deletion
             // We need to rehash subsequent elements in the probe chain
             unsafe {
-                *entries_data.add(idx * 2) = Value::unit();
+                *entries_data.add(idx * 2) = Value::VACANT_HASH_KEY;
             }
             count -= 1;
             unsafe {
@@ -3308,10 +3289,10 @@ pub(in super::super) fn handle_set_remove(
 
             // Rehash subsequent elements in probe chain
             let mut next_idx = (idx + 1) % capacity;
-            while !unsafe { *entries_data.add(next_idx * 2) }.is_unit() {
+            while !unsafe { *entries_data.add(next_idx * 2) }.is_vacant_hash_key() {
                 let elem_to_rehash = unsafe { *entries_data.add(next_idx * 2) };
                 unsafe {
-                    *entries_data.add(next_idx * 2) = Value::unit();
+                    *entries_data.add(next_idx * 2) = Value::VACANT_HASH_KEY;
                 }
 
                 // Reinsert the element
@@ -3319,7 +3300,7 @@ pub(in super::super) fn handle_set_remove(
                 let mut new_idx = rehash % capacity;
                 loop {
                     let new_slot = unsafe { *entries_data.add(new_idx * 2) };
-                    if new_slot.is_unit() {
+                    if new_slot.is_vacant_hash_key() {
                         unsafe {
                             *entries_data.add(new_idx * 2) = elem_to_rehash;
                         }

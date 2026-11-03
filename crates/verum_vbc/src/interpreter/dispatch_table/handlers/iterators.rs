@@ -646,7 +646,7 @@ pub(in super::super) fn handle_iter_next(
             let mut idx = current_idx;
             while idx < capacity {
                 let entry_key = unsafe { *entries_data.add(idx * 2) };
-                if !entry_key.is_unit() {
+                if !entry_key.is_vacant_hash_key() {
                     // Advance iterator to next slot.
                     unsafe {
                         *iter_data.add(1) = Value::from_i64((idx + 1) as i64);

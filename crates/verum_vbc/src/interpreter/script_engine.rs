@@ -1205,9 +1205,6 @@ fn build_map_value(
     interp.state.record_allocation();
     let entries_ptr = entries_obj.as_ptr() as *mut u8;
     let entries_data = unsafe { entries_ptr.add(OBJECT_HEADER_SIZE) as *mut Value };
-    for i in 0..(cap * 2) {
-        unsafe { *entries_data.add(i) = Value::unit() };
-    }
     let mut live = 0usize;
     for (k_owned, v_owned) in entries {
         let key = build_value(interp, k_owned);
@@ -1215,7 +1212,7 @@ fn build_map_value(
         let mut idx = value_hash(key, &interp.state) % cap;
         loop {
             // SAFETY: idx < cap; entries backing has cap (key,value) pairs.
-            if unsafe { (*entries_data.add(idx * 2)).is_unit() } {
+            if unsafe { (*entries_data.add(idx * 2)).is_vacant_hash_key() } {
                 unsafe {
                     *entries_data.add(idx * 2) = key;
                     *entries_data.add(idx * 2 + 1) = val;

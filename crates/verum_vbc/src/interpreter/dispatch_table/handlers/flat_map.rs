@@ -148,7 +148,7 @@ impl<'heap> FlatMap<'heap> {
         for _ in 0..self.capacity {
             // SAFETY: the checked backing contains two Values per bucket.
             let stored = unsafe { *self.entries.add(index * 2) };
-            if stored.is_unit() {
+            if stored.is_vacant_hash_key() {
                 return Some((index, false));
             }
             if value_eq(stored, key, state) {
@@ -176,7 +176,7 @@ impl<'heap> FlatMap<'heap> {
         (0..self.capacity).filter_map(|index| {
             // SAFETY: checked() validated both allocation extents.
             let pair = unsafe { *self.entries.add(index * 2).cast::<[Value; 2]>() };
-            (!pair[0].is_unit()).then_some(pair)
+            (!pair[0].is_vacant_hash_key()).then_some(pair)
         })
     }
 }
@@ -199,13 +199,12 @@ pub(super) fn resize(
     let entries = storage.data_ptr().cast::<[Value; 2]>();
     // SAFETY: alloc_hash_buckets allocated exactly capacity pairs.
     let entries = unsafe { std::slice::from_raw_parts_mut(entries, capacity) };
-    entries.fill([Value::unit(); 2]);
     let old = FlatMap::checked(state, receiver)?;
     let populated = old.occupied().try_for_each(|pair| {
         let start = value_hash(pair[0], state) % capacity;
         let index = (start..capacity)
             .chain(0..start)
-            .find(|index| entries[*index][0].is_unit())?;
+            .find(|index| entries[*index][0].is_vacant_hash_key())?;
         entries[index] = pair;
         Some(())
     });

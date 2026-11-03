@@ -2472,12 +2472,6 @@ pub(super) fn handle_bound_method(
             let entries = state.heap.alloc_hash_buckets(DEFAULT_CAP)?;
             state.record_allocation();
             let entries_ptr = entries.as_ptr() as *mut u8;
-            let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            for i in 0..(DEFAULT_CAP * 2) {
-                unsafe {
-                    *entries_data.add(i) = Value::unit();
-                }
-            }
             unsafe {
                 *header_ptr = Value::from_i64(0); // len
                 *header_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64); // cap
@@ -2573,13 +2567,6 @@ pub(super) fn handle_bound_method(
             let entries = state.heap.alloc_hash_buckets(actual_cap)?;
             state.record_allocation();
             let entries_ptr = entries.as_ptr() as *mut u8;
-            let entries_data =
-                unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            for i in 0..(actual_cap * 2) {
-                unsafe {
-                    *entries_data.add(i) = Value::unit();
-                }
-            }
             unsafe {
                 *header_ptr = Value::from_i64(0); // len
                 *header_ptr.add(1) = Value::from_i64(actual_cap as i64); // cap
@@ -7329,7 +7316,7 @@ pub(super) fn dispatch_primitive_method(
                             let mut idx = front_idx;
                             while idx < scan_end {
                                 let entry_key = unsafe { *entries_data.add(idx * 2) };
-                                if !entry_key.is_unit() {
+                                if !entry_key.is_vacant_hash_key() {
                                     unsafe {
                                         *iter_data.add(1) = Value::from_i64((idx + 1) as i64);
                                     }
@@ -7825,7 +7812,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut found = false;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
+                        if entry_key.is_vacant_hash_key() {
                             break;
                         }
                         if value_eq(entry_key, key, state) {
@@ -7862,11 +7849,6 @@ pub(super) fn dispatch_primitive_method(
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
                             unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                        for i in 0..(BOOTSTRAP_CAP * 2) {
-                            unsafe {
-                                *new_entries_data.add(i) = Value::unit();
-                            }
-                        }
                         capacity = BOOTSTRAP_CAP;
                         entries_data = new_entries_data;
                         unsafe {
@@ -7883,20 +7865,14 @@ pub(super) fn dispatch_primitive_method(
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
                             unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                        // Initialize all slots to unit
-                        for i in 0..(new_cap * 2) {
-                            unsafe {
-                                *new_entries_data.add(i) = Value::unit();
-                            }
-                        }
                         // Rehash existing entries
                         for i in 0..capacity {
                             let old_key = unsafe { *entries_data.add(i * 2) };
-                            if !old_key.is_unit() {
+                            if !old_key.is_vacant_hash_key() {
                                 let h = value_hash(old_key, state);
                                 let mut ni = h % new_cap;
                                 loop {
-                                    if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
+                                    if unsafe { (*new_entries_data.add(ni * 2)).is_vacant_hash_key() } {
                                         unsafe {
                                             *new_entries_data.add(ni * 2) = old_key;
                                             // Set's value-slot must be unit to match the
@@ -7933,7 +7909,7 @@ pub(super) fn dispatch_primitive_method(
                     let inserted: bool;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
+                        if entry_key.is_vacant_hash_key() {
                             unsafe {
                                 *entries_data.add(idx * 2) = val;
                                 // Set's value-slot is unit (`Map<T, ()>`).
@@ -7972,7 +7948,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut found = false;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
+                        if entry_key.is_vacant_hash_key() {
                             break;
                         }
                         if value_eq(entry_key, val, state) {
@@ -8112,14 +8088,14 @@ pub(super) fn dispatch_primitive_method(
                     let mut found_value: Option<Value> = None;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
+                        if entry_key.is_vacant_hash_key() {
                             break;
                         }
                         if value_eq(entry_key, key, state) {
                             found_value = Some(unsafe { *entries_data.add(idx * 2 + 1) });
                             // Clear the slot
                             unsafe {
-                                *entries_data.add(idx * 2) = Value::unit();
+                                *entries_data.add(idx * 2) = Value::VACANT_HASH_KEY;
                                 *entries_data.add(idx * 2 + 1) = Value::unit();
                             }
                             count -= 1;
@@ -8131,7 +8107,7 @@ pub(super) fn dispatch_primitive_method(
                             let mut j = (idx + 1) % capacity;
                             loop {
                                 let jk = unsafe { *entries_data.add(j * 2) };
-                                if jk.is_unit() {
+                                if jk.is_vacant_hash_key() {
                                     break;
                                 }
                                 let jh = value_hash(jk, state) % capacity;
@@ -8147,7 +8123,7 @@ pub(super) fn dispatch_primitive_method(
                                     unsafe {
                                         *entries_data.add(gap * 2) = jk;
                                         *entries_data.add(gap * 2 + 1) = jv;
-                                        *entries_data.add(j * 2) = Value::unit();
+                                        *entries_data.add(j * 2) = Value::VACANT_HASH_KEY;
                                         *entries_data.add(j * 2 + 1) = Value::unit();
                                     }
                                     gap = j;
@@ -8181,7 +8157,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut tuples = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             // Allocate a 2-element tuple: [key, value]
                             let tuple_obj = state
@@ -8213,10 +8189,10 @@ pub(super) fn dispatch_primitive_method(
                         *header_ptr = Value::from_i64(0);
                     }
                     // Clear all slots
-                    for i in 0..(capacity * 2) {
-                        unsafe {
-                            *entries_data.add(i) = Value::unit();
-                        }
+                    if capacity != 0 {
+                        // SAFETY: the backing contains exactly capacity pairs.
+                        unsafe { std::slice::from_raw_parts_mut(entries_data.cast::<[Value; 2]>(), capacity) }
+                            .fill([Value::VACANT_HASH_KEY, Value::unit()]);
                     }
                     return Ok(Some(Value::unit()));
                 }
@@ -8253,19 +8229,14 @@ pub(super) fn dispatch_primitive_method(
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
                         let new_entries_data =
                             unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                        for i in 0..(new_cap * 2) {
-                            unsafe {
-                                *new_entries_data.add(i) = Value::unit();
-                            }
-                        }
                         for i in 0..capacity {
                             let old_key = unsafe { *entries_data.add(i * 2) };
-                            if !old_key.is_unit() {
+                            if !old_key.is_vacant_hash_key() {
                                 let old_val = unsafe { *entries_data.add(i * 2 + 1) };
                                 let h = value_hash(old_key, state);
                                 let mut ni = h % new_cap;
                                 loop {
-                                    if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
+                                    if unsafe { (*new_entries_data.add(ni * 2)).is_vacant_hash_key() } {
                                         unsafe {
                                             *new_entries_data.add(ni * 2) = old_key;
                                             *new_entries_data.add(ni * 2 + 1) = old_val;
@@ -8289,7 +8260,7 @@ pub(super) fn dispatch_primitive_method(
                     let start = idx;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
+                        if entry_key.is_vacant_hash_key() {
                             // Not found - insert default
                             unsafe {
                                 *entries_data.add(idx * 2) = key;
@@ -8335,14 +8306,14 @@ pub(super) fn dispatch_primitive_method(
                     let mut found = false;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
+                        if entry_key.is_vacant_hash_key() {
                             break;
                         }
                         if value_eq(entry_key, val, state) {
                             found = true;
                             // Clear the slot
                             unsafe {
-                                *entries_data.add(idx * 2) = Value::unit();
+                                *entries_data.add(idx * 2) = Value::VACANT_HASH_KEY;
                                 *entries_data.add(idx * 2 + 1) = Value::unit();
                             }
                             count -= 1;
@@ -8354,7 +8325,7 @@ pub(super) fn dispatch_primitive_method(
                             let mut j = (idx + 1) % capacity;
                             loop {
                                 let jk = unsafe { *entries_data.add(j * 2) };
-                                if jk.is_unit() {
+                                if jk.is_vacant_hash_key() {
                                     break;
                                 }
                                 let jh = value_hash(jk, state) % capacity;
@@ -8368,7 +8339,7 @@ pub(super) fn dispatch_primitive_method(
                                     unsafe {
                                         *entries_data.add(gap * 2) = jk;
                                         *entries_data.add(gap * 2 + 1) = jv;
-                                        *entries_data.add(j * 2) = Value::unit();
+                                        *entries_data.add(j * 2) = Value::VACANT_HASH_KEY;
                                         *entries_data.add(j * 2 + 1) = Value::unit();
                                     }
                                     gap = j;
@@ -8395,10 +8366,10 @@ pub(super) fn dispatch_primitive_method(
                     unsafe {
                         *header_ptr = Value::from_i64(0);
                     }
-                    for i in 0..(capacity * 2) {
-                        unsafe {
-                            *entries_data.add(i) = Value::unit();
-                        }
+                    if capacity != 0 {
+                        // SAFETY: the backing contains exactly capacity pairs.
+                        unsafe { std::slice::from_raw_parts_mut(entries_data.cast::<[Value; 2]>(), capacity) }
+                            .fill([Value::VACANT_HASH_KEY, Value::unit()]);
                     }
                     return Ok(Some(Value::unit()));
                 }
@@ -8438,13 +8409,13 @@ pub(super) fn dispatch_primitive_method(
                     let mut elements = Vec::with_capacity(self_count + other_count);
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             elements.push(k);
                         }
                     }
                     for i in 0..other_cap {
                         let k = unsafe { *other_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             // Check if already in elements
                             let mut dup = false;
                             for existing in &elements {
@@ -8470,17 +8441,12 @@ pub(super) fn dispatch_primitive_method(
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
                         unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    for i in 0..(new_cap * 2) {
-                        unsafe {
-                            *new_data.add(i) = Value::unit();
-                        }
-                    }
                     // Insert all elements
                     for elem in &elements {
                         let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
-                            if unsafe { (*new_data.add(ni * 2)).is_unit() } {
+                            if unsafe { (*new_data.add(ni * 2)).is_vacant_hash_key() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
                                     // Set's value-slot is unit (`Map<T, ()>`
@@ -8531,7 +8497,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut elements = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             // Check if k is in other set
                             let h = value_hash(k, state);
                             let mut oi = h % other_cap;
@@ -8539,7 +8505,7 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() {
+                                if ok.is_vacant_hash_key() {
                                     break;
                                 }
                                 if value_eq(ok, k, state) {
@@ -8568,16 +8534,11 @@ pub(super) fn dispatch_primitive_method(
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
                         unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    for i in 0..(new_cap * 2) {
-                        unsafe {
-                            *new_data.add(i) = Value::unit();
-                        }
-                    }
                     for elem in &elements {
                         let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
-                            if unsafe { (*new_data.add(ni * 2)).is_unit() } {
+                            if unsafe { (*new_data.add(ni * 2)).is_vacant_hash_key() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
                                     // Set's value-slot is unit (`Map<T, ()>`
@@ -8627,7 +8588,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut elements = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             // Check if k is in other set
                             let h = value_hash(k, state);
                             let mut oi = h % other_cap;
@@ -8635,7 +8596,7 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() {
+                                if ok.is_vacant_hash_key() {
                                     break;
                                 }
                                 if value_eq(ok, k, state) {
@@ -8664,16 +8625,11 @@ pub(super) fn dispatch_primitive_method(
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
                         unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    for i in 0..(new_cap * 2) {
-                        unsafe {
-                            *new_data.add(i) = Value::unit();
-                        }
-                    }
                     for elem in &elements {
                         let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
-                            if unsafe { (*new_data.add(ni * 2)).is_unit() } {
+                            if unsafe { (*new_data.add(ni * 2)).is_vacant_hash_key() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
                                     // Set's value-slot is unit (`Map<T, ()>`
@@ -8726,14 +8682,14 @@ pub(super) fn dispatch_primitive_method(
                     let mut is_subset = true;
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() {
+                                if ok.is_vacant_hash_key() {
                                     break;
                                 }
                                 if value_eq(ok, k, state) {
@@ -8778,14 +8734,14 @@ pub(super) fn dispatch_primitive_method(
                     let mut is_superset = true;
                     for i in 0..other_cap {
                         let k = unsafe { *other_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let h = value_hash(k, state);
                             let mut si = h % self_cap;
                             let sstart = si;
                             let mut in_self = false;
                             loop {
                                 let sk = unsafe { *self_entries.add(si * 2) };
-                                if sk.is_unit() {
+                                if sk.is_vacant_hash_key() {
                                     break;
                                 }
                                 if value_eq(sk, k, state) {
@@ -8830,14 +8786,14 @@ pub(super) fn dispatch_primitive_method(
                     // Elements in self but not in other
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() {
+                                if ok.is_vacant_hash_key() {
                                     break;
                                 }
                                 if value_eq(ok, k, state) {
@@ -8857,14 +8813,14 @@ pub(super) fn dispatch_primitive_method(
                     // Elements in other but not in self
                     for i in 0..other_cap {
                         let k = unsafe { *other_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let h = value_hash(k, state);
                             let mut si = h % self_cap;
                             let sstart = si;
                             let mut in_self = false;
                             loop {
                                 let sk = unsafe { *self_entries.add(si * 2) };
-                                if sk.is_unit() {
+                                if sk.is_vacant_hash_key() {
                                     break;
                                 }
                                 if value_eq(sk, k, state) {
@@ -8892,16 +8848,11 @@ pub(super) fn dispatch_primitive_method(
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
                         unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    for i in 0..(new_cap * 2) {
-                        unsafe {
-                            *new_data.add(i) = Value::unit();
-                        }
-                    }
                     for elem in &elements {
                         let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
-                            if unsafe { (*new_data.add(ni * 2)).is_unit() } {
+                            if unsafe { (*new_data.add(ni * 2)).is_vacant_hash_key() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = *elem;
                                     // Set's value-slot is unit (`Map<T, ()>`
@@ -8948,13 +8899,13 @@ pub(super) fn dispatch_primitive_method(
                     let mut disjoint = true;
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() {
+                                if ok.is_vacant_hash_key() {
                                     break;
                                 }
                                 if value_eq(ok, k, state) {
@@ -8983,7 +8934,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut elems = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             elems.push(k);
                         }
                     }
@@ -9001,7 +8952,7 @@ pub(super) fn dispatch_primitive_method(
                         unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             call_closure_sync(state, closure_val, &[k])?;
                         }
                     }
@@ -9019,7 +8970,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut kept = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let result = call_closure_sync(state, closure_val, &[k])?;
                             if result.as_bool() {
                                 kept.push(k);
@@ -9040,7 +8991,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut mapped = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let out = call_closure_sync(state, closure_val, &[k])?;
                             mapped.push(out);
                         }
@@ -9059,7 +9010,7 @@ pub(super) fn dispatch_primitive_method(
                         unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             acc = call_closure_sync(state, closure_val, &[acc, k])?;
                         }
                     }
@@ -9077,7 +9028,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut count: i64 = 0;
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let r = call_closure_sync(state, closure_val, &[k])?;
                             if r.as_bool() {
                                 count += 1;
@@ -9098,7 +9049,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut kept = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let maybe = call_closure_sync(state, closure_val, &[k])?;
                             // Extract Some payload from Maybe variant. None → skip.
                             if let Some(inner) = unwrap_maybe_some(maybe) {
@@ -9117,7 +9068,7 @@ pub(super) fn dispatch_primitive_method(
                     let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             call_closure_sync(state, closure_val, &[k, v])?;
                         }
@@ -9134,7 +9085,7 @@ pub(super) fn dispatch_primitive_method(
                     let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             acc = call_closure_sync(state, closure_val, &[acc, k, v])?;
                         }
@@ -9152,7 +9103,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut kept_vals = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
                             if result.as_bool() {
@@ -9172,16 +9123,11 @@ pub(super) fn dispatch_primitive_method(
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
                         unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    for j in 0..(new_cap * 2) {
-                        unsafe {
-                            *new_data.add(j) = Value::unit();
-                        }
-                    }
                     for j in 0..kept_keys.len() {
                         let h = value_hash(kept_keys[j], state);
                         let mut ni = h % new_cap;
                         loop {
-                            if unsafe { (*new_data.add(ni * 2)).is_unit() } {
+                            if unsafe { (*new_data.add(ni * 2)).is_vacant_hash_key() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = kept_keys[j];
                                     *new_data.add(ni * 2 + 1) = kept_vals[j];
@@ -9211,7 +9157,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut found = false;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
                             if result.as_bool() {
@@ -9232,7 +9178,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut all_match = true;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
                             if !result.as_bool() {
@@ -9252,7 +9198,7 @@ pub(super) fn dispatch_primitive_method(
                     let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
                             if result.as_bool() {
@@ -9288,13 +9234,13 @@ pub(super) fn dispatch_primitive_method(
                     let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
                             if !result.as_bool() {
                                 // Remove this entry
                                 unsafe {
-                                    *entries_data.add(i * 2) = Value::unit();
+                                    *entries_data.add(i * 2) = Value::VACANT_HASH_KEY;
                                     *entries_data.add(i * 2 + 1) = Value::unit();
                                 }
                                 count -= 1;
@@ -9316,11 +9262,11 @@ pub(super) fn dispatch_primitive_method(
                     let entries_data = map_entries_data(header_ptr, capacity);
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let result = call_closure_sync(state, closure_val, &[k])?;
                             if !result.as_bool() {
                                 unsafe {
-                                    *entries_data.add(i * 2) = Value::unit();
+                                    *entries_data.add(i * 2) = Value::VACANT_HASH_KEY;
                                     *entries_data.add(i * 2 + 1) = Value::unit();
                                 }
                                 count -= 1;
@@ -9343,7 +9289,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut new_vals = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let mapped = call_closure_sync(state, closure_val, &[k, v])?;
                             keys.push(k);
@@ -9360,16 +9306,11 @@ pub(super) fn dispatch_primitive_method(
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
                     let new_data =
                         unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    for j in 0..(new_cap * 2) {
-                        unsafe {
-                            *new_data.add(j) = Value::unit();
-                        }
-                    }
                     for j in 0..keys.len() {
                         let h = value_hash(keys[j], state);
                         let mut ni = h % new_cap;
                         loop {
-                            if unsafe { (*new_data.add(ni * 2)).is_unit() } {
+                            if unsafe { (*new_data.add(ni * 2)).is_vacant_hash_key() } {
                                 unsafe {
                                     *new_data.add(ni * 2) = keys[j];
                                     *new_data.add(ni * 2 + 1) = new_vals[j];
@@ -9399,7 +9340,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut found = false;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
+                        if !k.is_vacant_hash_key() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             if value_eq(v, target, state) {
                                 found = true;
@@ -10739,12 +10680,6 @@ pub(super) fn build_set_from_values(
     state.record_allocation();
     let backing_ptr = backing.as_ptr() as *mut u8;
     let data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    // Initialise every slot to unit (empty-slot marker).
-    for i in 0..(initial_cap * 2) {
-        unsafe {
-            *data.add(i) = Value::unit();
-        }
-    }
     // Probe-insert each element, skipping duplicates.
     let mut live: usize = 0;
     for elem in elements.into_iter() {
@@ -10753,7 +10688,7 @@ pub(super) fn build_set_from_values(
         let start = idx;
         loop {
             let slot_key = unsafe { *data.add(idx * 2) };
-            if slot_key.is_unit() {
+            if slot_key.is_vacant_hash_key() {
                 unsafe {
                     *data.add(idx * 2) = elem;
                     *data.add(idx * 2 + 1) = Value::unit();

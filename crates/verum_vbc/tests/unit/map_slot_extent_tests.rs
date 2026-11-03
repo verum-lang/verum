@@ -35,10 +35,6 @@ fn backing(state: &mut InterpreterState, id: TypeId, slots: usize) -> Value {
 
 fn buckets(state: &mut InterpreterState, capacity: usize) -> Value {
     let table = state.heap.alloc_hash_buckets(capacity).unwrap();
-    for slot in 0..capacity * 2 {
-        // SAFETY: each writable cell belongs to this freshly allocated table.
-        unsafe { *table.data_ptr().cast::<Value>().add(slot) = Value::unit() };
-    }
     Value::from_ptr(table.as_ptr())
 }
 

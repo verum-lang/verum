@@ -800,8 +800,18 @@ impl Value {
 
     /// Creates the unit value.
     #[inline]
-    pub fn unit() -> Self {
+    pub const fn unit() -> Self {
         Value(NAN_BITS | (TAG_UNIT << TAG_SHIFT))
+    }
+
+    /// Storage-only empty key. Safe Verum values never encode this payload:
+    /// Unit has payload zero and register references require marker bit 47.
+    /// Floating NaNs use the separate TAG_NAN encoding in `from_f64`.
+    pub(crate) const VACANT_HASH_KEY: Self = Self(nanbox::NAN_UNIT_HEADER | 1);
+
+    #[inline]
+    pub(crate) fn is_vacant_hash_key(self) -> bool {
+        self == Self::VACANT_HASH_KEY
     }
 
     /// Creates a pointer value.
@@ -2619,6 +2629,17 @@ mod tests {
             assert!(!v.is_fat_ref());
             assert!(!v.is_generator());
         }
+    }
+
+    #[test]
+    fn vacant_hash_key_is_disjoint_from_unit_register_refs_and_float_nans() {
+        let vacant = Value::VACANT_HASH_KEY;
+        assert!(vacant.is_vacant_hash_key());
+        assert!(!vacant.is_unit());
+        assert!(!vacant.is_cbgr_regref());
+        assert!(!Value::unit().is_vacant_hash_key());
+        assert!(!Value::cbgr_regref(1, 0, false).is_vacant_hash_key());
+        assert!(!Value::from_f64(f64::from_bits(vacant.to_bits())).is_vacant_hash_key());
     }
 
     /// Tightening `is_unit` keeps `Value::unit()` classified while excluding

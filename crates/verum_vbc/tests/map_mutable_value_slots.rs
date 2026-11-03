@@ -24,12 +24,45 @@ const PRODUCTION_PRIMITIVES: &str = include_str!("../../../core/base/primitives.
 const CALLER: &str = r#"
 module mutable_map_values;
 mount core.collections.map.Map;
+mount core.collections.set.Set;
 mount core.mem.allocator.AllocError;
 
 type Cell is { padding: Int, value: Int };
 type Options is { version: Int, features: Maybe<Cell>, optional: Maybe<Bool> };
 type Dependency is Requirement(Int) | Detailed(Options);
 type Holder is { padding: Int, values: Map<Text, Int>, key: Text };
+
+fn unit_keys_are_values() -> Int {
+    let mut values: Map<Unit, Int> = { (): 17 };
+    let before = match values.get(()) { Maybe.Some(n) => n, Maybe.None => -7 };
+    let old = match values.insert((), 25) { Maybe.Some(n) => n, Maybe.None => -13 };
+    assert_eq(values.len(), 1);
+    assert(matches_unit_entry(&values));
+    assert(values.try_reserve(64) is Result.Ok(_));
+    let removed = match values.remove(()) { Maybe.Some(n) => n, Maybe.None => -19 };
+    assert_eq(values.len(), 0);
+    before * 1000 + old * 100 + removed
+}
+
+fn matches_unit_entry(values: &Map<Unit, Int>) -> Bool {
+    match values.get_key_value(&()) {
+        Maybe.Some(pair) => *pair.0 == () && *pair.1 == 25,
+        Maybe.None => false,
+    }
+}
+
+fn unit_set_membership() -> Int {
+    let mut values: Set<Unit> = Set.new();
+    assert(values.insert(()));
+    assert(!values.insert(()));
+    assert(values.contains(()));
+    assert_eq(values.len(), 1);
+    assert(values.remove(()));
+    assert(!values.contains(()));
+    assert(values.insert(()));
+    values.clear();
+    values.len()
+}
 
 fn read_number(values: &Map<Int, Int>, key: Int) -> Int {
     match values.get(key) { Maybe.Some(n) => n, Maybe.None => panic("key missing") }
@@ -549,6 +582,16 @@ fn check(name: &str, expected: i64) {
 fn existing_owned_lookup_control() {
     check("read_control", 719);
 }
+#[test]
+fn unit_is_a_valid_hash_key_across_lookup_growth_and_removal() {
+    check("unit_keys_are_values", 18725);
+}
+
+#[test]
+fn unit_is_a_valid_set_element_across_insert_remove_and_clear() {
+    check("unit_set_membership", 0);
+}
+
 #[test]
 fn fallible_insert_returns_the_replaced_value() {
     check("fallible_insert_contract", 17144);

@@ -667,7 +667,7 @@ fn format_map_for_print_depth(
         let mut parts = Vec::new();
         for i in 0..cap {
             let key = *entries_data.add(i * 2);
-            if !key.is_unit() {
+            if !key.is_vacant_hash_key() {
                 let val = *entries_data.add(i * 2 + 1);
                 parts.push(format!(
                     "{}: {}",
@@ -714,7 +714,7 @@ fn format_set_for_print_depth(
         let mut parts = Vec::new();
         for i in 0..cap {
             let key = *entries_data.add(i * 2);
-            if !key.is_unit() {
+            if !key.is_vacant_hash_key() {
                 parts.push(format_value_for_print_depth(state, key, depth + 1));
             }
         }

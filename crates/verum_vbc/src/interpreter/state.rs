@@ -2991,7 +2991,7 @@ impl InterpreterState {
             let mut out = Vec::new();
             for i in 0..cap {
                 let key = *entries_data.add(i * 2);
-                if key.is_unit() {
+                if key.is_vacant_hash_key() {
                     continue; // empty slot
                 }
                 let value = *entries_data.add(i * 2 + 1);

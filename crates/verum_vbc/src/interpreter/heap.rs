@@ -1275,12 +1275,16 @@ impl Heap {
         Ok(object)
     }
 
-    /// Allocate a flat Map/Set table. The caller initializes the key/value
-    /// slots before publishing the buffer. Role is independent of byte extent.
+    /// Allocate a flat Map/Set table of vacant key/value pairs. A stored
+    /// Unit key is ordinary data and must remain distinguishable from vacancy.
     pub(crate) fn alloc_hash_buckets(&mut self, capacity: usize) -> InterpreterResult<Object> {
         let bytes = capacity.checked_mul(std::mem::size_of::<[Value; 2]>())
             .ok_or(InterpreterError::AllocationTooLarge { requested: usize::MAX, max_allowed: MAX_ALLOCATION_SIZE })?;
-        let mut object = self.alloc(TypeId::UNIT, bytes)?;
+        let mut object = self.alloc_with_init(TypeId::UNIT, bytes, |data| {
+            // SAFETY: object data is Value-aligned; the checked extent is exactly capacity pairs.
+            let buckets = unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr().cast::<[Value; 2]>(), capacity) };
+            buckets.fill([Value::VACANT_HASH_KEY, Value::unit()]);
+        })?;
         object.header_mut().flags.insert(ObjectFlags::HASH_BUCKETS);
         Ok(object)
     }
