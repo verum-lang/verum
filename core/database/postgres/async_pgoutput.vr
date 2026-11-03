@@ -135,7 +135,7 @@ public type PgoutputChange is
 
 public type AsyncPgoutputConsumer is {
     conn: AsyncPgReplicationConnection,
-    cache: Shared<sync.mutex.Mutex<PgoRelationCache>>,
+    cache: Shared<Mutex<PgoRelationCache>>,
 };
 
 implement AsyncPgoutputConsumer {

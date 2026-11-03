@@ -108,7 +108,7 @@ type ListenerCommand is
 
 public type AsyncPgListener is {
     cmd_tx: Sender<ListenerCommand>,
-    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    join: Shared<Mutex<Maybe<JoinHandle<()>>>>,
 };
 
 implement AsyncPgListener {

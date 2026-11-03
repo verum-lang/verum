@@ -126,7 +126,7 @@ public type AsyncPgPool is {
     /// Channel-mediated availability — pop-to-acquire,
     /// push-to-release. Capacity == `max_size`.
     available_tx: Sender<AsyncPgConnection>,
-    available_rx: Shared<sync.mutex.Mutex<Receiver<AsyncPgConnection>>>,
+    available_rx: Shared<Mutex<Receiver<AsyncPgConnection>>>,
     /// Total currently-tracked connections (between 0 and
     /// `max_size`). `acquire` opens a fresh connection only if
     /// `current < max_size` AND the available channel is empty.

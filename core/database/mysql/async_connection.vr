@@ -157,7 +157,7 @@ public type LoadDataChunk is
 
 public type AsyncMysqlConnection is {
     tx: Sender<MysqlRequest>,
-    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    join: Shared<Mutex<Maybe<JoinHandle<()>>>>,
     /// MySQL thread-id (server's `connection_id` from initial
     /// handshake). Required input to `KILL QUERY <id>`. Captured
     /// once at connect time so cancel doesn't round-trip the

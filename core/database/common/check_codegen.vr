@@ -71,6 +71,7 @@ module core.database.common.check_codegen;
 
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
+mount core.base.memory.Heap;
 mount core.database.common.error.{AdapterId, AdPostgres, AdMysql, AdSqlite};
 
 // -----------------------------------------------------------------------------
@@ -121,12 +122,12 @@ public type RefinementPredicate is
       // Maybe-aware: predicate holds iff column is NULL OR (column
       // is NOT NULL AND inner holds). Used when the underlying
       // domain is `Maybe<Refined>`.
-    | RpOrNull(Box<RefinementPredicate>)
+    | RpOrNull(Heap<RefinementPredicate>)
       // Boolean composition. `RpAnd([])` and `RpOr([])` reduce to
       // `RpTrue` / `RpFalse` respectively.
     | RpAnd(List<RefinementPredicate>)
     | RpOr(List<RefinementPredicate>)
-    | RpNot(Box<RefinementPredicate>);
+    | RpNot(Heap<RefinementPredicate>);
 
 // -----------------------------------------------------------------------------
 // Builder helpers — terse construction at the derive call site.
@@ -199,7 +200,7 @@ public fn one_of_text(values: List<Text>) -> RefinementPredicate {
 /// col)`. The codegen avoids emitting `OR` when the column is
 /// declared NOT NULL — see `to_check_sql_for_column`.
 public fn or_null(inner: RefinementPredicate) -> RefinementPredicate {
-    RpOrNull(Box.new(inner))
+    RpOrNull(Heap.new(inner))
 }
 
 /// Conjunction. Empty list reduces to `RpTrue`.
@@ -214,7 +215,7 @@ public fn any(parts: List<RefinementPredicate>) -> RefinementPredicate {
 
 /// Negation.
 public fn not_(p: RefinementPredicate) -> RefinementPredicate {
-    RpNot(Box.new(p))
+    RpNot(Heap.new(p))
 }
 
 // -----------------------------------------------------------------------------
@@ -320,14 +321,14 @@ fn normalise(pred: &RefinementPredicate) -> RefinementPredicate {
             match &n {
                 RpTrue  => RpFalse,
                 RpFalse => RpTrue,
-                _       => RpNot(Box.new(n)),
+                _       => RpNot(Heap.new(n)),
             }
         }
         RpOrNull(inner) => {
             let n = normalise(&**inner);
             match &n {
                 RpTrue => RpTrue,            // anything is fine, including NULL
-                _      => RpOrNull(Box.new(n)),
+                _      => RpOrNull(Heap.new(n)),
             }
         }
         RpIntRange { lo, hi } => {

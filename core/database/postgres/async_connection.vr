@@ -60,6 +60,7 @@
 module core.database.postgres.async_connection;
 
 mount core.sync.mutex.{Mutex};
+mount core.net.addr.SocketAddr;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
@@ -190,7 +191,7 @@ public type AsyncPgConnection is {
     /// Join handle for the actor task — kept so `close()` can
     /// await the actor's clean shutdown after dispatching
     /// `ReqShutdown`.
-    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    join: Shared<Mutex<Maybe<JoinHandle<()>>>>,
     /// Cached server endpoint for issuing CancelRequest from a
     /// fresh socket without round-tripping through the busy
     /// actor. Captured once at connect time.
@@ -258,7 +259,7 @@ implement AsyncPgConnection {
     /// originally-trusted IP.
     public async fn cancel_running_query_with_local_bind(
         &self,
-        bind_local: Maybe<core.net.tcp.SocketAddr>,
+        bind_local: Maybe<SocketAddr>,
     ) -> Result<(), DbError> {
         let key = match self.backend_key {
             Maybe.Some(k) => k,

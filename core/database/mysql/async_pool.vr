@@ -88,7 +88,7 @@ public type AsyncMysqlPool is {
     config: MysqlConfig,
     pool_cfg: AsyncMysqlPoolConfig,
     available_tx: Sender<AsyncMysqlConnection>,
-    available_rx: Shared<sync.mutex.Mutex<Receiver<AsyncMysqlConnection>>>,
+    available_rx: Shared<Mutex<Receiver<AsyncMysqlConnection>>>,
     current: Shared<AtomicInt>,
 };
 

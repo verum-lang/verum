@@ -106,8 +106,8 @@ type BinlogActorCommand is
 
 public type AsyncMysqlBinlogStream is {
     cmd_tx: Sender<BinlogActorCommand>,
-    event_rx: Shared<sync.mutex.Mutex<Receiver<MysqlBinlogActorEvent>>>,
-    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    event_rx: Shared<Mutex<Receiver<MysqlBinlogActorEvent>>>,
+    join: Shared<Mutex<Maybe<JoinHandle<()>>>>,
 };
 
 implement AsyncMysqlBinlogStream {

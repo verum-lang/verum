@@ -106,7 +106,7 @@ public type BinlogChange is
 
 public type AsyncMysqlBinlogConsumer is {
     stream: AsyncMysqlBinlogStream,
-    cache: Shared<sync.mutex.Mutex<TableMapCache>>,
+    cache: Shared<Mutex<TableMapCache>>,
 };
 
 implement AsyncMysqlBinlogConsumer {

@@ -115,8 +115,8 @@ public type AsyncBaseBackupSession is {
     /// caller drains the chunk stream — useful for sizing a
     /// receive buffer or reserving disk per tablespace.
     tablespaces: List<BackupTablespace>,
-    event_rx: Shared<sync.mutex.Mutex<Receiver<BackupStreamEvent>>>,
-    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    event_rx: Shared<Mutex<Receiver<BackupStreamEvent>>>,
+    join: Shared<Mutex<Maybe<JoinHandle<()>>>>,
 };
 
 implement AsyncBaseBackupSession {

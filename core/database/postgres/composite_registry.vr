@@ -115,7 +115,7 @@ implement CompositeSchema {
 // =============================================================================
 
 public type CompositeRegistry is {
-    inner: Shared<sync.mutex.Mutex<List<CompositeSchema>>>,
+    inner: Shared<Mutex<List<CompositeSchema>>>,
 };
 
 implement CompositeRegistry {

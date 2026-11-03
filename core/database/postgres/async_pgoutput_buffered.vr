@@ -181,10 +181,10 @@ public type AsyncPgoutputBufferedConsumer is {
     /// than a Map because xids in a streaming session are bounded
     /// (typically O(1) concurrent — most workloads stream one
     /// long tx at a time). Linear scan is fine.
-    buffers: Shared<sync.mutex.Mutex<List<(Int, BufferedTx)>>>,
+    buffers: Shared<Mutex<List<(Int, BufferedTx)>>>,
     /// xid currently being filled (between StreamStart and
     /// StreamStop). `Maybe.None` outside a segment.
-    current_xid: Shared<sync.mutex.Mutex<Maybe<Int>>>,
+    current_xid: Shared<Mutex<Maybe<Int>>>,
     row_cap: Int,
     /// Per-tx soft cap on bytes_estimate. When a tx's estimate
     /// crosses this, the spill sink is invoked. 0 = disabled
@@ -196,7 +196,7 @@ public type AsyncPgoutputBufferedConsumer is {
     spill_sink: Shared<dyn SpillSink>,
     /// Per-xid set of "drop further events" markers — populated
     /// by SoDrop outcomes; cleared on StreamCommit/StreamAbort.
-    dropped_xids: Shared<sync.mutex.Mutex<List<Int>>>,
+    dropped_xids: Shared<Mutex<List<Int>>>,
 };
 
 implement AsyncPgoutputBufferedConsumer {
