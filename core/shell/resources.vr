@@ -20,7 +20,7 @@
 
 // This module wraps the platform-level handles (ShellFd, file paths, locks)
 // in CBGR-friendly types with explicit Drop impls. Where possible, we
-// reuse `core.io.fs.File` and `core.io.process.Child` directly — this
+// reuse `core.io.file.File` and `core.io.process.Child` directly — this
 // module exists to add shell-specific niceties (TempFile auto-unlink,
 // FileLock with flock, scoped lock guards).
 //
@@ -38,7 +38,8 @@ mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Drop};
 mount core.base.memory.{Shared};
 mount core.io.path.{Path, PathBuf};
-mount core.io.fs.{File, OpenOptions, remove_file as fs_remove_file};
+mount core.io.file.{File, OpenOptions};
+mount core.io.fs.{remove_file as fs_remove_file};
 mount core.text.format.{Formatter, FormatError};
 mount core.shell.context.{ShellContext};
 mount core.shell.result.{ShellError};
