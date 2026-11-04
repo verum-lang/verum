@@ -111,7 +111,7 @@ implement QuoteBuilder {
     }
 
     /// Create quote builder with specific span
-    public fn with_span(span: MetaSpan) -> Self {
+    public fn new_spanned(span: MetaSpan) -> Self {
         Self {
             tokens: List.new(),
             span,

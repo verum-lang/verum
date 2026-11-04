@@ -12,8 +12,8 @@
 //
 //   BOTH-TIER SAFE (tested here):
 //     * QuotePart 3-variant + disjointness.
-//     * QuoteBuilder record-literal ctor + `with_span` (static &
-//       instance) — direct `MetaSpan`, no `call_site()`.
+//     * QuoteBuilder record-literal ctor + `new_spanned` constructor
+//       and consuming `with_span` setter — direct `MetaSpan`, no `call_site()`.
 //     * `.keyword` (Leaf built inline) + `.splice` of an empty stream;
 //       `.build()` inspected via `.len()` and leaf `.flatten()` only.
 //     * Direct `Token`/`TokenKind`/`TokenTree.Leaf` construction +
@@ -114,7 +114,7 @@ fn test_quote_part_variants_pairwise_disjoint() {
 // =============================================================================
 //
 // `QuoteBuilder.new()` is intentionally NOT tested — it calls
-// `MetaSpan.call_site()`. `with_span(<MetaSpan>)` is the intrinsic-free
+// `MetaSpan.call_site()`. `new_spanned(<MetaSpan>)` is the intrinsic-free
 // entry point; a record literal is the other.
 //
 
@@ -125,8 +125,8 @@ fn test_builder_record_literal_ctor_empty() {
 }
 
 @test
-fn test_builder_with_span_static_ctor() {
-    let b = QuoteBuilder.with_span(synthetic_span());
+fn test_builder_new_spanned_ctor() {
+    let b = QuoteBuilder.new_spanned(synthetic_span());
     assert_eq(b.tokens.len(), 0);
 }
 
