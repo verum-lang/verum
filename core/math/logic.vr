@@ -28,8 +28,8 @@ public type Prop is ();
 /// A proof term witnessing the truth of a proposition P.
 /// Under Curry-Howard, proofs correspond to programs.
 public type Proof<P> is {
-    /// An opaque witness value.
-    witness: Int,
+    /// A value of the proposition itself, retained with its exact carrier.
+    witness: P,
 };
 
 /// The empty type (absurdity / bottom / ⊥).
@@ -42,20 +42,15 @@ public type Proof<P> is {
 
 /// This is the type-theoretic foundation of proof by contradiction:
 /// `Not<P> = |P| Void`.
-public type Void is ();  // unit stand-in; true Void requires uninhabited type support
+public type Void is !;
 
 /// Absurdity elimination: from a proof of Void, derive anything.
 /// (ex falso quodlibet / principle of explosion)
 ///
 
-/// Reaching this body means someone constructed an inhabitant of
-/// `Void` — currently a unit stand-in until proper uninhabited
-/// types ship. The descriptive message helps debug that semantic
-/// violation rather than silently surfacing as "entered unreachable
-/// code".
-public fn absurd<A>(v: Void) -> A {
-    unreachable("ex falso: reached `absurd` — Void was constructed (Void should be uninhabited by Curry-Howard)")
-}
+/// Eliminate the language's empty type by its bottom-type rule.
+/// There is no runtime sentinel or exception standing in for a proof.
+public fn absurd<A>(v: Void) -> A { v }
 
 // =============================================================================
 // 2. Logical Connectives
