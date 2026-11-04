@@ -120,6 +120,9 @@ public type Adapter is protocol {
 public type Connection is protocol {
     type Tx: Transaction;
 
+    /// Driver-selected row cursor; late transport and decoding failures remain explicit.
+    type Rows<R: Row>: Stream<Item = Result<R, DbError>>;
+
     /// Round-trip; cheap on Postgres (Sync), free on SQLite (no-op).
     async fn ping(&mut self) -> Result<(), DbError>;
 
@@ -152,7 +155,7 @@ public type Connection is protocol {
         params: P,
     ) -> Result<List<R>, DbError>;
 
-    /// Streaming variant — `Stream<R>` is backpressure-aware and
+    /// Streaming variant — `Self.Rows<R>` is backpressure-aware and
     /// driven by the cooperative async runtime. Postgres uses a server
     /// cursor; MySQL holds the result-set on the connection; SQLite
     /// loops `step()`.
@@ -160,7 +163,7 @@ public type Connection is protocol {
         &mut self,
         q: &PreparedQuery<R, P>,
         params: P,
-    ) -> Result<Stream<R>, DbError>;
+    ) -> Result<Self.Rows<R>, DbError>;
 
     async fn close(self) -> Result<(), DbError>;
 }
@@ -179,6 +182,9 @@ public type Connection is protocol {
 /// their own lifetime behavior; see docs/architecture/resource-mode-contract.md.
 public type affine Transaction is protocol {
     type SP: Savepoint;
+
+    /// Transaction-scoped cursor with explicit errors while consuming rows.
+    type Rows<R: Row>: Stream<Item = Result<R, DbError>>;
 
     async fn commit(self) -> Result<(), DbError>;
     async fn rollback(self) -> Result<(), DbError>;
@@ -201,7 +207,7 @@ public type affine Transaction is protocol {
         &mut self,
         q: &PreparedQuery<R, P>,
         params: P,
-    ) -> Result<Stream<R>, DbError>;
+    ) -> Result<Self.Rows<R>, DbError>;
 }
 
 // -----------------------------------------------------------------------------
