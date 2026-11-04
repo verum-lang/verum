@@ -39,7 +39,7 @@ mount core.time.instant.{Instant};
 mount core.async.timer.{sleep};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
 mount core.async.task.{spawn};
-mount core.async.task.{TaskHandle};
+mount core.async.task.{JoinHandle};
 
 // =============================================================================
 // Progress — bounded bar
@@ -168,7 +168,7 @@ fn format_duration_ms(ms: Int) -> Text {
 public type Spinner is {
     label:  Text,
     cancel: CancellationTokenSource,
-    task:   Maybe<TaskHandle<()>>,
+    task:   Maybe<JoinHandle<()>>,
     stopped: Bool,
 }
 

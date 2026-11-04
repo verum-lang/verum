@@ -23,7 +23,10 @@ module core.shell.text_utils;
 
 mount core.{Maybe, Result, List, Text};
 mount core.text.regex.{Regex, RegexError};
-mount core.shell.transducer.{Transducer, Reducer, mapping, filtering};
+mount core.base.iterator.{Transducer, Reducer};
+mount core.shell.transducer.{
+    mapping, filtering,
+};
 
 // =============================================================================
 // grep — line-oriented pattern filter

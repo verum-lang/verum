@@ -39,9 +39,9 @@ mount core.shell.context.{ShellContext};
 mount core.shell.exec.{};
 mount core.shell.escape.{Escaper, ShellEscape};
 mount core.shell.result.{ShellResult, ShellError};
+mount core.base.iterator.{Transducer, Reducer};
 mount core.shell.transducer.{
-    Transducer, Reducer, mapping, filtering, taking, dropping, compose, identity,
-    transduce_list, list_appender,
+    mapping, filtering, taking, dropping, compose, identity, transduce_list, list_appender,
 };
 
 // =============================================================================

@@ -34,7 +34,8 @@ module core.shell.result;
 mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.base.iterator.{Iterator, IntoIterator};
-mount core.text.format.{Formatter, FormatError};
+mount core.text.format.{Formatter};
+mount core.base.protocols.{FormatError};
 mount core.text.text.{Text as TextOps};
 // Re-exported so user tests / scripts can `mount core.shell.result.{ExitStatus}`
 // without an explicit `mount core.io.process` (the latter is an internal

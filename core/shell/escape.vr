@@ -42,7 +42,8 @@ module core.shell.escape;
 
 mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
-mount core.text.format.{Formatter, FormatError};
+mount core.text.format.{Formatter};
+mount core.base.protocols.{FormatError};
 
 // =============================================================================
 // ShellFlavour — target shell dialect
