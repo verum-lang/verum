@@ -977,20 +977,13 @@ impl<'s> CompilationPipeline<'s> {
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "module".to_string());
-            let exports = exporter.export_module(module, &module_path);
-            let data = verum_types::type_exporter::serialize_module_exports(exports);
-            if !data.is_empty() {
-                let vtyp_path = self.session.options().input.with_extension("vtyp");
-                if let Err(e) = std::fs::write(&vtyp_path, &data) {
-                    debug!("Failed to write type metadata: {}", e);
-                } else {
-                    info!(
-                        "Exported type metadata: {} ({} bytes)",
-                        vtyp_path.display(),
-                        data.len()
-                    );
-                }
-            }
+            let exports = exporter.export_module(module, &module_path)?;
+            let data = verum_types::type_exporter::serialize_module_exports(exports)?;
+            let vtyp_path = self.session.options().input.with_extension("vtyp");
+            std::fs::write(&vtyp_path, &data).map_err(|error| {
+                anyhow::anyhow!("cannot write type metadata {}: {error}", vtyp_path.display())
+            })?;
+            info!("Exported type metadata: {} ({} bytes)", vtyp_path.display(), data.len());
             drop(methods_guard);
         }
 

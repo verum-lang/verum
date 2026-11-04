@@ -36,6 +36,7 @@ fn negative_recursion() -> CoinductiveType {
             name: "observe".into(),
             return_type: Heap::new(Type::new(
                 TypeKind::Function {
+                    is_async: false,
                     params: [ty("Bad")].into_iter().collect(),
                     return_type: Box::new(ty("Bool")),
                     contexts: ContextList::empty(),

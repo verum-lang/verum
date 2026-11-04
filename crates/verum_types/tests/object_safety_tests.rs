@@ -33,6 +33,7 @@ fn test_object_safe_simple_protocol() {
     methods.insert(
         Text::from("draw"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("draw"),
             ty: Type::function(
                 vec![Type::reference(false, Type::int())].into(), // &self (simplified)
@@ -82,6 +83,7 @@ fn test_not_object_safe_returns_self() {
     methods.insert(
         Text::from("clone"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("clone"),
             ty: Type::function(
                 vec![Type::reference(false, Type::int())].into(), // &self (simplified)
@@ -143,8 +145,10 @@ fn test_not_object_safe_generic_method() {
     methods.insert(
         Text::from("method"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("method"),
             ty: Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![
                     Type::reference(false, Type::int()),             // &self
                     Type::Var(verum_types::ty::TypeVar::with_id(0)), // T
@@ -208,6 +212,7 @@ fn test_not_object_safe_no_self_parameter() {
     methods.insert(
         Text::from("new"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("new"),
             ty: Type::function(
                 vec![].into(), // No parameters
@@ -277,6 +282,7 @@ fn test_not_object_safe_takes_self_by_value() {
     methods.insert(
         Text::from("consume"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("consume"),
             ty: Type::function(
                 vec![Type::int()].into(), // self by value (not &self)
@@ -335,6 +341,7 @@ fn test_not_object_safe_has_associated_const() {
     methods.insert(
         Text::from("get_max"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("get_max"),
             ty: Type::function(
                 vec![Type::reference(false, Type::int())].into(), // &self
@@ -403,6 +410,7 @@ fn test_object_safe_multiple_methods() {
     methods.insert(
         Text::from("area"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("area"),
             ty: Type::function(
                 vec![Type::reference(false, Type::int())].into(), // &self
@@ -420,6 +428,7 @@ fn test_object_safe_multiple_methods() {
     methods.insert(
         Text::from("perimeter"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("perimeter"),
             ty: Type::function(
                 vec![Type::reference(false, Type::int())].into(), // &self
@@ -437,6 +446,7 @@ fn test_object_safe_multiple_methods() {
     methods.insert(
         Text::from("draw"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("draw"),
             ty: Type::function(
                 vec![Type::reference(true, Type::int())].into(), // &mut self
@@ -483,6 +493,7 @@ fn test_object_safe_checked_and_unsafe_references() {
     methods.insert(
         Text::from("method_checked"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("method_checked"),
             ty: Type::function(
                 vec![Type::checked_reference(false, Type::int())].into(), // &checked self
@@ -500,6 +511,7 @@ fn test_object_safe_checked_and_unsafe_references() {
     methods.insert(
         Text::from("method_unsafe"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("method_unsafe"),
             ty: Type::function(
                 vec![Type::unsafe_reference(false, Type::int())].into(), // &unsafe self

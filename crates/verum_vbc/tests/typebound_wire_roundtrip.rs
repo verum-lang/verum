@@ -17,6 +17,7 @@ fn type_bounds_survive_wire_roundtrip() {
     let name_f = module.intern_string("F");
     let name_fn = module.intern_string("adapter_fn");
     let bound = TypeRef::Function {
+        is_async: false,
         params: vec![TypeRef::Generic(verum_vbc::types::TypeParamId(0))],
         return_type: Box::new(TypeRef::Generic(verum_vbc::types::TypeParamId(2))),
         contexts: smallvec::SmallVec::new(),

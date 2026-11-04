@@ -1936,10 +1936,12 @@ impl ToTokens for Type {
             }
 
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 ..
             } => {
+                if *is_async { stream.push(Token::new(TokenKind::Async, self.span)); }
                 stream.push(Token::new(TokenKind::Fn, self.span));
                 stream.push(Token::new(TokenKind::LParen, self.span));
                 for (i, param) in params.iter().enumerate() {
@@ -1954,12 +1956,14 @@ impl ToTokens for Type {
             }
 
             TypeKind::Rank2Function {
+                is_async,
                 type_params,
                 params,
                 return_type,
                 ..
             } => {
                 // Rank-2 function type: fn<R>(Reducer<B, R>) -> Reducer<A, R>
+                if *is_async { stream.push(Token::new(TokenKind::Async, self.span)); }
                 stream.push(Token::new(TokenKind::Fn, self.span));
                 // Output type parameters: <R, S, ...>
                 if !type_params.is_empty() {

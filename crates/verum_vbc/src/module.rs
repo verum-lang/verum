@@ -871,7 +871,7 @@ impl VbcModule {
                 let args_str: Vec<String> = args.iter().map(|a| self.display_type_ref(a)).collect();
                 format!("{}<{}>", base_name, args_str.join(", "))
             }
-            TypeRef::Function {
+            TypeRef::Function { is_async,
                 params,
                 return_type,
                 ..
@@ -879,12 +879,13 @@ impl VbcModule {
                 let params_str: Vec<String> =
                     params.iter().map(|p| self.display_type_ref(p)).collect();
                 format!(
-                    "fn({}) -> {}",
+                    "{}fn({}) -> {}",
+                if *is_async { "async " } else { "" },
                     params_str.join(", "),
                     self.display_type_ref(return_type)
                 )
             }
-            TypeRef::Rank2Function {
+            TypeRef::Rank2Function { is_async,
                 type_param_count,
                 params,
                 return_type,
@@ -893,7 +894,8 @@ impl VbcModule {
                 let params_str: Vec<String> =
                     params.iter().map(|p| self.display_type_ref(p)).collect();
                 format!(
-                    "fn<{}>({}) -> {}",
+                    "{}fn<{}>({}) -> {}",
+                if *is_async { "async " } else { "" },
                     type_param_count,
                     params_str.join(", "),
                     self.display_type_ref(return_type)
@@ -3031,9 +3033,9 @@ impl FunctionDescriptor {
 
     /// Reconstruct a complete callable only from retained source facts.
     pub fn semantic_callable_signature(&self) -> Option<TypeRef> {
-        if self.is_generator || self.properties.contains(PropertySet::ASYNC)
-            || !self.contexts.is_empty() { return None; }
+        if self.is_generator || !self.contexts.is_empty() { return None; }
         Some(TypeRef::Function {
+            is_async: self.properties.contains(PropertySet::ASYNC),
             params: self.semantic_parameter_types()?.iter().cloned().collect::<Option<_>>()?,
             return_type: Box::new(self.semantic_return.clone()?),
             contexts: Default::default(),

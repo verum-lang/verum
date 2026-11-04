@@ -1142,6 +1142,7 @@ impl SpecializationSelector {
             // Function types - parameter and return types must match
             (
                 Type::Function {
+                    property_requirement: requirement1,
                     params: p1,
                     return_type: r1,
                     type_params: _,
@@ -1149,6 +1150,7 @@ impl SpecializationSelector {
                     properties: _,
                 },
                 Type::Function {
+                    property_requirement: requirement2,
                     params: p2,
                     return_type: r2,
                     type_params: _,
@@ -1157,7 +1159,8 @@ impl SpecializationSelector {
                 },
             ) => {
                 // Check parameter count and types (contravariant)
-                p1.len() == p2.len()
+                requirement1 == requirement2
+                    && p1.len() == p2.len()
                     && p1.iter().zip(p2.iter()).all(|(a, b)| {
                         self.types_match_with_bindings(b, a, bindings)
                     })

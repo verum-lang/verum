@@ -17,9 +17,11 @@ mod associated_type_bounds;
 mod associated_type_obligations;
 mod source_declarations;
 mod protocol_arguments;
+mod protocol_methods;
 mod source_type_registration;
 mod universe_parameters;
 mod call_obligations;
+mod callable_properties;
 mod preparation;
 mod dependent_records;
 mod reference_origin;
@@ -740,7 +742,7 @@ pub struct TypeChecker {
         Text,
         Text,
         TypeVar,
-        Vec<(usize, Type)>,
+        Vec<(usize, Type, Option<crate::context::InstantiatedScheme>)>,
     )>,
     /// (type_name, method_name) pairs whose single-slot
     /// `inherent_methods` entry was POISONED because two protocol
@@ -1661,6 +1663,7 @@ pub(crate) mod helpers;
 /// before they enter the type system.
 pub fn parse_descriptor_type_string(raw: &str) -> std::result::Result<Type, Text> {
     crate::core_metadata::validate_archive_array_spelling(raw)?;
+    crate::core_metadata::validate_archive_callable_spelling(raw, false)?;
     Ok(helpers::parse_descriptor_type_string(raw))
 }
 // Re-export helpers so sibling submodules can access them via `super::`

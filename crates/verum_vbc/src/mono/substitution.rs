@@ -151,10 +151,12 @@ fn map_free_parameters(
                 .collect::<Result<_, _>>()?,
         },
         TypeRef::Function {
+            is_async,
             params,
             return_type,
             contexts,
         } => TypeRef::Function {
+            is_async: *is_async,
             params: params
                 .iter()
                 .map(|ty| map_free_parameters(ty, depth, map))
@@ -163,6 +165,7 @@ fn map_free_parameters(
             contexts: contexts.clone(),
         },
         TypeRef::Rank2Function {
+            is_async,
             type_param_count,
             params,
             return_type,
@@ -172,6 +175,7 @@ fn map_free_parameters(
                 .checked_add(u32::from(*type_param_count))
                 .ok_or(SubstitutionError::BinderDepthOverflow)?;
             TypeRef::Rank2Function {
+                is_async: *is_async,
                 type_param_count: *type_param_count,
                 params: params
                     .iter()
@@ -230,12 +234,14 @@ mod record_projection_tests {
         assert_eq!(substitution.apply(&projection).unwrap(), projection);
         assert_eq!(lift_free_parameters(&projection, u32::MAX).unwrap(), projection);
         let nested = TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![TypeRef::Generic(TypeParamId(1))],
             return_type: Box::new(projection.clone()),
             contexts: Default::default(),
         };
         let expected = TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![TypeRef::Concrete(TypeId::INT)],
             return_type: Box::new(projection),

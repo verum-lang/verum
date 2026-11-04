@@ -591,11 +591,12 @@ impl Serializer {
                 }
             }
             TypeRef::Function {
+                is_async,
                 params,
                 return_type,
                 contexts,
             } => {
-                self.output.push(0x04);
+                self.output.push(0x04 | (u8::from(*is_async) << 4));
                 encode_varint(params.len() as u64, &mut self.output);
                 for param in params {
                     self.serialize_type_ref(param)?;
@@ -632,12 +633,13 @@ impl Serializer {
                 self.serialize_type_ref(inner)?;
             }
             TypeRef::Rank2Function {
+                is_async,
                 type_param_count,
                 params,
                 return_type,
                 contexts,
             } => {
-                self.output.push(0x0C);
+                self.output.push(0x0C | (u8::from(*is_async) << 4));
                 encode_u16(*type_param_count, &mut self.output);
                 encode_varint(params.len() as u64, &mut self.output);
                 for param in params {

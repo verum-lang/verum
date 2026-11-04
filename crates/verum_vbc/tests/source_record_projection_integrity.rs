@@ -82,11 +82,13 @@ fn nested_types(inner: TypeRef) -> Vec<TypeRef> {
         },
         TypeRef::Tuple(vec![inner.clone(), inner.clone()]),
         TypeRef::Function {
+            is_async: false,
             params: vec![inner.clone()],
             return_type: Heap::new(inner.clone()),
             contexts: Default::default(),
         },
         TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![inner.clone()],
             return_type: Heap::new(inner.clone()),
@@ -252,6 +254,7 @@ fn carrier_occurrences_are_bound_by_structural_position_not_counts() {
 #[test]
 fn locally_quantified_binders_shadow_only_their_own_source_names() {
     let mut value = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![TypeRef::Generic(TypeParamId(0)), right_projection()],
         return_type: Heap::new(TypeRef::Generic(TypeParamId(0))),
@@ -270,6 +273,7 @@ fn locally_quantified_binders_shadow_only_their_own_source_names() {
             .contains("exact source binder occurrence")
     );
     let inner = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![TypeRef::Generic(TypeParamId(0)), right_projection()],
         return_type: Heap::new(TypeRef::Generic(TypeParamId(0))),
@@ -278,6 +282,7 @@ fn locally_quantified_binders_shadow_only_their_own_source_names() {
     let mut module = two_carriers(
         "fn<R>(fn<left>(left, right) -> left, left) -> right",
         TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![inner, projection()],
             return_type: Heap::new(right_projection()),
@@ -599,6 +604,7 @@ fn ambiguous_argument_gate_preserves_closed_constants_and_locally_shadowed_types
         fixture("type Carrier<T> is { left: Type, value: fn<left>(Wrap<[left]>) -> left };");
     let local = TypeRef::Generic(TypeParamId(0));
     let ty = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![TypeRef::Instantiated {
             base: TypeId(1001),

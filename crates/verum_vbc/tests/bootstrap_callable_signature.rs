@@ -102,6 +102,7 @@ fn bootstrap_method_result_and_callable_bindings_remain_structural() {
             args: vec![payload.clone()],
         },
         TypeRef::Function {
+            is_async: false,
             params: vec![payload.clone()],
             return_type: Box::new(payload),
             contexts: Default::default(),
@@ -326,6 +327,7 @@ fn default_associated_callable_parameter_reaches_the_following_method() {
     assert_eq!(
         finish_witness(&module)[1],
         TypeRef::Function {
+            is_async: false,
             params: vec![payload.clone()],
             return_type: Box::new(payload),
             contexts: Default::default()

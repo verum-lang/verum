@@ -104,6 +104,7 @@ fn locally_quantified_function_binders_are_not_missing_types() {
         .find(|ty| module.get_string(ty.name) == Some("Poly"))
         .unwrap();
     let expected = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![
             TypeRef::Generic(TypeParamId(0)),
@@ -132,8 +133,10 @@ fn nested_quantifiers_preserve_local_outer_and_shadowed_identity() {
         .unwrap();
     let g = |index| TypeRef::Generic(TypeParamId(index));
     let expected = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![g(0), g(1), g(2)],
             return_type: Box::new(g(2)),
@@ -146,6 +149,7 @@ fn nested_quantifiers_preserve_local_outer_and_shadowed_identity() {
     assert_eq!(
         poly.fields[1].declaration_type,
         Some(TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![g(0)],
             return_type: Box::new(g(0)),
@@ -172,6 +176,7 @@ fn quantified_parameters_keep_semantic_metadata() {
     assert_eq!(
         function.semantic_parameter_types().unwrap(),
         &[Some(TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![
                 TypeRef::Generic(TypeParamId(0)),
@@ -212,6 +217,7 @@ fn quantified_shadow_cannot_capture_the_impl_self_type() {
     assert_eq!(
         function.params[0].type_ref,
         TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![TypeRef::Instantiated {
                 base: owner.id,

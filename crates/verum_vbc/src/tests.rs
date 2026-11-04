@@ -80,6 +80,7 @@ fn test_roundtrip_complex_type_refs() {
             ],
         },
         TypeRef::Function {
+            is_async: false,
             params: vec![TypeRef::Concrete(TypeId::INT)],
             return_type: Box::new(TypeRef::Concrete(TypeId::BOOL)),
             contexts: smallvec::smallvec![ContextRef(1)],

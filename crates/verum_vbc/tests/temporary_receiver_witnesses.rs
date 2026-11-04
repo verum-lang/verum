@@ -73,6 +73,7 @@ implement Factory { fn borrow(value: &Payload) -> &Payload { value } }
             assert_eq!(
                 *signature,
                 Some(TypeRef::Function {
+                    is_async: false,
                     params: vec![borrowed.clone()],
                     return_type: Box::new(borrowed),
                     contexts: Default::default(),
@@ -356,6 +357,7 @@ fn probe(fail: Bool) -> Int {
             assert_eq!(
                 type_args[3],
                 TypeRef::Function {
+                    is_async: false,
                     params: vec![TypeRef::Concrete(TypeId::BOOL)],
                     return_type: Box::new(TypeRef::Concrete(TypeId::INT)),
                     contexts: Default::default(),

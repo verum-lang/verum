@@ -212,6 +212,7 @@ fn test_infer_function_kind() {
     let mut inferer = KindInferer::new();
 
     let ty = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::Int, Type::Text].into(),
         return_type: Box::new(Type::Bool),
         contexts: None,

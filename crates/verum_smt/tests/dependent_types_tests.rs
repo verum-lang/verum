@@ -1621,6 +1621,7 @@ fn test_induction_principle_generation_simple() {
         Text::from("Succ"),
         Type::new(
             TypeKind::Function {
+                is_async: false,
                 params: vec![nat_type.clone()].into(),
                 return_type: Heap::new(nat_type.clone()),
                 calling_convention: verum_common::Maybe::None,
@@ -1752,6 +1753,7 @@ fn test_induction_principle_list_type() {
         Text::from("Cons"),
         Type::new(
             TypeKind::Function {
+                is_async: false,
                 params: vec![t_type.clone(), list_t_type.clone()].into(),
                 return_type: Heap::new(list_t_type.clone()),
                 calling_convention: verum_common::Maybe::None,
@@ -1824,6 +1826,7 @@ fn test_induction_principle_binary_tree() {
         Text::from("Node"),
         Type::new(
             TypeKind::Function {
+                is_async: false,
                 params: vec![tree_type.clone(), tree_type.clone()].into(),
                 return_type: Heap::new(tree_type.clone()),
                 calling_convention: verum_common::Maybe::None,

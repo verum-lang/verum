@@ -46,6 +46,8 @@ pub struct TypeScheme {
     /// Maps original type variables to their protocol constraints.
     /// These are checked at instantiation sites when the function is called.
     pub var_protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
+    /// Conditional obligations on arbitrary declared subjects, including Self.Item.
+    pub where_clauses: List<crate::protocol::WhereClause>,
     /// Number of leading type variables that come from the implement block.
     /// Used for instance methods to distinguish impl-level vars (bound from
     /// receiver type args) from method-level vars (inferred from arguments).
@@ -70,6 +72,7 @@ pub struct TypeScheme {
 
 /// One call's fresh body and obligations. All fields use the same simultaneous
 /// substitution, including level parameters nested in bounds and the receiver.
+#[derive(Clone)]
 pub struct InstantiatedScheme {
     substitution: Substitution,
     pub ty: Type,
@@ -77,6 +80,7 @@ pub struct InstantiatedScheme {
     pub implicit_vars: Set<TypeVar>,
     pub type_bounds: Map<TypeVar, List<Type>>,
     pub protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
+    pub where_clauses: List<crate::protocol::WhereClause>,
     pub impl_self_type: Option<Type>,
     pub explicit_method_vars: Option<List<Option<TypeVar>>>,
 }
@@ -123,6 +127,7 @@ impl TypeScheme {
             implicit_vars,
             type_bounds,
             protocol_bounds,
+            where_clauses: self.where_clauses.iter().map(|clause| clause.try_apply_subst(&subst)).collect::<Result<_, _>>()?,
             impl_self_type: self.impl_self_type.as_ref().map(|ty| ty.try_apply_subst(&subst)).transpose()?,
             explicit_method_vars: self.fresh_explicit_method_vars(&fresh_vars),
             fresh_vars,
@@ -138,6 +143,7 @@ impl TypeScheme {
             implicit_vars: Set::new(),
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
+            where_clauses: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
@@ -155,6 +161,7 @@ impl TypeScheme {
             implicit_vars: Set::new(),
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
+            where_clauses: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
@@ -173,6 +180,7 @@ impl TypeScheme {
             implicit_vars,
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
+            where_clauses: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
@@ -196,6 +204,7 @@ impl TypeScheme {
             implicit_vars: Set::new(),
             var_type_bounds,
             var_protocol_bounds: Map::new(),
+            where_clauses: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,

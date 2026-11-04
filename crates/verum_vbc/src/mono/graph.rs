@@ -189,11 +189,13 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             }
         }
         TypeRef::Function {
+            is_async,
             params,
             return_type,
             contexts,
         } => {
             3u8.hash(hasher);
+            is_async.hash(hasher);
             params.len().hash(hasher);
             for param in params {
                 hash_type_ref(param, hasher);
@@ -259,12 +261,14 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             v.hash(hasher);
         }
         TypeRef::Rank2Function {
+            is_async,
             type_param_count,
             params,
             return_type,
             contexts,
         } => {
             8u8.hash(hasher);
+            is_async.hash(hasher);
             type_param_count.hash(hasher);
             params.len().hash(hasher);
             for param in params {

@@ -508,6 +508,8 @@ pub struct TypeParam {
 /// - Cross-parameter constraints: `fn transfer(amount: Int, balance: Int{>= amount})`
 #[derive(Debug, Clone)]
 pub struct ProtocolMethod {
+    /// Exact source declaration telescope; absent for synthetic signatures.
+    pub scope: Option<ProtocolMethodScope>,
     /// Method name
     pub name: Text,
     /// Method type (function type)
@@ -533,12 +535,72 @@ pub struct ProtocolMethod {
     /// Type parameter bounds for method-level generic params.
     /// Maps param name to its bound type (e.g., "F" -> fn(Int) -> B).
     /// This enables closure type inference for methods like `fn map<B, F: fn(Self.Item) -> B>`.
-    pub type_param_bounds: Map<Text, Type>,
+    pub type_param_bounds: Map<Text, List<Type>>,
     /// Declaration facts before ABI erasure. Synthetic built-ins may embed the receiver in their function type.
     pub dispatch: Option<verum_ast::method_dispatch::MethodDispatch>,
 }
 
+/// Source method variables are owned by their declaration, not inferred from use.
+#[derive(Debug, Clone, Default)]
+pub struct ProtocolMethodScope {
+    pub binders: DeclarationBinders,
+    pub owner_values: List<(usize, Text)>,
+    pub protocol_bounds: Map<crate::ty::TypeVar, List<ProtocolBound>>,
+    pub where_clauses: List<WhereClause>,
+}
+
 impl ProtocolMethod {
+    /// Substitute the selected owner's argument roster without freshening local binders.
+    pub fn apply_owner(&self, arguments: &[Type], receiver: &Type) -> Result<Self, Text> {
+        if self.scope.is_none() && !arguments.is_empty() {
+            return Err("protocol method lacks its declaration-owned signature telescope".into());
+        }
+        if let Some(scope) = &self.scope {
+            let expected = scope.binders.owner.len() + scope.owner_values.len();
+            if arguments.len() != expected {
+                return Err(format!("protocol method expects {expected} owner arguments, received {}", arguments.len()).into());
+            }
+        }
+        let mut applied = self.clone();
+        let mut substitution = crate::ty::Substitution::new();
+        let mut values = Map::new();
+        if let Some(scope) = &self.scope {
+            for (position, variable) in &scope.binders.owner {
+                let argument = arguments.get(*position).ok_or_else(|| Text::from("protocol method application lacks a declared owner argument"))?;
+                substitution.insert(*variable, argument.clone());
+            }
+            for (position, name) in &scope.owner_values {
+                let argument = arguments.get(*position).ok_or_else(|| Text::from("protocol method application lacks a declared value argument"))?;
+                values.insert(name.clone(), argument.clone());
+            }
+        }
+        values.insert("Self".into(), receiver.clone());
+        let apply = |ty: &Type| -> std::result::Result<Type, Text> {
+            let ty = ty.try_apply_subst(&substitution)?;
+            Ok(ty.substitute_params(&values))
+        };
+        applied.ty = apply(&self.ty)?;
+        applied.type_param_bounds = self.type_param_bounds.iter().map(|(name, bounds)| Ok((name.clone(), bounds.iter().map(&apply).collect::<Result<_, Text>>()?))).collect::<std::result::Result<_, Text>>()?;
+        if let Some(scope) = &mut applied.scope {
+            for clause in &mut scope.where_clauses {
+                clause.ty = apply(&clause.ty)?;
+                for bound in &mut clause.bounds {
+                    for argument in &mut bound.args { *argument = apply(argument)?; }
+                    for argument in bound.associated_types.values_mut() { *argument = apply(argument)?; }
+                }
+            }
+            scope.binders.owner.clear();
+            scope.owner_values.clear();
+            for bounds in scope.protocol_bounds.values_mut() {
+                for bound in bounds {
+                    for argument in &mut bound.args { *argument = apply(argument)?; }
+                    for argument in bound.associated_types.values_mut() { *argument = apply(argument)?; }
+                }
+            }
+        }
+        Ok(applied)
+    }
+
     pub fn receiver_kind(&self) -> Option<ReceiverKind> {
         self.dispatch.map(|method| method.receiver)
     }
@@ -559,6 +621,7 @@ impl ProtocolMethod {
     /// This is the most common constructor for backward compatibility.
     pub fn simple(name: Text, ty: Type, has_default: bool) -> Self {
         Self {
+            scope: None,
             name,
             ty,
             has_default,
@@ -579,9 +642,10 @@ impl ProtocolMethod {
         ty: Type,
         has_default: bool,
         type_param_names: List<Text>,
-        type_param_bounds: Map<Text, Type>,
+        type_param_bounds: Map<Text, List<Type>>,
     ) -> Self {
         Self {
+            scope: None,
             name,
             ty,
             has_default,
@@ -603,6 +667,7 @@ impl ProtocolMethod {
         is_async: bool,
     ) -> Self {
         Self {
+            scope: None,
             name,
             ty,
             has_default,
@@ -618,6 +683,7 @@ impl ProtocolMethod {
     /// Create an async protocol method
     pub fn async_method(name: Text, ty: Type, has_default: bool) -> Self {
         Self {
+            scope: None,
             name,
             ty,
             has_default,
@@ -650,7 +716,7 @@ impl ProtocolMethod {
 /// ```
 /// Declaration-owned variables used to instantiate associated family bounds.
 #[derive(Debug, Clone, Default)]
-pub struct AssociatedTypeBinders {
+pub struct DeclarationBinders {
     pub self_type: Maybe<crate::ty::TypeVar>,
     /// Protocol parameter positions; value parameters do not become type variables.
     pub owner: List<(usize, crate::ty::TypeVar)>,
@@ -660,7 +726,7 @@ pub struct AssociatedTypeBinders {
 
 #[derive(Debug, Clone)]
 pub struct AssociatedType {
-    pub binders: AssociatedTypeBinders,
+    pub binders: DeclarationBinders,
     /// Type name
     pub name: Text,
     /// Type parameters for GATs (empty for regular associated types)
@@ -1007,10 +1073,19 @@ pub struct ProtocolImpl {
 }
 
 /// Where clause for constrained implementations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhereClause {
     pub ty: Type,
     pub bounds: List<ProtocolBound>,
+}
+
+impl WhereClause {
+    pub fn try_apply_subst(&self, substitution: &crate::ty::Substitution) -> Result<Self, Text> {
+        Ok(Self {
+            ty: self.ty.try_apply_subst(substitution)?,
+            bounds: self.bounds.iter().map(|bound| bound.try_apply_subst(substitution)).collect::<Result<_, _>>()?,
+        })
+    }
 }
 
 // ConstValue is imported from crate::const_eval
@@ -1501,12 +1576,14 @@ impl MethodSignature {
                     .collect(),
             ),
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 type_params,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| Self::apply_tv_mapping(p, mapping))
@@ -2296,6 +2373,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "eq".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "eq".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -2316,6 +2394,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "ne".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "ne".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -2460,6 +2539,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "cmp".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "cmp".into(),
                         // Params exclude the RECEIVER (T0701 result leg):
                         // every arg-count consumer compares against USER
@@ -2517,6 +2597,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "show".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "show".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]),
@@ -2563,6 +2644,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "map".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "map".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -2606,6 +2688,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "next".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "next".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]),
@@ -2652,6 +2735,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "next".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "next".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]),
@@ -2672,6 +2756,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "size_hint".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "size_hint".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]),
@@ -2721,6 +2806,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "hash".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "hash".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -2772,6 +2858,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "clone".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "clone".into(),
                         ty: Type::function(
                             List::from(vec![Type::Reference {
@@ -2814,6 +2901,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "default".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "default".into(),
                         ty: Type::function(
                             List::new(),                               // Static method, no self parameter
@@ -2859,6 +2947,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "deref".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "deref".into(),
                         ty: Type::function(
                             List::from(vec![Type::Reference {
@@ -2910,6 +2999,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "deref_mut".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "deref_mut".into(),
                         ty: Type::function(
                             List::from(vec![Type::Reference {
@@ -2970,6 +3060,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "next".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "next".into(),
                         ty: Type::function(
                             List::from(vec![Type::Reference {
@@ -3019,6 +3110,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "get".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "get".into(),
                         ty: Type::function(
                             List::from(vec![Type::Reference {
@@ -3039,6 +3131,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "advance".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "advance".into(),
                         ty: Type::function(
                             List::from(vec![Type::Reference {
@@ -3088,6 +3181,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "fmap".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "fmap".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -3150,6 +3244,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "pure".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "pure".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]), // T
@@ -3167,6 +3262,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "bind".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "bind".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -3229,6 +3325,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "from_output".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "from_output".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]), // Output
@@ -3246,6 +3343,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "branch".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "branch".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]), // Self
@@ -3305,6 +3403,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "from_residual".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "from_residual".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]), // R (residual)
@@ -3346,6 +3445,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "bitand".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "bitand".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -3393,6 +3493,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "bitor".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "bitor".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -3440,6 +3541,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "bitxor".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "bitxor".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -3487,6 +3589,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "shl".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "shl".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -3534,6 +3637,7 @@ impl ProtocolChecker {
                 methods.insert(
                     "shr".into(),
                     ProtocolMethod {
+                        scope: None,
                         name: "shr".into(),
                         ty: Type::function(
                             List::from(vec![
@@ -6682,12 +6786,14 @@ impl ProtocolChecker {
                 mutable: *mutable,
             },
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 type_params,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| self.apply_substitution(p, substitution))
@@ -8328,12 +8434,14 @@ impl ProtocolChecker {
                 size: *size,
             },
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 properties,
                 type_params,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| self.apply_type_substitution_impl(p, subst, d))
@@ -8971,12 +9079,14 @@ impl ProtocolChecker {
                 Type::Variant(new_variants)
             }
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 type_params,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| self.apply_type_substitution_with_map(p, subst))
@@ -10614,7 +10724,7 @@ impl ProtocolChecker {
             for proto_name in bounds.iter() {
                 if let Maybe::Some(proto) = self.get_protocol(proto_name) {
                     if let Some(pm) = proto.methods.get(method_name) {
-                        results.push(pm.ty.clone());
+                        if let Ok(applied) = pm.apply_owner(&[], ty) { results.push(applied.ty); }
                     }
                 }
             }
@@ -10660,8 +10770,8 @@ impl ProtocolChecker {
             // Direct: method declared on the receiver's own protocol.
             if let Maybe::Some(proto) = self.get_protocol(recv_name) {
                 if let Some(pm) = proto.methods.get(method_name) {
-                    let substituted = self.substitute_type_params(&pm.ty, &self_subst);
-                    results.push(substituted);
+                    let arguments = match ty { Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(), _ => &[] };
+                    if let Ok(applied) = pm.apply_owner(arguments, ty) { results.push(applied.ty); }
                 }
             }
             // Sub-protocols: any protocol that `extends` this receiver
@@ -10692,8 +10802,8 @@ impl ProtocolChecker {
                 });
                 if extends_receiver {
                     if let Some(pm) = sub_proto.methods.get(method_name) {
-                        let substituted = self.substitute_type_params(&pm.ty, &self_subst);
-                        results.push(substituted);
+                        // The receiver does not determine a generic sub-protocol's owner arguments.
+                        if let Ok(applied) = pm.apply_owner(&[], ty) { results.push(applied.ty); }
                     }
                 }
             }
@@ -12111,6 +12221,7 @@ impl ProtocolChecker {
 
             // Function types: substitute in parameters, return type, and type params
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -12118,6 +12229,7 @@ impl ProtocolChecker {
                 properties,
             } => {
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: params
                         .iter()
                         .map(|p| self.substitute_type_params(p, subst_map))

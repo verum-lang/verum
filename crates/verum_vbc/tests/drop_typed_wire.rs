@@ -140,6 +140,7 @@ fn specialization_refuses_a_witness_that_would_overflow_its_scope() {
             Instruction::DropTyped {
                 src: Reg(0),
                 type_ref: TypeRef::Rank2Function {
+                    is_async: false,
                     type_param_count: 1,
                     params: vec![TypeRef::Generic(TypeParamId(0))],
                     return_type: Box::new(TypeRef::Generic(TypeParamId(1))),

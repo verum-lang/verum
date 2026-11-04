@@ -316,6 +316,7 @@ pub fn create_from_tensor_literal_protocol() -> Protocol {
     methods.insert(
         "from_tensor_literal".into(),
         ProtocolMethod {
+            scope: None,
             name: "from_tensor_literal".into(),
             ty: Type::function(
                 vec![nested_array_ty].into(),

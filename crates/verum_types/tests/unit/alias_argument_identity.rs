@@ -85,7 +85,9 @@ fn alias_arguments_source_declaration_preserves_reordered_and_unused_slots() {
     }
     for spelling in ["Select", "alpha.Select"] {
         let application = parse_type(&format!("{spelling}<Int, Bool, Text>")).unwrap();
-        let expected = Type::function(List::from_iter([Type::Text, Type::Bool]), Type::Text);
+        let expected = Type::function_with_async(
+            List::from_iter([Type::Text, Type::Bool]), Type::Text, false,
+        );
         assert_eq!(
             checker.expand_type_alias(&application),
             Some(expected),

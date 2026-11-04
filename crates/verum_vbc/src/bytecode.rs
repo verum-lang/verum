@@ -3086,11 +3086,12 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             }
         }
         TypeRef::Function {
+            is_async,
             params,
             return_type,
             contexts,
         } => {
-            output.push(0x03);
+            output.push(0x03 | (u8::from(*is_async) << 4));
             encode_varint(params.len() as u64, output);
             for p in params {
                 encode_type_ref(p, output);
@@ -3128,12 +3129,13 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             encode_type_ref(inner, output);
         }
         TypeRef::Rank2Function {
+            is_async,
             type_param_count,
             params,
             return_type,
             contexts,
         } => {
-            output.push(0x0C);
+            output.push(0x0C | (u8::from(*is_async) << 4));
             encode_varint(*type_param_count as u64, output);
             encode_varint(params.len() as u64, output);
             for p in params {
@@ -6073,7 +6075,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
                 args,
             })
         }
-        0x03 => {
+        0x03 | 0x13 => {
             // Function { params, return_type, contexts }
             let param_count = decode_varint(data, offset)? as usize;
             let mut params = decode_vec_with_capacity(param_count, data, *offset);
@@ -6087,6 +6089,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
                 contexts.push(ContextRef(decode_varint(data, offset)? as u32));
             }
             Ok(TypeRef::Function {
+                is_async: discriminant & 0x10 != 0,
                 params,
                 return_type,
                 contexts,
@@ -6132,7 +6135,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             let inner = Box::new(decode_type_ref(data, offset)?);
             Ok(TypeRef::Slice(inner))
         }
-        0x0C => {
+        0x0C | 0x1C => {
             // Explicit scoped binders. Legacy 0x08 must never be reinterpreted.
             let type_param_count = u16::try_from(decode_varint(data, offset)?).map_err(|_| VbcError::InvalidTypeRef {
                 offset: (*offset - 1) as u32, discriminant,
@@ -6149,6 +6152,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
                 contexts.push(ContextRef(decode_varint(data, offset)? as u32));
             }
             Ok(TypeRef::Rank2Function {
+                is_async: discriminant & 0x10 != 0,
                 type_param_count,
                 params,
                 return_type,
@@ -7684,6 +7688,7 @@ mod tests {
     fn test_type_ref_function_roundtrip() {
         use smallvec::smallvec;
         let type_ref = TypeRef::Function {
+            is_async: false,
             params: vec![TypeRef::Concrete(TypeId(1)), TypeRef::Concrete(TypeId(2))],
             return_type: Box::new(TypeRef::Concrete(TypeId(3))),
             contexts: smallvec![ContextRef(1), ContextRef(2)],
@@ -7924,6 +7929,7 @@ mod tests {
         use smallvec::smallvec;
         // Complex function type with many parameters
         let type_ref = TypeRef::Function {
+            is_async: false,
             params: (0..20).map(|i| TypeRef::Concrete(TypeId(i))).collect(),
             return_type: Box::new(TypeRef::Tuple(
                 (0..5).map(|i| TypeRef::Concrete(TypeId(i))).collect(),

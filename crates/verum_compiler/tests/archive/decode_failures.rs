@@ -33,6 +33,7 @@ fn archive(damage: Option<Damage>, compressed: bool, broken_first: bool) -> VbcA
     let mut broken = VbcModule::new("broken".into());
     let mut callable = FunctionDescriptor::new(broken.intern_string("value"));
     callable.return_type = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![TypeRef::Generic(TypeParamId(0))],
         return_type: Box::new(TypeRef::Generic(TypeParamId(0))),

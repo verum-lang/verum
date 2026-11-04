@@ -350,10 +350,12 @@ impl VbcCodegen {
                         .into(),
                 }),
                 TypeRef::Function {
+                    is_async,
                     params,
                     return_type,
                     contexts,
                 } => Some(TypeRef::Function {
+                    is_async: *is_async,
                     params: params
                         .iter()
                         .map(|param| nested(param, active))

@@ -204,6 +204,7 @@ fn probe(stage: Stage<fn(Left, Right) -> Output>) -> Int { stage.transform(|x| x
 "#,
     );
     let expected = TypeRef::Function {
+        is_async: false,
         params: vec![nominal(&module, "Left"), nominal(&module, "Right")],
         return_type: Box::new(nominal(&module, "Output")),
         contexts: Default::default(),
@@ -304,6 +305,7 @@ fn borrowed_callback_bound_keeps_the_element_and_predicate_witnesses_distinct() 
         let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
         let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
         let predicate = |element| TypeRef::Function {
+            is_async: false,
             params: vec![TypeRef::Reference {
                 inner: Box::new(element),
                 mutability,
@@ -341,6 +343,7 @@ fn probe(stage: Stage<Payload>) -> Int { let f = stage.transform(|x| x); 0 }
     );
     let payload = nominal(&module, "Payload");
     let function = TypeRef::Function {
+        is_async: false,
         params: vec![payload.clone()],
         return_type: Box::new(payload.clone()),
         contexts: Default::default(),
@@ -427,6 +430,7 @@ fn probe(stage: Stage<Int>) -> Int { let f = stage.transform(|x| x); 0 }
     );
     let payload = nominal(&module, "Payload");
     let function = TypeRef::Function {
+        is_async: false,
         params: vec![payload.clone()],
         return_type: Box::new(payload),
         contexts: Default::default(),
@@ -480,6 +484,7 @@ fn probe(stage: Stage<Payload>) -> Int {
                 payload.clone(),
                 payload.clone(),
                 TypeRef::Function {
+                    is_async: false,
                     params: vec![payload.clone()],
                     return_type: Box::new(payload.clone()),
                     contexts: Default::default(),
@@ -489,6 +494,7 @@ fn probe(stage: Stage<Payload>) -> Int {
                 payload.clone(),
                 other.clone(),
                 TypeRef::Function {
+                    is_async: false,
                     params: vec![payload],
                     return_type: Box::new(other),
                     contexts: Default::default(),
@@ -576,6 +582,7 @@ fn probe(stage: Stage<Payload>) -> Int { stage.transform(|x| x).finish<Int>() }
             args: vec![payload.clone()],
         },
         TypeRef::Function {
+            is_async: false,
             params: vec![payload.clone()],
             return_type: Box::new(payload),
             contexts: Default::default(),
@@ -610,6 +617,7 @@ fn probe(stage: Stage<Payload>) -> Int {
     );
     let payload = nominal(&module, "Payload");
     let expected = TypeRef::Function {
+        is_async: false,
         params: vec![payload.clone()],
         return_type: Box::new(payload),
         contexts: Default::default(),
@@ -664,6 +672,7 @@ fn probe(stage: Stage<Int>) -> Int { stage.transform(|x| x).finish<Int>() }
                 args: vec![TypeRef::Concrete(TypeId::INT)]
             },
             TypeRef::Function {
+                is_async: false,
                 params: vec![payload.clone()],
                 return_type: Box::new(payload),
                 contexts: Default::default()
@@ -695,6 +704,7 @@ fn probe() -> Int { Factory.make(|x| x).finish<Int>() }
         vec![
             payload.clone(),
             TypeRef::Function {
+                is_async: false,
                 params: vec![payload.clone()],
                 return_type: Box::new(payload),
                 contexts: Default::default()

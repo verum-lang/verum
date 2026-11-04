@@ -16739,6 +16739,7 @@ impl VbcCodegen {
                         };
 
                         let method_type_ref = TypeRef::Function {
+                            is_async: decl.is_async,
                             params: param_refs,
                             return_type: Box::new(ret_ref),
                             contexts: smallvec::SmallVec::new(),
@@ -18461,6 +18462,7 @@ impl VbcCodegen {
         // → wrong-arity-name fallback at archive_metadata-render
         // time.
         if let TypeKind::Function {
+            is_async,
             params,
             return_type,
             contexts,
@@ -18484,6 +18486,7 @@ impl VbcCodegen {
                 })
                 .collect();
             return Ok(TypeRef::Function {
+                is_async: *is_async,
                 params: param_refs,
                 return_type: Box::new(ret_ref),
                 contexts: ctx_refs,
@@ -18494,6 +18497,7 @@ impl VbcCodegen {
         // an outer A cannot both denote Generic(0). Nested binders repeat the
         // same operation; substitution must respect this scope boundary.
         if let TypeKind::Rank2Function {
+            is_async,
             type_params,
             params,
             return_type,
@@ -18530,6 +18534,7 @@ impl VbcCodegen {
                 })
                 .collect::<CodegenResult<_>>()?;
             return Ok(TypeRef::Rank2Function {
+                is_async: *is_async,
                 type_param_count: count,
                 params: param_refs,
                 return_type: Box::new(ret_ref),
@@ -18897,6 +18902,7 @@ impl VbcCodegen {
                 }
             }
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 contexts,
@@ -18914,6 +18920,7 @@ impl VbcCodegen {
                     .map(|(i, _)| crate::types::ContextRef(i as u32))
                     .collect();
                 TypeRef::Function {
+                    is_async: *is_async,
                     params: param_refs,
                     return_type: Box::new(ret_ref),
                     contexts: ctx_refs,
@@ -23666,6 +23673,7 @@ impl VbcCodegen {
             // hook-callback registration (`register_update(fn)`)
             // failed E400 against it (T0555).
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 ..
@@ -23675,12 +23683,14 @@ impl VbcCodegen {
                     .map(|ty| Self::render_type_name(ty, qualified_paths, bound_path))
                     .collect();
                 format!(
-                    "fn({}) -> {}",
+                    "{}fn({}) -> {}",
+                    if *is_async { "async " } else { "" },
                     param_names.join(", "),
                     Self::render_type_name(return_type, qualified_paths, bound_path)
                 )
             }
             TypeKind::Rank2Function {
+                is_async,
                 type_params,
                 params,
                 return_type,
@@ -23706,7 +23716,8 @@ impl VbcCodegen {
                     .map(|ty| Self::render_type_name(ty, qualified_paths, bound_path))
                     .collect();
                 format!(
-                    "fn<{}>({}) -> {}",
+                    "{}fn<{}>({}) -> {}",
+                    if *is_async { "async " } else { "" },
                     quantified.join(", "),
                     param_names.join(", "),
                     Self::render_type_name(return_type, qualified_paths, bound_path)

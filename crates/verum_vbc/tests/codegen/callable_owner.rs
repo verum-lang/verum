@@ -70,6 +70,7 @@ fn callable_owner_structural_arguments_keep_declared_slot_ids() {
     assert_eq!(
         subst.get(TypeParamId(1)),
         Some(&TypeRef::Function {
+            is_async: false,
             params: vec![payload.clone(), boolean],
             return_type: Box::new(payload),
             contexts: Default::default()

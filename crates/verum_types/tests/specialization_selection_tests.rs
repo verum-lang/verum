@@ -351,6 +351,7 @@ fn test_function_type_matching() {
 
     // Test: (Int) -> Bool matches impl for function types
     let concrete = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![make_type("Int")].into(),
         return_type: Box::new(make_type("Bool")),
         contexts: None,
@@ -359,6 +360,7 @@ fn test_function_type_matching() {
     };
 
     let pattern = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![make_type_var(0)].into(),
         return_type: Box::new(make_type_var(1)),
         contexts: None,

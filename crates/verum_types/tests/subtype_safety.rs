@@ -66,6 +66,7 @@ fn constructor(name: &str, args: List<Type>, named: bool) -> Type {
 
 fn callable(properties: Option<PropertySet>, type_params: List<TypeParam>) -> Type {
     Type::Function {
+        property_requirement: properties.as_ref().map(|known| verum_types::computational_properties::PropertyRequirement::AtMost(known.clone())).unwrap_or(verum_types::computational_properties::PropertyRequirement::Unrestricted),
         params: vec![Type::int()].into(),
         return_type: Box::new(Type::int()),
         contexts: None,
@@ -136,7 +137,9 @@ fn uninferred_callable_properties_are_not_a_contract_proof() {
     ] {
         let known = callable(Some(properties), List::new());
         assert!(!subtyping.is_subtype(&unknown, &known));
-        assert!(!subtyping.is_subtype(&known, &unknown));
+        // The target explicitly has no declared restriction. Forgetting a
+        // finite footprint is permitted; inventing a purity proof is not.
+        assert!(subtyping.is_subtype(&known, &unknown));
     }
     assert!(subtyping.is_subtype(&unknown, &unknown));
 }

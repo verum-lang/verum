@@ -52,17 +52,19 @@ fn match_types(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitut
         }
         (
             T::Function {
+                is_async: py,
                 params: p,
                 return_type: pr,
                 contexts: pc,
             },
             T::Function {
+                is_async: ay,
                 params: a,
                 return_type: ar,
                 contexts: ac,
             },
         ) => {
-            pc == ac
+            py == ay && pc == ac
                 && p.len() == a.len()
                 && p.iter().zip(a).all(|(p, a)| match_types(p, a, bindings, concrete_only))
                 && match_types(pr, ar, bindings, concrete_only)

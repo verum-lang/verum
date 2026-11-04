@@ -15,9 +15,11 @@ fn generic(id: u16) -> TypeRef {
 }
 fn scoped() -> TypeRef {
     TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![generic(0), generic(1)],
         return_type: Box::new(TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 2,
             params: vec![generic(0), generic(1), generic(2), generic(3)],
             return_type: Box::new(generic(2)),
@@ -82,10 +84,11 @@ fn legacy_module_rank2_is_rejected_even_inside_an_archive_or_new_header() {
         .collect();
     assert_eq!(offsets.len(), 1);
     let mut noncanonical = bytes.clone();
-    noncanonical[offsets[0]] = 0x1C;
+    // Bit 0x10 now represents eager async callables; 0x20 remains reserved.
+    noncanonical[offsets[0]] = 0x2C;
     assert!(matches!(
         deserialize_module(&noncanonical),
-        Err(VbcError::InvalidTypeRefTag(0x1C))
+        Err(VbcError::InvalidTypeRefTag(0x2C))
     ));
     for minor in [34u16, 35] {
         let mut legacy = bytes.clone();

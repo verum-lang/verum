@@ -312,6 +312,7 @@ impl Subtyping {
             // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9574-9576
             (
                 Function {
+                    property_requirement: property_requirement1,
                     params: p1,
                     return_type: r1,
                     type_params: tp1,
@@ -319,22 +320,18 @@ impl Subtyping {
                     properties: properties1,
                 },
                 Function {
+                    property_requirement: property_requirement2,
                     params: p2,
                     return_type: r2,
                     type_params: tp2,
                     contexts: c2,
-                    properties: properties2,
+                    properties: _,
                 },
             ) => {
                 // Differently bound polymorphic contracts need instantiation and
                 // bound entailment, neither of which this boolean checker proves.
-                let properties_compatible = match (properties1, properties2) {
-                    (Some(source), Some(target)) => source.is_subset_of(target),
-                    (None, None) => true,
-                    // None means not yet inferred, not a proof of purity or an
-                    // unrestricted property contract.
-                    _ => false,
-                };
+                let properties_compatible = property_requirement2.satisfied_by(
+                    property_requirement1, properties1.as_ref());
                 tp1 == tp2
                     && properties_compatible
                     && self.check_function_subtype(p1, r1, c1, p2, r2, c2)

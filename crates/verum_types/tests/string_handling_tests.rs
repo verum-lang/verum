@@ -419,6 +419,7 @@ fn test_string_implements_display() {
                 ProtocolMethod::simple(
                     format_name.clone(),
                     Type::Function {
+                        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                         params: vec![Type::Text].into_iter().collect(),
                         return_type: Box::new(Type::Text),
                         contexts: None,
@@ -490,6 +491,7 @@ fn test_string_implements_eq() {
                 ProtocolMethod::simple(
                     eq_method_name.clone(),
                     Type::Function {
+                        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                         params: vec![Type::Text, Type::Text].into_iter().collect(),
                         return_type: Box::new(Type::Bool),
                         contexts: None,
@@ -505,6 +507,7 @@ fn test_string_implements_eq() {
                 ProtocolMethod::simple(
                     ne_method_name.clone(),
                     Type::Function {
+                        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                         params: vec![Type::Text, Type::Text].into_iter().collect(),
                         return_type: Box::new(Type::Bool),
                         contexts: None,
@@ -591,6 +594,7 @@ fn test_string_implements_add() {
                 ProtocolMethod::simple(
                     add_method_name.clone(),
                     Type::Function {
+                        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                         params: vec![Type::Text, Type::Var(verum_types::ty::TypeVar::new(0))]
                             .into_iter()
                             .collect(),
@@ -668,6 +672,7 @@ fn test_string_implements_clone() {
                 ProtocolMethod::simple(
                     clone_method_name.clone(),
                     Type::Function {
+                        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                         params: vec![Type::Text].into_iter().collect(),
                         return_type: Box::new(Type::Text),
                         contexts: None,
@@ -683,6 +688,7 @@ fn test_string_implements_clone() {
                 ProtocolMethod::simple(
                     clone_from_name.clone(),
                     Type::Function {
+                        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                         params: vec![Type::Text, Type::Text].into_iter().collect(),
                         return_type: Box::new(Type::Unit),
                         contexts: None,

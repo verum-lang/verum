@@ -392,6 +392,7 @@ mod tests {
 
     fn arrow(domain: Type, codomain: Type) -> Type {
         Type::Function {
+            property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
             params: List::from_iter(vec![domain]),
             return_type: Box::new(codomain),
             contexts: None,
@@ -479,6 +480,7 @@ mod tests {
             args: List::new(),
         };
         let arg = Type::Function {
+            property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
             params: List::from_iter(vec![bad_named]),
             return_type: Box::new(Type::Bool),
             contexts: None,
@@ -530,6 +532,7 @@ mod tests {
         let self_var = TypeVar::fresh();
         let bad_var = Type::Var(self_var);
         let arrow_with_var = Type::Function {
+            property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
             params: List::from_iter(vec![bad_var]),
             return_type: Box::new(Type::Bool),
             contexts: None,

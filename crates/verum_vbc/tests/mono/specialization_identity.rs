@@ -34,6 +34,7 @@ fn specialization_symbols_preserve_nested_reference_mutability_and_tiers() {
 #[test]
 fn specialization_symbols_preserve_callable_contexts_and_const_values() {
     let function = |contexts: Vec<ContextRef>| TypeRef::Function {
+        is_async: false,
         params: vec![TypeRef::Concrete(TypeId::INT)],
         return_type: Box::new(TypeRef::Concrete(TypeId::BOOL)),
         contexts: contexts.into(),
@@ -49,6 +50,27 @@ fn specialization_symbols_preserve_callable_contexts_and_const_values() {
         vec![TypeRef::ConstValue(i64::MIN)],
         vec![TypeRef::Concrete(TypeId(0))],
     ]);
+}
+
+#[test]
+fn specialization_symbols_preserve_yielding_callable_identity() {
+    let mut arguments = Vec::new();
+    for is_async in [false, true] {
+        arguments.push(vec![TypeRef::Function {
+            is_async,
+            params: vec![],
+            return_type: Box::new(TypeRef::Concrete(TypeId::INT)),
+            contexts: Default::default(),
+        }]);
+        arguments.push(vec![TypeRef::Rank2Function {
+            is_async,
+            type_param_count: 1,
+            params: vec![TypeRef::Generic(crate::types::TypeParamId(0))],
+            return_type: Box::new(TypeRef::Concrete(TypeId::INT)),
+            contexts: Default::default(),
+        }]);
+    }
+    assert_distinct_specializations(&arguments);
 }
 
 #[test]

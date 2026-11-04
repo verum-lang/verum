@@ -89,6 +89,7 @@ fn bench_validate_function_pointer(c: &mut Criterion) {
 
     let fn_ty = Type {
         kind: TypeKind::Function {
+            is_async: false,
             params,
             return_type: Heap::new(return_type),
             calling_convention: Maybe::None,

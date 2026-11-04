@@ -51,7 +51,7 @@ pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) ->
     let mut scan = SignatureScan::new(false);
     scan.visit_type_decl(declaration);
     scan.finish()?;
-    Ok(universes || scan.uses_applied_projection
+    Ok(universes || scan.uses_applied_projection || scan.uses_rank_two || scan.uses_callable_contexts
         || matches!(&declaration.body, crate::TypeDeclBody::Protocol(body) | crate::TypeDeclBody::Coinductive(body)
             if body.items.iter().any(|item| matches!(&item.kind, crate::decl::ProtocolItemKind::Type { .. })))
         || declaration.generics.iter().any(|param| {
@@ -188,7 +188,7 @@ pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Opti
     let mut needs = SignatureScan::new(false);
     needs.visit_function(function);
     needs.finish()?;
-    if !needs.uses_universes && !needs.uses_applied_projection {
+    if !needs.uses_universes && !needs.uses_applied_projection && !needs.uses_rank_two && !needs.uses_callable_contexts {
         return Ok(None);
     }
     let mut scan = SignatureScan::new(true);
@@ -260,6 +260,8 @@ struct SignatureScan {
     validate: bool,
     uses_universes: bool,
     uses_applied_projection: bool,
+    uses_rank_two: bool,
+    uses_callable_contexts: bool,
     universe_in_rank_two: bool,
     rank_two_depth: usize,
     type_bound_depth: usize,
@@ -275,6 +277,8 @@ impl SignatureScan {
             validate,
             uses_universes: false,
             uses_applied_projection: false,
+            uses_rank_two: false,
+            uses_callable_contexts: false,
             universe_in_rank_two: false,
             rank_two_depth: 0,
             type_bound_depth: 0,
@@ -666,6 +670,9 @@ impl Visitor for SignatureScan {
                 where_clause,
                 ..
             } => {
+                // The VBC local count cannot retain parameter kinds, bounds
+                // or the local where clause. Keep the actual source telescope.
+                self.uses_rank_two = true;
                 self.rank_two_depth += 1;
                 self.push_generics(type_params);
                 for parameter in params {
@@ -682,6 +689,7 @@ impl Visitor for SignatureScan {
                 self.rank_two_depth -= 1;
             }
             TypeKind::Function { contexts, .. } => {
+                self.uses_callable_contexts |= !contexts.is_empty();
                 walk_type(self, ty);
                 for context in &contexts.requirements {
                     self.context(context);

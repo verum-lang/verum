@@ -595,11 +595,13 @@ impl ModuleMerger {
             TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
                 base: *base, args: args.iter().map(resolve).collect::<Result<_, _>>()?,
             },
-            TypeRef::Function { params, return_type, contexts } => TypeRef::Function {
+            TypeRef::Function { is_async,  params, return_type, contexts } => TypeRef::Function {
+                is_async: *is_async,
                 params: params.iter().map(resolve).collect::<Result<_, _>>()?,
                 return_type: Box::new(resolve(return_type)?), contexts: contexts.clone(),
             },
-            TypeRef::Rank2Function { type_param_count, params, return_type, contexts } => TypeRef::Rank2Function {
+            TypeRef::Rank2Function { is_async,  type_param_count, params, return_type, contexts } => TypeRef::Rank2Function {
+                is_async: *is_async,
                 type_param_count: *type_param_count,
                 params: params.iter().map(resolve).collect::<Result<_, _>>()?,
                 return_type: Box::new(resolve(return_type)?), contexts: contexts.clone(),

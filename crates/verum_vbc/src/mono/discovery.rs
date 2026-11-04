@@ -38,6 +38,7 @@ mod record_projection_tests {
         assert!(!concrete(&projection));
         assert!(!concrete(&TypeRef::Tuple(vec![TypeRef::Concrete(TypeId::INT), projection.clone()])));
         assert!(!concrete(&TypeRef::Function {
+            is_async: false,
             params: vec![], return_type: Box::new(projection), contexts: Default::default(),
         }));
         assert!(concrete(&TypeRef::Concrete(TypeId::INT)));

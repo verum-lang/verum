@@ -154,6 +154,7 @@ fn blanket_substitution_avoids_method_and_quantified_binder_capture() {
             args: vec![TypeRef::Generic(TypeParamId(1))],
         };
         let expected = TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![lifted.clone(), TypeRef::Generic(TypeParamId(0))],
             return_type: Box::new(lifted),
@@ -167,6 +168,7 @@ fn blanket_substitution_avoids_method_and_quantified_binder_capture() {
         assert_eq!(
             shadowed.semantic_params.as_ref().unwrap()[1],
             Some(TypeRef::Rank2Function {
+                is_async: false,
                 type_param_count: 1,
                 params: vec![TypeRef::Generic(TypeParamId(0))],
                 return_type: Box::new(TypeRef::Generic(TypeParamId(0))),

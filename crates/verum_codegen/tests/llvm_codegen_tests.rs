@@ -500,6 +500,7 @@ fn test_type_lowering_function_type() {
     let types = TypeLowering::new(&context);
 
     let fn_ref = TypeRef::Function {
+        is_async: false,
         params: vec![TypeRef::Concrete(TypeId::INT)],
         return_type: Box::new(TypeRef::Concrete(TypeId::INT)),
         contexts: Default::default(),

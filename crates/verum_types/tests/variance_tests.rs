@@ -172,6 +172,7 @@ fn test_covariant_in_return_position() {
         vec![(
             Text::from("get"),
             Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![Type::Unit].into(),
                 return_type: Box::new(make_type_param("T")),
                 type_params: List::new(),
@@ -198,6 +199,7 @@ fn test_contravariant_in_param_position() {
         vec![(
             Text::from("put"),
             Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![make_type_param("T")].into(),
                 return_type: Box::new(Type::Unit),
                 type_params: List::new(),
@@ -272,7 +274,9 @@ fn test_invariant_mixed_positions() {
         vec![(
             Text::from("transform"),
             Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![Type::Function {
+                    property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                     params: vec![t_var.clone()].into(),
                     return_type: Box::new(t_var.clone()),
                     type_params: List::new(),
@@ -337,6 +341,7 @@ fn test_check_variance_mismatch_error() {
         vec![(
             Text::from("put"),
             Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![make_type_param("T")].into(),
                 return_type: Box::new(Type::Unit),
                 type_params: List::new(),
@@ -442,6 +447,7 @@ fn test_variance_error_message_format() {
         vec![(
             Text::from("put"),
             Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![make_type_param("T")].into(),
                 return_type: Box::new(Type::Unit),
                 type_params: List::new(),

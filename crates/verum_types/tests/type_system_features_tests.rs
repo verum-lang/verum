@@ -471,6 +471,7 @@ mod implicit_args {
 
         // Elaborate fn(T, U) -> T to fn(Int, Bool) -> Int
         let fn_ty = Type::Function {
+            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
             params: vec![Type::Var(tv1), Type::Var(tv2)].into(),
             return_type: Box::new(Type::Var(tv1)),
             type_params: List::new(),

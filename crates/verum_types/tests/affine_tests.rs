@@ -97,6 +97,7 @@ fn test_function_type() {
 
     match fn_ty {
         Type::Function {
+            property_requirement,
             params,
             return_type,
             contexts,

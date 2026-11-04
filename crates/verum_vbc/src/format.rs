@@ -131,7 +131,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.36 retains declaration-bound record field projections explicitly.
 /// Minor 37 preserves associated family bounds as typed AST bounds.
 /// Minor 38 preserves applied associated projection arguments and qualifiers.
-pub const VERSION_MINOR: u16 = 38;
+/// Minor 39 preserves the yielding property of eager callable types.
+pub const VERSION_MINOR: u16 = 39;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

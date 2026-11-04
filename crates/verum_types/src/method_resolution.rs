@@ -895,6 +895,7 @@ pub(crate) fn function_decl_to_type(func: &verum_ast::decl::FunctionDecl) -> Typ
     };
 
     Type::Function {
+        property_requirement: crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta),
         params,
         return_type: Box::new(return_type),
         contexts: None,

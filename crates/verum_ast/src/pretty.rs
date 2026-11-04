@@ -741,11 +741,13 @@ impl PrettyPrinter {
                 self.write("]");
             }
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 calling_convention,
                 contexts,
             } => {
+                if *is_async { self.write("async "); }
                 // Print extern prefix if there's a calling convention
                 if let Maybe::Some(cc) = calling_convention {
                     self.write("extern \"");
@@ -778,6 +780,7 @@ impl PrettyPrinter {
                 }
             }
             TypeKind::Rank2Function {
+                is_async,
                 type_params,
                 params,
                 return_type,
@@ -785,6 +788,7 @@ impl PrettyPrinter {
                 contexts,
                 where_clause,
             } => {
+                if *is_async { self.write("async "); }
                 // Print extern prefix if there's a calling convention
                 if let Maybe::Some(cc) = calling_convention {
                     self.write("extern \"");
@@ -3613,6 +3617,7 @@ mod tests {
 
         let fn_ty = Type::new(
             TypeKind::Function {
+                is_async: false,
                 params: vec![int_ty.clone(), int_ty.clone()].into(),
                 return_type: verum_common::Heap::new(bool_ty),
                 calling_convention: Maybe::None,

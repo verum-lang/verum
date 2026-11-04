@@ -44,6 +44,7 @@ fn test_default_associated_type_used() {
             methods.insert(
                 "get".into(),
                 ProtocolMethod {
+                    scope: None,
                     name: "get".into(),
                     ty: Type::function(
                         List::from(vec![

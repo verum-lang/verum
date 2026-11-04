@@ -228,14 +228,15 @@ impl Elab {
                 family
             }
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 calling_convention,
                 contexts,
             } => {
-                if calling_convention.is_some() || !contexts.is_empty() {
+                if *is_async || calling_convention.is_some() || !contexts.is_empty() {
                     return Err(unsupported(
-                        "external/contextual functions are not proof transformers",
+                        "async/external/contextual functions are not proof transformers",
                     ));
                 }
                 if params.is_empty() {
@@ -258,6 +259,7 @@ impl Elab {
                 body
             }
             TypeKind::Rank2Function {
+                is_async,
                 type_params,
                 params,
                 return_type,
@@ -265,7 +267,7 @@ impl Elab {
                 contexts,
                 where_clause,
             } => {
-                if calling_convention.is_some()
+                if *is_async || calling_convention.is_some()
                     || !contexts.is_empty()
                     || where_clause.is_some()
                     || params.is_empty()

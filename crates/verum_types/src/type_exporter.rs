@@ -1,27 +1,22 @@
-//! Type Exporter for VBC Generation
+//! Optional `.vtyp` declaration snapshots, separate from VBC and CoreMetadata.
 //!
-//! This module exports type information from the TypeChecker to VBC format,
-//! enabling stdlib to be distributed as VBC with full type metadata.
-//!
-//! # VBC Type Metadata Format
-//!
-//! The VBC format includes:
-//! - Type definitions (structs, enums, protocols)
-//! - Generic type parameters and bounds
-//! - Impl blocks with method signatures
-//! - Protocol implementations
-//! - Exported names and visibility
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let exporter = TypeExporter::new(&type_checker);
-//! let metadata = exporter.export_module("core/maybe")?;
-//! vbc_writer.write_type_metadata(&metadata)?;
-//! ```
+//! Version 2 preserves context-free monomorphic callable contracts, including
+//! the distinction between an unknown and a known computational footprint.
+//! Unsupported source contracts, local binders and nonportable type forms are
+//! errors; this format is not a replacement for declaration-owned semantic replay.
 
+use crate::computational_properties::{PropertyRequirement, PropertySet};
 use crate::context::TypeScheme;
-use crate::ty::{Type, TypeVar};
+use crate::ty::Type;
+
+#[path = "type_exporter_source.rs"]
+mod source;
+
+/// A snapshot cannot represent this declaration without losing semantics.
+#[derive(Debug, thiserror::Error)]
+#[error("VTYP export: {0}")]
+pub struct ExportError(pub String);
+type ExportResult<T> = std::result::Result<T, ExportError>;
 use verum_common::{List, Map, Maybe, Text};
 
 /// Exported type definition
@@ -196,7 +191,9 @@ impl<'a> TypeExporter<'a> {
         &mut self,
         module: &verum_ast::Module,
         module_path: &str,
-    ) -> &ModuleExports {
+    ) -> ExportResult<&ModuleExports> {
+        source::validate_module(module)?;
+        self.exports = ModuleExports::default();
         self.exports.path = Text::from(module_path);
 
         for item in &module.items {
@@ -220,7 +217,7 @@ impl<'a> TypeExporter<'a> {
             }
         }
 
-        &self.exports
+        Ok(&self.exports)
     }
 
     fn export_type_decl(&self, decl: &verum_ast::TypeDecl) -> Maybe<ExportedType> {
@@ -616,6 +613,7 @@ impl<'a> TypeExporter<'a> {
             },
 
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 ..
@@ -623,7 +621,7 @@ impl<'a> TypeExporter<'a> {
                 let param_types: List<Type> =
                     params.iter().map(|p| self.ast_type_to_type(p)).collect();
                 let ret_type = self.ast_type_to_type(return_type);
-                Type::function(param_types, ret_type)
+                Type::function_with_async(param_types, ret_type, *is_async)
             }
 
             _ => Type::Unit, // Fallback for unhandled cases
@@ -648,7 +646,9 @@ impl<'a> TypeExporter<'a> {
 // =============================================================================
 
 const VTYP_MAGIC: &[u8; 4] = b"VTYP";
-const VTYP_VERSION: u8 = 1;
+const VTYP_VERSION: u8 = 2;
+const MAX_WIRE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_TYPE_DEPTH: usize = 128;
 
 // Type tags
 const TAG_UNIT: u8 = 0;
@@ -660,7 +660,6 @@ const TAG_FLOAT: u8 = 5;
 const TAG_CHAR: u8 = 6;
 const TAG_TEXT: u8 = 7;
 const TAG_NAMED: u8 = 8;
-const TAG_GENERIC: u8 = 9;
 const TAG_FUNCTION: u8 = 10;
 const TAG_TUPLE: u8 = 11;
 const TAG_ARRAY: u8 = 12;
@@ -671,25 +670,23 @@ const TAG_RECORD: u8 = 16;
 const TAG_VARIANT: u8 = 17;
 const TAG_DYN_PROTOCOL: u8 = 18;
 const TAG_SLICE: u8 = 19;
-const TAG_VAR: u8 = 20;
 const TAG_POINTER: u8 = 21;
-const TAG_FORALL: u8 = 22;
-const TAG_META: u8 = 23;
 const TAG_OWNERSHIP: u8 = 24;
 const TAG_VOLATILE_PTR: u8 = 25;
-const TAG_REFINED: u8 = 26;
-const TAG_EXISTS: u8 = 27;
 const TAG_EXT_RECORD: u8 = 28;
 // Fallback for unhandled types
-const TAG_OPAQUE: u8 = 255;
 
 struct BinaryWriter {
     buf: List<u8>,
+    depth: usize,
 }
 
 impl BinaryWriter {
     fn new() -> Self {
-        Self { buf: List::new() }
+        Self {
+            buf: List::new(),
+            depth: 0,
+        }
     }
 
     fn write_u8(&mut self, v: u8) {
@@ -714,7 +711,19 @@ impl BinaryWriter {
         self.write_str(t.as_str());
     }
 
-    fn write_type(&mut self, ty: &Type) {
+    fn write_type(&mut self, ty: &Type) -> ExportResult<()> {
+        if self.depth >= MAX_TYPE_DEPTH {
+            return Err(ExportError(
+                "type nesting exceeds the snapshot limit".into(),
+            ));
+        }
+        self.depth += 1;
+        let result = self.write_type_inner(ty);
+        self.depth -= 1;
+        result
+    }
+
+    fn write_type_inner(&mut self, ty: &Type) -> ExportResult<()> {
         match ty {
             Type::Unit => self.write_u8(TAG_UNIT),
             Type::Never => self.write_u8(TAG_NEVER),
@@ -725,63 +734,59 @@ impl BinaryWriter {
             Type::Char => self.write_u8(TAG_CHAR),
             Type::Text => self.write_u8(TAG_TEXT),
 
-            Type::Var(tv) => {
-                self.write_u8(TAG_VAR);
-                self.write_u32(tv.id() as u32);
-            }
-
             Type::Named { path, args } => {
                 self.write_u8(TAG_NAMED);
-                // Serialize path as its string representation
-                let path_str = format!("{}", path);
-                self.write_str(&path_str);
+                // Preserve segment identity; a rendered qualified name is not a segment.
+                let path =
+                    serde_json::to_string(path).map_err(|error| ExportError(error.to_string()))?;
+                self.write_str(&path);
                 self.write_u32(args.len() as u32);
                 for arg in args.iter() {
-                    self.write_type(arg);
-                }
-            }
-
-            Type::Generic { name, args } => {
-                self.write_u8(TAG_GENERIC);
-                self.write_text(name);
-                self.write_u32(args.len() as u32);
-                for arg in args.iter() {
-                    self.write_type(arg);
+                    self.write_type(arg)?;
                 }
             }
 
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
-                contexts: _,
-                type_params: _,
-                properties: _,
+                contexts,
+                type_params,
+                properties,
             } => {
+                if contexts.is_some() || !type_params.is_empty() {
+                    return Err(ExportError(
+                        "callable contexts and local binders require semantic replay".into(),
+                    ));
+                }
                 self.write_u8(TAG_FUNCTION);
                 self.write_u32(params.len() as u32);
                 for p in params.iter() {
-                    self.write_type(p);
+                    self.write_type(p)?;
                 }
-                self.write_type(return_type);
-                // contexts, type_params, properties are omitted for now
-                // (complex nested types — will be added in v2)
+                self.write_type(return_type)?;
+                let contract = serde_json::to_string(&(property_requirement, properties))
+                    .map_err(|error| ExportError(error.to_string()))?;
+                self.write_str(&contract);
             }
 
             Type::Tuple(types) => {
                 self.write_u8(TAG_TUPLE);
                 self.write_u32(types.len() as u32);
                 for t in types.iter() {
-                    self.write_type(t);
+                    self.write_type(t)?;
                 }
             }
 
             Type::Array { element, size } => {
                 self.write_u8(TAG_ARRAY);
-                self.write_type(element);
+                self.write_type(element)?;
                 match size {
                     Some(n) => {
                         self.write_bool(true);
-                        self.write_u32(*n as u32);
+                        self.write_u32(u32::try_from(*n).map_err(|_| {
+                            ExportError("array size exceeds the wire range".into())
+                        })?);
                     }
                     None => self.write_bool(false),
                 }
@@ -789,43 +794,43 @@ impl BinaryWriter {
 
             Type::Slice { element } => {
                 self.write_u8(TAG_SLICE);
-                self.write_type(element);
+                self.write_type(element)?;
             }
 
             Type::Reference { mutable, inner } => {
                 self.write_u8(TAG_REFERENCE);
                 self.write_bool(*mutable);
-                self.write_type(inner);
+                self.write_type(inner)?;
             }
 
             Type::CheckedReference { mutable, inner } => {
                 self.write_u8(TAG_CHECKED_REF);
                 self.write_bool(*mutable);
-                self.write_type(inner);
+                self.write_type(inner)?;
             }
 
             Type::UnsafeReference { mutable, inner } => {
                 self.write_u8(TAG_UNSAFE_REF);
                 self.write_bool(*mutable);
-                self.write_type(inner);
+                self.write_type(inner)?;
             }
 
             Type::Ownership { mutable, inner } => {
                 self.write_u8(TAG_OWNERSHIP);
                 self.write_bool(*mutable);
-                self.write_type(inner);
+                self.write_type(inner)?;
             }
 
             Type::Pointer { mutable, inner } => {
                 self.write_u8(TAG_POINTER);
                 self.write_bool(*mutable);
-                self.write_type(inner);
+                self.write_type(inner)?;
             }
 
             Type::VolatilePointer { mutable, inner } => {
                 self.write_u8(TAG_VOLATILE_PTR);
                 self.write_bool(*mutable);
-                self.write_type(inner);
+                self.write_type(inner)?;
             }
 
             Type::Record(fields) => {
@@ -833,16 +838,19 @@ impl BinaryWriter {
                 self.write_u32(fields.len() as u32);
                 for (name, ty) in fields.iter() {
                     self.write_text(name);
-                    self.write_type(ty);
+                    self.write_type(ty)?;
                 }
             }
 
             Type::ExtensibleRecord { fields, row_var } => {
+                if row_var.is_some() {
+                    return Err(ExportError("row binders require semantic replay".into()));
+                }
                 self.write_u8(TAG_EXT_RECORD);
                 self.write_u32(fields.len() as u32);
                 for (name, ty) in fields.iter() {
                     self.write_text(name);
-                    self.write_type(ty);
+                    self.write_type(ty)?;
                 }
                 match row_var {
                     Some(tv) => {
@@ -858,7 +866,7 @@ impl BinaryWriter {
                 self.write_u32(variants.len() as u32);
                 for (name, ty) in variants.iter() {
                     self.write_text(name);
-                    self.write_type(ty);
+                    self.write_type(ty)?;
                 }
             }
 
@@ -871,104 +879,71 @@ impl BinaryWriter {
                 self.write_u32(bindings.len() as u32);
                 for (k, v) in bindings.iter() {
                     self.write_text(k);
-                    self.write_type(v);
+                    self.write_type(v)?;
                 }
             }
 
-            Type::Forall { vars, body } => {
-                self.write_u8(TAG_FORALL);
-                self.write_u32(vars.len() as u32);
-                for v in vars.iter() {
-                    self.write_u32(v.id() as u32);
-                }
-                self.write_type(body);
-            }
-
-            Type::Meta { name, ty, .. } => {
-                self.write_u8(TAG_META);
-                self.write_text(name);
-                self.write_type(ty);
-            }
-
-            Type::Refined { base, .. } => {
-                // Encode as base type (predicates are not serialized — regenerated at check time)
-                self.write_u8(TAG_REFINED);
-                self.write_type(base);
-            }
-
-            Type::Exists { var, body } => {
-                self.write_u8(TAG_EXISTS);
-                self.write_u32(var.id() as u32);
-                self.write_type(body);
-            }
-
-            // Fallback for any variant not covered
             _ => {
-                self.write_u8(TAG_OPAQUE);
-                let repr = format!("{:?}", ty);
-                self.write_str(&repr);
+                return Err(ExportError(
+                    "type form requires declaration-owned semantic replay".into(),
+                ));
             }
         }
+        Ok(())
     }
 
-    fn write_type_param(&mut self, tp: &TypeParam) {
-        self.write_text(&tp.name);
-        self.write_u32(tp.bounds.len() as u32);
-        for b in tp.bounds.iter() {
-            self.write_text(b);
-        }
-        match &tp.default {
-            Maybe::Some(ty) => {
-                self.write_bool(true);
-                self.write_type(ty);
-            }
-            Maybe::None => self.write_bool(false),
-        }
+    fn write_type_param(&mut self, _tp: &TypeParam) -> ExportResult<()> {
+        Err(ExportError(
+            "generic declaration telescopes require semantic replay".into(),
+        ))
     }
 
-    fn write_field(&mut self, f: &ExportedField) {
+    fn write_field(&mut self, f: &ExportedField) -> ExportResult<()> {
         self.write_text(&f.name);
-        self.write_type(&f.ty);
+        self.write_type(&f.ty)?;
         self.write_bool(f.is_public);
+        Ok(())
     }
 
-    fn write_variant_payload(&mut self, vp: &VariantPayload) {
+    fn write_variant_payload(&mut self, vp: &VariantPayload) -> ExportResult<()> {
         match vp {
             VariantPayload::Unit => self.write_u8(0),
             VariantPayload::Tuple(types) => {
                 self.write_u8(1);
                 self.write_u32(types.len() as u32);
                 for t in types.iter() {
-                    self.write_type(t);
+                    self.write_type(t)?;
                 }
             }
             VariantPayload::Struct(fields) => {
                 self.write_u8(2);
                 self.write_u32(fields.len() as u32);
                 for f in fields.iter() {
-                    self.write_field(f);
+                    self.write_field(f)?;
                 }
             }
         }
+        Ok(())
     }
 
-    fn write_method(&mut self, m: &ExportedMethod) {
+    fn write_method(&mut self, m: &ExportedMethod) -> ExportResult<()> {
         self.write_text(&m.name);
         self.write_u32(m.type_params.len() as u32);
         for tp in m.type_params.iter() {
-            self.write_type_param(tp);
+            self.write_type_param(tp)?;
         }
         self.write_u32(m.params.len() as u32);
         for p in m.params.iter() {
             self.write_text(&p.name);
-            self.write_type(&p.ty);
+            self.write_type(&p.ty)?;
         }
-        self.write_type(&m.return_type);
+        self.write_type(&m.return_type)?;
         self.write_bool(m.is_static);
         self.write_bool(m.is_async);
+        Ok(())
     }
 
-    fn write_exports(&mut self, exports: &ModuleExports) {
+    fn write_exports(&mut self, exports: &ModuleExports) -> ExportResult<()> {
         // Magic + version
         self.buf.extend_from_slice(VTYP_MAGIC);
         self.write_u8(VTYP_VERSION);
@@ -982,7 +957,7 @@ impl BinaryWriter {
             self.write_text(&et.name);
             self.write_u32(et.type_params.len() as u32);
             for tp in et.type_params.iter() {
-                self.write_type_param(tp);
+                self.write_type_param(tp)?;
             }
             // TypeDefinition tag + data
             match &et.definition {
@@ -990,7 +965,7 @@ impl BinaryWriter {
                     self.write_u8(0);
                     self.write_u32(fields.len() as u32);
                     for f in fields.iter() {
-                        self.write_field(f);
+                        self.write_field(f)?;
                     }
                 }
                 TypeDefinition::Variant { variants } => {
@@ -998,16 +973,16 @@ impl BinaryWriter {
                     self.write_u32(variants.len() as u32);
                     for v in variants.iter() {
                         self.write_text(&v.name);
-                        self.write_variant_payload(&v.payload);
+                        self.write_variant_payload(&v.payload)?;
                     }
                 }
                 TypeDefinition::Alias { target } => {
                     self.write_u8(2);
-                    self.write_type(target);
+                    self.write_type(target)?;
                 }
                 TypeDefinition::Newtype { inner } => {
                     self.write_u8(3);
-                    self.write_type(inner);
+                    self.write_type(inner)?;
                 }
                 TypeDefinition::Protocol {
                     methods,
@@ -1016,7 +991,7 @@ impl BinaryWriter {
                     self.write_u8(4);
                     self.write_u32(methods.len() as u32);
                     for m in methods.iter() {
-                        self.write_method(m);
+                        self.write_method(m)?;
                     }
                     self.write_u32(associated_types.len() as u32);
                     for at in associated_types.iter() {
@@ -1028,7 +1003,7 @@ impl BinaryWriter {
                         match &at.default {
                             Maybe::Some(ty) => {
                                 self.write_bool(true);
-                                self.write_type(ty);
+                                self.write_type(ty)?;
                             }
                             Maybe::None => self.write_bool(false),
                         }
@@ -1048,7 +1023,7 @@ impl BinaryWriter {
         // Impl blocks
         self.write_u32(exports.impls.len() as u32);
         for imp in exports.impls.iter() {
-            self.write_type(&imp.for_type);
+            self.write_type(&imp.for_type)?;
             match &imp.protocol {
                 Maybe::Some(p) => {
                     self.write_bool(true);
@@ -1058,11 +1033,11 @@ impl BinaryWriter {
             }
             self.write_u32(imp.type_params.len() as u32);
             for tp in imp.type_params.iter() {
-                self.write_type_param(tp);
+                self.write_type_param(tp)?;
             }
             self.write_u32(imp.methods.len() as u32);
             for m in imp.methods.iter() {
-                self.write_method(m);
+                self.write_method(m)?;
             }
         }
 
@@ -1077,19 +1052,25 @@ impl BinaryWriter {
         // Module-level functions
         self.write_u32(exports.functions.len() as u32);
         for f in exports.functions.iter() {
-            self.write_method(f);
+            self.write_method(f)?;
         }
+        Ok(())
     }
 }
 
 struct BinaryReader<'a> {
     data: &'a [u8],
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> BinaryReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
+        Self {
+            data,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     fn remaining(&self) -> usize {
@@ -1122,7 +1103,11 @@ impl<'a> BinaryReader<'a> {
     }
 
     fn read_bool(&mut self) -> Option<bool> {
-        self.read_u8().map(|v| v != 0)
+        match self.read_u8()? {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        }
     }
 
     fn read_text(&mut self) -> Option<Text> {
@@ -1137,6 +1122,16 @@ impl<'a> BinaryReader<'a> {
     }
 
     fn read_type(&mut self) -> Option<Type> {
+        if self.depth >= MAX_TYPE_DEPTH {
+            return None;
+        }
+        self.depth += 1;
+        let result = self.read_type_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn read_type_inner(&mut self) -> Option<Type> {
         let tag = self.read_u8()?;
         match tag {
             TAG_UNIT => Some(Type::Unit),
@@ -1148,34 +1143,15 @@ impl<'a> BinaryReader<'a> {
             TAG_CHAR => Some(Type::Char),
             TAG_TEXT => Some(Type::Text),
 
-            TAG_VAR => {
-                let id = self.read_u32()?;
-                Some(Type::Var(TypeVar::new(id as usize)))
-            }
-
             TAG_NAMED => {
-                let path_str = self.read_text()?;
+                let path_json = self.read_text()?;
                 let count = self.read_u32()? as usize;
                 let mut args = List::new();
                 for _ in 0..count {
                     args.push(self.read_type()?);
                 }
-                // Reconstruct Path from string
-                let path = verum_ast::ty::Path::single(verum_ast::Ident::new(
-                    path_str,
-                    verum_ast::span::Span::dummy(),
-                ));
+                let path = serde_json::from_str(path_json.as_str()).ok()?;
                 Some(Type::Named { path, args })
-            }
-
-            TAG_GENERIC => {
-                let name = self.read_text()?;
-                let count = self.read_u32()? as usize;
-                let mut args = List::new();
-                for _ in 0..count {
-                    args.push(self.read_type()?);
-                }
-                Some(Type::Generic { name, args })
             }
 
             TAG_FUNCTION => {
@@ -1185,12 +1161,16 @@ impl<'a> BinaryReader<'a> {
                     params.push(self.read_type()?);
                 }
                 let return_type = self.read_type()?;
+                let contract = self.read_text()?;
+                let (property_requirement, properties): (PropertyRequirement, Option<PropertySet>) =
+                    serde_json::from_str(contract.as_str()).ok()?;
                 Some(Type::Function {
+                    property_requirement,
                     params,
                     return_type: Box::new(return_type),
                     contexts: None,
                     type_params: List::new(),
-                    properties: None,
+                    properties,
                 })
             }
 
@@ -1284,7 +1264,9 @@ impl<'a> BinaryReader<'a> {
                 for _ in 0..count {
                     let name = self.read_text()?;
                     let ty = self.read_type()?;
-                    fields.insert(name, ty);
+                    if fields.insert(name, ty).is_some() {
+                        return None;
+                    }
                 }
                 Some(Type::Record(fields))
             }
@@ -1295,14 +1277,15 @@ impl<'a> BinaryReader<'a> {
                 for _ in 0..count {
                     let name = self.read_text()?;
                     let ty = self.read_type()?;
-                    fields.insert(name, ty);
+                    if fields.insert(name, ty).is_some() {
+                        return None;
+                    }
                 }
                 let has_row = self.read_bool()?;
-                let row_var = if has_row {
-                    Some(TypeVar::new(self.read_u32()? as usize))
-                } else {
-                    None
-                };
+                if has_row {
+                    return None;
+                }
+                let row_var = None;
                 Some(Type::ExtensibleRecord { fields, row_var })
             }
 
@@ -1312,7 +1295,9 @@ impl<'a> BinaryReader<'a> {
                 for _ in 0..count {
                     let name = self.read_text()?;
                     let ty = self.read_type()?;
-                    variants.insert(name, ty);
+                    if variants.insert(name, ty).is_some() {
+                        return None;
+                    }
                 }
                 Some(Type::Variant(variants))
             }
@@ -1328,54 +1313,11 @@ impl<'a> BinaryReader<'a> {
                 for _ in 0..bindings_count {
                     let k = self.read_text()?;
                     let v = self.read_type()?;
-                    bindings.insert(k, v);
+                    if bindings.insert(k, v).is_some() {
+                        return None;
+                    }
                 }
                 Some(Type::DynProtocol { bounds, bindings })
-            }
-
-            TAG_FORALL => {
-                let var_count = self.read_u32()? as usize;
-                let mut vars = List::new();
-                for _ in 0..var_count {
-                    vars.push(TypeVar::new(self.read_u32()? as usize));
-                }
-                let body = self.read_type()?;
-                Some(Type::Forall {
-                    vars,
-                    body: Box::new(body),
-                })
-            }
-
-            TAG_META => {
-                let name = self.read_text()?;
-                let ty = self.read_type()?;
-                Some(Type::Meta {
-                    name,
-                    ty: Box::new(ty),
-                    refinement: None,
-                    value: None,
-                })
-            }
-
-            TAG_REFINED => {
-                let base = self.read_type()?;
-                // Return base type — refinement predicates are regenerated
-                Some(*Box::new(base))
-            }
-
-            TAG_EXISTS => {
-                let var = TypeVar::new(self.read_u32()? as usize);
-                let body = self.read_type()?;
-                Some(Type::Exists {
-                    var,
-                    body: Box::new(body),
-                })
-            }
-
-            TAG_OPAQUE => {
-                // Read debug representation but return Unknown
-                let _repr = self.read_text()?;
-                Some(Type::Unknown)
             }
 
             _ => None,
@@ -1383,23 +1325,7 @@ impl<'a> BinaryReader<'a> {
     }
 
     fn read_type_param(&mut self) -> Option<TypeParam> {
-        let name = self.read_text()?;
-        let bounds_count = self.read_u32()? as usize;
-        let mut bounds = List::new();
-        for _ in 0..bounds_count {
-            bounds.push(self.read_text()?);
-        }
-        let has_default = self.read_bool()?;
-        let default = if has_default {
-            Maybe::Some(self.read_type()?)
-        } else {
-            Maybe::None
-        };
-        Some(TypeParam {
-            name,
-            bounds,
-            default,
-        })
+        None // This version has no portable declaration telescope.
     }
 
     fn read_field(&mut self) -> Option<ExportedField> {
@@ -1634,22 +1560,30 @@ impl<'a> BinaryReader<'a> {
     }
 }
 
-/// Serialize ModuleExports to binary format for VBC
-pub fn serialize_module_exports(exports: &ModuleExports) -> List<u8> {
+/// Serialize a complete supported snapshot, or return an error without bytes.
+pub fn serialize_module_exports(exports: &ModuleExports) -> ExportResult<List<u8>> {
     let mut writer = BinaryWriter::new();
-    writer.write_exports(exports);
-    writer.buf
+    writer.write_exports(exports)?;
+    if writer.buf.len() > MAX_WIRE_BYTES {
+        return Err(ExportError("snapshot exceeds the wire size limit".into()));
+    }
+    Ok(writer.buf)
 }
 
-/// Deserialize ModuleExports from binary format
+/// Reject unsupported versions, malformed contracts and trailing data.
 pub fn deserialize_module_exports(data: &[u8]) -> Maybe<ModuleExports> {
+    if data.len() > MAX_WIRE_BYTES {
+        return None;
+    }
     let mut reader = BinaryReader::new(data);
-    reader.read_exports()
+    let exports = reader.read_exports()?;
+    (reader.remaining() == 0).then_some(exports)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ty::TypeVar;
 
     #[test]
     fn test_type_exporter_basic() {
@@ -1667,7 +1601,7 @@ mod tests {
             re_exports: List::new(),
             functions: List::new(),
         };
-        let data = serialize_module_exports(&exports);
+        let data = serialize_module_exports(&exports).expect("supported snapshot");
         assert!(!data.is_empty());
         let deserialized = deserialize_module_exports(&data);
         match deserialized {
@@ -1710,7 +1644,7 @@ mod tests {
             re_exports: List::new(),
             functions: List::new(),
         };
-        let data = serialize_module_exports(&exports);
+        let data = serialize_module_exports(&exports).expect("supported snapshot");
         let deserialized = deserialize_module_exports(&data);
         match deserialized {
             Maybe::Some(result) => {
@@ -1766,24 +1700,7 @@ mod tests {
             re_exports: List::new(),
             functions: List::new(),
         };
-        let data = serialize_module_exports(&exports);
-        let deserialized = deserialize_module_exports(&data);
-        match deserialized {
-            Maybe::Some(result) => {
-                assert_eq!(result.types[0].name.as_str(), "Maybe");
-                assert_eq!(result.types[0].type_params.len(), 1);
-                assert_eq!(result.types[0].type_params[0].name.as_str(), "T");
-                if let TypeDefinition::Variant { variants } = &result.types[0].definition {
-                    assert_eq!(variants.len(), 2);
-                    assert_eq!(variants[0].name.as_str(), "None");
-                    assert!(matches!(variants[0].payload, VariantPayload::Unit));
-                    assert_eq!(variants[1].name.as_str(), "Some");
-                } else {
-                    panic!("expected Variant definition");
-                }
-            }
-            Maybe::None => panic!("deserialization failed"),
-        }
+        assert!(serialize_module_exports(&exports).is_err());
     }
 
     #[test]
@@ -1813,7 +1730,7 @@ mod tests {
             }]
             .into(),
         };
-        let data = serialize_module_exports(&exports);
+        let data = serialize_module_exports(&exports).expect("supported snapshot");
         let deserialized = deserialize_module_exports(&data);
         match deserialized {
             Maybe::Some(result) => {
@@ -1855,7 +1772,7 @@ mod tests {
             re_exports: List::new(),
             functions: List::new(),
         };
-        let data = serialize_module_exports(&exports);
+        let data = serialize_module_exports(&exports).expect("supported snapshot");
         let deserialized = deserialize_module_exports(&data);
         match deserialized {
             Maybe::Some(result) => {

@@ -277,6 +277,7 @@ fn test_marshal_function_pointer() {
 
     let ty = Type {
         kind: TypeKind::Function {
+            is_async: false,
             params,
             return_type: Heap::new(return_type),
             calling_convention: None,

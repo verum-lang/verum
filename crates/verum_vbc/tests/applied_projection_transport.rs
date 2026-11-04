@@ -17,6 +17,7 @@ fn projection(base: TypeRef, qualifier: TypeRef, argument: TypeRef) -> TypeRef {
 #[test]
 fn nested_projection_substitution_preserves_local_and_outer_binders() {
     let input = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1, params: vec![parameter(0)],
         return_type: Box::new(projection(parameter(1), parameter(2), parameter(0))),
         contexts: Default::default(),
@@ -25,6 +26,7 @@ fn nested_projection_substitution_preserves_local_and_outer_binders() {
     substitution.bind(TypeParamId(0), parameter(7));
     substitution.bind(TypeParamId(1), TypeRef::Concrete(TypeId::TEXT));
     let expected = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1, params: vec![parameter(0)],
         return_type: Box::new(projection(parameter(8), TypeRef::Concrete(TypeId::TEXT), parameter(0))),
         contexts: Default::default(),

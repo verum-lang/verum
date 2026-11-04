@@ -123,6 +123,7 @@ fn rank2_local_parameters_mask_outer_bindings() {
     subst.bind(TypeParamId(0), TypeRef::Concrete(TypeId::INT));
     subst.bind(TypeParamId(0x8000), TypeRef::Concrete(TypeId::TEXT));
     let rank2 = TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: 1,
         params: vec![TypeRef::Generic(TypeParamId(0))],
         return_type: Box::new(TypeRef::Tuple(vec![
@@ -134,6 +135,7 @@ fn rank2_local_parameters_mask_outer_bindings() {
     assert_eq!(
         subst.apply(&rank2).unwrap(),
         TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![TypeRef::Generic(TypeParamId(0))],
             return_type: Box::new(TypeRef::Tuple(vec![
@@ -151,6 +153,7 @@ fn generic(id: u16) -> TypeRef {
 
 fn quantified(count: u16, result: TypeRef) -> TypeRef {
     TypeRef::Rank2Function {
+        is_async: false,
         type_param_count: count,
         params: vec![generic(0)],
         return_type: Box::new(result),

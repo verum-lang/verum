@@ -6,6 +6,27 @@ fn generic(id: u16) -> TypeRef {
 }
 
 #[test]
+fn declaration_matching_keeps_yielding_distinct_from_sync() {
+    let callback = |is_async, output| TypeRef::Function {
+        is_async,
+        params: vec![],
+        return_type: Box::new(output),
+        contexts: Default::default(),
+    };
+    for is_async in [false, true] {
+        let pattern = callback(is_async, generic(0));
+        let actual = callback(is_async, TypeRef::Concrete(TypeId::INT));
+        let mut bindings = TypeSubstitution::empty();
+        assert!(match_declared_types(&pattern, &actual, &mut bindings));
+        assert_eq!(bindings.apply(&pattern).unwrap(), actual);
+        assert!(!match_declared_types(
+            &pattern, &callback(!is_async, TypeRef::Concrete(TypeId::INT)),
+            &mut TypeSubstitution::empty(),
+        ));
+    }
+}
+
+#[test]
 fn sparse_actual_generics_preserve_their_caller_scope() {
     let pattern = TypeRef::Tuple(vec![generic(0), generic(7), generic(0)]);
     let actual = TypeRef::Tuple(vec![generic(0x8000), generic(2), generic(0x8000)]);

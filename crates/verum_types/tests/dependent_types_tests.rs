@@ -102,6 +102,7 @@ fn test_pi_type_head_function_requires_nonzero() {
             args: List::new(),
         },
         Type::Function {
+            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
             params: List::from_iter([vec_succ_n]),
             return_type: Box::new(Type::Generic {
                 name: Text::from("T"),
@@ -171,6 +172,7 @@ fn test_pi_type_zip_preserves_length() {
             args: List::new(),
         },
         Type::Function {
+            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
             params: List::from_iter([vec_a_n, vec_b_n]),
             return_type: Box::new(result_type),
             contexts: None,
@@ -568,6 +570,7 @@ fn test_refinement_in_function_type() {
 
     // Function type: (Vec<T, n>) -> n
     let fn_type = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from_iter([Type::Generic {
             name: Text::from("Vec"),
             args: List::from_iter([

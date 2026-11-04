@@ -42,6 +42,7 @@ fn create_eq_protocol() -> Protocol {
     methods.insert(
         Text::from("eq"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("eq"),
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: false,
@@ -56,6 +57,7 @@ fn create_eq_protocol() -> Protocol {
     methods.insert(
         Text::from("ne"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("ne"),
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: true, // Default implementation
@@ -89,6 +91,7 @@ fn create_ord_protocol() -> Protocol {
     methods.insert(
         Text::from("cmp"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("cmp"),
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Int),
             has_default: false,
@@ -103,6 +106,7 @@ fn create_ord_protocol() -> Protocol {
     methods.insert(
         Text::from("lt"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("lt"),
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: true, // Derived from cmp
@@ -117,6 +121,7 @@ fn create_ord_protocol() -> Protocol {
     methods.insert(
         Text::from("le"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("le"),
             ty: Type::function(vec![Type::Int, Type::Int].into(), Type::Bool),
             has_default: true, // Derived from cmp
@@ -158,6 +163,7 @@ fn create_iterator_protocol() -> Protocol {
     methods.insert(
         Text::from("next"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("next"),
             ty: Type::function(vec![Type::Int].into(), Type::Int), // Simplified
             has_default: false,
@@ -172,6 +178,7 @@ fn create_iterator_protocol() -> Protocol {
     methods.insert(
         Text::from("count"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("count"),
             ty: Type::function(vec![Type::Int].into(), Type::Int),
             has_default: true, // Default impl using next()
@@ -504,6 +511,7 @@ fn test_method_override_in_subprotocol() {
     base_methods.insert(
         Text::from("process"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("process"),
             ty: Type::function(vec![Type::Int].into(), Type::Int),
             has_default: true,
@@ -536,6 +544,7 @@ fn test_method_override_in_subprotocol() {
     derived_methods.insert(
         Text::from("process"),
         ProtocolMethod {
+            scope: None,
             name: Text::from("process"),
             ty: Type::function(vec![Type::Int].into(), Type::Int),
             has_default: true, // Different implementation

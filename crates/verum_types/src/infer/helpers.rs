@@ -1690,6 +1690,40 @@ pub(super) fn parse_function_descriptor_type(
     })
 }
 
+// Textual callables use the source grammar; declaration-bearing contexts and
+// rank-2 bounds are admitted only with their source-signature carrier.
+fn parse_descriptor_callable(raw: &str, resolve_bound: &impl Fn(&str) -> Text) -> Option<Type> {
+    let ast = verum_fast_parser::VerumParser::new()
+        .parse_descriptor_type_str(raw, verum_ast::FileId::new(0)).ok()?;
+    let lower_type = |ty: &verum_ast::Type| {
+        if matches!(ty.kind, verum_ast::TypeKind::Unit) { return Some(Type::Unit); }
+        let spelling = raw.get(ty.span.start as usize..ty.span.end as usize)?;
+        Some(parse_descriptor_type(spelling, resolve_bound))
+    };
+    let lower = |params: &List<verum_ast::Type>, output: &verum_ast::Type, is_async: bool| {
+        let params = params.iter().map(&lower_type).collect::<Option<List<_>>>()?;
+        Some(Type::function_with_async(params, lower_type(output)?, is_async))
+    };
+    match &ast.kind {
+        verum_ast::TypeKind::Function { is_async, params, return_type, contexts, calling_convention }
+            if contexts.is_empty() && calling_convention.is_none() =>
+                lower(params, return_type, *is_async),
+        verum_ast::TypeKind::Rank2Function { is_async, type_params, params, return_type,
+            contexts, calling_convention, where_clause }
+            if contexts.is_empty() && calling_convention.is_none() && where_clause.is_none() => {
+                let names: Option<Vec<String>> = type_params.iter().map(|parameter| match &parameter.kind {
+                    verum_ast::ty::GenericParamKind::Type { name, bounds, default, .. }
+                        if bounds.is_empty() && default.is_none() => Some(name.name.to_string()),
+                    _ => None,
+                }).collect();
+                let names = names?;
+                let (vars, body) = with_rank2_binders(&names, || lower(params, return_type, *is_async));
+                Some(Type::Forall { vars, body: Box::new(body?) })
+            }
+        _ => None,
+    }
+}
+
 fn parse_descriptor_type(raw: &str, resolve_bound: &impl Fn(&str) -> Text) -> Type {
     let parse = |nested: &str| parse_descriptor_type(nested, resolve_bound);
     let trimmed = raw.trim();
@@ -1848,120 +1882,13 @@ fn parse_descriptor_type(raw: &str, resolve_bound: &impl Fn(&str) -> Text) -> Ty
         }
         return Type::Slice { element: Box::new(parse(inner.trim())) };
     }
-    // **Function-type spelling** (`fn(arg1, arg2, ...) -> ret`) — must
-    // be parsed BEFORE the generic-instantiation `<>` check below, since
-    // `fn(A) -> Maybe<T>` ends with `>` and would otherwise be mis-
-    // captured as `Type::Named { path: "fn(A) -> Maybe", args: [T] }`.
-    //
-    // Serialised by `archive_metadata::type_ref_to_text_with_params`'s
-    // `TypeRef::Function` arm (around line ~1059) using the form
-    // `fn(<args>) -> <ret>`.  Required for stdlib HOF metadata-side
-    // `F: fn(A) -> B` bound recovery (task #5/#13 §F).
-    //
-    // Parse shape: find the matching `)` at depth 0, split args at
-    // top-level commas, parse args + return-type recursively.
-    // **Rank-2 function spelling** (`fn<R>(args) -> ret`) — MUST precede
-    // both the `fn(` arm and the generic-instantiation `<>` arm below,
-    // or `fn<R>(Reducer<B, R>) -> Reducer<A, R>` is captured as a rigid
-    // `Type::Named { path: "fn<R>(…) -> Reducer", args: [A, R] }`.
-    //
-    // The quantifier is the meaning, not decoration: `fn<R>(…)` says the
-    // CALLEE works for every R, while `fn(…)` says the caller picks one.
-    // Parsing the body without binding R leaves it an ordinary free
-    // variable, which the FIRST use site then fixes for every later one
-    // — one instantiation per compilation unit, and a second with a
-    // different element type failed with the first one's type in the
-    // message (T0997).
-    if let Some(rest) = trimmed.strip_prefix("fn<") {
-        // Depth-aware scan for the binder list's closing `>`: a bound
-        // (`R: Reducer<A, B>`) may contain nested angle brackets.
-        let mut depth = 1usize;
-        let mut close: Option<usize> = None;
-        for (i, ch) in rest.char_indices() {
-            match ch {
-                '<' => depth += 1,
-                '>' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        close = Some(i);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if let Some(gt) = close {
-            let body_text = rest[gt + 1..].trim_start();
-            if body_text.starts_with('(') {
-                let names: Vec<String> = split_top_level_commas(&rest[..gt])
-                    .into_iter()
-                    // Keep the NAME only: `R: Bound` binds `R`.
-                    .map(|n| {
-                        n.split(':')
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .to_string()
-                    })
-                    .filter(|n| !n.is_empty())
-                    .collect();
-                if !names.is_empty() {
-                    let spelling = format!("fn{}", body_text);
-                    let (vars, body) = with_rank2_binders(&names, || {
-                        parse(&spelling)
-                    });
-                    return Type::Forall {
-                        vars,
-                        body: Box::new(body),
-                    };
-                }
-            }
-        }
-    }
-    if let Some(rest) = trimmed.strip_prefix("fn(") {
-        let bytes = rest.as_bytes();
-        let mut depth = 1usize;
-        let mut close_idx: Option<usize> = None;
-        for (i, &b) in bytes.iter().enumerate() {
-            match b {
-                b'(' | b'<' | b'[' => depth += 1,
-                b')' if depth == 1 => {
-                    close_idx = Some(i);
-                    break;
-                }
-                b')' | b'>' | b']' => depth -= 1,
-                _ => {}
-            }
-        }
-        if let Some(close) = close_idx {
-            let args_text = &rest[..close];
-            let after = rest[close + 1..].trim_start();
-            let ret_text = after
-                .strip_prefix("->")
-                .map(|s| s.trim_start())
-                .unwrap_or("");
-            let params: List<Type> = if args_text.trim().is_empty() {
-                List::new()
-            } else {
-                split_top_level_commas(args_text)
-                    .into_iter()
-                    .map(|s| parse(s.trim()))
-                    .collect()
-            };
-            let return_type = if ret_text.is_empty() {
-                Type::Unit
-            } else {
-                parse(ret_text)
-            };
-            return Type::Function {
-                params,
-                return_type: Box::new(return_type),
-                contexts: None,
-                type_params: List::new(),
-                properties: None,
-            };
-        }
-    }
+    // Source spellings are parsed by the same grammar as handwritten types.
+    // Its explicit descriptor mode also accepts internal projection tokens.
+    // External admission refuses malformed or source-carrier-only callable
+    // spellings before this infallible, already-validated reader is reached.
+    if (trimmed.starts_with("fn") || trimmed.starts_with("async"))
+        && let Some(callable) = parse_descriptor_callable(trimmed, resolve_bound)
+    { return callable; }
     // Generic instantiation: "Base<arg1, arg2, ...>".
     //
     // Task #25 — canonical form is `Type::Named { path, args }`, NOT

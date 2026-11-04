@@ -1021,6 +1021,7 @@ impl TypeLevelEvaluator {
             }
 
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -1032,6 +1033,7 @@ impl TypeLevelEvaluator {
                     new_params.push(self.substitute_meta(param)?);
                 }
                 Ok(Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: new_params,
                     return_type: Box::new(self.substitute_meta(return_type)?),
                     contexts: contexts.clone(),
@@ -1383,6 +1385,7 @@ pub mod equality {
             // Function types must have equal parameter types and return type
             (
                 Type::Function {
+                    property_requirement: requirement1,
                     params: p1,
                     return_type: r1,
                     contexts: c1,
@@ -1390,13 +1393,14 @@ pub mod equality {
                     properties: pr1,
                 },
                 Type::Function {
+                    property_requirement: requirement2,
                     params: p2,
                     return_type: r2,
                     contexts: c2,
                     type_params: tp2,
                     properties: pr2,
                 },
-            ) => args_equal(p1, p2) && types_equal(r1, r2) && c1 == c2 && tp1 == tp2 && pr1 == pr2,
+            ) => args_equal(p1, p2) && types_equal(r1, r2) && c1 == c2 && tp1 == tp2 && pr1 == pr2 && requirement1 == requirement2,
 
             _ => false,
         }

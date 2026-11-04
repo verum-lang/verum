@@ -1062,6 +1062,7 @@ impl Unifier {
                 }
             }
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
@@ -1088,6 +1089,7 @@ impl Unifier {
                         return_type.clone()
                     };
                 changed.then(|| Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params,
                     return_type,
                     type_params: type_params.clone(),
@@ -1384,6 +1386,7 @@ impl Unifier {
     fn resolve_context_vars(&self, ty: &Type) -> Type {
         match ty {
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
@@ -1394,6 +1397,7 @@ impl Unifier {
                     .as_ref()
                     .map(|ctx| ctx.apply_context_subst(&self.context_bindings));
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: params
                         .iter()
                         .map(|p| self.resolve_context_vars(p))
@@ -2113,6 +2117,7 @@ impl Unifier {
             // Function types
             (
                 Function {
+                    property_requirement: requirement1,
                     params: p1,
                     return_type: r1,
                     type_params: tp1,
@@ -2120,6 +2125,7 @@ impl Unifier {
                     properties: _,
                 },
                 Function {
+                    property_requirement: requirement2,
                     params: p2,
                     return_type: r2,
                     type_params: tp2,
@@ -2127,7 +2133,7 @@ impl Unifier {
                     properties: _,
                 },
             ) => {
-                if p1.len() != p2.len() {
+                if p1.len() != p2.len() || requirement1 != requirement2 {
                     return Err(TypeError::Mismatch {
                         expected: t2.to_text(),
                         actual: t1.to_text(),
@@ -5541,12 +5547,14 @@ impl Unifier {
 
             // Function types
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
                 contexts,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| Self::rename_bound_var(p, from, to))

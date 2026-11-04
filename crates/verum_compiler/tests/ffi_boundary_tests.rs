@@ -208,6 +208,7 @@ fn test_function_pointers_ffi_safe() {
 
     let fn_type = Type {
         kind: TypeKind::Function {
+            is_async: false,
             params: param_types,
             return_type: Heap::new(return_type),
             calling_convention: None,

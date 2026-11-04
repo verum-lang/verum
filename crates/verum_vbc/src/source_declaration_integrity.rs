@@ -234,10 +234,10 @@ pub(crate) fn validate_type_descriptor_diagnostic(
                             "runtime protocol method name or order differs from declaration",
                         ));
                     }
-                    if !matches!(&actual.payload, Some(TypeRef::Function { params, .. }) if params.len() == regular_params)
+                    if !matches!(&actual.payload, Some(TypeRef::Function { is_async, params, .. }) if params.len() == regular_params && *is_async == decl.is_async)
                     {
                         return Err(fail(
-                            "runtime protocol method parameter shape differs from declaration",
+                            "runtime protocol method callable shape differs from declaration",
                         ));
                     }
                     index = index

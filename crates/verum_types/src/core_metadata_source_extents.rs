@@ -3,7 +3,6 @@ use super::CoreMetadata;
 use super::{
     FieldDescriptor, FunctionDescriptor, TypeDescriptor, TypeDescriptorKind, VariantPayload,
 };
-use crate::ty::Type;
 use verum_ast::{
     decl::{FunctionParamKind, RecordField, TypeDeclBody, VariantData},
     ty::{GenericArg, TypeKind},
@@ -102,23 +101,26 @@ impl Scope<'_> {
 
 fn compare(
     source: &verum_ast::Type,
-    abi: &Type,
+    abi: &verum_ast::Type,
     matched: &mut usize,
     scope: &Scope,
 ) -> Result<(), Text> {
-    match (&source.kind, abi) {
+    match (&source.kind, &abi.kind) {
         (
             TypeKind::Array { element, size },
-            Type::Array {
+            TypeKind::Array {
                 element: other,
                 size: Some(actual),
             },
         ) => {
+            let actual = source_count(actual)?.ok_or_else(|| {
+                Text::from("archive array extent is not a concrete checked integer")
+            })?;
             let expected = size
                 .as_ref()
                 .ok_or_else(|| Text::from("source array is missing an extent"))?;
             match source_count(expected)? {
-                Some(n) if n == *actual => *matched += 1,
+                Some(n) if n == actual => *matched += 1,
                 Some(n) => {
                     return Err(format!(
                         "source array extent {n} disagrees with archive extent {actual}"
@@ -133,23 +135,26 @@ fn compare(
             }
             compare(element, other, matched, scope)?;
         }
-        (TypeKind::Slice(_), Type::Array { size: Some(_), .. }) => {
+        (TypeKind::Slice(_), TypeKind::Array { size: Some(_), .. }) => {
             return Err("source slice disagrees with a fixed archive array".into());
         }
-        (
-            TypeKind::Array { element, .. } | TypeKind::Slice(element),
-            Type::Slice { element: other },
-        ) => {
+        (TypeKind::Array { element, .. } | TypeKind::Slice(element), TypeKind::Slice(other)) => {
             // The legacy slice spelling provides no evidence about this dimension.
             compare(element, other, matched, scope)?;
         }
-        (TypeKind::Reference { inner, .. }, Type::Reference { inner: other, .. })
-        | (TypeKind::CheckedReference { inner, .. }, Type::CheckedReference { inner: other, .. })
-        | (TypeKind::UnsafeReference { inner, .. }, Type::UnsafeReference { inner: other, .. })
-        | (TypeKind::Pointer { inner, .. }, Type::Pointer { inner: other, .. }) => {
+        (TypeKind::Reference { inner, .. }, TypeKind::Reference { inner: other, .. })
+        | (
+            TypeKind::CheckedReference { inner, .. },
+            TypeKind::CheckedReference { inner: other, .. },
+        )
+        | (
+            TypeKind::UnsafeReference { inner, .. },
+            TypeKind::UnsafeReference { inner: other, .. },
+        )
+        | (TypeKind::Pointer { inner, .. }, TypeKind::Pointer { inner: other, .. }) => {
             compare(inner, other, matched, scope)?
         }
-        (TypeKind::Tuple(items), Type::Tuple(others)) if items.len() == others.len() => {
+        (TypeKind::Tuple(items), TypeKind::Tuple(others)) if items.len() == others.len() => {
             for (item, other) in items.iter().zip(others) {
                 compare(item, other, matched, scope)?;
             }
@@ -160,7 +165,19 @@ fn compare(
                 return_type,
                 ..
             },
-            Type::Function {
+            TypeKind::Function {
+                params: others,
+                return_type: result,
+                ..
+            },
+        )
+        | (
+            TypeKind::Rank2Function {
+                params,
+                return_type,
+                ..
+            },
+            TypeKind::Rank2Function {
                 params: others,
                 return_type: result,
                 ..
@@ -171,16 +188,29 @@ fn compare(
             }
             compare(return_type, result, matched, scope)?;
         }
-        (TypeKind::Generic { base, args }, Type::Named { path, args: others })
-            if let TypeKind::Path(head) = &base.kind
-                && head.to_string() == path.to_string()
-                && args.len() == others.len() =>
+        (
+            TypeKind::Generic { base, args },
+            TypeKind::Generic {
+                base: other_base,
+                args: others,
+            },
+        ) if let TypeKind::Path(head) = &base.kind
+            && let TypeKind::Path(path) = &other_base.kind
+            && head.to_string() == path.to_string()
+            && args.len() == others.len() =>
         {
             for (i, (arg, other)) in args.iter().zip(others).enumerate() {
-                if let GenericArg::Type(ty) = arg {
-                    compare(ty, other, matched, scope)?;
-                } else if let Some(ty) = scope.bracket_type(head, args.len(), i, arg) {
-                    compare(&ty, other, matched, scope)?;
+                match (arg, other) {
+                    (GenericArg::Type(ty), GenericArg::Type(other)) => {
+                        compare(ty, other, matched, scope)?
+                    }
+                    (arg, other) => {
+                        let source = scope.bracket_type(head, args.len(), i, arg);
+                        let abi = scope.bracket_type(head, others.len(), i, other);
+                        if let (Some(source), Some(abi)) = (source, abi) {
+                            compare(&source, &abi, matched, scope)?;
+                        }
+                    }
                 }
             }
         }
@@ -207,7 +237,9 @@ fn compare_spelling(
     if let Some(source) = source {
         compare(
             source,
-            &crate::infer::parse_descriptor_type_string(spelling)?,
+            &verum_fast_parser::FastParser::new()
+                .parse_descriptor_type_str(spelling, verum_ast::FileId::new(0))
+                .map_err(|_| Text::from("invalid archive type carrying a fixed array extent"))?,
             &mut matched,
             scope,
         )?;
@@ -389,11 +421,19 @@ fn protocol_methods<'a>(
             // Keep an explicit ABI receiver paired with its source slot so its
             // own type is checked too. A value-only ABI starts after source self.
             let params = match original.params.split_first() {
-                Some((first, rest)) if first.is_self() && method.dispatch.receiver.meta().has_self => {
-                    if method.stores_receiver() { original.params.as_slice() } else { rest }
+                Some((first, rest))
+                    if first.is_self() && method.dispatch.receiver.meta().has_self =>
+                {
+                    if method.stores_receiver() {
+                        original.params.as_slice()
+                    } else {
+                        rest
+                    }
                 }
                 _ if method.stores_receiver() => {
-                    return Err("stored protocol receiver has no corresponding source receiver".into());
+                    return Err(
+                        "stored protocol receiver has no corresponding source receiver".into(),
+                    );
                 }
                 _ => original.params.as_slice(),
             };
@@ -433,4 +473,29 @@ pub(super) fn protocol(
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod callable_array_tests {
+    use super::*;
+
+    #[test]
+    fn fixed_arrays_in_contextual_and_ranked_callables_use_source_structure() {
+        let metadata = CoreMetadata::default();
+        let scope = Scope {
+            metadata: &metadata,
+            module: "sample",
+        };
+        for source in [
+            "async fn([Int; 4]) -> Int using [Clock]",
+            "fn<T>(T, [Int; 4]) -> [Int; 4]",
+        ] {
+            let ast = verum_fast_parser::FastParser::new()
+                .parse_type_str(source, verum_ast::FileId::new(0))
+                .unwrap();
+            assert!(compare_spelling(Some(&ast), source, &scope).is_ok());
+            assert!(compare_spelling(Some(&ast), &source.replace("; 4", "; 5"), &scope).is_err());
+            assert!(compare_spelling(None, source, &scope).is_err());
+        }
+    }
 }

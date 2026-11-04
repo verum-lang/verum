@@ -9,7 +9,7 @@
 //! contract.
 
 use verum_compiler::typed_export::{
-    build_typed_ir, to_canonical_bytes, TYPED_IR_SCHEMA, TYPED_IR_VERSION,
+    TYPED_IR_SCHEMA, TYPED_IR_VERSION, build_typed_ir, to_canonical_bytes,
 };
 
 fn parse(source: &str) -> verum_ast::Module {
@@ -69,6 +69,27 @@ fn schema_header_pinned() {
     assert_eq!(value["version"], TYPED_IR_VERSION);
     assert!(bytes.ends_with(b"\n"));
     assert!(!bytes.ends_with(b"\n\n"));
+}
+
+/// An exported callable keeps its yielding contract and its eager result;
+/// consumers must not mistake an async callback for a synchronous one.
+#[test]
+fn callable_yielding_contract_is_explicit_in_typed_ir() {
+    let bytes = export_bytes(
+        "fn retain(sync: fn(Int) -> Int, yielding: async fn(Int) -> Int) \
+         -> async fn(Int) -> Int { yielding }",
+    );
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["version"], "2.0.0");
+    let function = &value["module"]["functions"][0];
+    for (index, is_async) in [false, true].into_iter().enumerate() {
+        let ty = &function["params"][index]["ty"];
+        assert_eq!(ty["kind"], "function");
+        assert_eq!(ty["is_async"], is_async);
+        assert_eq!(ty["ret"]["kind"], "int");
+    }
+    assert_eq!(function["return_type"]["is_async"], true);
+    assert_eq!(function["return_type"]["ret"]["kind"], "int");
 }
 
 /// §4: types and functions arrive sorted by name (canonical ordering is a
@@ -187,6 +208,12 @@ fn no_path_leakage() {
         !raw.contains(cwd_str.as_ref()),
         "artefact must not embed the working directory"
     );
-    assert!(!raw.contains("/Users/"), "artefact must not embed home paths");
-    assert!(!raw.contains("C:\\"), "artefact must not embed Windows paths");
+    assert!(
+        !raw.contains("/Users/"),
+        "artefact must not embed home paths"
+    );
+    assert!(
+        !raw.contains("C:\\"),
+        "artefact must not embed Windows paths"
+    );
 }

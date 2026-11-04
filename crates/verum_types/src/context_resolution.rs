@@ -1511,6 +1511,7 @@ fn type_to_text(ty: &verum_ast::ty::Type) -> Text {
         TypeKind::Array { element, size: _ } => format!("[{}]", type_to_text(element)).into(),
         TypeKind::Slice(inner) => format!("[{}]", type_to_text(inner)).into(),
         TypeKind::Function {
+            is_async,
             params,
             return_type,
             ..
@@ -1521,7 +1522,7 @@ fn type_to_text(ty: &verum_ast::ty::Type) -> Text {
                 .map(|t| t.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("fn({}) -> {}", params_joined, type_to_text(return_type)).into()
+            format!("{}fn({}) -> {}", if *is_async { "async " } else { "" }, params_joined, type_to_text(return_type)).into()
         }
         TypeKind::Unit => "()".into(),
         TypeKind::Inferred => "_".into(),

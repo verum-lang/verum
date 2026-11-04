@@ -15,11 +15,15 @@ mod source_extents;
 mod array_extents;
 pub use array_extents::{parse_archive_array_extent, validate_archive_array_extents, validate_archive_array_spelling};
 
+#[path = "core_metadata_callable.rs"]
+mod callable;
+pub use callable::validate_archive_callable_spelling;
+
 #[path = "core_metadata_source_signature.rs"]
 mod source_signature_wire;
 
 /// Current sidecar schema; bincode archives must be rebuilt when this changes.
-pub const CORE_METADATA_VERSION: u32 = 6;
+pub const CORE_METADATA_VERSION: u32 = 7;
 
 /// Framed sidecars reject stale schemas before decoding their AST payloads.
 pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";
@@ -77,6 +81,7 @@ pub fn decode_metadata(bytes: &[u8]) -> Result<CoreMetadata, verum_common::Text>
 }
 
 fn validate_metadata_descriptors(metadata: &CoreMetadata) -> Result<(), Text> {
+    callable::validate_archive_callables(metadata)?;
     validate_archive_array_extents(metadata)?;
     NominalSourceOwners::default().admit(metadata)?;
     for descriptor in metadata.functions.values() {

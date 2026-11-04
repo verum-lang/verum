@@ -10,6 +10,7 @@ use verum_common::{List, Map, Text, ToText};
 pub(super) struct PendingValueObligation {
     type_bounds: Map<TypeVar, List<Type>>,
     protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>>,
+    where_clauses: List<crate::protocol::WhereClause>,
     span: Span,
 }
 
@@ -58,7 +59,21 @@ impl TypeChecker {
         let instance = scheme
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
-        if !instance.type_bounds.is_empty() || !instance.protocol_bounds.is_empty() {
+        self.retain_value_instance_obligations(&instance, span)?;
+        Ok(instance)
+    }
+
+    /// A selected method candidate retains the same fresh signature and
+    /// requirements that participated in overload resolution.
+    pub(super) fn retain_value_instance_obligations(
+        &mut self,
+        instance: &InstantiatedScheme,
+        span: Span,
+    ) -> Result<()> {
+        if !instance.type_bounds.is_empty()
+            || !instance.protocol_bounds.is_empty()
+            || !instance.where_clauses.is_empty()
+        {
             if self.value_obligation_scope_depth == 0 {
                 return Err(TypeError::UniverseBinding {
                     message: "bounded value instantiation requires an inference obligation scope"
@@ -74,10 +89,11 @@ impl TypeChecker {
             self.pending_value_obligations.push(PendingValueObligation {
                 type_bounds: instance.type_bounds.clone(),
                 protocol_bounds: instance.protocol_bounds.clone(),
+                where_clauses: instance.where_clauses.clone(),
                 span,
             });
         }
-        Ok(instance)
+        Ok(())
     }
 
     pub(super) fn discharge_value_obligations(&mut self) -> Result<()> {
@@ -88,6 +104,7 @@ impl TypeChecker {
             for obligation in pending {
                 self.enforce_call_type_bounds(&obligation.type_bounds, obligation.span)?;
                 self.enforce_call_protocol_bounds(&obligation.protocol_bounds, obligation.span)?;
+                self.enforce_call_where_clauses(&obligation.where_clauses, obligation.span)?;
             }
         }
         Ok(())
@@ -101,6 +118,20 @@ impl TypeChecker {
         let instance = scheme
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
+        if !instance.where_clauses.is_empty() {
+            if self.value_obligation_scope_depth == 0 {
+                return Err(TypeError::UniverseBinding {
+                    message: "conditional call requires an inference obligation scope".into(),
+                    span,
+                });
+            }
+            self.pending_value_obligations.push(PendingValueObligation {
+                type_bounds: Map::new(),
+                protocol_bounds: Map::new(),
+                where_clauses: instance.where_clauses.clone(),
+                span,
+            });
+        }
         // These are hints for checking closures. They do not discharge the
         // obligations, which are checked after all arguments have been inferred.
         for (var, bounds) in &instance.type_bounds {
@@ -109,6 +140,84 @@ impl TypeChecker {
             }
         }
         Ok(instance)
+    }
+
+    /// Conditional method requirements remain obligations of this call. They
+    /// are proved from the caller's declared assumptions and actual impls, not
+    /// introduced as new assumptions or attached to every implementation.
+    pub(super) fn enforce_call_where_clauses(
+        &mut self,
+        clauses: &[crate::protocol::WhereClause],
+        span: Span,
+    ) -> Result<()> {
+        if clauses.is_empty() {
+            return Ok(());
+        }
+        let substitution = self.unifier.save_substitution();
+        let normalize = |checker: &Self, ty: &Type| -> Result<Type> {
+            let ty = ty
+                .try_apply_subst(&substitution)
+                .map_err(|message| TypeError::UniverseBinding { message, span })?;
+            Ok(checker.resolve_assoc_projections_deep(&ty))
+        };
+        let mut assumptions = List::new();
+        for (variable, bounds) in &self.type_var_bounds {
+            // Only active universal caller binders introduce assumptions. A
+            // flexible call variable carries obligations, never its own proof.
+            if !self.unifier.is_rigid(*variable) {
+                continue;
+            }
+            assumptions.push(crate::protocol::WhereClause {
+                ty: normalize(self, &Type::Var(*variable))?,
+                bounds: bounds
+                    .iter()
+                    .map(|bound| {
+                        bound
+                            .try_apply_subst(&substitution)
+                            .map_err(|message| TypeError::UniverseBinding { message, span })
+                    })
+                    .collect::<Result<_>>()?,
+            });
+        }
+        for clause in clauses {
+            let subject = normalize(self, &clause.ty)?;
+            if let Some(owner) = self.get_type_name(&subject) {
+                self.ensure_stdlib_type_loaded_transitive(&owner);
+            }
+            let bounds: List<_> = clause
+                .bounds
+                .iter()
+                .map(|bound| {
+                    let mut bound = bound
+                        .try_apply_subst(&substitution)
+                        .map_err(|message| TypeError::UniverseBinding { message, span })?;
+                    bound.args = bound
+                        .args
+                        .iter()
+                        .map(|ty| normalize(self, ty))
+                        .collect::<Result<_>>()?;
+                    for ty in bound.associated_types.values_mut() {
+                        *ty = normalize(self, ty)?;
+                    }
+                    Ok(bound)
+                })
+                .collect::<Result<_>>()?;
+            for bound in &bounds {
+                self.ensure_stdlib_type_loaded_transitive(&self.path_to_string(&bound.protocol));
+            }
+            self.protocol_checker
+                .read()
+                .check_universal_bounds(&subject, &bounds, &assumptions)
+                .map_err(|reason| TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(),
+                    msg: format!(
+                        "cannot establish method call requirement for `{subject}`: {reason}"
+                    )
+                    .into(),
+                    span,
+                })?;
+        }
+        Ok(())
     }
 
     /// Shared legacy protocol-bound check for calls and value instances.
@@ -336,6 +445,7 @@ impl TypeChecker {
         let bound = self.normalize_type(&bound);
         if let (
             Type::Function {
+                property_requirement: actual_property_requirement,
                 params: actual_params,
                 return_type: actual_return,
                 type_params: actual_generics,
@@ -343,6 +453,7 @@ impl TypeChecker {
                 properties: actual_properties,
             },
             Type::Function {
+                property_requirement: bound_property_requirement,
                 params: bound_params,
                 return_type: bound_return,
                 type_params: bound_generics,
@@ -354,6 +465,7 @@ impl TypeChecker {
             // Check the callable contract before variance-aware inference. Do
             // not let structural unification erase contexts or properties.
             let actual_contract = Type::Function {
+                property_requirement: actual_property_requirement.clone(),
                 params: List::new(),
                 return_type: Box::new(Type::Unit),
                 type_params: actual_generics.clone(),
@@ -361,6 +473,7 @@ impl TypeChecker {
                 properties: actual_properties.clone(),
             };
             let bound_contract = Type::Function {
+                property_requirement: bound_property_requirement.clone(),
                 params: List::new(),
                 return_type: Box::new(Type::Unit),
                 type_params: bound_generics.clone(),

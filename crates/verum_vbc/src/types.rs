@@ -568,6 +568,8 @@ pub enum TypeRef {
 
     /// Function type.
     Function {
+        /// The callable may yield. Calling remains eager; return_type is its output.
+        is_async: bool,
         /// Parameter types (Vec to avoid infinite size).
         params: Vec<TypeRef>,
         /// Return type.
@@ -585,6 +587,8 @@ pub enum TypeRef {
     /// Spec: grammar/verum.ebnf - rank2_function_type
     #[serde(rename = "ScopedRank2Function")]
     Rank2Function {
+        /// The callable may yield, independently of its local type binders.
+        is_async: bool,
         /// Number of universally quantified type parameters (local to this function type).
         /// Local IDs occupy 0..count. IDs >= count refer to the enclosing
         /// scope at index ID-count, recursively under nested binders.
@@ -1791,6 +1795,7 @@ mod tests {
     #[test]
     fn test_type_ref_function() {
         let tr = TypeRef::Function {
+            is_async: false,
             params: vec![TypeRef::Concrete(TypeId::INT)],
             return_type: Box::new(TypeRef::Concrete(TypeId::BOOL)),
             contexts: SmallVec::new(),
@@ -1802,6 +1807,7 @@ mod tests {
     #[test]
     fn test_type_ref_function_with_generic_param() {
         let tr = TypeRef::Function {
+            is_async: false,
             params: vec![TypeRef::Generic(TypeParamId(0))],
             return_type: Box::new(TypeRef::Concrete(TypeId::BOOL)),
             contexts: SmallVec::new(),
@@ -1812,6 +1818,7 @@ mod tests {
     #[test]
     fn test_type_ref_function_with_generic_return() {
         let tr = TypeRef::Function {
+            is_async: false,
             params: vec![TypeRef::Concrete(TypeId::INT)],
             return_type: Box::new(TypeRef::Generic(TypeParamId(0))),
             contexts: SmallVec::new(),
@@ -1825,6 +1832,7 @@ mod tests {
         contexts.push(ContextRef(1));
         contexts.push(ContextRef(2));
         let tr = TypeRef::Function {
+            is_async: false,
             params: vec![],
             return_type: Box::new(TypeRef::Concrete(TypeId::UNIT)),
             contexts,
@@ -2744,6 +2752,7 @@ mod tests {
         let mut contexts = SmallVec::new();
         contexts.push(ContextRef(1));
         let tr = TypeRef::Function {
+            is_async: false,
             params: vec![TypeRef::Concrete(TypeId::INT)],
             return_type: Box::new(TypeRef::Concrete(TypeId::BOOL)),
             contexts,
@@ -3001,6 +3010,7 @@ mod tests {
         contexts.push(ContextRef(2));
 
         let fn_type = TypeRef::Function {
+            is_async: false,
             params: vec![
                 TypeRef::Reference {
                     inner: Box::new(TypeRef::Generic(TypeParamId(0))),

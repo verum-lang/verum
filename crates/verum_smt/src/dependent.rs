@@ -3059,6 +3059,7 @@ impl InductiveType {
 
         let motive_type = Type::new(
             TypeKind::Function {
+                is_async: false,
                 params: motive_params.into(),
                 return_type: Box::new(Type::new(
                     TypeKind::Path(Path::from_ident(Ident::new("Type".to_string(), span))),
@@ -3111,6 +3112,7 @@ impl InductiveType {
 
         let final_type = Type::new(
             TypeKind::Function {
+                is_async: false,
                 params: final_params.into(),
                 return_type: Box::new(result_type),
                 calling_convention: Maybe::None,
@@ -3127,6 +3129,7 @@ impl InductiveType {
 
             complete_type = Type::new(
                 TypeKind::Function {
+                    is_async: false,
                     params: chain_params.into(),
                     return_type: Box::new(complete_type),
                     calling_convention: Maybe::None,
@@ -3259,6 +3262,7 @@ impl InductiveType {
             for param_type in param_types.iter().rev() {
                 complete_type = Type::new(
                     TypeKind::Function {
+                        is_async: false,
                         params: vec![param_type.clone()].into(),
                         return_type: Box::new(complete_type),
                         calling_convention: Maybe::None,

@@ -283,6 +283,7 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 ..
@@ -292,7 +293,7 @@ impl<'s> CompilationPipeline<'s> {
                     .map(|p| self.type_to_text(p).to_string())
                     .collect();
                 let ret_text = self.type_to_text(return_type);
-                Text::from(format!("fn({}) -> {}", params_str.join(", "), ret_text))
+                Text::from(format!("{}fn({}) -> {}", if *is_async { "async " } else { "" }, params_str.join(", "), ret_text))
             }
             TypeKind::Ownership { mutable, inner } => {
                 let inner_text = self.type_to_text(inner);

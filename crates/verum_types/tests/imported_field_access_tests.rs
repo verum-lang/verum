@@ -834,6 +834,7 @@ fn test_field_access_in_function_call() {
 
     // Add a function abs: Int -> Int to context
     let abs_type = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::int()].into(),
         return_type: Box::new(Type::int()),
         contexts: None,

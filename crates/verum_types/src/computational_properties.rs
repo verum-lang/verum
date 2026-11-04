@@ -179,6 +179,86 @@ pub struct PropertySet {
     properties: Set<ComputationalProperty>,
 }
 
+/// Declared restrictions on a callable, distinct from its inferred footprint.
+/// An unrestricted callable does not promise purity or the absence of mutation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PropertyRequirement {
+    Unrestricted,
+    Excludes(PropertySet),
+    AtMost(PropertySet),
+}
+
+impl PropertyRequirement {
+    /// Least upper bound for computations executed in sequence or alternatives.
+    pub fn join(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::Unrestricted, _) | (_, Self::Unrestricted) => Self::Unrestricted,
+            (Self::AtMost(left), Self::AtMost(right)) => Self::AtMost(left.union(right)),
+            (Self::Excludes(left), Self::Excludes(right)) => Self::Excludes(
+                PropertySet::from_properties(left.iter().filter(|p| right.contains(p)).cloned())),
+            (Self::Excludes(forbidden), Self::AtMost(known))
+            | (Self::AtMost(known), Self::Excludes(forbidden)) => Self::Excludes(
+                PropertySet::from_properties(forbidden.iter().filter(|p| !known.contains(p)).cloned())),
+        }
+    }
+
+    pub fn finite_footprint(&self) -> Option<&PropertySet> {
+        if let Self::AtMost(known) = self { Some(known) } else { None }
+    }
+
+    pub fn declared_function(is_pure: bool, is_meta: bool) -> Self {
+        use ComputationalProperty::*;
+        if is_meta { Self::AtMost(PropertySet::from_properties([Fallible, Divergent])) }
+        else if is_pure { Self::Excludes(PropertySet::from_properties([
+            IO, Async, Mutates, ReadsExternal, WritesExternal, FFI, Spawns,
+        ])) }
+        else { Self::Unrestricted }
+    }
+
+    pub fn source_callable(is_async: bool) -> Self {
+        if is_async { Self::Unrestricted }
+        else { Self::Excludes(PropertySet::single(ComputationalProperty::Async)) }
+    }
+
+    pub fn may_be_async(&self) -> bool {
+        match self {
+            Self::Unrestricted => true,
+            Self::Excludes(forbidden) => !forbidden.contains(&ComputationalProperty::Async),
+            Self::AtMost(allowed) => allowed.is_async(),
+        }
+    }
+
+    /// Pure denotes the absence of hazards, rather than a positive hazard.
+    pub fn accepts(&self, actual: &PropertySet) -> bool {
+        match self {
+            Self::Unrestricted => true,
+            Self::Excludes(forbidden) => actual.iter().all(|property|
+                matches!(property, ComputationalProperty::Pure) || !forbidden.contains(property)),
+            Self::AtMost(allowed) => actual.iter().all(|property|
+                matches!(property, ComputationalProperty::Pure) || allowed.contains(property)),
+        }
+    }
+
+    /// Every footprint authorized by this declaration satisfies `target`.
+    pub fn implies(&self, target: &Self) -> bool {
+        match (self, target) {
+            (_, Self::Unrestricted) => true,
+            (Self::AtMost(known), target) => target.accepts(known),
+            (Self::Excludes(source), Self::Excludes(target)) => target.iter().all(|property|
+                matches!(property, ComputationalProperty::Pure) || source.contains(property)),
+            (Self::Unrestricted, Self::Excludes(target)) => target.iter().all(|property|
+                matches!(property, ComputationalProperty::Pure)),
+            _ => false,
+        }
+    }
+
+    /// An observed finite footprint is evidence; otherwise require entailment
+    /// from the source declaration. Missing inference never establishes purity.
+    pub fn satisfied_by(&self, source: &Self, observed: Option<&PropertySet>) -> bool {
+        match observed { Some(known) => self.accepts(known), None => source.implies(self) }
+    }
+}
+
 // Custom Serialize/Deserialize for PropertySet because Set doesn't implement these traits
 impl serde::Serialize for PropertySet {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -879,6 +959,8 @@ pub struct PropertyInferenceContext {
 const BUILTIN_IO_FUNCTIONS: &[&str] = &["print", "println", "eprint", "eprintln"];
 
 impl PropertyInferenceContext {
+    pub fn forget_function(&mut self, name: &Text) { self.known_functions.remove(name); }
+
     /// Create new property inference context
     pub fn new() -> Self {
         let mut known_functions = std::collections::HashMap::new();
@@ -982,6 +1064,7 @@ impl Default for PropertyInferenceContext {
 pub struct PropertyInferrer {
     /// Context for tracking properties
     context: PropertyInferenceContext,
+    typed_calls: bool,
 }
 
 /// Does this assignment target reach memory the caller can see?
@@ -1023,7 +1106,25 @@ impl PropertyInferrer {
     pub fn new() -> Self {
         Self {
             context: PropertyInferenceContext::new(),
+            typed_calls: false,
         }
+    }
+
+    pub fn infer_function_body(&mut self, body: &verum_ast::FunctionBody) -> PropertySet {
+        let previous = std::mem::replace(&mut self.typed_calls, true);
+        let result = match body {
+            verum_ast::FunctionBody::Block(block) => self.infer_block(block),
+            verum_ast::FunctionBody::Expr(expr) => self.infer_expr(expr),
+        };
+        self.typed_calls = previous;
+        result
+    }
+
+    pub fn infer_local_operations(&mut self, expr: &verum_ast::Expr) -> PropertySet {
+        let previous = std::mem::replace(&mut self.typed_calls, true);
+        let result = self.infer_expr(expr);
+        self.typed_calls = previous;
+        result
     }
 
     /// Infer properties from an expression.
@@ -1137,7 +1238,7 @@ impl PropertyInferrer {
                 }
 
                 // Try to look up function properties if it's a simple path
-                if let ExprKind::Path(path) = &func.kind {
+                if !self.typed_calls && let ExprKind::Path(path) = &func.kind {
                     if let Some(name) = path.as_ident() {
                         if let Some(func_props) =
                             self.context.get_function_properties(&name.name.clone())
@@ -1164,7 +1265,7 @@ impl PropertyInferrer {
                 }
 
                 // Look up method properties
-                if let Some(method_props) =
+                if !self.typed_calls && let Some(method_props) =
                     self.context.get_function_properties(&method.name.clone())
                 {
                     combined = combined.union(method_props);
@@ -1226,11 +1327,7 @@ impl PropertyInferrer {
             // Loops may diverge
             ExprKind::Loop { body, .. } => {
                 // Loop bodies run repeatedly - add Divergent since they may not terminate
-                let body_props = if let Some(expr) = &body.expr {
-                    self.infer_expr(expr)
-                } else {
-                    PropertySet::pure()
-                };
+                let body_props = self.infer_block(body);
 
                 // Conservative: loops may diverge
                 body_props.union(&PropertySet::single(ComputationalProperty::Divergent))
@@ -1240,11 +1337,7 @@ impl PropertyInferrer {
                 condition, body, ..
             } => {
                 let cond_props = self.infer_expr(condition);
-                let body_props = if let Some(expr) = &body.expr {
-                    self.infer_expr(expr)
-                } else {
-                    PropertySet::pure()
-                };
+                let body_props = self.infer_block(body);
 
                 cond_props
                     .union(&body_props)
@@ -1253,35 +1346,23 @@ impl PropertyInferrer {
 
             ExprKind::For { iter, body, .. } => {
                 let iter_props = self.infer_expr(iter);
-                let body_props = if let Some(expr) = &body.expr {
-                    self.infer_expr(expr)
-                } else {
-                    PropertySet::pure()
-                };
+                let body_props = self.infer_block(body);
 
                 iter_props.union(&body_props)
             }
 
-            // Closures capture their body properties
-            ExprKind::Closure { body, .. } => self.infer_expr(body),
+            // Constructing a closure does not execute its body.
+            ExprKind::Closure { .. } => PropertySet::pure(),
 
             // Async blocks are async
             ExprKind::Async(body) => {
-                let body_props = if let Some(expr) = &body.expr {
-                    self.infer_expr(expr)
-                } else {
-                    PropertySet::pure()
-                };
+                let body_props = self.infer_block(body);
                 body_props.union(&PropertySet::single(ComputationalProperty::Async))
             }
 
             // Unsafe blocks mark as FFI (conservative - using unsafe code)
             ExprKind::Unsafe(body) => {
-                let body_props = if let Some(expr) = &body.expr {
-                    self.infer_expr(expr)
-                } else {
-                    PropertySet::pure()
-                };
+                let body_props = self.infer_block(body);
                 body_props.union(&PropertySet::single(ComputationalProperty::FFI))
             }
 

@@ -669,7 +669,7 @@ fn pool_methods_pass_the_session_declaration_to_the_error_mapping_call() {
             .rsplit('.').next().unwrap();
         assert_eq!(declared_name(*base), container);
         assert_eq!(args.as_slice(), &[TypeRef::Concrete(TypeId::INT)]);
-        let [_, TypeRef::Concrete(error), TypeRef::Concrete(failure), TypeRef::Function { params, return_type, contexts }] =
+        let [_, TypeRef::Concrete(error), TypeRef::Concrete(failure), TypeRef::Function { is_async: false,  params, return_type, contexts }] =
             witnesses.as_slice() else { panic!("{caller}: incomplete mapping witnesses: {witnesses:?}") };
         assert_eq!(declared_name(*error), "DbError");
         assert_eq!(declared_name(*failure), "Failure");

@@ -376,6 +376,7 @@ impl TypeChecker {
                     // testable in isolation.
                     let properties = crate::lift_ffi_function_to_properties(ffi_func);
                     let fn_type = Type::Function {
+                        property_requirement: properties.as_ref().map(|known| crate::computational_properties::PropertyRequirement::AtMost(known.clone())).unwrap_or(crate::computational_properties::PropertyRequirement::Unrestricted),
                         params: param_types,
                         return_type: Box::new(ret_type),
                         contexts: None,
@@ -6047,7 +6048,7 @@ impl TypeChecker {
                             func.is_async,
                             func.is_generator,
                         );
-                        let func_ty = Type::function(param_types, final_return_type);
+                        let func_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
 
                         // Prepare registration for after scope exit
                         // Quantify both the impl and method variables in declaration order.
@@ -6057,6 +6058,8 @@ impl TypeChecker {
                         method_scheme.receiver_kind =
                             Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                         method_scheme.impl_var_count = impl_type_vars.len();
+                        method_scheme.impl_self_type = self.current_self_type.clone();
+                        self.record_explicit_method_vars(&mut method_scheme, func);
                         method_scheme.impl_self_type = self.current_self_type.clone();
                         if !method_type_bounds.is_empty() {
                             method_scheme = method_scheme.with_type_bounds(method_type_bounds);
@@ -6158,7 +6161,7 @@ impl TypeChecker {
                             func.is_async,
                             func.is_generator,
                         );
-                        let method_ty = Type::function(param_types, final_return_type);
+                        let method_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
                         let type_name_text = method_owner.clone();
                         let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
@@ -6177,6 +6180,8 @@ impl TypeChecker {
                         method_scheme.receiver_kind =
                             Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                         method_scheme.impl_var_count = impl_type_vars.len();
+                        method_scheme.impl_self_type = self.current_self_type.clone();
+                        self.record_explicit_method_vars(&mut method_scheme, func);
                         if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=modules.rs:4465 count={}", impl_type_vars.len()); }
 
                         // CRITICAL: Add type bounds for closure type inference
@@ -6288,29 +6293,7 @@ impl TypeChecker {
 
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG import_impl_blocks] Added method '{}' with return_type={}", method_name, return_type.to_text());
-                        methods.insert(method_name, Type::function(param_types, final_return_type));
-                    }
-                }
-
-                // CRITICAL: If methods map is empty and we have a protocol name,
-                // try to get method types from the protocol definition itself
-                if methods.is_empty() && !protocol_name_for_debug.is_empty() {
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG import_impl_blocks] methods is EMPTY for {} for {}, trying to get from protocol definition",
-                    // protocol_name_for_debug, type_name);
-
-                    let protocol_name_text: verum_common::Text =
-                        protocol_name_for_debug.clone().into();
-                    let protocol_checker_guard = self.protocol_checker.read();
-                    if let verum_common::Maybe::Some(protocol_def) =
-                        protocol_checker_guard.get_protocol(&protocol_name_text)
-                    {
-                        for (method_name, method_info) in &protocol_def.methods {
-                            methods.insert(method_name.clone(), method_info.ty.clone());
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG import_impl_blocks] Got method '{}' from protocol def with ty={}",
-                            // method_name, method_info.ty.to_text());
-                        }
+                        methods.insert(method_name, Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta)));
                     }
                 }
 
@@ -6375,6 +6358,29 @@ impl TypeChecker {
                 let resolved_protocol_args = self.protocol_application_arguments(
                     protocol, ast_protocol_args, Some(&for_type_resolved),
                 )?;
+
+                // Defaults inherit the selected application, including owner values.
+                if let Some(declaration) = self.protocol_checker.read().get_protocol(&self.path_to_string(protocol)) {
+                    let impl_variables: List<TypeVar> = impl_type_bindings.iter().filter_map(|(name, _)| {
+                        match self.ctx.lookup_type(name.as_str()) { Some(Type::Var(var)) => Some(*var), _ => None }
+                    }).collect();
+                    for (name, method) in &declaration.methods {
+                        if methods.contains_key(name) {
+                            for key in [name.clone(), format!("$static${name}").into()] {
+                                let existing = self.inherent_methods.read().get(&method_owner).and_then(|methods| methods.get(&key)).cloned();
+                                if let Some(mut scheme) = existing {
+                                    self.attach_protocol_method_requirements(&mut scheme, method, &resolved_protocol_args, &for_type_resolved, impl_decl.span)?;
+                                    self.inherent_methods.write().entry(method_owner.clone()).or_default().insert(key, scheme);
+                                }
+                            }
+                        }
+                        if method.has_default && !methods.contains_key(name) {
+                            let scheme = self.inherited_protocol_method_scheme(method, &resolved_protocol_args, &for_type_resolved, &impl_variables)?;
+                            methods.insert(name.clone(), scheme.ty.clone());
+                            self.inherent_methods.write().entry(method_owner.clone()).or_default().entry(name.clone()).or_insert(scheme);
+                        }
+                    }
+                }
 
                 // Create and register the ProtocolImpl
                 let protocol_impl = crate::protocol::ProtocolImpl {
@@ -6888,6 +6894,7 @@ impl TypeChecker {
 
                 // Build function type for this method
                 let method_type = Type::Function {
+                    property_requirement: crate::computational_properties::PropertyRequirement::declared_function(method.is_pure, method.is_meta),
                     params: param_types,
                     return_type: Box::new(final_return_type),
                     contexts: None,
@@ -7182,6 +7189,7 @@ impl TypeChecker {
 
             // Build function type for this method
             let method_type = Type::Function {
+                property_requirement: crate::computational_properties::PropertyRequirement::declared_function(method.is_pure, method.is_meta),
                 params: param_types,
                 return_type: Box::new(final_return_type),
                 contexts: None,
@@ -8173,7 +8181,7 @@ impl TypeChecker {
         // non-unifying spellings ACROSS consumers. The canonical seam
         // is the DefId campaign (T0690 umbrella): identity by id with
         // names at edges — not a per-resolver spelling flip.
-        let fn_ty = Type::function(params, return_ty);
+        let fn_ty = Type::function_with_requirement(params, return_ty, crate::computational_properties::PropertyRequirement::Unrestricted);
 
         // BAKED-DEFAULT-ARG-1: relax the arity gate for defaulted
         // trailing params — same prefix rule as the AST path in
@@ -9163,95 +9171,13 @@ impl TypeChecker {
                     for proto_item in &protocol_body.items {
                         match &proto_item.kind {
                             ProtocolItemKind::Function { decl, default_impl } => {
-                                // CRITICAL FIX: Enter a scope for method type parameters.
-                                // Methods can have their own type params like `fn map<B, F>(...)`.
-                                // These must be registered as TypeVars so they get captured by
-                                // generalize_ordered later, enabling fresh instantiation per call.
-                                self.ctx.enter_scope();
-
-                                // Register method type parameters as TypeVars and collect their type bounds
-                                // For `fn map<B, F: fn(Self.Item) -> B>`, we store the bound fn(Self.Item) -> B for F
-                                let mut method_type_param_names: List<Text> = List::new();
-                                let mut method_type_param_bounds: Map<Text, Type> = Map::new();
-                                for generic_param in &decl.generics {
-                                    if let verum_ast::ty::GenericParamKind::Type {
-                                        name,
-                                        bounds,
-                                        ..
-                                    } = &generic_param.kind
-                                    {
-                                        let type_var = TypeVar::fresh();
-                                        let param_name: Text = name.name.clone();
-                                        method_type_param_names.push(param_name.clone());
-                                        self.ctx
-                                            .define_type(param_name.clone(), Type::Var(type_var));
-
-                                        // Extract type bounds (like fn(Self.Item) -> B)
-                                        let type_bounds = self.extract_type_bounds_from_ast(bounds);
-                                        for bound in type_bounds {
-                                            // Store the bound keyed by param NAME for later transfer to TypeScheme
-                                            method_type_param_bounds
-                                                .insert(param_name.clone(), bound);
-                                        }
-                                    }
+                                match self.elaborate_protocol_method(
+                                    &type_decl.generics, &constraint_scope, decl,
+                                    decl.body.is_some() || default_impl.is_some(),
+                                ) {
+                                    Ok(signature) => { protocol_methods.insert(decl.name.name.clone(), signature); }
+                                    Err(error) => self.push_diagnostic_for(error),
                                 }
-
-                                // Build method type from signature using lenient conversion
-                                // to handle types not yet in scope during protocol registration.
-                                // Self parameter is EXCLUDED from params (it's implicit in method calls)
-                                // but its receiver kind is tracked for object safety analysis.
-                                let params: List<Type> = decl.params.iter()
-                                    .filter_map(|p| match &p.kind {
-                                        FunctionParamKind::Regular { ty, .. } => Some(self.ast_to_type_lenient(ty)),
-                                        _ => None,
-                                    })
-                                    .collect();
-
-                                {
-                                    // CRITICAL FIX: Use ast_to_type_lenient for protocol method return types.
-                                    // During protocol registration, dependency types (like Maybe, Result)
-                                    // may not yet be in scope. ast_to_type_lenient preserves the type structure
-                                    // as Named types that will be resolved later during method lookup.
-                                    let method_name_pre: Text = decl.name.name.clone();
-                                    let return_type = if let Some(ref ret_ty) = decl.return_type {
-                                        let ty = self.ast_to_type_lenient(ret_ty);
-                                        #[cfg(debug_assertions)]
-                                        if method_name_pre.as_str() == "next" {
-                                            // #[cfg(debug_assertions)]
-                                            // eprintln!("[DEBUG protocol_registration] Method 'next' return_type (lenient): {:?}", ty);
-                                        }
-                                        ty
-                                    } else {
-                                        Type::unit()
-                                    };
-
-                                    let method_ty = Type::function(params, return_type.clone());
-                                    let method_name: Text = decl.name.name.clone();
-                                    let has_default = decl.body.is_some() || default_impl.is_some();
-
-                                    // if method_name.as_str() == "map" {
-                                    //  eprintln!("[DEBUG protocol_registration] Registering 'map' method");
-                                    //  eprintln!(" return_type={:?}", return_type);
-                                    //  eprintln!(" method_ty={:?}", method_ty);
-                                    //  eprintln!(" has_default={}", has_default);
-                                    //  eprintln!(" type_param_bounds={:?}", method_type_param_bounds);
-                                    // }
-
-                                    // Use with_type_bounds to store the method's type param bounds
-                                    let mut protocol_method =
-                                        crate::protocol::ProtocolMethod::with_type_bounds(
-                                            method_name.clone(),
-                                            method_ty,
-                                            has_default,
-                                            method_type_param_names.clone(),
-                                            method_type_param_bounds.clone(),
-                                        );
-                                    protocol_method.set_dispatch(verum_ast::method_dispatch::MethodDispatch::from_declaration(decl));
-                                    protocol_methods.insert(method_name, protocol_method);
-                                }
-
-                                // Exit method type parameter scope
-                                self.ctx.exit_scope();
                             }
                             ProtocolItemKind::Type { name, .. } => {
                                 match self.elaborate_associated_type(&type_decl.generics, &constraint_scope, &proto_item.kind) {
@@ -9685,7 +9611,7 @@ impl TypeChecker {
                         .map(|t| self.ast_to_type_lenient(t))
                         .unwrap_or(Type::Unit);
 
-                    let method_ty = Type::function(param_types, return_type);
+                    let method_ty = Type::function_with_requirement(param_types, return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
 
                     // Generalize with ordered params: [I, method-level params...]
                     let mut ordered_params: List<verum_common::Text> =
@@ -10857,6 +10783,7 @@ impl TypeChecker {
 
                 return Some((
                     Type::Function {
+                        property_requirement: crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta),
                         params: param_types,
                         return_type: Box::new(final_return_type),
                         contexts: None,
@@ -10968,6 +10895,7 @@ impl TypeChecker {
 
                 return Some((
                     Type::Function {
+                        property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
                         params: param_types,
                         return_type: Box::new(return_type),
                         contexts: None,
@@ -11093,6 +11021,7 @@ impl TypeChecker {
                                 // Non-unit variant: type is a constructor function
                                 return Some((
                                     Type::Function {
+                                        property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
                                         params: param_types,
                                         return_type: Box::new(return_type),
                                         contexts: None,
@@ -11182,6 +11111,7 @@ impl TypeChecker {
         // Most math functions are Float -> Float
         let func_type = match name {
             "sqrt" | "sin" | "cos" | "tan" | "floor" | "ceil" | "round" | "abs" => Type::Function {
+                property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
                 params: List::from(vec![Type::float()]),
                 return_type: Box::new(Type::float()),
                 contexts: None,
@@ -11191,6 +11121,7 @@ impl TypeChecker {
             "min" | "max" => {
                 // Binary functions: (Float, Float) -> Float
                 Type::Function {
+                    property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
                     params: List::from(vec![Type::float(), Type::float()]),
                     return_type: Box::new(Type::float()),
                     contexts: None,
@@ -11201,6 +11132,7 @@ impl TypeChecker {
             "pow" => {
                 // pow(Float, Int) -> Float (exponent is always Int)
                 Type::Function {
+                    property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
                     params: List::from(vec![Type::float(), Type::Int]),
                     return_type: Box::new(Type::float()),
                     contexts: None,
@@ -11640,10 +11572,11 @@ impl TypeChecker {
         )?;
 
         // Create initial function type with contexts and add to environment (for recursive calls)
-        let initial_func_type = if let Some(req) = context_requirement.clone() {
-            Type::function_with_contexts(param_types.clone(), initial_return_for_sig, req)
-        } else {
-            Type::function(param_types.clone(), initial_return_for_sig)
+        let initial_func_type = Type::Function {
+            params: param_types.clone(), return_type: Box::new(initial_return_for_sig),
+            contexts: context_requirement.clone().map(crate::di::requirement::ContextExpr::Concrete),
+            type_params: List::new(), properties: None,
+            property_requirement: crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta),
         };
         // CRITICAL: Create TypeScheme explicitly with tracked type parameters.
         // We cannot use `generalize()` which relies on `free_vars()` because:
@@ -13216,9 +13149,9 @@ impl TypeChecker {
             if !resolved_ret.free_vars().is_empty() {
                 continue;
             }
-            let matching: Vec<&(usize, Type)> = cands
+            let matching: Vec<&(usize, Type, Option<crate::context::InstantiatedScheme>)> = cands
                 .iter()
-                .filter(|(_, r)| {
+                .filter(|(_, r, _)| {
                     let r_applied = self.unifier.apply(r);
                     self.types_compatible(&resolved_ret, &r_applied)
                         || self.types_compatible(&r_applied, &resolved_ret)
@@ -13226,7 +13159,11 @@ impl TypeChecker {
                 .collect();
             match matching.len() {
                 1 => {
-                    let (ord, _) = matching[0];
+                    let (ord, _, instance) = matching[0];
+                    if let Some(instance) = instance {
+                        self.type_registry.register_call_target(call_span, instance.ty.clone());
+                        self.retain_value_instance_obligations(instance, call_span)?;
+                    }
                     let qualified = if *ord == 1 {
                         format!("{}.{}", head, method_name)
                     } else {
@@ -13252,7 +13189,7 @@ impl TypeChecker {
                             resolved_ret,
                             cands
                                 .iter()
-                                .map(|(_, r)| format!("`{}`", r))
+                                .map(|(_, r, _)| format!("`{}`", r))
                                 .collect::<Vec<_>>()
                                 .join(", "),
                         )),
@@ -13398,35 +13335,13 @@ impl TypeChecker {
         // Int at call sites.  Free type-param vars pass through unchanged.
         let final_return_type = self.unifier.apply(&final_return_type);
 
-        // Infer computational properties from function body
-        // Computational properties: compile-time tracking of Pure, IO, Async, Fallible, Mutates effects inferred from function bodies — (Pure, IO, Async, Fallible, Mutates)
-        let inferred_properties = if let Some(ref body) = func.body {
-            // Use property inferrer to analyze the function body
-            let body_expr = match body {
-                FunctionBody::Block(block) => {
-                    // Create a synthetic expression from the block for property inference
-                    Expr::new(
-                        verum_ast::expr::ExprKind::Block(block.clone()),
-                        block.span(),
-                    )
-                }
-                FunctionBody::Expr(expr) => expr.clone(),
-            };
-            let mut properties = self.property_inferrer.infer_expr(&body_expr);
-
-            // Add Async property for async functions
-            if func.is_async {
-                properties =
-                    properties.union(&crate::computational_properties::PropertySet::single(
-                        crate::computational_properties::ComputationalProperty::Async,
-                    ));
-            }
-
-            properties
-        } else {
-            // No body - default to pure
-            crate::computational_properties::PropertySet::pure()
+        // Typed call targets contribute bounds; absent finite evidence stays unknown.
+        let body_bound = match &func.body {
+            Some(body) => self.callable_function_body_bound(body),
+            None => crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta),
         };
+        let inferred_bound = Self::callable_bound_with_marker(body_bound.clone(), func.is_async);
+        let inferred_properties = inferred_bound.finite_footprint().cloned();
 
         // ============================================================
         // E501: Enforce purity for meta functions
@@ -13435,11 +13350,12 @@ impl TypeChecker {
         // Meta functions run at compile-time and cannot have side effects.
         // They must be pure: no IO, no mutation, no external state access.
         if func.is_meta {
-            if let Err(impure_props) = inferred_properties.validate_for_meta_fn() {
+            if !inferred_bound.implies(&crate::computational_properties::PropertyRequirement::declared_function(false, true)) {
+                let impure_props = inferred_properties.as_ref().map(|properties| properties.to_list()).unwrap_or_default();
                 let props_str: Vec<String> = impure_props.iter().map(|p| p.to_string()).collect();
                 return Err(TypeError::ImpureMetaFunction {
                     func_name: func.name.name.clone(),
-                    properties: verum_common::Text::from(props_str.join(", ")),
+                    properties: if inferred_properties.is_some() { props_str.join(", ").into() } else { "callee computational footprint is unknown".into() },
                     span: func.span,
                 });
             }
@@ -13496,11 +13412,12 @@ impl TypeChecker {
             }
         }
         if func.is_pure {
-            if let Err(impure_props) = inferred_properties.validate_for_pure_fn() {
+            if !inferred_bound.implies(&crate::computational_properties::PropertyRequirement::declared_function(true, false)) {
+                let impure_props = inferred_properties.as_ref().map(|properties| properties.to_list()).unwrap_or_default();
                 let props_str: Vec<String> = impure_props.iter().map(|p| p.to_string()).collect();
                 return Err(TypeError::ImpurePureFunction {
                     func_name: func.name.name.clone(),
-                    properties: verum_common::Text::from(props_str.join(", ")),
+                    properties: if inferred_properties.is_some() { props_str.join(", ").into() } else { "callee computational footprint is unknown".into() },
                     span: func.span,
                 });
             }
@@ -13534,33 +13451,11 @@ impl TypeChecker {
             }
         }
 
-        // ============================================================
-        // E504: Async property enforcement
-        // Ensure async functions have Async property in their type
-        // ============================================================
-        // If a function is declared async, ensure the Async property is tracked.
-        // If a non-async function body contains .await expressions, that's an error
-        // (already caught by in_async_context checks, but we double-check here).
-        // E504: Non-async function with async body operations.
-        // Only warn for non-entry-point functions. Entry points (main, @test) are
-        // allowed to contain async blocks since they serve as program roots that
-        // orchestrate async execution without being async themselves.
-        let is_entry_point =
-            func.name.name.as_str() == "main" || func.attributes.iter().any(|a| a.is_named("test"));
-        if !func.is_async && !is_entry_point && inferred_properties.is_async() {
-            // Emit as warning, not hard error — existing codebase has many
-            // non-async functions that spawn async work.
-            tracing::debug!(
-                "E504: function `{}` contains async operations but is not declared `async`",
-                func.name.name
-            );
+        if let Some(properties) = &inferred_properties {
+            self.property_inferrer.context_mut().register_function(func.name.name.clone(), properties.clone());
+        } else {
+            self.property_inferrer.context_mut().forget_function(&func.name.name);
         }
-
-        // Register inferred properties with the property inferrer context
-        // so that callers of this function can look up its properties.
-        self.property_inferrer
-            .context_mut()
-            .register_function(func.name.name.clone(), inferred_properties.clone());
 
         // Register function return type in type registry
         self.type_registry
@@ -13606,22 +13501,17 @@ impl TypeChecker {
         // requires a context imposed no obligation on its caller — the
         // program compiled and panicked at runtime with "Context Log not
         // provided" (T0935).
-        let final_func_type = match context_requirement.clone() {
-            Some(req) => Type::Function {
-                params: param_types.clone(),
-                return_type: Box::new(final_return_for_sig),
-                contexts: Some(crate::di::requirement::ContextExpr::Concrete(req)),
-                type_params: List::new(),
-                properties: Some(inferred_properties),
-            },
-            None => Type::function_with_properties(
-                param_types.clone(),
-                final_return_for_sig,
-                inferred_properties,
-            ),
+        let final_func_type = Type::Function {
+            property_requirement: inferred_bound,
+            params: param_types.clone(),
+            return_type: Box::new(final_return_for_sig),
+            contexts: context_requirement.clone().map(crate::di::requirement::ContextExpr::Concrete),
+            type_params: List::new(),
+            properties: inferred_properties,
         };
         // CRITICAL: Create TypeScheme explicitly with tracked type parameters (same as initial).
         // We cannot use `generalize()` because phantom type parameters would be lost.
+        let final_func_type = final_func_type;
         let final_scheme = if func_type_param_vars.is_empty() {
             TypeScheme::mono(final_func_type.clone())
         } else if func_implicit_type_vars.is_empty() {
@@ -16007,6 +15897,7 @@ impl TypeChecker {
                 }
             }
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -16019,6 +15910,7 @@ impl TypeChecker {
                     .collect();
                 let subst_ret = Box::new(self.substitute_type_vars_impl(return_type, subst, d));
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: subst_params,
                     return_type: subst_ret,
                     contexts: contexts.clone(),
@@ -16341,6 +16233,7 @@ impl TypeChecker {
             },
             // Function type: substitute in params and return type
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -16352,6 +16245,7 @@ impl TypeChecker {
                     .map(|p| self.substitute_type_params_impl(p, param_subst, d))
                     .collect();
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: substituted_params,
                     return_type: Box::new(self.substitute_type_params_impl(
                         return_type,
@@ -18324,12 +18218,14 @@ impl TypeChecker {
                     .collect(),
             ),
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
                 contexts,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| Self::substitute_named_params_in_type(p, subst))
@@ -18437,12 +18333,14 @@ impl TypeChecker {
                     .collect(),
             ),
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
                 contexts,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| Self::substitute_typevars_in_type(p, subst))
@@ -20234,10 +20132,12 @@ impl TypeChecker {
                                     })
                                 })
                         });
-                    scheme_opt.and_then(|scheme| {
+                    scheme_opt.map(|scheme| -> Result<Option<_>> {
                         let impl_vc = scheme.impl_var_count;
-                        let (ty, fresh_vars, type_bounds) =
-                            scheme.instantiate_with_type_bounds();
+                        let instance = scheme.try_instantiate().map_err(|message| TypeError::UniverseBinding { message, span })?;
+                        let ty = instance.ty;
+                        let fresh_vars = instance.fresh_vars;
+                        let type_bounds = instance.type_bounds;
                         if crate::ctor_trace_enabled() {
                             eprintln!(
                                 "[ctor-trace] early-inherent HIT {}.{} impl_vc={} inst={:?}",
@@ -20306,11 +20206,11 @@ impl TypeChecker {
                                 args.len(),
                                 span,
                             ));
-                            return None;
+                            return Ok(None);
                         }
                         let explicit_vars = scheme.fresh_explicit_method_vars(&fresh_vars);
-                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind))
-                    })
+                        Ok(Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind, instance.impl_self_type, instance.protocol_bounds, instance.where_clauses)))
+                    }).transpose()?.flatten()
                 };
                 if crate::ctor_trace_enabled() && early_method_info.is_none() {
                     eprintln!(
@@ -20319,9 +20219,10 @@ impl TypeChecker {
                     );
                 }
 
-                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind)) =
+                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind, impl_self_type, protocol_bounds, where_clauses)) =
                     early_method_info
                 {
+                    self.type_registry.register_call_target(span, method_ty.clone());
                     // #91/#95 — STATIC-DISPATCH ONLY.  Stamp the
                     // resolved-call-target side-table only when the
                     // receiver is a type-name path
@@ -20427,6 +20328,9 @@ impl TypeChecker {
                                 receiver_type_args.len(),
                             );
                             let mut combined_subst = crate::ty::Substitution::new();
+                            if let Some(pattern) = &impl_self_type {
+                                combined_subst = self.unifier.unify(pattern, &recv_ty, span)?;
+                            } else {
                             for (type_var, type_arg) in ordered_fresh_vars
                                 .iter()
                                 .take(bind_limit)
@@ -20438,6 +20342,7 @@ impl TypeChecker {
                                     combined_subst = combined_subst.compose(&subst)
                                 .map_err(|message| TypeError::UniverseBinding { message, span })?;
                                 }
+                            }
                             }
                             combined_subst = combined_subst.compose(&self.bind_explicit_method_arguments(
                                 explicit_vars.as_ref(), type_args, method, span,
@@ -20488,6 +20393,10 @@ impl TypeChecker {
                                     }
                                     self.check_expr(arg, &subst_param_ty)?;
                                 }
+
+                                self.enforce_call_type_bounds(&type_bounds, span)?;
+                                self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
+                                self.enforce_call_where_clauses(&where_clauses, span)?;
 
                                 // Apply substitution and unifier to get concrete return type
                                 let subst_return_type = return_type.apply_subst(&combined_subst);
@@ -21565,150 +21474,10 @@ impl TypeChecker {
                             // Look up the method in the protocol definition AND its superprotocols.
                             // When Hashable extends Eq + Hash, calling hash() on T: Hashable
                             // must find hash() in the Hash superprotocol.
-                            if let Some((_, declaration)) = self.find_method_in_protocol_hierarchy(
-                                &protocol_key, &method_name_text,
-                            ) {
+                            if let Some(declaration) = self.applied_protocol_method_in_hierarchy(
+                                &protocol_key, &bound.args, &recv_ty, &method_name_text, span,
+                            )? {
                                 let receiver_kind = declaration.receiver_kind();
-                                let method_ty = declaration.ty;
-                                // Substitute protocol type parameters with bound args.
-                                // E.g., for E: Module<Text, DynTensor<Float>>, substitute In->Text, Out->DynTensor<Float>
-                                // so that forward's fn(In) -> Out becomes fn(Text) -> DynTensor<Float>.
-                                //
-
-                                // CRITICAL: The stored method type uses TypeVar IDs (e.g., Var(tvar_In)),
-                                // NOT Named types (e.g., Named("In")). The TypeVars appear in the method
-                                // signature in the same order as the protocol's type params (In, Out, ...).
-                                // We collect free TypeVars in order and substitute using "T{id}" keys.
-                                // Collect free TypeVars from method_ty in order of appearance.
-                                // These correspond to the protocol's type params in declaration order.
-                                fn collect_free_vars_ordered(ty: &Type, vars: &mut Vec<TypeVar>) {
-                                    match ty {
-                                        Type::Var(tv) => {
-                                            if !vars.iter().any(|v| v == tv) {
-                                                vars.push(*tv);
-                                            }
-                                        }
-                                        Type::Function {
-                                            params,
-                                            return_type,
-                                            ..
-                                        } => {
-                                            for p in params {
-                                                collect_free_vars_ordered(p, vars);
-                                            }
-                                            collect_free_vars_ordered(return_type, vars);
-                                        }
-                                        Type::Named { args, .. } | Type::Generic { args, .. } => {
-                                            for a in args {
-                                                collect_free_vars_ordered(a, vars);
-                                            }
-                                        }
-                                        Type::Tuple(tys) => {
-                                            for t in tys {
-                                                collect_free_vars_ordered(t, vars);
-                                            }
-                                        }
-                                        Type::Reference { inner, .. }
-                                        | Type::CheckedReference { inner, .. }
-                                        | Type::UnsafeReference { inner, .. } => {
-                                            collect_free_vars_ordered(inner, vars);
-                                        }
-                                        Type::TypeApp { constructor, args } => {
-                                            collect_free_vars_ordered(constructor, vars);
-                                            for a in args {
-                                                collect_free_vars_ordered(a, vars);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-
-                                let method_ty = if !bound.args.is_empty() {
-                                    // Substitute protocol type parameters with the bound's
-                                    // concrete arguments. E.g., for E: Module<Text, DynTensor<Float>>,
-                                    // the protocol's In/Out slots become Text/DynTensor<Float>.
-
-                                    let mut free_vars: Vec<TypeVar> = Vec::new();
-                                    collect_free_vars_ordered(&method_ty, &mut free_vars);
-
-                                    let mut param_subst: indexmap::IndexMap<Text, Type> =
-                                        indexmap::IndexMap::new();
-
-                                    // Map by TypeVar ID (T{id} key) — primary path for stored method types
-                                    for (tv, arg_ty) in free_vars.iter().zip(bound.args.iter()) {
-                                        let var_key: Text = format!("T{}", tv.id()).into();
-                                        param_subst.insert(var_key, arg_ty.clone());
-                                    }
-
-                                    // Also map by protocol type param name — fallback for Named-type methods
-                                    {
-                                        let pc = self.protocol_checker.read();
-                                        if let Maybe::Some(proto) =
-                                            pc.get_protocol(&Text::from(protocol_name))
-                                        {
-                                            for (param, arg_ty) in
-                                                proto.type_params.iter().zip(bound.args.iter())
-                                            {
-                                                param_subst
-                                                    .insert(param.name.clone(), arg_ty.clone());
-                                            }
-                                        }
-                                    }
-
-                                    if !param_subst.is_empty() {
-                                        self.substitute_type_params(&method_ty, &param_subst)
-                                    } else {
-                                        method_ty
-                                    }
-                                } else {
-                                    // bound.args is empty — this is the HKT bound case:
-                                    // `fn fmap<F<_>: Functor, ...>`. Here F has the implicit
-                                    // role of Functor's HKT type parameter, so we substitute
-                                    // the protocol's first type param (the HKT slot) with
-                                    // Var(var) — the caller's type variable.
-                                    //
-
-                                    // Without this, method return types like `F<B>` retain the
-                                    // protocol's internal TypeVar for F and fail to unify with
-                                    // the caller's `F<_>` at the call site; the compiler then
-                                    // falls through to blanket-impl lookup and picks the wrong
-                                    // implementation (e.g., FutureExt::map → MapFuture<_, F<_>>).
-                                    let pc = self.protocol_checker.read();
-                                    let proto_opt = pc.get_protocol(&Text::from(protocol_name));
-                                    if let Maybe::Some(proto) = proto_opt {
-                                        if !proto.type_params.is_empty() {
-                                            let mut free_vars: Vec<TypeVar> = Vec::new();
-                                            collect_free_vars_ordered(&method_ty, &mut free_vars);
-
-                                            let mut param_subst: indexmap::IndexMap<Text, Type> =
-                                                indexmap::IndexMap::new();
-
-                                            // Map the protocol's first type param (HKT slot) to the
-                                            // caller's type variable, both by its fresh-TypeVar id
-                                            // (primary: stored method types reference free Vars) and by
-                                            // the parameter's human-readable name (fallback for
-                                            // Named/Generic references inside the signature).
-                                            if let Some(hkt_slot_tv) = free_vars.first() {
-                                                let var_key: Text =
-                                                    format!("T{}", hkt_slot_tv.id()).into();
-                                                param_subst.insert(var_key, Type::Var(*var));
-                                            }
-                                            let first_param_name =
-                                                proto.type_params[0].name.clone();
-                                            param_subst.insert(first_param_name, Type::Var(*var));
-                                            drop(pc);
-
-                                            self.substitute_type_params(&method_ty, &param_subst)
-                                        } else {
-                                            drop(pc);
-                                            method_ty
-                                        }
-                                    } else {
-                                        drop(pc);
-                                        method_ty
-                                    }
-                                };
-
                                 // Found the method in a bounding protocol!
                                 // Defer the actual protocol check until the type is resolved
                                 self.defer_constraint(DeferredConstraint::ProtocolBound {
@@ -21717,15 +21486,10 @@ impl TypeChecker {
                                     span,
                                 });
 
-                                // Return early with the method type instantiated for this receiver
-                                let instantiated_method_ty =
-                                    self.instantiate_method_for_receiver(&method_ty, &recv_ty);
-                                // Instantiate method's own type parameters with explicit type args
-                                let instantiated_method_ty = self.instantiate_method_type_params(
-                                    instantiated_method_ty,
-                                    type_args,
-                                    span,
+                                let instantiated_method_ty = self.instantiate_applied_protocol_method(
+                                    &declaration, &recv_ty, type_args, span,
                                 )?;
+                                self.type_registry.register_call_target(span, instantiated_method_ty.clone());
 
                                 // Check arguments against parameter types
                                 if let Type::Function {
@@ -21807,7 +21571,7 @@ impl TypeChecker {
         // Step 3: Search for method in all protocols
         // Track which protocols we've already seen to avoid duplicates from generic/blanket impls
         let mut seen_protocols: verum_common::Set<Text> = verum_common::Set::new();
-        let mut candidates: List<(Path, Type)> = List::new();
+        let mut candidates: List<(Path, Type, Option<crate::context::InstantiatedScheme>)> = List::new();
         // PARAMETERIZED-PROTOCOL OVERLOADS (T0585 ERROR-14): bookkeeping
         // alongside the candidate walk.  `own_method_ordinal` counts impls
         // that declare the method in their OWN block, in registration
@@ -21818,7 +21582,7 @@ impl TypeChecker {
         // snapshots (ordinal, substituted fn type) for the
         // defer-by-return step at the ambiguity gate below.
         let mut own_method_ordinal: usize = 0;
-        let mut overload_candidates: Vec<(usize, Type)> = Vec::new();
+        let mut overload_candidates: Vec<(usize, Type, Option<crate::context::InstantiatedScheme>)> = Vec::new();
 
         // Scope the read guard tightly to avoid borrow conflicts later
         {
@@ -21867,7 +21631,15 @@ impl TypeChecker {
                         let key: Text = recv_name.clone();
                         if !seen_protocols.contains(&key) {
                             seen_protocols.insert(key);
-                            candidates.push((proto_path, substituted));
+                            let owner_arguments = match &resolved_ty {
+                                Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(),
+                                _ => &[],
+                            };
+                            let instance = self.prepare_protocol_method_candidate(
+                                recv_name, owner_arguments, &resolved_ty, &method_name, span,
+                            )?;
+                            let signature = instance.as_ref().map_or(substituted, |i| i.ty.clone());
+                            candidates.push((proto_path, signature, instance));
                         }
                     }
                 }
@@ -21918,7 +21690,11 @@ impl TypeChecker {
                         sub_name,
                         method.span,
                     ));
-                    candidates.push((sub_path, substituted));
+                    let instance = self.prepare_protocol_method_candidate(
+                        &self.path_to_string(&sub_path), &[], &resolved_ty, &method_name, span,
+                    )?;
+                    let signature = instance.as_ref().map_or(substituted, |i| i.ty.clone());
+                    candidates.push((sub_path, signature, instance));
                 }
             }
 
@@ -22020,7 +21796,11 @@ impl TypeChecker {
                             sub_name,
                             method.span,
                         ));
-                        candidates.push((sub_path, substituted));
+                        let instance = self.prepare_protocol_method_candidate(
+                            &self.path_to_string(&sub_path), &[], &resolved_ty, &method_name, span,
+                        )?;
+                        let signature = instance.as_ref().map_or(substituted, |i| i.ty.clone());
+                        candidates.push((sub_path, signature, instance));
                     }
                 }
             }
@@ -22217,11 +21997,18 @@ impl TypeChecker {
                             // substituted_method_ty
                             // );
                         }
+                        let owner_arguments: List<_> = impl_.protocol_args.iter()
+                            .map(|argument| self.substitute_type_params(argument, &param_subst))
+                            .collect();
+                        let instance = self.prepare_protocol_method_candidate(
+                            &self.path_to_string(&impl_.protocol), &owner_arguments,
+                            &resolved_ty, &method_name, span,
+                        )?;
+                        let signature = instance.as_ref().map_or(substituted_method_ty, |i| i.ty.clone());
                         if own_method_ordinal_here > 0 {
-                            overload_candidates
-                                .push((own_method_ordinal_here, substituted_method_ty.clone()));
+                            overload_candidates.push((own_method_ordinal_here, signature.clone(), instance.clone()));
                         }
-                        candidates.push((source_protocol, substituted_method_ty));
+                        candidates.push((source_protocol, signature, instance));
                     }
                 }
             }
@@ -22249,9 +22036,9 @@ impl TypeChecker {
         // This must happen BEFORE superprotocol filtering, because superprotocol filtering
         // would remove the concrete Iterator candidate in favor of the abstract DoubleEndedIterator one.
         if candidates.len() > 1 {
-            let concrete_candidates: List<(Path, Type)> = candidates
+            let concrete_candidates: List<(Path, Type, Option<crate::context::InstantiatedScheme>)> = candidates
                 .iter()
-                .filter(|(_, ty)| !self.contains_unresolved_projection(ty))
+                .filter(|(_, ty, _)| !self.contains_unresolved_projection(ty))
                 .cloned()
                 .collect();
 
@@ -22274,7 +22061,7 @@ impl TypeChecker {
             // Get protocol names for all candidates
             let candidate_names: List<verum_common::Text> = candidates
                 .iter()
-                .filter_map(|(path, _)| path.as_ident().map(|id| id.name.clone()))
+                .filter_map(|(path, _, _)| path.as_ident().map(|id| id.name.clone()))
                 .collect();
 
             // Check which protocols are superprotocols of others
@@ -22320,7 +22107,7 @@ impl TypeChecker {
 
             // Filter out superprotocol candidates
             if !is_superprotocol.is_empty() {
-                candidates.retain(|(path, _)| {
+                candidates.retain(|(path, _, _)| {
                     path.as_ident()
                         .map(|id| !is_superprotocol.contains(&id.name))
                         .unwrap_or(true)
@@ -22333,7 +22120,7 @@ impl TypeChecker {
             if candidates.len() > 1 && !method_origin.is_empty() {
                 let candidate_origins: verum_common::Set<verum_common::Text> = candidates
                     .iter()
-                    .filter_map(|(path, _)| {
+                    .filter_map(|(path, _, _)| {
                         path.as_ident()
                             .and_then(|id| method_origin.get(&id.name).cloned())
                     })
@@ -22349,13 +22136,13 @@ impl TypeChecker {
                 // and the return types differ; the defer-by-return gate
                 // below owns that shape.
                 let overload_shape = overload_candidates.len() == candidates.len()
-                    && candidates.iter().all(|(_, t)| {
+                    && candidates.iter().all(|(_, t, _)| {
                         matches!(t, Type::Function { .. })
                     })
                     && {
                         let rets: Vec<&Type> = candidates
                             .iter()
-                            .filter_map(|(_, t)| match t {
+                            .filter_map(|(_, t, _)| match t {
                                 Type::Function { return_type, .. } => {
                                     Some(return_type.as_ref())
                                 }
@@ -22388,7 +22175,7 @@ impl TypeChecker {
             // still-free var is judged honest-E404 by the binding judge.
             let fn_shapes: Option<Vec<(&List<Type>, &Type)>> = candidates
                 .iter()
-                .map(|(_, t)| {
+                .map(|(_, t, _)| {
                     if let Type::Function {
                         params,
                         return_type,
@@ -22428,16 +22215,21 @@ impl TypeChecker {
                             let resolved_param = self.unifier.apply(param_ty);
                             self.check_expr(arg, &resolved_param)?;
                         }
+                        for instance in overload_candidates.iter().filter_map(|(_, _, i)| i.as_ref()) {
+                            self.bind_explicit_method_arguments(
+                                instance.explicit_method_vars.as_ref(), type_args, method, span,
+                            )?;
+                        }
                         let alpha = crate::ty::TypeVar::fresh();
-                        let rets: Vec<(usize, Type)> = overload_candidates
+                        let rets: Vec<(usize, Type, Option<crate::context::InstantiatedScheme>)> = overload_candidates
                             .iter()
-                            .map(|(ord, t)| {
+                            .map(|(ord, t, instance)| {
                                 let ret = if let Type::Function { return_type, .. } = t {
                                     (**return_type).clone()
                                 } else {
                                     Type::Unknown
                                 };
-                                (*ord, ret)
+                                (*ord, ret, instance.clone())
                             })
                             .collect();
                         self.pending_method_overloads.push((
@@ -22466,9 +22258,9 @@ impl TypeChecker {
         // We should prefer the concrete version from the direct implementation.
         let candidates = {
             // Check if any candidate has a concrete signature (no ::Item projections)
-            let concrete_candidates: List<(Path, Type)> = candidates
+            let concrete_candidates: List<(Path, Type, Option<crate::context::InstantiatedScheme>)> = candidates
                 .iter()
-                .filter(|(_, ty)| !self.contains_unresolved_projection(ty))
+                .filter(|(_, ty, _)| !self.contains_unresolved_projection(ty))
                 .cloned()
                 .collect();
 
@@ -22488,7 +22280,14 @@ impl TypeChecker {
         };
 
         // Step 5: Extract the unique method signature
-        let (protocol_path, method_ty) = &candidates[0];
+        let (protocol_path, method_ty, instance) = &candidates[0];
+        self.type_registry.register_call_target(span, method_ty.clone());
+        if let Some(instance) = instance {
+            self.bind_explicit_method_arguments(
+                instance.explicit_method_vars.as_ref(), type_args, method, span,
+            )?;
+            self.retain_value_instance_obligations(instance, span)?;
+        }
         if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] proto-search WINNER {}::{} ty={}",
@@ -23257,12 +23056,8 @@ impl TypeChecker {
                                     // Protocol methods use Self as a placeholder for the implementing type.
                                     // For bounded type params like T: Default, calling T.default()
                                     // should return T, not Self.
-                                    let method_ty = self
-                                        .instantiate_method_for_receiver(&method.ty, &recv_ty);
-                                    // Instantiate method's own type parameters with explicit type args
-                                    let method_ty = self.instantiate_method_type_params(
-                                        method_ty, type_args, span,
-                                    )?;
+                                    let applied = self.applied_protocol_method(method, &bound.args, recv_ty)?;
+                                    let method_ty = self.instantiate_applied_protocol_method(&applied, recv_ty, type_args, span)?;
 
                                     // Type check arguments against method signature
                                     if let Type::Function {
@@ -23308,7 +23103,7 @@ impl TypeChecker {
         // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
         if let Type::TypeApp {
             constructor,
-            args: type_args,
+            ..
         } = &recv_ty
         {
             // Extract the constructor name - it could be a TypeConstructor, Named type, or Var (HKT param)
@@ -23389,30 +23184,13 @@ impl TypeChecker {
                             if protocol_exists {
                                 // Check if this protocol or its super_protocols have the method
                                 // This enables protocol inheritance: Monad extends Applicative extends Functor
-                                let found_method = self.find_method_in_protocol_hierarchy(
-                                    &protocol_name,
-                                    &method_name,
-                                );
-
-                                if let Some((_, protocol_method)) = found_method {
-                                    // Found the method in a bounded protocol!
-                                    // CRITICAL: Instantiate fresh type variables for each call
-                                    // Without this, multiple calls like fa.map(f).map(g) would
-                                    // share the same type variables and fail unification
-                                    let method_ty = {
-                                        use crate::ty::Substitution;
-                                        let free_vars = protocol_method.ty.free_vars();
-                                        if free_vars.is_empty() {
-                                            protocol_method.ty.clone()
-                                        } else {
-                                            let mut subst = Substitution::new();
-                                            for var in free_vars {
-                                                let fresh = TypeVar::fresh();
-                                                subst.insert(var, Type::Var(fresh));
-                                            }
-                                            protocol_method.ty.apply_subst(&subst)
-                                        }
-                                    };
+                                let found_method = self.applied_protocol_method_in_hierarchy(
+                                    &protocol_name, &bound.args, recv_ty, &method_name, span,
+                                )?;
+                                if let Some(protocol_method) = found_method {
+                                    let method_ty = self.instantiate_applied_protocol_method(
+                                        &protocol_method, recv_ty, type_args, span,
+                                    )?;
 
                                     // Type check arguments against method signature
                                     if let Type::Function {
@@ -24061,7 +23839,7 @@ impl TypeChecker {
                 }
             }
         };
-        if let Type::Named { path, .. } = &protocol_lookup_ty {
+        if let Type::Named { path, args: owner_arguments } = &protocol_lookup_ty {
             {
                 let protocol_name = self.path_to_string(path);
                 // Check if this is a registered protocol
@@ -24075,13 +23853,8 @@ impl TypeChecker {
                     if let Some(proto_method) = protocol.methods.get(&method_name_text) {
                         // Found the method in the protocol definition!
                         // Substitute Self with the protocol type for method resolution
-                        let method_ty = self.instantiate_method_for_receiver(
-                            &proto_method.ty,
-                            &protocol_lookup_ty,
-                        );
-                        // Instantiate method's own type parameters with explicit type args
-                        let method_ty =
-                            self.instantiate_method_type_params(method_ty, type_args, span)?;
+                        let applied = self.applied_protocol_method(proto_method, owner_arguments, &protocol_lookup_ty)?;
+                        let method_ty = self.instantiate_applied_protocol_method(&applied, &protocol_lookup_ty, type_args, span)?;
 
                         if let Type::Function {
                             params,
@@ -24132,10 +23905,9 @@ impl TypeChecker {
                         self.protocol_checker.read().get_protocol(&pname).cloned();
                     if let Maybe::Some(protocol) = protocol_opt {
                         if let Some(proto_method) = protocol.methods.get(&method_name_text) {
-                            let method_ty =
-                                self.instantiate_method_for_receiver(&proto_method.ty, inner);
-                            let method_ty = self
-                                .instantiate_method_type_params(method_ty, type_args, span)?;
+                            let owner_arguments = match inner { Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(), _ => &[] };
+                        let applied = self.applied_protocol_method(&proto_method, owner_arguments, inner)?;
+                        let method_ty = self.instantiate_applied_protocol_method(&applied, inner, type_args, span)?;
                             if let Type::Function {
                                 params,
                                 return_type,
@@ -24189,10 +23961,9 @@ impl TypeChecker {
                         }
                     };
                     if let Some(proto_method) = method_opt {
-                        let method_ty =
-                            self.instantiate_method_for_receiver(&proto_method.ty, inner);
-                        let method_ty =
-                            self.instantiate_method_type_params(method_ty, type_args, span)?;
+                        let owner_arguments = match inner { Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(), _ => &[] };
+                        let applied = self.applied_protocol_method(&proto_method, owner_arguments, inner)?;
+                        let method_ty = self.instantiate_applied_protocol_method(&applied, inner, type_args, span)?;
                         if let Type::Function {
                             params,
                             return_type,
@@ -26878,16 +26649,8 @@ bake to have this verified.",
                                                 if proto_method.name.as_str() == method_name {
                                                     // Found the method in a bounded protocol
                                                     // Substitute Self with the type parameter's type variable
-                                                    let method_ty = self
-                                                        .instantiate_method_for_receiver(
-                                                            &proto_method.ty,
-                                                            &ty,
-                                                        );
-                                                    // Instantiate method's own type parameters with explicit type args
-                                                    let method_ty = self
-                                                        .instantiate_method_type_params(
-                                                            method_ty, type_args, span,
-                                                        )?;
+                                                    let applied = self.applied_protocol_method(proto_method, &bound.args, &ty)?;
+                                                    let method_ty = self.instantiate_applied_protocol_method(&applied, &ty, type_args, span)?;
 
                                                     if let Type::Function {
                                                         params,

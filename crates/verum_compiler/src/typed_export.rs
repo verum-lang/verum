@@ -45,7 +45,7 @@ pub const TYPED_IR_SCHEMA: &str = "verum-typed-ir";
 /// Schema version, semver, versioned INDEPENDENTLY of the compiler.
 /// Bump the minor for additive fields, the major for anything a
 /// v1 consumer could misread.
-pub const TYPED_IR_VERSION: &str = "1.0.0";
+pub const TYPED_IR_VERSION: &str = "2.0.0";
 
 // =============================================================================
 // Schema types (the wire format)
@@ -89,6 +89,8 @@ pub enum TypeIr {
     Named { name: String, args: Vec<TypeIr> },
     /// `fn(params) -> ret`.
     Function {
+        /// Whether the eager callable may yield. The result remains its output.
+        is_async: bool,
         params: Vec<TypeIr>,
         ret: Box<TypeIr>,
     },
@@ -556,10 +558,12 @@ fn convert_type(ty: &AstType) -> TypeIr {
                 .collect(),
         },
         TypeKind::Function {
+            is_async,
             params,
             return_type,
             ..
         } => TypeIr::Function {
+            is_async: *is_async,
             params: params.iter().map(convert_type).collect(),
             ret: Box::new(convert_type(return_type)),
         },

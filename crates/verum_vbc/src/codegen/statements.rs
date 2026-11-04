@@ -192,6 +192,7 @@ impl VbcCodegen {
                                     return_type,
                                     None,
                                     false,
+                                    func.is_async,
                                 )?
                                 {
                                     let fn_name = func.name.name.to_string();

@@ -175,6 +175,7 @@ fn test_subtyping_functions() {
 
     // fn(Int) -> Bool
     let fn1 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: {
             let mut params = List::new();
             params.push(Type::Int);
@@ -333,6 +334,7 @@ fn test_substitution_in_function() {
 
     // fn(T) -> T
     let fn_ty = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: {
             let mut params = List::new();
             params.push(Type::Var(var));
@@ -538,6 +540,7 @@ fn test_deeply_nested_function_types() {
 
     for _ in 0..20 {
         ty = Type::Function {
+            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
             params: List::new(),
             return_type: Box::new(ty),
             contexts: None,

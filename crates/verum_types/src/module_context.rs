@@ -886,7 +886,7 @@ impl ModuleTypeInference {
                 .collect();
 
             // Create function type
-            let func_type = Type::function(param_types, Type::Var(return_type_var));
+            let func_type = Type::function_with_requirement(param_types, Type::Var(return_type_var), crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
 
             TypeScheme::mono(func_type)
         } else {
@@ -898,7 +898,7 @@ impl ModuleTypeInference {
                 .map(|_| Type::Var(TypeVar::fresh()))
                 .collect();
             let return_type_var = TypeVar::fresh();
-            let func_type = Type::function(param_types, Type::Var(return_type_var));
+            let func_type = Type::function_with_requirement(param_types, Type::Var(return_type_var), crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
 
             TypeScheme::mono(func_type)
         };
@@ -1614,7 +1614,7 @@ impl ModuleTypeInference {
         };
 
         // Build function type
-        let func_type = Type::function(param_types, return_type);
+        let func_type = Type::function_with_requirement(param_types, return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
 
         // Create a type scheme from the inferred type
         let scheme = TypeScheme::mono(func_type);
@@ -1844,6 +1844,7 @@ fn convert_ast_type_to_internal(ast_ty: &verum_ast::ty::Type) -> Type {
 
         // Function types: (A, B) -> C
         TypeKind::Function {
+            is_async,
             params,
             return_type,
             ..
@@ -1851,13 +1852,7 @@ fn convert_ast_type_to_internal(ast_ty: &verum_ast::ty::Type) -> Type {
             let param_types: List<Type> = params.iter().map(convert_ast_type_to_internal).collect();
             let ret_type = convert_ast_type_to_internal(return_type);
 
-            Type::Function {
-                params: param_types,
-                return_type: Box::new(ret_type),
-                contexts: None,
-                type_params: List::new(),
-                properties: None,
-            }
+            Type::function_with_async(param_types, ret_type, *is_async)
         }
 
         // Tuple types: (A, B, C)

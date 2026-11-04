@@ -455,6 +455,7 @@ fn test_default_method_ne_from_eq() {
             methods.insert(
                 Text::from("eq"),
                 ProtocolMethod {
+                    scope: None,
                     name: Text::from("eq"),
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false,
@@ -469,6 +470,7 @@ fn test_default_method_ne_from_eq() {
             methods.insert(
                 Text::from("ne"),
                 ProtocolMethod {
+                    scope: None,
                     name: Text::from("ne"),
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: true, // Default implementation
@@ -546,6 +548,7 @@ fn test_explicit_method_overrides_default() {
             methods.insert(
                 Text::from("eq"),
                 ProtocolMethod {
+                    scope: None,
                     name: Text::from("eq"),
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false,
@@ -560,6 +563,7 @@ fn test_explicit_method_overrides_default() {
             methods.insert(
                 Text::from("ne"),
                 ProtocolMethod {
+                    scope: None,
                     name: Text::from("ne"),
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: true, // Default implementation
@@ -641,6 +645,7 @@ fn test_missing_required_method_error() {
             methods.insert(
                 Text::from("eq"),
                 ProtocolMethod {
+                    scope: None,
                     name: Text::from("eq"),
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false, // Required method
@@ -1345,6 +1350,7 @@ fn test_error_message_method_not_found() {
             methods.insert(
                 Text::from("eq"),
                 ProtocolMethod {
+                    scope: None,
                     name: Text::from("eq"),
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),
                     has_default: false,

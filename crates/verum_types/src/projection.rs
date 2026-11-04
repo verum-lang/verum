@@ -547,6 +547,7 @@ impl<'a> ProjectionResolver<'a> {
 
             // Recursively normalize compound types
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -561,6 +562,7 @@ impl<'a> ProjectionResolver<'a> {
                 let normalized_return = self.normalize(return_type)?;
 
                 Ok(Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: normalized_params,
                     return_type: Box::new(normalized_return),
                     contexts: contexts.clone(),

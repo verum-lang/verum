@@ -203,6 +203,7 @@ pub fn collect_type_vars(ty: &InternalType) -> Set<crate::ty::TypeVar> {
         }
 
         InternalType::Function {
+            properties,
             params,
             return_type,
             ..
@@ -455,6 +456,7 @@ pub fn convert_internal_to_ast(ty: &InternalType) -> Type {
         InternalType::Function {
             params,
             return_type,
+            property_requirement,
             ..
         } => {
             let param_types: verum_common::List<Type> =
@@ -462,6 +464,7 @@ pub fn convert_internal_to_ast(ty: &InternalType) -> Type {
             let ret_type = convert_internal_to_ast(return_type);
             Type {
                 kind: TypeKind::Function {
+                    is_async: property_requirement.may_be_async(),
                     params: param_types,
                     return_type: verum_common::Heap::new(ret_type),
                     calling_convention: verum_common::Maybe::None,

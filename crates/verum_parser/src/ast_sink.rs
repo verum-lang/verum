@@ -3126,59 +3126,20 @@ impl AstSink {
     /// ```
     fn convert_function_type(&mut self, node: &SyntaxNode) -> Option<Type> {
         let span = self.range_to_span(node.text_range());
-
-        let mut param_types = List::new();
-        let mut return_type = None;
-        let mut in_params = false;
-        let mut after_arrow = false;
-
-        for child in node.children() {
-            match child {
-                SyntaxElement::Token(token) => match token.kind() {
-                    SyntaxKind::L_PAREN => in_params = true,
-                    SyntaxKind::R_PAREN => in_params = false,
-                    SyntaxKind::ARROW => after_arrow = true,
-                    SyntaxKind::FN_KW => {} // Skip fn keyword
-                    SyntaxKind::COMMA => {} // Skip comma separators
-                    _ => {}
-                },
-                SyntaxElement::Node(child_node) => {
-                    if child_node.kind() == SyntaxKind::PARAM_LIST {
-                        // Handle PARAM_LIST node - extract types from parameters
-                        for param in child_node.child_nodes() {
-                            // Look for type nodes within parameters
-                            for param_child in param.child_nodes() {
-                                if let Some(ty) = self.convert_type(&param_child) {
-                                    param_types.push(ty);
-                                    break; // Only take first type per param
-                                }
-                            }
-                        }
-                    } else if after_arrow && return_type.is_none() {
-                        // Return type after ->
-                        return_type = self.convert_type(&child_node);
-                    } else if in_params {
-                        // Parameter types directly in the parentheses
-                        if let Some(ty) = self.convert_type(&child_node) {
-                            param_types.push(ty);
-                        }
-                    }
-                }
+        let source = &self.source[span.start as usize..span.end as usize];
+        let tokens = match verum_lexer::Lexer::new_at(source, self.file_id, span.start)
+            .collect::<Result<Vec<_>, _>>() {
+            Ok(tokens) => tokens,
+            Err(error) => {
+                self.error_at(node.text_range(), &error.to_string());
+                return None;
             }
+        };
+        let mut parser = crate::RecursiveParser::new(&tokens, self.file_id);
+        match parser.parse_type() {
+            Ok(ty) => Some(ty),
+            Err(error) => { self.errors.push(error); None }
         }
-
-        // Default to unit return type if not specified
-        let ret_type = return_type.unwrap_or_else(|| Type::unit(span));
-
-        Some(Type::new(
-            TypeKind::Function {
-                params: param_types,
-                return_type: Heap::new(ret_type),
-                calling_convention: Maybe::None,
-                contexts: ContextList::empty(),
-            },
-            span,
-        ))
     }
 
     /// Convert a REFINED_TYPE node to Type.

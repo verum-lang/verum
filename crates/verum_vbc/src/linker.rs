@@ -832,6 +832,7 @@ impl VbcLinker {
                 }
             }
             TypeRef::Function {
+                is_async,
                 params,
                 return_type,
                 contexts,
@@ -846,12 +847,14 @@ impl VbcLinker {
                     out_ctx.push(remap.map_context(*c)?);
                 }
                 TypeRef::Function {
+                    is_async: *is_async,
                     params: out_params,
                     return_type: out_ret,
                     contexts: out_ctx,
                 }
             }
             TypeRef::Rank2Function {
+                is_async,
                 type_param_count,
                 params,
                 return_type,
@@ -867,6 +870,7 @@ impl VbcLinker {
                     out_ctx.push(remap.map_context(*c)?);
                 }
                 TypeRef::Rank2Function {
+                    is_async: *is_async,
                     type_param_count: *type_param_count,
                     params: out_params,
                     return_type: out_ret,

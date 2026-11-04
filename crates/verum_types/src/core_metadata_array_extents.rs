@@ -1,5 +1,4 @@
 //! Admission of fixed extents in textual archive type descriptors.
-use self::validate_archive_array_spelling as check;
 use super::{
     AssociatedTypeDescriptor, CoreMetadata, GenericParam, MethodSignature, ParamDescriptor,
     TypeDescriptorKind, VariantPayload,
@@ -41,7 +40,10 @@ fn check_brackets(spelling: &str) -> Result<(), Text> {
     visit_archive_extents(spelling, |_| ())
 }
 
-pub(super) fn visit_archive_extents(spelling: &str, mut observe: impl FnMut(usize)) -> Result<(), Text> {
+pub(super) fn visit_archive_extents(
+    spelling: &str,
+    mut observe: impl FnMut(usize),
+) -> Result<(), Text> {
     // Bound the stack and visit every dimension once, including those inside
     // generic arguments, function signatures and other fixed arrays.
     let mut brackets = Vec::new();
@@ -114,7 +116,10 @@ pub(super) fn visit_archive_extents(spelling: &str, mut observe: impl FnMut(usiz
     Ok(())
 }
 
-fn generics(params: &[GenericParam]) -> Result<(), Text> {
+fn generics(
+    params: &[GenericParam],
+    check: &mut dyn FnMut(&str) -> Result<(), Text>,
+) -> Result<(), Text> {
     for param in params {
         for ty in param
             .bounds
@@ -128,7 +133,11 @@ fn generics(params: &[GenericParam]) -> Result<(), Text> {
     Ok(())
 }
 
-fn signature(params: &[ParamDescriptor], result: &str) -> Result<(), Text> {
+fn signature(
+    params: &[ParamDescriptor],
+    result: &str,
+    check: &mut dyn FnMut(&str) -> Result<(), Text>,
+) -> Result<(), Text> {
     for param in params {
         check(&param.ty)?;
         check(&param.declared_ty)?;
@@ -136,14 +145,20 @@ fn signature(params: &[ParamDescriptor], result: &str) -> Result<(), Text> {
     check(result)
 }
 
-fn methods(declarations: &[MethodSignature]) -> Result<(), Text> {
+fn methods(
+    declarations: &[MethodSignature],
+    check: &mut dyn FnMut(&str) -> Result<(), Text>,
+) -> Result<(), Text> {
     for method in declarations {
-        signature(&method.params, &method.return_type)?;
+        signature(&method.params, &method.return_type, check)?;
     }
     Ok(())
 }
 
-fn associated(declarations: &[AssociatedTypeDescriptor]) -> Result<(), Text> {
+fn associated(
+    declarations: &[AssociatedTypeDescriptor],
+    check: &mut dyn FnMut(&str) -> Result<(), Text>,
+) -> Result<(), Text> {
     for decl in declarations {
         for ty in decl.bounds.iter().chain(&decl.default) {
             check(ty)?;
@@ -152,11 +167,31 @@ fn associated(declarations: &[AssociatedTypeDescriptor]) -> Result<(), Text> {
     Ok(())
 }
 
-/// Validate all descriptor type strings before a consumer can cache a scheme.
+/// Validate fixed array ABI extents and their source correspondence.
 pub fn validate_archive_array_extents(metadata: &CoreMetadata) -> Result<(), Text> {
     for decl in metadata.types.values() {
         super::source_extents::nominal(decl, metadata)?;
-        generics(&decl.generic_params)?;
+    }
+    for protocol in metadata.protocols.values() {
+        super::source_extents::protocol(protocol, metadata)?;
+    }
+    for function in metadata.functions.values() {
+        super::source_extents::function(function, metadata)?;
+    }
+    visit_archive_type_spellings(metadata, |spelling, _| {
+        validate_archive_array_spelling(spelling)
+    })
+}
+
+/// Visit the shared descriptor surface. The flag denotes an exact source
+/// declaration available to the semantic loader, not an inferred contract.
+pub(super) fn visit_archive_type_spellings(
+    metadata: &CoreMetadata,
+    mut visit: impl FnMut(&str, bool) -> Result<(), Text>,
+) -> Result<(), Text> {
+    for decl in metadata.types.values() {
+        let mut check = |spelling: &str| visit(spelling, decl.source_declaration.is_some());
+        generics(&decl.generic_params, &mut check)?;
         for ty in &decl.implements {
             check(ty)?;
         }
@@ -191,29 +226,37 @@ pub fn validate_archive_array_extents(metadata: &CoreMetadata) -> Result<(), Tex
                 for ty in super_protocols {
                     check(ty)?;
                 }
-                associated(associated_types)?;
-                methods(required_methods)?;
+                associated(associated_types, &mut check)?;
+                methods(required_methods, &mut check)?;
             }
             TypeDescriptorKind::Alias { target } => check(target)?,
             TypeDescriptorKind::Opaque => (),
         }
     }
     for protocol in metadata.protocols.values() {
-        super::source_extents::protocol(protocol, metadata)?;
-        generics(&protocol.generic_params)?;
+        let owner = protocol
+            .origin_module_path
+            .as_ref()
+            .unwrap_or(&protocol.module_path);
+        let key = verum_common::qualified_name::qualify_module_name(owner, &protocol.name);
+        let has_source = crate::TypeChecker::metadata_type_with_declaring_key(metadata, &key)
+            .is_some_and(|declaration| declaration.source_declaration.is_some());
+        let mut check = |spelling: &str| visit(spelling, has_source);
+        generics(&protocol.generic_params, &mut check)?;
         for ty in &protocol.super_protocols {
             check(ty)?;
         }
-        associated(&protocol.associated_types)?;
-        methods(&protocol.required_methods)?;
-        methods(&protocol.default_methods)?;
+        associated(&protocol.associated_types, &mut check)?;
+        methods(&protocol.required_methods, &mut check)?;
+        methods(&protocol.default_methods, &mut check)?;
     }
     for function in metadata.functions.values() {
-        super::source_extents::function(function, metadata)?;
-        generics(&function.generic_params)?;
-        signature(&function.params, &function.return_type)?;
+        let mut check = |spelling: &str| visit(spelling, function.source_signature.is_some());
+        generics(&function.generic_params, &mut check)?;
+        signature(&function.params, &function.return_type, &mut check)?;
     }
     for decl in &metadata.implementations {
+        let mut check = |spelling: &str| visit(spelling, false);
         for ty in decl
             .protocol_args
             .iter()
@@ -223,14 +266,14 @@ pub fn validate_archive_array_extents(metadata: &CoreMetadata) -> Result<(), Tex
         }
         check(&decl.protocol)?;
         check(&decl.target_type)?;
-        generics(&decl.generic_params)?;
+        generics(&decl.generic_params, &mut check)?;
     }
     for decl in metadata.statics.values() {
-        check(&decl.ty)?;
+        visit(&decl.ty, false)?;
     }
     for mono in metadata.monomorphizations.values() {
         for ty in &mono.type_args {
-            check(ty)?;
+            visit(ty, false)?;
         }
     }
     Ok(())

@@ -164,7 +164,7 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
             let args_str: Vec<String> = args.iter().map(|a| format_type_ref(module, a)).collect();
             format!("{}<{}>", base_name, args_str.join(", "))
         }
-        TypeRef::Function {
+        TypeRef::Function { is_async,
             params,
             return_type,
             ..
@@ -172,12 +172,13 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
             let params_str: Vec<String> =
                 params.iter().map(|p| format_type_ref(module, p)).collect();
             format!(
-                "fn({}) -> {}",
+                "{}fn({}) -> {}",
+                if *is_async { "async " } else { "" },
                 params_str.join(", "),
                 format_type_ref(module, return_type)
             )
         }
-        TypeRef::Rank2Function {
+        TypeRef::Rank2Function { is_async,
             type_param_count,
             params,
             return_type,
@@ -186,7 +187,8 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
             let params_str: Vec<String> =
                 params.iter().map(|p| format_type_ref(module, p)).collect();
             format!(
-                "fn<{}>({}) -> {}",
+                "{}fn<{}>({}) -> {}",
+                if *is_async { "async " } else { "" },
                 type_param_count,
                 params_str.join(", "),
                 format_type_ref(module, return_type)

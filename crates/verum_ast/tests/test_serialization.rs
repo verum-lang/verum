@@ -197,6 +197,7 @@ fn test_type_serialization() {
     // Function type
     let fn_ty = Type::new(
         TypeKind::Function {
+            is_async: false,
             params: List::from(vec![Type::int(span), Type::text(span)]),
             return_type: Heap::new(Type::bool(span)),
             calling_convention: Maybe::None,
@@ -204,7 +205,14 @@ fn test_type_serialization() {
         },
         span,
     );
-    test_round_trip!(fn_ty);
+    test_round_trip!(fn_ty.clone());
+    let mut async_ty = fn_ty.clone();
+    if let TypeKind::Function { is_async, .. } = &mut async_ty.kind {
+        *is_async = true;
+    }
+    let decoded = test_round_trip!(async_ty);
+    assert!(matches!(decoded.kind, TypeKind::Function { is_async: true, .. }));
+    assert_ne!(decoded, fn_ty);
 }
 
 #[test]

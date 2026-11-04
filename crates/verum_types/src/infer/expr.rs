@@ -1417,6 +1417,29 @@ impl TypeChecker {
     /// When `expected` is a `Forall` (rank-2), instantiates the quantified
     /// variables. When a `Function` type is known, uses it to bind params;
     /// otherwise falls back to synthesis + subsumption.
+    fn closure_callable_properties(
+        &mut self, body: &Expr, is_async: bool,
+    ) -> Result<crate::computational_properties::PropertyRequirement> {
+        let bound = self.callable_body_bound(body);
+        Ok(Self::callable_bound_with_marker(bound, is_async))
+    }
+
+    fn check_closure_properties(
+        &mut self, body: &Expr, is_async: bool, expected: &Type, span: Span,
+    ) -> Result<crate::computational_properties::PropertyRequirement> {
+        let bound = self.closure_callable_properties(body, is_async)?;
+        let Type::Function { property_requirement: expected_requirement, .. } = expected else {
+            return Err(TypeError::Other("closure property check needs a callable contract".into()));
+        };
+        let mut actual = Type::function_with_requirement(List::new(), Type::Unit, bound.clone());
+        if let Type::Function { properties, .. } = &mut actual {
+            *properties = bound.finite_footprint().cloned();
+        }
+        let contract = Type::function_with_requirement(List::new(), Type::Unit, expected_requirement.clone());
+        self.check_call_type_bound(&actual, &contract, span, 0)?;
+        Ok(bound)
+    }
+
     fn check_closure_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Closure {
@@ -1494,6 +1517,7 @@ impl TypeChecker {
                     // `Reducer<N, R>` needs to be resolved to `fn(R, N) -> R`
                     let normalized_body = self.normalize_type(&instantiated_body);
 
+
                     // Check the closure against the instantiated function type
                     if let Type::Function {
                         params: expected_params,
@@ -1560,6 +1584,7 @@ impl TypeChecker {
                         let body_check = self.check_expr(closure_body, &ret_ty);
                         self.current_function_return_type = saved_return_type;
                         body_check?;
+                        self.check_closure_properties(closure_body, *async_, &normalized_body, expr.span)?;
 
                         // T0653: close capture tracking and enforce async
                         // Send-safety BEFORE leaving the closure scope, the
@@ -1601,6 +1626,7 @@ impl TypeChecker {
                         ..
                     } = &normalized_expected
                     {
+
                         if params.len() != expected_params.len() {
                             return Err(TypeError::Mismatch {
                                 expected: expected.to_text(),
@@ -1662,6 +1688,7 @@ impl TypeChecker {
                         let body_check = self.check_expr(closure_body, &ret_ty);
                         self.current_function_return_type = saved_return_type;
                         body_check?;
+                        let callable_properties = self.check_closure_properties(closure_body, *async_, &normalized_expected, expr.span)?;
 
                         // T0653: close capture tracking and enforce async
                         // Send-safety BEFORE leaving the closure scope.
@@ -1673,8 +1700,10 @@ impl TypeChecker {
                         // bound permits discarding it. A generic F denotes this
                         // actual closure type, not the contract used to check it.
                         let mut actual = normalized_expected.clone();
-                        if let Type::Function { return_type, .. } = &mut actual {
+                        if let Type::Function { return_type, properties, property_requirement, .. } = &mut actual {
                             *return_type = Box::new(ret_ty);
+                            *properties = callable_properties.finite_footprint().cloned();
+                            *property_requirement = callable_properties.clone();
                         }
                         if let Type::Var(var) = self.unifier.apply(expected) {
                             self.unifier.unify(&Type::Var(var), &actual, expr.span)?;
@@ -2495,6 +2524,19 @@ impl TypeChecker {
         let resolved_result_ty = self.unifier.apply(&result.ty);
         // Check for Never type (handles both Type::Never and Named("Never"))
         if resolved_result_ty.is_never() {
+            return Ok(InferResult::new(expected.clone()));
+        }
+
+        // Callable contracts are directional. Structural unification ignores
+        // computational properties, so it cannot authorize this conversion.
+        let actual_callable = self.normalize_type(&resolved_result_ty);
+        let expected_callable = self.normalize_type(&self.unifier.apply(expected));
+        if matches!(actual_callable, Type::Function { .. } | Type::Reference { .. }
+            | Type::CheckedReference { .. } | Type::UnsafeReference { .. } | Type::Pointer { .. }
+            | Type::Tuple(_) | Type::Array { .. } | Type::Slice { .. })
+            && std::mem::discriminant(&actual_callable) == std::mem::discriminant(&expected_callable)
+        {
+            self.check_call_type_bound(&actual_callable, &expected_callable, expr.span, 0)?;
             return Ok(InferResult::new(expected.clone()));
         }
 
@@ -6420,37 +6462,25 @@ impl TypeChecker {
                     let is_dependent = params.len() == 1
                         && self.return_type_depends_on_param(&ret_ty, &param_names);
 
-                    // If async closure, wrap return type in Future<T>
-                    let func_ty = if *async_ {
-                        let future_ret_ty = Type::Generic {
-                            name: verum_common::Text::from("Future"),
-                            args: vec![ret_ty].into(),
-                        };
-                        if let (true, Some(param_name)) =
+                    // Async callables obey the same eager output law as
+                    // named functions. Only explicit Future values are polled.
+                    let properties = self.closure_callable_properties(body, *async_)?;
+                    let func_ty = if !*async_ && properties.finite_footprint().is_some_and(|p| p.is_pure())
+                        && let (true, Some(param_name)) =
                             (is_dependent, param_names.get(0).and_then(|p| p.clone()))
-                        {
-                            // Dependent async function: (x: A) -> Future<B(x)>
-                            Type::Pi {
-                                param_name,
-                                param_type: Box::new(param_types[0].clone()),
-                                return_type: Box::new(future_ret_ty),
-                            }
-                        } else {
-                            Type::function(param_types, future_ret_ty)
-                        }
-                    } else if let (true, Some(param_name)) =
-                        (is_dependent, param_names.get(0).and_then(|p| p.clone()))
                     {
-                        // Dependent function: (x: A) -> B(x)
-                        // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi type introduction
                         Type::Pi {
                             param_name,
                             param_type: Box::new(param_types[0].clone()),
                             return_type: Box::new(ret_ty),
                         }
                     } else {
-                        // Regular function: A -> B
-                        Type::function(param_types, ret_ty)
+                        { let mut callable = Type::function_with_async(param_types, ret_ty, *async_);
+                          if let Type::Function { properties: footprint, property_requirement, .. } = &mut callable {
+                              *footprint = properties.finite_footprint().cloned();
+                              *property_requirement = properties;
+                          }
+                          callable }
                     };
 
                     // Register closure type in the type registry for codegen
@@ -7920,6 +7950,8 @@ impl TypeChecker {
             _ => func_ty_raw,
         };
 
+        self.type_registry.register_call_target(expr.span, func_ty.clone());
+
         match func_ty {
             // Unknown propagation: in stdlib single-file mode,
             // unresolvable callees return Unknown — skip all
@@ -8529,7 +8561,7 @@ impl TypeChecker {
                 }
 
                 let ret_ty = Type::Var(TypeVar::fresh());
-                let func_ty_inst = Type::function(param_types.clone(), ret_ty.clone());
+                let func_ty_inst = Type::function_with_async(param_types.clone(), ret_ty.clone(), true);
 
                 // Unify the type variable with the function type
                 self.unifier
@@ -8564,6 +8596,7 @@ impl TypeChecker {
 
                 // Apply substitution to the body to get the instantiated function type
                 let instantiated_body = self.substitute_type_vars(body, &subst);
+                self.type_registry.register_call_target(expr.span, instantiated_body.clone());
 
                 // Now the body should be a Function type - extract and check
                 match instantiated_body {
@@ -10763,6 +10796,7 @@ impl TypeChecker {
                 // For simplicity, we'll try unification
                 let ret_ty = Type::Var(TypeVar::fresh());
                 let expected_fn = Type::Function {
+                    property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
                     params: vec![left_ty].into(),
                     return_type: Box::new(ret_ty.clone()),
                     properties: None,

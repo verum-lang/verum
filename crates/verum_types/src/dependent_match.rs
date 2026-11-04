@@ -120,12 +120,14 @@ impl Motive {
             },
             // Function type - substitute in params and return type
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 type_params,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| self.substitute_term_in_type(p, var, term))
@@ -412,12 +414,14 @@ impl Motive {
                     .collect(),
             },
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 type_params,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| self.substitute_type_in_type(p, var, replacement))
@@ -506,12 +510,14 @@ impl ConstructorRefinement {
                 }
             }
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 type_params,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| self.substitute_in_type(p, var, replacement))

@@ -5,7 +5,7 @@ use crate::advanced_protocols::{AssociatedTypeKind, GATTypeParam, GATWhereClause
 use crate::{
     Result, TypeError,
     protocol::{
-        AssociatedType, AssociatedTypeBinders, ProtocolBound, ProtocolConstraints, WhereClause,
+        AssociatedType, DeclarationBinders, ProtocolBound, ProtocolConstraints, WhereClause,
     },
     ty::{Type, TypeVar},
 };
@@ -168,7 +168,7 @@ impl TypeChecker {
             ));
         };
         let mut frame = indexmap::IndexMap::new();
-        let mut binders = AssociatedTypeBinders::default();
+        let mut binders = DeclarationBinders::default();
         for (position, parameter) in owner.iter().enumerate() {
             if let Some(name) = type_parameter_name(parameter) {
                 let var = match scope {

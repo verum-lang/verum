@@ -305,6 +305,7 @@ fn test_unify_function_types_with_same_contexts() {
     let logger_ctx = ContextExpr::concrete(make_logger_req());
 
     let f1 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Int),
         contexts: Some(logger_ctx.clone()),
@@ -313,6 +314,7 @@ fn test_unify_function_types_with_same_contexts() {
     };
 
     let f2 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Int),
         contexts: Some(logger_ctx),
@@ -331,6 +333,7 @@ fn test_unify_function_types_with_no_contexts() {
     let span = make_span();
 
     let f1 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Bool),
         contexts: None,
@@ -339,6 +342,7 @@ fn test_unify_function_types_with_no_contexts() {
     };
 
     let f2 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Bool),
         contexts: None,
@@ -359,6 +363,7 @@ fn test_unify_function_types_with_context_variable() {
 
     // f1 uses a context variable C
     let f1 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Int),
         contexts: Some(ContextExpr::variable(ctx_var)),
@@ -368,6 +373,7 @@ fn test_unify_function_types_with_context_variable() {
 
     // f2 uses concrete Logger context
     let f2 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Int),
         contexts: Some(ContextExpr::concrete(make_logger_req())),
@@ -390,6 +396,7 @@ fn test_unify_function_types_context_mismatch() {
     let span = make_span();
 
     let f1 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Int),
         contexts: Some(ContextExpr::concrete(make_logger_req())),
@@ -398,6 +405,7 @@ fn test_unify_function_types_context_mismatch() {
     };
 
     let f2 = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Int),
         contexts: Some(ContextExpr::concrete(make_db_req())),

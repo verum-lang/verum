@@ -1395,6 +1395,7 @@ impl ProgramExtractor {
 
             // Closure expressions
             ExprKind::Closure {
+                async_,
                 params,
                 return_type,
                 body,
@@ -1412,6 +1413,7 @@ impl ProgramExtractor {
                     }
                     return Maybe::Some(Type::new(
                         TypeKind::Function {
+                            is_async: *async_,
                             params: param_types,
                             return_type: Heap::new(ret_ty.clone()),
                             calling_convention: Maybe::None,
@@ -1434,6 +1436,7 @@ impl ProgramExtractor {
                 }
                 Maybe::Some(Type::new(
                     TypeKind::Function {
+                        is_async: *async_,
                         params: param_types,
                         return_type: Heap::new(ret_ty),
                         calling_convention: Maybe::None,

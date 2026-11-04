@@ -453,9 +453,21 @@ impl FastParser {
     /// [`Self::require_input_consumed`]). Lex errors are reported, not
     /// silently dropped; see [`Self::lex_all`].
     pub fn parse_type_str(&self, source: &str, file_id: FileId) -> ParseResult<verum_ast::Type> {
+        self.parse_type_spelling(source, file_id, false)
+    }
+
+    /// Read an archive type with the ordinary grammar plus its explicit
+    /// `::Associated<Base, Args...>` projection spelling. Both entry points
+    /// reject lexical errors and unconsumed input.
+    pub fn parse_descriptor_type_str(&self, source: &str, file_id: FileId) -> ParseResult<verum_ast::Type> {
+        self.parse_type_spelling(source, file_id, true)
+    }
+
+    fn parse_type_spelling(&self, source: &str, file_id: FileId, descriptor_projections: bool) -> ParseResult<verum_ast::Type> {
         let tokens = Self::lex_all(source, file_id)?;
 
         let mut parser = RecursiveParser::new(&tokens, file_id);
+        parser.descriptor_projections = descriptor_projections;
         let ty = parser.parse_type().map_err(|e| List::from(vec![e]))?;
 
         if !parser.errors.is_empty() {
@@ -480,14 +492,8 @@ impl FastParser {
         {
             return false;
         }
-        let Ok(tokens) = Self::lex_all(bound, file) else {
-            return false;
-        };
-        let mut parser = RecursiveParser::new(&tokens, file);
-        parser.descriptor_projections = true;
-        parser.parse_type().is_ok_and(|ty| matches!(ty.kind, verum_ast::TypeKind::Function { .. }))
-            && parser.errors.is_empty()
-            && Self::require_input_consumed(&parser).is_ok()
+        Self::new().parse_descriptor_type_str(bound, file)
+            .is_ok_and(|ty| matches!(ty.kind, verum_ast::TypeKind::Function { .. }))
     }
 
     /// [`Self::require_input_consumed`] adapted to the token entry points'

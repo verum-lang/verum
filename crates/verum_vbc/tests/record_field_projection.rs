@@ -120,6 +120,7 @@ fn generic_function(module: &mut VbcModule) -> FunctionDescriptor {
     });
     let mut callable = TypeParamDescriptor { id: TypeParamId(1), ..Default::default() };
     callable.type_bounds.push(TypeRef::Function {
+        is_async: false,
         params: vec![generic.clone()], return_type: Box::new(generic),
         contexts: Default::default(),
     });

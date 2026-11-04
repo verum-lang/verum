@@ -17,6 +17,7 @@ use verum_types::ty::Type;
 
 fn func(params: Vec<Type>, ret: Type) -> Type {
     Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: params.into_iter().collect::<List<Type>>(),
         return_type: Box::new(ret),
         contexts: None,

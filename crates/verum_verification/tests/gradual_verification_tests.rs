@@ -396,6 +396,7 @@ fn test_integration_type_system() {
         contexts: None,
         type_params: List::new(),
         properties: None,
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
     };
     assert!(TypeSystemIntegration::requires_verification(
         &func_with_refined_return

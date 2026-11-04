@@ -74,6 +74,7 @@ impl VbcCodegen {
         let params = self.source_semantic_parameters(function, scope, receiver_scope, declared_ids)
             .into_iter().collect::<Option<List<_>>>()?;
         Some(TypeRef::Function {
+            is_async: function.is_async,
             params: params.into_iter().collect(),
             return_type: Box::new(return_type),
             contexts: Default::default(),
@@ -86,7 +87,7 @@ impl VbcCodegen {
         scope: &std::collections::HashMap<String, u16>,
         declared_ids: &[TypeParamId],
     ) -> Option<TypeRef> {
-        if function.is_async || function.is_generator || !function.contexts.is_empty() {
+        if function.is_generator || !function.contexts.is_empty() {
             return None;
         }
         self.semantic_formal_type_with_values(function.return_type.as_ref()?, scope, declared_ids,
@@ -357,6 +358,7 @@ impl VbcCodegen {
                     return_type,
                     contexts,
                     calling_convention,
+                    ..
                 } => {
                     calling_convention.is_none()
                         && contexts.requirements.is_empty()
@@ -367,6 +369,7 @@ impl VbcCodegen {
                 }
                 TypeKind::Rank2Function {
                     type_params, params, return_type, contexts, calling_convention, where_clause,
+                    ..
                 } => {
                     let Ok((_, inner)) = VbcCodegen::rank2_type_scope(type_params, scope, ty.span) else {
                         return false;
@@ -461,6 +464,7 @@ fn remapped_declaration_type(
             }
             TypeRef::Tuple(parts) => parts.iter().all(|ty| known(ty, map, depth + 1)),
             TypeRef::Function {
+                is_async: _,
                 params,
                 return_type,
                 contexts,
@@ -511,6 +515,7 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
             concrete(*base) && args.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
         }
         TypeRef::Function {
+            is_async: _,
             params,
             return_type,
             contexts,
@@ -519,7 +524,7 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
                 && params.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
                 && resolved_in_scope(return_type, declared_ids, depth + 1, binders)
         }
-        TypeRef::Rank2Function { type_param_count, params, return_type, contexts } => {
+        TypeRef::Rank2Function { is_async: _, type_param_count, params, return_type, contexts } => {
             let Some(binders) = binders.checked_add(u32::from(*type_param_count)) else { return false; };
             contexts.is_empty()
                 && params.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
@@ -542,6 +547,7 @@ mod record_projection_tests {
         ));
         assert!(!resolved(&projection, &[TypeParamId(7)], 0));
         assert!(!resolved(&TypeRef::Function {
+            is_async: false,
             params: vec![], return_type: Box::new(projection), contexts: Default::default(),
         }, &[TypeParamId(7)], 0));
     }

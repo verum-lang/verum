@@ -570,12 +570,14 @@ impl OverlapDetector {
             },
 
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
                 contexts,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params.iter().map(|p| self.apply_subst(p, subst)).collect(),
                 return_type: Box::new(self.apply_subst(return_type.as_ref(), subst)),
                 type_params: type_params.clone(),

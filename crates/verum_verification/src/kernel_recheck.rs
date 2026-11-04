@@ -1990,6 +1990,7 @@ mod tests {
             contexts: None,
             type_params: List::new(),
             properties: None,
+            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         };
         match super::lift_types_type_to_core(&ty) {
             CoreTerm::App(_, _) => {}
@@ -2061,6 +2062,7 @@ mod tests {
             contexts: None,
             type_params: List::new(),
             properties: None,
+            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         };
         // refine_omega_from_types is only meaningful when called
         // ON a refinement. Calling it on a Function type would

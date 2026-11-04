@@ -72,6 +72,7 @@ fn test_simple_method_call_eq() {
             methods.insert(
                 Text::from("eq"),
                 ProtocolMethod {
+                    scope: None,
                     name: Text::from("eq"),
                     // fn eq(self: Int, other: Int) -> Bool
                     ty: Type::function(vec![Type::int(), Type::int()].into(), Type::bool()),

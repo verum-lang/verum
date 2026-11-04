@@ -222,6 +222,7 @@ fn test_function_types() {
     // Simple function: fn(Int) -> Bool
     let simple = Type::new(
         TypeKind::Function {
+            is_async: false,
             params: List::from(vec![Type::int(span)]),
             return_type: Heap::new(Type::bool(span)),
             calling_convention: Maybe::None,
@@ -245,6 +246,7 @@ fn test_function_types() {
     // Multiple parameters: fn(Int, String, Bool) -> ()
     let multi_param = Type::new(
         TypeKind::Function {
+            is_async: false,
             params: List::from(vec![Type::int(span), Type::text(span), Type::bool(span)]),
             return_type: Heap::new(Type::unit(span)),
             calling_convention: Maybe::None,
@@ -267,8 +269,10 @@ fn test_function_types() {
     // Higher-order function: fn(fn(Int) -> Bool) -> fn() -> Int
     let higher_order = Type::new(
         TypeKind::Function {
+            is_async: false,
             params: List::from(vec![Type::new(
                 TypeKind::Function {
+                    is_async: false,
                     params: List::from(vec![Type::int(span)]),
                     return_type: Heap::new(Type::bool(span)),
                     calling_convention: Maybe::None,
@@ -278,6 +282,7 @@ fn test_function_types() {
             )]),
             return_type: Heap::new(Type::new(
                 TypeKind::Function {
+                    is_async: false,
                     params: List::from(vec![]),
                     return_type: Heap::new(Type::int(span)),
                     calling_convention: Maybe::None,

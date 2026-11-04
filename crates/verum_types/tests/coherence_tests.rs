@@ -576,6 +576,7 @@ fn test_coherence_function_types() {
     let checker = ProtocolChecker::new();
 
     let fn_type = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::from(vec![Type::Int]),
         return_type: Box::new(Type::Bool),
         contexts: None,

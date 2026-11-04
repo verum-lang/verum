@@ -4012,12 +4012,14 @@ impl TypeChecker {
                 mutable: *mutable,
             },
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
                 type_params,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| Self::reconnect_metadata_parent(p, parent, declaring_key, self_ty))

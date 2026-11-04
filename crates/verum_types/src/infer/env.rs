@@ -7139,7 +7139,8 @@ impl TypeChecker {
         // Accepts any type for convenience in tests
         let print_t = TypeVar::fresh();
         let print_params = List::from_iter([Type::Var(print_t)]);
-        let print_ty = Type::function(print_params, Type::unit());
+        let print_ty = Type::function_with_properties(print_params, Type::unit(),
+            crate::computational_properties::PropertySet::single(crate::computational_properties::ComputationalProperty::IO));
         let print_scheme = TypeScheme::poly(List::from_iter([print_t]), print_ty);
         self.define_builtin_value(verum_common::Text::from("print"), print_scheme);
 
@@ -7147,7 +7148,8 @@ impl TypeChecker {
         // Accepts any type for convenience in tests
         let println_t = TypeVar::fresh();
         let println_params = List::from_iter([Type::Var(println_t)]);
-        let println_ty = Type::function(println_params, Type::unit());
+        let println_ty = Type::function_with_properties(println_params, Type::unit(),
+            crate::computational_properties::PropertySet::single(crate::computational_properties::ComputationalProperty::IO));
         let println_scheme = TypeScheme::poly(List::from_iter([println_t]), println_ty);
         self.define_builtin_value(verum_common::Text::from("println"), println_scheme);
 
@@ -7167,7 +7169,8 @@ impl TypeChecker {
         for io_name in ["eprint", "eprintln"] {
             let t = TypeVar::fresh();
             let params = List::from_iter([Type::Var(t)]);
-            let ty = Type::function(params, Type::unit());
+            let ty = Type::function_with_properties(params, Type::unit(),
+                crate::computational_properties::PropertySet::single(crate::computational_properties::ComputationalProperty::IO));
             let scheme = TypeScheme::poly(List::from_iter([t]), ty);
             self.define_builtin_value(verum_common::Text::from(io_name), scheme);
         }
@@ -9193,6 +9196,7 @@ impl TypeChecker {
                         .count();
                     let params = (0..param_count).map(|_| Type::Unknown).collect();
                     let method_type = Type::Function {
+                        property_requirement: crate::computational_properties::PropertyRequirement::declared_function(method.is_pure, method.is_meta),
                         params,
                         return_type: Box::new(Type::Unknown),
                         properties: None,
@@ -9828,9 +9832,8 @@ impl TypeChecker {
             func.is_generator,
         );
 
-        // Infer computational properties from the function declaration
-        // This handles throws_clause -> Fallible correlation, async -> Async, and body analysis
-        let properties = self.property_inferrer.infer_function_decl(func);
+        // A declaration grants its contract, not an unverified finite body footprint.
+        let properties = crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta);
 
         let mut declaration_slots = TypeScheme::mono(Type::unit());
         self.record_explicit_method_vars(&mut declaration_slots, func);
@@ -9850,11 +9853,10 @@ impl TypeChecker {
             )?;
         }
 
-        Ok(Type::function_with_properties(
-            param_types,
-            final_return_type,
-            properties,
-        ))
+        Ok(Type::Function {
+            params: param_types, return_type: Box::new(final_return_type),
+            contexts: None, type_params: List::new(), properties: None, property_requirement: properties,
+        })
     }
 
     /// Look up associated item on a type path

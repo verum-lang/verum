@@ -156,6 +156,7 @@ fn inherited_application_avoids_method_and_rank2_capture() {
                 .as_ref()
                 .unwrap()[1],
             Some(TypeRef::Rank2Function {
+                is_async: false,
                 type_param_count: 1,
                 params: vec![lifted.clone(), TypeRef::Generic(TypeParamId(0))],
                 return_type: Box::new(lifted),
@@ -168,6 +169,7 @@ fn inherited_application_avoids_method_and_rank2_capture() {
                 .as_ref()
                 .unwrap()[1],
             Some(TypeRef::Rank2Function {
+                is_async: false,
                 type_param_count: 1,
                 params: vec![TypeRef::Generic(TypeParamId(0))],
                 return_type: Box::new(TypeRef::Generic(TypeParamId(0))),

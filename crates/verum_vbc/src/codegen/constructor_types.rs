@@ -690,6 +690,7 @@ mod binder_tests {
         assert_eq!(cg.resolve_declared_projections(&projection, 0), Some(projection.clone()));
         assert!(cg.declaration_type_name(&projection, 0).is_none());
         assert!(!fully_bound(&TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1, params: vec![TypeRef::Generic(TypeParamId(0))],
             return_type: Box::new(projection), contexts: Default::default(),
         }, &bindings));
@@ -698,6 +699,7 @@ mod binder_tests {
     #[test]
     fn quantified_local_is_bound_but_free_slot_requires_its_outer_witness() {
         let quantified = |index| TypeRef::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![TypeRef::Generic(TypeParamId(0))],
             return_type: Box::new(TypeRef::Generic(TypeParamId(index))),

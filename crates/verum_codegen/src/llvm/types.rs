@@ -379,6 +379,7 @@ mod record_projection_tests {
             TypeRef::Instantiated { base: TypeId::LIST, args: vec![projection.clone()] },
             TypeRef::Slice(Box::new(projection.clone())),
             TypeRef::Function {
+                is_async: false,
                 params: vec![],
                 return_type: Box::new(projection),
                 contexts: Default::default(),

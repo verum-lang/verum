@@ -1348,7 +1348,7 @@ impl<'a> Deserializer<'a> {
  }
  Ok(TypeRef::Instantiated { base, args })
  }
- 0x04 => {
+ 0x04 if tag == 0x04 || (tag == 0x14 && self.header.as_ref().is_some_and(|header| header.version_minor >= 39)) => {
  let params_count = decode_varint(self.data, &mut self.offset)? as usize;
  if params_count > MAX_FN_TYPE_REF_PARAMS {
  return Err(VbcError::TableTooLarge {
@@ -1375,6 +1375,7 @@ impl<'a> Deserializer<'a> {
  contexts.push(ContextRef(decode_u32(self.data, &mut self.offset)?));
  }
  Ok(TypeRef::Function {
+     is_async: tag & 0x10 != 0,
  params,
  return_type,
  contexts,
@@ -1418,7 +1419,7 @@ impl<'a> Deserializer<'a> {
  }
  // 0x09 represented ambiguous unscoped rank-2 parameter IDs. It must not
  // acquire the new meaning merely because a newer reader loads the file.
- 0x0C if tag == 0x0C => {
+ 0x0C if tag == 0x0C || (tag == 0x1C && self.header.as_ref().is_some_and(|header| header.version_minor >= 39)) => {
  let type_param_count = decode_u16(self.data, &mut self.offset)?;
  let params_count = decode_varint(self.data, &mut self.offset)? as usize;
  if params_count > MAX_FN_TYPE_REF_PARAMS {
@@ -1446,6 +1447,7 @@ impl<'a> Deserializer<'a> {
  contexts.push(ContextRef(decode_u32(self.data, &mut self.offset)?));
  }
  Ok(TypeRef::Rank2Function {
+     is_async: tag & 0x10 != 0,
  type_param_count,
  params,
  return_type,

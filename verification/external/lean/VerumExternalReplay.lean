@@ -8,6 +8,7 @@
 -- hence `lake build`.
 import VerumExternalReplay.KernelSoundness
 import VerumExternalReplay.TypeAlgebra
+import VerumExternalReplay.PropertyRequirement
 import VerumExternalReplay.IntegerBoundEntailment
 import VerumExternalReplay.CapabilityAttenuation
 import VerumExternalReplay.UniverseLevels

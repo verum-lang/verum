@@ -804,7 +804,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Async function type: async fn(A, B) -> C
         // Grammar: function_type = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
-        // Transforms to: fn(A, B) -> Future<C>
+        // Preserve async as a callable property; the output remains C.
         // Also handles async protocol bounds: async FnOnce(), async Iterator, etc.
         if self.stream.check(&TokenKind::Async) {
             // Look ahead: if next is 'fn', parse as async function type
@@ -1538,6 +1538,7 @@ impl<'a> RecursiveParser<'a> {
         // Create Rank2Function if we have type parameters, otherwise regular Function
         let kind = if type_params.is_empty() {
             TypeKind::Function {
+                is_async: false,
                 params: params.into_iter().collect::<List<_>>(),
                 return_type: Box::new(return_type),
                 calling_convention,
@@ -1545,6 +1546,7 @@ impl<'a> RecursiveParser<'a> {
             }
         } else {
             TypeKind::Rank2Function {
+                is_async: false,
                 type_params,
                 params: params.into_iter().collect::<List<_>>(),
                 return_type: Box::new(return_type),
@@ -1557,102 +1559,21 @@ impl<'a> RecursiveParser<'a> {
         Ok(Type::new(kind, span))
     }
 
-    /// Parse async function type: async fn(A, B) -> C
-    /// Transforms to fn(A, B) -> Future<C>
-    ///
-    /// Grammar: function_type = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
+    /// Parse an async callable, preserving its declared eager output.
     fn parse_async_function_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
-
-        // Consume 'async'
         self.stream.expect(TokenKind::Async)?;
-
-        // Parse the rest as a regular function type
-        let fn_type = self.parse_function_type(Maybe::None, boundary)?;
-
-        // Wrap the return type in Future<T>
-        // async fn() -> T becomes fn() -> Future<T>
-        // async fn() becomes fn() -> Future<()>
-        match fn_type.kind {
-            TypeKind::Function {
-                params,
-                return_type,
-                calling_convention,
-                contexts,
-            } => {
-                // Create Future<return_type>
-                // First create the base path type for "Future"
-                let future_span = self.stream.make_span(start_pos);
-                let future_ident = Ident::new("Future", future_span);
-                let future_path = Path::single(future_ident);
-                let future_base = Type::new(TypeKind::Path(future_path), future_span);
-
-                // Then wrap in Generic with the return type as argument
-                let future_type = Type::new(
-                    TypeKind::Generic {
-                        base: Box::new(future_base),
-                        args: List::from(vec![GenericArg::Type(*return_type)]),
-                    },
-                    future_span,
-                );
-
-                let span = self.stream.make_span(start_pos);
-                Ok(Type::new(
-                    TypeKind::Function {
-                        params,
-                        return_type: Box::new(future_type),
-                        calling_convention,
-                        contexts,
-                    },
-                    span,
-                ))
-            }
-            TypeKind::Rank2Function {
-                type_params,
-                params,
-                return_type,
-                calling_convention,
-                contexts,
-                where_clause,
-            } => {
-                // Create Future<return_type>
-                // First create the base path type for "Future"
-                let future_span = self.stream.make_span(start_pos);
-                let future_ident = Ident::new("Future", future_span);
-                let future_path = Path::single(future_ident);
-                let future_base = Type::new(TypeKind::Path(future_path), future_span);
-
-                // Then wrap in Generic with the return type as argument
-                let future_type = Type::new(
-                    TypeKind::Generic {
-                        base: Box::new(future_base),
-                        args: List::from(vec![GenericArg::Type(*return_type)]),
-                    },
-                    future_span,
-                );
-
-                let span = self.stream.make_span(start_pos);
-                Ok(Type::new(
-                    TypeKind::Rank2Function {
-                        type_params,
-                        params,
-                        return_type: Box::new(future_type),
-                        calling_convention,
-                        contexts,
-                        where_clause,
-                    },
-                    span,
-                ))
-            }
-            _ => {
-                // Should not happen - parse_function_type always returns Function or Rank2Function
-                let span = self.stream.make_span(start_pos);
-                Err(ParseError::invalid_syntax(
-                    "internal error: expected function type",
-                    span,
-                ))
-            }
+        let mut ty = self.parse_function_type(Maybe::None, boundary)?;
+        match &mut ty.kind {
+            TypeKind::Function { is_async, .. }
+            | TypeKind::Rank2Function { is_async, .. } => *is_async = true,
+            _ => return Err(ParseError::invalid_syntax(
+                "internal error: expected function type",
+                self.stream.make_span(start_pos),
+            )),
         }
+        ty.span = self.stream.make_span(start_pos);
+        Ok(ty)
     }
 
     /// Parse tuple type: (A, B, C) - requires at least 2 elements
@@ -3290,8 +3211,9 @@ impl<'a> RecursiveParser<'a> {
                 // Grammar: kind_annotated_param = identifier ':' kind_expr
                 //  kind_expr = 'Type' [ '->' kind_expr ] | '(' kind_expr ')'
                 // Disambiguates from protocol bounds (T: Display) by the presence of
-                // the `Type` keyword (TokenKind::Type) as the first token after ':'.
-                if self.stream.check(&TokenKind::Type) {
+                // an arrow-kind expression. Bare Type and Type(u) retain their
+                // universe-bound interpretation.
+                if self.starts_arrow_kind() {
                     let kind_ann = self.parse_kind_annotation()?;
 
                     // Optional additional protocol bounds after '+': F: Type -> Type + Functor
@@ -3516,6 +3438,7 @@ impl<'a> RecursiveParser<'a> {
             if !self.stream.check(&TokenKind::Bang)
                 && !self.is_ident()
                 && !self.stream.check(&TokenKind::SelfType)
+                && !matches!(self.stream.peek_kind(), Some(TokenKind::Fn | TokenKind::Async))
                 && !is_lifetime
             {
                 // Trailing '+' is invalid per grammar: bounds = bound , { '+' , bound } ;
@@ -3618,7 +3541,8 @@ impl<'a> RecursiveParser<'a> {
                 } else if matches!(self.stream.peek_kind(), Some(TokenKind::Lifetime(_))) {
                     // Lifetime bound: 'static, 'a, etc. - consume and skip (informational in Verum)
                     self.stream.advance();
-                } else if self.is_ident() || self.stream.check(&TokenKind::SelfType) {
+                } else if self.is_ident() || self.stream.check(&TokenKind::SelfType)
+                    || matches!(self.stream.peek_kind(), Some(TokenKind::Fn | TokenKind::Async)) {
                     // Positive bound: Protocol or Protocol<T>
                     // Use parse_type_no_refinement to correctly handle generic arguments
                     let bound_type = self.parse_type_no_refinement()?;
@@ -4239,7 +4163,21 @@ impl<'a> RecursiveParser<'a> {
     ///
     /// Called after the `:` in `F: Type -> Type`.
     /// The caller is responsible for having already confirmed that
-    /// `TokenKind::Type` is next in the stream.
+    /// an arrow-kind expression starts next in the stream.
+    fn starts_arrow_kind(&self) -> bool {
+        let mut position = 0;
+        let mut has_arrow = false;
+        loop {
+            match self.stream.peek_nth(position).map(|token| &token.kind) {
+                Some(TokenKind::Ident(name)) if name.as_str() == "Type" => {}
+                Some(TokenKind::LParen | TokenKind::RParen) => {}
+                Some(TokenKind::RArrow) => has_arrow = true,
+                _ => return has_arrow,
+            }
+            position += 1;
+        }
+    }
+
     fn parse_kind_annotation(&mut self) -> ParseResult<KindAnnotation> {
         let start_pos = self.stream.position();
 
@@ -4265,12 +4203,13 @@ impl<'a> RecursiveParser<'a> {
 
         // Base kind: 'Type' — pre-capture span before the mutable `expect` call.
         let type_span = self.stream.make_span(start_pos);
-        self.stream.expect(TokenKind::Type).map_err(|_| {
-            ParseError::invalid_syntax(
+        if !matches!(self.stream.peek_kind(), Some(TokenKind::Ident(name)) if name.as_str() == "Type") {
+            return Err(ParseError::invalid_syntax(
                 "expected `Type` in kind annotation (e.g. `F: Type -> Type`)",
                 type_span,
-            )
-        })?;
+            ));
+        }
+        self.stream.advance();
 
         // Check for arrow: '->' means this is an arrow kind
         if self.stream.consume(&TokenKind::RArrow).is_some() {

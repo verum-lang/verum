@@ -1426,7 +1426,7 @@ impl VbcCodegen {
                 } else {
                     Some(expr.span)
                 };
-                self.compile_closure(params, body, return_type.as_ref(), hint_key, !async_ && contexts.is_empty())
+                self.compile_closure(params, body, return_type.as_ref(), hint_key, contexts.is_empty(), *async_)
             }
 
             // === Optional chaining: obj?.field ===
@@ -2300,7 +2300,7 @@ impl VbcCodegen {
                                 },
                                 sp,
                             );
-                            return self.compile_closure(&params, &body, None, None, false);
+                            return self.compile_closure(&params, &body, None, None, false, func_info.is_async);
                         }
                     }
 
@@ -8498,7 +8498,7 @@ impl VbcCodegen {
     pub(super) fn compiled_callable_signature(&self, expr: &Expr) -> Option<&crate::types::TypeRef> {
         match &expr.kind {
             ExprKind::Paren(inner) => self.compiled_callable_signature(inner),
-            ExprKind::Closure { async_: false, contexts, .. } if contexts.is_empty() => {
+            ExprKind::Closure { contexts, .. } if contexts.is_empty() => {
                 let id = self.ctx.compiled_closures.get(&expr.span)?;
                 self.ctx.lookup_function_by_id(*id)?.callable_signature.as_ref()
             }
@@ -9143,8 +9143,9 @@ impl VbcCodegen {
                     tier,
                 })
             }
-            TypeKind::Function { params, return_type, contexts, .. } if contexts.requirements.is_empty() => {
+            TypeKind::Function { is_async, params, return_type, contexts, .. } if contexts.requirements.is_empty() => {
                 Some(TypeRef::Function {
+                    is_async: *is_async,
                     params: params.iter().map(|ty| self.explicit_type_witness(ty, None)).collect::<Option<Vec<_>>>()?,
                     return_type: Box::new(self.explicit_type_witness(return_type, None)?),
                     contexts: Default::default(),
@@ -31854,7 +31855,8 @@ impl VbcCodegen {
                 args.iter().map(render).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
             TypeRef::Tuple(items) => Some(format!("({})",
                 items.iter().map(render).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
-            TypeRef::Function { params, return_type, contexts } if contexts.is_empty() => Some(format!("fn({}) -> {}",
+            TypeRef::Function { is_async,  params, return_type, contexts } if contexts.is_empty() => Some(format!("{}fn({}) -> {}",
+                if *is_async { "async " } else { "" },
                 params.iter().map(render).collect::<Option<verum_common::List<_>>>()?.join(", "),
                 render(return_type)?).into()),
             TypeRef::Reference { inner, tier, mutability } => Some(format!("&{}{}{}",
@@ -32040,6 +32042,7 @@ impl VbcCodegen {
         return_type: Option<&verum_ast::ty::Type>,
         hint_key: Option<verum_ast::Span>,
         signature_is_plain: bool,
+        is_async: bool,
     ) -> CodegenResult<Option<Reg>> {
         // Claim only this closure's contextual signature; sibling callbacks
         // and closures compiled inside the receiver keep their own entries.
@@ -32165,6 +32168,7 @@ impl VbcCodegen {
             return_type,
             return_hint,
             signature_is_plain,
+            is_async,
         )?;
 
         if let Some(span) = hint_key {
@@ -32268,6 +32272,7 @@ impl VbcCodegen {
         return_type_ast: Option<&verum_ast::ty::Type>,
         return_hint: verum_common::Maybe<verum_common::Text>,
         signature_is_plain: bool,
+        is_async: bool,
     ) -> CodegenResult<u32> {
         // Generate unique name for closure function
         let closure_name = format!(
@@ -32313,7 +32318,7 @@ impl VbcCodegen {
             param_count: param_names.len(),
             param_names,
             param_type_names: vec![],
-            is_async: false,
+            is_async,
             is_generator: false,
             contexts: Vec::new(),
             return_type: closure_return_type_ref.clone(),
@@ -32580,6 +32585,7 @@ impl VbcCodegen {
 
         let callable_signature = param_type_refs.iter().cloned().collect::<Option<Vec<_>>>()
             .zip(closure_return_type_ref.clone()).filter(|_| signature_is_plain).map(|(params, return_type)| crate::types::TypeRef::Function {
+                is_async,
                 params, return_type: Box::new(return_type), contexts: Default::default(),
             });
         // Registration may expose several names for this body. Update all
@@ -32594,6 +32600,7 @@ impl VbcCodegen {
         let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
         descriptor.id = crate::module::FunctionId(func_id);
         descriptor.is_generic = !lexical_param_ids.is_empty();
+        if is_async { descriptor.properties |= crate::types::PropertySet::ASYNC; }
         for &id in lexical_param_ids {
             let name = self.ctx.current_generic_param_ids.iter()
                 .find(|(_, pid)| **pid == id.0).map(|(name, _)| name.clone())
@@ -46481,9 +46488,9 @@ fn bind_generic_free(
                 bind_generic_free(p, a, bindings);
             }
         }
-        (TR::Function { params: pp, return_type: pr, contexts: pc },
-         TR::Function { params: ap, return_type: ar, contexts: ac })
-            if pp.len() == ap.len() && pc == ac => {
+        (TR::Function { is_async: py, params: pp, return_type: pr, contexts: pc },
+         TR::Function { is_async: ay, params: ap, return_type: ar, contexts: ac })
+            if py == ay && pp.len() == ap.len() && pc == ac => {
             for (p, a) in pp.iter().zip(ap) { bind_generic_free(p, a, bindings); }
             bind_generic_free(pr, ar, bindings);
         }
@@ -46503,6 +46510,10 @@ fn bind_generic_free(
         _ => {}
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/codegen/callable_marker_binding.rs"]
+mod callable_marker_binding_tests;
 
 /// `VERUM_TRACE_BARE_VARIANT` gate — the value is a SUBSTRING filter on
 /// the bare name, matching `VERUM_TRACE_CALLRES` and `VERUM_TRACE_FNREG`

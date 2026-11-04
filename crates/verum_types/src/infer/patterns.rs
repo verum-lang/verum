@@ -3518,6 +3518,7 @@ impl TypeChecker {
         // Also register the pattern as a function in the type environment
         // so it can be called like a regular function if needed
         let func_ty = Type::Function {
+            property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
             params: param_types,
             return_type: Box::new(return_ty),
             contexts: None,
@@ -3539,6 +3540,7 @@ impl TypeChecker {
                     implicit_vars: Set::new(),
                     var_type_bounds: Map::new(),
                     var_protocol_bounds: Map::new(),
+                    where_clauses: List::new(),
                     impl_var_count: 0,
                     impl_self_type: None,
                     receiver_kind: None,

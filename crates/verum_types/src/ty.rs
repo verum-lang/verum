@@ -444,6 +444,7 @@ pub enum Type {
         contexts: Option<crate::di::requirement::ContextExpr>,
         type_params: List<crate::context::TypeParam>, // Generic type parameters with bounds
         properties: Option<crate::computational_properties::PropertySet>, // Computational properties (None = not yet inferred)
+        property_requirement: crate::computational_properties::PropertyRequirement,
     },
 
     /// Tuple type: (T1, T2, ..., Tn)
@@ -1437,6 +1438,7 @@ impl Type {
             }
             // Function types: recurse into params and return
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -1449,6 +1451,7 @@ impl Type {
                     .collect();
                 let new_ret = Box::new(Self::substitute_params_impl(return_type, subst, d));
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: new_params,
                     return_type: new_ret,
                     contexts: contexts.clone(),
@@ -1731,29 +1734,49 @@ impl Type {
         self.as_maybe().is_some()
     }
 
-    /// Create a function type (pure by default, no context requirements)
+    /// Construct a function shape without claiming a body footprint.
     pub fn function(params: List<Type>, return_type: Type) -> Self {
-        Type::Function {
-            params,
-            return_type: Box::new(return_type),
-            type_params: List::new(),
-            contexts: None,
-            properties: Some(crate::computational_properties::PropertySet::pure()),
-        }
+        Self::function_with_requirement(params, return_type,
+            crate::computational_properties::PropertyRequirement::Unrestricted)
     }
 
-    /// Create a function type with DI contexts (pure by default)
+    /// Construct a callable whose body footprint is not known.
+    pub fn function_with_requirement(params: List<Type>, return_type: Type, property_requirement: crate::computational_properties::PropertyRequirement) -> Self {
+        Type::Function { params, return_type: Box::new(return_type), contexts: None,
+            type_params: List::new(), properties: None, property_requirement }
+    }
+
+    /// Construct a source callable annotation without changing its eager output.
+    pub fn function_with_async(params: List<Type>, return_type: Type, is_async: bool) -> Self {
+        Self::function_with_requirement(params, return_type,
+            crate::computational_properties::PropertyRequirement::source_callable(is_async))
+    }
+
+    /// Retain a declaration's async property alongside other inferred properties.
+    pub fn with_async_property(mut self, is_async: bool) -> Self {
+        if let Type::Function { properties, property_requirement, .. } = &mut self {
+            *property_requirement = crate::computational_properties::PropertyRequirement::source_callable(is_async);
+            if is_async && let Some(known) = properties {
+                *known = known.union(&crate::computational_properties::PropertySet::single(
+                    crate::computational_properties::ComputationalProperty::Async));
+            }
+        }
+        self
+    }
+
+    /// Construct a function with DI contexts and an unknown body footprint.
     pub fn function_with_contexts(
         params: List<Type>,
         return_type: Type,
         contexts: crate::di::requirement::ContextRequirement,
     ) -> Self {
         Type::Function {
+            property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
             params,
             return_type: Box::new(return_type),
             type_params: List::new(),
             contexts: Some(crate::di::requirement::ContextExpr::Concrete(contexts)),
-            properties: Some(crate::computational_properties::PropertySet::pure()),
+            properties: None,
         }
     }
 
@@ -1764,11 +1787,12 @@ impl Type {
         context_var: TypeVar,
     ) -> Self {
         Type::Function {
+            property_requirement: crate::computational_properties::PropertyRequirement::Unrestricted,
             params,
             return_type: Box::new(return_type),
             type_params: List::new(),
             contexts: Some(crate::di::requirement::ContextExpr::Variable(context_var)),
-            properties: Some(crate::computational_properties::PropertySet::pure()),
+            properties: None,
         }
     }
 
@@ -1779,6 +1803,7 @@ impl Type {
         properties: crate::computational_properties::PropertySet,
     ) -> Self {
         Type::Function {
+            property_requirement: crate::computational_properties::PropertyRequirement::AtMost(properties.clone()),
             params,
             return_type: Box::new(return_type),
             type_params: List::new(),
@@ -2712,12 +2737,14 @@ impl Type {
         Ok(match self {
             Type::Var(v) => subst.get(v).cloned().unwrap_or_else(|| self.clone()),
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
                 contexts,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| p.try_apply_subst_with_depth(subst, next_depth, max_depth))
@@ -3201,12 +3228,16 @@ impl fmt::Display for Type {
                 Ok(())
             }
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params: _,
                 contexts,
-                properties: _,
+                properties,
             } => {
+                if property_requirement.may_be_async() {
+                    write!(f, "async ")?;
+                }
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {
                     if i > 0 {

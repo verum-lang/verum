@@ -45,6 +45,7 @@ fn parameter_metadata(type_ref: TypeRef, declared: Option<&str>) -> ParamDescrip
 
 fn opaque_callback() -> TypeRef {
     TypeRef::Function {
+        is_async: false,
         params: Vec::new(),
         return_type: Box::new(TypeRef::Concrete(verum_vbc::types::TypeId::PTR)),
         contexts: Default::default(),

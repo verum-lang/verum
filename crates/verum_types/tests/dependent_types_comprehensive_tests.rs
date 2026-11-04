@@ -166,6 +166,7 @@ fn test_pi_type_printf_dependent() {
     // Inner Pi: ParseFormat(fmt) -> Text
 
     let inner = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::Generic {
             name: Text::from("ParseFormat"),
             args: List::new(),
@@ -287,6 +288,7 @@ fn test_pi_type_with_tuple_param() {
 fn test_pi_type_returning_function() {
     // Test Pi type returning a function: (x: Int) -> (Bool -> Text)
     let inner_fn = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::Bool].into_iter().collect(),
         return_type: Box::new(Type::Text),
         contexts: None,
@@ -821,6 +823,7 @@ fn test_eq_type_with_lambda() {
     };
 
     let fn_type = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::Int].into_iter().collect(),
         return_type: Box::new(Type::Int),
         contexts: None,
@@ -1314,6 +1317,7 @@ fn test_type_level_plus_function() {
 
     // plus : Nat -> Nat -> Nat
     let plus_type = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![nat.clone(), nat.clone()].into_iter().collect(),
         return_type: Box::new(nat),
         contexts: None,
@@ -1615,6 +1619,7 @@ fn test_collect_type_vars() {
 
     // Test function with multiple vars
     let fn_ty = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::Var(TypeVar::new(1))].into_iter().collect(),
         return_type: Box::new(Type::Var(TypeVar::new(2))),
         contexts: None,

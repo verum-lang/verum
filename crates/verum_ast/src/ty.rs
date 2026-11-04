@@ -236,6 +236,9 @@ pub enum TypeKind {
     /// type WinCallback is extern "stdcall" fn(c_int) -> c_int;
     /// ```
     Function {
+        /// The callable may yield at await points. Calls still return the
+        /// declared output directly under Verum's eager async semantics.
+        is_async: bool,
         params: List<Type>,
         return_type: Heap<Type>,
         /// Optional calling convention for extern function pointers
@@ -280,6 +283,8 @@ pub enum TypeKind {
     /// the quantified parameters are known, or via dictionary passing when
     /// true polymorphism is needed.
     Rank2Function {
+        /// The callable may yield; this does not wrap its output in Future.
+        is_async: bool,
         /// Universally quantified type parameters local to this function type
         type_params: List<GenericParam>,
         /// Parameter types (may reference type_params)

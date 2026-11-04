@@ -83,6 +83,7 @@ fn module(declaration: TypeDecl) -> VbcModule {
                         name: module.intern_string(decl.name.name.as_str()),
                         tag: descriptor.variants.len().try_into().unwrap(),
                         payload: Some(TypeRef::Function {
+                            is_async: decl.is_async,
                             params: decl
                                 .params
                                 .iter()

@@ -296,6 +296,7 @@ fn test_unsafe_reference_is_send_sync() {
     let unsafe_fn_ref = Type::UnsafeReference {
         mutable: false,
         inner: Box::new(Type::Function {
+            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
             params: vec![Type::Int].into(),
             return_type: Box::new(Type::Bool),
             contexts: None,
@@ -352,6 +353,7 @@ fn test_functions_not_send_sync() {
 
     // fn(Int) -> Bool is NOT Send + NOT Sync
     let func = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::Int].into(),
         return_type: Box::new(Type::Bool),
         contexts: None,
@@ -369,6 +371,7 @@ fn test_functions_not_send_sync() {
 
     // fn() -> () is NOT Send + NOT Sync
     let nullary_func = Type::Function {
+        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::new(),
         return_type: Box::new(Type::Unit),
         contexts: None,
@@ -827,6 +830,7 @@ fn test_not_send_container() {
         vec![
             Type::Int,
             Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![].into(),
                 return_type: Box::new(Type::Bool),
                 contexts: None,
@@ -1010,6 +1014,7 @@ fn test_comprehensive_coverage() {
         ),
         (
             Type::Function {
+                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![Type::Int].into(),
                 return_type: Box::new(Type::Bool),
                 contexts: None,

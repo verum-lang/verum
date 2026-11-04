@@ -519,6 +519,7 @@ fn record_projection_is_refused_before_function_abi_erasure() {
                 "generic_bound" => {
                     let mut parameter = verum_vbc::types::TypeParamDescriptor::default();
                     parameter.type_bounds.push(TypeRef::Function {
+                        is_async: false,
                         params: vec![], return_type: Box::new(ty.clone()), contexts: Default::default(),
                     });
                     function.type_params.push(parameter);

@@ -447,7 +447,10 @@ impl Default for IncrementalParser {
 /// // Lossless round-trip
 /// assert_eq!(result.green.text(), source);
 /// ```
-pub struct EventBasedParser;
+pub struct EventBasedParser {
+    // One immutable canonical token buffer per parsing session.
+    tokens: List<Token>,
+}
 
 /// Result of event-based parsing.
 #[derive(Debug)]
@@ -480,7 +483,11 @@ impl EventBasedParse {
 impl EventBasedParser {
     /// Create a new event-based parser.
     pub fn new() -> Self {
-        Self
+        Self { tokens: List::new() }
+    }
+
+    fn with_tokens(tokens: &List<RichToken>) -> Self {
+        Self { tokens: tokens.iter().map(|token| token.token.clone()).collect() }
     }
 
     /// Parse source code using the event-based infrastructure.
@@ -499,7 +506,8 @@ impl EventBasedParser {
 
         // Phase 3: Parse using EventBuilder, emitting events
         let mut event_builder = EventBuilder::new();
-        self.parse_with_events(source, &rich_tokens, &mut event_builder);
+        let session = Self::with_tokens(&rich_tokens);
+        session.parse_with_events(source, &rich_tokens, &mut event_builder);
 
         // Phase 4: Process events through GreenTreeSink
         let events = event_builder.reorder();
@@ -1866,6 +1874,8 @@ impl EventBasedParser {
         }
 
         match &tokens[pos].token.kind {
+            TokenKind::Fn | TokenKind::Async =>
+                self.parse_callable_type_events(tokens, pos, builder),
             // Reference types: &T, &mut T, &checked T, &checked mut T, &unsafe T, &unsafe mut T
             TokenKind::Ampersand => self.parse_reference_type_events(source, tokens, pos, builder),
             // Tuple types: (T1, T2, ...)
@@ -1876,6 +1886,34 @@ impl EventBasedParser {
             }
             _ => (start_pos, false),
         }
+    }
+
+    /// Use the canonical callable grammar for the extent and validation of this
+    /// lossless node. In particular, rank-2 binders and contexts must not be
+    /// recognized by a second reduced grammar in the editor.
+    fn parse_callable_type_events(
+        &self,
+        tokens: &[&RichToken],
+        start_pos: usize,
+        builder: &mut EventBuilder,
+    ) -> (usize, bool) {
+        let input = &self.tokens.as_slice()[start_pos..];
+        debug_assert_eq!(input[0].span, tokens[start_pos].token.span);
+        let mut parser = RecursiveParser::new(input, input[0].span.file_id);
+        let result = parser.parse_type();
+        let consumed = parser.stream.position().max(1).min(input.len());
+        let marker = builder.start();
+        for token in &input[..consumed] {
+            builder.token(token_kind_to_syntax_kind(&token.kind));
+        }
+        match result {
+            Ok(_) => marker.complete(builder, SyntaxKind::FUNCTION_TYPE),
+            Err(error) => {
+                builder.error(error.to_string());
+                marker.complete(builder, SyntaxKind::ERROR)
+            }
+        };
+        (start_pos + consumed, true)
     }
 
     /// Parse a reference type: &T, &mut T, &checked T, &checked mut T, &unsafe T, &unsafe mut T
@@ -2425,235 +2463,60 @@ impl EventBasedParser {
         parser.parse_type_internal(source)
     }
 
-    /// Internal: parse as module (default)
+    /// Every module entry point uses the same session initialization.
     fn parse_internal(&self, source: &str, file_id: FileId) -> EventBasedParse {
-        // This delegates to the existing parse method with file_id
-        let lossless_lexer = LosslessLexer::new(source, file_id);
-        let rich_tokens = lossless_lexer.tokenize();
-
-        let token_sources = self.convert_tokens_to_sources(source, &rich_tokens);
-
-        let mut event_builder = EventBuilder::new();
-        self.parse_with_events(source, &rich_tokens, &mut event_builder);
-
-        let events = event_builder.reorder();
-        let event_count = events.len();
-
-        let mut sink = GreenTreeSink::new();
-        process(events, &token_sources, &mut sink);
-
-        let (green, sink_errors) = sink.finish();
-        let errors: Vec<verum_syntax::ParseError> = sink_errors
-            .into_iter()
-            .map(|e| verum_syntax::ParseError::at(0, e.message))
-            .collect();
-
-        EventBasedParse {
-            green,
-            event_count,
-            errors,
-        }
+        self.parse(source, file_id)
     }
 
-    /// Internal: parse as single item
     fn parse_item_internal(&self, source: &str) -> EventBasedParse {
-        let file_id = FileId::new(0);
-        let lossless_lexer = LosslessLexer::new(source, file_id);
-        let rich_tokens = lossless_lexer.tokenize();
-
-        let token_sources = self.convert_tokens_to_sources(source, &rich_tokens);
-        let token_slice: Vec<_> = rich_tokens.iter().collect();
-
-        let mut event_builder = EventBuilder::new();
-
-        // Start SOURCE_FILE wrapper
-        let root = event_builder.start();
-
-        // Parse single item
-        if !token_slice.is_empty() {
-            let _ = self.parse_item_events(source, &token_slice, 0, &mut event_builder);
-        }
-
-        root.complete(&mut event_builder, SyntaxKind::SOURCE_FILE);
-
-        let events = event_builder.reorder();
-        let event_count = events.len();
-
-        let mut sink = GreenTreeSink::new();
-        process(events, &token_sources, &mut sink);
-
-        let (green, sink_errors) = sink.finish();
-        let errors: Vec<verum_syntax::ParseError> = sink_errors
-            .into_iter()
-            .map(|e| verum_syntax::ParseError::at(0, e.message))
-            .collect();
-
-        EventBasedParse {
-            green,
-            event_count,
-            errors,
-        }
+        self.parse_fragment(source, Self::parse_item_events)
     }
 
-    /// Internal: parse as block
     fn parse_block_internal(&self, source: &str) -> EventBasedParse {
-        let file_id = FileId::new(0);
-        let lossless_lexer = LosslessLexer::new(source, file_id);
-        let rich_tokens = lossless_lexer.tokenize();
-
-        let token_sources = self.convert_tokens_to_sources(source, &rich_tokens);
-        let token_slice: Vec<_> = rich_tokens.iter().collect();
-
-        let mut event_builder = EventBuilder::new();
-
-        // Start SOURCE_FILE wrapper
-        let root = event_builder.start();
-
-        // Parse block
-        if !token_slice.is_empty() {
-            let _ = self.parse_block_events(source, &token_slice, 0, &mut event_builder);
-        }
-
-        root.complete(&mut event_builder, SyntaxKind::SOURCE_FILE);
-
-        let events = event_builder.reorder();
-        let event_count = events.len();
-
-        let mut sink = GreenTreeSink::new();
-        process(events, &token_sources, &mut sink);
-
-        let (green, sink_errors) = sink.finish();
-        let errors: Vec<verum_syntax::ParseError> = sink_errors
-            .into_iter()
-            .map(|e| verum_syntax::ParseError::at(0, e.message))
-            .collect();
-
-        EventBasedParse {
-            green,
-            event_count,
-            errors,
-        }
+        self.parse_fragment(source, Self::parse_block_events)
     }
 
-    /// Internal: parse as statement
     fn parse_statement_internal(&self, source: &str) -> EventBasedParse {
-        let file_id = FileId::new(0);
-        let lossless_lexer = LosslessLexer::new(source, file_id);
-        let rich_tokens = lossless_lexer.tokenize();
-
-        let token_sources = self.convert_tokens_to_sources(source, &rich_tokens);
-        let token_slice: Vec<_> = rich_tokens.iter().collect();
-
-        let mut event_builder = EventBuilder::new();
-
-        // Start SOURCE_FILE wrapper
-        let root = event_builder.start();
-
-        // Parse statement
-        if !token_slice.is_empty() {
-            let _ = self.parse_stmt_events(source, &token_slice, 0, &mut event_builder);
-        }
-
-        root.complete(&mut event_builder, SyntaxKind::SOURCE_FILE);
-
-        let events = event_builder.reorder();
-        let event_count = events.len();
-
-        let mut sink = GreenTreeSink::new();
-        process(events, &token_sources, &mut sink);
-
-        let (green, sink_errors) = sink.finish();
-        let errors: Vec<verum_syntax::ParseError> = sink_errors
-            .into_iter()
-            .map(|e| verum_syntax::ParseError::at(0, e.message))
-            .collect();
-
-        EventBasedParse {
-            green,
-            event_count,
-            errors,
-        }
+        self.parse_fragment(source, Self::parse_stmt_events)
     }
 
-    /// Internal: parse as expression
     fn parse_expression_internal(&self, source: &str) -> EventBasedParse {
-        let file_id = FileId::new(0);
-        let lossless_lexer = LosslessLexer::new(source, file_id);
-        let rich_tokens = lossless_lexer.tokenize();
-
-        let token_sources = self.convert_tokens_to_sources(source, &rich_tokens);
-        let token_slice: Vec<_> = rich_tokens.iter().collect();
-
-        let mut event_builder = EventBuilder::new();
-
-        // Start SOURCE_FILE wrapper
-        let root = event_builder.start();
-
-        // Parse expression
-        if !token_slice.is_empty() {
-            let _ = self.parse_expr_events(source, &token_slice, 0, &mut event_builder);
-        }
-
-        root.complete(&mut event_builder, SyntaxKind::SOURCE_FILE);
-
-        let events = event_builder.reorder();
-        let event_count = events.len();
-
-        let mut sink = GreenTreeSink::new();
-        process(events, &token_sources, &mut sink);
-
-        let (green, sink_errors) = sink.finish();
-        let errors: Vec<verum_syntax::ParseError> = sink_errors
-            .into_iter()
-            .map(|e| verum_syntax::ParseError::at(0, e.message))
-            .collect();
-
-        EventBasedParse {
-            green,
-            event_count,
-            errors,
-        }
+        self.parse_fragment(source, Self::parse_expr_events)
     }
 
-    /// Internal: parse as type
     fn parse_type_internal(&self, source: &str) -> EventBasedParse {
-        let file_id = FileId::new(0);
-        let lossless_lexer = LosslessLexer::new(source, file_id);
-        let rich_tokens = lossless_lexer.tokenize();
+        self.parse_fragment(source, Self::parse_type_events)
+    }
 
+    /// Parse fragments with the same single canonical token buffer as modules.
+    /// The selected grammar rule receives a fully initialized session, including
+    /// when nested callable syntax appears in an item, statement or expression.
+    fn parse_fragment(
+        &self,
+        source: &str,
+        rule: fn(&Self, &str, &[&RichToken], usize, &mut EventBuilder) -> (usize, bool),
+    ) -> EventBasedParse {
+        let rich_tokens = LosslessLexer::new(source, FileId::new(0)).tokenize();
+        let session = Self::with_tokens(&rich_tokens);
         let token_sources = self.convert_tokens_to_sources(source, &rich_tokens);
         let token_slice: Vec<_> = rich_tokens.iter().collect();
-
         let mut event_builder = EventBuilder::new();
-
-        // Start SOURCE_FILE wrapper
         let root = event_builder.start();
-
-        // Parse type
         if !token_slice.is_empty() {
-            let _ = self.parse_type_events(source, &token_slice, 0, &mut event_builder);
+            let _ = rule(&session, source, &token_slice, 0, &mut event_builder);
         }
-
         root.complete(&mut event_builder, SyntaxKind::SOURCE_FILE);
-
         let events = event_builder.reorder();
         let event_count = events.len();
-
         let mut sink = GreenTreeSink::new();
         process(events, &token_sources, &mut sink);
-
         let (green, sink_errors) = sink.finish();
-        let errors: Vec<verum_syntax::ParseError> = sink_errors
-            .into_iter()
-            .map(|e| verum_syntax::ParseError::at(0, e.message))
+        let errors = sink_errors.into_iter()
+            .map(|error| verum_syntax::ParseError::at(0, error.message))
             .collect();
-
-        EventBasedParse {
-            green,
-            event_count,
-            errors,
-        }
+        EventBasedParse { green, event_count, errors }
     }
+
 }
 
 /// Convert lexer trivia kind to syntax kind.

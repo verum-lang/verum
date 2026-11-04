@@ -83,6 +83,7 @@ fn make_refined_type(base: Type, predicate: Expr) -> Type {
 fn make_function_type(params: Vec<Type>, return_type: Type) -> Type {
     Type::new(
         TypeKind::Function {
+            is_async: false,
             params: params.into(),
             return_type: Heap::new(return_type),
             calling_convention: verum_common::Maybe::None,

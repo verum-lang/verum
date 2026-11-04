@@ -845,6 +845,7 @@ fn register_module_metadata(
                         let payload = v.payload.as_ref()?;
                         let (param_refs, ret_ref, ctx_refs) = match payload {
                             TypeRef::Function {
+                                is_async,
                                 params,
                                 return_type,
                                 contexts,
@@ -2070,7 +2071,7 @@ fn render_type_ref(
                 format!("{}<{}>", base_name, arg_strings.join(", "))
             }
         }
-        TypeRef::Function {
+        TypeRef::Function { is_async,
             params,
             return_type,
             ..
@@ -2080,7 +2081,8 @@ fn render_type_ref(
                 .map(|t| render_type_ref(t, declared_name, param_id_to_name))
                 .collect();
             format!(
-                "fn({}) -> {}",
+                "{}fn({}) -> {}",
+                if *is_async { "async " } else { "" },
                 p.join(", "),
                 render_type_ref(return_type, declared_name, param_id_to_name)
             )
@@ -2222,7 +2224,7 @@ fn type_ref_mentions_ptr_carrier(tr: &verum_vbc::types::TypeRef) -> bool {
         TypeRef::Instantiated { base, args } => {
             *base == TypeId::PTR || args.iter().any(type_ref_mentions_ptr_carrier)
         }
-        TypeRef::Function {
+        TypeRef::Function { is_async,
             params,
             return_type,
             ..

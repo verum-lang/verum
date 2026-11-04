@@ -1143,6 +1143,7 @@ pub fn process_type(input_type: Type, output_type: Type) -> CoinductiveType {
     // step : A -> (B, Process<A, B>)
     let step_type = Type::new(
         TypeKind::Function {
+            is_async: false,
             params: vec![input_type.clone()].into(),
             return_type: Box::new(pair_type),
             calling_convention: Maybe::None,
@@ -2087,6 +2088,7 @@ pub fn state_t_type(state_type: Type, result_type: Type) -> CoinductiveType {
 
     let run_type = Type::new(
         TypeKind::Function {
+            is_async: false,
             params: vec![state_type.clone()].into(),
             return_type: Box::new(pair_type),
             calling_convention: Maybe::None,

@@ -72,6 +72,8 @@ pub struct TypeRegistry {
     /// expression-level type information including literals, variables,
     /// function calls, and compound expressions.
     expr_types: HashMap<Span, Type>,
+    /// Callable selected for an executed call, distinct from its result type.
+    call_targets: verum_common::Map<Span, Type>,
 
     /// Variable types indexed by (span, name)
     ///
@@ -93,9 +95,18 @@ impl TypeRegistry {
     pub fn new() -> Self {
         Self {
             expr_types: HashMap::new(),
+            call_targets: verum_common::Map::new(),
             var_types: HashMap::new(),
             func_return_types: HashMap::new(),
         }
+    }
+
+    pub fn register_call_target(&mut self, span: Span, ty: Type) {
+        self.call_targets.insert(span, ty);
+    }
+
+    pub fn lookup_call_target(&self, span: Span) -> Maybe<&Type> {
+        self.call_targets.get(&span)
     }
 
     /// Register the type of an expression
@@ -257,6 +268,7 @@ impl TypeRegistry {
     /// that should not share type information.
     pub fn clear(&mut self) {
         self.expr_types.clear();
+        self.call_targets.clear();
         self.var_types.clear();
         self.func_return_types.clear();
     }
@@ -270,6 +282,7 @@ impl TypeRegistry {
     ///
     /// * `unifier` - The unifier containing the accumulated substitutions
     pub fn apply_substitution(&mut self, unifier: &crate::unify::Unifier) {
+        for ty in self.call_targets.values_mut() { *ty = unifier.apply(ty); }
         // Apply substitution to all expression types
         for ty in self.expr_types.values_mut() {
             *ty = unifier.apply(ty);

@@ -209,6 +209,7 @@ impl TypeChecker {
 
             // CRITICAL FIX: Handle Function types by recursively resolving parameter and return types.
             TypeKind::Function {
+                is_async,
                 params,
                 return_type,
                 ..
@@ -216,7 +217,7 @@ impl TypeChecker {
                 let param_types: List<Type> =
                     params.iter().map(|p| self.ast_to_type_lenient(p)).collect();
                 let ret_type = self.ast_to_type_lenient(return_type);
-                Type::function(param_types, ret_type)
+                Type::function_with_async(param_types, ret_type, *is_async)
             }
 
             // For other type kinds, use the standard resolution with fallback
@@ -650,6 +651,25 @@ impl TypeChecker {
         self.ast_to_type_inner(ast_ty)
     }
 
+    fn source_callable_type(
+        &mut self,
+        params: List<Type>,
+        output: Type,
+        is_async: bool,
+        contexts: &verum_ast::ContextList,
+        span: verum_ast::Span,
+    ) -> Result<Type> {
+        let mut callable = if contexts.is_empty() {
+            Type::function(params, output)
+        } else {
+            self.ensure_using_types_registered(&contexts.requirements);
+            let requirement = self.context_resolver.resolve_requirement(&contexts.requirements, span)?;
+            Type::function_with_contexts(params, output, requirement)
+        };
+        if let Type::Function { properties, .. } = &mut callable { *properties = None; }
+        Ok(callable.with_async_property(is_async))
+    }
+
     fn ast_to_type_inner(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         use verum_ast::ty::TypeKind;
 
@@ -663,6 +683,8 @@ impl TypeChecker {
             TypeKind::Never => Ok(Type::never()),
 
             TypeKind::Function {
+                is_async,
+                contexts,
                 params,
                 return_type,
                 ..
@@ -709,7 +731,7 @@ impl TypeChecker {
                     }
                 }
 
-                Ok(Type::function(param_types, ret_type))
+                self.source_callable_type(param_types, ret_type, *is_async, contexts, ast_ty.span)
             }
 
             TypeKind::Rank2Function { .. } => self.ast_to_rank2_function_type(ast_ty),
@@ -1370,7 +1392,7 @@ impl TypeChecker {
 
     fn ast_to_rank2_function_type_in_universe_scope(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         use verum_ast::ty::{GenericParamKind, TypeKind};
-        let TypeKind::Rank2Function { type_params, params, return_type, .. } = &ast_ty.kind
+        let TypeKind::Rank2Function { is_async, type_params, params, return_type, contexts, .. } = &ast_ty.kind
             else { unreachable!() };
 
         // Unlike a lazily entered declaration, an explicit nested binder
@@ -1424,7 +1446,8 @@ impl TypeChecker {
                 }
             }
             let inputs = params.iter().map(|p| self.ast_to_type(p)).collect::<Result<List<_>>>()?;
-            let function = Type::function(inputs, self.ast_to_type(return_type)?);
+            let output = self.ast_to_type(return_type)?;
+            let function = self.source_callable_type(inputs, output, *is_async, contexts, ast_ty.span)?;
             Ok(if vars.is_empty() { function }
                 else { Type::Forall { vars, body: Box::new(function) } })
         })();
@@ -3097,6 +3120,7 @@ fn substitute_refinement_binder(
     ) -> Result<Type> {
         // Only process if the method is a function type with type parameters
         if let Type::Function {
+            property_requirement,
             params,
             return_type,
             contexts,
@@ -3209,6 +3233,7 @@ fn substitute_refinement_binder(
 
             // Return the substituted function type (without type_params since they're now instantiated)
             Ok(Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: substituted_params,
                 return_type: Box::new(substituted_return),
                 contexts: contexts.clone(),
@@ -3268,6 +3293,7 @@ fn substitute_refinement_binder(
         // the method type param count, replace them with fresh vars.
         // This handles the case where C is Type::Var(old_var) from protocol registration.
         if let Type::Function {
+            property_requirement,
             params,
             return_type,
             contexts,
@@ -3292,6 +3318,7 @@ fn substitute_refinement_binder(
                 let new_return =
                     Box::new(self.substitute_type_vars_fresh(return_type, &old_to_fresh));
                 result_ty = Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: new_params,
                     return_type: new_return,
                     contexts: contexts.clone(),
@@ -3416,12 +3443,14 @@ fn substitute_refinement_binder(
                     .collect(),
             },
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
                 contexts,
                 properties,
             } => Type::Function {
+                property_requirement: property_requirement.clone(),
                 params: params
                     .iter()
                     .map(|p| self.substitute_type_vars_fresh(p, old_to_fresh))
@@ -3594,6 +3623,7 @@ fn substitute_refinement_binder(
                 }
             }
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
@@ -3606,6 +3636,7 @@ fn substitute_refinement_binder(
                     .collect();
                 let new_return = Box::new(Self::replace_named_with_var(return_type, name, var));
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: new_params,
                     return_type: new_return,
                     type_params: type_params.clone(),
@@ -3799,6 +3830,7 @@ fn substitute_refinement_binder(
 
             // Function types - substitute in params and return type
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -3812,6 +3844,7 @@ fn substitute_refinement_binder(
                 let substituted_return = self.substitute_self_type(return_type, self_ty);
 
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: substituted_params,
                     return_type: Box::new(substituted_return),
                     contexts: contexts.clone(),
@@ -4045,6 +4078,7 @@ fn substitute_refinement_binder(
 
             // Recursively resolve in compound types
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -4062,6 +4096,7 @@ fn substitute_refinement_binder(
                     })
                     .collect();
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: resolved_params,
                     return_type: Box::new(self.resolve_associated_type_projections_with_impl(
                         return_type,
@@ -4232,37 +4267,6 @@ fn substitute_refinement_binder(
     ///
     /// This enables protocol inheritance: when M<_>: Monad, calling `.map()` should find the
     /// method in Functor (which Monad extends through Applicative).
-    pub(super) fn find_method_in_protocol_hierarchy(
-        &self,
-        protocol_name: &Text,
-        method_name: &Text,
-    ) -> Option<(Text, crate::protocol::ProtocolMethod)> {
-        // Get the protocol definition
-        let protocol_checker_guard = self.protocol_checker.read();
-        let protocol_opt = protocol_checker_guard.get_protocol(protocol_name);
-        if let Maybe::Some(protocol) = protocol_opt {
-            // First, check if this protocol directly has the method
-            for (_, protocol_method) in &protocol.methods {
-                if &protocol_method.name == method_name {
-                    return Some((protocol_name.clone(), protocol_method.clone()));
-                }
-            }
-
-            // If not found, search in super_protocols recursively
-            for super_bound in &protocol.super_protocols {
-                if let Some(super_ident) = super_bound.protocol.as_ident() {
-                    let super_name: Text = super_ident.name.clone();
-                    if let Some(found) =
-                        self.find_method_in_protocol_hierarchy(&super_name, method_name)
-                    {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-        None
-    }
-
     /// # Examples
     ///
     /// ```ignore
@@ -4335,6 +4339,7 @@ fn substitute_refinement_binder(
 
             // Function types - substitute in params and return type
             Type::Function {
+                property_requirement,
                 params,
                 return_type,
                 contexts,
@@ -4349,6 +4354,7 @@ fn substitute_refinement_binder(
                     self.substitute_self_hkt_in_type(return_type, hkt_name, constructor);
 
                 Type::Function {
+                    property_requirement: property_requirement.clone(),
                     params: substituted_params,
                     return_type: Box::new(substituted_return),
                     contexts: contexts.clone(),
@@ -4880,6 +4886,7 @@ fn substitute_refinement_binder(
             }
 
             Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
@@ -4892,6 +4899,7 @@ fn substitute_refinement_binder(
                     .map(|t| self.normalize_type_impl(t, d))
                     .collect();
                 Function {
+                    property_requirement: property_requirement.clone(),
                     params: normalized_params,
                     return_type: Box::new(self.normalize_type_impl(return_type, depth + 1)),
                     type_params: type_params.clone(),
@@ -5755,6 +5763,7 @@ fn substitute_refinement_binder(
 
             // Function types
             Function {
+                property_requirement,
                 params,
                 return_type,
                 type_params,
@@ -5769,6 +5778,7 @@ fn substitute_refinement_binder(
                     self.substitute_term_in_type_impl(return_type, var_name, term, next_depth);
 
                 Function {
+                    property_requirement: property_requirement.clone(),
                     params: new_params,
                     return_type: Box::new(new_return),
                     type_params: type_params.clone(),

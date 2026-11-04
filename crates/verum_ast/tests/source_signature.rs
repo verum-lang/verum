@@ -205,6 +205,7 @@ fn callable_result_universes_keep_their_lexical_binders() {
         bounds.push(TypeBound {
             kind: TypeBoundKind::Equality(Type::new(
                 TypeKind::Function {
+                    is_async: false,
                     params: List::new(),
                     return_type: Heap::new(universe(result_level)),
                     calling_convention: None,
@@ -281,6 +282,7 @@ fn methods_and_rank_two_universes_refuse_instead_of_losing_scopes() {
     let mut declaration = function();
     declaration.params.push(parameter(Type::new(
         TypeKind::Rank2Function {
+            is_async: false,
             type_params: List::from_iter([level("u")]),
             params: List::from_iter([universe(variable("u"))]),
             return_type: Heap::new(universe(variable("u"))),
@@ -372,6 +374,7 @@ fn carrier_field() -> RecordField {
 fn callable_universe() -> Type {
     Type::new(
         TypeKind::Function {
+            is_async: false,
             params: List::from_iter([Type::new(TypeKind::Int, Span::dummy())]),
             return_type: Heap::new(universe(UniverseLevelExpr::Concrete(1))),
             calling_convention: None,
@@ -631,6 +634,7 @@ fn nominal_carriers_reject_free_wrong_kind_duplicate_rank_two_and_oversize_annot
     duplicate.generics.extend([ordinary("A"), ordinary("A")]);
     let rank_two = type_declaration(TypeDeclBody::Alias(Type::new(
         TypeKind::Rank2Function {
+            is_async: false,
             type_params: List::from_iter([ordinary("A")]),
             params: List::new(),
             return_type: Heap::new(universe(UniverseLevelExpr::Concrete(0))),
@@ -689,6 +693,7 @@ fn nominal_detection_and_validation_include_record_defaults_and_variant_constrai
     bounds.push(TypeBound {
         kind: TypeBoundKind::Equality(Type::new(
             TypeKind::Function {
+                is_async: false,
                 params: List::new(),
                 return_type: Heap::new(universe(variable("free"))),
                 contexts: Default::default(),
@@ -720,4 +725,26 @@ fn nominal_detection_and_validation_include_record_defaults_and_variant_constrai
             "{error}"
         );
     }
+}
+
+#[test]
+fn nested_callable_contexts_retain_exact_declaration_carriers() {
+    let callback = Type::new(TypeKind::Function {
+        is_async: true, params: vec![Type::new(TypeKind::Int, Span::dummy())].into(),
+        return_type: Heap::new(Type::new(TypeKind::Int, Span::dummy())),
+        calling_convention: None,
+        contexts: verum_ast::context::ContextList::new(vec![
+            verum_ast::context::ContextRequirement::simple(Path::single(ident("Trace")), List::new(), Span::dummy()),
+        ].into()),
+    }, Span::dummy());
+    let nested = Type::new(TypeKind::Tuple(vec![callback].into()), Span::dummy());
+    let mut declaration = function();
+    declaration.params.push(parameter(nested.clone()));
+    let carrier = source_signature(&declaration, false).unwrap().expect("context declaration carrier");
+    assert_eq!(carrier.params, declaration.params);
+    validate_source_signature(&carrier, false).unwrap();
+    let nominal = type_declaration(TypeDeclBody::Alias(nested));
+    let nominal_carrier = source_type_declaration(&nominal).unwrap().expect("nested alias carrier");
+    assert_eq!(nominal_carrier.body, nominal.body);
+    validate_source_type_declaration(&nominal_carrier).unwrap();
 }

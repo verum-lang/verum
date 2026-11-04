@@ -4941,6 +4941,7 @@ dependencies = [
  "verum_error",
  "verum_fast_parser",
  "verum_kernel",
+ "verum_lexer",
  "verum_modules",
  "verum_parser",
  "verum_protocol_types",

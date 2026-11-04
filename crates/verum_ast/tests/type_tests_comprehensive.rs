@@ -276,6 +276,7 @@ fn test_function_type() {
 
     let ty = Type::new(
         TypeKind::Function {
+            is_async: false,
             params: params.clone(),
             return_type,
             calling_convention: Maybe::None,
