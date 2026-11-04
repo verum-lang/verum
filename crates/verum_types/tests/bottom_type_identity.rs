@@ -88,3 +88,27 @@ fn a_nominal_name_does_not_authorize_bottom_elimination() {
     assert!(errors("type Never is { value: Int }; fn good(x: Never) -> Never { x }").is_empty());
     assert!(!errors("type Never is { value: Int }; fn forge<A>(x: Never) -> A { x }").is_empty());
 }
+
+#[test]
+fn record_literals_require_a_declared_record_constructor() {
+    for source in [
+        "type Empty is !; fn forge() -> Empty { Empty {} }",
+        "type Number is Int; fn forge() -> Number { Number {} }",
+        "type Callback is fn() -> Int; fn forge() -> Callback { Callback {} }",
+        "fn forge<T>() -> T { T {} }",
+    ] {
+        assert!(!errors(source).is_empty(), "accepted: {source}");
+    }
+}
+
+#[test]
+fn actual_empty_records_and_record_aliases_keep_their_constructors() {
+    for source in [
+        "type Empty is {}; fn make() -> Empty { Empty {} }",
+        "type Value is { n: Int }; type Alias is Value; fn make() -> Alias { Alias { n: 7 } }",
+        "type Value<T> is { n: T }; type Alias<T> is Value<T>; fn make() -> Alias<Int> { Alias { n: 7 } }",
+    ] {
+        let errors = errors(source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+}

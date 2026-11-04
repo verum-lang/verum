@@ -11464,42 +11464,16 @@ impl TypeChecker {
                                         {
                                             field_types.clone()
                                         } else {
-                                            // THE THIRD ESCAPE HATCH (T1367).
-                                            // A literal whose type cannot be
-                                            // resolved to a field map is
-                                            // accepted UNCHECKED — neither
-                                            // Step 5 (missing) nor Step 6
-                                            // (extra) runs on it. That is
-                                            // deliberate for a genuinely
-                                            // opaque cross-module record, and
-                                            // it is also where every
-                                            // unresolved spelling lands, so
-                                            // the lever says when it is taken
-                                            // rather than leaving the count
-                                            // to a static guess.
-                                            if std::env::var_os(
-                                                "VERUM_TRACE_MISSING_FIELD",
-                                            )
-                                            .is_some()
-                                            {
-                                                eprintln!(
-                                                    "[unchecked-record] {} accepted with no field map in {}",
-                                                    name,
-                                                    match &self.current_function_name {
-                                                        Maybe::Some(n) => n.as_str().to_string(),
-                                                        Maybe::None => String::from("<no enclosing fn>"),
-                                                    }
-                                                );
-                                            }
-                                            let base_maybe = base
-                                                .as_ref()
-                                                .map(|b| Heap::new((**b).clone()));
-                                            let _inferred = self.infer_structural_record(
-                                                fields,
-                                                &base_maybe,
-                                                expr.span,
-                                            )?;
-                                            return Ok(InferResult::new(record_ty.clone()));
+                                            // Resolve transparent aliases through their declaration.
+                                            // An opaque or non-record type does not acquire a
+                                            // constructor merely because braces were written.
+                                            self.resolve_to_record_type(&record_ty).ok_or_else(|| {
+                                                TypeError::OtherWithCodeSpanned {
+                                                    code: "E400".into(),
+                                                    msg: format!("type '{name}' has no resolved record constructor").into(),
+                                                    span: expr.span,
+                                                }
+                                            })?
                                         }
                                     }
                                     Option::Some(other_ty) => {
