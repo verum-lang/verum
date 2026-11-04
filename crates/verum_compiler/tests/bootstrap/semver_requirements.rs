@@ -335,10 +335,10 @@ fn current_semver_sources_publish_real_bodies_signatures_and_private_fields() {
                 .chain(interfaces.iter())
                 .filter(|(owner, _)| owner.rsplit_once('.').unwrap().0 == module)
                 .map(|(owner, ast)| {
-                    (
-                        PathBuf::from(owner.replace('.', "/")).with_extension("vr"),
-                        ast.clone(),
-                    )
+                    OwnedSourceFile {
+                        path: PathBuf::from(owner.replace('.', "/")).with_extension("vr"),
+                        owner: (*owner).into(), ast: ast.clone(),
+                    }
                 })
                 .collect();
             (module.into(), asts.into())
@@ -373,7 +373,7 @@ fn current_semver_sources_publish_real_bodies_signatures_and_private_fields() {
     let (module, count) = pipeline
         .compile_core_module_from_ast(
             &unit,
-            asts.as_slice(),
+            &asts.iter().map(|ast| (unit.name.as_str(), *ast)).collect::<Vec<_>>(),
             &config,
             &verum_ast::cfg::TargetConfig::host(),
             &[],

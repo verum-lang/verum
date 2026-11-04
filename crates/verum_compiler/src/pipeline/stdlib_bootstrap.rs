@@ -38,6 +38,14 @@ use crate::module_utils;
 
 use super::CompilationPipeline;
 
+/// A parsed source file carries its lexical owner through every bootstrap phase.
+/// File-mount aliases are already complete owners, unlike directory groups.
+struct OwnedSourceFile {
+    path: PathBuf,
+    owner: String,
+    ast: verum_ast::Module,
+}
+
 impl<'s> CompilationPipeline<'s> {
     /// Compile the standard library to a VBC archive.
     ///
@@ -167,9 +175,32 @@ impl<'s> CompilationPipeline<'s> {
                     })
             },
         ).map_err(|error| anyhow::anyhow!("resolving stdlib file mounts: {error}"))?;
+        let mut all_parsed_modules: Vec<(String, Vec<OwnedSourceFile>)> = all_parsed_modules
+            .into_iter()
+            .map(|(group, files)| {
+                let owned = files
+                    .into_iter()
+                    .map(|(path, ast)| OwnedSourceFile {
+                        owner: module_utils::source_file_module_path(&group, &path, &ast),
+                        path,
+                        ast,
+                    })
+                    .collect();
+                (group, owned)
+            })
+            .collect();
         for entry in resolved {
-            all_parsed_modules.push((entry.synthetic_name, vec![(entry.absolute_path, entry.module)]));
+            let owner = VbcCodegen::resolve_full_module_path(&entry.module, &entry.synthetic_name)
+                .unwrap_or_else(|| entry.synthetic_name.clone());
+            all_parsed_modules.push((entry.synthetic_name, vec![OwnedSourceFile {
+                path: entry.absolute_path, owner, ast: entry.module,
+            }]));
         }
+        let source_names = module_utils::source_type_names(
+            all_parsed_modules
+                .iter()
+                .flat_map(|(_, files)| files.iter().map(|file| (file.owner.as_str(), &file.ast))),
+        );
         phase.next("Stdlib module registration");
 
         // ====================================================================
@@ -185,10 +216,10 @@ impl<'s> CompilationPipeline<'s> {
         {
             let module_registry = self.session.module_registry();
             for (module_name, ast_modules_with_paths) in &all_parsed_modules {
-                for (file_path, ast_module) in ast_modules_with_paths {
+                for OwnedSourceFile { path: file_path, owner: source_owner, ast: ast_module } in ast_modules_with_paths {
                     // Compute module path from module name + file
                     // Module names are already in dot-separated format (e.g., "core.base.primitives")
-                    let module_path = ModulePath::from_str(module_name.as_str());
+                    let module_path = ModulePath::from_str(&source_owner);
                     let module_id = module_registry.read().allocate_id();
 
                     let file_id = ast_module
@@ -220,7 +251,7 @@ impl<'s> CompilationPipeline<'s> {
                     module_registry.write().register(module_info);
 
                     // Also add to self.modules for later use
-                    let path_text = Text::from(module_name.as_str());
+                    let path_text = Text::from(source_owner.as_str());
                     if !self.modules.contains_key(&path_text) {
                         self.modules.insert(path_text, Arc::new(ast_module.clone()));
                     }
@@ -228,54 +259,7 @@ impl<'s> CompilationPipeline<'s> {
                     // Inline modules belong to the declaring file, just as in
                     // ordinary project loading. Register them before computing
                     // the public reexport closure for bootstrap dependencies.
-                    let source_owner = VbcCodegen::resolve_full_module_path(ast_module, module_name)
-                        .map_or_else(|| module_path.clone(), |owner| ModulePath::from_str(&owner));
-                    self.register_inline_modules(ast_module, &source_owner, file_id);
-
-                    // ALSO register a per-file sub-module path for non-mod.vr files.
-                    // E.g., core/async/poll.vr -> register as "core.async.poll"
-                    // This enables relative imports like `mount .poll.*` to resolve
-                    // from within the parent module (core.async).
-                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                        if file_stem != "mod" {
-                            let sub_module_name = format!("{}.{}", module_name, file_stem);
-                            let sub_module_path = ModulePath::from_str(&sub_module_name);
-                            let sub_module_id = module_registry.read().allocate_id();
-
-                            let mut sub_module_info = ModuleInfo::new(
-                                sub_module_id,
-                                sub_module_path.clone(),
-                                ast_module.clone(),
-                                file_id,
-                                Text::from(std::fs::read_to_string(file_path).unwrap_or_default()),
-                            );
-
-                            match extract_exports_from_module(
-                                ast_module,
-                                sub_module_id,
-                                &sub_module_path,
-                            ) {
-                                Ok(export_table) => {
-                                    sub_module_info.exports = export_table;
-                                }
-                                Err(e) => {
-                                    debug!(
-                                        "Failed to extract exports from {}: {:?}",
-                                        sub_module_name, e
-                                    );
-                                }
-                            }
-
-                            module_registry.write().register(sub_module_info);
-
-                            // Also add to self.modules
-                            let sub_path_text = Text::from(sub_module_name.as_str());
-                            if !self.modules.contains_key(&sub_path_text) {
-                                self.modules
-                                    .insert(sub_path_text, Arc::new(ast_module.clone()));
-                            }
-                        }
-                    }
+                    self.register_inline_modules(ast_module, &module_path, file_id);
                 }
             }
 
@@ -398,55 +382,30 @@ impl<'s> CompilationPipeline<'s> {
         // calls — so io/mod.vr's IoError alias was never collected,
         // never exported, and net's `IoError.from_os(e)` degraded to
         // an instance CallM (bakeAI [static-alias] alias_hit=false).
-        // Scope oracle is the DECLARING module's merged item set;
-        // first-wins across modules mirrors the merge-back discipline.
+        // The declaring file owns both the alias scope and the qualified key.
         {
-            let mut aliases_registered = 0usize;
-            for (_module_name, ast_modules) in &all_parsed_modules {
-                let merged: Vec<verum_ast::Item> = ast_modules
-                    .iter()
-                    .flat_map(|(_, m)| m.items.iter().cloned())
-                    .collect();
-                let scope = verum_ast::decl::locally_visible_type_names(&merged);
-                for item in &merged {
-                    if let verum_ast::ItemKind::Type(td) = &item.kind
-                        && let Some(target) =
-                            verum_vbc::codegen::VbcCodegen::detect_variant_form_alias(td, &scope)
-                    {
-                        // [diag] name-level trace via the same
-                        // VERUM_TRACE_STUB=<substr> convention.
-                        if let Ok(filter) = std::env::var("VERUM_TRACE_STUB")
-                            && filter != "1"
-                            && td.name.name.as_str().contains(&filter)
-                        {
-                            eprintln!(
-                                "[stage-alias] '{}' -> '{}'",
-                                td.name.name, target
-                            );
-                        }
-                        // MODULE-QUALIFIED key is authoritative — three
-                        // distinct stdlib `IoError` aliases exist (io →
-                        // StreamError, sys.io_engine → EngineIoError,
-                        // …); a flat bare key first-wins picks one
-                        // arbitrarily for EVERY consumer. The consumer-
-                        // side resolver disambiguates through its OWN
-                        // mount (`mounted_types`: IoError →
-                        // core.io.IoError → key "io.IoError"). Bare key
-                        // stays as the compat fallback (or_insert).
-                        self.global_type_alias_registry
-                            .entry(format!(
-                                "{}.{}",
-                                _module_name,
-                                td.name.name.as_str()
-                            ))
-                            .or_insert(target.clone());
-                        self.global_type_alias_registry
-                            .entry(td.name.name.to_string())
-                            .or_insert(target);
-                        aliases_registered += 1;
-                    }
+            let aliases_registered = source_names.aliases.len();
+            for alias in &source_names.aliases {
+                if let Ok(filter) = std::env::var("VERUM_TRACE_STUB")
+                    && filter != "1"
+                    && alias.local_name.contains(&filter)
+                {
+                    eprintln!(
+                        "[stage-alias] '{}' -> '{}'",
+                        alias.qualified_name, alias.target
+                    );
                 }
             }
+            module_utils::merge_type_aliases(
+                &mut self.global_type_alias_registry,
+                source_names.aliases.iter().flat_map(|alias| {
+                    [
+                        (alias.qualified_name.clone(), alias.target.clone()),
+                        (alias.local_name.clone(), alias.target.clone()),
+                    ]
+                }),
+                &source_names.ambiguous,
+            );
             if std::env::var("VERUM_TRACE_STUB").is_ok() {
                 eprintln!(
                     "[stage-alias] pre-registered {} variant-form type aliases",
@@ -488,10 +447,9 @@ impl<'s> CompilationPipeline<'s> {
             let mut layouts_registered = 0usize;
             let mut simple_name_collisions = 0usize;
             for (module_name, ast_modules) in &all_parsed_modules {
-                for (_file_path, ast_module) in ast_modules {
-                    let field_types = field_renderer.declared_field_type_names(ast_module, module_name);
-                    let source_module = VbcCodegen::resolve_full_module_path(ast_module, module_name)
-                        .unwrap_or_else(|| module_name.clone());
+                for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
+                    let source_module = source_owner;
+                    let field_types = field_renderer.declared_field_type_names(ast_module, &source_module);
                     let source_prefix = format!("{source_module}.");
                     for (key, ty) in &field_types {
                         if key.0.starts_with(&source_prefix) {
@@ -516,7 +474,7 @@ impl<'s> CompilationPipeline<'s> {
                             verum_ast::decl::TypeDeclBody::Record(fields) if !fields.is_empty() => {
                                 entries.push((
                                     owner.clone(),
-                                    format!("{module_name}.{owner}"),
+                                    format!("{source_module}.{owner}"),
                                     fields.iter().map(|f| f.name.name.to_string()).collect(),
                                     fields
                                         .iter()
@@ -553,7 +511,7 @@ impl<'s> CompilationPipeline<'s> {
                                     let vname = v.name.name.to_string();
                                     entries.push((
                                         format!("{owner}.{vname}"),
-                                        format!("{module_name}.{owner}.{vname}"),
+                                        format!("{source_module}.{owner}.{vname}"),
                                         names.clone(),
                                         types.clone(),
                                     ));
@@ -636,27 +594,8 @@ impl<'s> CompilationPipeline<'s> {
         // therefore not caution, it is the only place the discipline can
         // live on this path.
         {
-            let mut declared_in: std::collections::HashMap<&str, &str> =
-                std::collections::HashMap::new();
-            for (module_name, ast_modules) in &all_parsed_modules {
-                for (_file_path, ast_module) in ast_modules {
-                    for item in &ast_module.items {
-                        let verum_ast::ItemKind::Type(td) = &item.kind else {
-                            continue;
-                        };
-                        let name = td.name.name.as_str();
-                        match declared_in.get(name) {
-                            Some(first) if *first != module_name.as_str() => {
-                                self.ambiguous_core_type_names.insert(name.to_string());
-                            }
-                            Some(_) => {}
-                            None => {
-                                declared_in.insert(name, module_name.as_str());
-                            }
-                        }
-                    }
-                }
-            }
+            self.ambiguous_core_type_names
+                .extend(source_names.ambiguous);
             if config.verbose {
                 eprintln!(
                     "  transparency seed: {} simple type name(s) declared by more than \
@@ -677,10 +616,13 @@ one module and therefore never seeded",
         phase.next("Stdlib body compilation");
         for (module_name, ast_modules_with_paths) in &all_parsed_modules {
             let module_start = std::time::Instant::now();
-            let module = modules_to_compile
-                .iter()
-                .find(|m| &m.name == module_name)
-                .expect("module should exist");
+            let mounted_module = StdlibModule {
+                name: module_name.clone(),
+                source_files: ast_modules_with_paths.iter().map(|file| file.path.clone()).collect(),
+                dependencies: Vec::new(),
+            };
+            let module = modules_to_compile.iter().find(|m| &m.name == module_name)
+                .unwrap_or(&mounted_module);
 
             if config.verbose {
                 eprintln!(
@@ -690,9 +632,8 @@ one module and therefore never seeded",
                 );
             }
 
-            // Extract just the AST modules for compilation
-            let ast_modules: Vec<&verum_ast::Module> =
-                ast_modules_with_paths.iter().map(|(_, ast)| ast).collect();
+            let ast_modules: Vec<_> = ast_modules_with_paths.iter()
+                .map(|file| (file.owner.as_str(), &file.ast)).collect();
 
             let (vbc_module, funcs) = self.compile_core_module_from_ast(
                 module,
@@ -837,7 +778,7 @@ one module and therefore never seeded",
     /// other declarations cannot claim those aliases by registration order.
     fn pre_register_canonical_static_methods(
         &mut self,
-        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+        all_modules: &[(String, Vec<OwnedSourceFile>)],
     ) -> Result<()> {
         use verum_ast::decl::{ImplItemKind, ImplKind, Visibility};
         use verum_ast::ItemKind;
@@ -889,7 +830,7 @@ one module and therefore never seeded",
             // duplicate nominal spelling is deliberately unknown, never a
             // sibling declaration selected by insertion order.
             let mut owner_generics: std::collections::HashMap<String, Option<Vec<String>>> = std::collections::HashMap::new();
-            for (_, ast) in ast_modules {
+            for OwnedSourceFile { owner, ast, .. } in ast_modules {
                 for item in &ast.items {
                     if let ItemKind::Type(decl) = &item.kind {
                         let names = decl.generics.iter().filter_map(|p| match &p.kind {
@@ -898,11 +839,11 @@ one module and therefore never seeded",
                             | verum_ast::ty::GenericParamKind::Meta { name, .. } => Some(name.name.to_string()),
                             _ => None,
                         }).collect();
-                        owner_generics.entry(decl.name.name.to_string()).and_modify(|v| *v = None).or_insert(Some(names));
+                        owner_generics.entry(verum_vbc::module::qualify_module_name(owner, decl.name.name.as_str())).and_modify(|v| *v = None).or_insert(Some(names));
                     }
                 }
             }
-            for (_file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
                 for item in ast_module.items.iter() {
                     let impl_decl = match &item.kind {
                         ItemKind::Impl(impl_decl) => impl_decl,
@@ -988,21 +929,15 @@ one module and therefore never seeded",
                     // ORDER is, and this pre-pass is what makes order
                     // irrelevant for the names it covers.
                     //
-                    // QUALIFIED KEY ONLY, and that is what makes widening
-                    // past the canonical set safe: `DEFAULT` / `NONE` /
-                    // `BOLD` collide across dozens of types, so a bare-key
-                    // registration would hand the first-wins slot to an
-                    // arbitrary declarer. `Type.MEMBER` cannot collide.
-                    // Same discipline the record-layout seeder above
-                    // already uses — qualified authoritative, bare
-                    // first-wins.
+                    // Only the full source owner distinguishes same-named
+                    // nominal types. Prelude aliases are convenience entries.
                     for impl_item in impl_decl.items.iter() {
                         let (const_name, const_ty) = match &impl_item.kind {
                             ImplItemKind::Const { name, ty, .. } => (name, ty),
                             _ => continue,
                         };
-                        let qualified =
-                            format!("{}.{}", target_type_name, const_name.name);
+                        let short = format!("{}.{}", target_type_name, const_name.name);
+                        let qualified = verum_vbc::module::qualify_module_name(source_owner, &short);
                         if self.global_function_registry.contains_key(&qualified) {
                             continue;
                         }
@@ -1057,14 +992,15 @@ one module and therefore never seeded",
                                 qualified, stub_id.0
                             );
                         }
+                        if is_canonical_stdlib_type(&target_type_name) {
+                            self.global_function_registry.entry(short).or_insert_with(|| info.clone());
+                        }
                         self.global_function_registry.insert(qualified, info);
                         stubs_registered += 1;
                     }
                     // Every source-owned method needs a forward declaration.
                     // Only the canonical prelude set also receives a legacy
                     // short alias; unrelated nominal types stay qualified.
-                    let source_owner = VbcCodegen::resolve_full_module_path(ast_module, _module_name)
-                        .unwrap_or_else(|| _module_name.clone());
                     // Walk the impl block's items, register each
                     // `public fn` as a stub.
                     for impl_item in impl_decl.items.iter() {
@@ -1155,7 +1091,7 @@ one module and therefore never seeded",
                                     | verum_ast::decl::FunctionParamKind::SelfRefUnsafeMut
                             )
                         );
-                        let parent_names = owner_generics.get(&target_type_name).and_then(|v| v.as_deref()).unwrap_or(&[]);
+                        let parent_names = owner_generics.get(&verum_vbc::module::qualify_module_name(source_owner, &target_type_name)).and_then(|v| v.as_deref()).unwrap_or(&[]);
                         let impl_names: Vec<String> = if impl_decl.generics.is_empty() {
                             verum_vbc::codegen::VbcCodegen::impl_target_arg_names(&impl_decl.kind)
                                 .into_iter().filter(|name| parent_names.contains(name)).collect()
@@ -1232,7 +1168,7 @@ one module and therefore never seeded",
     /// references never require provisional ABI descriptors or unknown types.
     fn collect_core_declaration_interfaces(
         &mut self,
-        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+        all_modules: &[(String, Vec<OwnedSourceFile>)],
         config: &CoreConfig,
         target: &verum_ast::cfg::TargetConfig,
     ) -> Result<Vec<verum_vbc::VbcModule>> {
@@ -1249,8 +1185,10 @@ one module and therefore never seeded",
                 .with_optimization_level(config.optimization_level)
                 .with_target(target.clone()),
         );
-        let sources: Vec<_> = all_modules.iter().flat_map(|(owner, files)|
-            files.iter().map(move |(_, ast)| (owner.as_str(), ast))).collect();
+        let sources: Vec<_> = all_modules
+            .iter()
+            .flat_map(|(_, files)| files.iter().map(|file| (file.owner.as_str(), &file.ast)))
+            .collect();
         let interface = declarations.collect_owned_declaration_interface(&sources)
             .map_err(|error| anyhow::anyhow!("collecting stdlib declaration graph: {error}"))?;
         declarations.export_foreign_interfaces(&interface, &mut foreign);
@@ -1307,7 +1245,7 @@ one module and therefore never seeded",
     fn import_core_nominal_dependencies(
         &self,
         codegen: &mut VbcCodegen,
-        sources: &[&verum_ast::Module],
+        sources: &[(&str, &verum_ast::Module)],
         available: &[&verum_vbc::VbcModule],
     ) -> Result<()> {
         // Source exports, including re-export aliases, choose the declaring
@@ -1315,7 +1253,7 @@ one module and therefore never seeded",
         let source_registry = self.session.module_registry();
         let source_registry = source_registry.read();
         let source_resolver = verum_types::TypeChecker::new();
-        codegen.import_bootstrap_nominal_dependencies_with_resolver(
+        codegen.import_owned_bootstrap_nominal_dependencies_with_resolver(
             sources, available, |written| {
                 let (owner, name) = written.rsplit_once('.')?;
                 let (declaration, declared_owner) = source_resolver.resolve_public_source_type(
@@ -1349,7 +1287,7 @@ one module and therefore never seeded",
     ///
     fn pre_register_public_free_functions(
         &mut self,
-        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+        all_modules: &[(String, Vec<OwnedSourceFile>)],
     ) -> Result<()> {
         use verum_ast::decl::Visibility;
         use verum_ast::ItemKind;
@@ -1361,7 +1299,7 @@ one module and therefore never seeded",
         let mut name_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for (_module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { ast: ast_module, .. } in ast_modules {
                 for item in ast_module.items.iter() {
                     if let ItemKind::Function(func) = &item.kind
                         && matches!(func.visibility, Visibility::Public)
@@ -1376,9 +1314,8 @@ one module and therefore never seeded",
         // Pass 2: canonical identities survive collisions and compile order.
         let mut stubs_registered: usize = 0;
         for (module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
-                let owner = VbcCodegen::resolve_full_module_path(ast_module, module_name)
-                    .unwrap_or_else(|| module_name.clone());
+            for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
+                let owner = source_owner;
                 for item in ast_module.items.iter() {
                     let func = match &item.kind {
                         ItemKind::Function(f) => f,
@@ -1477,7 +1414,7 @@ one module and therefore never seeded",
     /// zero-arg-fn backed.
     fn pre_register_unique_public_consts(
         &mut self,
-        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+        all_modules: &[(String, Vec<OwnedSourceFile>)],
     ) -> Result<()> {
         use verum_ast::ItemKind;
         use verum_ast::decl::Visibility;
@@ -1491,7 +1428,7 @@ one module and therefore never seeded",
         // name with any public fn is skipped (the fn owns the slot).
         let mut fn_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (_module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { ast: ast_module, .. } in ast_modules {
                 for item in ast_module.items.iter() {
                     match &item.kind {
                         ItemKind::Const(c) if matches!(c.visibility, Visibility::Public) => {
@@ -1510,7 +1447,7 @@ one module and therefore never seeded",
         let mut consts_registered: usize = 0;
         let mut inlined: usize = 0;
         for (_module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { ast: ast_module, .. } in ast_modules {
                 for item in ast_module.items.iter() {
                     let c = match &item.kind {
                         ItemKind::Const(c) => c,
@@ -1585,7 +1522,7 @@ one module and therefore never seeded",
 
     fn register_stdlib_types_globally(
         &mut self,
-        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+        all_modules: &[(String, Vec<OwnedSourceFile>)],
         type_checker: &mut verum_types::infer::TypeChecker,
         config: &CoreConfig,
     ) -> Result<()> {
@@ -1620,7 +1557,7 @@ one module and therefore never seeded",
             eprintln!("  Pass 0: Processing import aliases from all modules...");
         }
         for (_module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { ast: ast_module, .. } in ast_modules {
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Mount(import_decl) = &item.kind {
                         type_checker.process_import_aliases(import_decl);
@@ -1641,19 +1578,8 @@ one module and therefore never seeded",
             let registry = self.session.module_registry();
             for (module_name, ast_modules) in all_modules {
                 // For each file in the module, compute the correct current_module_path
-                for (file_path, ast_module) in ast_modules {
-                    let current_module_path =
-                        if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                            if file_stem == "mod" {
-                                // mod.vr represents its parent directory module
-                                module_name.clone()
-                            } else {
-                                // Regular file: module_name.file_stem
-                                format!("{}.{}", module_name, file_stem)
-                            }
-                        } else {
-                            module_name.clone()
-                        };
+                for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
+                    let current_module_path = source_owner.clone();
 
                     for item in &ast_module.items {
                         if let verum_ast::ItemKind::Mount(import_decl) = &item.kind {
@@ -1692,7 +1618,7 @@ one module and therefore never seeded",
             eprintln!("  Pass 1: Registering type names from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { ast: ast_module, .. } in ast_modules {
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                         type_checker.register_type_name_only(type_decl);
@@ -1709,23 +1635,14 @@ one module and therefore never seeded",
             eprintln!("  Pass 2: Registering type bodies from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
                 // Architectural: set the checker's current module so that
                 // `define_type_in_current_module` can publish each type
                 // under its fully-qualified key (`{module}.{name}`). Without
                 // this the qualified-name layer stays empty and same-named
                 // stdlib types (e.g. `RecvError` in broadcast/channel/quic)
                 // silently collide on the flat lookup table.
-                let per_file_module_path =
-                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                        if file_stem == "mod" {
-                            module_name.clone()
-                        } else {
-                            format!("{}.{}", module_name, file_stem)
-                        }
-                    } else {
-                        module_name.clone()
-                    };
+                let per_file_module_path = source_owner.clone();
                 type_checker.set_current_module_path(per_file_module_path);
 
                 // ALIAS-VS-MARKER scope (#41): the declaring file's local
@@ -1755,21 +1672,12 @@ one module and therefore never seeded",
             eprintln!("  Pass 3: Registering function signatures from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
                 // Module-scoped resolution: free fn signatures reference types
                 // (`Result<_, RecvError>`) that may collide across modules, so
                 // anchor each file to its qualified module path before
                 // registration.
-                let per_file_module_path =
-                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                        if file_stem == "mod" {
-                            module_name.clone()
-                        } else {
-                            format!("{}.{}", module_name, file_stem)
-                        }
-                    } else {
-                        module_name.clone()
-                    };
+                let per_file_module_path = source_owner.clone();
                 type_checker.set_current_module_path(per_file_module_path);
 
                 for item in &ast_module.items {
@@ -1794,18 +1702,9 @@ one module and therefore never seeded",
             eprintln!("  Pass 4: Registering protocols from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
                 // Module-scoped resolution for protocol method signatures.
-                let per_file_module_path =
-                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                        if file_stem == "mod" {
-                            module_name.clone()
-                        } else {
-                            format!("{}.{}", module_name, file_stem)
-                        }
-                    } else {
-                        module_name.clone()
-                    };
+                let per_file_module_path = source_owner.clone();
                 type_checker.set_current_module_path(per_file_module_path);
 
                 for item in &ast_module.items {
@@ -1830,22 +1729,13 @@ one module and therefore never seeded",
             eprintln!("  Pass 5: Registering impl blocks from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (file_path, ast_module) in ast_modules {
+            for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules {
                 // Architectural: set the current module path so that type
                 // references inside impl-block signatures (e.g. `RecvError` in
                 // `Stream for BroadcastReceiver`) resolve against the
                 // qualified-name layer first — avoiding collisions between
                 // same-named types in different stdlib modules.
-                let per_file_module_path =
-                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                        if file_stem == "mod" {
-                            module_name.clone()
-                        } else {
-                            format!("{}.{}", module_name, file_stem)
-                        }
-                    } else {
-                        module_name.clone()
-                    };
+                let per_file_module_path = source_owner.clone();
                 type_checker.set_current_module_path(per_file_module_path);
 
                 for item in &ast_module.items {
@@ -1874,7 +1764,7 @@ one module and therefore never seeded",
         // architectural violation for those.
         let mut all_ast_modules: Vec<&verum_ast::Module> = Vec::new();
         for (_, ast_modules) in all_modules {
-            for (_, ast_module) in ast_modules {
+            for OwnedSourceFile { ast: ast_module, .. } in ast_modules {
                 all_ast_modules.push(ast_module);
             }
         }
@@ -1910,9 +1800,21 @@ one module and therefore never seeded",
             eprintln!("  Pass 6: Validating imports...");
         }
 
-        let export_index = crate::core_compiler::build_export_index(all_modules);
+        let exports: Vec<_> = all_modules
+            .iter()
+            .flat_map(|(_, files)| {
+                files
+                    .iter()
+                    .map(|file| (file.owner.as_str(), file.path.as_path(), &file.ast))
+            })
+            .collect();
+        let sources: Vec<_> = exports
+            .iter()
+            .map(|(owner, _, ast)| (*owner, *ast))
+            .collect();
+        let export_index = crate::core_compiler::build_owned_export_index(&exports);
         let import_errors =
-            crate::core_compiler::validate_imports(all_modules, &export_index, &target);
+            crate::core_compiler::validate_owned_imports(&sources, &export_index, &target);
 
         for (module_path, item_name, similar, span) in import_errors {
             let message = if similar.is_empty() {
@@ -1941,65 +1843,25 @@ one module and therefore never seeded",
         Ok(())
     }
 
-    /// Runs the user pipeline's VALIDATION phases over the stdlib's own
-    /// files (T0692).
-    ///
-    /// A user compile validates contexts, FFI boundaries, Send/Sync and
-    /// the safety gate. The bake ran NONE of them — measured in T0640,
-    /// which counted zero calls to each from the bake path — so the
-    /// standard library was never held to rules the language enforces
-    /// on everyone else. That is not a small asymmetry: `core/` is the
-    /// largest body of Verum in existence and the one every program
-    /// links.
-    ///
-    /// These four are pure AST walks whose findings are warnings, so
-    /// running them is measurement first and enforcement later. The
-    /// safety gate can FAIL a build, and is therefore reported here
-    /// rather than propagated: a bake that stops because the library
-    /// trips a gate nobody has ever run over it would be a regression
-    /// in the tool, not a finding about the library. Turning that
-    /// report into a hard failure is the next step, once the count is
-    /// known and driven to zero.
-    ///
-    /// FIRST MEASUREMENT (2026-08-19, full bake): 590 modules, 2558
-    /// files, zero findings — no FFI-boundary errors, no safety-gate
-    /// rejections, no context or Send/Sync diagnostics.
-    ///
-    /// What that zero does and does not mean, stated because a silent
-    /// pass and an unrun phase look identical:
-    ///
-    /// * context validation and Send/Sync DO run on the default
-    ///   configuration (`[context] enabled = true`), so their zero is
-    ///   evidence.
-    /// * `phase_safety_gate` returns early when every `[safety]` flag
-    ///   is permissive, which is the default. Its zero says the
-    ///   library trips nothing under the shipped policy, NOT that it
-    ///   would survive a strict one — measuring that needs a bake with
-    ///   the flags raised, and is the next step.
-    ///
-    /// `VERUM_BAKE_VALIDATION=off` skips them; `=report` prints the
-    /// per-module counts the numbers above come from.
+    /// Validate source-owned files before compiling bodies or publishing an archive.
+    /// Mandatory checks follow the user pipeline's configured policy. Report mode
+    /// adds counts; strict adds declared FFI/capability checks; verify adds contract
+    /// verification. An attempted check's errors always reject the archive.
     fn run_user_validation_phases(
         &mut self,
         module_name: &str,
-        ast_modules: &[&verum_ast::Module],
-    ) {
-        if std::env::var("VERUM_BAKE_VALIDATION").as_deref() == Ok("off") {
-            return;
-        }
-        let mode = std::env::var("VERUM_BAKE_VALIDATION").unwrap_or_default();
+        ast_modules: &[(&str, &verum_ast::Module)],
+    ) -> Result<()> {
+        let mode = match std::env::var("VERUM_BAKE_VALIDATION") {
+            Ok(mode) if matches!(mode.as_str(), "" | "report" | "strict" | "verify") => mode,
+            Err(std::env::VarError::NotPresent) => String::new(),
+            other => anyhow::bail!(
+                "invalid VERUM_BAKE_VALIDATION {other:?}: expected report, strict or verify; mandatory stdlib validation cannot be disabled"
+            ),
+        };
         let strict = mode == "strict";
-        // `=verify` adds CONTRACT verification — the phase that reads
-        // `@verify(formal)`. It is its own mode because it is the
-        // expensive one (an SMT context, and an AST clone per module),
-        // and because its subject is real: core/ carries 546 such
-        // annotations across 51 files that nothing has ever checked.
-        //
-        // Note which phase this is. `phase_verify` — the refinement one
-        // — was tried first and reported zero over 577 modules, because
-        // it collects functions with refinement TYPES and core/ has
-        // none. Its zero was honest and empty. The annotations live on
-        // a different carrier, and that carrier has a different phase.
+        // Contract verification is an explicit additional mode, not evidence
+        // provided by an ordinary successful bytecode build.
         let verify = mode == "verify";
         let mut contract_failures = 0usize;
         let mut meta_failures = 0usize;
@@ -2011,28 +1873,11 @@ one module and therefore never seeded",
         // would have reported a clean library while saying nothing
         // about two of the four phases.
         let errors_before = self.session.error_count();
-        for ast_module in ast_modules {
-            // META EVALUATION — the last of T0640's six absent phases.
-            // A zero-parameter `meta fn` is EVALUATED at compile time,
-            // and the phase reports the ones that fail. core/ declares
-            // 22 of them and the bake had never run a single one, so
-            // nothing would have noticed if one stopped evaluating.
-            //
-            // The library passes: 590 modules, 0 failures. That zero is
-            // CONTROLLED, not assumed — a `meta fn` returning `1 / 0`
-            // was added to core/ on purpose and the count went to 1,
-            // then back to 0 when it was removed.
-            //
-            // The first control missed, and the miss is worth keeping:
-            // pointing a `@intrinsic("no_such_thing")` at the phase
-            // changed nothing, because an unresolved intrinsic is not
-            // in `is_reportable_meta_error`'s list — intrinsics resolve
-            // later, by design. A control has to break the thing the
-            // instrument actually measures.
-            if verify
-                && let Err(e) = self.phase_meta_evaluation(
+        for (source_owner, ast_module) in ast_modules {
+            // Evaluate closed computations in the file's lexical source scope.
+            if let Err(e) = self.phase_meta_evaluation(
                     ast_module,
-                    &verum_common::Text::from(module_name),
+                    &verum_common::Text::from(*source_owner),
                 )
             {
                 meta_failures += 1;
@@ -2048,13 +1893,8 @@ one module and therefore never seeded",
                 safety_failures += 1;
                 tracing::warn!("stdlib safety gate: {}", e);
             }
-            // `=strict` asks the question the default configuration
-            // cannot: what does the gate say when every `[safety]` flag
-            // is raised? The shipped policy is permissive, so
-            // `phase_safety_gate` returns before walking anything and
-            // its zero carries no information. This measures the
-            // library against the strictest policy the gate can express
-            // WITHOUT changing what any build enforces.
+            // Strict mode raises the FFI/capability policy without prohibiting
+            // the library's legitimate unsafe/system boundary implementations.
             if strict {
                 // The policy asks what is FAIR to ask of a standard
                 // library, not what is strictest. `unsafe`, `extern`
@@ -2073,11 +1913,14 @@ one module and therefore never seeded",
                     mls_level: verum_common::Text::from("public"),
                     forbid_stdlib_extern: false,
                 };
-                strict_findings += crate::phases::safety_gate::check_safety(
+                let diagnostics = crate::phases::safety_gate::check_safety(
                     std::slice::from_ref(*ast_module),
                     policy,
-                )
-                .len();
+                );
+                strict_findings += diagnostics.len();
+                for diagnostic in diagnostics {
+                    self.session.emit_diagnostic(diagnostic);
+                }
             }
         }
         // A silent pass and an unrun phase look identical from the
@@ -2087,7 +1930,7 @@ one module and therefore never seeded",
         // told apart from "no phases".
         if verify {
             let owned: Vec<verum_ast::Module> =
-                ast_modules.iter().map(|m| (*m).clone()).collect();
+                ast_modules.iter().map(|(_, module)| (*module).clone()).collect();
             let phase = crate::phases::contract_verification::ContractVerificationPhase::new();
             let input = crate::phases::PhaseInput {
                 data: crate::phases::PhaseData::AstModules(owned.into()),
@@ -2103,19 +1946,8 @@ one module and therefore never seeded",
             use crate::phases::CompilationPhase;
             if let Err(diags) = phase.execute(input) {
                 contract_failures += diags.len();
-                // The MESSAGES, not just the count. The first run
-                // reported five failures in `core.cog` — a module that
-                // declares no `@verify`, `@contract`, `@requires` or
-                // `@ensures` at all — so the number said nothing about
-                // what the phase actually objected to. A count without
-                // its text is the same defect as a count without its
-                // address, one level down.
-                for d in diags.iter().take(3) {
-                    eprintln!(
-                        "[bake-validation]   {}: {}",
-                        module_name,
-                        d.message()
-                    );
+                for diagnostic in diags {
+                    self.session.emit_diagnostic(diagnostic);
                 }
             }
         }
@@ -2139,12 +1971,23 @@ one module and therefore never seeded",
                 meta_failures,
             );
         }
+        let session_errors = self.session.error_count().saturating_sub(errors_before);
+        anyhow::ensure!(
+            session_errors == 0
+                && ffi_failures == 0
+                && safety_failures == 0
+                && strict_findings == 0
+                && contract_failures == 0
+                && meta_failures == 0,
+            "stdlib validation failed in {module_name}: {session_errors} diagnostics, {ffi_failures} FFI, {safety_failures} safety, {strict_findings} strict, {contract_failures} contract, {meta_failures} meta failures"
+        );
+        Ok(())
     }
 
     fn compile_core_module_from_ast(
         &mut self,
         module: &StdlibModule,
-        ast_modules: &[&verum_ast::Module],
+        ast_modules: &[(&str, &verum_ast::Module)],
         config: &CoreConfig,
         target: &verum_ast::cfg::TargetConfig,
         declaration_interfaces: &[verum_vbc::VbcModule],
@@ -2239,13 +2082,14 @@ one module and therefore never seeded",
         // that mattered was never the passes, it was that a MODULE is
         // many files and a user compile is one; that difference now
         // lives in the argument.
-        codegen.collect_unit_declarations(ast_modules).map_err(|e| {
+        codegen
+            .collect_owned_unit_declarations(ast_modules)
+            .map_err(|e| {
             anyhow::anyhow!("collecting declarations for {}: {}", module.name, e)
         })?;
 
-        // Pass 1a.7 (T0692): the VALIDATION phases a user compile runs
-        // and the bake does not.
-        self.run_user_validation_phases(&module.name, ast_modules);
+        // Rejections must propagate before body compilation and archive publication.
+        self.run_user_validation_phases(&module.name, ast_modules)?;
 
         // After all declarations collected, resolve pending imports
         // This handles cross-file imports within the same module
@@ -2274,7 +2118,7 @@ one module and therefore never seeded",
         let pre_body_layouts: Option<std::collections::BTreeMap<String, Vec<String>>> =
             trace_lazy_layout.then(|| codegen.export_type_layouts().into_iter().collect());
 
-        codegen.compile_unit_items(ast_modules, ItemFailurePolicy::Strict)
+        codegen.compile_owned_unit_items(ast_modules, ItemFailurePolicy::Strict)
             .map_err(|e| anyhow::anyhow!("compiling stdlib bodies for {}: {e}", module.name))?;
         let merged_vbc = codegen
             .finalize_module_from_state()
@@ -2426,9 +2270,11 @@ one module and therefore never seeded",
         // and use them resolve the alias (companion to the alias-vs-marker
         // typechecker fix; without this the embedded @core bodies that use
         // a cross-module alias as a namespace stay lenient panic-stubs).
-        for (name, target) in codegen.export_type_aliases() {
-            self.global_type_alias_registry.entry(name).or_insert(target);
-        }
+        module_utils::merge_type_aliases(
+            &mut self.global_type_alias_registry,
+            codegen.export_type_aliases(),
+            &self.ambiguous_core_type_names,
+        );
         // T1192: publish this module's transparent-wrapper names, minus the
         // ones another module also declares (see `ambiguous_core_type_names`).
         for name in codegen.export_newtype_names() {
@@ -2471,13 +2317,30 @@ one module and therefore never seeded",
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("StdlibModuleResolver not initialized"))?;
 
-        // Add modules in compilation order
-        for name in resolver.compilation_order() {
+        // Directory discovery does not enumerate file-mounted compilation
+        // units. Publish every produced module, retaining the discovered order
+        // and a stable order for these explicitly loaded source units.
+        let mut order: Vec<_> = resolver.compilation_order().iter().collect();
+        let discovered: std::collections::HashSet<&str> =
+            order.iter().map(|name| name.as_str()).collect();
+        let mut mounted: Vec<_> = self
+            .compiled_stdlib_modules
+            .keys()
+            .filter(|name| !discovered.contains(name.as_str()))
+            .collect();
+        mounted.sort();
+        order.extend(mounted);
+        for name in order {
             if let Some(module) = self.compiled_stdlib_modules.get(name) {
-                let deps: Vec<&str> = resolver
-                    .get_module(name)
-                    .map(|m| m.dependencies.iter().map(|s: &String| s.as_str()).collect())
-                    .unwrap_or_default();
+                let deps: Vec<&str> = if let Some(source) = resolver.get_module(name) {
+                    source.dependencies.iter().map(String::as_str).collect()
+                } else {
+                    module.dependencies.iter().map(|dependency| {
+                        module.get_string(dependency.name).ok_or_else(|| anyhow::anyhow!(
+                            "module {name} has an invalid dependency string index {:?}", dependency.name,
+                        ))
+                    }).collect::<Result<Vec<_>>>()?
+                };
 
                 builder.add_module(name, module, &deps).map_err(|e| {
                     anyhow::anyhow!("Failed to add module {} to archive: {}", name, e)
@@ -2516,3 +2379,7 @@ mod semver_requirement_tests;
 #[cfg(test)]
 #[path = "../../tests/bootstrap/forward_results.rs"]
 mod forward_result_tests;
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/meta_validation_owners.rs"]
+mod meta_validation_owner_tests;

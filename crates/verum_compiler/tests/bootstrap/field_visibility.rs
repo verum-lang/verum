@@ -20,7 +20,7 @@ fn source_module(owner: &str, source: &str) -> verum_vbc::module::VbcModule {
     let (module, _) = pipeline
         .compile_core_module_from_ast(
             &unit,
-            &[&ast],
+            &[(unit.name.as_str(), &ast)],
             &config,
             &verum_ast::cfg::TargetConfig::host(),
             &[],

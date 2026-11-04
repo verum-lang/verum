@@ -71,7 +71,7 @@ fn bootstrap(prior: &[(&str, &str)], source: &str) -> (VbcModule, VbcArchive) {
         let (module, _) = pipeline
             .compile_core_module_from_ast(
                 &unit,
-                &[ast],
+                &[(*owner, ast)],
                 &config,
                 &verum_ast::cfg::TargetConfig::host(),
                 &[],

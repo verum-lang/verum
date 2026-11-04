@@ -47,7 +47,7 @@ fn source_publication_replaces_stubs_and_keeps_existing_real_entries() {
     let (artifact, count) = pipeline
         .compile_core_module_from_ast(
             &module,
-            &[&alpha, &beta],
+            &[("bundle.alpha", &alpha), ("bundle.beta", &beta)],
             &config,
             &verum_ast::cfg::TargetConfig::host(),
             &[],

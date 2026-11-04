@@ -154,13 +154,33 @@ pub struct StdlibModule {
 pub fn build_export_index(
     all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
 ) -> ModuleExportsIndex {
+    let owned: Vec<_> = all_modules
+        .iter()
+        .flat_map(|(group, files)| {
+            files.iter().map(move |(path, ast)| {
+                (
+                    module_utils::source_file_module_path(group, path, ast),
+                    path,
+                    ast,
+                )
+            })
+        })
+        .collect();
+    let sources: Vec<_> = owned
+        .iter()
+        .map(|(owner, path, ast)| (owner.as_str(), path.as_path(), *ast))
+        .collect();
+    build_owned_export_index(&sources)
+}
+
+/// Index exports using the exact source owners shared by declaration and body lowering.
+pub fn build_owned_export_index(
+    sources: &[(&str, &Path, &verum_ast::Module)],
+) -> ModuleExportsIndex {
     let mut index: ModuleExportsIndex = HashMap::new();
 
-    for (module_name, ast_modules) in all_modules {
-        for (file_path, ast_module) in ast_modules {
-            // Derive submodule path from file name
-            // e.g., "core/base/memory.vr" with module_name "core" -> "core.memory"
-            let submodule_path = module_utils::derive_submodule_path(module_name, file_path);
+    for (owner, file_path, ast_module) in sources {
+        let submodule_path = (*owner).to_owned();
 
             // Collect exports from this AST module
             let exports = index
@@ -279,65 +299,8 @@ pub fn build_export_index(
                     .collect();
                 eprintln!("[exports]   items in AST: {:?}", forms);
             }
-
-            // Also add exports to the parent module for mod.vr files
-            // This allows imports like `.memory.Heap` to work when memory/mod.vr exports Heap
-            if file_path.file_name().map_or(false, |n| n == "mod.vr") {
-                let parent_exports = index
-                    .entry(module_name.clone())
-                    .or_insert_with(HashSet::new);
-                for item in &ast_module.items {
-                    match &item.kind {
-                        verum_ast::ItemKind::Function(func) => {
-                            if matches!(func.visibility, verum_ast::Visibility::Public) {
-                                parent_exports.insert(func.name.name.to_string());
-                            }
-                        }
-                        verum_ast::ItemKind::Type(type_decl) => {
-                            if matches!(type_decl.visibility, verum_ast::Visibility::Public) {
-                                parent_exports.insert(type_decl.name.name.to_string());
-                            }
-                        }
-                        verum_ast::ItemKind::Const(const_decl) => {
-                            if matches!(const_decl.visibility, verum_ast::Visibility::Public) {
-                                parent_exports.insert(const_decl.name.name.to_string());
-                            }
-                        }
-                        verum_ast::ItemKind::Static(static_decl) => {
-                            if matches!(static_decl.visibility, verum_ast::Visibility::Public) {
-                                parent_exports.insert(static_decl.name.name.to_string());
-                            }
-                        }
-                        verum_ast::ItemKind::Protocol(protocol_decl) => {
-                            if matches!(protocol_decl.visibility, verum_ast::Visibility::Public) {
-                                parent_exports.insert(protocol_decl.name.name.to_string());
-                            }
-                        }
-                        verum_ast::ItemKind::Mount(import_decl) => {
-                            // Public imports are re-exports - add the imported items as exports
-                            if matches!(import_decl.visibility, verum_ast::Visibility::Public) {
-                                collect_import_exports(&import_decl.tree, parent_exports);
-                            }
-                        }
-                        verum_ast::ItemKind::ExternBlock(extern_block) => {
-                            // Only export FFI functions that are explicitly marked public
-                            for func in extern_block.functions.iter() {
-                                if matches!(func.visibility, verum_ast::Visibility::Public) {
-                                    parent_exports.insert(func.name.name.to_string());
-                                }
-                            }
-                        }
-                        verum_ast::ItemKind::Axiom(axiom_decl) => {
-                            if matches!(axiom_decl.visibility, verum_ast::Visibility::Public) {
-                                parent_exports.insert(axiom_decl.name.name.to_string());
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
     }
+
 
     index
 }
@@ -473,13 +436,30 @@ pub fn validate_imports(
     export_index: &ModuleExportsIndex,
     target: &TargetConfig,
 ) -> Vec<(String, String, String, verum_ast::Span)> {
+    let owned: Vec<_> = all_modules
+        .iter()
+        .flat_map(|(group, files)| {
+            files.iter().map(move |(path, ast)| {
+                (module_utils::source_file_module_path(group, path, ast), ast)
+            })
+        })
+        .collect();
+    let sources: Vec<_> = owned
+        .iter()
+        .map(|(owner, ast)| (owner.as_str(), *ast))
+        .collect();
+    validate_owned_imports(&sources, export_index, target)
+}
+
+/// Validate mounts in their declaration-owned source scopes.
+pub fn validate_owned_imports(
+    sources: &[(&str, &verum_ast::Module)],
+    export_index: &ModuleExportsIndex,
+    target: &TargetConfig,
+) -> Vec<(String, String, String, verum_ast::Span)> {
     let mut errors = Vec::new();
 
-    for (module_name, ast_modules) in all_modules {
-        for (file_path, ast_module) in ast_modules {
-            // Derive the current module context for relative path resolution
-            let current_module = module_utils::derive_submodule_path(module_name, file_path);
-
+    for (current_module, ast_module) in sources {
             for item in &ast_module.items {
                 if let verum_ast::ItemKind::Mount(import_decl) = &item.kind {
                     validate_import_tree(
@@ -491,8 +471,8 @@ pub fn validate_imports(
                     );
                 }
             }
-        }
     }
+
 
     errors
 }

@@ -219,10 +219,26 @@ impl VbcCodegen {
         available: &[&VbcModule],
         resolve_export: impl Fn(&str) -> Option<Text>,
     ) -> CodegenResult<usize> {
-        // Own declarations must have their final IDs before any imported field,
-        // bound, or method signature is translated into this codegen's space.
-        // Later source prepasses reuse these exact reservations.
-        self.claim_unit_source_type_identities(sources)?;
+        let parent = self.config.module_name.clone();
+        let owned: Vec<_> = sources.iter().map(|source| (parent.as_str(), *source)).collect();
+        self.import_owned_bootstrap_nominal_dependencies_with_resolver(&owned, available, resolve_export)
+    }
+
+    /// Import dependencies in the same per-file lexical scopes used by the
+    /// declaration and body passes. Preserve the caller's archive configuration.
+    pub fn import_owned_bootstrap_nominal_dependencies_with_resolver(
+        &mut self,
+        sources: &[(&str, &verum_ast::Module)],
+        available: &[&VbcModule],
+        resolve_export: impl Fn(&str) -> Option<Text>,
+    ) -> CodegenResult<usize> {
+        // Reserve all local identities before importing any dependency ID.
+        for (parent, source) in sources {
+            let previous = std::mem::replace(&mut self.config.module_name, (*parent).to_owned());
+            let result = self.claim_unit_source_type_identities(&[*source]);
+            self.config.module_name = previous;
+            result?;
+        }
         let mut catalog = BTreeMap::<String, (usize, usize)>::new();
         let mut functions = BTreeMap::<String, (usize, usize)>::new();
         let mut source_keys = HashMap::new();
@@ -287,9 +303,9 @@ impl VbcCodegen {
                 .or_insert(Some(key.clone()));
         }
         let mut names = BTreeSet::new();
-        let mut scopes: Vec<_> = sources.iter().map(|source| {
-            let owner = self.source_file_owner(source, &self.config.module_name)
-                .unwrap_or_else(|| self.config.module_name.clone());
+        let mut scopes: Vec<_> = sources.iter().map(|(parent, source)| {
+            let owner = self.source_file_owner(source, parent)
+                .unwrap_or_else(|| (*parent).to_owned());
             (owner, source.items.as_slice(), verum_ast::prelude::implicit_prelude_path(source))
         }).collect();
         while let Some((owner, items, prelude)) = scopes.pop() {

@@ -1951,9 +1951,10 @@ impl<'s> CompilationPipeline<'s> {
                 if !func.is_meta {
                     continue;
                 }
-                // Only evaluate parameterless meta functions — those with parameters
-                // need concrete arguments and are evaluated when called.
-                if !func.params.is_empty() {
+                // Runtime arguments and generic binders both require an
+                // instantiation. A declaration with an open telescope is not
+                // a closed compile-time computation merely because it has no values.
+                if !func.params.is_empty() || !func.generics.is_empty() {
                     continue;
                 }
                 let fn_name = func.name.as_str().to_string();

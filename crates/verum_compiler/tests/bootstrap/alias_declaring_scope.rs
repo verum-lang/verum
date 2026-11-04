@@ -94,7 +94,7 @@ fn bootstrap(files: &[(&str, &str)], root_reexport: bool) -> (VbcModule, VbcArch
         let (module, _) = pipeline
             .compile_core_module_from_ast(
                 &unit,
-                asts.as_slice(),
+                &asts.iter().map(|ast| (*bundle, *ast)).collect::<Vec<_>>(),
                 &config,
                 &verum_ast::cfg::TargetConfig::host(),
                 &[],

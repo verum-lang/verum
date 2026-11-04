@@ -15,6 +15,9 @@
 //! Both `core_compiler.rs` and `pipeline.rs` should use these shared utilities
 //! instead of implementing their own versions.
 
+mod source_type_owners;
+pub(crate) use source_type_owners::{merge_type_aliases, source_type_names};
+
 use std::path::Path;
 
 use verum_ast::cfg::{CfgEvaluator, TargetConfig};
@@ -429,6 +432,18 @@ pub fn derive_submodule_path(module_name: &str, file_path: &Path) -> String {
         // Other files export at submodule level
         format!("{}.{}", module_name, file_name)
     }
+}
+
+/// Resolve one source file's namespace independently of its archive grouping.
+/// An explicit module header is authoritative; headerless files use the same
+/// path-derived ownership as the module loader and public export index.
+pub fn source_file_module_path(
+    module_name: &str,
+    file_path: &Path,
+    module: &verum_ast::Module,
+) -> String {
+    verum_vbc::codegen::VbcCodegen::resolve_full_module_path(module, module_name)
+        .unwrap_or_else(|| derive_submodule_path(module_name, file_path))
 }
 
 // =============================================================================

@@ -4,7 +4,7 @@ use crate::Session;
 use verum_common::Text;
 use verum_fast_parser::Parser;
 
-fn parsed() -> Vec<(String, Vec<(PathBuf, verum_ast::Module)>)> {
+fn parsed() -> Vec<(String, Vec<OwnedSourceFile>)> {
     [
         ("core.base.result", "public type Result<T, E> is Ok(T) | Err(E);"),
         ("core.handles", "public type Descriptor is (Int); implement Descriptor { public fn raw(&self) -> Int { self.0 } }"),
@@ -13,7 +13,7 @@ fn parsed() -> Vec<(String, Vec<(PathBuf, verum_ast::Module)>)> {
         ("core.consumer", "mount core.provider.acquire as open_handle; public fn probe() -> Int { match open_handle() { Result.Ok(value) => value.raw(), Result.Err(_) => 0 } }"),
     ].into_iter().map(|(owner, source)| {
         let ast = Parser::new(&format!("module {owner}; {source}")).parse_module().unwrap();
-        (owner.to_owned(), vec![(PathBuf::from(format!("{owner}.vr")), ast)])
+        (owner.to_owned(), vec![OwnedSourceFile {path: PathBuf::from(format!("{owner}.vr")), owner: owner.into(), ast}])
     }).collect()
 }
 
@@ -46,15 +46,15 @@ fn forward_result_payload_selects_its_foreign_nominal_method() {
 fn forward_result_case(serialized: bool, relative: bool) {
     let mut parsed = parsed();
     if relative {
-        parsed[2].1[0].1 = Parser::new("module core.provider; mount super.handles.Descriptor; public fn acquire() -> Result<Descriptor, Int> { Result.Ok(Descriptor(7)) }").parse_module().unwrap();
-        parsed[4].1[0].1 = Parser::new("module core.consumer; mount super.provider.acquire as open_handle; public fn probe() -> Int { match open_handle() { Result.Ok(value) => value.raw(), Result.Err(_) => 0 } }").parse_module().unwrap();
+        parsed[2].1[0].ast = Parser::new("module core.provider; mount super.handles.Descriptor; public fn acquire() -> Result<Descriptor, Int> { Result.Ok(Descriptor(7)) }").parse_module().unwrap();
+        parsed[4].1[0].ast = Parser::new("module core.consumer; mount super.provider.acquire as open_handle; public fn probe() -> Int { match open_handle() { Result.Ok(value) => value.raw(), Result.Err(_) => 0 } }").parse_module().unwrap();
     }
     let mut session = Session::new(Default::default());
     {
         let registry = session.module_registry();
         let mut registry = registry.write();
         for (owner, files) in &parsed {
-            let ast = &files[0].1;
+            let ast = &files[0].ast;
             let id = registry.allocate_id();
             let path = ModulePath::from_str(owner);
             let mut info = ModuleInfo::new(id, path.clone(), ast.clone(), ast.file_id, Text::new());
@@ -99,7 +99,7 @@ fn forward_result_case(serialized: bool, relative: bool) {
         let (compiled, _) = pipeline
             .compile_core_module_from_ast(
                 &module,
-                &[&files[0].1],
+                &[(files[0].owner.as_str(), &files[0].ast)],
                 &config,
                 &target,
                 &interfaces,
@@ -167,7 +167,7 @@ fn protocol_method_forward_ids_belong_to_the_selected_declarations() {
         let ast = Parser::new(&source).parse_module().unwrap();
         parsed.push((
             owner.to_owned(),
-            vec![(PathBuf::from(format!("{owner}.vr")), ast)],
+            vec![OwnedSourceFile {path: PathBuf::from(format!("{owner}.vr")), owner: owner.into(), ast}],
         ));
     }
     let mut session = Session::new(Default::default());
@@ -205,4 +205,81 @@ fn protocol_method_forward_ids_belong_to_the_selected_declarations() {
             .global_function_registry
             .contains_key("Handle.read")
     );
+}
+
+
+#[test]
+fn same_leaf_file_types_keep_stage1_constants_methods_and_generic_slots() {
+    for reverse in [false, true] {
+        // The archive group is intentionally shared. Only the per-file owner
+        // distinguishes these declarations; both parser ASTs have FileId(0).
+        let mut files: Vec<_> = [
+            ("fixture.cells.alpha", "alpha.vr", "public type Cell<T> is { value:T }; implement Cell<T> { public const DEFAULT:Int=11; public fn read(&self)->T {self.value} public fn convert<V>(&self,value:V)->V {value} }"),
+            ("fixture.cells.beta", "beta.vr", "public type Cell<U> is { value:U }; implement Cell<U> { public const DEFAULT:Bool=false; public fn read(&self)->U {self.value} public fn convert<V>(&self,value:V)->V {value} }"),
+        ].into_iter().map(|(owner, path, source)| OwnedSourceFile {
+            path: PathBuf::from(path),
+            owner: owner.into(),
+            ast: Parser::new(source).parse_module().expect("headerless generic source"),
+        }).collect();
+        if reverse { files.reverse(); }
+        let sources = vec![("fixture.cells".to_owned(), files)];
+        let mut session = Session::new(Default::default());
+        let mut pipeline = CompilationPipeline::new_core(&mut session, CoreConfig::new("."));
+        pipeline.pre_register_canonical_static_methods(&sources).unwrap();
+        let mut ids = std::collections::HashSet::new();
+        for (owner, parameter, constant_type) in [
+            ("fixture.cells.alpha", "T", "Int"),
+            ("fixture.cells.beta", "U", "Bool"),
+        ] {
+            let constant_key = format!("{owner}.Cell.DEFAULT");
+            let constant = pipeline.global_function_registry.get(&constant_key)
+                .unwrap_or_else(|| panic!("missing source-owned constant {constant_key}"));
+            assert!(constant.is_const);
+            assert_eq!(constant.return_type_name.as_deref(), Some(constant_type));
+            assert!(verum_vbc::stub_ranges::in_stage1(constant.id.0));
+            assert!(ids.insert(constant.id), "source-owned constants must not share a stub");
+
+            let read_key = format!("{owner}.Cell.read");
+            let read = pipeline.global_function_registry.get(&read_key)
+                .unwrap_or_else(|| panic!("missing source-owned method {read_key}"));
+            assert!(!read.is_const);
+            assert!(read.has_source_body);
+            assert_eq!(read.return_type_name.as_deref(), Some(parameter));
+            assert_eq!(read.type_param_ids, vec![verum_vbc::types::TypeParamId(0)],
+                "each owner's parent generic must survive the same-leaf collision");
+            assert!(read.explicit_type_param_ids.is_empty());
+            assert!(verum_vbc::stub_ranges::in_stage1(read.id.0));
+            assert!(ids.insert(read.id));
+
+            let convert_key = format!("{owner}.Cell.convert");
+            let convert = pipeline.global_function_registry.get(&convert_key)
+                .unwrap_or_else(|| panic!("missing source-owned method {convert_key}"));
+            assert_eq!(convert.type_param_ids,
+                vec![verum_vbc::types::TypeParamId(0), verum_vbc::types::TypeParamId(1)]);
+            assert_eq!(convert.explicit_type_param_ids,
+                vec![Some(verum_vbc::types::TypeParamId(1))],
+                "the method argument follows its own retained parent slot");
+            assert!(verum_vbc::stub_ranges::in_stage1(convert.id.0));
+            assert!(ids.insert(convert.id));
+        }
+        assert_eq!(ids.len(), 6);
+        for short in ["Cell.DEFAULT", "Cell.read", "Cell.convert"] {
+            assert!(!pipeline.global_function_registry.contains_key(short),
+                "non-prelude same-leaf declarations cannot publish {short}");
+        }
+    }
+}
+
+#[test]
+fn file_mounted_archive_publication_refuses_an_invalid_dependency_name() {
+    let mut session = Session::new(Default::default());
+    let config = CoreConfig::new(".");
+    let mut pipeline = CompilationPipeline::new_core(&mut session, config.clone());
+    let mut module = verum_vbc::VbcModule::new("mounted".into());
+    module.dependencies.push(verum_vbc::module::ModuleDependency {
+        name: verum_vbc::types::StringId(u32::MAX), hash: 0,
+    });
+    pipeline.compiled_stdlib_modules.insert("mounted".into(), module);
+    let error = pipeline.build_stdlib_archive(&config).unwrap_err();
+    assert!(format!("{error:#}").contains("module mounted has an invalid dependency string index"), "{error:#}");
 }

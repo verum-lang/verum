@@ -22,7 +22,9 @@
 // canonical-primitive ν-invariant lives in (cf. MSFS Thm 4.4).
 // =============================================================================
 
-mount core.action.articulation;
+module core.theory_interop.coord;
+
+mount core.action.articulation.{Articulation};
 
 // -----------------------------------------------------------------------------
 // §10.2 — Obstruction verdict

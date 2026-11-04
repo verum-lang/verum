@@ -1034,6 +1034,9 @@ pub struct VbcCodegen {
     /// bodies (each module's literals resolve against its own types;
     /// already-compiled bodies keep their baked indices).
     source_type_visibility: std::collections::HashMap<String, verum_ast::Visibility>,
+    /// Exact local context declarations, independent of imported ABI stubs.
+    /// This evidence is never serialized or used to authorize type completion.
+    source_context_declarations: std::collections::HashMap<String, verum_ast::ContextDecl>,
     /// Source binder headers, keyed by the declaration's final nominal identity.
     /// None is a known unsupported header; an empty roster is a nongeneric type.
     source_generic_rosters: HashMap<TypeId, Option<impl_generic_rosters::GenericRoster>>,
@@ -2424,6 +2427,7 @@ impl VbcCodegen {
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
             source_type_visibility: Default::default(),
+            source_context_declarations: Default::default(),
             source_generic_rosters: Default::default(),
             source_callable_rosters: Default::default(),
             pending_implementation_attachments: Default::default(),
@@ -2975,6 +2979,25 @@ impl VbcCodegen {
             // Without this, context protocol impls can't populate TypeDescriptor.protocols.
             if let ItemKind::Context(ctx_decl) = &item.kind {
                 let ctx_name = ctx_decl.name.name.to_string();
+                let source_owner = self.source_file_owner(module, &self.config.module_name)
+                    .unwrap_or_else(|| self.config.module_name.clone());
+                let owner_key = crate::module::qualify_module_name(&source_owner, &ctx_name);
+                if let Some(existing) = self.source_context_declarations.get(&owner_key) {
+                    if existing != ctx_decl {
+                        let _ = self.reject_source_declaration(format!(
+                            "context declaration `{owner_key}` has conflicting exact source declarations",
+                        ).into());
+                        return;
+                    }
+                } else {
+                    // A type protocol's semantic AST cannot establish that it
+                    // is this context declaration, even under the same owner.
+                    if self.has_source_declaration(&owner_key) {
+                        let _ = self.reject_source_declaration_conflict(&owner_key);
+                        return;
+                    }
+                    self.source_context_declarations.insert(owner_key.clone(), ctx_decl.clone());
+                }
                 // CTX-HIJACK-TRIPWIRE-1 (T0240): record every DECLARED
                 // context name (outside the type-registration guard below
                 // — re-collection across modules must still remember it).
@@ -2982,7 +3005,7 @@ impl VbcCodegen {
                 // `<Ctx>.method(...)` receivers outside their `using`
                 // scope instead of letting the static rungs hijack them.
                 self.ctx.declared_context_types.insert(ctx_name.clone());
-                if !self.type_name_to_id.contains_key(&ctx_name) {
+                if !self.type_name_to_id.contains_key(&owner_key) {
                     let type_id = self.alloc_user_type_id();
                     if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
                         eprintln!(
@@ -2990,7 +3013,8 @@ impl VbcCodegen {
                             type_id.0
                         );
                     }
-                    self.type_name_to_id.insert(ctx_name.clone(), type_id);
+                    self.type_name_to_id.insert(owner_key, type_id);
+                    self.type_name_to_id.entry(ctx_name.clone()).or_insert(type_id);
 
                     // Create TypeDescriptor with method names as variants
                     // (dyn: dispatch uses variants to determine vtable method order)
@@ -2998,9 +3022,9 @@ impl VbcCodegen {
                         id: type_id,
                         name: StringId(self.ctx.intern_string_raw(&ctx_name)),
                         kind: crate::types::TypeKind::Protocol,
-                        // TYPE-ORIGIN-MODULE (T0555, sibling sweep) — see
-                        // the TypeDeclBody::Protocol arm.
-                        origin_module: self.current_origin_module_sid(),
+                        // This descriptor is the context's ABI, not a semantic
+                        // declaration for a same-named protocol in another file.
+                        origin_module: Some(StringId(self.ctx.intern_string_raw(&source_owner))),
                         ..Default::default()
                     };
                     for method in ctx_decl.methods.iter() {
@@ -8530,6 +8554,20 @@ impl VbcCodegen {
         result
     }
 
+    /// Keep the file's source scope and resolver parent together during a pass.
+    /// Restore both before returning, including an unsuccessful Result.
+    fn with_owned_source_scope<R>(
+        &mut self, parent: &str, module: &Module, operation: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous_parent = std::mem::replace(&mut self.config.module_name, parent.to_owned());
+        let previous_scope = self.ctx.current_source_module.take();
+        self.ctx.current_source_module = self.source_file_owner(module, parent);
+        let outcome = operation(self);
+        self.ctx.current_source_module = previous_scope;
+        self.config.module_name = previous_parent;
+        outcome
+    }
+
     fn run_owned_declaration_prepasses(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
         // The order is the one `collect_all_declarations` established
         // for a single file, applied ACROSS the unit: every file's
@@ -8540,20 +8578,20 @@ impl VbcCodegen {
         // exactly the multi-file hazard the bake's Pass 1a.5 was added
         // for (T0625).
         for (parent, module) in files {
-            self.config.module_name = (*parent).to_owned();
-            self.claim_unit_source_type_identities(&[module])?;
+            self.with_owned_source_scope(parent, module, |codegen|
+                codegen.claim_unit_source_type_identities(&[module]))?;
         }
         for (parent, module) in files {
-            self.config.module_name = (*parent).to_owned();
-            self.register_declared_type_aliases(module);
+            self.with_owned_source_scope(parent, module, |codegen|
+                codegen.register_declared_type_aliases(module));
         }
         for (parent, module) in files {
-            self.config.module_name = (*parent).to_owned();
-            self.collect_blanket_impls(module)?;
+            self.with_owned_source_scope(parent, module, |codegen|
+                codegen.collect_blanket_impls(module))?;
         }
         for (parent, module) in files {
-            self.config.module_name = (*parent).to_owned();
-            self.pregenerate_ffi_struct_layouts(module);
+            self.with_owned_source_scope(parent, module, |codegen|
+                codegen.pregenerate_ffi_struct_layouts(module));
         }
         Ok(())
     }
@@ -8659,12 +8697,26 @@ impl VbcCodegen {
         files: &[&Module],
         policy: ItemFailurePolicy,
     ) -> CodegenResult<()> {
+        let parent = self.config.module_name.clone();
+        let owned: Vec<_> = files.iter().map(|module| (parent.as_str(), *module)).collect();
+        self.compile_owned_unit_items(&owned, policy)
+    }
+
+    /// Compile the same owned source roster used to collect declarations.
+    /// Archive names and parser file IDs are not lexical namespace authority.
+    pub fn compile_owned_unit_items(
+        &mut self,
+        files: &[(&str, &Module)],
+        policy: ItemFailurePolicy,
+    ) -> CodegenResult<()> {
         // Source imports must be settled before any entry point can emit
         // bodies, including the single-module compiler with inline modules.
         self.resolve_pending_imports();
         self.check_source_declaration_error()?;
         let mut first_error: Option<CodegenError> = None;
-        for module in files {
+        for (parent, module) in files {
+            if !self.cfg_evaluator.should_include(&module.attributes) { continue; }
+            let previous_parent = std::mem::replace(&mut self.config.module_name, (*parent).to_owned());
             let previous_scope = self.ctx.current_source_module.take();
             if let Some(name) =
                 self.source_file_owner(module, &self.config.module_name)
@@ -8695,6 +8747,7 @@ impl VbcCodegen {
                 Ok(())
             })();
             self.ctx.current_source_module = previous_scope;
+            self.config.module_name = previous_parent;
             outcome?;
         }
         match first_error {
@@ -8753,7 +8806,7 @@ impl VbcCodegen {
     /// A compilation unit can contain files from distinct source parents.
     /// Parent paths are resolver input, separate from the source AST and from
     /// the output archive's name. Every declaration phase keeps this ownership.
-    fn collect_owned_unit_declarations(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
+    pub fn collect_owned_unit_declarations(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
         let previous = self.config.module_name.clone();
         let active: Vec<_> = files.iter().copied().filter(|(_, module)|
             self.cfg_evaluator.should_include(&module.attributes)).collect();
@@ -8803,8 +8856,8 @@ impl VbcCodegen {
         // implementor at the moment that implementor is collected, so
         // the protocol has to exist by then.
         for (parent, module) in files {
-            self.config.module_name = (*parent).to_owned();
-            self.collect_protocol_definitions(module);
+            self.with_owned_source_scope(parent, module, |codegen|
+                codegen.collect_protocol_definitions(module));
         }
         self.run_owned_declaration_prepasses(files)
     }
@@ -9571,6 +9624,7 @@ impl VbcCodegen {
         self.functions.clear();
         self.types.clear();
         self.type_index.clear();
+        self.source_context_declarations.clear();
         self.source_generic_rosters.clear();
         self.source_callable_rosters.clear();
         self.pending_implementation_attachments.clear();
@@ -29243,6 +29297,10 @@ pub struct VariantTagAnomaly {
     /// that no variant carries.
     pub missing_tags: Vec<u32>,
 }
+
+#[cfg(test)]
+#[path = "../../tests/codegen/owned_source_scope.rs"]
+mod owned_source_scope_tests;
 
 #[cfg(test)]
 mod tests {
