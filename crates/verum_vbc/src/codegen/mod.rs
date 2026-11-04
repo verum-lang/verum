@@ -9993,6 +9993,8 @@ impl VbcCodegen {
                 let selected_items = self.selected_impl_items(impl_decl)?;
                 // Get the type name for qualified method registration
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
+                let impl_generics = self.resolve_impl_generics(impl_decl).2;
+                let mut registered_receiver = None;
 
                 // ARRAY-ITER-CONCRETIZE-1 (a)-leg — STRUCTURAL impl
                 // targets (`implement<T> [T]`, `implement<T; N> [T; N]`)
@@ -10063,7 +10065,21 @@ impl VbcCodegen {
                             // and method resolution. We do NOT register by simple name to avoid
                             // collisions with standalone functions of the same name.
                             if let Some(ref ty_name) = type_name {
-                                self.register_declared_impl_function(func, &impl_decl.kind, ty_name, &self.resolve_impl_generics(impl_decl).2)?;
+                                // Self belongs to the implementation, before any
+                                // method-local binders. Reuse its exact witness for
+                                // all selected methods in this declaration.
+                                if registered_receiver.is_none() {
+                                    let target = match &impl_decl.kind {
+                                        verum_ast::decl::ImplKind::Inherent(target) => target,
+                                        verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
+                                    };
+                                    let scope = self.declared_impl_generic_scope(&impl_decl.kind, &impl_generics);
+                                    registered_receiver = Some(self.resolve_impl_receiver(target, &scope, &impl_generics)?);
+                                }
+                                self.register_declared_impl_function(
+                                    func, registered_receiver.as_ref().expect("receiver resolved above"),
+                                    ty_name, &impl_generics,
+                                )?;
 
                                 // If this is a Drop impl and the function is named "drop",
                                 // record the drop function ID in the TypeDescriptor

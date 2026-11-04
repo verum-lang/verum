@@ -96,17 +96,11 @@ impl VbcCodegen {
     pub(super) fn register_declared_impl_function(
         &mut self,
         function: &FunctionDecl,
-        implementation: &verum_ast::decl::ImplKind,
+        receiver: &super::ImplReceiverWitness,
         name: &str,
         generics: &[String],
     ) -> super::CodegenResult<()> {
-        let target = match implementation {
-            verum_ast::decl::ImplKind::Inherent(target) => target,
-            verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
-        };
-        let (dense, _) = self.declared_impl_generic_param_maps(function, implementation, generics);
-        let receiver = self.resolve_impl_receiver(target, &dense, generics)?;
-        let saved = self.current_impl_receiver.replace(receiver);
+        let saved = self.current_impl_receiver.replace(receiver.clone());
         let result = self.register_impl_function(function, name, generics);
         self.current_impl_receiver = saved;
         result

@@ -213,6 +213,49 @@ fn implementation_application_and_default_receiver_share_binder_identity() {
 }
 
 #[test]
+fn explicit_methods_share_the_receiver_without_capturing_local_binders() {
+    for generics in ["Z, Y", "Y, Z"] {
+        let source = format!(r#"
+            module explicit_scope;
+            type Pair<A, B> is {{ first: A, second: B }};
+            implement<{generics}> Pair<Y, Z> {{
+                fn echo(&self, value: Z) -> Z {{ value }}
+                fn choose<Y>(&self, value: Y) -> Y {{ value }}
+                fn quantified(&self, transform: fn<R>(Z, R) -> Z) -> Int {{ 1 }}
+            }}
+            fn main() -> Int {{
+                let pair: Pair<Bool, Int> = Pair {{ first: false, second: 3 }};
+                pair.echo(17) + pair.choose<Int>(25)
+            }}
+        "#);
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let module = VbcCodegen::new().compile_module(&ast).unwrap();
+        for module in [module.clone(), roundtrip(&module)] {
+            let pair = nominal(&module, "explicit_scope", "Pair");
+            for name in ["echo", "choose", "quantified"] {
+                let function = method(&module, name);
+                let receiver = function.semantic_params.as_ref().unwrap()[0].as_ref().unwrap();
+                let TypeRef::Reference { inner, .. } = receiver else { panic!("{receiver:?}") };
+                assert_eq!(**inner, TypeRef::Instantiated {
+                    base: pair, args: vec![TypeRef::Generic(TypeParamId(0)), TypeRef::Generic(TypeParamId(1))],
+                }, "{generics}: {name}");
+            }
+            assert_eq!(method(&module, "echo").semantic_return, Some(TypeRef::Generic(TypeParamId(1))));
+            assert_eq!(method(&module, "choose").semantic_return, Some(TypeRef::Generic(TypeParamId(0x8000))));
+            let function = method(&module, "quantified");
+            let TypeRef::Rank2Function { params, return_type, .. } = function.semantic_params.as_ref().unwrap()[1].as_ref().unwrap()
+                else { panic!("{:?}", function.semantic_params) };
+            assert_eq!(params, &[TypeRef::Generic(TypeParamId(2)), TypeRef::Generic(TypeParamId(0))]);
+            assert_eq!(**return_type, TypeRef::Generic(TypeParamId(2)));
+            let entry = module.find_function_by_name("explicit_scope.main").unwrap();
+            let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+                .execute_function(entry).unwrap();
+            assert_eq!(result.try_as_i64(), Some(42));
+        }
+    }
+}
+
+#[test]
 fn protocol_application_cannot_drop_or_invent_positional_arguments() {
     for application in ["Extend", "Extend<Int, Bool>", "Extend<Missing>"] {
         let source = format!(
