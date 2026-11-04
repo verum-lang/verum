@@ -159,7 +159,7 @@ implement TempFile {
     public fn path(&self) -> &PathBuf { &self.path }
 
     /// Mutable access to the underlying file handle.
-    public fn file(&mut self) -> Option<&mut File> { self.file.as_mut() }
+    public fn file(&mut self) -> Maybe<&mut File> { self.file.as_mut() }
 
     /// Persist — Drop will not delete. Returns the final path.
     public fn persist(mut self) -> PathBuf {
