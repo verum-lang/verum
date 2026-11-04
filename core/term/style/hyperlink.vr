@@ -2,7 +2,7 @@
 // style/hyperlink.vr - OSC 8 Hyperlinks
 // =============================================================================
 // Layer: 2 (Style & Color)
-// Dependencies: core.io, raw/escape.vr, widget/paragraph.vr (Span)
+// Dependencies: core.io, raw/escape.vr, widget/paragraph.vr (TextSpan)
 // =============================================================================
 //
 
@@ -13,7 +13,7 @@
 
 // Usage:
 // ```verum
-// Span.styled("Click here", Style.new().fg(Color.Blue).underlined())
+// TextSpan.styled("Click here", Style.new().fg(Color.Blue).underlined())
 //  .hyperlink("https://verum-lang.org")
 // ```
 //
@@ -31,7 +31,7 @@ module core.term.style.hyperlink;
 mount core.io.IoResult;
 mount core.io.{IoError, IoErrorKind};
 mount super.super.raw.escape.EscapeWriter;
-mount super.super.widget.paragraph.Span;
+mount core.term.widget.paragraph.TextSpan;
 
 // =============================================================================
 // HyperlinkSpan Type
@@ -41,15 +41,15 @@ mount super.super.widget.paragraph.Span;
 /// The URI is transmitted as an OSC 8 attribute and rendered by the terminal
 /// as a clickable link.
 public type HyperlinkSpan is {
-    span: Span,
+    span: TextSpan,
     uri: Text,
 };
 
 // =============================================================================
-// Span Extension
+// TextSpan Extension
 // =============================================================================
 
-implement Span {
+implement TextSpan {
     /// Attach a hyperlink URI to this span.
     public fn hyperlink(self, uri: Text) -> HyperlinkSpan {
         HyperlinkSpan { span: self, uri: uri }

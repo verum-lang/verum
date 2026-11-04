@@ -15,7 +15,7 @@ mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
 mount super.super.style.theme.Theme;
-mount super.super.widget.paragraph.{Paragraph, Line, Span, Wrap};
+mount super.super.widget.paragraph.{Paragraph, Line, Wrap};
 mount super.super.widget.block.{Block, Borders, Alignment};
 
 /// Confirmation prompt: "Are you sure? [y/N]"
