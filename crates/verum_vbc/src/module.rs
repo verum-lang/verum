@@ -2999,6 +2999,15 @@ impl Default for FunctionDescriptor {
 }
 
 impl FunctionDescriptor {
+    /// This callable declaration requires an intrinsic implementation.
+    /// Instruction shape is not source ownership: an empty source block is a
+    /// real body, while a generated forward-declaration return is not. Constant
+    /// value producers use the intrinsic-name carrier for inlining metadata and
+    /// are not callable intrinsic declarations.
+    pub fn requires_intrinsic_implementation(&self) -> bool {
+        self.intrinsic_name.is_some() && !self.has_source_body && !self.is_const
+    }
+
     /// Every retained TypeRef root owned by this function declaration.
     /// Consumers recurse into each root according to their own operation;
     /// semantic signatures and generic constraints must not disappear when

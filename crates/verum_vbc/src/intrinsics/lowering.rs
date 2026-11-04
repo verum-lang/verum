@@ -307,6 +307,10 @@ impl IntrinsicLowering {
                 self.lower_inline_sequence(*seq_id, operands)
             }
             CodegenStrategy::CompileTimeConstant => self.lower_compile_time_constant(intrinsic),
+            // Runtime calls require the selected source declaration and its
+            // executable ABI. This inline MLIR interface has neither, so it
+            // cannot fabricate an operation or a result for the caller.
+            CodegenStrategy::RuntimeCall => None,
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.lower_arith_extended_opcode(intrinsic, *sub_op, operands)
             }
@@ -1925,44 +1929,6 @@ impl IntrinsicLowering {
                     operands: operands.to_vec(),
                     region: None,
                 })
-            }
-
-            // Poll pending - return false constant for Tier 0 async
-            InlineSequenceId::PollPending => self.emit(MlirOp {
-                name: "arith.constant".to_string(),
-                attrs: vec![MlirAttr {
-                    name: "value".to_string(),
-                    value: MlirAttrValue::Bool(false),
-                }],
-                result_types: vec![MlirType::I1],
-                operands: vec![],
-                region: None,
-            }),
-
-            // Call second argument as closure (recovery passthrough)
-            InlineSequenceId::CallSecondArg => {
-                // For MLIR: call the second operand (closure) with no args
-                if operands.len() >= 2 {
-                    self.emit(MlirOp {
-                        name: "func.call_indirect".to_string(),
-                        attrs: vec![],
-                        result_types: vec![MlirType::I64],
-                        operands: vec![operands[1]], // closure is second arg
-                        region: None,
-                    })
-                } else {
-                    // Return zero (unit equivalent) if insufficient args
-                    self.emit(MlirOp {
-                        name: "arith.constant".to_string(),
-                        attrs: vec![MlirAttr {
-                            name: "value".to_string(),
-                            value: MlirAttrValue::Integer(0),
-                        }],
-                        result_types: vec![MlirType::I64],
-                        operands: vec![],
-                        region: None,
-                    })
-                }
             }
 
             // Load unit constant (represented as i64 zero)

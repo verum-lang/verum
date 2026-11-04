@@ -16,6 +16,10 @@ pub enum LlvmLoweringError {
     #[error("Unsupported VBC instruction: {0}")]
     UnsupportedInstruction(Text),
 
+    /// A source-declared intrinsic has no executable native implementation.
+    #[error("Intrinsic `{intrinsic}` declared by `{declaration}` has no native implementation")]
+    UnsupportedIntrinsic { declaration: Text, intrinsic: Text },
+
     /// Type lowering error.
     #[error("Type lowering error: {0}")]
     TypeLowering(Text),

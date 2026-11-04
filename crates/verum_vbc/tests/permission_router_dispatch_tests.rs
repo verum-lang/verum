@@ -29,17 +29,14 @@ fn empty_state() -> InterpreterState {
 #[test]
 fn permission_assert_encodes_and_decodes_round_trip() {
     // PermissionAssert encoding shape:
-    //  TensorExtended (0xFC) + 0x1D sub-opcode + scope_tag (1B
-    //  immediate) + target_id (1B short reg).
+    //  TensorExtended + escape + payload length + 0x1D + scope + target.
     let instr = Instruction::PermissionAssert {
         scope_tag: 1, // FileSystem
         target_id: Reg(7),
     };
     let mut bytes = Vec::new();
     encode_instruction(&instr, &mut bytes);
-    assert_eq!(bytes.len(), 4);
-    assert_eq!(bytes[1], 0x1D, "permission_assert sub-opcode tag");
-    assert_eq!(bytes[2], 1, "scope_tag immediate byte");
+    assert_eq!(bytes, vec![0xFC, 0xFF, 3, 0x1D, 1, 7]);
 
     let mut offset = 0;
     let decoded = decode_instruction(&bytes, &mut offset).expect("decoder must succeed");
@@ -70,8 +67,7 @@ fn permission_check_wire_encodes_and_decodes_round_trip() {
     // NewFromArgs at 0x0D) and the regex window (0x0A-0x0C) so
     // the decoder's TensorSubOpcode probe falls through to the
     // ExtSubOpcode dispatch.
-    assert_eq!(bytes.len(), 5);
-    assert_eq!(bytes[1], 0x1C, "permission_check_wire sub-opcode tag");
+    assert_eq!(bytes, vec![0xFC, 0xFF, 4, 0x1C, 3, 4, 5]);
 
     let mut offset = 0;
     let decoded = decode_instruction(&bytes, &mut offset).expect("decoder must succeed");
@@ -286,15 +282,14 @@ fn dispatch_handler_writes_value_zero_for_allow_one_for_deny() {
 
 #[test]
 fn permission_stats_read_encodes_and_decodes_round_trip() {
-    // [TensorExtended 0xFC] [0x1E sub-op] [dst:reg] [selector:reg]
+    // Escaped TensorExtended carrier with a bounded typed payload.
     let instr = Instruction::PermissionStatsRead {
         dst: Reg(2),
         selector: Reg(5),
     };
     let mut bytes = Vec::new();
     encode_instruction(&instr, &mut bytes);
-    assert_eq!(bytes.len(), 4);
-    assert_eq!(bytes[1], 0x1E, "permission_stats_read sub-opcode tag");
+    assert_eq!(bytes, vec![0xFC, 0xFF, 3, 0x1E, 2, 5]);
 
     let mut offset = 0;
     let decoded = decode_instruction(&bytes, &mut offset).expect("decode");
@@ -312,8 +307,7 @@ fn permission_stats_clear_encodes_and_decodes_round_trip() {
     let instr = Instruction::PermissionStatsClear { dst: Reg(3) };
     let mut bytes = Vec::new();
     encode_instruction(&instr, &mut bytes);
-    assert_eq!(bytes.len(), 3);
-    assert_eq!(bytes[1], 0x1F, "permission_stats_clear sub-opcode tag");
+    assert_eq!(bytes, vec![0xFC, 0xFF, 2, 0x1F, 3]);
 
     let mut offset = 0;
     let decoded = decode_instruction(&bytes, &mut offset).expect("decode");
@@ -386,4 +380,179 @@ fn permission_stats_clear_zeros_counters_preserves_cache() {
         invocations_after, invocations_before,
         "clearing stats must NOT clear the cache; warm-path hits should not invoke policy"
     );
+}
+
+fn emitted_permission_routes(instructions: &[Instruction]) -> [VbcModule; 2] {
+    use verum_vbc::{
+        bytecode::encode_instructions,
+        module::FunctionDescriptor,
+        types::{TypeId, TypeRef},
+    };
+    let mut module = VbcModule::new("permission_execution".into());
+    let mut function = FunctionDescriptor::new(module.intern_string("probe"));
+    function.has_source_body = true;
+    function.register_count = 140;
+    function.return_type = TypeRef::Concrete(TypeId::INT);
+    function.bytecode_length = encode_instructions(instructions, &mut module.bytecode) as u32;
+    module.add_function(function);
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    [
+        module,
+        verum_vbc::deserialize::deserialize_module(&wire).unwrap(),
+    ]
+}
+
+#[test]
+fn emitted_permission_assert_enforces_policy_and_resumes_after_wide_operands() {
+    use verum_vbc::interpreter::{Interpreter, InterpreterError};
+    for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+        for module in emitted_permission_routes(&[
+            Instruction::LoadI {
+                dst: Reg(130),
+                value: 37123,
+            },
+            Instruction::PermissionAssert {
+                scope_tag: PermissionScope::Syscall.to_wire_tag(),
+                target_id: Reg(130),
+            },
+            Instruction::LoadI {
+                dst: Reg(0),
+                value: 41,
+            },
+            Instruction::Ret { value: Reg(0) },
+        ]) {
+            let id = module.find_function_by_name("probe").unwrap();
+            let mut interpreter = Interpreter::new(Arc::new(module));
+            let requests = Arc::new(Mutex::new(0));
+            let count = requests.clone();
+            interpreter
+                .state
+                .set_permission_policy(move |scope, target| {
+                    assert_eq!(scope, PermissionScope::Syscall);
+                    assert_eq!(target, 37123);
+                    *count.lock().unwrap() += 1;
+                    decision
+                });
+            let result = interpreter.execute_function(id);
+            match decision {
+                PermissionDecision::Allow => assert_eq!(result.unwrap().as_i64(), 41),
+                PermissionDecision::Deny => {
+                    assert!(matches!(result, Err(InterpreterError::Panic { message })
+                    if message == "permission denied: Syscall(37123)"))
+                }
+            }
+            assert_eq!(*requests.lock().unwrap(), 1);
+        }
+    }
+}
+
+#[test]
+fn emitted_permission_check_and_statistics_use_the_same_bounded_carrier() {
+    use verum_vbc::interpreter::Interpreter;
+    for clear in [false, true] {
+        let mut instructions = vec![
+            Instruction::LoadI {
+                dst: Reg(130),
+                value: 0,
+            },
+            Instruction::LoadI {
+                dst: Reg(131),
+                value: 37123,
+            },
+            Instruction::PermissionCheckWire {
+                dst: Reg(132),
+                scope_tag: Reg(130),
+                target_id: Reg(131),
+            },
+            Instruction::LoadI {
+                dst: Reg(133),
+                value: 4,
+            }, // denial count
+        ];
+        if clear {
+            instructions.push(Instruction::PermissionStatsClear { dst: Reg(135) });
+        }
+        instructions.extend([
+            Instruction::PermissionStatsRead {
+                dst: Reg(134),
+                selector: Reg(133),
+            },
+            Instruction::Ret { value: Reg(134) },
+        ]);
+        for module in emitted_permission_routes(&instructions) {
+            let id = module.find_function_by_name("probe").unwrap();
+            let mut interpreter = Interpreter::new(Arc::new(module));
+            interpreter.state.set_permission_policy(|scope, target| {
+                assert_eq!(scope, PermissionScope::Syscall);
+                assert_eq!(target, 37123);
+                PermissionDecision::Deny
+            });
+            let result = interpreter.execute_function(id).unwrap();
+            assert_eq!(result.as_i64(), if clear { 0 } else { 1 });
+        }
+    }
+}
+
+#[test]
+fn historical_bare_permission_decode_canonicalizes_to_existing_escaped_carrier() {
+    for bare in [
+        vec![0xFC, 0x1D, 1, 7],
+        vec![0xFC, 0x1C, 3, 4, 5],
+        vec![0xFC, 0x1E, 2, 5],
+        vec![0xFC, 0x1F, 3],
+    ] {
+        let mut offset = 0;
+        let instruction = decode_instruction(&bare, &mut offset).unwrap();
+        assert_eq!(offset, bare.len());
+        let mut canonical = Vec::new();
+        encode_instruction(&instruction, &mut canonical);
+        assert_eq!(&canonical[..2], &[0xFC, 0xFF]);
+        assert_eq!(canonical[2] as usize, canonical.len() - 3);
+        assert_eq!(&canonical[3..], &bare[1..]);
+        let mut offset = 0;
+        let recovered = decode_instruction(&canonical, &mut offset).unwrap();
+        assert_eq!(offset, canonical.len());
+        assert_eq!(recovered, instruction);
+    }
+}
+
+#[test]
+fn historical_bare_permission_bytes_cannot_be_misread_as_an_envelope() {
+    use verum_vbc::interpreter::{Interpreter, InterpreterError};
+    for bare in [
+        vec![0xFC, 0x1D, 2, 0],
+        vec![0xFC, 0x1C, 3, 4, 5],
+        vec![0xFC, 0x1E, 2, 5],
+        vec![0xFC, 0x1F, 3],
+    ] {
+        let mut module =
+            emitted_permission_routes(&[Instruction::Ret { value: Reg(0) }])[0].clone();
+        module.bytecode = bare;
+        encode_instruction(
+            &Instruction::LoadI {
+                dst: Reg(0),
+                value: 41,
+            },
+            &mut module.bytecode,
+        );
+        encode_instruction(&Instruction::Ret { value: Reg(0) }, &mut module.bytecode);
+        module.functions[0].bytecode_length = module.bytecode.len() as u32;
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        for module in [
+            module,
+            verum_vbc::deserialize::deserialize_module(&bytes).unwrap(),
+        ] {
+            let id = module.find_function_by_name("probe").unwrap();
+            let mut interpreter = Interpreter::new(Arc::new(module));
+            interpreter
+                .state
+                .set_permission_policy(|_, _| panic!("ambiguous operand must not reach policy"));
+            let result = interpreter.execute_function(id);
+            assert!(
+                matches!(&result, Err(InterpreterError::InvalidBytecode { message, .. })
+                if message == "unescaped permission instruction must be re-encoded before execution"),
+                "{result:?}"
+            );
+        }
+    }
 }

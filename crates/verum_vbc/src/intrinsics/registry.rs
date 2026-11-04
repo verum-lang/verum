@@ -183,6 +183,11 @@ pub enum CodegenStrategy {
     /// Compile-time constant.
     CompileTimeConstant,
 
+    /// Runtime operation reached through its declared callable and ABI.
+    /// Preserve the selected FunctionId; neither host constant folding nor an
+    /// invented inline instruction supplies an implementation of this contract.
+    RuntimeCall,
+
     /// Maps to ArithExtended opcode (0xBD) with a sub-opcode.
     /// Used for checked, overflowing, and polymorphic arithmetic operations.
     ArithExtendedOpcode(ArithSubOpcode),
@@ -633,10 +638,6 @@ pub enum InlineSequenceId {
     GlobalAllocator,
     /// atomic_exchange: atomic exchange operation
     AtomicExchange,
-    /// poll_pending: return Poll::Pending for async operations in Tier 0
-    PollPending,
-    /// call_second_arg: call the second argument as a function (for recovery passthrough)
-    CallSecondArg,
     /// load_unit: load unit value ()
     LoadUnit,
     /// volatile_load: volatile memory read (prevents optimization)
@@ -5619,8 +5620,8 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::CompileTimeConstant, // Returns 1 in interpreter
-        mlir_op: Some("verum.sys.num_cpus"),
+        strategy: CodegenStrategy::RuntimeCall,
+        mlir_op: None,
         doc: "Get number of CPU cores",
     },
     // =========================================================================
@@ -6071,17 +6072,6 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: Some("verum.async.block_on"),
         doc: "Block on future (single-threaded)",
     },
-    Intrinsic {
-        name: "future_poll_sync",
-        category: IntrinsicCategory::Async,
-        hints: &[IntrinsicHint::Generic],
-        param_count: 1, // future
-        return_count: 1,
-        // Tier 0 interpreter: poll returns pending (None/false) as async is not supported
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PollPending),
-        mlir_op: Some("verum.async.poll"),
-        doc: "Poll future synchronously",
-    },
     // ASYNC-SLEEP-INTERP-1: these previously mapped to
     // DirectOpcode(IoSubmit) — a const-0 STUB on Tier-0 (silent no-op:
     // async_sleep_ms returned instantly, every lower-bound contract
@@ -6133,17 +6123,6 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::DirectOpcode(Opcode::Nop),
         mlir_op: Some("verum.supervisor.set_parent"),
         doc: "Set parent supervisor link",
-    },
-    Intrinsic {
-        name: "exec_with_recovery",
-        category: IntrinsicCategory::Context,
-        hints: &[IntrinsicHint::Generic],
-        param_count: 2, // recovery_ctx, future_factory
-        return_count: 1,
-        // Tier 0 interpreter: execute without recovery, call factory directly
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CallSecondArg),
-        mlir_op: Some("verum.recovery.exec"),
-        doc: "Execute with recovery strategy",
     },
     // =========================================================================
     // Registry Intrinsics (Library-level)

@@ -24,6 +24,28 @@ use crate::value::Value;
 pub(in super::super) fn handle_tensor_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    // Historical bare permission instructions have no length prefix. Reading
+    // their scope/register as a length can authorize a different resource.
+    // They remain decodable for migration, but execution requires the existing
+    // escaped carrier emitted by the canonical encoder.
+    let sub_op = state
+        .operand_bytecode()
+        .and_then(|bytes| bytes.get(state.pc() as usize))
+        .and_then(|byte| TensorExtSubOpcode::from_byte(*byte));
+    if matches!(
+        sub_op,
+        Some(
+            TensorExtSubOpcode::PermissionCheckWire
+                | TensorExtSubOpcode::PermissionAssert
+                | TensorExtSubOpcode::PermissionStatsRead
+                | TensorExtSubOpcode::PermissionStatsClear
+        )
+    ) {
+        return Err(InterpreterError::InvalidBytecode {
+            pc: state.pc() as usize,
+            message: "unescaped permission instruction must be re-encoded before execution".into(),
+        });
+    }
     dispatch_enveloped(state, tensor_extended_body)
 }
 
@@ -4505,7 +4527,7 @@ fn tensor_extended_body(
                 // remain available for code that wants to surface
                 // a typed Result instead of a panic.
                 Some(TensorExtSubOpcode::PermissionAssert) => {
-                    use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+                    use crate::interpreter::permission::PermissionScope;
                     let scope_byte = read_u8(state)?;
                     let target_reg = read_reg(state)?;
                     let target_val = state.get_reg(target_reg);
@@ -4527,18 +4549,8 @@ fn tensor_extended_body(
                         // errs on stronger gating, not weaker.
                         _ => PermissionScope::Syscall,
                     };
-                    let decision = state.check_permission(scope, target_id);
-                    match decision {
-                        PermissionDecision::Allow => Ok(DispatchResult::Continue),
-                        PermissionDecision::Deny => {
-                            // Build a stable diagnostic — the
-                            // surrounding catch frame sees this
-                            // as a PermissionDenied panic and can
-                            // pattern-match on it.
-                            let message = format!("permission denied: {:?}({})", scope, target_id);
-                            Err(InterpreterError::Panic { message })
-                        }
-                    }
+                    crate::interpreter::permission::assert_permission(state, scope, target_id)?;
+                    Ok(DispatchResult::Continue)
                 }
 
                 // #12 / P3.2 — wire-level bridge to PermissionRouter.

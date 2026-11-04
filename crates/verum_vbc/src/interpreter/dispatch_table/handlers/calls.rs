@@ -199,6 +199,7 @@ pub(in super::super) fn handle_call(
                         args.start,
                         args.count as u8,
                         caller_base,
+                        IntrinsicNameOrigin::ExternalSymbol,
                     )? {
                         state.set_reg(dst, value);
                         return Ok(DispatchResult::Continue);
@@ -230,6 +231,7 @@ pub(in super::super) fn handle_call(
     let func_name_id = func.name;
     let reg_count = func.register_count;
     let has_intrinsic_marker = func.intrinsic_name.is_some();
+    let declared_intrinsic = func.requires_intrinsic_implementation();
 
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCalls) {
         let func_name: String = state
@@ -356,7 +358,7 @@ pub(in super::super) fn handle_call(
             // (`__ctx_*_raw` / `__defer_*_raw`) used to be intercepted
             // here as a sibling to hasher_runtime / char_runtime.  The
             // widened bytecode_length gate below (`is_intrinsic_stub`)
-            // now routes them through `try_dispatch_intrinsic_by_name`
+            // now routes them through `try_dispatch_intrinsic_function`
             // directly.  See the `is_intrinsic_stub` comment for
             // the architectural rationale.
             if let Some(result) = super::shell_runtime::try_intercept_shell_runtime(
@@ -581,27 +583,14 @@ pub(in super::super) fn handle_call(
         }
     }
 
-    // Check for external/intrinsic functions with no bytecode body OR
-    // an `@intrinsic`-tagged forward declaration whose body is the
-    // 1-byte Return stub the codegen emits when `lookup_intrinsic`
-    // doesn't find a registry entry for the intrinsic name (e.g.
-    // every `core/intrinsics/runtime/os.vr` declaration tagged
-    // `@intrinsic("file_open")`, `@intrinsic("time_now_ms")`,
-    // `@intrinsic("ctx_get")`, …).
-    //
-    // Pre-fix the gate was strictly `bytecode_length == 0` — so
-    // every `__*_raw` stub-bodied intrinsic call fell through to
-    // the body's Return-Unit, defeating the per-name dispatch arms
-    // in `try_dispatch_intrinsic_by_name`.  The widened gate
-    // captures both shapes (no body / stub body) without
-    // false-positive-intercepting real Verum bodies: the
-    // `has_intrinsic_marker` discriminator captured above pins the
-    // intercept to declarations explicitly tagged @intrinsic.
-    if bytecode_length == 0 || (bytecode_length <= 1 && has_intrinsic_marker) {
+    // Declaration provenance selects intrinsic dispatch. Generated forward
+    // returns never establish an implementation, and real source bodies retain
+    // their semantics even when their instruction stream is only a Unit return.
+    if declared_intrinsic || (bytecode_length == 0 && !has_intrinsic_marker) {
         let caller_base = state.reg_base();
-        if let Some(result) = try_dispatch_intrinsic_by_name(
+        if let Some(result) = try_dispatch_intrinsic_function(
             state,
-            func_name_id,
+            func_id,
             dst,
             args.start,
             args.count,
@@ -806,6 +795,7 @@ pub(in super::super) fn handle_call_generic(
                         args.start,
                         args.count as u8,
                         caller_base,
+                        IntrinsicNameOrigin::ExternalSymbol,
                     )? {
                         state.set_reg(dst, value);
                         return Ok(DispatchResult::Continue);
@@ -820,6 +810,7 @@ pub(in super::super) fn handle_call_generic(
     let func_name_id = func.name;
     let reg_count = func.register_count;
     let has_intrinsic_marker = func.intrinsic_name.is_some();
+    let declared_intrinsic = func.requires_intrinsic_implementation();
 
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCalls) {
         let func_name: String = state
@@ -834,16 +825,12 @@ pub(in super::super) fn handle_call_generic(
         );
     }
 
-    // Intercept external/intrinsic functions with no bytecode body OR
-    // an `@intrinsic`-tagged forward declaration with a 1-byte Return
-    // stub body — the same widened gate as `handle_call` (0x5B); the
-    // narrow `== 0` gate let a CallG onto an intrinsic declaration
-    // execute the stub's RetV and silently return unit.
-    if bytecode_length == 0 || (bytecode_length <= 1 && has_intrinsic_marker) {
+    // Use the same declaration-owned dispatch as ordinary calls.
+    if declared_intrinsic || (bytecode_length == 0 && !has_intrinsic_marker) {
         let caller_base = state.reg_base();
-        if let Some(result) = try_dispatch_intrinsic_by_name(
+        if let Some(result) = try_dispatch_intrinsic_function(
             state,
-            func_name_id,
+            func_id,
             dst,
             args.start,
             args.count,
@@ -1056,15 +1043,16 @@ pub(in super::super) fn handle_call_cached(
         .get_function(func_id)
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
     let bytecode_length = func.bytecode_length;
-    let func_name_id = func.name;
+    let has_intrinsic_marker = func.intrinsic_name.is_some();
+    let declared_intrinsic = func.requires_intrinsic_implementation();
     let reg_count = func.register_count;
 
     // Intercept external/intrinsic functions with no bytecode body
-    if bytecode_length == 0 {
+    if declared_intrinsic || (bytecode_length == 0 && !has_intrinsic_marker) {
         let caller_base = state.reg_base();
-        if let Some(result) = try_dispatch_intrinsic_by_name(
+        if let Some(result) = try_dispatch_intrinsic_function(
             state,
-            func_name_id,
+            func_id,
             dst,
             args.start,
             args.count,
@@ -1156,6 +1144,22 @@ pub(in super::super) fn handle_call_closure(
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
     let reg_count = func.register_count;
+    let intrinsic_stub = func.requires_intrinsic_implementation();
+    if intrinsic_stub {
+        if capture_count != 0 {
+            return Err(InterpreterError::InvalidBytecode {
+                pc: state.pc() as usize,
+                message: "an intrinsic declaration cannot receive a captured environment".into(),
+            });
+        }
+        let caller_base = state.reg_base();
+        if let Some(result) = try_dispatch_intrinsic_function(
+            state, func_id, dst, args_start, arg_count, caller_base,
+        )? {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
     let witnesses = state.closure_generic_witnesses(closure_val, func_id)?;
     let return_pc = state.pc();
     let caller_base = state.reg_base();
@@ -1233,7 +1237,15 @@ pub(in super::super) fn handle_tail_call_op(
         });
     }
     let reg_count = func.register_count;
+    let intrinsic_stub = func.requires_intrinsic_implementation();
     let current_base = state.reg_base();
+    if intrinsic_stub {
+        if let Some(result) = try_dispatch_intrinsic_function(
+            state, func_id, Reg(0), args.start, args.count, current_base,
+        )? {
+            return super::super::do_return(state, result);
+        }
+    }
 
     // Collect arguments first (before we modify registers)
     let arg_values: Vec<Value> = (0..args.count as u16)
@@ -1403,33 +1415,121 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
 /// - Float classification (is_nan, is_inf, is_finite)
 /// - Saturating arithmetic (saturating_add/sub/mul)
 /// - Platform intrinsics (num_cpus, abort, cbgr_advance_epoch)
-/// - Tier/async stubs (tier_promote, get_tier, future_poll_sync)
-fn try_dispatch_intrinsic_by_name(
+/// - Execution-tier introspection (tier_promote, get_tier)
+fn try_dispatch_intrinsic_function(
     state: &mut InterpreterState,
-    func_name_id: StringId,
+    func_id: FunctionId,
     dst: Reg,
     args_start: Reg,
     arg_count: u8,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    // Snapshot func name + args eagerly so we don't carry an immutable
-    // borrow of `state` through the body — TCP/UDP intrinsics need
-    // `&mut state` to allocate Text return values.
-    let func_name: String = match state.module.strings.get(func_name_id) {
-        Some(name) => name.to_string(),
-        None => return Ok(None),
-    };
-    try_dispatch_intrinsic_named(state, func_name, dst, args_start, arg_count, caller_base)
+    let descriptor = state
+        .module
+        .get_function(func_id)
+        .ok_or(InterpreterError::FunctionNotFound(func_id))?;
+    let declaration_id = descriptor.name;
+    let intrinsic_name = descriptor.intrinsic_name;
+    let declared_arity = descriptor.params.len();
+    // The attribute, not the source function's spelling, owns intrinsic identity.
+    let identity = intrinsic_name.unwrap_or(descriptor.name);
+    let name: String = state
+        .module
+        .strings
+        .get(identity)
+        .unwrap_or("<invalid intrinsic name>")
+        .into();
+    if intrinsic_name.is_some() {
+        if declared_arity != usize::from(arg_count) {
+            return Err(InterpreterError::InvalidBytecode {
+                pc: state.pc() as usize,
+                message: format!(
+                    "intrinsic '{name}' declaration expects {declared_arity} arguments, call provides {arg_count}"
+                ),
+            });
+        }
+        if let Some(info) = crate::intrinsics::lookup_intrinsic(&name) {
+            let intrinsic = info.intrinsic;
+            if declared_arity != usize::from(intrinsic.param_count) {
+                return Err(InterpreterError::InvalidBytecode {
+                    pc: state.pc() as usize,
+                    message: format!(
+                        "intrinsic '{name}' contract expects {} arguments, declaration provides {declared_arity}",
+                        intrinsic.param_count
+                    ),
+                });
+            }
+            if let Some((scope, operand)) =
+                crate::interpreter::permission::intrinsic_permission_request(intrinsic).map_err(
+                    |message| InterpreterError::InvalidBytecode {
+                        pc: state.pc() as usize,
+                        message: message.into_string(),
+                    },
+                )?
+            {
+                if operand >= usize::from(arg_count) {
+                    return Err(InterpreterError::InvalidBytecode {
+                        pc: state.pc() as usize,
+                        message: format!("intrinsic '{name}' is missing its permission target"),
+                    });
+                }
+                let target = state
+                    .registers
+                    .get(caller_base, Reg(args_start.0 + operand as u16));
+                let target =
+                    target
+                        .try_as_i64()
+                        .ok_or_else(|| InterpreterError::InvalidBytecode {
+                            pc: state.pc() as usize,
+                            message: format!(
+                                "intrinsic '{name}' permission target must be an integer"
+                            ),
+                        })?;
+                crate::interpreter::permission::assert_permission(state, scope, target as u64)?;
+            }
+        }
+    }
+    let result = try_dispatch_intrinsic_named(
+        state,
+        name,
+        dst,
+        args_start,
+        arg_count,
+        caller_base,
+        if intrinsic_name.is_some() {
+            IntrinsicNameOrigin::DeclaredIdentity
+        } else {
+            IntrinsicNameOrigin::ExternalSymbol
+        },
+    )?;
+    if result.is_none() && intrinsic_name.is_some() {
+        return Err(InterpreterError::UnsupportedIntrinsic {
+            declaration: state
+                .module
+                .strings
+                .get(declaration_id)
+                .unwrap_or("<invalid declaration name>")
+                .into(),
+            intrinsic: state
+                .module
+                .strings
+                .get(identity)
+                .unwrap_or("<invalid intrinsic name>")
+                .into(),
+        });
+    }
+    Ok(result)
 }
 
-/// The by-NAME half of the intrinsic intercept.
-///
-/// Split out of `try_dispatch_intrinsic_by_name` (T0734) because a caller
-/// can hold the callee's name without holding a `StringId` for it: a
-/// cross-module band reference carries its qualified name in
-/// `external_function_names`, not in the module's string table. Before this
-/// split, such a call had a name the intercept could have answered and no
-/// way to hand it over, so it died with a diagnostic instead of running.
+/// Attribute identities and unresolved external symbol spellings have
+/// different resolution rules; qualification cannot create intrinsic identity.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IntrinsicNameOrigin {
+    DeclaredIdentity,
+    ExternalSymbol,
+}
+
+/// Dispatch an exact declared identity or a legacy external-symbol reference.
 fn try_dispatch_intrinsic_named(
     state: &mut InterpreterState,
     func_name: String,
@@ -1437,6 +1537,7 @@ fn try_dispatch_intrinsic_named(
     args_start: Reg,
     arg_count: u8,
     caller_base: u32,
+    origin: IntrinsicNameOrigin,
 ) -> InterpreterResult<Option<Value>> {
 
     // Helper closures to read argument values from the caller's frame
@@ -1454,32 +1555,14 @@ fn try_dispatch_intrinsic_named(
 
     let get_i64_arg = |state: &InterpreterState, idx: u8| -> i64 { get_arg(state, idx).as_i64() };
 
-    // Normalize function name: strip common prefixes and qualifications
-    // e.g., "math.sqrt" -> "sqrt", "elementary.sqrt" -> "sqrt",
-    //  "llvm.sqrt.f64" -> handled directly.
-    //
-    // Module-qualified intrinsics (`core.intrinsics.runtime.os.__time_now_ms_raw`
-    // etc.) also need the bare-name form for the per-name match arms
-    // below.  This is the canonical normalisation step — every other
-    // path (`@intrinsic("name")` registry lookup, alias rules in
-    // intrinsics/mod.rs::lookup_intrinsic) already keys off the bare
-    // name; the dispatch table here is the last place that historically
-    // saw only the bare form because `bytecode_length == 0` short-
-    // circuited before name canonicalisation.  Now that the widened
-    // gate at `is_intrinsic_stub` admits qualified-form stubs, strip
-    // the module prefix off any `__*_raw`-shaped name so the existing
-    // per-name arms still fire.
-    // Take the bare last segment for EVERY module-qualified name (not just
-    // the `__*_raw` shape): the registry and every @intrinsic("…") key are
-    // bare, so the per-name arms below are keyed bare — a qualified
-    // `core.intrinsics.runtime.mem_raw.load_byte` call previously fell past
-    // every arm into the reduced suffix-matcher duplicate (which lacks most
-    // ops) and then into the declaration stub.  `llvm.*` names are the one
-    // dotted FAMILY matched whole ("llvm.sqrt.f64"), so they keep their
-    // qualification.  The gate above already guarantees the callee is an
-    // @intrinsic-tagged stub, so bare-suffix matching cannot capture a real
-    // user function.
-    let normalized: String = if func_name.starts_with("llvm.") {
+    // Declared identities permit only exact operations and aliases recorded in
+    // the intrinsic registry. Historical external-symbol qualification is a
+    // separate compatibility route; it cannot authorize an attribute identity.
+    let normalized: String = if origin == IntrinsicNameOrigin::DeclaredIdentity {
+        crate::intrinsics::lookup_intrinsic(&func_name)
+            .map(|info| info.intrinsic.name.to_owned())
+            .unwrap_or_else(|| func_name.clone())
+    } else if func_name.starts_with("llvm.") {
         func_name.clone()
     } else if let Some(idx) = func_name.rfind('.') {
         func_name[idx + 1..].to_string()
@@ -1908,7 +1991,9 @@ fn try_dispatch_intrinsic_named(
         "verum_num_cpus" | "num_cpus" => {
             let cpus = std::thread::available_parallelism()
                 .map(|n| n.get() as i64)
-                .unwrap_or(1);
+                .map_err(|error| InterpreterError::Panic {
+                    message: format!("Unable to determine available processor count: {error}"),
+                })?;
             Ok(Some(Value::from_i64(cpus)))
         }
         "abort" | "verum_abort" => Err(InterpreterError::Panic {
@@ -1939,17 +2024,8 @@ fn try_dispatch_intrinsic_named(
             Ok(Some(Value::from_i64(0)))
         }
         "is_interpreted" => Ok(Some(Value::from_bool(true))),
-        "verum_future_poll_sync" | "future_poll_sync" => {
-            // Return false/nil: async not supported in tier 0
-            Ok(Some(Value::from_bool(false)))
-        }
         "verum_supervisor_set_parent" | "supervisor_set_parent" => {
             // No-op: supervisor hierarchy not available
-            Ok(Some(Value::unit()))
-        }
-        "verum_exec_with_recovery" | "exec_with_recovery" => {
-            // Execute without recovery: just call the factory directly
-            // Return unit as placeholder
             Ok(Some(Value::unit()))
         }
         "verum_shared_registry_global" | "shared_registry_global" => {
@@ -3222,7 +3298,7 @@ fn try_dispatch_intrinsic_named(
         _ => {
             // Try suffix matching for qualified names like "math.sqrt", "elementary.sin"
             let suffix = name.rsplit('.').next().unwrap_or(name);
-            if suffix != name {
+            if origin == IntrinsicNameOrigin::ExternalSymbol && suffix != name {
                 // Recurse with just the suffix
                 return try_dispatch_intrinsic_by_suffix(
                     state,
@@ -3271,13 +3347,15 @@ fn try_dispatch_intrinsic_by_suffix(
     match suffix {
         // Platform intrinsics that route through module-qualified names
         // (e.g. `verum.runtime.num_cpus` → suffix `num_cpus`).  Mirror the
-        // by-name dispatch arm at the top of `try_dispatch_intrinsic_by_name`
+        // by-name dispatch arm at the top of `try_dispatch_intrinsic_function`
         // so qualified-form `@intrinsic("verum.runtime.num_cpus")` calls
         // resolve through the suffix-extract path.
         "num_cpus" => {
             let cpus = std::thread::available_parallelism()
                 .map(|n| n.get() as i64)
-                .unwrap_or(1);
+                .map_err(|error| InterpreterError::Panic {
+                    message: format!("Unable to determine available processor count: {error}"),
+                })?;
             Ok(Some(Value::from_i64(cpus)))
         }
         // Unary F64 math

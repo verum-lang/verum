@@ -2323,7 +2323,6 @@ impl VbcCodegen {
                         && !func_info.is_generator
                         && (func_info.is_const
                             || func_info.variant_tag.is_some()
-                            || func_info.intrinsic_name.is_some()
                             || func_info.id.0 == u32::MAX / 2)
                     {
                         if let Ok(reg) = self.ctx.get_var_reg(name) {
@@ -7623,7 +7622,9 @@ impl VbcCodegen {
 
                     // Check if this is an intrinsic function imported from sys.intrinsics
                     // Functions declared with @intrinsic("name") can be called through imports
-                    if let Some(intrinsic_info) = lookup_intrinsic(&func_name) {
+                    if let Some(intrinsic_info) = lookup_intrinsic(&func_name)
+                        && !intrinsic_info.is_runtime_call()
+                    {
                         return self.compile_imported_intrinsic_call(&intrinsic_info, args, None);
                     }
 
@@ -7787,8 +7788,10 @@ impl VbcCodegen {
         // Check if this function is an intrinsic (declared with @intrinsic("name"))
         // This is the primary intrinsic resolution path - intrinsic identity is established
         // at declaration time via @intrinsic attribute, not at call-site via name matching.
-        if let Some(intrinsic_name) = &func_info.intrinsic_name
+        if !func_info.has_source_body
+            && let Some(intrinsic_name) = &func_info.intrinsic_name
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
+            && !intrinsic_info.is_runtime_call()
         {
             return self.compile_imported_intrinsic_call(&intrinsic_info, args, func_info.return_type.as_ref());
         }
@@ -18141,8 +18144,10 @@ impl VbcCodegen {
         // resolved TypeDescriptor pins the record shape.
 
         // Check if this function is an intrinsic — resolve inline instead of emitting Call
-        if let Some(intrinsic_name) = &func_info.intrinsic_name
+        if !func_info.has_source_body
+            && let Some(intrinsic_name) = &func_info.intrinsic_name
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
+            && !intrinsic_info.is_runtime_call()
         {
             return self.compile_imported_intrinsic_call(&intrinsic_info, args, func_info.return_type.as_ref());
         }
@@ -36084,60 +36089,29 @@ impl VbcCodegen {
         ptr_elem_stride: u8,
         declared_return: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<()> {
-        use crate::intrinsics::registry::{CodegenStrategy, IntrinsicCategory, IntrinsicHint};
+        use crate::intrinsics::registry::CodegenStrategy;
 
         let intrinsic = info.intrinsic;
 
-        // #12 / P3.2 — auto-emit a PermissionAssert prologue for
-        // every intrinsic carrying `RequiresPermission`. The
-        // single-instruction shape needs no branching machinery
-        // here: the dispatch handler raises a typed panic on
-        // Deny, the rest of the codegen continues unchanged.
-        //
-
-        // scope_tag derivation:
-        //  IntrinsicCategory::Syscall → 0 (PermissionScope::Syscall)
-        //
-
-        // target_id derivation:
-        //  For raw syscallN intrinsics the first argument
-        //  register holds the syscall number, which is the
-        //  stable target identifier within the Syscall scope.
-        //  The pin tests
-        //  (test_syscall_intrinsics_require_permission /
-        //  test_observational_intrinsics_skip_permission) keep
-        //  this mapping load-bearing — any new tagged category
-        //  triggers a deliberate match-arm extension here, not
-        //  a silent "ungated" emission.
-        if intrinsic.hints.contains(&IntrinsicHint::RequiresPermission) {
-            let (scope_tag, target_reg) = match intrinsic.category {
-                IntrinsicCategory::Syscall => {
-                    let target = args.first().copied().unwrap_or(Reg(0));
-                    (0_u8, target)
-                }
-                // Future tagged categories must extend this
-                // mapping. The pin test on
-                // `RequiresPermission` ensures no untagged
-                // syscall-like intrinsic slips through; if a
-                // *new* category gets tagged, the registry
-                // pin will direct attention here.
-                _ => {
-                    return Err(CodegenError::new(CodegenErrorKind::Internal(format!(
-                        "intrinsic `{}` carries RequiresPermission but \
-                             category {:?} is not yet wired to a permission \
-                             scope (#12 / P3.2 follow-up — extend the match \
-                             in emit_intrinsic_instructions)",
-                        intrinsic.name, intrinsic.category
-                    ))));
-                }
-            };
+        // Both inline lowering and declared-call dispatch use the same registry
+        // permission request, so storing an intrinsic as a value cannot remove it.
+        if let Some((scope, operand)) = crate::interpreter::permission::intrinsic_permission_request(intrinsic)
+            .map_err(CodegenError::internal)?
+        {
+            let target_id = args.get(operand).copied().ok_or_else(||
+                CodegenError::unsupported_expr(format!("intrinsic '{}' is missing its permission target", intrinsic.name)))?;
             self.ctx.emit(Instruction::PermissionAssert {
-                scope_tag,
-                target_id: target_reg,
+                scope_tag: scope.to_wire_tag(), target_id,
             });
         }
 
         match &intrinsic.strategy {
+            CodegenStrategy::RuntimeCall => {
+                return Err(CodegenError::unsupported_expr(format!(
+                    "runtime intrinsic '{}' requires a declaration-owned callable",
+                    intrinsic.name,
+                )));
+            }
             CodegenStrategy::DirectOpcode(opcode) => {
                 self.emit_intrinsic_direct_opcode(*opcode, args, dest);
             }
@@ -38143,26 +38117,6 @@ impl VbcCodegen {
                         dst: dest,
                         value: 0,
                     });
-                }
-            }
-
-            // Tier 0 async: always return pending (no real async support)
-            InlineSequenceId::PollPending => {
-                // Load false to indicate Poll::Pending
-                self.ctx.emit(Instruction::LoadFalse { dst: dest });
-            }
-
-            // Call second argument as function (for recovery passthrough)
-            InlineSequenceId::CallSecondArg => {
-                if args.len() >= 2 {
-                    // args[1] is the closure/function to call, ignore args[0] (recovery context)
-                    self.ctx.emit(Instruction::CallClosure {
-                        dst: dest,
-                        closure: args[1],
-                        args: RegRange::new(Reg::new(0), 0), // No args to the factory
-                    });
-                } else {
-                    self.ctx.emit(Instruction::LoadNil { dst: dest });
                 }
             }
 
@@ -40574,16 +40528,6 @@ impl VbcCodegen {
                 } else {
                     self.ctx.emit(Instruction::LoadFalse { dst: dest });
                 }
-            }
-            "num_cpus" => {
-                // Return actual CPU count at compile time
-                let cpus = std::thread::available_parallelism()
-                    .map(|n| n.get() as i64)
-                    .unwrap_or(1);
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: cpus,
-                });
             }
             // TIER-DETECT-AOT-1: `is_interpreted` / `get_tier` are
             // deliberately ABSENT here — a CompileTimeConstant fold

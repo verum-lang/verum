@@ -16,7 +16,7 @@ use verum_llvm::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use verum_vbc::{
     array_storage::ArrayResultFact,
     instruction::{Instruction, Reg},
-    module::{ParamDescriptor, VbcModule},
+    module::{FunctionDescriptor, ParamDescriptor, VbcModule},
 };
 
 /// Exception handler info for structured exception handling.
@@ -1168,6 +1168,24 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.func_id_map
             .as_ref()
             .and_then(|m| m.get(&func_id).copied())
+    }
+
+    /// Resolve the declaration already selected by VBC identity.
+    /// Physical symbols can differ from source names (entries, overloads and
+    /// intrinsic wrappers); another same-named function is not a substitute.
+    pub fn resolve_declared_function(
+        &self,
+        declaration: &FunctionDescriptor,
+    ) -> Result<FunctionValue<'ctx>> {
+        self.resolve_func_id(declaration.id.0).ok_or_else(|| {
+            let name = self.vbc_module
+                .and_then(|module| module.get_string(declaration.name))
+                .unwrap_or("<unknown>");
+            LlvmLoweringError::MissingFunction(format!(
+                "declaration '{name}' (VBC id {}) has no native target",
+                declaration.id.0,
+            ).into())
+        })
     }
 
     /// Install the AOT permission policy for this function. Called by

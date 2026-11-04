@@ -392,6 +392,13 @@ impl<'ctx> PlatformIR<'ctx> {
     /// Emit all platform runtime functions into the module.
     /// This replaces verum_platform.c with pure LLVM IR.
     pub fn emit_platform_functions(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        self.emit_platform_functions_with_intrinsics(module).map(|_| ())
+    }
+
+    pub(crate) fn emit_platform_functions_with_intrinsics(
+        &self, module: &Module<'ctx>,
+    ) -> super::error::Result<super::native_intrinsic::NativeIntrinsicImplementations<'ctx>> {
+        let mut intrinsics = super::native_intrinsic::NativeIntrinsicImplementations::default();
         // Core OS primitives
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_core_declarations"); }
         self.emit_core_declarations(module)?;
@@ -402,7 +409,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_num_cpus — ONE CPU-count authority (AOT-NUM-CPUS-LEG-1)
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_num_cpus"); }
-        self.emit_num_cpus(module)?;
+        self.emit_num_cpus(module, &mut intrinsics)?;
 
         // Memory allocator (bump allocator with spinlock)
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_allocator"); }
@@ -526,7 +533,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // Thread Pool
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_pool_ir"); }
-        self.emit_pool_ir(module)?;
+        self.emit_pool_ir(module, &intrinsics)?;
 
         // Async I/O (submit + poll + syscall)
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_async_io_ir"); }
@@ -612,7 +619,7 @@ impl<'ctx> PlatformIR<'ctx> {
         self.emit_cond_wait_ir(module)?;
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_cond_timedwait_ir"); }
         self.emit_cond_timedwait_ir(module)?;
-        Ok(())
+        Ok(intrinsics)
     }
 
     // ========================================================================
@@ -678,9 +685,17 @@ impl<'ctx> PlatformIR<'ctx> {
     ///    (allowed boundary), clamped to >= 1;
     ///  - linux:   direct SYS_sched_getaffinity (x86_64 204 / aarch64
     ///    123) over a zeroed 128-byte mask, popcount of the mask words,
-    ///    clamped to >= 1 (no libc);
-    ///  - other:   const 1 (documented conservative floor).
-    fn emit_num_cpus(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+    ///    an invalid query result raises the configured runtime panic (no libc);
+    ///  - other:   unavailable until an actual CPU query is implemented.
+    fn emit_num_cpus(
+        &self, module: &Module<'ctx>,
+        intrinsics: &mut super::native_intrinsic::NativeIntrinsicImplementations<'ctx>,
+    ) -> super::error::Result<()> {
+        if !target_is_darwin(module) && !target_is_linux(module) {
+            // There is no CPU-query implementation for this target. Leave the
+            // intrinsic unavailable instead of registering a fabricated count.
+            return Ok(());
+        }
         let ctx = self.context;
         let i64_type = ctx.i64_type();
 
@@ -694,7 +709,6 @@ impl<'ctx> PlatformIR<'ctx> {
         let entry = ctx.append_basic_block(func, "entry");
         builder.position_at_end(entry);
 
-        let one = i64_type.const_int(1, false);
         let raw_count: verum_llvm::values::IntValue = if target_is_darwin(module) {
             let sysconf_fn = self.get_or_declare_fn(
                 module,
@@ -766,7 +780,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     .build_int_add(sum, bits, &format!("sum{}", i))
                     .or_llvm_err()?;
             }
-            // rc < 0 (syscall error) => raw 0, clamped to 1 below.
+            // rc < 0 (syscall error) => raw 0, rejected below.
             let rc_ok = builder
                 .build_int_compare(IntPredicate::SGE, rc, i64_type.const_zero(), "aff_ok")
                 .or_llvm_err()?;
@@ -775,19 +789,43 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?
                 .into_int_value()
         } else {
-            // Windows/embedded: conservative floor until their legs land
-            // (kernel32 GetSystemInfo / bare-metal config respectively).
-            one
+            unreachable!("supported CPU-query targets checked before emission")
         };
 
-        let lt1 = builder
-            .build_int_compare(IntPredicate::SLT, raw_count, one, "lt1")
+        let valid = builder.build_int_compare(
+            IntPredicate::SGT, raw_count, i64_type.const_zero(), "valid_cpu_count",
+        ).or_llvm_err()?;
+        let success = ctx.append_basic_block(func, "query_succeeded");
+        let failure = ctx.append_basic_block(func, "query_failed");
+        builder.build_conditional_branch(valid, success, failure).or_llvm_err()?;
+        builder.position_at_end(failure);
+        self.emit_runtime_failure(module, &builder, "Unable to determine available processor count")?;
+        builder.position_at_end(success);
+        builder.build_return(Some(&raw_count)).or_llvm_err()?;
+        let intrinsic = verum_vbc::intrinsics::lookup_intrinsic("num_cpus")
+            .or_internal("num_cpus intrinsic registration is missing")?;
+        intrinsics.register(intrinsic.intrinsic, func, fn_type)?;
+        Ok(())
+    }
+
+    /// Fail through the configured panic policy instead of inventing a value.
+    fn emit_runtime_failure(
+        &self, module: &Module<'ctx>, builder: &verum_llvm::builder::Builder<'ctx>,
+        message: &str,
+    ) -> super::error::Result<()> {
+        let ctx = self.context;
+        let pointer = ctx.ptr_type(AddressSpace::default());
+        let message_pointer = builder.build_global_string_ptr(message, "runtime_failure")
             .or_llvm_err()?;
-        let clamped = builder
-            .build_select(lt1, one, raw_count, "ncpu")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_return(Some(&clamped)).or_llvm_err()?;
+        let panic = self.get_or_declare_fn(module, "verum_panic", ctx.void_type().fn_type(
+            &[pointer.into(), ctx.i64_type().into(), pointer.into(), ctx.i32_type().into()], false,
+        ));
+        builder.build_call(panic, &[
+            message_pointer.as_pointer_value().into(),
+            ctx.i64_type().const_int(message.len() as u64, false).into(),
+            pointer.const_null().into(), ctx.i32_type().const_zero().into(),
+        ], "").or_llvm_err()?;
+        builder.build_unreachable().or_llvm_err()?;
         Ok(())
     }
 
@@ -10986,13 +11024,16 @@ impl<'ctx> PlatformIR<'ctx> {
     // Thread Pool
     // ========================================================================
 
-    fn emit_pool_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+    fn emit_pool_ir(
+        &self, module: &Module<'ctx>,
+        intrinsics: &super::native_intrinsic::NativeIntrinsicImplementations<'ctx>,
+    ) -> super::error::Result<()> {
         self.emit_pool_worker_entry(module)?;
         self.emit_pool_create(module)?;
         self.emit_pool_submit(module)?;
         self.emit_pool_await(module)?;
         self.emit_pool_destroy(module)?;
-        self.emit_pool_global(module)?;
+        self.emit_pool_global(module, intrinsics)?;
         self.emit_pool_global_submit(module)?;
         Ok(())
     }
@@ -12240,7 +12281,10 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_pool_global() -> i64
     /// Lazy-init global pool using CAS pattern.
-    fn emit_pool_global(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+    fn emit_pool_global(
+        &self, module: &Module<'ctx>,
+        intrinsics: &super::native_intrinsic::NativeIntrinsicImplementations<'ctx>,
+    ) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let _ptr_type = ctx.ptr_type(AddressSpace::default());
@@ -12250,6 +12294,14 @@ impl<'ctx> PlatformIR<'ctx> {
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
+
+        let Some(ncpu_fn) = intrinsics.get("num_cpus") else {
+            let builder = ctx.create_builder();
+            builder.position_at_end(ctx.append_basic_block(func, "unsupported_cpu_query"));
+            self.emit_runtime_failure(module, &builder,
+                "Global worker pool requires an available processor-count implementation")?;
+            return Ok(());
+        };
 
         // Global variable for the pool pointer
         let global_pool = if let Some(g) = module.get_global("__verum_global_pool") {
@@ -12292,10 +12344,6 @@ impl<'ctx> PlatformIR<'ctx> {
         // sysconf on darwin and a direct sched_getaffinity syscall on
         // Linux. Pool sizing keeps its own [2, 64] clamp.
         let num_cpus = {
-            self.emit_num_cpus(module)?;
-            let ncpu_fn = module
-                .get_function("verum_num_cpus")
-                .or_internal("verum_num_cpus missing after emit")?;
             let ncpu = builder
                 .build_call(ncpu_fn, &[], "ncpu")
                 .or_llvm_err()?

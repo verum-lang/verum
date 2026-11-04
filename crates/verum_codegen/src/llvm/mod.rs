@@ -78,6 +78,7 @@
 //! - Generated code: within 5% of hand-written LLVM IR
 
 // Error types
+pub(crate) mod native_intrinsic;
 pub mod error;
 
 // Type lowering (VBC types → LLVM types)

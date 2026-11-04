@@ -9,7 +9,8 @@
 //!
 //! ## Design Principles
 //!
-//! 1. **Zero Overhead**: Intrinsics compile to inline VBC opcodes, not function calls
+//! 1. **Explicit Dispatch**: Opcode intrinsics inline; runtime intrinsics retain
+//!    their declared call target and ABI
 //! 2. **LLVM Transparent**: MLIR lowering produces operations LLVM can fully optimize
 //! 3. **Interpreter Fast Path**: Hot intrinsics use dedicated dispatch handlers
 //! 4. **Compile-Time Evaluation**: Pure intrinsics fold to constants when possible
@@ -70,6 +71,13 @@ pub struct IntrinsicInfo {
     pub is_pure: bool,
     /// Whether this intrinsic can be evaluated at compile time.
     pub is_const_eval: bool,
+}
+
+impl IntrinsicInfo {
+    /// This intrinsic must retain its declaration-owned runtime call.
+    pub fn is_runtime_call(&self) -> bool {
+        matches!(self.intrinsic.strategy, registry::CodegenStrategy::RuntimeCall)
+    }
 }
 
 /// Intrinsics whose NAME carries an operand-width suffix (`_f32` / `_f64`)

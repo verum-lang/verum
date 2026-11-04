@@ -61,6 +61,18 @@ first-wins, shadowing the bitwise.vr generic wrapper.
 
 - Same regression-test set as Rule 1.
 
+Callable declaration identity comes from `intrinsic_name`; executable source
+ownership comes from `has_source_body`. An intrinsic annotation does not make
+a function a constant-on-read value. Generated declaration returns are not
+implementations. Direct calls and function values retain the same identity,
+arity and permission requirements.
+
+Native implementations bind through the current emitter's canonical registry
+identity and checked ABI. A matching symbol name does not grant that binding.
+Runtime queries remain calls rather than constants captured from the compiler
+host. Unsupported declarations fail explicitly instead of returning fabricated
+values.
+
 ## 3. Call-site arity matches intrinsic param_count
 
 > **Every `@intrinsic("...", args)` macro call site MUST have arity

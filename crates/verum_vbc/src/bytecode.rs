@@ -863,8 +863,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             scope_tag,
             target_id,
         } => {
-            output.push(Opcode::TensorExtended.to_byte());
-            output.push(TensorExtSubOpcode::PermissionCheckWire.to_byte());
+            encode_escaped_tensor_header(
+                TensorExtSubOpcode::PermissionCheckWire,
+                crate::encoding::reg_size(*dst)
+                    + crate::encoding::reg_size(*scope_tag)
+                    + crate::encoding::reg_size(*target_id),
+                output,
+            );
             encode_reg(*dst, output);
             encode_reg(*scope_tag, output);
             encode_reg(*target_id, output);
@@ -879,24 +884,35 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             scope_tag,
             target_id,
         } => {
-            output.push(Opcode::TensorExtended.to_byte());
-            output.push(TensorExtSubOpcode::PermissionAssert.to_byte());
+            encode_escaped_tensor_header(
+                TensorExtSubOpcode::PermissionAssert,
+                1
+                    + crate::encoding::reg_size(*target_id),
+                output,
+            );
             output.push(*scope_tag);
             encode_reg(*target_id, output);
         }
 
         // #101 — read a single PermissionRouterStats field.
         Instruction::PermissionStatsRead { dst, selector } => {
-            output.push(Opcode::TensorExtended.to_byte());
-            output.push(TensorExtSubOpcode::PermissionStatsRead.to_byte());
+            encode_escaped_tensor_header(
+                TensorExtSubOpcode::PermissionStatsRead,
+                crate::encoding::reg_size(*dst)
+                    + crate::encoding::reg_size(*selector),
+                output,
+            );
             encode_reg(*dst, output);
             encode_reg(*selector, output);
         }
 
         // #101 — clear all PermissionRouter stats.
         Instruction::PermissionStatsClear { dst } => {
-            output.push(Opcode::TensorExtended.to_byte());
-            output.push(TensorExtSubOpcode::PermissionStatsClear.to_byte());
+            encode_escaped_tensor_header(
+                TensorExtSubOpcode::PermissionStatsClear,
+                crate::encoding::reg_size(*dst),
+                output,
+            );
             encode_reg(*dst, output);
         }
 
@@ -3027,6 +3043,55 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
     output.len() - start_len
 }
 
+/// Use the existing escaped extended carrier for structured operations too.
+/// Length includes the extended opcode; registers retain their variable width.
+fn encode_escaped_tensor_header(
+    sub_op: TensorExtSubOpcode,
+    operand_size: usize,
+    output: &mut Vec<u8>,
+) {
+    output.push(Opcode::TensorExtended.to_byte());
+    output.push(0xFF);
+    encode_varint((1 + operand_size) as u64, output);
+    output.push(sub_op.to_byte());
+}
+
+/// Recover typed permission IR from both historical bare operands and the
+/// canonical escaped carrier. The caller owns the operand boundary.
+fn decode_permission_instruction(
+    sub_op: u8,
+    data: &[u8],
+    offset: &mut usize,
+) -> Option<VbcResult<Instruction>> {
+    match TensorExtSubOpcode::from_byte(sub_op) {
+        Some(TensorExtSubOpcode::PermissionCheckWire) => Some((|| {
+            Ok(Instruction::PermissionCheckWire {
+                dst: decode_reg(data, offset)?,
+                scope_tag: decode_reg(data, offset)?,
+                target_id: decode_reg(data, offset)?,
+            })
+        })()),
+        Some(TensorExtSubOpcode::PermissionAssert) => Some((|| {
+            Ok(Instruction::PermissionAssert {
+                scope_tag: decode_u8(data, offset)?,
+                target_id: decode_reg(data, offset)?,
+            })
+        })()),
+        Some(TensorExtSubOpcode::PermissionStatsRead) => Some((|| {
+            Ok(Instruction::PermissionStatsRead {
+                dst: decode_reg(data, offset)?,
+                selector: decode_reg(data, offset)?,
+            })
+        })()),
+        Some(TensorExtSubOpcode::PermissionStatsClear) => Some((|| {
+            Ok(Instruction::PermissionStatsClear {
+                dst: decode_reg(data, offset)?,
+            })
+        })()),
+        _ => None,
+    }
+}
+
 /// Encodes a vector of registers.
 #[inline]
 fn encode_reg_vec(regs: &[Reg], output: &mut Vec<u8>) {
@@ -4279,6 +4344,23 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 || registry_driven_tensor_arity(sub_opcode_byte).is_some()
             {
                 let operands = decode_bytes(data, offset)?;
+                if sub_opcode_byte == 0xFF
+                    && let Some(&extended) = operands.first()
+                {
+                    let mut operand_offset = 1;
+                    if let Some(decoded) =
+                        decode_permission_instruction(extended, &operands, &mut operand_offset)
+                    {
+                        let decoded = decoded?;
+                        if operand_offset != operands.len() {
+                            return Err(VbcError::InvalidInstructionEncoding {
+                                offset: *offset,
+                                reason: "permission instruction has trailing operands".into(),
+                            });
+                        }
+                        return Ok(decoded);
+                    }
+                }
                 return Ok(Instruction::TensorExtended {
                     sub_op: sub_opcode_byte,
                     operands,
@@ -5006,42 +5088,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         | Some(TensorExtSubOpcode::RegexCaptures) => {
                             Err(VbcError::InvalidOpcode(sub_opcode_byte))
                         }
-                        // #12 / P3.2 — permission_check_wire encoding:
-                        // [dst:reg, scope_tag:reg, target_id:reg].
-                        // Decoded into the dispatch handler in
-                        // tensor_extended.rs, which routes through
-                        // InterpreterState::check_permission.
-                        Some(TensorExtSubOpcode::PermissionCheckWire) => {
-                            let dst = decode_reg(data, offset)?;
-                            let scope_tag = decode_reg(data, offset)?;
-                            let target_id = decode_reg(data, offset)?;
-                            Ok(Instruction::PermissionCheckWire {
-                                dst,
-                                scope_tag,
-                                target_id,
-                            })
-                        }
-                        // #12 / P3.2 — permission_assert encoding:
-                        // [scope_tag:u8, target_id:reg].
-                        Some(TensorExtSubOpcode::PermissionAssert) => {
-                            let scope_tag = decode_u8(data, offset)?;
-                            let target_id = decode_reg(data, offset)?;
-                            Ok(Instruction::PermissionAssert {
-                                scope_tag,
-                                target_id,
-                            })
-                        }
-                        // #101 — read PermissionRouterStats field.
-                        Some(TensorExtSubOpcode::PermissionStatsRead) => {
-                            let dst = decode_reg(data, offset)?;
-                            let selector = decode_reg(data, offset)?;
-                            Ok(Instruction::PermissionStatsRead { dst, selector })
-                        }
-                        // #101 — clear all PermissionRouter stats.
-                        Some(TensorExtSubOpcode::PermissionStatsClear) => {
-                            let dst = decode_reg(data, offset)?;
-                            Ok(Instruction::PermissionStatsClear { dst })
-                        }
+                        // Read historical bare encodings, then canonicalize on re-encode.
+                        Some(TensorExtSubOpcode::PermissionCheckWire)
+                        | Some(TensorExtSubOpcode::PermissionAssert)
+                        | Some(TensorExtSubOpcode::PermissionStatsRead)
+                        | Some(TensorExtSubOpcode::PermissionStatsClear) =>
+                            decode_permission_instruction(sub_opcode_byte, data, offset)
+                                .expect("permission opcode selected above"),
                         None => Err(VbcError::InvalidOpcode(sub_opcode_byte)),
                     }
                 }

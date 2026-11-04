@@ -2415,72 +2415,6 @@ fn emit_text_free<'ctx>(
     Ok(())
 }
 
-/// Resolve an LLVM function by name, handling stdlib/user name collisions.
-///
-/// When a compiled stdlib function and a user function share a name but
-/// have different arities, `declare_functions` renames the colliding one
-/// to `func_name__arityN`. This function first tries the primary name,
-/// then the arity-suffixed variant.
-fn resolve_llvm_function<'a, 'ctx>(
-    module: &'a Module<'ctx>,
-    func_name: &str,
-    expected_param_count: usize,
-    call_kind: &str,
-) -> Result<FunctionValue<'ctx>> {
-    // Try primary name first
-    if let Some(f) = module.get_function(func_name) {
-        if f.count_params() as usize == expected_param_count {
-            return Ok(f);
-        }
-    }
-    // Try arity-suffixed name (from collision resolution in declare_functions)
-    let arity_name = format!("{}__arity{}", func_name, expected_param_count);
-    if let Some(f) = module.get_function(&arity_name) {
-        if f.count_params() as usize == expected_param_count {
-            return Ok(f);
-        }
-    }
-    // Fall back to primary even if param count doesn't match.
-    //
-    // THIS STEP EMITS IR THAT CANNOT VERIFY (T1153). The two checks
-    // above measured the mismatch and this discards the measurement:
-    // the caller then builds a call with `expected_param_count`
-    // arguments against a function that takes a different number, and
-    // the LLVM verifier — not this compiler — is what notices:
-    //
-    //     Incorrect number of arguments passed to called function!
-    //       call fastcc i64 @Cow.clone(i64 %r10, i64 %r11)
-    //     define internal fastcc i64 @Cow.clone(i64 %0)
-    //
-    // One module of the registry showcase refuses to verify for that
-    // pair, and the whole program dies with SIGSEGV in
-    // `generate_native` rather than a diagnostic naming a call site.
-    //
-    // NOT CHANGED BLIND. Returning an error here would be a NARROWING,
-    // and a fallback that legitimately succeeds today would start
-    // failing — the same shape as the FFI marshaller's integer arm.
-    // `VERUM_TRACE_ARITY_FALLBACK` counts how often this fires and with
-    // what mismatch, so the question "is this dead weight hiding
-    // defects, or does it have real cases" gets an answer instead of an
-    // argument.
-    let f = module.get_function(func_name).ok_or_else(|| {
-        LlvmLoweringError::internal(format!(
-            "{}: function '{}' (expected {} params) not found in LLVM module",
-            call_kind, func_name, expected_param_count
-        ))
-    })?;
-    if std::env::var_os("VERUM_TRACE_ARITY_FALLBACK").is_some() {
-        eprintln!(
-            "[arity-fallback] {} '{}': call passes {}, definition takes {}",
-            call_kind,
-            func_name,
-            expected_param_count,
-            f.count_params()
-        );
-    }
-    Ok(f)
-}
-
 pub fn lower_instruction<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     instr: &Instruction,
@@ -3627,17 +3561,11 @@ fn lower_instruction_impl<'ctx>(
 
         Instruction::TailCall { func_id, args } => {
             let vbc_mod = ctx.vbc_module().or_internal("TailCall requires VBC module for function resolution")?;
-            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!(
+            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).ok_or_else(|| LlvmLoweringError::MissingFunction(format!(
                     "TailCall: function id {} not found in VBC module",
                     func_id
-                ))?;
-            let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
-            let llvm_fn = resolve_llvm_function(
-                ctx.get_module(),
-                func_name,
-                args.count as usize,
-                "TailCall",
-            )?;
+                ).into()))?;
+            let llvm_fn = ctx.resolve_declared_function(func_desc)?;
             let tail_param_types = llvm_fn.get_type().get_param_types();
             let arg_vals: Vec<BasicMetadataValueEnum> = args
                 .iter()
@@ -3665,6 +3593,7 @@ fn lower_instruction_impl<'ctx>(
                 .builder()
                 .build_call(llvm_fn, &arg_vals, "tail_call")
                 .or_llvm_err()?;
+            call_site.set_call_convention(llvm_fn.get_call_conventions());
             call_site.set_tail_call(true);
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                 ctx.builder()
@@ -3843,10 +3772,10 @@ fn lower_instruction_impl<'ctx>(
                     return Ok(());
                 }
                 None => {
-                    return Err(LlvmLoweringError::internal(format!(
+                    return Err(LlvmLoweringError::MissingFunction(format!(
                         "NewClosure: function id {} not found",
                         func_id
-                    )));
+                    ).into()));
                 }
             };
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
@@ -3858,11 +3787,7 @@ fn lower_instruction_impl<'ctx>(
                 ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
                 return Ok(());
             }
-            let llvm_fn = ctx.get_module().get_function(func_name).ok_or_else(|| {
-                let message = format!("NewClosure: function '{func_name}' not found in LLVM module");
-                if captures.is_empty() { LlvmLoweringError::internal(message) }
-                else { LlvmLoweringError::UnprovenCallableEnvironment(message.into()) }
-            })?;
+            let llvm_fn = ctx.resolve_declared_function(func_desc)?;
 
             // Preserve the existing generated closure-body environment
             // convention. Adapt the exact declared LLVM signature, including
@@ -3882,7 +3807,7 @@ fn lower_instruction_impl<'ctx>(
                 && llvm_fn.get_type().get_return_type() == Some(i64_type.into());
 
             let fn_ptr = if !already_slot_abi {
-                let trampoline_name = format!("{}$trampoline$", func_name);
+                let trampoline_name = format!("{}$trampoline$", llvm_fn.get_name().to_string_lossy());
                 let trampoline_fn = if let Some(existing) =
                     ctx.get_module().get_function(&trampoline_name)
                 {
@@ -11477,31 +11402,6 @@ fn lower_call<'ctx>(
         func_name.rsplit('.').next().unwrap_or(func_name)
     };
 
-    // AOT-NUM-CPUS-LEG-1: the bodiless `num_cpus` intrinsic decl (the
-    // whole delegator chain — sys.num_cpus → core.intrinsics.num_cpus →
-    // core.intrinsics.runtime.time.num_cpus — bottoms out here) would
-    // otherwise lower to the skipped-entry const-0 shell:
-    // available_parallelism() == 0 at Tier-1 while Tier-0 answers via
-    // the runtime name-intercept. Route to the ONE platform helper.
-    // The bodiless gate (bytecode_length <= 1, same widened intrinsic
-    // gate as Tier-0's calls.rs) keeps any USER free fn named
-    // `num_cpus` with a real body on the normal path.
-    if bare_name == "num_cpus" && args.count == 0 && func_desc.bytecode_length <= 1 {
-        let i64_type = ctx.types().i64_type();
-        let helper = super::error::get_or_declare_function(
-            ctx.get_module(),
-            "verum_num_cpus",
-            i64_type.fn_type(&[], false),
-        );
-        let n = ctx
-            .builder()
-            .build_call(helper, &[], "num_cpus")
-            .or_llvm_err()?
-            .basic_value_or("verum_num_cpus: expected return value")?;
-        ctx.set_register(dst.0, n);
-        return Ok(());
-    }
-
     // Intercept low-level process C runtime bridge functions.
     // These are simple (Int, Text) → Int functions that the Verum
     // process.vr code calls. The high-level Result wrapping happens
@@ -14887,16 +14787,8 @@ fn lower_call<'ctx>(
         return lower_default_hash_value(ctx, dst, Reg(args.start.0));
     }
 
-    // Resolve by func_id first (handles name collisions correctly),
-    // fall back to name-based resolution for C runtime/intrinsic functions.
-    let llvm_fn = ctx.resolve_func_id(resolved_id).unwrap_or_else(|| {
-        resolve_llvm_function(ctx.get_module(), func_name, args.count as usize, "Call")
-            .unwrap_or_else(|_| {
-                ctx.get_module()
-                    .get_function(func_name)
-                    .expect(&format!("Call: function '{}' not found", func_name))
-            })
-    });
+    // Use the selected descriptor, including archive/band resolution above.
+    let llvm_fn = ctx.resolve_declared_function(func_desc)?;
 
     // Coerce arguments to match callee's expected parameter types
     // Special handling: Int→Float implicit coercion uses sitofp, not bitcast
@@ -43223,19 +43115,12 @@ fn lower_load_const<'ctx>(
             result.into()
         }
         Constant::Function(func_id) => {
-            // Function reference — look up as LLVM function pointer
-            let func_name = vbc_mod
-                .get_string(
-                    vbc_mod
-                        .get_function(*func_id)
-                        .map(|f| f.name)
-                        .unwrap_or_default(),
-                )
-                .unwrap_or("<unknown>");
-            let llvm_fn = ctx.get_module().get_function(func_name).or_internal_else(|| format!(
-                    "LoadK: function '{}' not found in LLVM module",
-                    func_name
-                ))?;
+            let declaration = vbc_mod.get_function(*func_id).ok_or_else(|| {
+                LlvmLoweringError::MissingFunction(format!(
+                    "function constant references undeclared VBC id {}", func_id.0,
+                ).into())
+            })?;
+            let llvm_fn = ctx.resolve_declared_function(declaration)?;
             llvm_fn.as_global_value().as_pointer_value().into()
         }
         Constant::Type(_) | Constant::Protocol(_) => {

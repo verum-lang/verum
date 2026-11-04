@@ -594,3 +594,32 @@ mod tests {
         assert!(!router.has_policy());
     }
 }
+
+/// Resolve the registry-owned permission operand before either inline execution
+/// or invocation of a declared intrinsic. New gated categories fail closed.
+pub(crate) fn intrinsic_permission_request(
+    intrinsic: &crate::intrinsics::Intrinsic,
+) -> Result<Option<(PermissionScope, usize)>, verum_common::Text> {
+    use crate::intrinsics::{IntrinsicCategory, IntrinsicHint};
+    if !intrinsic.hints.contains(&IntrinsicHint::RequiresPermission) {
+        return Ok(None);
+    }
+    match intrinsic.category {
+        IntrinsicCategory::Syscall => Ok(Some((PermissionScope::Syscall, 0))),
+        category => Err(format!("intrinsic '{}' requires permission but category {category:?} has no permission request", intrinsic.name).into()),
+    }
+}
+
+/// Apply the same permission assertion to bytecode and declared-call dispatch.
+pub(crate) fn assert_permission(
+    state: &mut super::InterpreterState,
+    scope: PermissionScope,
+    target_id: PermissionTargetId,
+) -> super::InterpreterResult<()> {
+    match state.check_permission(scope, target_id) {
+        PermissionDecision::Allow => Ok(()),
+        PermissionDecision::Deny => Err(super::InterpreterError::Panic {
+            message: format!("permission denied: {scope:?}({target_id})"),
+        }),
+    }
+}

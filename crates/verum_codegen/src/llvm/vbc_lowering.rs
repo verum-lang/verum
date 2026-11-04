@@ -1209,6 +1209,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 }
                 continue;
             }
+            // A declared intrinsic has no source body to lower. Native runtime
+            // emitters may supply its implementation below; an empty declaration
+            // must never become an implicit successful return.
+            if func_desc.requires_intrinsic_implementation()
+            {
+                continue;
+            }
             if let Some(ref instructions) = func_desc.instructions {
                 let vbc_func = VbcFunction::new(func_desc.clone(), instructions.clone());
                 let func_name = vbc_module
@@ -1277,7 +1284,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // Never replace that body with the lenient zero-return stub.
                     if matches!(e, super::error::LlvmLoweringError::UnprovenArrayStorage(_)
                         | super::error::LlvmLoweringError::UnprovenCallableEnvironment(_)
-                        | super::error::LlvmLoweringError::UnprovenOwnedDestruction(_))
+                        | super::error::LlvmLoweringError::UnprovenOwnedDestruction(_)
+                        | super::error::LlvmLoweringError::MissingFunction(_)
+                        | super::error::LlvmLoweringError::UnsupportedInstruction(_)
+                        | super::error::LlvmLoweringError::UnsupportedIntrinsic { .. })
                         || self.functions.get(&func_desc.id.0)
                             .is_some_and(|target| self.array_returns.contains_key(target))
                     {
@@ -1548,6 +1558,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Must be emitted BEFORE setting Internal linkage (Phase 3.7) so that
         // the IR versions become module-internal and don't conflict with C runtime
         // symbols at link time.
+        let native_intrinsics;
         {
             // VERUM_AOT_TRACE_RUNTIME=1 prints which top-level
             // runtime-emit phase is running so signature-mismatch
@@ -1581,7 +1592,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 self.config.panic_strategy,
             )
             .with_runtime_bridge(self.config.runtime_bridge);
-            platform.emit_platform_functions(&self.module)?;
+            native_intrinsics = platform.emit_platform_functions_with_intrinsics(&self.module)?;
             if let Some(index) = entry_index {
                 let function_id = vbc_module.functions[index].id.0;
                 let entry_function = self.functions.get(&function_id).copied()
@@ -1649,6 +1660,61 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // it so a later lower_module in the same process starts
             // from the conservative default instead of a stale walk.
             super::error::set_reachable_function_names(None);
+        }
+
+        // Native runtime emission is the authority for bodyless intrinsic
+        // declarations. Reject an executable declaration that still has no
+        // implementation, regardless of whether the caller used it directly or
+        // as a function value. Unreachable declarations remain declarations;
+        // the legacy default-return pass below must not manufacture semantics.
+        let mut unresolved_intrinsic_targets = Set::new();
+        for descriptor in &vbc_module.functions {
+            let Some(intrinsic_id) = descriptor.intrinsic_name else { continue };
+            if !descriptor.requires_intrinsic_implementation()
+            {
+                continue;
+            }
+            let target = self.functions.get(&descriptor.id.0).copied();
+            let intrinsic = vbc_module.strings.get(intrinsic_id).unwrap_or("<invalid intrinsic name>");
+            if let (Some(target), Some(implementation)) = (target, native_intrinsics.get(intrinsic)) {
+                if target.get_type() != implementation.get_type() {
+                    return Err(LlvmLoweringError::TypeLowering(format!(
+                        "Intrinsic declaration '{}' has an ABI incompatible with native intrinsic '{}'",
+                        vbc_module.strings.get(descriptor.name).unwrap_or("<invalid declaration name>"),
+                        intrinsic,
+                    ).into()));
+                }
+                if target.count_basic_blocks() != 0 {
+                    return Err(LlvmLoweringError::TypeLowering(format!(
+                        "Intrinsic declaration '{}' already has a body without native binding authority",
+                        vbc_module.strings.get(descriptor.name).unwrap_or("<invalid declaration name>"),
+                    ).into()));
+                }
+                let builder = self.context.create_builder();
+                builder.position_at_end(self.context.append_basic_block(target, "native_intrinsic"));
+                let arguments: verum_common::List<_> = target.get_param_iter().map(Into::into).collect();
+                let call = builder.build_call(implementation, &arguments, "").or_llvm_err()?;
+                call.set_call_convention(implementation.get_call_conventions());
+                if let Some(value) = call.try_as_basic_value().basic() {
+                    builder.build_return(Some(&value)).or_llvm_err()?;
+                } else {
+                    builder.build_return(None).or_llvm_err()?;
+                }
+                continue;
+            }
+            if let Some(target) = target {
+                unresolved_intrinsic_targets.insert(target);
+            }
+            if reachable_for_lowering.as_ref()
+                .is_none_or(|reachable| reachable.contains(&descriptor.id.0))
+            {
+                return Err(LlvmLoweringError::UnsupportedIntrinsic {
+                    declaration: vbc_module.strings.get(descriptor.name)
+                        .unwrap_or("<invalid declaration name>").into(),
+                    intrinsic: vbc_module.strings.get(intrinsic_id)
+                        .unwrap_or("<invalid intrinsic name>").into(),
+                });
+            }
         }
 
         // Phase 3.6 (#106 Path A.2): final-pass safety net — for any
@@ -1808,6 +1874,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             while let Some(f) = func {
                 let next = f.get_next_function();
                 if f.get_first_basic_block().is_none() {
+                    if unresolved_intrinsic_targets.contains(&f) {
+                        func = next;
+                        continue;
+                    }
                     let name = f.get_name().to_string_lossy().to_string();
                     // T1413 — ASK THE MODULE, NOT A LIST.
                     //
@@ -2243,6 +2313,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 .types
                 .lower_function_type(&effective_params, &effective_return_type)?;
 
+            // Keep a declaration-owned target separate from native symbols.
+            // Its body is bound only after an emitter provides the canonical
+            // intrinsic identity and an exactly matching physical ABI.
+            let intrinsic_declaration = func_desc.requires_intrinsic_implementation();
+
             // Rename the ENTRY function to "verum_main" so the C
             // runtime shim can call it. The entry is picked by the
             // same rule the interpreter uses (VbcModule::entry_main):
@@ -2250,7 +2325,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // `module X;` program's `X.main` unrenamed — the shim's
             // weak verum_main won the link and the binary silently
             // exited 1 while Tier 0 at least said "no main".
-            let func_name = if Some(func_idx) == entry_index {
+            let func_name = if intrinsic_declaration {
+                format!("{raw_name}.__intrinsic_decl_{}", func_desc.id.0)
+            } else if Some(func_idx) == entry_index {
                 "verum_main".to_string()
             } else if raw_name == "main" {
                 // The platform shim owns the process symbol. A dependency's
@@ -2266,9 +2343,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             //
 
             // Fix: detect the collision and create the new function with a unique name.
-            // The Call handler uses resolve_llvm_function() which tries suffixed names
-            // to find the correct arity match.
-            let llvm_fn = if let Some(existing) = self.module.get_function(&func_name) {
+            // Calls and callable values use the selected declaration's VBC id,
+            // so physical symbol renaming never changes their target.
+            let llvm_fn = if intrinsic_declaration {
+                self.module.add_function(&func_name, fn_type, None)
+            } else if let Some(existing) = self.module.get_function(&func_name) {
                 if existing.count_params() as usize != effective_params.len()
                     && existing.count_basic_blocks() == 0
                     && !pending_source_bodies.contains(&existing)

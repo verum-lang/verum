@@ -261,6 +261,9 @@ pub enum InterpreterError {
         message: String,
     },
 
+    /// A declared intrinsic has no executable interpreter implementation.
+    UnsupportedIntrinsic { declaration: Text, intrinsic: Text },
+
     /// Feature not implemented.
     NotImplemented {
         /// Feature name.
@@ -544,6 +547,9 @@ impl fmt::Display for InterpreterError {
             }
             Self::InvalidBytecode { pc, message } => {
                 write!(f, "Invalid bytecode at pc {}: {}", pc, message)
+            }
+            Self::UnsupportedIntrinsic { declaration, intrinsic } => {
+                write!(f, "Intrinsic `{intrinsic}` declared by `{declaration}` has no interpreter implementation")
             }
             Self::NotImplemented { feature, opcode } => match opcode {
                 Some(op) => write!(f, "Not implemented: {} (opcode {:?})", feature, op),
