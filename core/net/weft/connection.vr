@@ -692,7 +692,7 @@ fn decide_keep_alive(
 async fn write_response<T: WeftTransport>(
     stream: &mut T,
     resp: &Response,
-) -> Result<(), core.io.protocols.IoError> {
+) -> Result<(), IoError> {
     // Post-#316 follow-up: assemble the wire response directly as
     // `List<Byte>` — the transport accepts bytes natively, so no
     // back-conversion at the body-copy step.
