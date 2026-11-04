@@ -34,6 +34,7 @@ mount super.types.{
     MouseEvent, MouseEventKind, MouseButton,
 };
 mount super.keys.{KeyCode, Modifiers};
+mount core.collections.deque.Deque;
 
 // =============================================================================
 // Parser State — DFA states
