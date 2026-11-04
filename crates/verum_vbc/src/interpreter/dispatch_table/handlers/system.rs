@@ -42,6 +42,21 @@ pub(in super::super) fn handle_syscall(
 
     #[cfg(target_os = "linux")]
     {
+        // clone/clone3 would resume the same VM stack and mutable interpreter
+        // state in another host thread. Never invoke them without isolation.
+        let thread_operation = if num == libc::SYS_clone {
+            Some("clone")
+        } else if num == libc::SYS_clone3 {
+            Some("clone3")
+        } else {
+            None
+        };
+        if let Some(operation) = thread_operation {
+            return Err(InterpreterError::UnsupportedRuntimeOperation {
+                operation: operation.into(),
+                reason: "native threads require isolated concurrent VM execution".into(),
+            });
+        }
         let result = unsafe { libc::syscall(num, a1, a2, a3, a4, a5, a6) };
         state.set_reg(dst, Value::from_i64(result as i64));
         Ok(DispatchResult::Continue)

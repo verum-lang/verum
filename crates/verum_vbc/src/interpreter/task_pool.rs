@@ -68,59 +68,6 @@ pub(crate) fn take(handle: i64) -> i64 {
     })
 }
 
-// ---------------------------------------------------------------------------
-// THREAD-EAGER-TIER0-1: parked pthread return VALUES.
-//
-// Unlike the pool table above (i64 task results), pthread start
-// routines return a full NaN-boxed `Value` (`&unsafe Byte` — often a
-// pointer).  Round-trip the raw bit-pattern so pointer tags survive.
-// Handles are 1-based and disjoint from real pthread_t values only by
-// context: they are only ever produced and consumed by the Tier-0
-// pthread_create / pthread_join intercepts.
-// ---------------------------------------------------------------------------
-
-thread_local! {
-    static THREAD_RETVALS: RefCell<PoolTable> = RefCell::new(PoolTable::default());
-}
-
-/// Park an eagerly-computed thread return value (raw Value bits);
-/// returns the synthetic thread handle.
-pub(crate) fn thread_store(ret_bits: i64) -> i64 {
-    THREAD_RETVALS.with(|t| {
-        let mut t = t.borrow_mut();
-        let idx = match t.free.pop() {
-            Some(i) => {
-                t.slots[i] = Some(ret_bits);
-                i
-            }
-            None => {
-                t.slots.push(Some(ret_bits));
-                t.slots.len() - 1
-            }
-        };
-        (idx + 1) as i64
-    })
-}
-
-/// Collect a parked thread return value by synthetic handle.
-/// Unknown / drained handles return 0 bits (nil-equivalent).
-pub(crate) fn thread_take(handle: i64) -> i64 {
-    if handle <= 0 {
-        return 0;
-    }
-    let idx = (handle - 1) as usize;
-    THREAD_RETVALS.with(|t| {
-        let mut t = t.borrow_mut();
-        match t.slots.get_mut(idx).and_then(|s| s.take()) {
-            Some(v) => {
-                t.free.push(idx);
-                v
-            }
-            None => 0,
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

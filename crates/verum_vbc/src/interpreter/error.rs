@@ -264,6 +264,14 @@ pub enum InterpreterError {
     /// A declared intrinsic has no executable interpreter implementation.
     UnsupportedIntrinsic { declaration: Text, intrinsic: Text },
 
+    /// Runtime operation whose execution contract is unavailable in this VM.
+    UnsupportedRuntimeOperation {
+        /// Selected foreign or runtime operation identity.
+        operation: Text,
+        /// Missing execution capability, without a synthetic successful result.
+        reason: Text,
+    },
+
     /// Feature not implemented.
     NotImplemented {
         /// Feature name.
@@ -550,6 +558,12 @@ impl fmt::Display for InterpreterError {
             }
             Self::UnsupportedIntrinsic { declaration, intrinsic } => {
                 write!(f, "Intrinsic `{intrinsic}` declared by `{declaration}` has no interpreter implementation")
+            }
+            Self::UnsupportedRuntimeOperation { operation, reason } => {
+                write!(
+                    f,
+                    "Runtime operation '{operation}' is unavailable in this interpreter: {reason}"
+                )
             }
             Self::NotImplemented { feature, opcode } => match opcode {
                 Some(op) => write!(f, "Not implemented: {} (opcode {:?})", feature, op),

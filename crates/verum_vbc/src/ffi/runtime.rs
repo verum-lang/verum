@@ -1220,12 +1220,6 @@ impl FfiRuntime {
     /// # Returns
     ///
     /// A trampoline ID and raw function pointer that can be passed to C code.
-    /// See [`TrampolineRegistry::fn_id_for_code_ptr`].
-    pub fn callback_fn_id_for_code_ptr(&self, code_ptr: usize) -> Option<u32> {
-        self.trampolines.fn_id_for_code_ptr(code_ptr)
-    }
-
-    /// Create an FFI callback trampoline for a Verum function.
     pub fn create_callback(
         &mut self,
         return_type: CTypeRuntime,

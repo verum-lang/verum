@@ -188,6 +188,28 @@ fn ffi_symbol_permission_scope(
     }
 }
 
+/// Foreign identity comes from the selected symbol descriptor, including an
+/// explicit link-name alias. A source function's spelling never selects this
+/// boundary. No callback, handle writeback, or host thread may run beforehand.
+fn check_thread_ffi_capability(state: &InterpreterState, symbol_idx: u32) -> InterpreterResult<()> {
+    let symbol = state
+        .module
+        .get_ffi_symbol(FfiSymbolId(symbol_idx))
+        .ok_or_else(|| {
+            InterpreterError::FfiRuntimeError(format!("unknown foreign symbol {symbol_idx}"))
+        })?;
+    let operation = state.module.strings.get(symbol.name).ok_or_else(|| {
+        InterpreterError::FfiRuntimeError(format!("foreign symbol {symbol_idx} has no name"))
+    })?;
+    if matches!(operation, "pthread_create" | "pthread_join" | "pthread_detach") {
+        return Err(InterpreterError::UnsupportedRuntimeOperation {
+            operation: operation.into(),
+            reason: "native threads require isolated concurrent VM execution".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Inline guard: consult the permission router for this FFI call,
 /// raising `Panic` on Deny so the surrounding catch frame can
 /// pattern-match the failure. No-op for symbols not in the
@@ -985,6 +1007,7 @@ fn ffi_extended_body(
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let symbol_idx = read_u32(state)?;
+            check_thread_ffi_capability(state, symbol_idx)?;
             let arg_count = read_u8(state)? as usize;
             let ret_reg = read_reg(state)?;
 
@@ -1052,133 +1075,6 @@ fn ffi_extended_body(
                     // manifest-default behaviour.
                     state.set_reg(ret_reg, Value::from_i64(0));
                     return Ok(DispatchResult::Continue);
-                }
-
-                // **THREAD-EAGER-TIER0-1 intercept**: pthread thread
-                // primitives.  The Tier-0 interpreter is single-threaded
-                // by design (dispatch cannot re-enter from a foreign OS
-                // thread — `CURRENT_INTERPRETER` is thread-local), so a
-                // REAL `pthread_create` can never run a Verum
-                // `start_routine`: pre-fix the FFI marshalling failed and
-                // `Thread.spawn` died with `SpawnFailed` on every spawn.
-                // Tier-0 semantics instead run the start routine EAGERLY
-                // on the interpreter thread (run-to-completion at the
-                // spawn point) and park its return value; `pthread_join`
-                // replays it.  Observable results equal Tier-1's native
-                // threads for any join-observing program — only the
-                // interleaving differs, which the language does not
-                // promise.  The stdlib thread stack
-                // (`core/runtime/thread.vr` wrapper → `Shared<Maybe<T>>`
-                // result cell → `sys.<os>.thread`) runs UNCHANGED on
-                // top.  Linux Tier-0 reaches thread creation via the
-                // clone-syscall path, not this FFI surface — its eager
-                // twin lives with the syscall handlers.
-                if matches!(
-                    bare,
-                    "pthread_create"
-                        | "pthread_join"
-                        | "pthread_detach"
-                        | "pthread_threadid_np"
-                ) {
-                    match bare {
-                        "pthread_create" if arg_count == 4 => {
-                            // (thread_out, attr, start_routine, arg)
-                            // The start routine reaches us as a libffi
-                            // TRAMPOLINE pointer (CreateCallback runs
-                            // before this call) — resolve it back to
-                            // the Verum fn through the trampoline
-                            // registry's reverse map.  FuncRef /
-                            // plain-id / closure-object forms are
-                            // handled for the non-callback shapes.
-                            let func_val = args[2];
-                            // `ffi_runtime` (and the trampoline registry)
-                            // only exists under the `ffi` feature — gate
-                            // the reverse-map probe so feature subsets
-                            // (`--features codegen` CI check) still
-                            // compile; without libffi there are no
-                            // trampoline pointers to resolve anyway.
-                            #[cfg(feature = "ffi")]
-                            let trampoline_fn_id = {
-                                let raw_bits = (func_val.to_bits()
-                                    & crate::value::PAYLOAD_MASK)
-                                    as usize;
-                                state
-                                    .ffi_runtime
-                                    .as_ref()
-                                    .and_then(|rt| {
-                                        rt.callback_fn_id_for_code_ptr(raw_bits)
-                                    })
-                            };
-                            #[cfg(not(feature = "ffi"))]
-                            let trampoline_fn_id: Option<u32> = None;
-                            let ret = if let Some(fn_id) = trampoline_fn_id {
-                                super::super::call_function_sync(
-                                    state,
-                                    crate::module::FunctionId(fn_id),
-                                    &[args[3]],
-                                )?
-                            } else if func_val.is_func_ref() {
-                                super::super::call_function_sync(
-                                    state,
-                                    func_val.as_func_id(),
-                                    &[args[3]],
-                                )?
-                            } else if func_val.is_ptr() && !func_val.is_nil() {
-                                super::super::call_closure_sync(
-                                    state,
-                                    func_val,
-                                    &[args[3]],
-                                )?
-                            } else {
-                                super::super::call_function_sync(
-                                    state,
-                                    crate::module::FunctionId(func_val.as_i64() as u32),
-                                    &[args[3]],
-                                )?
-                            };
-                            let handle = crate::interpreter::task_pool::thread_store(
-                                ret.to_bits() as i64,
-                            );
-                            // Write the synthetic handle into the
-                            // caller's `&mut PthreadT` via the same
-                            // writeback map the real FFI path uses.
-                            if let Some(&src) = source_reg_map.get(&0u8) {
-                                state.set_reg(Reg(src), Value::from_i64(handle));
-                            }
-                            state.set_reg(ret_reg, Value::from_i64(0));
-                            return Ok(DispatchResult::Continue);
-                        }
-                        "pthread_join" if arg_count == 2 => {
-                            let handle = args[0].as_integer_compatible();
-                            let bits =
-                                crate::interpreter::task_pool::thread_take(handle);
-                            if let Some(&src) = source_reg_map.get(&1u8) {
-                                state.set_reg(Reg(src), Value::from_bits(bits as u64));
-                            }
-                            state.set_reg(ret_reg, Value::from_i64(0));
-                            return Ok(DispatchResult::Continue);
-                        }
-                        "pthread_detach" => {
-                            if arg_count >= 1 {
-                                let handle = args[0].as_integer_compatible();
-                                let _ =
-                                    crate::interpreter::task_pool::thread_take(handle);
-                            }
-                            state.set_reg(ret_reg, Value::from_i64(0));
-                            return Ok(DispatchResult::Continue);
-                        }
-                        "pthread_threadid_np" if arg_count == 2 => {
-                            // Tier-0 runs everything on the ONE
-                            // interpreter thread; report tid 1 (matches
-                            // the whitelist stub for pthread_self).
-                            if let Some(&src) = source_reg_map.get(&1u8) {
-                                state.set_reg(Reg(src), Value::from_i64(1));
-                            }
-                            state.set_reg(ret_reg, Value::from_i64(0));
-                            return Ok(DispatchResult::Continue);
-                        }
-                        _ => {}
-                    }
                 }
             }
 
@@ -1507,6 +1403,7 @@ fn ffi_extended_body(
             // symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             // mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let symbol_idx = read_u32(state)?;
+            check_thread_ffi_capability(state, symbol_idx)?;
             let arg_count = read_u8(state)? as usize;
             let ret_reg = read_reg(state)?;
 
@@ -1686,6 +1583,7 @@ fn ffi_extended_body(
             // Format: symbol_idx:u32, fixed_count:u8, variadic_count:u8, ret_reg:reg, [arg_regs...],
             //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let symbol_idx = read_u32(state)?;
+            check_thread_ffi_capability(state, symbol_idx)?;
             let fixed_count = read_u8(state)? as usize;
             let variadic_count = read_u8(state)? as usize;
             let arg_count = fixed_count + variadic_count;
