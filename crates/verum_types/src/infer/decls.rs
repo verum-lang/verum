@@ -5189,23 +5189,26 @@ impl TypeChecker {
         &self,
         impl_decl: &verum_ast::decl::ImplDecl,
     ) -> Option<verum_ast::decl::ImplDecl> {
-        if impl_decl.items.iter().all(|i| i.attributes.is_empty()) {
-            return None;
-        }
-        let kept: verum_common::List<verum_ast::decl::ImplItem> = impl_decl
-            .items
-            .iter()
-            .filter(|i| {
-                i.attributes.is_empty() || self.cfg_evaluator.should_include(&i.attributes)
-            })
+        let include = |item: &verum_ast::decl::ImplItem| {
+            item.attributes.is_empty() || self.cfg_evaluator.should_include(&item.attributes)
+        };
+        // Most attributed methods are still included. Find an actual exclusion
+        // before copying any body; attributes alone must not clone the AST.
+        let first_excluded = impl_decl.items.iter().position(|item| !include(item))?;
+        let items = impl_decl.items.as_slice()[..first_excluded].iter()
+            .chain(impl_decl.items.as_slice()[first_excluded + 1..].iter().filter(|item| include(item)))
             .cloned()
             .collect();
-        if kept.len() == impl_decl.items.len() {
-            return None;
-        }
-        let mut out = impl_decl.clone();
-        out.items = kept;
-        Some(out)
+        Some(verum_ast::decl::ImplDecl {
+            is_unsafe: impl_decl.is_unsafe,
+            generics: impl_decl.generics.clone(),
+            kind: impl_decl.kind.clone(),
+            generic_where_clause: impl_decl.generic_where_clause.clone(),
+            meta_where_clause: impl_decl.meta_where_clause.clone(),
+            specialize_attr: impl_decl.specialize_attr.clone(),
+            items,
+            span: impl_decl.span,
+        })
     }
 
     /// Inner implementation of register_impl_block
