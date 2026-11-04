@@ -48,6 +48,7 @@ mount core.net.http.{Response, StatusCode};
 mount core.net.weft.response_ext.{resp_status, resp_text, resp_with_body_text};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.sync.mutex.{Mutex};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError};
 
@@ -108,14 +109,14 @@ implement ReadinessCheck for ReadinessFlag {
 // =============================================================================
 
 public type Readiness is {
-    checks: Shared<sync.Mutex<List<Heap<dyn ReadinessCheck>>>>,
+    checks: Shared<Mutex<List<Heap<dyn ReadinessCheck>>>>,
     draining: Shared<AtomicBool>,
 };
 
 implement Readiness {
     public fn new() -> Readiness {
         Readiness {
-            checks: Shared.new(sync.Mutex.new(List.new())),
+            checks: Shared.new(Mutex.new(List.new())),
             draining: Shared.new(AtomicBool.new(false)),
         }
     }
