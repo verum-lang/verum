@@ -1012,3 +1012,159 @@ impl serde::ser::SerializeStructVariant for Compound<'_> {
         Ok(())
     }
 }
+
+/// Retain the implementation header and associated assignments in their actual
+/// source scope. Method/proof bodies have separate executable authorities.
+/// Validate the retained fields before cloning, including nested AST data.
+pub fn source_associated_implementation(
+    declaration: &crate::decl::ImplDecl,
+) -> Result<crate::decl::ImplDecl> {
+    source_associated_implementation_items(declaration, &declaration.items.iter().collect::<Vec<_>>())
+}
+
+/// Capture exactly the items admitted for the compilation target.
+pub fn source_associated_implementation_items(
+    declaration: &crate::decl::ImplDecl,
+    selected_items: &[&crate::decl::ImplItem],
+) -> Result<crate::decl::ImplDecl> {
+    use crate::decl::{ImplDecl, ImplItemKind};
+    let ImplDecl {
+        is_unsafe,
+        generics,
+        kind,
+        generic_where_clause,
+        meta_where_clause,
+        specialize_attr,
+        items: _,
+        span,
+    } = declaration;
+    let items = selected_items;
+    let mut budget = Budget::new();
+    budget
+        .visit(
+            &(
+                is_unsafe,
+                generics,
+                kind,
+                generic_where_clause,
+                meta_where_clause,
+                specialize_attr,
+                span,
+            ),
+            0,
+        )
+        .map_err(|error| error.0)?;
+    for item in items {
+        match &item.kind {
+            ImplItemKind::Type { .. } => budget.visit(item, 1).map_err(|error| error.0)?,
+            ImplItemKind::Function(function) => {
+                check_size(function)?;
+                budget.visit(&(&item.attributes, &item.visibility, &item.span), 1).map_err(|error| error.0)?;
+            }
+            _ => return Err("associated implementation carrier cannot represent constants or proof clauses".into()),
+        }
+    }
+    let retained = ImplDecl {
+        is_unsafe: *is_unsafe,
+        generics: generics.clone(),
+        kind: kind.clone(),
+        generic_where_clause: generic_where_clause.clone(),
+        meta_where_clause: meta_where_clause.clone(),
+        specialize_attr: specialize_attr.clone(),
+        span: *span,
+        items: items
+            .iter()
+            .filter_map(|item| match &item.kind {
+                ImplItemKind::Type { .. } => Some((*item).clone()),
+                ImplItemKind::Function(function) => Some(crate::decl::ImplItem {
+                    attributes: item.attributes.clone(), visibility: item.visibility.clone(),
+                    span: item.span, kind: ImplItemKind::Function(copy_function_signature(function)),
+                }),
+                _ => None,
+            })
+            .collect(),
+    };
+    validate_source_associated_implementation(&retained)?;
+    Ok(retained)
+}
+
+/// Bounded syntax and binder closure only. This does not prove conformance,
+/// method availability, associated equalities or specialization coverage.
+pub fn validate_source_associated_implementation(
+    declaration: &crate::decl::ImplDecl,
+) -> Result<()> {
+    use crate::decl::{ImplItemKind, ImplKind};
+    use crate::ty::GenericArg;
+    Budget::new()
+        .visit(declaration, 0)
+        .map_err(|error| error.0)?;
+    let ImplKind::Protocol {
+        protocol,
+        protocol_args,
+        for_type,
+    } = &declaration.kind
+    else {
+        return Err("associated implementation carrier requires a protocol declaration".into());
+    };
+    if protocol.segments.is_empty() {
+        return Err("associated implementation carrier has no protocol identity".into());
+    }
+    let mut scan = SignatureScan::new(true);
+    scan.nominal_depth = 1;
+    scan.push_generics(&declaration.generics);
+    scan.visit_type(for_type);
+    for argument in protocol_args {
+        match argument {
+            GenericArg::Type(ty) => scan.visit_type(ty),
+            GenericArg::Const(expression) => scan.visit_expr(expression),
+            GenericArg::Binding(binding) => scan.visit_type(&binding.ty),
+            GenericArg::Lifetime(_) => {}
+        }
+    }
+    for clause in [
+        &declaration.generic_where_clause,
+        &declaration.meta_where_clause,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        scan.visit_where_clause(clause);
+    }
+    if let Some(clause) = declaration
+        .specialize_attr
+        .as_ref()
+        .and_then(|attribute| attribute.when_clause.as_ref())
+    {
+        scan.visit_where_clause(clause);
+    }
+    let mut names = verum_common::Set::new();
+    for item in &declaration.items {
+        if let ImplItemKind::Function(function) = &item.kind {
+            if function.body.is_some() {
+                return Err("associated implementation carrier contains a method body".into());
+            }
+            scan.attributes(&item.attributes);
+            scan.visit_function(function);
+            continue;
+        }
+        let ImplItemKind::Type {
+            name,
+            type_params,
+            ty,
+        } = &item.kind
+        else {
+            return Err("associated implementation carrier contains an executable item".into());
+        };
+        if name.name.is_empty() || !names.insert(name.name.clone()) {
+            return Err(
+                "associated implementation carrier has an empty or repeated assignment".into(),
+            );
+        }
+        scan.push_generics(type_params);
+        scan.attributes(&item.attributes);
+        scan.visit_type(ty);
+        scan.scopes.pop();
+    }
+    scan.scopes.pop();
+    scan.finish()
+}

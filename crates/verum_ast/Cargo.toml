@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 smallvec = { workspace = true, features = ["serde"] }
 indexmap = { workspace = true }
 bitflags = { workspace = true }
@@ -21,5 +22,4 @@ stacker = "0.1"
 
 [dev-dependencies]
 proptest = { workspace = true }
-serde_json = { workspace = true }
 criterion = { workspace = true }

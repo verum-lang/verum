@@ -132,6 +132,7 @@ pub mod pattern;
 pub mod pretty;
 pub mod prelude;
 pub mod source_signature;
+pub mod source_implementation;
 pub mod span;
 pub mod stmt;
 pub mod ty;
