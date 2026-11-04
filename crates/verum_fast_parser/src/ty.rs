@@ -2515,17 +2515,12 @@ impl<'a> RecursiveParser<'a> {
                     } else {
                         // Check if this looks like a const expression (ident, paren, etc.)
                         // to avoid hanging on invalid tokens
-                        let can_be_const = matches!(
+                        let can_be_const = p.stream.peek().is_some_and(|token| token.is_literal()) || matches!(
                             p.stream.peek_kind(),
                             Some(TokenKind::Ident(_))
                                 | Some(TokenKind::LParen)
                                 | Some(TokenKind::LBracket)     // Array literal: [3, 4]
                                 | Some(TokenKind::Minus)
-                                | Some(TokenKind::True)
-                                | Some(TokenKind::False)
-                                | Some(TokenKind::Integer(_))
-                                | Some(TokenKind::Float(_))
-                                | Some(TokenKind::Text(_))
                                 | Some(TokenKind::Bang)
                                 | Some(TokenKind::SelfValue)
                                 | Some(TokenKind::Proof)

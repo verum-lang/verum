@@ -3590,7 +3590,7 @@ impl<'a> RecursiveParser<'a> {
     /// Check if the current `<` token starts a generic type expression rather than a comparison.
     ///
     /// This uses lookahead to find the matching `>` and checks what follows.
-    /// Generic type expressions are followed by: `.`, `(`, `;`, `,`, `)`, `]`, `}`, or `>`
+    /// Generic type expressions are followed by a member access or expression delimiter
     /// (indicating a nested generic or end of expression context).
     ///
     /// This enables parsing patterns like:
@@ -3598,204 +3598,48 @@ impl<'a> RecursiveParser<'a> {
     /// - `List<Int>.new()` - static method call
     /// - `Map<Text, Int>.with_capacity(10)` - associated function call
     fn is_generic_type_expr_lookahead(&self) -> bool {
-        // We're at a `<` token. Look ahead to find the matching `>`.
-        let mut depth = 0;
-        let mut offset = 0;
-        let mut brackets = 0usize;
-
-        loop {
-            let token = self.stream.peek_nth_kind(offset);
-
-            match token {
-                Some(TokenKind::LBracket) => {
-                    brackets += 1;
-                    offset += 1;
-                }
-                Some(TokenKind::RBracket) if brackets > 0 => {
-                    brackets -= 1;
-                    offset += 1;
-                }
-                // The bracket payload is an expression as well as potential
-                // type syntax. Comparisons and shifts inside it cannot close
-                // the surrounding generic argument list. The real parser
-                // validates the payload after this bounded lookahead.
-                Some(_) if brackets > 0 => {
-                    offset += 1;
-                }
-
-                Some(TokenKind::Lt) => {
-                    depth += 1;
-                    offset += 1;
-                }
-                Some(TokenKind::Gt) => {
-                    depth -= 1;
-                    if depth == 0 && brackets == 0 {
-                        // Found the matching `>`. Check what follows.
-                        offset += 1;
-                        let next = self.stream.peek_nth_kind(offset);
-                        // NOTE: LParen is NOT included here because func<T>() is a generic function call,
-                        // not a TypeExpr. TypeExpr is for Type<T>.method() pattern.
-                        return matches!(
-                            next,
-                            Some(TokenKind::Dot)         // method call: Type<T>.method()
-                                | Some(TokenKind::Semicolon) // end of statement
-                                | Some(TokenKind::Comma)    // in list context
-                                | Some(TokenKind::RParen)   // end of paren expr
-                                | Some(TokenKind::RBracket) // end of array
-                                | Some(TokenKind::RBrace)   // end of block
-                                | Some(TokenKind::Question) // try operator
-                                | Some(TokenKind::QuestionDot) // optional chaining
-                                | None  // end of input
-                        );
-                    }
-                    offset += 1;
-                }
-                // Right shift `>>` can act as two `>` tokens in generic context
-                Some(TokenKind::GtGt) => {
-                    depth -= 2;
-                    if depth <= 0 && brackets == 0 {
-                        // Found the end. Check what follows.
-                        // NOTE: LParen excluded - func<T>() is a generic function call, not TypeExpr
-                        offset += 1;
-                        let next = self.stream.peek_nth_kind(offset);
-                        return matches!(
-                            next,
-                            Some(TokenKind::Dot)
-                                | Some(TokenKind::Semicolon)
-                                | Some(TokenKind::Comma)
-                                | Some(TokenKind::RParen)
-                                | Some(TokenKind::RBracket)
-                                | Some(TokenKind::RBrace)
-                                | Some(TokenKind::Question)
-                                | Some(TokenKind::QuestionDot)
-                                | None
-                        );
-                    }
-                    offset += 1;
-                }
-                // Tokens that are valid inside generic args
-                Some(TokenKind::Ident(_))
-                | Some(TokenKind::Comma)
-                | Some(TokenKind::Colon)
-                | Some(TokenKind::Dot)  // For nested paths
-                | Some(TokenKind::Integer(_))
-                | Some(TokenKind::Eq)
-                | Some(TokenKind::Fn)
-                | Some(TokenKind::RArrow)
-                | Some(TokenKind::LParen)
-                | Some(TokenKind::RParen)
-                | Some(TokenKind::Ampersand)
-                | Some(TokenKind::Mut)
-                | Some(TokenKind::Checked)
-                | Some(TokenKind::Unsafe)
-                | Some(TokenKind::Lifetime(_))
-                | Some(TokenKind::Star)
-                | Some(TokenKind::SelfType)
-                | Some(TokenKind::Plus) => {
-                    offset += 1;
-                }
-                // Invalid or end - not a generic type
-                _ => {
-                    return false;
-                }
-            }
-
-            // Safety: don't loop forever on malformed input
-            if offset > 100 {
-                return false;
-            }
-        }
+        self.generic_argument_list_end().is_some_and(|end| matches!(
+            self.stream.peek_nth_kind(end),
+            Some(TokenKind::Dot | TokenKind::Semicolon | TokenKind::Comma
+                | TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
+                | TokenKind::Question | TokenKind::QuestionDot) | None
+        ))
     }
 
-    /// Check if the current `<` token starts generic type arguments for a method call.
-    ///
-    /// This is similar to `is_generic_type_expr_lookahead()` but specifically for method calls.
-    /// For a generic method call like `.method<T>()`, the closing `>` must be followed by `(`.
-    ///
-    /// This prevents misinterpreting comparisons like `.field < value` as generic args.
-    fn is_generic_method_call_lookahead(&self) -> bool {
-        // We're at a `<` token. Look ahead to find the matching `>`.
-        let mut depth = 0;
-        let mut offset = 0;
+    /// Calls and nominal type expressions share one bounded argument scan.
+    /// This only disambiguates the delimiter; the argument parser owns syntax
+    /// and the selected declaration owns the argument's type/value/level role.
+    fn generic_argument_list_end(&self) -> Option<usize> {
+        let mut depth = 0i32;
         let mut brackets = 0usize;
-
-        loop {
-            let token = self.stream.peek_nth_kind(offset);
-
-            match token {
-                Some(TokenKind::LBracket) => {
-                    brackets += 1;
-                    offset += 1;
-                }
-                Some(TokenKind::RBracket) if brackets > 0 => {
-                    brackets -= 1;
-                    offset += 1;
-                }
-                // The bracket payload is an expression as well as potential
-                // type syntax. Comparisons and shifts inside it cannot close
-                // the surrounding generic argument list. The real parser
-                // validates the payload after this bounded lookahead.
-                Some(_) if brackets > 0 => {
-                    offset += 1;
-                }
-
-                Some(TokenKind::Lt) => {
-                    depth += 1;
-                    offset += 1;
-                }
-                Some(TokenKind::Gt) => {
-                    depth -= 1;
-                    if depth == 0 && brackets == 0 {
-                        // Found the matching `>`. For method calls, must be followed by `(`.
-                        offset += 1;
-                        let next = self.stream.peek_nth_kind(offset);
-                        return matches!(next, Some(TokenKind::LParen));
-                    }
-                    offset += 1;
-                }
-                // Right shift `>>` can act as two `>` tokens in generic context
-                Some(TokenKind::GtGt) => {
-                    depth -= 2;
-                    if depth <= 0 && brackets == 0 {
-                        // Found the end. For method calls, must be followed by `(`.
-                        offset += 1;
-                        let next = self.stream.peek_nth_kind(offset);
-                        return matches!(next, Some(TokenKind::LParen));
-                    }
-                    offset += 1;
-                }
-                // Tokens that are valid inside generic args
-                Some(TokenKind::Ident(_))
-                | Some(TokenKind::Comma)
-                | Some(TokenKind::Colon)
-                | Some(TokenKind::Dot)  // For nested paths
-                | Some(TokenKind::Integer(_))
-                | Some(TokenKind::Eq)
-                | Some(TokenKind::Fn)
-                | Some(TokenKind::RArrow)
-                | Some(TokenKind::LParen)
-                | Some(TokenKind::RParen)
-                | Some(TokenKind::Ampersand)
-                | Some(TokenKind::Mut)
-                | Some(TokenKind::Checked)
-                | Some(TokenKind::Unsafe)
-                | Some(TokenKind::Lifetime(_))
-                | Some(TokenKind::Star)
-                | Some(TokenKind::SelfType)
-                | Some(TokenKind::Plus) => {
-                    offset += 1;
-                }
-                // Invalid or end - not a generic method call
-                _ => {
-                    return false;
-                }
-            }
-
-            // Safety: don't loop forever on malformed input
-            if offset > 100 {
-                return false;
+        for offset in 0..=100 {
+            let token = self.stream.peek_nth(offset)?;
+            match &token.kind {
+                TokenKind::LBracket => brackets += 1,
+                TokenKind::RBracket if brackets > 0 => brackets -= 1,
+                _ if brackets > 0 => {},
+                TokenKind::Lt => depth += 1,
+                TokenKind::Gt | TokenKind::GtGt => {
+                    depth -= if matches!(token.kind, TokenKind::GtGt) { 2 } else { 1 };
+                    if depth <= 0 { return Some(offset + 1); }
+                },
+                _ if token.is_literal() => {},
+                TokenKind::Ident(_) | TokenKind::Comma | TokenKind::Colon
+                | TokenKind::Dot | TokenKind::Eq | TokenKind::Fn | TokenKind::RArrow
+                | TokenKind::LParen | TokenKind::RParen | TokenKind::Ampersand
+                | TokenKind::Mut | TokenKind::Checked | TokenKind::Unsafe
+                | TokenKind::Lifetime(_) | TokenKind::Star | TokenKind::SelfType
+                | TokenKind::Plus | TokenKind::Minus | TokenKind::Slash
+                | TokenKind::Percent | TokenKind::Bang | TokenKind::Tilde => {},
+                _ => return None,
             }
         }
+        None
+    }
+
+    fn is_generic_method_call_lookahead(&self) -> bool {
+        self.generic_argument_list_end().is_some_and(|end|
+            matches!(self.stream.peek_nth_kind(end), Some(TokenKind::LParen)))
     }
 
     /// Check if this is a generic function call: func<T>(args)
