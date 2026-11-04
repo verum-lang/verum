@@ -5249,7 +5249,7 @@ impl TypeChecker {
                             // Wrap method registration in error recovery so that a single
                             // method failing to resolve types doesn't prevent remaining methods
                             // in the impl block from being registered.
-                            let method_result: Result<()> = {
+                            let method_result: Result<()> = self.with_declared_value_scope(&func.generics, |checker| {
                                 // Check if this is a static method (no self parameter)
                                 // `is_self` is the authority on what counts as a
                                 // receiver. Re-listing the variants here left out
@@ -5276,7 +5276,7 @@ impl TypeChecker {
                                         })
                                         .unwrap_or(false);
                                     if takes_by_value {
-                                        self.self_by_value_methods.insert((
+                                        checker.self_by_value_methods.insert((
                                             verum_common::Text::from(type_name_str.as_str()),
                                             verum_common::Text::from(func.name.name.as_str()),
                                         ));
@@ -5300,14 +5300,14 @@ impl TypeChecker {
                                             let fresh_var = TypeVar::fresh();
                                             let type_var = Type::Var(fresh_var);
                                             let name_text: Text = name.name.clone();
-                                            self.ctx.define_type(name_text.clone(), type_var);
+                                            checker.ctx.define_type(name_text.clone(), type_var);
                                             method_type_param_names.push(name_text);
                                             method_type_vars.push(fresh_var);
 
                                             // Extract type bounds (e.g., F: fn(T) -> U)
                                             if !bounds.is_empty() {
                                                 let extracted_bounds =
-                                                    self.extract_type_bounds_from_ast(bounds);
+                                                    checker.extract_type_bounds_from_ast(bounds);
                                                 if !extracted_bounds.is_empty() {
                                                     method_type_var_bounds
                                                         .insert(fresh_var, extracted_bounds);
@@ -5317,7 +5317,7 @@ impl TypeChecker {
                                     }
 
                                     // Register static method
-                                    // Use lenient fallback for cross-module types not yet loaded
+                                    // Signature admission preserves every declared value-domain obligation.
                                     let param_types: List<Type> = func
                                         .params
                                         .iter()
@@ -5325,19 +5325,14 @@ impl TypeChecker {
                                             FunctionParamKind::Regular { ty, .. } => Some(ty),
                                             _ => None,
                                         })
-                                        .map(|ty| {
-                                            self.ast_to_type(ty)
-                                                .unwrap_or_else(|_| self.ast_to_type_lenient(ty))
-                                        })
-                                        .collect();
+                                        .map(|ty| checker.ast_to_type(ty))
+                                        .collect::<Result<List<Type>>>()?;
 
                                     let return_type = func
                                         .return_type
                                         .as_ref()
-                                        .map(|t| {
-                                            self.ast_to_type(t)
-                                                .unwrap_or_else(|_| self.ast_to_type_lenient(t))
-                                        })
+                                        .map(|t| checker.ast_to_type(t))
+                                        .transpose()?
                                         .unwrap_or(Type::Unit);
 
                                     // CRITICAL FIX: Wrap return type in Future<T> for async static methods
@@ -5345,7 +5340,7 @@ impl TypeChecker {
                                     // Future<Generator<Y, Unit>> for `async fn*`).
                                     // This enables proper await/for-await type checking for
                                     // Connection.connect().await AND Connection.events_stream().
-                                    let final_return_type = self.wrap_return_type_for_sig_full(
+                                    let final_return_type = checker.wrap_return_type_for_sig_full(
                                         return_type,
                                         &func.throws_clause,
                                         func.is_async,
@@ -5368,7 +5363,7 @@ impl TypeChecker {
                                         .collect();
                                     ordered_vars.extend(method_type_vars);
                                     let mut func_scheme =
-                                        self.ctx.generalize_with_vars(func_ty, &ordered_vars);
+                                        checker.ctx.generalize_with_vars(func_ty, &ordered_vars);
                                     func_scheme.impl_self_type = Some(self_type.clone());
                                     // Record how many ordered vars are impl-level so method-level params
                                     // (e.g., method's own <U>) aren't bound from receiver type args at call time.
@@ -5383,10 +5378,10 @@ impl TypeChecker {
 
                                     // Clean up method-level generic type parameters AFTER generalize_ordered
                                     for param_name in method_type_param_names {
-                                        self.ctx.remove_type(&param_name);
+                                        checker.ctx.remove_type(&param_name);
                                     }
 
-                                    self.ctx
+                                    checker.ctx
                                         .env
                                         .insert(qualified_name.as_str(), func_scheme.clone());
 
@@ -5399,7 +5394,7 @@ impl TypeChecker {
                                     let type_name_text =
                                         verum_common::Text::from(type_name_str.as_str());
                                     {
-                                        let mut methods = self.inherent_methods.write();
+                                        let mut methods = checker.inherent_methods.write();
                                         let type_methods =
                                             methods.entry(type_name_text).or_default();
                                         type_methods.insert(static_key, func_scheme);
@@ -5427,7 +5422,7 @@ impl TypeChecker {
                                             let fresh_var = TypeVar::fresh();
                                             let type_var = Type::Var(fresh_var);
                                             let name_text: Text = name.name.clone();
-                                            self.ctx.define_type(name_text.clone(), type_var);
+                                            checker.ctx.define_type(name_text.clone(), type_var);
                                             method_type_param_names.push(name_text);
 
                                             // Extract type bounds (e.g., F: fn(T) -> U)
@@ -5435,7 +5430,7 @@ impl TypeChecker {
                                                 // #[cfg(debug_assertions)]
                                                 // eprintln!("[DEBUG method_reg] Type param '{}' has {} bounds", name.name.as_str(), bounds.len());
                                                 let extracted_bounds =
-                                                    self.extract_type_bounds_from_ast(bounds);
+                                                    checker.extract_type_bounds_from_ast(bounds);
                                                 // #[cfg(debug_assertions)]
                                                 // eprintln!("[DEBUG method_reg] Extracted {} type bounds", extracted_bounds.len());
                                                 if !extracted_bounds.is_empty() {
@@ -5450,7 +5445,7 @@ impl TypeChecker {
                                     // eprintln!("[DEBUG method_reg] Method '{}' has {} method_type_var_bounds entries", func.name.name.as_str(), method_type_var_bounds.len());
 
                                     // Register instance method
-                                    // Use lenient fallback for cross-module types not yet loaded
+                                    // Signature admission preserves every declared value-domain obligation.
                                     let param_types: List<Type> = func
                                         .params
                                         .iter()
@@ -5459,19 +5454,14 @@ impl TypeChecker {
                                             FunctionParamKind::Regular { ty, .. } => Some(ty),
                                             _ => None,
                                         })
-                                        .map(|ty| {
-                                            self.ast_to_type(ty)
-                                                .unwrap_or_else(|_| self.ast_to_type_lenient(ty))
-                                        })
-                                        .collect();
+                                        .map(|ty| checker.ast_to_type(ty))
+                                        .collect::<Result<List<Type>>>()?;
 
                                     let return_type = func
                                         .return_type
                                         .as_ref()
-                                        .map(|t| {
-                                            self.ast_to_type(t)
-                                                .unwrap_or_else(|_| self.ast_to_type_lenient(t))
-                                        })
+                                        .map(|t| checker.ast_to_type(t))
+                                        .transpose()?
                                         .unwrap_or(Type::Unit);
 
                                     // CRITICAL FIX: Wrap return type in Future<T> for async methods
@@ -5479,7 +5469,7 @@ impl TypeChecker {
                                     // Future<Generator<Y, Unit>> for `async fn*`).
                                     // This enables proper await/for-await type checking for
                                     // inherent impl methods.
-                                    let final_return_type = self.wrap_return_type_for_sig_full(
+                                    let final_return_type = checker.wrap_return_type_for_sig_full(
                                         return_type,
                                         &func.throws_clause,
                                         func.is_async,
@@ -5549,14 +5539,14 @@ impl TypeChecker {
                                     // to their fresh TypeVars here.
                                     for name in method_type_param_names.iter() {
                                         if let Option::Some(Type::Var(v)) =
-                                            self.ctx.lookup_type(name.as_str())
+                                            checker.ctx.lookup_type(name.as_str())
                                         {
                                             ordered_vars.push(*v);
                                         }
                                     }
 
                                     let mut method_scheme =
-                                        self.ctx.generalize_with_vars(method_ty, &ordered_vars);
+                                        checker.ctx.generalize_with_vars(method_ty, &ordered_vars);
                                     // impl_var_count is the number of impl-level
                                     // vars IN for_type, i.e. the first block.
                                     // This is exactly `receiver.args.len()` at call
@@ -5567,7 +5557,7 @@ impl TypeChecker {
                                     method_scheme.receiver_kind =
                                         Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                     method_scheme.impl_var_count = impl_vars_in_for_type.len();
-                                    self.record_explicit_method_vars(&mut method_scheme, func);
+                                    checker.record_explicit_method_vars(&mut method_scheme, func);
                                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5370 count={}", impl_vars_in_for_type.len()); }
 
                                     // CRITICAL: Add type bounds to the TypeScheme for closure type inference
@@ -5580,14 +5570,14 @@ impl TypeChecker {
 
                                     // Clean up method-level generic type parameters AFTER generalize_ordered
                                     for param_name in method_type_param_names {
-                                        self.ctx.remove_type(&param_name);
+                                        checker.ctx.remove_type(&param_name);
                                     }
 
                                     // Register in inherent_methods map — guarded ONE
                                     // write-path (T0585 ERROR-14); inherent
                                     // registrations keep last-write-wins and may
                                     // reclaim a protocol-poisoned slot.
-                                    self.register_inherent_method_guarded(
+                                    checker.register_inherent_method_guarded(
                                         type_name_text.clone(),
                                         method_name_text.clone(),
                                         method_scheme,
@@ -5618,7 +5608,7 @@ impl TypeChecker {
                                     // with the constraint stored alongside each
                                     // candidate signature. Tracked as task #35.
                                     if !impl_self_type_args.is_empty() {
-                                        let mut patterns_guard = self.method_impl_patterns.write();
+                                        let mut patterns_guard = checker.method_impl_patterns.write();
                                         let type_patterns = patterns_guard
                                             .entry(type_name_text.clone())
                                             .or_default();
@@ -5635,14 +5625,13 @@ impl TypeChecker {
                                     );
                                 }
                                 Ok(())
-                            }; // end of method registration closure
+                            }); // end of method registration closure
                             for (name, ty) in &impl_bindings {
                                 self.ctx.define_type(name.clone(), ty.clone());
                             }
 
-                            if let Err(_e) = method_result {
-                                // Method type resolution failed — skip this method and continue
-                                // with remaining methods in the impl block
+                            if let Err(error) = method_result {
+                                self.deferred_soundness_errors.push(error);
                             }
                         }
 
@@ -6509,10 +6498,17 @@ impl TypeChecker {
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
-        self.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
+        // Carry the declaration-owned identities through source-authority lookup.
+        // Imported signatures start with an empty frame; ordinary methods may
+        // inherit their exact implementation frame. Flat ambient names are not binders.
+        let frame = self.decl_param_frames.last().cloned().unwrap_or_default();
+        self.push_decl_param_frame(frame);
+        let result = self.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
             checker.validate_function_universes(func)?;
             checker.register_function_signature_in_universe_scope(func)
-        })
+        });
+        self.pop_decl_param_frame();
+        result
     }
 
     fn register_function_signature_in_universe_scope(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
@@ -6634,6 +6630,7 @@ impl TypeChecker {
         // deleting legitimate type definitions from the context.
         let mut saved_types: List<(Text, Option<Type>)> = List::new();
 
+        let result = (|| {
         for generic_param in &func.generics {
             use verum_ast::ty::GenericParamKind;
             match &generic_param.kind {
@@ -6643,7 +6640,9 @@ impl TypeChecker {
                     let name_text: Text = name.name.clone();
                     saved_types
                         .push((name_text.clone(), self.ctx.lookup_type(&name_text).cloned()));
-                    self.ctx.define_type(name_text.clone(), type_var);
+                    self.ctx.define_type(name_text.clone(), type_var.clone());
+                    self.decl_param_frames.last_mut().expect("function declaration frame")
+                        .insert(name_text.clone(), type_var);
                     type_param_names.push(name_text);
                     type_param_vars.push(fresh_var);
 
@@ -6672,7 +6671,9 @@ impl TypeChecker {
                     let type_var = Type::Var(fresh_var);
                     saved_types
                         .push((name_text.clone(), self.ctx.lookup_type(&name_text).cloned()));
-                    self.ctx.define_type(name_text.clone(), type_var);
+                    self.ctx.define_type(name_text.clone(), type_var.clone());
+                    self.decl_param_frames.last_mut().expect("function declaration frame")
+                        .insert(name_text.clone(), type_var);
                     type_param_names.push(name_text);
                     type_param_vars.push(fresh_var);
 
@@ -6683,24 +6684,14 @@ impl TypeChecker {
 
 
                 }
-                GenericParamKind::Meta { name, ty, .. } | GenericParamKind::Const { name, ty } => {
-                    // Meta (const generic) parameters are compile-time values.
-                    // Create a fresh TypeVar so they are included in the scheme's vars list,
-                    // allowing explicit type arguments `foo<N>(args)` to bind meta values.
-                    let fresh_var = TypeVar::fresh();
+                GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
                     let meta_type = self.source_value_parameter(generic_param)?;
-                    let name_text: Text = name.name.clone();
-                    saved_types
-                        .push((name_text.clone(), self.ctx.lookup_type(&name_text).cloned()));
-                    // Preserve the declared value role in signature bounds.
-                    self.ctx.define_type(name_text.clone(), meta_type);
+                    let name_text = name.name.clone();
+                    saved_types.push((name_text.clone(), self.ctx.lookup_type(&name_text).cloned()));
+                    self.ctx.define_type(name_text.clone(), meta_type.clone());
+                    self.decl_param_frames.last_mut().expect("function declaration frame")
+                        .insert(name_text.clone(), meta_type);
                     type_param_names.push(name_text);
-                    type_param_vars.push(fresh_var);
-
-                    // Track if this is an implicit parameter
-                    if generic_param.is_implicit {
-                        implicit_type_vars.insert(fresh_var);
-                    }
                 }
                 _ => {} // Other generic param kinds (Lifetime, Context) handled elsewhere
             }
@@ -6885,21 +6876,24 @@ impl TypeChecker {
                 .insert(func.name.name.clone(), required_params);
         }
 
-        // Restore previous types instead of removing — this prevents generic params
-        // (e.g., `Output`, `Args`) from permanently deleting real type definitions.
-        for (name, saved) in saved_types {
-            match saved {
-                Some(ty) => self.ctx.define_type(name.clone(), ty),
-                None => self.ctx.remove_type(&name),
-            }
-        }
-
         tracing::debug!(
             "Registered function signature: {} (required_params: {})",
             func.name.name,
             required_params
         );
         Ok(())
+        })();
+
+        // Restore previous types instead of removing — this prevents generic params
+        // (e.g., `Output`, `Args`) from permanently deleting real type definitions.
+        for (name, saved) in saved_types.into_iter().rev() {
+            match saved {
+                Some(ty) => self.ctx.define_type(name.clone(), ty),
+                None => self.ctx.remove_type(&name),
+            }
+        }
+
+        result
     }
 
     /// Register an intrinsic function using the intrinsic name (from @intrinsic("name") attribute)

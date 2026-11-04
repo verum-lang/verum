@@ -1261,12 +1261,12 @@ impl SpecializationValidator {
             // Meta types
             (
                 Type::Meta {
-                    name: n1, ty: t1, ..
+                    value: v1, ty: t1, refinement: r1, ..
                 },
                 Type::Meta {
-                    name: n2, ty: t2, ..
+                    value: v2, ty: t2, refinement: r2, ..
                 },
-            ) => n1 == n2 && self.types_compatible(t1, t2),
+            ) => v1 == v2 && r1 == r2 && self.types_compatible(t1, t2),
 
             // Quantified types
             (

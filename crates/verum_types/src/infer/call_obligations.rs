@@ -8,6 +8,7 @@ use verum_ast::Span;
 use verum_common::{List, Map, Text, ToText};
 
 pub(super) struct PendingValueObligation {
+    value_parameters: List<Type>,
     type_bounds: Map<TypeVar, List<Type>>,
     protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>>,
     where_clauses: List<crate::protocol::WhereClause>,
@@ -15,6 +16,19 @@ pub(super) struct PendingValueObligation {
 }
 
 impl TypeChecker {
+    /// Keep value-domain obligations only after selecting a callable candidate.
+    pub(super) fn retain_call_value_domains(&mut self, parameters: List<Type>, span: Span) -> Result<()> {
+        if parameters.is_empty() { return Ok(()); }
+        if self.value_obligation_scope_depth == 0 {
+            return Err(TypeError::UniverseBinding { message: "value instantiation requires an inference obligation scope".into(), span });
+        }
+        self.pending_value_obligations.push(PendingValueObligation {
+            value_parameters: parameters, type_bounds: Map::new(), protocol_bounds: Map::new(),
+            where_clauses: List::new(), span,
+        });
+        Ok(())
+    }
+
     /// Nested entry points reuse a frame; a named function owns a fresh one.
     /// Restore the parent even when inference or obligation checking fails.
     pub(super) fn with_value_obligation_scope<T>(
@@ -73,6 +87,7 @@ impl TypeChecker {
         if !instance.type_bounds.is_empty()
             || !instance.protocol_bounds.is_empty()
             || !instance.where_clauses.is_empty()
+            || !instance.value_parameters.is_empty()
         {
             if self.value_obligation_scope_depth == 0 {
                 return Err(TypeError::UniverseBinding {
@@ -87,6 +102,7 @@ impl TypeChecker {
                 }
             }
             self.pending_value_obligations.push(PendingValueObligation {
+                value_parameters: instance.value_parameters.clone(),
                 type_bounds: instance.type_bounds.clone(),
                 protocol_bounds: instance.protocol_bounds.clone(),
                 where_clauses: instance.where_clauses.clone(),
@@ -102,6 +118,22 @@ impl TypeChecker {
         while !self.pending_value_obligations.is_empty() {
             let pending = std::mem::take(&mut self.pending_value_obligations);
             for obligation in pending {
+                for parameter in &obligation.value_parameters {
+                    let argument = self.unifier.apply(parameter);
+                    let Type::Meta { ty: expected_sort, .. } = parameter else {
+                        return Err(TypeError::UniverseBinding { message: "invalid value parameter roster".into(), span: obligation.span });
+                    };
+                    let Type::Meta { ty: actual_sort, value, .. } = &argument else {
+                        return Err(TypeError::UniverseBinding { message: "a value parameter was instantiated with a type".into(), span: obligation.span });
+                    };
+                    if matches!(value, crate::ty::ValueTerm::Inference(_))
+                        || !self.types_equivalent(expected_sort.base(), actual_sort.base())
+                        || !self.meta_argument_satisfies_domain(parameter, &argument) {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: "E405".into(), msg: "call value argument does not establish its declared scalar domain".into(), span: obligation.span,
+                        });
+                    }
+                }
                 self.enforce_call_type_bounds(&obligation.type_bounds, obligation.span)?;
                 self.enforce_call_protocol_bounds(&obligation.protocol_bounds, obligation.span)?;
                 self.enforce_call_where_clauses(&obligation.where_clauses, obligation.span)?;
@@ -118,7 +150,7 @@ impl TypeChecker {
         let instance = scheme
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
-        if !instance.where_clauses.is_empty() {
+        if !instance.where_clauses.is_empty() || !instance.value_parameters.is_empty() {
             if self.value_obligation_scope_depth == 0 {
                 return Err(TypeError::UniverseBinding {
                     message: "conditional call requires an inference obligation scope".into(),
@@ -126,6 +158,7 @@ impl TypeChecker {
                 });
             }
             self.pending_value_obligations.push(PendingValueObligation {
+                value_parameters: instance.value_parameters.clone(),
                 type_bounds: Map::new(),
                 protocol_bounds: Map::new(),
                 where_clauses: instance.where_clauses.clone(),

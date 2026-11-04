@@ -11,7 +11,7 @@ use verum_ast::ty::{Ident, Path};
 use verum_common::{List, Map, Maybe, Set};
 
 use verum_types::advanced_protocols::{SpecializationInfo, SpecializationLattice};
-use verum_types::protocol::ProtocolImpl;
+use verum_types::protocol::{Protocol, ProtocolChecker, ProtocolImpl, ProtocolKind};
 use verum_types::specialization_selection::{CoherenceChecker, SpecializationSelector};
 use verum_types::ty::Type;
 use verum_types::unify::Unifier;
@@ -56,6 +56,31 @@ fn make_type(name: &str) -> Type {
 fn make_type_var(id: usize) -> Type {
     use verum_types::ty::TypeVar;
     Type::Var(TypeVar::with_id(id))
+}
+
+fn selection_registry(count: usize) -> (Protocol, ProtocolChecker) {
+    let protocol = Protocol {
+        source_parameters: None,
+        constraints: Default::default(),
+        kind: ProtocolKind::Constraint,
+        name: "Render".into(),
+        type_params: List::new(),
+        methods: Map::new(),
+        associated_types: Map::new(),
+        associated_consts: Map::new(),
+        super_protocols: List::new(),
+        specialization_info: None,
+        defining_crate: None,
+        span: Span::default(),
+    };
+    let mut registry = ProtocolChecker::new();
+    registry.register_protocol(protocol.clone()).unwrap();
+    for i in 0..count {
+        registry
+            .register_impl(make_impl("Render", make_type(&format!("Surface{i}")), 0))
+            .unwrap();
+    }
+    (protocol, registry)
 }
 
 // ==================== Benchmarks ====================
@@ -124,18 +149,32 @@ fn bench_selection_uncached(c: &mut Criterion) {
 
 fn bench_selection_cached(c: &mut Criterion) {
     let mut group = c.benchmark_group("selection_cached");
-
+    let (protocol, registry) = selection_registry(100);
     let mut selector = SpecializationSelector::new();
-
-    // Pre-populate cache
+    let mut unifier = Unifier::new();
     for i in 0..100 {
-        selector.cache_selection("Display".into(), format!("Type{}", i).into(), i % 10);
+        assert_eq!(
+            selector
+                .select_implementation(
+                    &protocol,
+                    &make_type(&format!("Surface{i}")),
+                    &registry,
+                    &mut unifier
+                )
+                .unwrap(),
+            i
+        );
     }
-
-    group.bench_function("cached_lookup", |b| {
-        b.iter(|| black_box(selector.cache.get(&("Display".into(), "Type50".into()))));
+    let target = make_type("Surface50");
+    group.bench_function("validated_cached_selection", |b| {
+        b.iter(|| {
+            black_box(
+                selector
+                    .select_implementation(&protocol, &target, &registry, &mut unifier)
+                    .unwrap(),
+            )
+        });
     });
-
     group.finish();
 }
 
@@ -282,28 +321,47 @@ fn bench_lattice_selection_diamond(c: &mut Criterion) {
 
 fn bench_cache_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_operations");
-
-    group.bench_function("cache_insert", |b| {
+    let (protocol, registry) = selection_registry(1);
+    let target = make_type("Surface0");
+    group.bench_function("cold_selection", |b| {
         b.iter(|| {
             let mut selector = SpecializationSelector::new();
-            selector.cache_selection("Display".into(), "Int".into(), 42);
-            black_box(selector.cache.len())
+            black_box(
+                selector
+                    .select_implementation(&protocol, &target, &registry, &mut Unifier::new())
+                    .unwrap(),
+            )
         });
     });
-
-    group.bench_function("cache_lookup_hit", |b| {
+    group.bench_function("warm_selection", |b| {
         let mut selector = SpecializationSelector::new();
-        selector.cache_selection("Display".into(), "Int".into(), 42);
-
-        b.iter(|| black_box(selector.cache.get(&("Display".into(), "Int".into()))));
+        let mut unifier = Unifier::new();
+        assert_eq!(
+            selector
+                .select_implementation(&protocol, &target, &registry, &mut unifier)
+                .unwrap(),
+            0
+        );
+        b.iter(|| {
+            black_box(
+                selector
+                    .select_implementation(&protocol, &target, &registry, &mut unifier)
+                    .unwrap(),
+            )
+        });
     });
-
-    group.bench_function("cache_lookup_miss", |b| {
-        let selector = SpecializationSelector::new();
-
-        b.iter(|| black_box(selector.cache.get(&("Display".into(), "Int".into()))));
+    group.bench_function("missing_implementation", |b| {
+        let mut selector = SpecializationSelector::new();
+        let mut unifier = Unifier::new();
+        let missing = make_type("Missing");
+        b.iter(|| {
+            black_box(
+                selector
+                    .select_implementation(&protocol, &missing, &registry, &mut unifier)
+                    .unwrap_err(),
+            )
+        });
     });
-
     group.finish();
 }
 

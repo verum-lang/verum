@@ -1580,7 +1580,7 @@ fn substitute_refinement_binder(
     /// Constants discharge predicates by evaluation; symbolic arguments must
     /// carry a domain that entails the declaration's domain. Failure to prove
     /// an obligation is never admission, including identical opaque predicates.
-    fn meta_argument_satisfies_domain(&self, parameter: &Type, argument: &Type) -> bool {
+    pub(super) fn meta_argument_satisfies_domain(&self, parameter: &Type, argument: &Type) -> bool {
         let (Type::Meta { ty: expected, refinement: required, .. },
              Type::Meta { ty: actual, refinement: known, value, .. }) = (parameter, argument)
         else { return false; };
@@ -1592,7 +1592,7 @@ fn substitute_refinement_binder(
             }
         };
         let expected = domain(expected, required);
-        if let Some(value) = value {
+        if let crate::ty::ValueTerm::Constant(value) = value {
             let mut current = &expected;
             while let Type::Refined { base, predicate } = current {
                 let mut evaluator = crate::const_eval::ConstEvaluator::new();
@@ -3080,21 +3080,34 @@ fn substitute_refinement_binder(
         scheme: &mut crate::context::TypeScheme,
         func: &verum_ast::decl::FunctionDecl,
     ) {
-        scheme.explicit_method_vars = Some(
-            func.generics
-                .iter()
-                .filter(|parameter| !parameter.is_implicit)
-                .map(|parameter| match &parameter.kind {
-                    verum_ast::ty::GenericParamKind::Type { name, .. } => {
-                        match self.ctx.lookup_type(name.name.as_str()) {
-                            Some(Type::Var(var)) => Some(*var),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                })
-                .collect(),
-        );
+        use crate::context::GenericBinder;
+        // The exact receiver type carries implementation-owned value identities.
+        // Explicit method slots contain only the method's own telescope.
+        if scheme.impl_self_type.is_none() {
+            scheme.impl_self_type = self.current_self_type.clone();
+        }
+        scheme.value_parameters = scheme.impl_self_type.as_ref()
+            .map(Type::value_parameters).unwrap_or_default();
+        scheme.explicit_method_vars = Some(func.generics.iter().filter_map(|parameter| {
+            let binder = match &parameter.kind {
+                verum_ast::ty::GenericParamKind::Type { name, .. }
+                | verum_ast::ty::GenericParamKind::HigherKinded { name, .. }
+                | verum_ast::ty::GenericParamKind::KindAnnotated { name, .. } =>
+                    match self.ctx.lookup_type(name.name.as_str()) {
+                        Some(Type::Var(var)) => Some(GenericBinder::Type(*var)), _ => None,
+                    },
+                verum_ast::ty::GenericParamKind::Meta { name, .. }
+                | verum_ast::ty::GenericParamKind::Const { name, .. } =>
+                    match self.ctx.lookup_type(name.name.as_str()) {
+                        Some(value @ Type::Meta { value: crate::ty::ValueTerm::Parameter(_), .. }) => {
+                            scheme.value_parameters.push(value.clone());
+                            Some(GenericBinder::Value(value.clone()))
+                        }, _ => None,
+                    },
+                _ => None,
+            };
+            (!parameter.is_implicit).then_some(binder)
+        }).collect());
     }
 
     /// Projected array syntax must not erase an invalid length to an unsized
@@ -3146,7 +3159,7 @@ fn substitute_refinement_binder(
     /// Constrain declaration slots before argument checking and return inference.
     pub(super) fn bind_explicit_method_arguments(
         &mut self,
-        slots: Option<&List<Option<TypeVar>>>,
+        slots: Option<&List<Option<crate::context::GenericBinder>>>,
         arguments: &List<verum_ast::ty::GenericArg>,
         method: &verum_ast::Ident,
         span: Span,
@@ -3170,7 +3183,7 @@ fn substitute_refinement_binder(
             });
         }
         for (argument, slot) in arguments.iter().zip(slots.iter()) {
-            if let Some(var) = slot {
+            if let Some(crate::context::GenericBinder::Type(var)) = slot {
                 let Some(ty) = argument.type_for_declared_slot() else {
                     return Err(TypeError::OtherWithCodeSpanned {
                         code: "E400".into(),
@@ -3185,6 +3198,32 @@ fn substitute_refinement_binder(
                 let inferred = self.unifier.unify(&Type::Var(*var), &provided, span)?;
                 combined = combined.compose(&inferred)
                     .map_err(|message| TypeError::UniverseBinding { message, span })?;
+            } else if let Some(crate::context::GenericBinder::Value(expected)) = slot {
+                let provided = match argument {
+                    verum_ast::ty::GenericArg::Const(expression) => {
+                        let symbolic = match &expression.kind {
+                            ExprKind::Path(path) => path.as_ident().and_then(|id| self.lookup_decl_param(&id.name))
+                                .filter(|ty| matches!(ty, Type::Meta { .. })).cloned(),
+                            _ => None,
+                        };
+                        symbolic.or_else(|| self.eval_const_arg(expression))
+                    }
+                    verum_ast::ty::GenericArg::Type(annotation) => {
+                        let candidate = self.ast_to_type(annotation)?;
+                        matches!(candidate, Type::Meta { .. }).then_some(candidate)
+                    }
+                    _ => None,
+                }.ok_or_else(|| TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(), msg: "a value argument needs an exact compile-time identity".into(), span,
+                })?;
+                let inferred = self.unifier.unify(expected, &provided, span)?;
+                use crate::ty::SubstitutionExt;
+                combined = combined.compose(&inferred)
+                    .map_err(|message| TypeError::UniverseBinding { message, span })?;
+            } else {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(), msg: "explicit argument lacks a declaration-owned parameter kind".into(), span,
+                });
             }
         }
         Ok(combined)

@@ -140,7 +140,7 @@ fn lean_checks_the_real_hott_ntype_declaration_and_specialized_truncation_indice
     );
     match &args[1] {
         Type::Meta {
-            name, value: None, ..
+            name, value: verum_types::ty::ValueTerm::Parameter(_), ..
         } => assert_eq!(name.as_str(), "N"),
         Type::Named { path, args } if args.is_empty() => assert_eq!(path.last_segment_name(), "N"),
         other => panic!("NType lost its declared index N: {other:?}"),
@@ -180,7 +180,7 @@ fn lean_checks_the_real_hott_ntype_declaration_and_specialized_truncation_indice
         assert_eq!(actual_level, level);
         assert!(root.fields.is_empty());
         let Type::Meta {
-            value: Some(verum_common::ConstValue::Int(n)),
+            value: verum_types::ty::ValueTerm::Constant(verum_common::ConstValue::Int(n)),
             ..
         } = &actual[1]
         else {

@@ -285,12 +285,9 @@ impl<'a> DependentExhaustivenessChecker<'a> {
                     || (n1.as_str() == "Succ" && n2.as_str() == "Zero")
             }
             // Different meta values - incompatible
-            (Type::Meta { name: n1, .. }, Type::Meta { name: n2, .. }) => {
-                // Only incompatible if both are concrete values
-                let n1_concrete = n1.as_str().chars().all(|c| c.is_numeric());
-                let n2_concrete = n2.as_str().chars().all(|c| c.is_numeric());
-                n1_concrete && n2_concrete && n1 != n2
-            }
+            (Type::Meta { value: crate::ty::ValueTerm::Constant(left), ty: left_ty, .. },
+             Type::Meta { value: crate::ty::ValueTerm::Constant(right), ty: right_ty, .. }) =>
+                left_ty == right_ty && !crate::ty::same_constant_identity(left, right),
             _ => false,
         }
     }
@@ -584,9 +581,6 @@ impl<'a> DependentExhaustivenessChecker<'a> {
                 if args.is_empty() && name.as_str().len() == 1 {
                     out.insert(name.clone(), ctor_arg.clone());
                 }
-            }
-            if let Type::Meta { name, .. } = scr_arg {
-                out.insert(name.clone(), ctor_arg.clone());
             }
         }
     }

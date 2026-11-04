@@ -3124,25 +3124,9 @@ impl TypeChecker {
                     }
                 }
 
-                // Normalized type structural equality: accept if alias-expanded
-                // types match textually (e.g., Result<T,E> -> Ok(T)|Err(E)).
-                //
-                // Two UNSOLVED variables are not equal just because they print
-                // the same. Every one of them renders as `_`, so this test read
-                // `_ == _` and accepted, which is how `fn f<A, B>(a: A, b: B)
-                // -> A { b }` type-checked: A and B are distinct parameters,
-                // unification correctly refused to bind one to the other, and
-                // this recovery then overruled the refusal on the strength of
-                // both being printed as a placeholder. The comparison is meant
-                // for spellings that differ structurally while naming the same
-                // type; a placeholder names nothing.
-                let is_placeholder_text = |t: &Type| {
-                    let rendered = t.to_text();
-                    rendered.as_str() == "_" || rendered.as_str().is_empty()
-                };
-                if !is_placeholder_text(&normalized_actual)
-                    && normalized_actual.to_text() == normalized_expected.to_text()
-                {
+                // Printed names are diagnostic labels, never equality evidence.
+                // Structural equality retains declaration-owned value identities.
+                if normalized_actual == normalized_expected {
                     return Ok(InferResult::new(expected.clone()));
                 }
 
@@ -7774,7 +7758,7 @@ impl TypeChecker {
                     pending_protocol_bounds = instance.protocol_bounds;
                     pending_type_bounds = instance.type_bounds;
 
-                    let explicit_slots = scheme.fresh_explicit_method_vars(&fresh_vars);
+                    let explicit_slots = instance.explicit_method_vars;
                     if let Some(slots) = explicit_slots.as_ref() {
                         self.bind_explicit_method_arguments(
                             Some(slots), type_args,

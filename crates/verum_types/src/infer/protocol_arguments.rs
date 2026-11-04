@@ -19,6 +19,29 @@ fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
 }
 
 impl TypeChecker {
+    /// Install one declaration's value identities, restoring its lexical parent even on failure.
+    pub(super) fn with_declared_value_scope<T>(&mut self, parameters: &[GenericParam],
+        check: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let mut previous = List::new();
+        let result = (|| {
+            for parameter in parameters {
+                let name = match &parameter.kind {
+                    GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => name,
+                    _ => continue,
+                };
+                let value = self.source_value_parameter(parameter)?;
+                previous.push((name.name.clone(), self.ctx.lookup_type(&name.name).cloned()));
+                self.ctx.define_type(name.name.clone(), value);
+            }
+            check(self)
+        })();
+        for (name, value) in previous.into_iter().rev() {
+            if let Some(value) = value { self.ctx.define_type(name, value); }
+            else { self.ctx.remove_type(&name); }
+        }
+        result
+    }
+
     /// One source representation for value binders in declarations, lazy
     /// imports and method/function scopes. A value binder is never a TypeVar.
     pub(super) fn source_value_parameter(&mut self, parameter: &GenericParam) -> Result<Type> {
@@ -509,7 +532,7 @@ impl TypeChecker {
         self.check_protocol_value_carrier(carrier, span)?;
         match argument {
             Type::Meta {
-                value: Some(ConstValue::Int(value)),
+                value: crate::ty::ValueTerm::Constant(ConstValue::Int(value)),
                 ty,
                 refinement: None,
                 ..

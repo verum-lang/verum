@@ -205,24 +205,8 @@ impl Motive {
                 lhs: Box::new(self.substitute_term_in_eq_term(lhs, var, term)),
                 rhs: Box::new(self.substitute_term_in_eq_term(rhs, var, term)),
             },
-            // Meta type (compile-time parameter)
-            Type::Meta {
-                name: meta_name,
-                ty: meta_ty,
-                refinement,
-                value,
-            } => {
-                if meta_name.as_str() == var.as_str() {
-                    self.term_to_type(term)
-                } else {
-                    Type::Meta {
-                        name: meta_name.clone(),
-                        ty: Box::new(self.substitute_term_in_type(meta_ty, var, term)),
-                        refinement: refinement.clone(),
-                        value: value.clone(),
-                    }
-                }
-            }
+            // A named term carries no authority over an owned compile-time binder.
+            Type::Meta { .. } => ty.clone(),
             // Refined type - substitute in base type
             Type::Refined { base, predicate } => Type::Refined {
                 base: Box::new(self.substitute_term_in_type(base, var, term)),
@@ -303,7 +287,7 @@ impl Motive {
                         name: Text::from(format!("{}", n)),
                         ty: Box::new(Type::Int),
                         refinement: None,
-                        value: Some(verum_common::ConstValue::Int(*n as i128)),
+                        value: crate::ty::ValueTerm::Constant(verum_common::ConstValue::Int(*n as i128)),
                     }
                 }
                 EqConst::Nat(n) => Type::Meta {
@@ -313,13 +297,13 @@ impl Motive {
                         args: List::new(),
                     }),
                     refinement: None,
-                    value: Some(verum_common::ConstValue::UInt(*n as u128)),
+                    value: crate::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(*n as u128)),
                 },
                 EqConst::Bool(b) => Type::Meta {
                     name: Text::from(if *b { "true" } else { "false" }),
                     ty: Box::new(Type::Bool),
                     refinement: None,
-                    value: Some(verum_common::ConstValue::Bool(*b)),
+                    value: crate::ty::ValueTerm::Constant(verum_common::ConstValue::Bool(*b)),
                 },
                 EqConst::Unit => Type::Unit,
                 EqConst::Named(name) => Type::Generic {
@@ -620,11 +604,9 @@ impl ConstructorRefinement {
     //  `T::A` vs `T::B`.
     //
 
-    //  2. **Distinct concrete `Meta` values** — two `Type::Meta` with
-    //  different `name` fields and no further refinement are
-    //  compile-time constants of distinct value; they cannot be
-    //  equal (e.g. `Meta{0}` vs `Meta{1}` on the same underlying
-    //  `Nat`).
+    //  2. **Distinct concrete `Meta` values** — represented constants of
+    //  the same carrier are disjoint when their values differ. Parameter
+    //  names and distinct symbolic identities do not establish disjointness.
     //
 
     //  3. **Cross-form Named vs Generic** — a `Type::Named` whose last
@@ -659,21 +641,19 @@ impl ConstructorRefinement {
             }
 
             // --- Rule 2: distinct compile-time Meta values ---
-            // Two `Meta { name }` with different names encode different
-            // concrete singletons (e.g. `0` vs `1` on `Nat`). If both
-            // have no residual refinement, they are provably disjoint.
+            // Only actual constants provide this evidence; spelling does not.
             (
                 Type::Meta {
-                    name: n1,
-                    refinement: r1,
+                    value: crate::ty::ValueTerm::Constant(left),
+                    ty: left_ty,
                     ..
                 },
                 Type::Meta {
-                    name: n2,
-                    refinement: r2,
+                    value: crate::ty::ValueTerm::Constant(right),
+                    ty: right_ty,
                     ..
                 },
-            ) => n1 != n2 && r1.is_none() && r2.is_none(),
+            ) => left_ty == right_ty && !crate::ty::same_constant_identity(left, right),
 
             // --- Rule 3: cross-form Named vs Generic ---
             // A Named path whose head differs from the Generic's name
@@ -1198,12 +1178,6 @@ impl<'a> DependentPatternChecker<'a> {
                     .insert(name.clone(), ctor_arg.clone());
             }
 
-            // Also check for Meta types (compile-time parameters)
-            if let Type::Meta { name, .. } = scr_arg {
-                refinement
-                    .index_subst
-                    .insert(name.clone(), ctor_arg.clone());
-            }
 
             // Add equality constraint if types differ
             if ctor_arg != scr_arg {
@@ -1225,11 +1199,9 @@ impl<'a> DependentPatternChecker<'a> {
                             args: List::new(),
                         }),
                         refinement: None,
-                        value: Some(verum_common::ConstValue::UInt(0)),
+                        value: crate::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(0)),
                     };
                     if let Type::Generic { name, .. } = arg {
-                        refinement.index_subst.insert(name.clone(), zero.clone());
-                    } else if let Type::Meta { name, .. } = arg {
                         refinement.index_subst.insert(name.clone(), zero.clone());
                     }
                 }
@@ -1247,8 +1219,6 @@ impl<'a> DependentPatternChecker<'a> {
                         args: List::from_iter([pred.clone()]),
                     };
                     if let Type::Generic { name, .. } = arg {
-                        refinement.index_subst.insert(name.clone(), succ);
-                    } else if let Type::Meta { name, .. } = arg {
                         refinement.index_subst.insert(name.clone(), succ);
                     }
                 }
@@ -1396,7 +1366,9 @@ impl<'a> DependentPatternChecker<'a> {
                 false
             }
             // Different concrete meta values - incompatible
-            (Type::Meta { name: n1, .. }, Type::Meta { name: n2, .. }) => n1 != n2,
+            (Type::Meta { value: crate::ty::ValueTerm::Constant(left), ty: left_ty, .. },
+             Type::Meta { value: crate::ty::ValueTerm::Constant(right), ty: right_ty, .. }) =>
+                left_ty == right_ty && !crate::ty::same_constant_identity(left, right),
             _ => false,
         }
     }

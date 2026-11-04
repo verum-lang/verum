@@ -834,7 +834,7 @@ impl TypeLevelEvaluator {
                             args: List::new(),
                         }),
                         refinement: None,
-                        value: Some(verum_common::ConstValue::UInt(sum)),
+                        value: crate::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(sum)),
                     });
                 }
             }
@@ -849,7 +849,7 @@ impl TypeLevelEvaluator {
                             args: List::new(),
                         }),
                         refinement: None,
-                        value: Some(verum_common::ConstValue::UInt(prod)),
+                        value: crate::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(prod)),
                     });
                 }
             }
@@ -1234,7 +1234,7 @@ pub mod meta {
             name: name.into(),
             ty: Box::new(ty),
             refinement: None,
-            value: None,
+            value: crate::ty::ValueTerm::Parameter(crate::ty::ValueId::fresh()),
         }
     }
 
@@ -1319,23 +1319,21 @@ pub mod equality {
                 paths_equal(p1, p2) && args_equal(a1, a2)
             }
 
-            // Meta parameters must have same name, type, and concrete value (if any).
-            // A concrete-value mismatch short-circuits equality regardless of the
-            // symbolic name, so `Meta(value=2)` is distinct from `Meta(value=3)`.
+            // Value identity is declaration-owned; spelling is diagnostic only.
             (
                 Type::Meta {
-                    name: n1,
+                    name: _,
                     ty: t1,
                     refinement: r1,
                     value: v1,
                 },
                 Type::Meta {
-                    name: n2,
+                    name: _,
                     ty: t2,
                     refinement: r2,
                     value: v2,
                 },
-            ) => v1 == v2 && n1 == n2 && types_equal(t1, t2) && refinements_equal(r1, r2),
+            ) => v1 == v2 && types_equal(t1, t2) && refinements_equal(r1, r2),
 
             // Tuples must have same arity and element types
             (Type::Tuple(elems1), Type::Tuple(elems2)) => {

@@ -90,7 +90,7 @@ fn unsupported_local_binders_are_never_erased_even_when_nested() {
             name: "N".into(),
             ty: Box::new(Type::Int),
             refinement: None,
-            value: None,
+            value: verum_types::ty::ValueTerm::Parameter(verum_types::ty::ValueId::fresh()),
         },
     ] {
         let nested = Type::Reference {

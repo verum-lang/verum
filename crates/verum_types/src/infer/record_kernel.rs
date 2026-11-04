@@ -215,7 +215,7 @@ impl Encoding<'_> {
             }
             Type::Meta {
                 ty,
-                value: Some(value),
+                value: crate::ty::ValueTerm::Constant(value),
                 refinement: None,
                 ..
             } => {

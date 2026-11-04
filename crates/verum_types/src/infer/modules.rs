@@ -11285,6 +11285,7 @@ impl TypeChecker {
             Map::new();
         let mut func_param_type_bounds: Map<TypeVar, List<Type>> = Map::new();
         let mut func_implicit_type_vars: Set<TypeVar> = Set::new();
+        let mut func_value_parameters_by_name: Map<Text, Type> = Map::new();
 
         for generic_param in &func.generics {
             use verum_ast::ty::GenericParamKind;
@@ -11373,6 +11374,7 @@ impl TypeChecker {
                 }
                 GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
                     let value = self.source_value_parameter(generic_param)?;
+                    func_value_parameters_by_name.insert(name.name.clone(), value.clone());
                     self.ctx.define_type(name.name.clone(), value);
                 }
                 _ => {} // Handle other generic param kinds (Const, Lifetime) later
@@ -11595,6 +11597,7 @@ impl TypeChecker {
         scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
         let source_returned_parameter = scheme.returned_parameter;
         let source_explicit_slots = scheme.explicit_method_vars.clone();
+        let source_value_parameters = scheme.value_parameters.clone();
         // Protect builtin polymorphic functions from being overwritten by stdlib functions.
         // During stdlib loading, protocol methods like `Drop.drop(&mut self)` would overwrite
         // the builtin `drop: ∀T. fn(T) -> Unit` with a monomorphic version.
@@ -11783,7 +11786,10 @@ impl TypeChecker {
                     ty,
                     refinement,
                 } => {
-                    let meta_ty = self.source_value_parameter(generic_param)?;
+                    let meta_ty = func_value_parameters_by_name.get(&name.name).cloned()
+                        .ok_or_else(|| TypeError::UniverseBinding {
+                            message: "function body lost its declared value binder".into(), span: name.span,
+                        })?;
 
                     // Add to environment
                     self.ctx
@@ -11806,7 +11812,10 @@ impl TypeChecker {
                             .span(span_to_line_col(func.span))
                             .build(),
                     );
-                    let meta_ty = self.source_value_parameter(generic_param)?;
+                    let meta_ty = func_value_parameters_by_name.get(&name.name).cloned()
+                        .ok_or_else(|| TypeError::UniverseBinding {
+                            message: "function body lost its declared value binder".into(), span: name.span,
+                        })?;
                     self.ctx
                         .env
                         .insert(name.name.clone(), TypeScheme::mono(meta_ty));
@@ -13524,6 +13533,7 @@ impl TypeChecker {
         let mut final_scheme = final_scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         final_scheme.explicit_method_vars = source_explicit_slots;
+        final_scheme.value_parameters = source_value_parameters;
         final_scheme.returned_parameter = source_returned_parameter;
         if !self.in_impl_block {
             // T0231 guarded / T1120 declaration channel — see the
@@ -16102,9 +16112,7 @@ impl TypeChecker {
         let d = depth + 1;
 
         match ty {
-            Type::Meta { name, value: None, .. } if param_subst.contains_key(name) => {
-                param_subst[name].clone()
-            }
+            Type::Meta { .. } => ty.clone(),
 
             // Type variable: metadata-loaded variant payloads carry their
             // generic params as `Type::Var(tv)` (the source-driven path uses
@@ -20117,6 +20125,7 @@ impl TypeChecker {
                                     })
                                 })
                         });
+                    drop(methods_guard);
                     scheme_opt.map(|scheme| -> Result<Option<_>> {
                         let impl_vc = scheme.impl_var_count;
                         let instance = scheme.try_instantiate().map_err(|message| TypeError::UniverseBinding { message, span })?;
@@ -20193,7 +20202,8 @@ impl TypeChecker {
                             ));
                             return Ok(None);
                         }
-                        let explicit_vars = scheme.fresh_explicit_method_vars(&fresh_vars);
+                        self.retain_call_value_domains(instance.value_parameters, span)?;
+                        let explicit_vars = instance.explicit_method_vars;
                         Ok(Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind, instance.impl_self_type, instance.protocol_bounds, instance.where_clauses)))
                     }).transpose()?.flatten()
                 };
@@ -24288,15 +24298,17 @@ impl TypeChecker {
                         // Use instantiate_with_type_bounds to preserve function type bounds
                         // This enables proper closure type inference for methods like
                         // `map<U, F: fn(T) -> U>` where F needs its fn type bound
-                        let impl_vc = scheme.impl_var_count;
-                        let (ty, fresh_vars, type_bounds) =
-                            scheme.instantiate_with_type_bounds();
-                        let explicit_vars = scheme.fresh_explicit_method_vars(&fresh_vars);
-                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind))
+                        Some(scheme)
                     })
                 })
             })
         };
+
+        let method_info_opt = method_info_opt.map(|scheme| -> Result<_> {
+            let instance = self.instantiate_call_scheme(&scheme, span)?;
+            Ok(((instance.ty, instance.fresh_vars, scheme.impl_var_count, instance.explicit_method_vars),
+                instance.type_bounds, scheme.receiver_kind, instance.impl_self_type))
+        }).transpose()?;
 
         if let Some(type_name_text) = exact_type_name.or(unwrapped_type_name) {
             // Clone the method type to avoid borrow issues with check_expr
@@ -24306,7 +24318,7 @@ impl TypeChecker {
             // AND that function type bounds (like F: fn(T) -> U) are preserved for closure checking.
             let _ = type_name_text; // Used in original code but now method_info_opt is computed above
 
-            if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind)) =
+            if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind, impl_self_type)) =
                 method_info_opt
             {
                 // CRITICAL: Register type bounds for fresh type variables
@@ -24461,6 +24473,9 @@ impl TypeChecker {
                         receiver_type_args.len(),
                     );
                     let mut combined_subst = crate::ty::Substitution::new();
+                    if let Some(pattern) = &impl_self_type {
+                        combined_subst = self.unifier.unify(pattern, &recv_ty, span)?;
+                    } else {
                     for (type_var, type_arg) in ordered_fresh_vars
                         .iter()
                         .take(bind_limit)
@@ -24473,6 +24488,7 @@ impl TypeChecker {
                             combined_subst = combined_subst.compose(&subst)
                                 .map_err(|message| TypeError::UniverseBinding { message, span })?;
                         }
+                    }
                     }
                     combined_subst = combined_subst.compose(&self.bind_explicit_method_arguments(
                         explicit_vars.as_ref(), type_args, method, span,
@@ -25132,8 +25148,10 @@ bake to have this verified.",
             // Also check for variant constructors like Maybe<Int>.Some(42)
             let qualified_name = format!("{}.{}", type_name, method_name);
             if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
-                let (constructor_ty, fresh_vars) = scheme.instantiate_with_fresh_vars();
-                let receiver_pattern = scheme.fresh_impl_self_type(&fresh_vars);
+                let instance = self.instantiate_call_scheme(&scheme, span)?;
+                let constructor_ty = instance.ty;
+                let fresh_vars = instance.fresh_vars;
+                let receiver_pattern = instance.impl_self_type;
                 if let Some(pattern) = &receiver_pattern {
                     // The impl head is the receiver authority. It can reorder
                     // or nest variables, and its method may return another type.

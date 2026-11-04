@@ -1069,7 +1069,7 @@ fn test_type_level_computation_with_meta() {
             args: List::new(),
         }),
         refinement: None,
-        value: None,
+        value: verum_types::ty::ValueTerm::Parameter(verum_types::ty::ValueId::fresh()),
     };
 
     assert!(matches!(meta, Type::Meta { .. }));
@@ -1095,7 +1095,7 @@ fn test_type_level_computation_refinement() {
             args: List::new(),
         }),
         refinement: Some(RefinementPredicate::placeholder()),
-        value: None,
+        value: verum_types::ty::ValueTerm::Parameter(verum_types::ty::ValueId::fresh()),
     };
 
     assert!(matches!(meta, Type::Meta { .. }));

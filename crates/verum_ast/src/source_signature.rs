@@ -182,7 +182,12 @@ pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Opti
     let mut needs = SignatureScan::new(false);
     needs.visit_function(function);
     needs.finish()?;
-    if !needs.uses_universes && !needs.uses_applied_projection && !needs.uses_rank_two && !needs.uses_callable_contexts {
+    let has_value_parameters = function.generics.iter().any(|parameter| matches!(
+        parameter.kind, GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
+    ));
+    if !needs.uses_universes && !needs.uses_applied_projection && !needs.uses_rank_two
+        && !needs.uses_callable_contexts && !has_value_parameters
+    {
         return Ok(None);
     }
     let mut scan = SignatureScan::new(true);

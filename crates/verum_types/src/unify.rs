@@ -3938,77 +3938,32 @@ impl Unifier {
                     value: v2,
                 },
             ) => {
-                // Value-carrying Metas take precedence: when both sides hold a
-                // concrete const value, compare the values directly. This bypasses
-                // name comparison because the canonical name is derived from the
-                // value and equal values trivially produce equal names.
-                match (v1, v2) {
-                    (Some(a), Some(b)) => {
-                        if a != b {
-                            return Err(TypeError::Mismatch {
-                                expected: format!("{}", b).into(),
-                                actual: format!("{}", a).into(),
-                                span,
-                            });
-                        }
-                        // Values match — unify base types for completeness.
-                        return self.unify_inner(t1, t2, span);
-                    }
-                    (Some(_), None) | (None, Some(_)) => {
-                        // A declaration parameter denotes an arbitrary value,
-                        // not an inference slot. Equal scalar sorts do not make
-                        // that value equal to a particular constant. A call
-                        // must first instantiate its own declared value binder;
-                        // equality cannot perform that substitution implicitly.
-                        return Err(TypeError::Mismatch {
-                            expected: format!("exact value index `{n2}`").into(),
-                            actual: format!("exact value index `{n1}`").into(),
-                            span,
-                        });
-                    }
-                    (None, None) => {
-                        // Fall through to name-based comparison below.
-                    }
+                use crate::ty::ValueTerm;
+                if v1 == v2 {
+                    return self.unify_inner(t1, t2, span);
                 }
-
-                // Names must match (same meta parameter)
-                if n1 != n2 {
-                    return Err(TypeError::Mismatch {
-                        expected: format!("Meta parameter '{}''", n2).into(),
-                        actual: format!("Meta parameter '{}'", n1).into(),
-                        span,
+                let (variable, target) = match (v1, v2) {
+                    (ValueTerm::Inference(id), _) => (*id, Type::Meta {
+                        name: n2.clone(), ty: t2.clone(), refinement: r2.clone(), value: v2.clone(),
+                    }),
+                    (_, ValueTerm::Inference(id)) => (*id, Type::Meta {
+                        name: n1.clone(), ty: t1.clone(), refinement: r1.clone(), value: v1.clone(),
+                    }),
+                    _ => return Err(TypeError::Mismatch {
+                        expected: format!("exact value index `{n2}`").into(),
+                        actual: format!("exact value index `{n1}`").into(), span,
+                    }),
+                };
+                if target.value_ids().contains(&variable) {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(), msg: "cyclic compile-time value substitution".into(), span,
                     });
                 }
-
-                // Check refinements are compatible
-                // For unification, we require exact refinement match
-                // (subtyping is handled separately in subtype.rs)
-                match (r1, r2) {
-                    (Some(p1), Some(p2)) => {
-                        if p1 != p2 {
-                            return Err(TypeError::Mismatch {
-                                expected: "Meta parameter with refinement predicate"
-                                    .to_string()
-                                    .into(),
-                                actual: "Meta parameter with different refinement predicate"
-                                    .to_string()
-                                    .into(),
-                                span,
-                            });
-                        }
-                    }
-                    (None, None) => {}
-                    _ => {
-                        return Err(TypeError::Mismatch {
-                            expected: "Meta parameter with refinement".into(),
-                            actual: "Meta parameter without refinement".into(),
-                            span,
-                        });
-                    }
-                }
-
-                // Unify base types
-                self.unify_inner(t1, t2, span)
+                let mut substitution = self.unify_inner(t1, t2, span)?;
+                let target = target.try_apply_subst(&substitution)
+                    .map_err(|message| TypeError::UniverseBinding { message, span })?;
+                substitution.value_bindings.insert(variable, target);
+                Ok(substitution)
             }
 
             // Meta parameter unification with non-Meta types:

@@ -9,7 +9,7 @@
 //! - Module tracking for qualified type resolution (Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — )
 
 use crate::protocol::ProtocolBound;
-use crate::ty::{Substitution, Type, TypeVar, UniverseLevel};
+use crate::ty::{Substitution, Type, TypeVar, UniverseLevel, ValueId, ValueTerm};
 pub use crate::variance::Variance;
 use indexmap::IndexMap;
 use verum_ast::span::Span;
@@ -19,6 +19,13 @@ use verum_common::{List, Map, Maybe, Set, Shared, Text};
 // Module system integration
 // Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports
 pub use verum_modules::ModuleId;
+
+/// A declaration-owned explicit slot. Type and value arguments never share an inference variable.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericBinder {
+    Type(TypeVar),
+    Value(Type),
+}
 
 /// A type scheme represents a polymorphic type: ∀α β. T
 ///
@@ -30,6 +37,8 @@ pub use verum_modules::ModuleId;
 pub struct TypeScheme {
     /// Universally quantified type variables
     pub vars: List<TypeVar>,
+    /// Rigid value parameters, including their exact scalar sorts and domains.
+    pub value_parameters: List<Type>,
     /// Rigid declaration levels quantified by this scheme.
     pub(crate) universe_params: List<u32>,
     /// The body type
@@ -67,7 +76,7 @@ pub struct TypeScheme {
     /// Method-owned explicit argument slots in declaration order. The stored
     /// TypeVars belong to this scheme, not to the receiver's parameter list.
     /// None means legacy metadata; an empty list is a known nongeneric method.
-    pub explicit_method_vars: Option<List<Option<TypeVar>>>,
+    pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
 }
 
 /// One call's fresh body and obligations. All fields use the same simultaneous
@@ -77,12 +86,13 @@ pub struct InstantiatedScheme {
     substitution: Substitution,
     pub ty: Type,
     pub fresh_vars: List<TypeVar>,
+    pub value_parameters: List<Type>,
     pub implicit_vars: Set<TypeVar>,
     pub type_bounds: Map<TypeVar, List<Type>>,
     pub protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
     pub where_clauses: List<crate::protocol::WhereClause>,
     pub impl_self_type: Option<Type>,
-    pub explicit_method_vars: Option<List<Option<TypeVar>>>,
+    pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
 }
 
 impl InstantiatedScheme {
@@ -106,6 +116,43 @@ impl TypeScheme {
             fresh_vars.push(fresh);
             if self.implicit_vars.contains(original) { implicit_vars.insert(fresh); }
         }
+        let mut value_parameters = List::new();
+        for parameter in &self.value_parameters {
+            let Type::Meta { name, ty, refinement, value: ValueTerm::Parameter(id) } = parameter else {
+                return Err("a quantified value parameter must have a rigid declaration identity".into());
+            };
+            let fresh = Type::Meta { name: name.clone(), ty: ty.clone(), refinement: refinement.clone(),
+                value: ValueTerm::Inference(ValueId::fresh()) };
+            if subst.value_bindings.insert(*id, fresh.clone()).is_some() {
+                return Err("duplicate quantified value parameter".into());
+            }
+            value_parameters.push(fresh);
+        }
+        let rebased_values = subst.value_bindings.iter().map(|(id, value)|
+            value.try_apply_subst(&subst).map(|value| (*id, value)))
+            .collect::<Result<IndexMap<_, _>, _>>()?;
+        subst.value_bindings = rebased_values;
+        // Every domain uses the same owner substitution as the signature.
+        let value_parameters = value_parameters.iter().map(|parameter| parameter.try_apply_subst(&subst))
+            .collect::<Result<List<_>, _>>()?;
+        let explicit_method_vars = self.explicit_method_vars.as_ref().map(|slots| slots.iter().map(|slot| match slot {
+            Some(GenericBinder::Type(var)) => subst.get(var).and_then(|ty| match ty {
+                Type::Var(var) => Some(GenericBinder::Type(*var)), _ => None,
+            }).ok_or_else(|| Text::from("explicit type slot has no quantified owner")).map(Some),
+            Some(GenericBinder::Value(value)) => {
+                let Type::Meta { value: ValueTerm::Parameter(id), ty, refinement, .. } = value else {
+                    return Err("explicit value slot lacks a rigid declaration identity".into());
+                };
+                if !self.value_parameters.iter().any(|parameter| matches!(parameter,
+                    Type::Meta { value: ValueTerm::Parameter(owner), ty: declared_ty,
+                        refinement: declared_refinement, .. }
+                    if owner == id && declared_ty == ty && declared_refinement == refinement)) {
+                    return Err("explicit value slot has no matching quantified owner and domain".into());
+                }
+                value.try_apply_subst(&subst).map(|value| Some(GenericBinder::Value(value)))
+            },
+            None => Ok(None),
+        }).collect::<Result<List<_>, Text>>()).transpose()?;
         let fresh_key = |original: &TypeVar| -> Result<TypeVar, Text> {
             match subst.get(original) {
                 Some(Type::Var(fresh)) => Ok(*fresh),
@@ -129,7 +176,8 @@ impl TypeScheme {
             protocol_bounds,
             where_clauses: self.where_clauses.iter().map(|clause| clause.try_apply_subst(&subst)).collect::<Result<_, _>>()?,
             impl_self_type: self.impl_self_type.as_ref().map(|ty| ty.try_apply_subst(&subst)).transpose()?,
-            explicit_method_vars: self.fresh_explicit_method_vars(&fresh_vars),
+            explicit_method_vars,
+            value_parameters,
             fresh_vars,
             substitution: subst,
         })
@@ -149,6 +197,7 @@ impl TypeScheme {
             receiver_kind: None,
             returned_parameter: None,
             explicit_method_vars: None,
+            value_parameters: List::new(),
             universe_params: List::new(),
         }
     }
@@ -167,6 +216,7 @@ impl TypeScheme {
             receiver_kind: None,
             returned_parameter: None,
             explicit_method_vars: None,
+            value_parameters: List::new(),
             universe_params: List::new(),
         }
     }
@@ -186,6 +236,7 @@ impl TypeScheme {
             receiver_kind: None,
             returned_parameter: None,
             explicit_method_vars: None,
+            value_parameters: List::new(),
             universe_params: List::new(),
         }
     }
@@ -210,6 +261,7 @@ impl TypeScheme {
             receiver_kind: None,
             returned_parameter: None,
             explicit_method_vars: None,
+            value_parameters: List::new(),
             universe_params: List::new(),
         }
     }
@@ -277,13 +329,6 @@ impl TypeScheme {
 
     pub fn universe_parameters(&self) -> &[u32] { &self.universe_params }
 
-    fn instantiation_substitution(&self) -> Substitution {
-        let mut substitution = Substitution::new();
-        substitution.universes = crate::universe_inference::UniverseInference::instantiate(&self.universe_params)
-            .expect("TypeScheme constructors validate the universe binder roster");
-        substitution
-    }
-
     /// Check if a type variable is implicit (inferred from context)
     pub fn is_implicit(&self, var: &TypeVar) -> bool {
         self.implicit_vars.contains(var)
@@ -304,31 +349,7 @@ impl TypeScheme {
 
     /// Instantiate the type scheme with fresh type variables
     pub fn instantiate(&self) -> Type {
-        // FILTER, not a flag: set it to a substring of the type you are
-        // chasing (`VERUM_TRACE_INSTANTIATE=StatefulTransducer`). Every
-        // scheme whose text contains it reports whether this call
-        // FRESHENED anything — `vars=0` means the scheme carries no
-        // quantifier here and every caller shares one copy (T0997).
-        if let Ok(want) = std::env::var("VERUM_TRACE_INSTANTIATE") {
-            let text = format!("{:?}", self.ty);
-            if !want.is_empty() && text.contains(&want) {
-                eprintln!(
-                    "[instantiate] vars={} ty={}",
-                    self.vars.len(),
-                    &text[..text.len().min(140)]
-                );
-            }
-        }
-        if self.vars.is_empty() && self.universe_params.is_empty() {
-            return self.ty.clone();
-        }
-
-        let mut subst = self.instantiation_substitution();
-        for var in &self.vars {
-            subst.insert(*var, Type::Var(TypeVar::fresh()));
-        }
-
-        self.ty.apply_subst(&subst)
+        self.try_instantiate().expect("validated scheme instantiation").ty
     }
 
     /// Instantiate the type scheme and return both the type and the ordered list of fresh type vars
@@ -337,19 +358,8 @@ impl TypeScheme {
     /// The returned Vec<TypeVar> preserves the order of vars in the scheme, which should match
     /// the order of type params in the original implement block + method declaration.
     pub fn instantiate_with_fresh_vars(&self) -> (Type, List<TypeVar>) {
-        if self.vars.is_empty() && self.universe_params.is_empty() {
-            return (self.ty.clone(), List::new());
-        }
-
-        let mut subst = self.instantiation_substitution();
-        let mut fresh_vars = List::new();
-        for var in &self.vars {
-            let fresh = TypeVar::fresh();
-            subst.insert(*var, Type::Var(fresh));
-            fresh_vars.push(fresh);
-        }
-
-        (self.ty.apply_subst(&subst), fresh_vars)
+        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        (instance.ty, instance.fresh_vars)
     }
 
     /// Instantiate the type scheme and return the type, fresh vars, and which are implicit.
@@ -358,57 +368,8 @@ impl TypeScheme {
     /// fresh type variables should be inferred vs. explicitly provided.
     /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
     pub fn instantiate_with_implicit_info(&self) -> (Type, List<TypeVar>, Set<TypeVar>) {
-        if self.vars.is_empty() && self.universe_params.is_empty() {
-            return (self.ty.clone(), List::new(), Set::new());
-        }
-
-        let mut subst = self.instantiation_substitution();
-        let mut fresh_vars = List::new();
-        let mut fresh_implicit = Set::new();
-
-        for var in &self.vars {
-            let fresh = TypeVar::fresh();
-            subst.insert(*var, Type::Var(fresh));
-            fresh_vars.push(fresh);
-
-            // Track if the original var was implicit
-            if self.implicit_vars.contains(var) {
-                fresh_implicit.insert(fresh);
-            }
-        }
-
-        (self.ty.apply_subst(&subst), fresh_vars, fresh_implicit)
-    }
-
-    /// Rebase the declared receiver with the same substitution as the method.
-    pub(crate) fn fresh_impl_self_type(&self, fresh_vars: &[TypeVar]) -> Option<Type> {
-        self.impl_self_type.as_ref().map(|receiver| {
-            let mut subst = self.instantiation_substitution();
-            for (original, fresh) in self.vars.iter().zip(fresh_vars.iter()) {
-                subst.insert(*original, Type::Var(*fresh));
-            }
-            receiver.apply_subst(&subst)
-        })
-    }
-
-    /// Rebase declared explicit slots onto this call's fresh instantiation.
-    pub(crate) fn fresh_explicit_method_vars(
-        &self,
-        fresh_vars: &[TypeVar],
-    ) -> Option<List<Option<TypeVar>>> {
-        self.explicit_method_vars.as_ref().map(|slots| {
-            slots
-                .iter()
-                .map(|slot| {
-                    slot.and_then(|original| {
-                        self.vars
-                            .iter()
-                            .position(|var| *var == original)
-                            .and_then(|index| fresh_vars.get(index).copied())
-                    })
-                })
-                .collect()
-        })
+        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        (instance.ty, instance.fresh_vars, instance.implicit_vars)
     }
 
     /// Instantiate the type scheme and return type, fresh vars, and type bounds mapped to fresh vars.
@@ -421,47 +382,8 @@ impl TypeScheme {
     /// Returns: (instantiated_type, fresh_vars, type_bounds_for_fresh_vars)
     /// The Map maps fresh TypeVar to its type bounds (if any).
     pub fn instantiate_with_type_bounds(&self) -> (Type, List<TypeVar>, Map<TypeVar, List<Type>>) {
-        // Same filter as `instantiate` — and it MUST be here too. The
-        // method-call path uses this entry, not that one, so a probe on
-        // `instantiate` alone reports zero and reads as "never
-        // instantiated" (T0997).
-        if let Ok(want) = std::env::var("VERUM_TRACE_INSTANTIATE") {
-            let text = format!("{:?}", self.ty);
-            if !want.is_empty() && text.contains(&want) {
-                eprintln!(
-                    "[inst-bounds] vars={} ty={}",
-                    self.vars.len(),
-                    &text[..text.len().min(140)]
-                );
-            }
-        }
-        if self.vars.is_empty() && self.universe_params.is_empty() {
-            return (self.ty.clone(), List::new(), Map::new());
-        }
-
-        let mut subst = self.instantiation_substitution();
-        let mut fresh_vars = List::new();
-        let mut old_to_fresh: Map<TypeVar, TypeVar> = Map::new();
-
-        for var in &self.vars {
-            let fresh = TypeVar::fresh();
-            subst.insert(*var, Type::Var(fresh));
-            fresh_vars.push(fresh);
-            old_to_fresh.insert(*var, fresh);
-        }
-
-        // Map type bounds from old vars to fresh vars
-        let mut fresh_bounds: Map<TypeVar, List<Type>> = Map::new();
-        for (old_var, bounds) in &self.var_type_bounds {
-            if let Some(fresh_var) = old_to_fresh.get(old_var) {
-                // Apply substitution to bounds to replace old vars with fresh ones
-                let mapped_bounds: List<Type> =
-                    bounds.iter().map(|b| b.apply_subst(&subst)).collect();
-                fresh_bounds.insert(*fresh_var, mapped_bounds);
-            }
-        }
-
-        (self.ty.apply_subst(&subst), fresh_vars, fresh_bounds)
+        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        (instance.ty, instance.fresh_vars, instance.type_bounds)
     }
 
     /// Instantiate the type scheme and return the protocol bounds mapped to fresh vars.
@@ -471,35 +393,8 @@ impl TypeScheme {
     pub fn instantiate_with_protocol_bounds(
         &self,
     ) -> (Type, List<TypeVar>, Map<TypeVar, List<ProtocolBound>>) {
-        if self.vars.is_empty() && self.universe_params.is_empty() {
-            return (self.ty.clone(), List::new(), Map::new());
-        }
-
-        let mut subst = self.instantiation_substitution();
-        let mut fresh_vars = List::new();
-        let mut old_to_fresh: Map<TypeVar, TypeVar> = Map::new();
-
-        for var in &self.vars {
-            let fresh = TypeVar::fresh();
-            subst.insert(*var, Type::Var(fresh));
-            fresh_vars.push(fresh);
-            old_to_fresh.insert(*var, fresh);
-        }
-
-        // Map protocol bounds from old vars to fresh vars
-        let mut fresh_protocol_bounds: Map<TypeVar, List<ProtocolBound>> = Map::new();
-        for (old_var, bounds) in &self.var_protocol_bounds {
-            if let Some(fresh_var) = old_to_fresh.get(old_var) {
-                fresh_protocol_bounds.insert(*fresh_var,
-                    bounds.iter().map(|bound| bound.apply_subst(&subst)).collect());
-            }
-        }
-
-        (
-            self.ty.apply_subst(&subst),
-            fresh_vars,
-            fresh_protocol_bounds,
-        )
+        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        (instance.ty, instance.fresh_vars, instance.protocol_bounds)
     }
 
     /// Get free type variables in the scheme

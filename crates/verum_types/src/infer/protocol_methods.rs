@@ -226,7 +226,8 @@ impl TypeChecker {
         scheme.impl_var_count = impl_variables.len();
         scheme.impl_self_type = Some(receiver.clone());
         scheme.receiver_kind = method.receiver_kind();
-        scheme.explicit_method_vars = Some(locals.iter().copied().map(Some).collect());
+        scheme.explicit_method_vars = Some(locals.iter()
+            .map(|variable| Some(crate::context::GenericBinder::Type(*variable))).collect());
         for (name, variable) in applied.type_param_names.iter().zip(&locals) {
             if let Some(bound) = applied.type_param_bounds.get(name) {
                 scheme.var_type_bounds.insert(*variable, bound.clone());
@@ -268,13 +269,13 @@ impl TypeChecker {
         }
         let mut substitution = crate::ty::Substitution::new();
         for (original, slot) in scope.binders.local.iter().zip(slots) {
-            let variable = slot.ok_or_else(|| {
-                invalid(
+            let Some(crate::context::GenericBinder::Type(variable)) = slot.as_ref() else {
+                return Err(invalid(
                     span,
                     "method override changes a type parameter's declared kind",
-                )
-            })?;
-            substitution.insert(*original, Type::Var(variable));
+                ));
+            };
+            substitution.insert(*original, Type::Var(*variable));
         }
         for clause in &scope.where_clauses {
             scheme.where_clauses.push(

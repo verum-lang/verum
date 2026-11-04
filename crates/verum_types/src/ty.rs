@@ -25,6 +25,48 @@ use crate::refinement::RefinementPredicate;
 
 pub use crate::universe_level::UniverseLevel;
 
+/// Identity of one compile-time value binder. Names never establish equality.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ValueId(usize);
+static VALUE_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
+impl ValueId {
+    pub fn fresh() -> Self {
+        Self(VALUE_ID_COUNTER.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+            |id| id.checked_add(1)).expect("value binder identity space exhausted"))
+    }
+    pub fn id(self) -> usize { self.0 }
+}
+
+/// Declaration values are rigid; only explicitly instantiated inference slots bind.
+#[derive(Clone, Debug)]
+pub enum ValueTerm {
+    Parameter(ValueId),
+    Inference(ValueId),
+    Constant(verum_common::ConstValue),
+}
+#[path = "value_constant_identity.rs"]
+mod value_constant_identity;
+pub(crate) use value_constant_identity::same_constant_identity;
+impl PartialEq for ValueTerm {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Parameter(left), Self::Parameter(right))
+            | (Self::Inference(left), Self::Inference(right)) => left == right,
+            (Self::Constant(left), Self::Constant(right)) =>
+                value_constant_identity::same_constant_identity(left, right),
+            _ => false,
+        }
+    }
+}
+impl ValueTerm {
+    pub fn id(&self) -> Option<ValueId> {
+        match self { Self::Parameter(id) | Self::Inference(id) => Some(*id), Self::Constant(_) => None }
+    }
+    pub fn as_constant(&self) -> Option<&verum_common::ConstValue> {
+        match self { Self::Constant(value) => Some(value), _ => None }
+    }
+}
+
 #[path = "record_field_types.rs"]
 mod record_field_types;
 pub use record_field_types::{RecordFieldSlot, RecordReceiver};
@@ -565,19 +607,15 @@ pub enum Type {
     Meta {
         /// Parameter name (for error messages and debugging).
         /// At declaration sites this holds the user-visible parameter name (e.g. "N").
-        /// At instantiation sites where `value` is `Some`, the name is the concrete
+        /// For constant arguments the name is the concrete
         /// value's canonical Display form (e.g. "2"), preserved for diagnostics.
         name: Text,
         /// Base type of the meta parameter (e.g., usize, [usize], bool)
         ty: Box<Type>,
         /// Optional refinement constraint (e.g., {> 0})
         refinement: Option<RefinementPredicate>,
-        /// Concrete compile-time value, when this Meta is an instantiation
-        /// (e.g. the `7` in `Matrix<Float, 7, 7>`). `None` at declaration sites
-        /// or when the argument is a variable reference to another meta parameter.
-        /// Unification of two meta parameters with `value: Some(_)` on both sides
-        /// compares the values directly — this is how dimension mismatches are caught.
-        value: Option<verum_common::ConstValue>,
+        /// Exact owned identity or constant; declaration and inference roles are distinct.
+        value: ValueTerm,
     },
 
     /// Future type: Future<T>
@@ -1375,7 +1413,8 @@ impl Type {
         }
         let d = depth + 1;
         match ty {
-            Type::Meta { name, value: None, .. } if subst.contains_key(name) => subst[name].clone(),
+            // A diagnostic name cannot authorize substitution of a value binder.
+            Type::Meta { .. } => ty.clone(),
 
             // Type variables with matching names get substituted
             Type::Var(tv) => {
@@ -1879,7 +1918,7 @@ impl Type {
             name,
             ty: Box::new(ty),
             refinement,
-            value: None,
+            value: ValueTerm::Parameter(ValueId::fresh()),
         }
     }
 
@@ -1892,7 +1931,7 @@ impl Type {
             name,
             ty: Box::new(base_ty),
             refinement: None,
-            value: Some(value),
+            value: ValueTerm::Constant(value),
         }
     }
 
@@ -2762,7 +2801,7 @@ impl Type {
         for binder in binders {
             scoped.shift_remove(binder);
         }
-        if binders.is_empty() || scoped.types.is_empty() {
+        if binders.is_empty() || (scoped.types.is_empty() && scoped.value_bindings.is_empty()) {
             return Ok((binders.iter().copied().collect(), scoped));
         }
         let mut free_body = Set::new();
@@ -2777,6 +2816,12 @@ impl Type {
                 )?;
             }
         }
+        let value_ids = self.value_ids();
+        for (id, replacement) in &scoped.value_bindings {
+            if value_ids.contains(id) {
+                replacement.collect_type_variables(&mut free_ranges, false, Some(remaining_depth))?;
+            }
+        }
         if !binders.iter().any(|binder| free_ranges.contains(binder)) {
             return Ok((binders.iter().copied().collect(), scoped));
         }
@@ -2787,7 +2832,7 @@ impl Type {
         self.collect_type_variables(&mut occupied, true, Some(remaining_depth))?;
         occupied.extend(binders.iter().copied());
         occupied.extend(substitution.keys().copied());
-        for replacement in substitution.values() {
+        for replacement in substitution.values().chain(substitution.value_bindings.values()) {
             replacement.collect_type_variables(&mut occupied, true, Some(remaining_depth))?;
         }
         let mut renamed = List::new();
@@ -2935,11 +2980,14 @@ impl Type {
                 ty,
                 refinement,
                 value,
-            } => Type::Meta {
-                name: name.clone(),
-                ty: Box::new(ty.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
-                refinement: refinement.clone(),
-                value: value.clone(),
+            } => {
+                if let Some(replacement) = value.id().and_then(|id| subst.value_bindings.get(&id)) {
+                    replacement.clone()
+                } else {
+                    Type::Meta { name: name.clone(),
+                        ty: Box::new(ty.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
+                        refinement: refinement.clone(), value: value.clone() }
+                }
             },
             Type::Future { output } => Type::Future {
                 output: Box::new(output.try_apply_subst_with_depth(subst, next_depth, max_depth)?),
@@ -3450,7 +3498,7 @@ impl fmt::Display for Type {
             } => {
                 // If we carry a concrete value, show just the value (e.g. "7")
                 // — matches what the user wrote at the call site.
-                if let Some(v) = value {
+                if let ValueTerm::Constant(v) = value {
                     return write!(f, "{}", v);
                 }
                 write!(f, "{}: meta {}", name, ty)?;
@@ -3823,12 +3871,48 @@ impl ToText for TypeVar {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Substitution {
     types: IndexMap<TypeVar, Type>,
+    pub(crate) value_bindings: IndexMap<ValueId, Type>,
     pub(crate) universes: crate::universe_inference::UniverseInference,
 }
 
 impl Substitution {
     pub fn new() -> Self { Self::default() }
-    pub fn is_empty(&self) -> bool { self.types.is_empty() && self.universes.is_empty() }
+    pub fn is_empty(&self) -> bool { self.types.is_empty() && self.value_bindings.is_empty() && self.universes.is_empty() }
+
+    fn check_value_cycles(&self) -> Result<(), Text> {
+        let mut completed = Set::new();
+        let mut visiting = Set::new();
+        let mut pending = List::new();
+        for root in self.value_bindings.keys() {
+            if completed.contains(root) { continue; }
+            pending.push((*root, false));
+            while let Some((id, leaving)) = pending.pop() {
+                if leaving {
+                    visiting.remove(&id);
+                    completed.insert(id);
+                    continue;
+                }
+                if completed.contains(&id) { continue; }
+                if !visiting.insert(id) {
+                    return Err("cyclic compile-time value substitution".into());
+                }
+                pending.push((id, true));
+                if let Some(value) = self.value_bindings.get(&id) {
+                    for dependency in value.value_ids() {
+                        if self.value_bindings.contains_key(&dependency) {
+                            if visiting.contains(&dependency) {
+                                return Err("cyclic compile-time value substitution".into());
+                            }
+                            if !completed.contains(&dependency) {
+                                pending.push((dependency, false));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl std::ops::Deref for Substitution {
@@ -3840,7 +3924,7 @@ impl std::ops::DerefMut for Substitution {
 }
 impl FromIterator<(TypeVar, Type)> for Substitution {
     fn from_iter<I: IntoIterator<Item = (TypeVar, Type)>>(items: I) -> Self {
-        Self { types: items.into_iter().collect(), universes: Default::default() }
+        Self { types: items.into_iter().collect(), value_bindings: Default::default(), universes: Default::default() }
     }
 }
 impl<'a> IntoIterator for &'a Substitution {
@@ -3862,6 +3946,19 @@ impl SubstitutionExt for Substitution {
     fn compose(&self, other: &Substitution) -> Result<Substitution, Text> {
         let mut result = Substitution::new();
         result.universes = self.universes.compose(&other.universes)?;
+        for (id, value) in &self.value_bindings {
+            result.value_bindings.insert(*id, value.try_apply_subst(other)?);
+        }
+        for (id, value) in &other.value_bindings {
+            if let Some(previous) = result.value_bindings.get(id) {
+                if previous != value {
+                    return Err("conflicting substitutions for one compile-time value binder".into());
+                }
+            } else {
+                result.value_bindings.insert(*id, value.clone());
+            }
+        }
+        result.check_value_cycles()?;
 
         // Apply other to all types in self (s1.compose(s2) means apply s2 after s1)
         // So for each v -> t in s1, we get v -> s2(t)
@@ -4065,3 +4162,7 @@ mod free_vars_covers_every_carrier {
 }
 
 // Tests moved to tests/ty_tests.rs
+
+#[cfg(test)]
+#[path = "../tests/unit/value_substitution.rs"]
+mod value_substitution_laws;

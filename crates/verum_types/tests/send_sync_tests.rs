@@ -509,7 +509,7 @@ fn test_meta_parameters_send_sync() {
         name: Text::from("N"),
         ty: Box::new(Type::Int),
         refinement: None,
-        value: None,
+        value: verum_types::ty::ValueTerm::Parameter(verum_types::ty::ValueId::fresh()),
     };
     assert!(
         derivation.is_send(&meta),

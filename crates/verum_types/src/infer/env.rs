@@ -549,11 +549,11 @@ impl TypeChecker {
         {
             return;
         }
-        let slots: Option<verum_common::List<Option<crate::ty::TypeVar>>> = source_slots
+        let slots: Option<verum_common::List<Option<crate::context::GenericBinder>>> = source_slots
             .iter()
             .map(|slot| match slot {
                 Some(id) if ids.contains(id) => {
-                    scope.get(&format!("__generic_{id}")).copied().map(Some)
+                    scope.get(&format!("__generic_{id}")).copied().map(|var| Some(crate::context::GenericBinder::Type(var)))
                 }
                 Some(_) => None,
                 None => Some(None),
@@ -564,7 +564,9 @@ impl TypeChecker {
         };
         // Aliases in the parsing scope are multiple names for one variable;
         // quantifying it twice would disconnect the first fresh slot from use.
-        for var in slots.iter().flatten() {
+        for var in slots.iter().flatten().filter_map(|slot| match slot {
+            crate::context::GenericBinder::Type(var) => Some(var), _ => None,
+        }) {
             if seen.insert(*var) {
                 scheme.vars.push(*var);
             }
@@ -1803,21 +1805,21 @@ impl TypeChecker {
             // Declaration-site const/meta parameter (`SIZE` bound as
             // `Meta { value: None }`) — wildcard over instantiations,
             // same rule as an impl-level type Var.
-            Type::Meta { value: None, .. } => true,
+            Type::Meta { value: crate::ty::ValueTerm::Parameter(_), .. } => true,
             // Impl target pinned to a concrete const value
             // (`implement Stack<1024>`): pin the receiver's value.
             Type::Meta {
-                value: Some(pv),
+                value: crate::ty::ValueTerm::Constant(pv),
                 ty: pty,
                 ..
             } => match receiver {
                 Type::Meta {
-                    value: Some(rv), ..
+                    value: crate::ty::ValueTerm::Constant(rv), ..
                 } => rv == pv,
                 // Unresolved receiver const (another const param, or a
                 // bare TypeVar) — nothing is known, stay permissive so
                 // inference isn't pinned prematurely.
-                Type::Meta { value: None, .. }
+                Type::Meta { value: crate::ty::ValueTerm::Parameter(_), .. }
                 | Type::Var(_)
                 | Type::Placeholder { .. }
                 | Type::Unknown => true,

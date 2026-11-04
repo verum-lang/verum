@@ -3536,6 +3536,7 @@ impl TypeChecker {
                 name.as_str(),
                 TypeScheme {
                     vars: type_param_vars,
+                    value_parameters: List::new(),
                     ty: func_ty,
                     implicit_vars: Set::new(),
                     var_type_bounds: Map::new(),

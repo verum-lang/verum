@@ -276,17 +276,31 @@ fn test_specialization_with_where_clauses() {
 #[test]
 fn test_cached_selection() {
     let mut selector = SpecializationSelector::new();
-
-    // Manually cache a selection
-    selector.cache_selection("Display".into(), "Int".into(), 42);
-
-    // Check cache hit
-    let cached = selector.cache.get(&("Display".into(), "Int".into()));
-    assert_eq!(cached, Some(&42));
-
-    // Verify stats
-    assert_eq!(selector.stats().cache_hits, 0); // No selections yet
-    assert_eq!(selector.stats().cache_misses, 0);
+    let protocol = make_protocol("Render");
+    let target = make_type("Canvas");
+    let mut registry = ProtocolChecker::new();
+    registry.register_protocol(protocol.clone()).unwrap();
+    registry
+        .register_impl(make_impl("Render", target.clone(), 0))
+        .unwrap();
+    let mut unifier = Unifier::new();
+    assert_eq!(
+        selector
+            .select_implementation(&protocol, &target, &registry, &mut unifier)
+            .unwrap(),
+        0
+    );
+    assert_eq!(selector.cache_len(), 1);
+    assert_eq!(selector.stats().cache_misses, 1);
+    assert_eq!(selector.stats().cache_hits, 0);
+    assert_eq!(
+        selector
+            .select_implementation(&protocol, &target, &registry, &mut unifier)
+            .unwrap(),
+        0
+    );
+    assert_eq!(selector.stats().cache_hits, 1);
+    assert_eq!(selector.stats().selections, 2);
 }
 
 #[test]
@@ -351,7 +365,8 @@ fn test_function_type_matching() {
 
     // Test: (Int) -> Bool matches impl for function types
     let concrete = Type::Function {
-        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
+        property_requirement:
+            verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![make_type("Int")].into(),
         return_type: Box::new(make_type("Bool")),
         contexts: None,
@@ -360,7 +375,8 @@ fn test_function_type_matching() {
     };
 
     let pattern = Type::Function {
-        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
+        property_requirement:
+            verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![make_type_var(0)].into(),
         return_type: Box::new(make_type_var(1)),
         contexts: None,
@@ -514,17 +530,34 @@ fn test_specialization_relationship_detection() {
 #[test]
 fn test_cache_clear() {
     let mut selector = SpecializationSelector::new();
-
-    // Add some cached entries
-    selector.cache_selection("Display".into(), "Int".into(), 1);
-    selector.cache_selection("Debug".into(), "Bool".into(), 2);
-
-    assert_eq!(selector.cache.len(), 2);
-
-    // Clear cache
+    let protocol = make_protocol("Render");
+    let mut registry = ProtocolChecker::new();
+    registry.register_protocol(protocol.clone()).unwrap();
+    for name in ["Canvas", "Surface"] {
+        registry
+            .register_impl(make_impl("Render", make_type(name), 0))
+            .unwrap();
+    }
+    let mut unifier = Unifier::new();
+    for (expected, name) in ["Canvas", "Surface"].into_iter().enumerate() {
+        assert_eq!(
+            selector
+                .select_implementation(&protocol, &make_type(name), &registry, &mut unifier)
+                .unwrap(),
+            expected
+        );
+    }
+    assert_eq!(selector.cache_len(), 2);
     selector.clear_cache();
-
-    assert_eq!(selector.cache.len(), 0);
+    assert_eq!(selector.cache_len(), 0);
+    let misses = selector.stats().cache_misses;
+    assert_eq!(
+        selector
+            .select_implementation(&protocol, &make_type("Canvas"), &registry, &mut unifier)
+            .unwrap(),
+        0
+    );
+    assert_eq!(selector.stats().cache_misses, misses + 1);
 }
 
 #[test]
@@ -686,8 +719,8 @@ fn test_type_to_cache_key() {
 fn test_default_selector() {
     let selector = SpecializationSelector::default();
 
-    assert_eq!(selector.cache.len(), 0);
-    assert_eq!(selector.lattices.len(), 0);
+    assert_eq!(selector.cache_len(), 0);
+    assert_eq!(selector.lattice_len(), 0);
 }
 
 #[test]

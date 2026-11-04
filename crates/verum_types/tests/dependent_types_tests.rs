@@ -318,7 +318,7 @@ fn test_motive_type_substitution() {
             args: List::new(),
         }),
         refinement: None,
-        value: Some(verum_common::ConstValue::UInt(5)),
+        value: verum_types::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(5)),
     };
 
     let result = motive.apply_type(&replacement);
@@ -749,7 +749,7 @@ fn test_absurd_meta_different_values() {
                 args: List::new(),
             }),
             refinement: None,
-            value: Some(verum_common::ConstValue::UInt(0)),
+            value: verum_types::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(0)),
         },
         Type::Meta {
             name: Text::from("1"),
@@ -758,7 +758,7 @@ fn test_absurd_meta_different_values() {
                 args: List::new(),
             }),
             refinement: None,
-            value: Some(verum_common::ConstValue::UInt(1)),
+            value: verum_types::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(1)),
         },
     ));
 
@@ -785,7 +785,7 @@ fn test_non_absurd_meta_same_value() {
                 args: List::new(),
             }),
             refinement: None,
-            value: Some(verum_common::ConstValue::UInt(0)),
+            value: verum_types::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(0)),
         },
         Type::Meta {
             name: Text::from("0"),
@@ -794,7 +794,7 @@ fn test_non_absurd_meta_same_value() {
                 args: List::new(),
             }),
             refinement: None,
-            value: Some(verum_common::ConstValue::UInt(0)),
+            value: verum_types::ty::ValueTerm::Constant(verum_common::ConstValue::UInt(0)),
         },
     ));
 
@@ -1332,5 +1332,19 @@ fn test_non_absurd_unknown_constructors() {
     ));
 
     // Unknown constructors -- conservative, NOT absurd
+    assert!(!refinement.is_absurd());
+}
+
+#[test]
+fn distinct_symbolic_value_parameters_do_not_prove_an_absurd_branch() {
+    let constructor = InductiveConstructor {
+        name: "symbolic".into(), type_params: List::new(), args: List::new(),
+        return_type: verum_common::Heap::new(Type::Unit),
+    };
+    let mut refinement = ConstructorRefinement::empty(constructor);
+    refinement.constraints.push((
+        Type::meta("N".into(), Type::Int, None),
+        Type::meta("M".into(), Type::Int, None),
+    ));
     assert!(!refinement.is_absurd());
 }

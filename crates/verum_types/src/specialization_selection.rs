@@ -14,13 +14,6 @@
 //! 4. **Check Ambiguity**: Ensure exactly one maximal element exists
 //! 5. **Cache Result**: Store decision for fast subsequent lookups
 //!
-//! # Performance
-//!
-//! - Selection (uncached): <5ms
-//! - Selection (cached): <1ms
-//! - Lattice construction: <50ms (one-time per protocol)
-//! - Coherence checking: <100ms (compile-time only)
-//!
 //! # Example
 //!
 //! ```verum
@@ -32,7 +25,7 @@
 //! // Specialized for Int
 //! @specialize
 //! implement Display for Int {
-//!  fn display(self) -> Text { format!("{}", self) }
+//!  fn display(self) -> Text { f"{self}" }
 //! }
 //!
 //! fn show<T: Display>(x: T) {
@@ -447,12 +440,16 @@ pub enum NegativeBoundResult {
 
 /// Selects the most specific protocol implementation during type inference
 pub struct SpecializationSelector {
-    /// Cache: (protocol_name, type) -> selected implementation
-    pub cache: Map<(Text, Text), ImplementId>,
+    /// Coarse routing buckets. Only actual successful selections write entries;
+    /// a bucket hit must also match the exact query witness.
+    cache: Map<(Text, Text), List<(Type, ImplementId)>>,
+
+    /// Both decisions and lattices belong to one immutable registry revision.
+    cache_revision: Option<u64>,
 
     /// Specialization lattices for each protocol
     /// Map: protocol_name -> lattice
-    pub lattices: Map<Text, SpecializationLattice>,
+    lattices: Map<Text, SpecializationLattice>,
 
     /// Statistics for performance monitoring
     stats: SelectionStats,
@@ -476,6 +473,7 @@ impl SpecializationSelector {
     pub fn new() -> Self {
         Self {
             cache: Map::new(),
+            cache_revision: None,
             lattices: Map::new(),
             stats: SelectionStats::default(),
         }
@@ -502,9 +500,24 @@ impl SpecializationSelector {
         let start = std::time::Instant::now();
         self.stats.selections += 1;
 
+        if self.cache_revision != Some(protocol_checker.resolution_revision()) {
+            self.cache.clear();
+            self.lattices.clear();
+            self.cache_revision = Some(protocol_checker.resolution_revision());
+        }
+
         // 1. Check cache
         let type_key = self.type_to_cache_key(self_type);
-        if let Some(&impl_id) = self.cache.get(&(protocol.name.clone(), type_key.clone())) {
+        if let Some(impl_id) = self
+            .cache
+            .get(&(protocol.name.clone(), type_key.clone()))
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|(query, _)| query == self_type)
+                    .map(|(_, implementation)| *implementation)
+            })
+        {
             self.stats.cache_hits += 1;
             return Ok(impl_id);
         }
@@ -555,7 +568,10 @@ impl SpecializationSelector {
         let selected = ranked[0];
 
         // 6. Cache result
-        self.cache_selection(protocol.name.clone(), type_key, selected);
+        self.cache
+            .entry((protocol.name.clone(), type_key))
+            .or_default()
+            .push((self_type.clone(), selected));
 
         self.stats.time_us += start.elapsed().as_micros() as u64;
 
@@ -596,67 +612,36 @@ impl SpecializationSelector {
         &self,
         self_type: &Type,
         pattern: &Type,
-        unifier: &mut Unifier,
+        _unifier: &mut Unifier,
     ) -> bool {
-        // Try to unify self_type with the impl's for_type
-        // This handles cases like:
-        // - impl for Int matches Int
-        // - impl<T> for List<T> matches List<Int>
-        // - impl<T: Clone> for T matches any Clone type
-
-        match (self_type, pattern) {
-            // Exact type match
-            (Type::Named { path: p1, .. }, Type::Named { path: p2, .. }) if p1 == p2 => true,
-
-            // Type variable in pattern (generic impl)
-            (_, Type::Var(_)) => true,
-
-            // Compound types (recursive check)
+        // Implementation variables are local to the pattern. Query variables
+        // remain rigid, and repeated occurrences share one substitution.
+        let fresh: crate::ty::Substitution = pattern
+            .free_vars()
+            .into_iter()
+            .map(|variable| (variable, Type::Var(TypeVar::fresh())))
+            .collect();
+        let Ok(pattern) = pattern.try_apply_subst(&fresh) else {
+            return false;
+        };
+        let mut matcher = Unifier::new();
+        matcher.enter_rigid_scope(self_type.free_vars().into_iter().map(|variable| {
             (
-                Type::Named {
-                    path: p1,
-                    args: args1,
-                },
-                Type::Named {
-                    path: p2,
-                    args: args2,
-                },
-            ) if p1 == p2 => {
-                args1.len() == args2.len()
-                    && args1
-                        .iter()
-                        .zip(args2.iter())
-                        .all(|(a1, a2)| self.matches_impl_pattern(a1, a2, unifier))
-            }
-
-            // Function types
-            (
-                Type::Function {
-                    params: p1,
-                    return_type: r1,
-                    ..
-                },
-                Type::Function {
-                    params: p2,
-                    return_type: r2,
-                    ..
-                },
-            ) => {
-                p1.len() == p2.len()
-                    && p1
-                        .iter()
-                        .zip(p2.iter())
-                        .all(|(param1, param2)| self.matches_impl_pattern(param1, param2, unifier))
-                    && self.matches_impl_pattern(r1.as_ref(), r2.as_ref(), unifier)
-            }
-
-            // Reference types
-            (Type::Reference { inner: t1, .. }, Type::Reference { inner: t2, .. }) => {
-                self.matches_impl_pattern(t1.as_ref(), t2.as_ref(), unifier)
-            }
-
-            _ => false,
+                variable,
+                format!("parameter{}", variable.id()).into(),
+                false,
+                None,
+            )
+        }));
+        if matcher.unify(&pattern, self_type, Span::default()).is_err() {
+            return false;
         }
+        // Inference unification permits coercions. Only exact instantiated
+        // structure proves this implementation head, including value indices,
+        // callable contracts, reference mutability and repeated parameters.
+        matcher
+            .try_apply(&pattern, Span::default())
+            .is_ok_and(|matched| matched == *self_type)
     }
 
     /// Check if where clauses are satisfied for a type
@@ -1505,14 +1490,19 @@ impl SpecializationSelector {
         }
     }
 
-    /// Cache a specialization decision
-    pub fn cache_selection(&mut self, protocol: Text, type_key: Text, impl_id: ImplementId) {
-        self.cache.insert((protocol, type_key), impl_id);
+    /// Number of successful query decisions retained by the selector.
+    pub fn cache_len(&self) -> usize {
+        self.cache.values().map(List::len).sum()
+    }
+
+    /// Number of specialization lattices retained for the current registry.
+    pub fn lattice_len(&self) -> usize {
+        self.lattices.len()
     }
 
     /// Convert a type to a cache key
     pub fn type_to_cache_key(&self, ty: &Type) -> Text {
-        // Generate a stable string representation for caching
+        // Routing only: distinct types may deliberately share a bucket.
         match ty {
             Type::Named { path, args } => {
                 let mut key = path.to_string();

@@ -127,6 +127,43 @@ macro_rules! push_type_children {
 }
 
 impl Type {
+    /// Value identities occurring anywhere in this type, including domains.
+    /// Reuse the shared traversal so nested obligations cannot escape a binder.
+    pub fn value_ids(&self) -> verum_common::Set<crate::ty::ValueId> {
+        let mut identities = verum_common::Set::new();
+        let mut stack = List::new();
+        stack.push(self);
+        while let Some(ty) = stack.pop() {
+            if let Type::Meta { value: crate::ty::ValueTerm::Parameter(identity)
+                | crate::ty::ValueTerm::Inference(identity), .. } = ty
+            {
+                identities.insert(*identity);
+            }
+            push_type_children!(ty, stack);
+        }
+        identities
+    }
+
+    /// Declaration value binders reachable from this exact owner type.
+    pub fn value_parameters(&self) -> List<Type> {
+        let mut seen = verum_common::Set::new();
+        let mut result = List::new();
+        let mut stack = List::from_single(self);
+        while let Some(ty) = stack.pop() {
+            if let Type::Meta { value: crate::ty::ValueTerm::Parameter(id), .. } = ty {
+                if seen.insert(*id) { result.push(ty.clone()); }
+            }
+            push_type_children!(ty, stack);
+        }
+        result
+    }
+
+    pub fn has_value_inference(&self) -> bool {
+        self.contains_type(|ty| matches!(ty,
+            Type::Meta { value: crate::ty::ValueTerm::Inference(_), .. }
+        ))
+    }
+
     /// Whether any nested type depends on a record slot or instance.
     /// A backend without a faithful representation must decline the whole
     /// type, including opaque containers whose translation skips arguments.

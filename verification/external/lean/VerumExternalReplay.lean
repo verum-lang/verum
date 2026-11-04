@@ -11,6 +11,7 @@ import VerumExternalReplay.TypeAlgebra
 import VerumExternalReplay.TerminalCategory
 import VerumExternalReplay.PropertyRequirement
 import VerumExternalReplay.IntegerBoundEntailment
+import VerumExternalReplay.ValueIndexUnification
 import VerumExternalReplay.CapabilityAttenuation
 import VerumExternalReplay.UniverseLevels
 import VerumExternalReplay.UniverseInstantiation

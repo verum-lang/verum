@@ -18,19 +18,22 @@
 //! - **ProtocolMethod**: Method signature with optional default impl
 //! - **VTable**: Virtual dispatch table for protocol methods
 
-#[path = "protocol_obligations.rs"]
-mod obligations;
-#[path = "protocol_implementation_match.rs"]
-mod implementation_match;
 #[path = "protocol_associated_assignment.rs"]
 mod associated_assignment;
+#[path = "protocol_implementation_match.rs"]
+mod implementation_match;
+#[path = "protocol_obligations.rs"]
+mod obligations;
 pub use associated_assignment::AssociatedTypeAssignment;
 #[path = "protocol_associated_families.rs"]
 mod associated_families;
 pub use associated_families::FamilyApplication;
 
 use std::cell::RefCell;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::ty::{Type, TypeVar};
 use verum_ast::{
@@ -50,24 +53,24 @@ thread_local! {
     // Key: (checker_id, type_key, protocol_key) — see Audit-A2 in
     // ProtocolChecker.checker_id for why the checker_id dimension is
     // required for cross-checker coherence on a long-lived thread.
-    static IMPL_OPTIMISTIC_CACHE: RefCell<std::collections::HashMap<(u64, Text, Text), bool>> = RefCell::new(std::collections::HashMap::new());
-    // Stack of (type_key, protocol_key) pairs currently being checked
-    // Used for cycle detection in implements_optimistic
-    static IMPL_CHECKING_STACK: RefCell<Vec<(Text, Text)>> = const { RefCell::new(Vec::new()) };
+    static IMPL_OPTIMISTIC_CACHE: RefCell<Map<(u64, Text, Text), List<(Type, Path, bool)>>> = RefCell::new(Map::new());
+    // A routing-key collision is not a recursive obligation. Retain the exact
+    // receiver, protocol and registry revision for active queries as well.
+    static IMPL_CHECKING_STACK: RefCell<List<(u64, Type, ProtocolBound)>> = RefCell::new(List::new());
     // Cycle detection for try_find_associated_type ↔ try_resolve_projection_type
     // Tracks (type_key, assoc_name) pairs being resolved to detect infinite loops
     // caused by blanket impls forwarding associated types (e.g., FutureExt.Output = F.Output)
-    static ASSOC_TYPE_RESOLUTION_STACK: RefCell<Vec<(Text, Text)>> = const { RefCell::new(Vec::new()) };
+    static ASSOC_TYPE_RESOLUTION_STACK: RefCell<List<(u64, Type, Text)>> = RefCell::new(List::new());
 }
 
 /// One active implementation obligation. Repeated or unbounded recursive
 /// obligations do not constitute evidence for a conditional implementation.
 struct ImplQueryGuard {
-    key: (Text, Text),
+    key: (u64, Type, ProtocolBound),
 }
 
 impl ImplQueryGuard {
-    fn enter(key: (Text, Text)) -> Option<Self> {
+    fn enter(key: (u64, Type, ProtocolBound)) -> Option<Self> {
         IMPL_CHECKING_STACK.with(|stack| {
             let mut stack = stack.borrow_mut();
             if stack.len() >= 64 || stack.contains(&key) {
@@ -90,13 +93,18 @@ impl Drop for ImplQueryGuard {
     }
 }
 
-/// Process-global counter handing out unique `ProtocolChecker.checker_id`
-/// values. AtomicU64 wraps after 2^64 — for any realistic process
-/// lifetime this is unbounded.
+/// Process-global authority identities. Exhaustion must refuse allocation;
+/// wrapping would let a new registry reuse an earlier cache authority.
 static NEXT_CHECKER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 fn allocate_checker_id() -> u64 {
-    NEXT_CHECKER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    NEXT_CHECKER_ID
+        .fetch_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |current| current.checked_add(1),
+        )
+        .expect("protocol registry identity space exhausted")
 }
 
 /// Type alias for type variable substitutions
@@ -566,7 +574,11 @@ impl ProtocolMethod {
         if let Some(scope) = &self.scope {
             let expected = scope.binders.owner.len() + scope.owner_values.len();
             if arguments.len() != expected {
-                return Err(format!("protocol method expects {expected} owner arguments, received {}", arguments.len()).into());
+                return Err(format!(
+                    "protocol method expects {expected} owner arguments, received {}",
+                    arguments.len()
+                )
+                .into());
             }
         }
         let mut applied = self.clone();
@@ -574,11 +586,15 @@ impl ProtocolMethod {
         let mut values = Map::new();
         if let Some(scope) = &self.scope {
             for (position, variable) in &scope.binders.owner {
-                let argument = arguments.get(*position).ok_or_else(|| Text::from("protocol method application lacks a declared owner argument"))?;
+                let argument = arguments.get(*position).ok_or_else(|| {
+                    Text::from("protocol method application lacks a declared owner argument")
+                })?;
                 substitution.insert(*variable, argument.clone());
             }
             for (position, name) in &scope.owner_values {
-                let argument = arguments.get(*position).ok_or_else(|| Text::from("protocol method application lacks a declared value argument"))?;
+                let argument = arguments.get(*position).ok_or_else(|| {
+                    Text::from("protocol method application lacks a declared value argument")
+                })?;
                 values.insert(name.clone(), argument.clone());
             }
         }
@@ -588,21 +604,38 @@ impl ProtocolMethod {
             Ok(ty.substitute_params(&values))
         };
         applied.ty = apply(&self.ty)?;
-        applied.type_param_bounds = self.type_param_bounds.iter().map(|(name, bounds)| Ok((name.clone(), bounds.iter().map(&apply).collect::<Result<_, Text>>()?))).collect::<std::result::Result<_, Text>>()?;
+        applied.type_param_bounds = self
+            .type_param_bounds
+            .iter()
+            .map(|(name, bounds)| {
+                Ok((
+                    name.clone(),
+                    bounds.iter().map(&apply).collect::<Result<_, Text>>()?,
+                ))
+            })
+            .collect::<std::result::Result<_, Text>>()?;
         if let Some(scope) = &mut applied.scope {
             for clause in &mut scope.where_clauses {
                 clause.ty = apply(&clause.ty)?;
                 for bound in &mut clause.bounds {
-                    for argument in &mut bound.args { *argument = apply(argument)?; }
-                    for argument in bound.associated_types.values_mut() { *argument = apply(argument)?; }
+                    for argument in &mut bound.args {
+                        *argument = apply(argument)?;
+                    }
+                    for argument in bound.associated_types.values_mut() {
+                        *argument = apply(argument)?;
+                    }
                 }
             }
             scope.binders.owner.clear();
             scope.owner_values.clear();
             for bounds in scope.protocol_bounds.values_mut() {
                 for bound in bounds {
-                    for argument in &mut bound.args { *argument = apply(argument)?; }
-                    for argument in bound.associated_types.values_mut() { *argument = apply(argument)?; }
+                    for argument in &mut bound.args {
+                        *argument = apply(argument)?;
+                    }
+                    for argument in bound.associated_types.values_mut() {
+                        *argument = apply(argument)?;
+                    }
                 }
             }
         }
@@ -618,7 +651,11 @@ impl ProtocolMethod {
         self.is_async = dispatch.is_async;
     }
 
-    pub(crate) fn from_metadata(signature: &crate::core_metadata::MethodSignature, ty: Type, has_default: bool) -> Self {
+    pub(crate) fn from_metadata(
+        signature: &crate::core_metadata::MethodSignature,
+        ty: Type,
+        has_default: bool,
+    ) -> Self {
         let mut method = Self::simple(signature.name.clone(), ty, has_default);
         method.set_dispatch(signature.dispatch);
         method
@@ -667,13 +704,7 @@ impl ProtocolMethod {
     }
 
     /// Create a protocol method with all fields specified
-    pub fn new(
-        name: Text,
-        ty: Type,
-        has_default: bool,
-        doc: Maybe<Text>,
-        is_async: bool,
-    ) -> Self {
+    pub fn new(name: Text, ty: Type, has_default: bool, doc: Maybe<Text>, is_async: bool) -> Self {
         Self {
             scope: None,
             name,
@@ -703,7 +734,6 @@ impl ProtocolMethod {
             dispatch: None,
         }
     }
-
 }
 
 /// Associated type in a protocol (with GAT support)
@@ -1083,11 +1113,18 @@ impl ProtocolImpl {
     /// Distinguish an absent assignment from a family requiring arguments.
     /// Only absence may permit a declaration default at a zero-argument use.
     pub fn ordinary_associated_type(&self, name: &Text) -> Result<Option<&Type>, ProtocolError> {
-        self.associated_types.get(name).map(|assignment| {
-            assignment.ordinary_body().ok_or_else(|| ProtocolError::AssociatedTypeNotSpecified {
-                protocol: self.protocol.clone(), assoc_name: name.clone(), for_type: self.for_type.clone(),
+        self.associated_types
+            .get(name)
+            .map(|assignment| {
+                assignment.ordinary_body().ok_or_else(|| {
+                    ProtocolError::AssociatedTypeNotSpecified {
+                        protocol: self.protocol.clone(),
+                        assoc_name: name.clone(),
+                        for_type: self.for_type.clone(),
+                    }
+                })
             })
-        }).transpose()
+            .transpose()
     }
 }
 
@@ -1102,7 +1139,11 @@ impl WhereClause {
     pub fn try_apply_subst(&self, substitution: &crate::ty::Substitution) -> Result<Self, Text> {
         Ok(Self {
             ty: self.ty.try_apply_subst(substitution)?,
-            bounds: self.bounds.iter().map(|bound| bound.try_apply_subst(substitution)).collect::<Result<_, _>>()?,
+            bounds: self
+                .bounds
+                .iter()
+                .map(|bound| bound.try_apply_subst(substitution))
+                .collect::<Result<_, _>>()?,
         })
     }
 }
@@ -1711,7 +1752,6 @@ fn trygate_trace() -> bool {
     *ON.get_or_init(|| std::env::var_os("VERUM_TRACE_TRYGATE").is_some())
 }
 
-
 /// Coherence candidates retain insertion order so the first refusal and the
 /// order of lenient warnings agree with a full implementation scan.
 #[derive(Clone, Default)]
@@ -1784,8 +1824,8 @@ pub struct ProtocolChecker {
     /// pre-registration, imported source, and body checking.
     source_impls: Map<(Text, Span), (Arc<verum_ast::decl::ImplDecl>, usize)>,
     /// Implementation index for fast lookup
-    /// Map from (type, protocol) to implementation
-    impl_index: Map<(Text, Text), usize>,
+    /// Coarse keys route to candidates; exact declarations remain authoritative.
+    impl_index: Map<(Text, Text), List<usize>>,
     /// Overlap candidates by protocol and proven nominal target constructor.
     impls_by_protocol: Map<Text, ImplOverlapIndex>,
     #[cfg(test)]
@@ -1804,9 +1844,9 @@ pub struct ProtocolChecker {
     ///
     /// This cache stores the results of `implements()` checks to avoid repeated
     /// resolution when the same type/protocol pair is queried multiple times.
-    /// The value is `Maybe::Some(true)` if implemented, `Maybe::Some(false)` if not,
-    /// and the entry is absent if not yet checked.
-    impl_check_cache: Map<(Text, Text), bool>,
+    /// Each candidate retains the exact queried receiver and protocol. A key
+    /// collision can cause a miss, but cannot supply another query's answer.
+    impl_check_cache: Map<(Text, Text), List<(Type, Path, bool)>>,
 
     /// Method signatures explicitly registered for a receiver and method name.
     method_registry: Map<(Text, Text), MethodSignature>,
@@ -1844,7 +1884,7 @@ pub struct ProtocolChecker {
 
     /// Cache for method resolution: (type_key, protocol_key, method_name) -> MethodResolution
     /// Avoids repeated find_impl + method lookup for the same type/protocol/method triple
-    method_resolution_cache: Map<(Text, Text, Text), MethodResolution>,
+    method_resolution_cache: Map<(Text, Text, Text), List<(Type, Path, MethodResolution)>>,
 
     /// Audit-A2 coherence: per-checker identity used to scope the
     /// thread-local `IMPL_OPTIMISTIC_CACHE`.
@@ -1863,6 +1903,10 @@ pub struct ProtocolChecker {
     /// are impossible within the lifetime of a process and across
     /// processes the cache is fresh anyway (thread-local).
     checker_id: u64,
+
+    /// Identity of the current resolution state. Clones may share a revision
+    /// until either registry changes; subsequent cache entries cannot cross it.
+    resolution_revision: u64,
 
     /// `[protocols].resolution_strategy` — chooses how `find_impl`
     /// resolves multi-candidate cases. Threaded from manifest via
@@ -1993,6 +2037,7 @@ impl ProtocolChecker {
             variant_type_name_candidates: Map::new(),
             method_resolution_cache: Map::new(),
             checker_id: allocate_checker_id(),
+            resolution_revision: allocate_checker_id(),
             resolution_strategy: Text::from("most_specific"),
             blanket_impls: true,
             instance_search_enabled: true,
@@ -2031,6 +2076,7 @@ impl ProtocolChecker {
             variant_type_name_candidates: Map::new(),
             method_resolution_cache: Map::new(),
             checker_id: allocate_checker_id(),
+            resolution_revision: allocate_checker_id(),
             resolution_strategy: Text::from("most_specific"),
             blanket_impls: true,
             instance_search_enabled: true,
@@ -2058,6 +2104,7 @@ impl ProtocolChecker {
                 self.resolution_strategy = Text::from("most_specific");
             }
         }
+        self.invalidate_impl_cache();
     }
 
     /// Apply the manifest-side `[protocols].blanket_impls`. When
@@ -2065,6 +2112,7 @@ impl ProtocolChecker {
     /// bare type variable from the candidate set.
     pub fn set_blanket_impls(&mut self, allowed: bool) {
         self.blanket_impls = allowed;
+        self.invalidate_impl_cache();
     }
 
     /// Apply the manifest-side `[types].instance_search`. When
@@ -2076,6 +2124,7 @@ impl ProtocolChecker {
     /// consulted it.
     pub fn set_instance_search_enabled(&mut self, enabled: bool) {
         self.instance_search_enabled = enabled;
+        self.invalidate_impl_cache();
     }
 
     /// Read-only accessor — exposed for diagnostics + tests.
@@ -2125,11 +2174,16 @@ impl ProtocolChecker {
         self.checker_id
     }
 
+    pub(crate) fn resolution_revision(&self) -> u64 {
+        self.resolution_revision
+    }
+
     /// Clear implementation check cache
     ///
     /// This should be called when new implementations are registered
     /// to ensure the cache stays consistent.
     pub fn invalidate_impl_cache(&mut self) {
+        self.resolution_revision = allocate_checker_id();
         self.impl_check_cache.clear();
         self.method_resolution_cache.clear();
         // Also clear thread-local optimistic cache
@@ -2147,6 +2201,7 @@ impl ProtocolChecker {
     /// This enables dynamic method registration during stdlib bootstrap,
     /// allowing methods to be registered as .vr files are parsed.
     pub fn method_registry_mut(&mut self) -> &mut Map<(Text, Text), MethodSignature> {
+        self.invalidate_impl_cache();
         &mut self.method_registry
     }
 
@@ -2163,6 +2218,7 @@ impl ProtocolChecker {
     ///
     /// Spec: stdlib-agnostic protocol resolution
     pub fn register_variant_type_name(&mut self, signature: Text, type_name: Text) {
+        self.invalidate_impl_cache();
         // Every claimant is recorded, not only the first. See the field's own
         // documentation: for the relaxed signature "first" is decided by hash
         // iteration order, and 58 signatures in `core/` have more than one
@@ -2339,7 +2395,18 @@ impl ProtocolChecker {
             self.make_type_key(ty),
             self.make_full_protocol_key(protocol, protocol_args),
         );
-        self.impl_index.contains_key(&key)
+        self.impl_index.get(&key).is_some_and(|candidates| {
+            candidates.iter().any(|index| {
+                self.impls.get(*index).is_some_and(|implementation| {
+                    self.paths_equal(&implementation.protocol, protocol)
+                        && self.types_structurally_equal(&implementation.for_type, ty)
+                        && implementation.protocol_args.len() == protocol_args.len()
+                        && implementation.protocol_args.iter().zip(protocol_args).all(
+                            |(declared, actual)| self.types_structurally_equal(declared, actual),
+                        )
+                })
+            })
+        })
     }
 
     /// Extract a type name from a Type for registry lookup
@@ -2403,7 +2470,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Test for equality".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2424,7 +2491,7 @@ impl ProtocolChecker {
                         ),
                         has_default: true,
                         doc: Maybe::Some("Test for inequality (has default impl)".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2504,15 +2571,9 @@ impl ProtocolChecker {
                         Type::Var(crate::ty::TypeVar::with_id(0)),
                     ]),
                     Type::Named {
-                        path: Path::single(Ident::new(
-                            WKT::Maybe.as_str(),
-                            Span::default(),
-                        )),
+                        path: Path::single(Ident::new(WKT::Maybe.as_str(), Span::default())),
                         args: List::from(vec![Type::Named {
-                            path: Path::single(Ident::new(
-                                WKT::Ordering.as_str(),
-                                Span::default(),
-                            )),
+                            path: Path::single(Ident::new(WKT::Ordering.as_str(), Span::default())),
                             args: List::new(),
                         }]),
                     },
@@ -2576,7 +2637,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Compare two values".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2624,7 +2685,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Convert to string representation".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2677,7 +2738,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Map a function over the functor".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2715,7 +2776,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get next element".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2764,7 +2825,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get next element asynchronously".into()),
-                                    is_async: true, // This is an async method
+                        is_async: true, // This is an async method
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2785,7 +2846,7 @@ impl ProtocolChecker {
                         doc: Maybe::Some(
                             "Return size hint (lower bound, optional upper bound)".into(),
                         ),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2845,7 +2906,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Feed this value into a Hasher".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2888,7 +2949,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Create a deep copy of this value".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2923,7 +2984,7 @@ impl ProtocolChecker {
                         scope: None,
                         name: "default".into(),
                         ty: Type::function(
-                            List::new(),                               // Static method, no self parameter
+                            List::new(), // Static method, no self parameter
                             // Self is a declaration placeholder, never a live
                             // inference variable. A fixed id aliases the first
                             // generic parameter and leaks across later calls.
@@ -2934,7 +2995,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Create a default value".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -2980,7 +3041,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Immutably dereferences the value".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3032,7 +3093,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Mutably dereferences the value".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3090,7 +3151,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get next element as generation-aware reference".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3140,7 +3201,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Get current item without advancing".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3161,7 +3222,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Advance to next item".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3214,7 +3275,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Map a function over a functor (higher-kinded)".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3271,7 +3332,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Wrap a value in the monad".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3295,7 +3356,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Sequentially compose two monadic actions".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3352,7 +3413,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Construct from success value".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3376,7 +3437,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Decide whether to continue or break".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3430,7 +3491,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Convert residual to Self".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3475,7 +3536,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise AND operation".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3523,7 +3584,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise OR operation".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3571,7 +3632,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise XOR operation".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3619,7 +3680,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise left shift operation".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3667,7 +3728,7 @@ impl ProtocolChecker {
                         ),
                         has_default: false,
                         doc: Maybe::Some("Bitwise right shift operation".into()),
-                                    is_async: false,
+                        is_async: false,
                         context_requirements: List::new(),
                         type_param_names: List::new(),
                         type_param_bounds: Map::new(),
@@ -3859,7 +3920,10 @@ impl ProtocolChecker {
                         let mut assoc = Map::new();
                         assoc.insert("Output".into(), output_type);
                         assoc
-                    }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
+                    })
+                    .into_iter()
+                    .map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty)))
+                    .collect(),
                     associated_consts: Map::new(),
                     specialization: Maybe::None,
                     impl_crate: Maybe::Some("stdlib".into()),
@@ -3910,7 +3974,10 @@ impl ProtocolChecker {
                     },
                 );
                 assoc
-            }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
+            })
+            .into_iter()
+            .map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty)))
+            .collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("stdlib".into()),
@@ -3951,7 +4018,10 @@ impl ProtocolChecker {
                     },
                 );
                 assoc
-            }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
+            })
+            .into_iter()
+            .map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty)))
+            .collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("stdlib".into()),
@@ -3992,7 +4062,10 @@ impl ProtocolChecker {
                     },
                 );
                 assoc
-            }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
+            })
+            .into_iter()
+            .map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty)))
+            .collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("stdlib".into()),
@@ -4229,7 +4302,12 @@ impl ProtocolChecker {
             {
                 eprintln!(
                     "[slice-lookup] ty={:?} → key=({}, {}) type_args={:?} sig.return={:?} subst={:?} resolved={:?}",
-                    ty, type_name, method_name, type_args, sig.return_type, substitution,
+                    ty,
+                    type_name,
+                    method_name,
+                    type_args,
+                    sig.return_type,
+                    substitution,
                     resolved_return_type,
                 );
             }
@@ -4867,7 +4945,11 @@ impl ProtocolChecker {
                     // with WHAT. R3 answers `PeekableIter<ISize>` where the
                     // receiver is `Range<Int>`, so one of these maps `Self` to
                     // something that is neither the receiver nor the impl target.
-                    eprintln!("[selfsubst] site-04883 self_ty self={} recv={}", self_ty.to_text(), "<n/a>");
+                    eprintln!(
+                        "[selfsubst] site-04883 self_ty self={} recv={}",
+                        self_ty.to_text(),
+                        "<n/a>"
+                    );
                 }
                 subst_map.insert(Text::from("Self"), self_ty.clone());
 
@@ -4876,7 +4958,9 @@ impl ProtocolChecker {
 
                 // Add associated type mappings to resolve Self.Item projections
                 for (assoc_name, assignment) in impl_.associated_types.iter() {
-                    let Some(assoc_ty) = assignment.ordinary_body() else { continue };
+                    let Some(assoc_ty) = assignment.ordinary_body() else {
+                        continue;
+                    };
                     let prefixed_name = format!("::{}", assoc_name);
                     subst_map.insert(Text::from(prefixed_name), assoc_ty.clone());
                     subst_map.insert(assoc_name.clone(), assoc_ty.clone());
@@ -5076,13 +5160,17 @@ impl ProtocolChecker {
         let receipt = ProtocolBindingReceipt {
             name: name.clone(),
             previous: self.protocols.insert(name.clone(), protocol),
-            previous_revision: self.protocol_revisions.insert(name.clone(), installed_revision.clone()),
+            previous_revision: self
+                .protocol_revisions
+                .insert(name.clone(), installed_revision.clone()),
             installed_revision,
         };
         // Invalidate caches when new protocol is registered
         self.methods_cache.clear();
         self.superprotocol_cache.clear();
         self.method_resolution_cache.clear();
+
+        self.invalidate_impl_cache();
 
         // Check for cycles introduced by this registration
         if let Err(e) = self.check_hierarchy_cycles(&name) {
@@ -5102,12 +5190,16 @@ impl ProtocolChecker {
     /// even a superseded publication so another rollback cannot resurrect it.
     pub(crate) fn restore_protocol_binding(&mut self, receipt: ProtocolBindingReceipt) -> bool {
         receipt.installed_revision.store(false, Ordering::Release);
-        if !self.protocol_revisions.get(&receipt.name)
+        if !self
+            .protocol_revisions
+            .get(&receipt.name)
             .is_some_and(|current| Arc::ptr_eq(current, &receipt.installed_revision))
         {
             return false;
         }
-        let predecessor_valid = receipt.previous_revision.as_ref()
+        let predecessor_valid = receipt
+            .previous_revision
+            .as_ref()
             .is_none_or(|revision| revision.load(Ordering::Acquire));
         self.protocols.remove(&receipt.name);
         self.protocol_revisions.remove(&receipt.name);
@@ -5122,6 +5214,7 @@ impl ProtocolChecker {
         self.methods_cache.clear();
         self.superprotocol_cache.clear();
         self.method_resolution_cache.clear();
+        self.invalidate_impl_cache();
         true
     }
 
@@ -5140,10 +5233,13 @@ impl ProtocolChecker {
         owner: &Text,
         declaration: &verum_ast::decl::ImplDecl,
     ) -> crate::Result<Option<&ProtocolImpl>> {
-        let Some((original, index)) = self.source_impls.get(&(owner.clone(), declaration.span)) else {
+        let Some((original, index)) = self.source_impls.get(&(owner.clone(), declaration.span))
+        else {
             return Ok(None);
         };
-        if original.as_ref() == declaration && let Some(implementation) = self.impls.get(*index) {
+        if original.as_ref() == declaration
+            && let Some(implementation) = self.impls.get(*index)
+        {
             return Ok(Some(implementation));
         }
         Err(crate::TypeError::OtherWithCodeSpanned {
@@ -5158,7 +5254,8 @@ impl ProtocolChecker {
         owner: &Text,
         declaration: &verum_ast::decl::ImplDecl,
     ) -> crate::Result<bool> {
-        self.source_impl(owner, declaration).map(|implementation| implementation.is_some())
+        self.source_impl(owner, declaration)
+            .map(|implementation| implementation.is_some())
     }
 
     pub(crate) fn register_source_impl(
@@ -5178,10 +5275,12 @@ impl ProtocolChecker {
             });
         }
         let index = self.impls.len();
-        self.register_impl(implementation).map_err(|error| crate::TypeError::OtherWithCodeSpanned {
-            code: "E405".into(),
-            msg: error.to_string().into(),
-            span: declaration.span,
+        self.register_impl(implementation).map_err(|error| {
+            crate::TypeError::OtherWithCodeSpanned {
+                code: "E405".into(),
+                msg: error.to_string().into(),
+                span: declaration.span,
+            }
         })?;
         if self.impls.len() != index + 1 {
             return Err(crate::TypeError::OtherWithCodeSpanned {
@@ -5240,7 +5339,8 @@ impl ProtocolChecker {
                         {
                             self.registration_overlap_comparisons += 1;
                         }
-                        if let Err(e) = self.check_overlap_same_protocol(&impl_, &self.impls[index]) {
+                        if let Err(e) = self.check_overlap_same_protocol(&impl_, &self.impls[index])
+                        {
                             overlap_warnings.push(e);
                         }
                     }
@@ -5269,7 +5369,10 @@ impl ProtocolChecker {
             // impls, which moved the measurement down to the archive.
             eprintln!(
                 "[regimpl] proto={} for={} from={}",
-                impl_.protocol.as_ident().map(|i| i.as_str().to_string())
+                impl_
+                    .protocol
+                    .as_ident()
+                    .map(|i| i.as_str().to_string())
                     .unwrap_or_else(|| format!("{}", impl_.protocol)),
                 impl_.for_type.to_text(),
                 std::panic::Location::caller()
@@ -5284,20 +5387,35 @@ impl ProtocolChecker {
         let protocol_key = self.make_full_protocol_key(&impl_.protocol, &impl_.protocol_args);
         let key = (type_key, protocol_key);
 
-        // Idempotence: the stdlib lazy-loader re-registers the same impl once
-        // per lazy-load call, so without this `impls` accumulates 24-66 identical
-        // copies — bloating the generic/blanket scan in get_implementations and
-        // re-running the O(n) coherence check each time. If this exact (type,
-        // protocol, protocol_args) key is already indexed, the impl is present,
-        // so skip the duplicate push. Strict coherence already rejects a same-key
-        // NON-duplicate above (check_overlap), so a collision surviving to here is
-        // a re-registration, not a new overlap (T0305).
-        if self.impl_index.contains_key(&key) {
+        // Lazy loading may publish an identical declaration repeatedly. A coarse
+        // routing key only narrows candidates: compare the declaration before
+        // skipping it, and retain distinct declarations in the same bucket.
+        if self.impl_index.get(&key).is_some_and(|candidates| {
+            candidates.iter().any(|index| {
+                self.impls.get(*index).is_some_and(|existing| {
+                    self.paths_equal(&existing.protocol, &impl_.protocol)
+                        && existing.for_type == impl_.for_type
+                        && existing.protocol_args == impl_.protocol_args
+                        && existing.where_clauses == impl_.where_clauses
+                        && existing.methods == impl_.methods
+                        && existing.associated_types == impl_.associated_types
+                        && existing.associated_consts.len() == impl_.associated_consts.len()
+                        && existing.associated_consts.iter().all(|(name, value)| {
+                            impl_.associated_consts.get(name).is_some_and(|other| {
+                                crate::ty::same_constant_identity(value, other)
+                            })
+                        })
+                        && existing.specialization == impl_.specialization
+                        && existing.impl_crate == impl_.impl_crate
+                        && existing.type_param_fn_bounds == impl_.type_param_fn_bounds
+                })
+            })
+        }) {
             return Ok(());
         }
 
         let idx = self.impls.len();
-        self.impl_index.insert(key, idx);
+        self.impl_index.entry(key).or_default().push(idx);
         // Populate in every mode, including Off, so a later mode change or
         // cloned checker sees every admitted implementation exactly once.
         self.impls_by_protocol
@@ -5421,9 +5539,7 @@ impl ProtocolChecker {
         // Use find_impl which handles exact matching, generic matching, and where clauses
         // This ensures implements() and find_impl() have consistent behavior
         let found = self.find_impl(ty, protocol).is_some();
-        if trygate_trace()
-            && protocol.as_ident().map(|i| i.as_str()) == Some("Try")
-        {
+        if trygate_trace() && protocol.as_ident().map(|i| i.as_str()) == Some("Try") {
             // T0927: the query key is identical across runs and the answer
             // is not, so the divergence is the INDEX CONTENT, not the key.
             // Print what the index holds for this key at the moment of asking.
@@ -5485,7 +5601,8 @@ impl ProtocolChecker {
                     let ftk = self.make_type_key(&impl_.for_type);
                     match self.try_match_type(&impl_.for_type, ty) {
                         Some(subst) => {
-                            let wc = self.check_where_clauses_satisfied(&impl_.where_clauses, &subst);
+                            let wc =
+                                self.check_where_clauses_satisfied(&impl_.where_clauses, &subst);
                             eprintln!(
                                 "[trygate]   impl#{} for={} match=YES where={} nclauses={}",
                                 i,
@@ -5515,7 +5632,13 @@ impl ProtocolChecker {
                     if let Some(impl_proto_name) = impl_.protocol.as_ident().map(|i| i.as_str()) {
                         let impl_proto_text: Text = impl_proto_name.into();
                         if self.inherits_from(&impl_proto_text, &target_text)
-                            && self.find_impl_for_instantiation(ty, &impl_.protocol, &impl_.protocol_args).is_some()
+                            && self
+                                .find_impl_for_instantiation(
+                                    ty,
+                                    &impl_.protocol,
+                                    &impl_.protocol_args,
+                                )
+                                .is_some()
                         {
                             return true;
                         }
@@ -5545,15 +5668,25 @@ impl ProtocolChecker {
         let cache_key = (type_key.clone(), protocol_key.clone());
 
         // Check cache first
-        if let Some(&result) = self.impl_check_cache.get(&cache_key) {
-            return result;
+        if let Some(candidates) = self.impl_check_cache.get(&cache_key) {
+            if let Some((_, _, result)) =
+                candidates.iter().find(|(receiver, queried_protocol, _)| {
+                    receiver == ty && queried_protocol == protocol
+                })
+            {
+                return *result;
+            }
         }
 
         // Not in cache - perform the check
         let result = self.implements(ty, protocol);
 
         // Store in cache
-        self.impl_check_cache.insert(cache_key, result);
+        self.impl_check_cache.entry(cache_key).or_default().push((
+            ty.clone(),
+            protocol.clone(),
+            result,
+        ));
 
         result
     }
@@ -5647,14 +5780,20 @@ impl ProtocolChecker {
         );
 
         // Stage 1: Try exact match first
-        if let Some(&idx) = self.impl_index.get(&(type_key, exact_key)) {
-            if let Some(impl_) = self.impls.get(idx) {
+        if let Some(candidates) = self.impl_index.get(&(type_key, exact_key)) {
+            for impl_ in candidates.iter().filter_map(|index| self.impls.get(*index)) {
                 let exact_arguments = args.is_none_or(|args| {
                     impl_.protocol_args.len() == args.len()
-                        && impl_.protocol_args.iter().zip(args)
-                            .all(|(expected, actual)| self.types_structurally_equal(expected, actual))
+                        && impl_
+                            .protocol_args
+                            .iter()
+                            .zip(args)
+                            .all(|(expected, actual)| {
+                                self.types_structurally_equal(expected, actual)
+                            })
                 });
                 if exact_arguments
+                    && self.paths_equal(&impl_.protocol, protocol)
                     && self.types_structurally_equal(&impl_.for_type, ty)
                     && self.check_where_clauses_satisfied(&impl_.where_clauses, &Map::new())
                 {
@@ -5674,7 +5813,9 @@ impl ProtocolChecker {
         let mut candidates: List<(usize, &ProtocolImpl, Map<Text, Type>)> = List::new();
 
         for (idx, impl_) in self.impls.iter().enumerate() {
-            if self.make_protocol_key(&impl_.protocol) != protocol_key {
+            if self.make_protocol_key(&impl_.protocol) != protocol_key
+                || !self.paths_equal(&impl_.protocol, protocol)
+            {
                 continue;
             }
 
@@ -5826,12 +5967,28 @@ impl ProtocolChecker {
     /// Returns true if unification succeeds, false otherwise.
     /// On success, the substitution map contains bindings for type variables.
     fn unify_types(&self, pattern: &Type, concrete: &Type, subst: &mut Map<Text, Type>) -> bool {
+        if self.types_structurally_equal(pattern, concrete) {
+            return true;
+        }
         match (pattern, concrete) {
             // A value argument is not its runtime carrier. Only an exact
             // represented value can discharge a concrete value obligation.
-            (Type::Meta { value: Some(left), ty: left_ty, refinement: left_ref, .. },
-             Type::Meta { value: Some(right), ty: right_ty, refinement: right_ref, .. }) => {
-                left == right && left_ref == right_ref
+            (
+                Type::Meta {
+                    value: left,
+                    ty: left_ty,
+                    refinement: left_ref,
+                    ..
+                },
+                Type::Meta {
+                    value: right,
+                    ty: right_ty,
+                    refinement: right_ref,
+                    ..
+                },
+            ) => {
+                left == right
+                    && left_ref == right_ref
                     && self.types_structurally_equal(left_ty, right_ty)
             }
             (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
@@ -6013,15 +6170,11 @@ impl ProtocolChecker {
                                 .map(|(name, _)| name)
                                 .collect();
                             payload_names.sort();
-                            let non_unit_payloads: List<&Type> = payload_names
-                                .into_iter()
-                                .map(|n| &variants[n])
-                                .collect();
+                            let non_unit_payloads: List<&Type> =
+                                payload_names.into_iter().map(|n| &variants[n]).collect();
 
                             // Match pattern args to non-unit payloads positionally
-                            for (pattern_arg, payload) in
-                                a1.iter().zip(non_unit_payloads.iter())
-                            {
+                            for (pattern_arg, payload) in a1.iter().zip(non_unit_payloads.iter()) {
                                 if !self.unify_types(pattern_arg, payload, subst) {
                                     return false;
                                 }
@@ -6317,6 +6470,35 @@ impl ProtocolChecker {
 
     /// Check if two paths are equal
     fn paths_equal(&self, p1: &Path, p2: &Path) -> bool {
+        // Metadata may carry a canonical qualified name in one Ident; source
+        // syntax carries one segment per component. Both denote the same full
+        // declaration path, never merely its leaf. Relative markers remain
+        // distinct and cannot be erased by rendering a routing key.
+        fn components(path: &Path) -> impl Iterator<Item = &str> {
+            path.segments
+                .iter()
+                .filter_map(|segment| match segment {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                    _ => None,
+                })
+                .flat_map(|name| name.split('.'))
+        }
+        let nominal = |path: &Path| {
+            path.segments
+                .iter()
+                .all(|segment| matches!(segment, verum_ast::ty::PathSegment::Name(_)))
+        };
+        if nominal(p1) && nominal(p2) {
+            let mut left = components(p1);
+            let mut right = components(p2);
+            loop {
+                match (left.next(), right.next()) {
+                    (Some(a), Some(b)) if !a.is_empty() && a == b => {}
+                    (None, None) => return !p1.segments.is_empty(),
+                    _ => return false,
+                }
+            }
+        }
         if p1.segments.len() != p2.segments.len() {
             return false;
         }
@@ -6344,6 +6526,15 @@ impl ProtocolChecker {
             return true;
         }
         match (ty1, ty2) {
+            (Type::Named { path, args }, primitive) | (primitive, Type::Named { path, args })
+                if args.is_empty()
+                    && primitive.primitive_name().is_some()
+                    && !matches!(primitive, Type::Unknown) =>
+            {
+                path.as_ident().is_some_and(|name| {
+                    Some(Type::canonical_primitive(name.as_str())) == primitive.primitive_name()
+                })
+            }
             (Type::Unit, Type::Unit) => true,
             (Type::Never, Type::Never) => true,
             (Type::Bool, Type::Bool) => true,
@@ -6374,12 +6565,19 @@ impl ProtocolChecker {
                 // nominal application. Identity is the complete declaring path;
                 // a projection, relative path or matching suffix is insufficient.
                 !name.starts_with("::")
-                    && path.segments.iter().map(|segment| match segment {
-                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                        _ => None,
-                    }).eq(name.as_str().split('.').map(Some))
+                    && path
+                        .segments
+                        .iter()
+                        .map(|segment| match segment {
+                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                            _ => None,
+                        })
+                        .eq(name.as_str().split('.').map(Some))
                     && left.len() == right.len()
-                    && left.iter().zip(right).all(|(left, right)| self.types_structurally_equal(left, right))
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| self.types_structurally_equal(left, right))
             }
             (Type::Tuple(e1), Type::Tuple(e2)) => {
                 e1.len() == e2.len()
@@ -6524,16 +6722,22 @@ impl ProtocolChecker {
         let type_key = self.make_type_key(ty);
         let protocol_key = self.make_protocol_key(protocol);
 
-        // Check thread-local cache first to avoid redundant recursive checks.
-        // Audit-A2: cache key now includes `self.checker_id` so a long-lived
-        // thread can't leak `(type_key, protocol_key)` results from a prior
-        // checker into this one — the two checkers may have completely
-        // different impl sets.
-        let cache_key = (self.checker_id, type_key.clone(), protocol_key.clone());
-        // Stack uses the checkerless key — recursion guarding is per-thread,
-        // not per-checker. (Pre-A2 behaviour preserved.)
-        let stack_key = (type_key.clone(), protocol_key.clone());
-        let cached = IMPL_OPTIMISTIC_CACHE.with(|c| c.borrow().get(&cache_key).copied());
+        let cache_key = (self.resolution_revision, type_key, protocol_key);
+        let stack_key = (
+            self.resolution_revision,
+            ty.clone(),
+            ProtocolBound::simple(protocol.clone()),
+        );
+        let cached = IMPL_OPTIMISTIC_CACHE.with(|cache| {
+            cache.borrow().get(&cache_key).and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|(receiver, queried_protocol, _)| {
+                        receiver == ty && queried_protocol == protocol
+                    })
+                    .map(|(_, _, result)| *result)
+            })
+        });
         if let Some(result) = cached {
             return result;
         }
@@ -6546,7 +6750,11 @@ impl ProtocolChecker {
         // ordinary resolution. Only the unresolved fallback below is optimistic.
         if self.find_impl_with_substitution(ty, protocol).is_some() {
             IMPL_OPTIMISTIC_CACHE.with(|cache| {
-                cache.borrow_mut().insert(cache_key, true);
+                cache.borrow_mut().entry(cache_key).or_default().push((
+                    ty.clone(),
+                    protocol.clone(),
+                    true,
+                ));
             });
             return true;
         }
@@ -6650,7 +6858,11 @@ impl ProtocolChecker {
         // For fully resolved types with no matching impl, don't be optimistic
         // Cache the negative result
         IMPL_OPTIMISTIC_CACHE.with(|c| {
-            c.borrow_mut().insert(cache_key, false);
+            c.borrow_mut().entry(cache_key).or_default().push((
+                ty.clone(),
+                protocol.clone(),
+                false,
+            ));
         });
         false
     }
@@ -7199,14 +7411,12 @@ impl ProtocolChecker {
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     pub fn check_bounds(&self, ty: &Type, bounds: &[ProtocolBound]) -> Result<(), ProtocolError> {
         for bound in bounds {
-            let _guard = ImplQueryGuard::enter((
-                self.make_type_key(ty),
-                self.make_full_protocol_key(&bound.protocol, &bound.args),
-            ))
-            .ok_or_else(|| ProtocolError::BoundNotSatisfied {
-                ty: ty.clone(),
-                protocol: bound.protocol.clone(),
-            })?;
+            let _guard =
+                ImplQueryGuard::enter((self.resolution_revision, ty.clone(), bound.clone()))
+                    .ok_or_else(|| ProtocolError::BoundNotSatisfied {
+                        ty: ty.clone(),
+                        protocol: bound.protocol.clone(),
+                    })?;
             let implements = if bound.args.is_empty() {
                 self.implements(ty, &bound.protocol)
             } else {
@@ -7295,7 +7505,9 @@ impl ProtocolChecker {
             {
                 let impl_proto_text: Text = impl_protocol_name.into();
                 if self.inherits_from(&impl_proto_text, protocol_name)
-                    && self.find_impl_for_instantiation(ty, &impl_.protocol, &impl_.protocol_args).is_some()
+                    && self
+                        .find_impl_for_instantiation(ty, &impl_.protocol, &impl_.protocol_args)
+                        .is_some()
                 {
                     return Ok(true);
                 }
@@ -7487,13 +7699,26 @@ impl ProtocolChecker {
         let protocol_key = format!("{:?}", protocol);
         let cache_key = (type_key.clone(), protocol_key.into(), method.clone());
 
-        if let Some(cached) = self.method_resolution_cache.get(&cache_key) {
+        if let Some(cached) = self
+            .method_resolution_cache
+            .get(&cache_key)
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|(receiver, queried_protocol, _)| {
+                        receiver == ty && queried_protocol == protocol
+                    })
+                    .map(|(_, _, resolution)| resolution)
+            })
+        {
             return Ok(cached.clone());
         }
 
         let result = self.resolve_method(ty, protocol, method)?;
         self.method_resolution_cache
-            .insert(cache_key, result.clone());
+            .entry(cache_key)
+            .or_default()
+            .push((ty.clone(), protocol.clone(), result.clone()));
         Ok(result)
     }
 
@@ -7526,12 +7751,16 @@ impl ProtocolChecker {
         // has more than one exact impl (e.g. several protocols). Collect the
         // matches and push them in declaration order (by impl index) so the
         // returned list is stable across runs (T0368).
-        let mut exact: Vec<(usize, &ProtocolImpl)> = Vec::new();
-        for ((tk, _), &idx) in &self.impl_index {
-            if tk == &type_key
-                && let Some(impl_) = self.impls.get(idx)
-            {
-                exact.push((idx, impl_));
+        let mut exact: List<(usize, &ProtocolImpl)> = List::new();
+        for ((tk, _), candidates) in &self.impl_index {
+            if tk == &type_key {
+                for &idx in candidates {
+                    if let Some(impl_) = self.impls.get(idx)
+                        && self.types_structurally_equal(&impl_.for_type, ty)
+                    {
+                        exact.push((idx, impl_));
+                    }
+                }
             }
         }
         exact.sort_by_key(|(idx, _)| *idx);
@@ -7984,8 +8213,7 @@ impl ProtocolChecker {
         // Cycle detection: if we're already resolving this (type, assoc_name) pair,
         // we've hit an infinite loop (e.g., blanket impl FutureExt.Output = F.Output
         // recursing back to the same type). Break the cycle by returning None.
-        let type_key = self.make_type_key(ty);
-        let resolution_key = (type_key.clone(), assoc_name.clone());
+        let resolution_key = (self.resolution_revision, ty.clone(), assoc_name.clone());
 
         let is_cycle =
             ASSOC_TYPE_RESOLUTION_STACK.with(|stack| stack.borrow().contains(&resolution_key));
@@ -7999,21 +8227,18 @@ impl ProtocolChecker {
         });
 
         // RAII guard to pop from stack on exit
-        struct AssocTypeGuard(Text, Text);
+        struct AssocTypeGuard((u64, Type, Text));
         impl Drop for AssocTypeGuard {
             fn drop(&mut self) {
                 ASSOC_TYPE_RESOLUTION_STACK.with(|stack| {
                     let mut s = stack.borrow_mut();
-                    if let Some(pos) = s
-                        .iter()
-                        .position(|item| item.0 == self.0 && item.1 == self.1)
-                    {
+                    if let Some(pos) = s.iter().rposition(|item| item == &self.0) {
                         s.remove(pos);
                     }
                 });
             }
         }
-        let _guard = AssocTypeGuard(resolution_key.0, resolution_key.1);
+        let _guard = AssocTypeGuard(resolution_key);
 
         // Fast path: Type::Future { output: T } intrinsically has Output = T.
         // This avoids a full impl lookup and ensures that projection types like
@@ -8034,7 +8259,7 @@ impl ProtocolChecker {
             eprintln!(
                 "[assoc-trace] resolve ::{} for type_key='{}' — {} impl(s) registered",
                 assoc_name,
-                type_key,
+                self.make_type_key(ty),
                 impls.len()
             );
             for impl_ in impls.iter() {
@@ -8064,9 +8289,20 @@ impl ProtocolChecker {
         let mut best_projection: Option<Type> = None;
 
         for impl_ in impls.iter() {
+            // Enumeration returns candidates, including generic heads with the
+            // same constructor. Neither a shared head nor a routing-key hit
+            // proves this receiver satisfies the implementation.
+            let Some(substitution) = self.try_match_type(&impl_.for_type, ty) else {
+                continue;
+            };
+            if !self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution) {
+                continue;
+            }
             // Check if this implementation has the associated type explicitly defined
             if let Some(assignment) = impl_.associated_types.get(assoc_name) {
-                let Some(assoc_ty) = assignment.ordinary_body() else { continue };
+                let Some(assoc_ty) = assignment.ordinary_body() else {
+                    continue;
+                };
                 let substituted = self.substitute_impl_type_params(assoc_ty, impl_, ty);
 
                 // Check if the substituted type is a projection (still needs resolution)
@@ -8404,8 +8640,7 @@ impl ProtocolChecker {
                 // `::`-named Generic and prints BEFORE and AFTER, which is
                 // the pair that says whether the substitution introduced the
                 // base or merely carried it.
-                if name.as_str().starts_with("::")
-                    && std::env::var("VERUM_TRACE_PROJSUBST").is_ok()
+                if name.as_str().starts_with("::") && std::env::var("VERUM_TRACE_PROJSUBST").is_ok()
                 {
                     let before: Vec<String> =
                         args.iter().map(|a| a.to_text().to_string()).collect();
@@ -8590,28 +8825,48 @@ impl ProtocolChecker {
     pub fn normalize_projection_type(&self, ty: &Type) -> Type {
         match ty {
             Type::TypeApp { constructor, args } => {
-                if let Type::Generic { name, args: receiver } = constructor.as_ref()
-                    && name.starts_with("::") && receiver.len() == 1
+                if let Type::Generic {
+                    name,
+                    args: receiver,
+                } = constructor.as_ref()
+                    && name.starts_with("::")
+                    && receiver.len() == 1
                 {
                     let receiver = self.normalize_projection_type(&receiver[0]);
-                    let args: List<_> = args.iter().map(|argument| self.normalize_projection_type(argument)).collect();
+                    let args: List<_> = args
+                        .iter()
+                        .map(|argument| self.normalize_projection_type(argument))
+                        .collect();
                     let application = Type::TypeApp {
-                        constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([receiver.clone()]) }), args: args.clone(),
+                        constructor: Box::new(Type::Generic {
+                            name: name.clone(),
+                            args: List::from_iter([receiver.clone()]),
+                        }),
+                        args: args.clone(),
                     };
-                    return self.resolve_associated_family(&receiver, &name[2..].into(), &args, &[])
-                        .ok().flatten().map(|value| value.result).unwrap_or(application);
+                    return self
+                        .resolve_associated_family(&receiver, &name[2..].into(), &args, &[])
+                        .ok()
+                        .flatten()
+                        .map(|value| value.result)
+                        .unwrap_or(application);
                 }
                 Type::TypeApp {
                     constructor: Box::new(self.normalize_projection_type(constructor)),
-                    args: args.iter().map(|argument| self.normalize_projection_type(argument)).collect(),
+                    args: args
+                        .iter()
+                        .map(|argument| self.normalize_projection_type(argument))
+                        .collect(),
                 }
             }
-            Type::Generic { name, args } if name.starts_with("::") && args.len() > 1 => {
-                self.normalize_projection_type(&Type::TypeApp {
-                    constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([args[0].clone()]) }),
+            Type::Generic { name, args } if name.starts_with("::") && args.len() > 1 => self
+                .normalize_projection_type(&Type::TypeApp {
+                    constructor: Box::new(Type::Generic {
+                        name: name.clone(),
+                        args: List::from_iter([args[0].clone()]),
+                    }),
                     args: args.iter().skip(1).cloned().collect(),
-                })
-            }
+                }),
             Type::Generic { name, args } if name.as_str().starts_with("::") && args.len() == 1 => {
                 // This is a projection type - try to resolve it
                 let assoc_name = &name.as_str()[2..]; // Strip "::" prefix
@@ -8767,7 +9022,10 @@ impl ProtocolChecker {
         // Try protocol-based resolution first (doesn't require hardcoded type knowledge)
         let has_try = self.implements_protocol(ty, "Try");
         if trygate_trace() {
-            eprintln!("[trygate] resolve_try: implements_protocol(Try) = {}", has_try);
+            eprintln!(
+                "[trygate] resolve_try: implements_protocol(Try) = {}",
+                has_try
+            );
         }
         if has_try {
             let try_path = Path::single(verum_ast::ty::Ident::new("Try", Span::default()));
@@ -8778,14 +9036,16 @@ impl ProtocolChecker {
 
                 // Resolve Output associated type
                 let output = impl_
-                    .ordinary_associated_type(&"Output".into()).ok()?
+                    .ordinary_associated_type(&"Output".into())
+                    .ok()?
                     .cloned()
                     .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                     .or_else(|| self.try_find_associated_type(ty, &"Output".into()));
 
                 // Resolve Residual associated type
                 let residual = impl_
-                    .ordinary_associated_type(&"Residual".into()).ok()?
+                    .ordinary_associated_type(&"Residual".into())
+                    .ok()?
                     .cloned()
                     .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                     .or_else(|| self.try_find_associated_type(ty, &"Residual".into()));
@@ -8918,11 +9178,13 @@ impl ProtocolChecker {
                             let mut subst = Map::new();
                             self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
                             let output = impl_
-                                .ordinary_associated_type(&"Output".into()).ok()?
+                                .ordinary_associated_type(&"Output".into())
+                                .ok()?
                                 .cloned()
                                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
                             let residual = impl_
-                                .ordinary_associated_type(&"Residual".into()).ok()?
+                                .ordinary_associated_type(&"Residual".into())
+                                .ok()?
                                 .cloned()
                                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
                             if let (Some(output), Some(residual)) = (output, residual) {
@@ -9259,7 +9521,10 @@ impl ProtocolChecker {
                 eprintln!(
                     "[ctor-trace] ccr-row impl_for={} arg0={:?} for_match={}",
                     impl_for_type_normalized.to_text(),
-                    impl_.protocol_args.first().map(|a| self.normalize_variant_to_generic(a).to_text()),
+                    impl_
+                        .protocol_args
+                        .first()
+                        .map(|a| self.normalize_variant_to_generic(a).to_text()),
                     for_type_match.is_some()
                 );
             }
@@ -9376,18 +9641,17 @@ impl ProtocolChecker {
     ///
     /// Stdlib-agnostic: every input flows from the impl's own AST-
     /// derived metadata + the user's expected types at the call site.
-    fn where_clauses_satisfied_under(
-        &self,
-        impl_: &ProtocolImpl,
-        subst: &Map<Text, Type>,
-    ) -> bool {
+    fn where_clauses_satisfied_under(&self, impl_: &ProtocolImpl, subst: &Map<Text, Type>) -> bool {
         if impl_.where_clauses.is_empty() {
             return true;
         }
         for clause in impl_.where_clauses.iter() {
             let resolved_ty = self.apply_substitution(&clause.ty, subst);
-            let bounds: List<_> = clause.bounds.iter()
-                .map(|bound| self.substitute_protocol_bound(bound, subst)).collect();
+            let bounds: List<_> = clause
+                .bounds
+                .iter()
+                .map(|bound| self.substitute_protocol_bound(bound, subst))
+                .collect();
             if self.check_bounds(&resolved_ty, &bounds).is_err() {
                 return false;
             }
@@ -9451,9 +9715,7 @@ impl ProtocolChecker {
                 inner: Box::new(Self::canonicalize_never(inner)),
                 mutable: *mutable,
             },
-            Type::Tuple(items) => {
-                Type::Tuple(items.iter().map(Self::canonicalize_never).collect())
-            }
+            Type::Tuple(items) => Type::Tuple(items.iter().map(Self::canonicalize_never).collect()),
             _ => ty.clone(),
         }
     }
@@ -9632,7 +9894,8 @@ impl ProtocolChecker {
 
             // Extract associated types Item and IntoIter
             let item = impl_
-                .ordinary_associated_type(&"Item".into()).ok()?
+                .ordinary_associated_type(&"Item".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 // CRITICAL: Normalize projection types after substitution
@@ -9641,7 +9904,8 @@ impl ProtocolChecker {
                 .map(|t| self.normalize_projection_type(&t));
 
             let iter = impl_
-                .ordinary_associated_type(&"IntoIter".into()).ok()?
+                .ordinary_associated_type(&"IntoIter".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 .map(|t| self.normalize_projection_type(&t));
@@ -9754,7 +10018,8 @@ impl ProtocolChecker {
             // Extract associated type Output - use apply_type_substitution (not _with_map)
             // because the latter does not resolve deferred projection types (::Output[...]).
             if let Some(output) = impl_
-                .ordinary_associated_type(&"Output".into()).ok()?
+                .ordinary_associated_type(&"Output".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution(&t, &subst))
             {
@@ -9815,12 +10080,14 @@ impl ProtocolChecker {
 
             // Extract associated types Item and IntoIter
             let item = impl_
-                .ordinary_associated_type(&"Item".into()).ok()?
+                .ordinary_associated_type(&"Item".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
 
             let iter = impl_
-                .ordinary_associated_type(&"IntoAsyncIter".into()).ok()?
+                .ordinary_associated_type(&"IntoAsyncIter".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 .or_else(|| Some(ty.clone())); // Default: type is its own async iterator
@@ -9873,7 +10140,8 @@ impl ProtocolChecker {
             let target = match protocol_name {
                 "Ref" | "RefMut" => impl_.protocol_args.first(),
                 "Deref" | "DerefMut" => impl_
-                    .ordinary_associated_type(&verum_common::Text::from("Target")).ok()?,
+                    .ordinary_associated_type(&verum_common::Text::from("Target"))
+                    .ok()?,
                 _ => None,
             };
             let Some(target) = target else { continue };
@@ -9912,10 +10180,7 @@ impl ProtocolChecker {
     /// Accepting `guard[i]` in the typechecker while codegen indexes the
     /// guard itself turns a type error into a silently wrong value, so
     /// the two layers agree through this number.
-    pub fn resolve_index_with_hops(
-        &self,
-        ty: &Type,
-    ) -> Option<(IndexResolution, usize)> {
+    pub fn resolve_index_with_hops(&self, ty: &Type) -> Option<(IndexResolution, usize)> {
         if let Some(direct) = self.resolve_index_direct(ty) {
             return Some((direct, 0));
         }
@@ -10034,13 +10299,15 @@ impl ProtocolChecker {
 
             // Extract associated types Idx and Output
             let key = impl_
-                .ordinary_associated_type(&"Idx".into()).ok()?
+                .ordinary_associated_type(&"Idx".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 .unwrap_or(Type::Int); // Default to Int if not specified
 
             let output = impl_
-                .ordinary_associated_type(&"Output".into()).ok()?
+                .ordinary_associated_type(&"Output".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
 
@@ -10096,7 +10363,8 @@ impl ProtocolChecker {
 
             // Extract associated type Inner
             if let Some(inner) = impl_
-                .ordinary_associated_type(&"Inner".into()).ok()?
+                .ordinary_associated_type(&"Inner".into())
+                .ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
             {
@@ -10330,7 +10598,11 @@ impl ProtocolChecker {
         let key = (Text::from(constructor_name), Text::from(protocol_name));
         // Use a sentinel value (max usize) to indicate a registered HKT impl
         // without an actual impl index
-        self.impl_index.insert(key, usize::MAX);
+        let candidates = self.impl_index.entry(key).or_default();
+        if !candidates.contains(&usize::MAX) {
+            candidates.push(usize::MAX);
+            self.invalidate_impl_cache();
+        }
     }
 
     /// Check if type implements all required methods of a protocol
@@ -10448,10 +10720,15 @@ impl ProtocolChecker {
         // 4. Check required associated types
         for (assoc_name, assoc_type_def) in protocol_def.associated_types.iter() {
             if let Some(impl_assoc_type) = impl_.associated_types.get(assoc_name) {
-                if let Err(failure) = self.check_associated_assignment(impl_, assoc_name, impl_assoc_type) {
+                if let Err(failure) =
+                    self.check_associated_assignment(impl_, assoc_name, impl_assoc_type)
+                {
                     violations.push(ProtocolViolation::AssociatedTypeBoundViolation {
                         assoc_name: assoc_name.clone(),
-                        actual_type: failure.actual.unwrap_or_else(|| Type::Generic { name: format!("::{assoc_name}").into(), args: List::from_iter([impl_.for_type.clone()]) }),
+                        actual_type: failure.actual.unwrap_or_else(|| Type::Generic {
+                            name: format!("::{assoc_name}").into(),
+                            args: List::from_iter([impl_.for_type.clone()]),
+                        }),
                         unsatisfied_bound: failure.bound.unwrap_or(failure.reason),
                     });
                 }
@@ -10653,7 +10930,11 @@ impl ProtocolChecker {
                     // with WHAT. R3 answers `PeekableIter<ISize>` where the
                     // receiver is `Range<Int>`, so one of these maps `Self` to
                     // something that is neither the receiver nor the impl target.
-                    eprintln!("[selfsubst] site-10546 impl.for_type self={} recv={}", impl_.for_type.to_text(), ty.to_text());
+                    eprintln!(
+                        "[selfsubst] site-10546 impl.for_type self={} recv={}",
+                        impl_.for_type.to_text(),
+                        ty.to_text()
+                    );
                 }
                 subst_map.insert(Text::from("Self"), impl_.for_type.clone());
 
@@ -10709,7 +10990,11 @@ impl ProtocolChecker {
                     // with WHAT. R3 answers `PeekableIter<ISize>` where the
                     // receiver is `Range<Int>`, so one of these maps `Self` to
                     // something that is neither the receiver nor the impl target.
-                    eprintln!("[selfsubst] site-10595 impl.for_type self={} recv={}", impl_.for_type.to_text(), ty.to_text());
+                    eprintln!(
+                        "[selfsubst] site-10595 impl.for_type self={} recv={}",
+                        impl_.for_type.to_text(),
+                        ty.to_text()
+                    );
                 }
                 subst_map.insert(Text::from("Self"), impl_.for_type.clone());
 
@@ -10772,7 +11057,9 @@ impl ProtocolChecker {
             for proto_name in bounds.iter() {
                 if let Maybe::Some(proto) = self.get_protocol(proto_name) {
                     if let Some(pm) = proto.methods.get(method_name) {
-                        if let Ok(applied) = pm.apply_owner(&[], ty) { results.push(applied.ty); }
+                        if let Ok(applied) = pm.apply_owner(&[], ty) {
+                            results.push(applied.ty);
+                        }
                     }
                 }
             }
@@ -10806,20 +11093,29 @@ impl ProtocolChecker {
             // protocol method's `Self`/`Self.Item` references stay symbolic
             // and the call-site param-type unification fails.
             let mut self_subst: Map<Text, Type> = Map::new();
-                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
-                    // INSTRUMENT: which of the five `Self` bindings fires, and
-                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
-                    // receiver is `Range<Int>`, so one of these maps `Self` to
-                    // something that is neither the receiver nor the impl target.
-                    eprintln!("[selfsubst] site-10690 ty self={} recv={}", ty.to_text(), "<same>");
-                }
+            if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
+                // INSTRUMENT: which of the five `Self` bindings fires, and
+                // with WHAT. R3 answers `PeekableIter<ISize>` where the
+                // receiver is `Range<Int>`, so one of these maps `Self` to
+                // something that is neither the receiver nor the impl target.
+                eprintln!(
+                    "[selfsubst] site-10690 ty self={} recv={}",
+                    ty.to_text(),
+                    "<same>"
+                );
+            }
             self_subst.insert(Text::from("Self"), ty.clone());
 
             // Direct: method declared on the receiver's own protocol.
             if let Maybe::Some(proto) = self.get_protocol(recv_name) {
                 if let Some(pm) = proto.methods.get(method_name) {
-                    let arguments = match ty { Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(), _ => &[] };
-                    if let Ok(applied) = pm.apply_owner(arguments, ty) { results.push(applied.ty); }
+                    let arguments = match ty {
+                        Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(),
+                        _ => &[],
+                    };
+                    if let Ok(applied) = pm.apply_owner(arguments, ty) {
+                        results.push(applied.ty);
+                    }
                 }
             }
             // Sub-protocols: any protocol that `extends` this receiver
@@ -10851,7 +11147,9 @@ impl ProtocolChecker {
                 if extends_receiver {
                     if let Some(pm) = sub_proto.methods.get(method_name) {
                         // The receiver does not determine a generic sub-protocol's owner arguments.
-                        if let Ok(applied) = pm.apply_owner(&[], ty) { results.push(applied.ty); }
+                        if let Ok(applied) = pm.apply_owner(&[], ty) {
+                            results.push(applied.ty);
+                        }
                     }
                 }
             }
@@ -10900,7 +11198,11 @@ impl ProtocolChecker {
                     // with WHAT. R3 answers `PeekableIter<ISize>` where the
                     // receiver is `Range<Int>`, so one of these maps `Self` to
                     // something that is neither the receiver nor the impl target.
-                    eprintln!("[selfsubst] site-10772 impl.for_type self={} recv={}", impl_.for_type.to_text(), ty.to_text());
+                    eprintln!(
+                        "[selfsubst] site-10772 impl.for_type self={} recv={}",
+                        impl_.for_type.to_text(),
+                        ty.to_text()
+                    );
                 }
                 subst_map.insert(Text::from("Self"), impl_.for_type.clone());
 
@@ -11191,13 +11493,15 @@ impl ProtocolChecker {
                 verum_common::Text::from(format!("refined:{}", self.make_type_key(base)))
             }
             Var(_) => "var".into(),
-            Meta { name, ty, refinement, value } => {
-                // Keep scalar sort and concrete value in the index. Display
-                // names are diagnostic data, never concrete value identity.
-                let identity = value.as_ref().map_or_else(
-                    || format!("symbol:{name:?}"), |value| format!("value:{value:?}"),
-                );
-                format!("meta:{identity}:{refinement:?}:{}", self.make_type_key(ty)).into()
+            Meta {
+                ty,
+                refinement,
+                value,
+                ..
+            } => {
+                // Keep represented identity, scalar sort and domain in the
+                // index. Diagnostic spelling never identifies a value binder.
+                format!("meta:{value:?}:{refinement:?}:{}", self.make_type_key(ty)).into()
             }
             // Handle other Type variants
             Ownership { inner, .. } => {
@@ -11322,7 +11626,11 @@ impl ProtocolChecker {
                 verum_common::Text::from(format!("partial:{}", self.make_type_key(element_type)))
             }
             Interval => "I".into(),
-            RecordField { slot, receiver, level } => format!("record-field:{slot:?}:{receiver:?}:{level:?}").into(),
+            RecordField {
+                slot,
+                receiver,
+                level,
+            } => format!("record-field:{slot:?}:{receiver:?}:{level:?}").into(),
             Universe { level } => verum_common::Text::from(format!("universe:{}", level)),
             Prop => "Prop".into(),
             Inductive { name, .. } => verum_common::Text::from(format!("inductive:{}", name)),
@@ -11405,7 +11713,6 @@ impl ProtocolChecker {
         }
         key
     }
-
 
     /// Extract the simple protocol name from a path
     ///
@@ -11545,7 +11852,10 @@ impl ProtocolChecker {
             {
                 // Rule 3a: No generic methods
                 // Basic protocols with simple associated types (initial release) — 2 line 11663
-                if !type_params.is_empty() || !method.type_param_names.is_empty() || method.dispatch.is_some_and(|m| m.has_generics) {
+                if !type_params.is_empty()
+                    || !method.type_param_names.is_empty()
+                    || method.dispatch.is_some_and(|m| m.has_generics)
+                {
                     errors.push(ObjectSafetyError::GenericMethod {
                         method_name: method_name.clone(),
                     });
@@ -11584,21 +11894,29 @@ impl ProtocolChecker {
                 {
                     eprintln!(
                         "[objsafe] {}::{} receiver_kind={:?} params={} type_params={} -> {:?}",
-                        protocol_name, method_name, method.receiver_kind(),
-                        params.len(), type_params.len(), receiver
+                        protocol_name,
+                        method_name,
+                        method.receiver_kind(),
+                        params.len(),
+                        type_params.len(),
+                        receiver
                     );
                     eprintln!(
                         "[objsafe]   registration holds {} method(s): {}",
                         protocol.methods.len(),
-                        protocol.methods.iter()
+                        protocol
+                            .methods
+                            .iter()
                             .map(|(n, m)| format!(
                                 "{}(recv={:?},{}p{})",
-                                n, m.receiver_kind(),
+                                n,
+                                m.receiver_kind(),
                                 match &m.ty {
                                     Type::Function { params, .. } => params.len(),
                                     _ => 0,
                                 },
-                                if m.has_default { ",default" } else { "" }))
+                                if m.has_default { ",default" } else { "" }
+                            ))
                             .collect::<Vec<_>>()
                             .join(" ")
                     );
@@ -11621,7 +11939,9 @@ impl ProtocolChecker {
 
                 // Rule 3d: Must not return Self
                 // Basic protocols with simple associated types (initial release) — 2 line 11662
-                if method.dispatch.is_some_and(|m| m.returns_self) || self.type_contains_self(return_type) {
+                if method.dispatch.is_some_and(|m| m.returns_self)
+                    || self.type_contains_self(return_type)
+                {
                     errors.push(ObjectSafetyError::ReturnsSelf {
                         method_name: method_name.clone(),
                     });
@@ -11786,7 +12106,6 @@ impl ProtocolChecker {
         impl1: &ProtocolImpl,
         impl2: &ProtocolImpl,
     ) -> Result<(), CoherenceError> {
-
         // CRITICAL FIX: Check if protocol_args are different
         // Sub<Duration> and Sub<Instant> for the same type are NOT overlapping
         // because they have different type arguments
@@ -11948,9 +12267,20 @@ impl ProtocolChecker {
     /// Helper: Check if two types could unify (simple heuristic)
     fn types_could_unify(&self, ty1: &Type, ty2: &Type) -> bool {
         match (ty1, ty2) {
-            (Type::Meta { value: Some(left), ty: left_ty, .. },
-             Type::Meta { value: Some(right), ty: right_ty, .. }) => {
-                left == right && self.types_could_unify(left_ty, right_ty)
+            (
+                Type::Meta {
+                    value: crate::ty::ValueTerm::Constant(left),
+                    ty: left_ty,
+                    ..
+                },
+                Type::Meta {
+                    value: crate::ty::ValueTerm::Constant(right),
+                    ty: right_ty,
+                    ..
+                },
+            ) => {
+                crate::ty::same_constant_identity(left, right)
+                    && self.types_could_unify(left_ty, right_ty)
             }
             // An unevaluated value is not proof of disjointness.
             (Type::Meta { .. }, Type::Meta { .. }) => true,
@@ -11972,15 +12302,17 @@ impl ProtocolChecker {
                 // source locations. Comparing Debug text both allocated in
                 // this hot path and missed overlaps at different use sites.
                 let same_constructor = p1.segments.len() == p2.segments.len()
-                    && p1.segments.iter().zip(p2.segments.iter()).all(|(left, right)| {
-                        match (left, right) {
+                    && p1
+                        .segments
+                        .iter()
+                        .zip(p2.segments.iter())
+                        .all(|(left, right)| match (left, right) {
                             (
                                 verum_ast::ty::PathSegment::Name(left),
                                 verum_ast::ty::PathSegment::Name(right),
                             ) => left.name == right.name,
                             _ => left == right,
-                        }
-                    });
+                        });
                 if !same_constructor {
                     return false;
                 }
@@ -12483,7 +12815,9 @@ impl ProtocolChecker {
             Type::Interval => Type::Interval,
 
             Type::RecordField { .. } => ty.clone(),
-            Type::Universe { level } => Type::Universe { level: level.clone() },
+            Type::Universe { level } => Type::Universe {
+                level: level.clone(),
+            },
             Type::Prop => Type::Prop,
 
             Type::Inductive {
@@ -12703,13 +13037,15 @@ impl ProtocolChecker {
         // If no implementations found, return error
         if applicable.is_empty() {
             // Try exact match as fallback
-            if let Some(&idx) = self.impl_index.get(&(type_key, protocol_key)) {
-                return self.impls.get(idx).ok_or_else(|| {
-                    crate::advanced_protocols::AdvancedProtocolError::AmbiguousSpecialization {
-                        ty: ty.clone(),
-                        candidates: List::new(),
+            if let Some(candidates) = self.impl_index.get(&(type_key, protocol_key)) {
+                for index in candidates {
+                    if let Some(implementation) = self.impls.get(*index)
+                        && self.paths_equal(&implementation.protocol, protocol)
+                        && self.types_structurally_equal(&implementation.for_type, ty)
+                    {
+                        return Ok(implementation);
                     }
-                });
+                }
             }
             return Err(
                 crate::advanced_protocols::AdvancedProtocolError::AmbiguousSpecialization {
@@ -13260,12 +13596,17 @@ impl ProtocolChecker {
         for (assoc_name, assoc_type) in all_assoc_types.iter() {
             if let Some(impl_type) = impl_.associated_types.get(assoc_name) {
                 self.check_associated_assignment(impl_, assoc_name, impl_type)
-                    .map_err(|failure| ConformanceError::AssociatedTypeBoundNotSatisfied {
-                        assoc_type: assoc_name.clone(),
-                        bound: failure.bound.unwrap_or(failure.reason),
-                        actual_type: failure.actual.unwrap_or_else(|| Type::Generic { name: format!("::{assoc_name}").into(), args: List::from_iter([impl_.for_type.clone()]) }),
-                        span: impl_.span,
-                    })?;
+                    .map_err(
+                        |failure| ConformanceError::AssociatedTypeBoundNotSatisfied {
+                            assoc_type: assoc_name.clone(),
+                            bound: failure.bound.unwrap_or(failure.reason),
+                            actual_type: failure.actual.unwrap_or_else(|| Type::Generic {
+                                name: format!("::{assoc_name}").into(),
+                                args: List::from_iter([impl_.for_type.clone()]),
+                            }),
+                            span: impl_.span,
+                        },
+                    )?;
 
                 // Check variance compatibility
                 assoc_type
@@ -13275,7 +13616,6 @@ impl ProtocolChecker {
                         message: msg,
                         span: impl_.span,
                     })?;
-
             } else if assoc_type.default.is_none() {
                 // Associated type not provided and has no default
                 return Err(ConformanceError::MissingAssociatedType {
@@ -15118,13 +15458,20 @@ mod tests {
     #[test]
     fn protocol_rollback_restores_exact_predecessor_and_preserves_other_names() {
         let mut registry = ProtocolChecker::new_empty();
-        registry.register_protocol(rollback_protocol("Owner", ProtocolKind::Injectable)).unwrap();
-        let receipt = registry.register_protocol_with_receipt(
-            rollback_protocol("Owner", ProtocolKind::Constraint),
-        ).unwrap();
-        registry.register_protocol(rollback_protocol("Other", ProtocolKind::Constraint)).unwrap();
+        registry
+            .register_protocol(rollback_protocol("Owner", ProtocolKind::Injectable))
+            .unwrap();
+        let receipt = registry
+            .register_protocol_with_receipt(rollback_protocol("Owner", ProtocolKind::Constraint))
+            .unwrap();
+        registry
+            .register_protocol(rollback_protocol("Other", ProtocolKind::Constraint))
+            .unwrap();
         assert!(registry.restore_protocol_binding(receipt));
-        assert_eq!(registry.get_protocol(&"Owner".into()).unwrap().kind, ProtocolKind::Injectable);
+        assert_eq!(
+            registry.get_protocol(&"Owner".into()).unwrap().kind,
+            ProtocolKind::Injectable
+        );
         assert!(registry.has_protocol(&"Other".into()));
     }
 
@@ -15132,7 +15479,9 @@ mod tests {
     fn protocol_rollback_does_not_remove_a_later_identical_publication() {
         let mut registry = ProtocolChecker::new_empty();
         let protocol = rollback_protocol("Owner", ProtocolKind::Constraint);
-        let receipt = registry.register_protocol_with_receipt(protocol.clone()).unwrap();
+        let receipt = registry
+            .register_protocol_with_receipt(protocol.clone())
+            .unwrap();
         // Same contents still belong to another writer; structural equality is
         // not evidence that the failing group owns the current publication.
         registry.register_protocol(protocol).unwrap();
@@ -15143,14 +15492,17 @@ mod tests {
     #[test]
     fn protocol_rollback_does_not_resurrect_a_failed_superseded_publication() {
         let mut registry = ProtocolChecker::new_empty();
-        let first = registry.register_protocol_with_receipt(
-            rollback_protocol("Owner", ProtocolKind::Constraint),
-        ).unwrap();
-        let second = registry.register_protocol_with_receipt(
-            rollback_protocol("Owner", ProtocolKind::Injectable),
-        ).unwrap();
+        let first = registry
+            .register_protocol_with_receipt(rollback_protocol("Owner", ProtocolKind::Constraint))
+            .unwrap();
+        let second = registry
+            .register_protocol_with_receipt(rollback_protocol("Owner", ProtocolKind::Injectable))
+            .unwrap();
         assert!(!registry.restore_protocol_binding(first));
-        assert_eq!(registry.get_protocol(&"Owner".into()).unwrap().kind, ProtocolKind::Injectable);
+        assert_eq!(
+            registry.get_protocol(&"Owner".into()).unwrap().kind,
+            ProtocolKind::Injectable
+        );
         assert!(registry.restore_protocol_binding(second));
         assert!(!registry.has_protocol(&"Owner".into()));
     }
@@ -15228,9 +15580,17 @@ mod tests {
         let count = checker
             .get_implementations(&instant)
             .iter()
-            .filter(|i| i.protocol.as_ident().map(|id| id.as_str() == "Sub").unwrap_or(false))
+            .filter(|i| {
+                i.protocol
+                    .as_ident()
+                    .map(|id| id.as_str() == "Sub")
+                    .unwrap_or(false)
+            })
             .count();
-        assert_eq!(count, 2, "both Sub implementations must survive registration");
+        assert_eq!(
+            count, 2,
+            "both Sub implementations must survive registration"
+        );
 
         // And the imprecise question — the one the broken guard asked —
         // cannot tell them apart. Asserted so the distinction stays
@@ -15255,11 +15615,12 @@ mod tests {
         assert!(matches!(m, MethodSource::Explicit));
 
         // Round-trip in the reverse direction.
-        let canonical = verum_protocol_types::MethodSource::Default(
-            Text::from("Display"),
-        );
+        let canonical = verum_protocol_types::MethodSource::Default(Text::from("Display"));
         let aliased: MethodSource = canonical;
-        assert_eq!(aliased.kind(), verum_protocol_types::MethodSourceKind::Default);
+        assert_eq!(
+            aliased.kind(),
+            verum_protocol_types::MethodSourceKind::Default
+        );
     }
 
     /// Drift-pin: `ObjectSafetyErrorKind` is the discriminator
@@ -15291,10 +15652,7 @@ mod tests {
 
         // 3. from_name round-trips.
         for k in ObjectSafetyErrorKind::ALL {
-            assert_eq!(
-                ObjectSafetyErrorKind::from_name(k.meta().name),
-                Some(*k),
-            );
+            assert_eq!(ObjectSafetyErrorKind::from_name(k.meta().name), Some(*k),);
         }
         assert_eq!(ObjectSafetyErrorKind::from_name("nope"), None);
 
@@ -15590,9 +15948,8 @@ mod tests {
     /// surfaces here as a string-shape failure.
     #[test]
     fn meta_pin_unified_protocol_error_inner_kind_name() {
-        let p = UnifiedProtocolError::Protocol(ProtocolError::ProtocolNotFound {
-            name: "Eq".into(),
-        });
+        let p =
+            UnifiedProtocolError::Protocol(ProtocolError::ProtocolNotFound { name: "Eq".into() });
         assert_eq!(p.inner_kind_name(), "protocol/protocol_not_found");
 
         let c = UnifiedProtocolError::Conformance(ConformanceError::ProtocolNotFound {
@@ -16734,7 +17091,10 @@ mod tests {
             },
             where_clauses: List::new(),
             methods: Map::new(),
-            associated_types: impl_assoc_types.into_iter().map(|(name, ty)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
+            associated_types: impl_assoc_types
+                .into_iter()
+                .map(|(name, ty)| (name, AssociatedTypeAssignment::ordinary(ty)))
+                .collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("test".into()),
@@ -17557,20 +17917,32 @@ mod nominal_application_identity_tests {
     fn named(owner: &str, arguments: List<Type>) -> Type {
         Type::Named {
             path: Path {
-                segments: owner.split('.').map(|name| verum_ast::ty::PathSegment::Name(Ident::new(name, Span::default()))).collect(),
+                segments: owner
+                    .split('.')
+                    .map(|name| verum_ast::ty::PathSegment::Name(Ident::new(name, Span::default())))
+                    .collect(),
                 span: Span::default(),
             },
             args: arguments,
         }
     }
     fn generic(owner: &str, arguments: List<Type>) -> Type {
-        Type::Generic { name: owner.into(), args: arguments }
+        Type::Generic {
+            name: owner.into(),
+            args: arguments,
+        }
     }
     #[test]
     fn nominal_source_and_archive_forms_have_symmetric_exact_identity() {
         let checker = ProtocolChecker::new();
-        let source = named("a.Owner", List::from_iter([named("b.Item", List::from_iter([Type::Int]))]));
-        let archive = generic("a.Owner", List::from_iter([generic("b.Item", List::from_iter([Type::Int]))]));
+        let source = named(
+            "a.Owner",
+            List::from_iter([named("b.Item", List::from_iter([Type::Int]))]),
+        );
+        let archive = generic(
+            "a.Owner",
+            List::from_iter([generic("b.Item", List::from_iter([Type::Int]))]),
+        );
         assert!(checker.types_structurally_equal(&source, &archive));
         assert!(checker.types_structurally_equal(&archive, &source));
     }
@@ -17578,7 +17950,12 @@ mod nominal_application_identity_tests {
     fn cross_representation_identity_cannot_merge_owners_or_arguments() {
         let checker = ProtocolChecker::new();
         let source = named("a.Owner", List::from_iter([Type::Int]));
-        for other in [generic("b.Owner", List::from_iter([Type::Int])), generic("Owner", List::from_iter([Type::Int])), generic("a.Owner", List::from_iter([Type::Bool])), generic("a.Owner", List::new())] {
+        for other in [
+            generic("b.Owner", List::from_iter([Type::Int])),
+            generic("Owner", List::from_iter([Type::Int])),
+            generic("a.Owner", List::from_iter([Type::Bool])),
+            generic("a.Owner", List::new()),
+        ] {
             assert!(!checker.types_structurally_equal(&source, &other));
             assert!(!checker.types_structurally_equal(&other, &source));
         }
@@ -17587,11 +17964,31 @@ mod nominal_application_identity_tests {
     fn projection_and_relative_paths_are_not_nominal_identity_evidence() {
         let checker = ProtocolChecker::new();
         let source = named("Owner", List::from_iter([Type::Int]));
-        assert!(!checker.types_structurally_equal(&source, &generic("::Owner", List::from_iter([Type::Int]))));
+        assert!(
+            !checker.types_structurally_equal(
+                &source,
+                &generic("::Owner", List::from_iter([Type::Int]))
+            )
+        );
         let relative = Type::Named {
-            path: Path {segments: [verum_ast::ty::PathSegment::Relative, verum_ast::ty::PathSegment::Name(Ident::new("Owner", Span::default()))].into_iter().collect(), span: Span::default()},
+            path: Path {
+                segments: [
+                    verum_ast::ty::PathSegment::Relative,
+                    verum_ast::ty::PathSegment::Name(Ident::new("Owner", Span::default())),
+                ]
+                .into_iter()
+                .collect(),
+                span: Span::default(),
+            },
             args: List::from_iter([Type::Int]),
         };
-        assert!(!checker.types_structurally_equal(&relative, &generic("a.Owner", List::from_iter([Type::Int]))));
+        assert!(!checker.types_structurally_equal(
+            &relative,
+            &generic("a.Owner", List::from_iter([Type::Int]))
+        ));
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/protocol_query_identity.rs"]
+mod query_identity_tests;

@@ -598,29 +598,9 @@ impl Subtyping {
                     value: v2,
                 },
             ) => {
-                // Concrete values take precedence over names for subtyping checks,
-                // matching the unification behavior (see unify.rs). Two Metas with
-                // concrete compile-time values are in a subtype relation iff the
-                // values are equal.
-                match (v1, v2) {
-                    (Some(a), Some(b)) => {
-                        if a != b {
-                            return false;
-                        }
-                    }
-                    (Some(_), None) | (None, Some(_)) => {
-                        // A declaration parameter is an arbitrary fixed value,
-                        // not a call-local inference slot. Sharing its scalar
-                        // sort does not establish equality with a constant.
-                        return false;
-                    }
-                    (None, None) => {
-                        // Names must match (same meta parameter)
-                        if n1 != n2 {
-                            return false;
-                        }
-                    }
-                }
+                // Value identity is invariant. Only call instantiation can
+                // introduce inference slots; subtyping never solves them.
+                if v1 != v2 { return false; }
 
                 // Base types must be subtypes
                 if !self.is_subtype(t1, t2) {
