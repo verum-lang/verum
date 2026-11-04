@@ -9660,8 +9660,17 @@ impl TypeChecker {
         // CRITICAL FIX: Register generic type parameters BEFORE processing parameter/return types
         // This allows HKT parameters like F<_> to be resolved in fn map<F<_>: Functor>(x: F<A>)
         // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
+        let saved_parameters: Vec<_> = func.generics.iter().filter_map(|parameter| {
+            match &parameter.kind {
+                GenericParamKind::Type { name, .. } | GenericParamKind::HigherKinded { name, .. }
+                | GenericParamKind::KindAnnotated { name, .. } | GenericParamKind::Meta { name, .. }
+                | GenericParamKind::Const { name, .. } => Some(name.name.clone()),
+                _ => None,
+            }
+        }).map(|name| { let prior = self.ctx.type_defs.get(&name).cloned(); (name, prior) }).collect();
         self.ctx.enter_scope();
 
+        let signature = (|| -> Result<_> {
         for generic_param in &func.generics {
             match &generic_param.kind {
                 GenericParamKind::Type { name, bounds, .. } => {
@@ -9676,8 +9685,7 @@ impl TypeChecker {
 
                     // Register bounds if present
                     if !bounds.is_empty() {
-                        if let Ok(protocol_bounds) =
-                            self.convert_type_bounds_to_protocol_bounds(bounds)
+                        let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(tvar)))?;
                         {
                             // CRITICAL: Register bounds in type_var_bounds for auto-deref
                             self.register_type_var_bounds(tvar, protocol_bounds.clone());
@@ -9721,8 +9729,7 @@ impl TypeChecker {
 
                     // Register bounds if present (e.g., F<_>: Functor)
                     if !bounds.is_empty() {
-                        if let Ok(protocol_bounds) =
-                            self.convert_type_bounds_to_protocol_bounds(bounds)
+                        let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(tvar)))?;
                         {
                             // CRITICAL: Register bounds in type_var_bounds for auto-deref
                             self.register_type_var_bounds(tvar, protocol_bounds.clone());
@@ -9765,8 +9772,7 @@ impl TypeChecker {
 
                     // Register protocol bounds if present (e.g., F: Type -> Type + Functor)
                     if !bounds.is_empty() {
-                        if let Ok(protocol_bounds) =
-                            self.convert_type_bounds_to_protocol_bounds(bounds)
+                        let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(tvar)))?;
                         {
                             self.register_type_var_bounds(tvar, protocol_bounds.clone());
 
@@ -9780,6 +9786,10 @@ impl TypeChecker {
                             self.register_type_var_type_bound(tvar, bound);
                         }
                     }
+                }
+                GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
+                    let value = self.source_value_parameter(generic_param)?;
+                    self.ctx.define_type(name.name.clone(), value);
                 }
                 _ => {
                     // Other param kinds (Meta, Const, Lifetime) handled as needed
@@ -9826,7 +9836,14 @@ impl TypeChecker {
         self.record_explicit_method_vars(&mut declaration_slots, func);
         // Argument spellings belong to the caller, outside the declaration's
         // generic scope. Captured IDs still refer to this selected signature.
+        Ok((param_types?, final_return_type, properties, declaration_slots))
+        })();
         self.ctx.exit_scope();
+        for (name, prior) in saved_parameters.into_iter().rev() {
+            if let Some(ty) = prior { self.ctx.define_type(name, ty); }
+            else { self.ctx.remove_type(&name); }
+        }
+        let (param_types, final_return_type, properties, declaration_slots) = signature?;
         if let Some(arguments) = arguments.filter(|arguments| !arguments.is_empty()) {
             self.bind_explicit_method_arguments(
                 declaration_slots.explicit_method_vars.as_ref(), arguments, &func.name, func.span,
@@ -9834,7 +9851,7 @@ impl TypeChecker {
         }
 
         Ok(Type::function_with_properties(
-            param_types?,
+            param_types,
             final_return_type,
             properties,
         ))
@@ -13138,7 +13155,8 @@ with .to_float() or .to_int() (at {:?})",
         supers: &[verum_ast::Type],
     ) -> Result<List<crate::protocol::ProtocolBound>> {
         let bounds = Self::source_super_protocol_bounds(supers)?;
-        self.convert_type_bounds_to_protocol_bounds(&bounds)
+        let receiver = self.current_self_type.clone();
+        self.convert_type_bounds_for_receiver(&bounds, receiver.as_ref())
     }
 
     /// Convert AST type bounds to protocol bounds.
@@ -13150,6 +13168,14 @@ with .to_float() or .to_int() (at {:?})",
     pub(super) fn convert_type_bounds_to_protocol_bounds(
         &mut self,
         bounds: &[verum_ast::ty::TypeBound],
+    ) -> Result<List<crate::protocol::ProtocolBound>> {
+        self.convert_type_bounds_for_receiver(bounds, None)
+    }
+
+    pub(super) fn convert_type_bounds_for_receiver(
+        &mut self,
+        bounds: &[verum_ast::ty::TypeBound],
+        receiver: Option<&Type>,
     ) -> Result<List<crate::protocol::ProtocolBound>> {
         let mut protocol_bounds = List::new();
 
@@ -13236,11 +13262,12 @@ with .to_float() or .to_int() (at {:?})",
                             ))));
                         }
                     }
-                    // Simple protocol bound: T: Clone
+                    let resolved_protocol = resolved_protocol?;
+                    let arguments = self.protocol_application_arguments(&resolved_protocol, &[], receiver)?;
                     protocol_bounds.push(crate::protocol::ProtocolBound {
                         associated_types: Default::default(),
-                        protocol: resolved_protocol?,
-                        args: List::new(),
+                        protocol: resolved_protocol,
+                        args: arguments,
                         is_negative: false,
                     });
                 }
@@ -13257,10 +13284,12 @@ with .to_float() or .to_int() (at {:?})",
                     // This enables patterns like:
                     //  implement<T: Clone + !Copy> DeepClone for T { ... }
                     // which only applies to types that are Clone but NOT Copy.
+                    let protocol = self.resolve_protocol_reference(path)?;
+                    let arguments = self.protocol_application_arguments(&protocol, &[], receiver)?;
                     protocol_bounds.push(crate::protocol::ProtocolBound {
                         associated_types: Default::default(),
-                        protocol: self.resolve_protocol_reference(path)?,
-                        args: List::new(),
+                        protocol,
+                        args: arguments,
                         is_negative: true,
                     });
                 }
@@ -13279,14 +13308,14 @@ with .to_float() or .to_int() (at {:?})",
                     if let TypeKind::Generic { base, args } = &ty.kind {
                         if let TypeKind::Path(path) = &base.kind {
                             // Convert generic args to protocol bound args
-                            let mut bound_args = List::new();
+                            let protocol = self.resolve_protocol_reference(path)?;
+                            let positional: List<_> = args.iter()
+                                .filter(|arg| !matches!(arg, verum_ast::GenericArg::Binding(_)))
+                                .cloned().collect();
+                            let bound_args = self.protocol_application_arguments(&protocol, &positional, receiver)?;
                             let mut associated_types = Map::new();
                             for argument in args {
                                 match argument {
-                                    verum_ast::ty::GenericArg::Type(ty) => {
-                                        let ty = self.ast_to_type(ty)?;
-                                        bound_args.push(self.unifier.normalize_aliases(&ty));
-                                    }
                                     verum_ast::ty::GenericArg::Binding(binding) => {
                                         let ty = self.ast_to_type(&binding.ty)?;
                                         let ty = self.unifier.normalize_aliases(&ty);
@@ -13303,7 +13332,7 @@ with .to_float() or .to_int() (at {:?})",
                             }
                             protocol_bounds.push(crate::protocol::ProtocolBound {
                                 associated_types,
-                                protocol: self.resolve_protocol_reference(path)?,
+                                protocol,
                                 args: bound_args,
                                 is_negative: false,
                             });
@@ -13385,7 +13414,7 @@ with .to_float() or .to_int() (at {:?})",
     pub(super) fn convert_generic_params_to_type_params(
         &mut self,
         generics: &[verum_ast::ty::GenericParam],
-    ) -> List<crate::protocol::TypeParam> {
+    ) -> Result<List<crate::protocol::TypeParam>> {
         use verum_ast::ty::GenericParamKind;
 
         let mut type_params = List::new();
@@ -13398,9 +13427,9 @@ with .to_float() or .to_int() (at {:?})",
                     default,
                 } => {
                     // Convert bounds from TypeBound to ProtocolBound
+                    let receiver = self.ctx.lookup_type(name.name.as_str()).cloned();
                     let protocol_bounds = self
-                        .convert_type_bounds_to_protocol_bounds(bounds)
-                        .unwrap_or_else(|_| List::new());
+                        .convert_type_bounds_for_receiver(bounds, receiver.as_ref())?;
 
                     // Convert default type if present
                     let default_type = match default {
@@ -13420,9 +13449,9 @@ with .to_float() or .to_int() (at {:?})",
                 GenericParamKind::HigherKinded { name, bounds, .. } => {
                     // Higher-kinded type parameters like F<_>
                     // Convert bounds similarly
+                    let receiver = self.ctx.lookup_type(name.name.as_str()).cloned();
                     let protocol_bounds = self
-                        .convert_type_bounds_to_protocol_bounds(bounds)
-                        .unwrap_or_else(|_| List::new());
+                        .convert_type_bounds_for_receiver(bounds, receiver.as_ref())?;
 
                     type_params.push(crate::protocol::TypeParam {
                         name: verum_common::Text::from(name.name.as_str()),
@@ -13475,9 +13504,9 @@ with .to_float() or .to_int() (at {:?})",
                 GenericParamKind::KindAnnotated { name, bounds, .. } => {
                     // Kind-annotated HKT parameter: F: Type -> Type
                     // Treated like HigherKinded for protocol purposes.
+                    let receiver = self.ctx.lookup_type(name.name.as_str()).cloned();
                     let protocol_bounds = self
-                        .convert_type_bounds_to_protocol_bounds(bounds)
-                        .unwrap_or_else(|_| List::new());
+                        .convert_type_bounds_for_receiver(bounds, receiver.as_ref())?;
                     type_params.push(crate::protocol::TypeParam {
                         name: verum_common::Text::from(name.name.as_str()),
                         bounds: protocol_bounds,
@@ -13487,7 +13516,7 @@ with .to_float() or .to_int() (at {:?})",
             }
         }
 
-        type_params
+        Ok(type_params)
     }
 }
 

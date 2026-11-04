@@ -157,22 +157,40 @@ impl TypeChecker {
     /// frame. A runtime type PID exists only for ordinary type parameters.
     fn bind_semantic_value_parameters(&mut self, declaration: &TypeDecl) -> Result<()> {
         use verum_ast::ty::GenericParamKind;
-        if !declaration.generics.iter().any(|parameter| matches!(parameter.kind,
-                GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }))
-            || !verum_ast::source_signature::type_declaration_needs_semantic_carrier(declaration)
-                .map_err(|message| TypeError::UniverseBinding { message, span: declaration.span })?
-        {
-            return Ok(());
-        }
+        // Value roles are source semantics even when the declaration needs no
+        // additional archive carrier. Aliases must not publish an erased body.
         for parameter in &declaration.generics {
             if let GenericParamKind::Meta { name, ty, .. } | GenericParamKind::Const { name, ty } = &parameter.kind {
-                let base = self.ast_to_type(ty)?;
-                let value = Type::meta(name.name.clone(), base, None);
+                let value = self.source_value_parameter(parameter)?;
                 self.decl_param_frames.last_mut().expect("declaration parameter frame")
                     .insert(name.name.clone(), value);
             }
         }
         Ok(())
+    }
+
+    /// Alias application substitutes every declared slot in source order.
+    /// Filtering value parameters changes both arity and substitution identity.
+    fn register_source_alias_parameters(
+        &mut self,
+        name: &Text,
+        parameters: &List<verum_ast::ty::GenericParam>,
+    ) {
+        use verum_ast::ty::GenericParamKind;
+        let names: List<Text> = parameters.iter().map(|parameter| {
+            match &parameter.kind {
+                GenericParamKind::Type { name, .. }
+                | GenericParamKind::HigherKinded { name, .. }
+                | GenericParamKind::KindAnnotated { name, .. }
+                | GenericParamKind::Const { name, .. }
+                | GenericParamKind::Meta { name, .. }
+                | GenericParamKind::Context { name }
+                | GenericParamKind::Level { name } => name.name.clone(),
+                GenericParamKind::Lifetime { name } => name.name.clone(),
+            }
+        }).collect();
+        self.unifier.register_type_alias_params(self.declared_type_key(name.as_str()), names.clone());
+        self.unifier.register_type_alias_params(name.clone(), names);
     }
 
     /// Record constraints independently of the representation used for
@@ -574,7 +592,12 @@ impl TypeChecker {
         // Defaults share the declaration's lexical parameter frame and owner.
         // Imported signatures cannot postpone a missing name to the consumer.
         self.bind_semantic_value_parameters(type_decl)?;
-        self.record_type_param_defaults(type_name.as_str(), &type_decl.generics)?;
+        // Protocol defaults belong to their retained source telescope. They
+        // may name the selected receiver, which does not exist at declaration
+        // time; a nominal default cache cannot represent that obligation.
+        if !matches!(effective_body, TypeDeclBody::Protocol(_) | TypeDeclBody::Coinductive(_)) {
+            self.record_type_param_defaults(type_name.as_str(), &type_decl.generics)?;
+        }
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 // Register the type alias in the type context
@@ -592,25 +615,7 @@ impl TypeChecker {
 
                 // Register type parameter names in the unifier for generic alias expansion.
                 // This enables IoResult<Text> -> Result<Text, StreamError> during unification.
-                if !type_decl.generics.is_empty() {
-                    let alias_param_names: List<Text> = type_decl
-                        .generics
-                        .iter()
-                        .filter_map(|param| {
-                            use verum_ast::ty::GenericParamKind;
-                            match &param.kind {
-                                GenericParamKind::Type { name, .. } => Some(name.name.clone()),
-                                _ => None,
-                            }
-                        })
-                        .collect();
-                    self.unifier.register_type_alias_params(
-                        self.declared_type_key(type_name.as_str()),
-                        alias_param_names.clone(),
-                    );
-                    self.unifier
-                        .register_type_alias_params(type_name.clone(), alias_param_names);
-                }
+                self.register_source_alias_parameters(&type_name, &type_decl.generics);
 
                 // For type_defs, store a Named type reference (not the resolved type)
                 // This preserves the indirection needed for generic alias substitution
@@ -2216,10 +2221,11 @@ impl TypeChecker {
                 };
 
                 let protocol = crate::protocol::Protocol {
+                    source_parameters: Some(std::sync::Arc::new(type_decl.generics.clone())),
                     constraints: constraint_scope,
                     name: self.declared_type_key(type_name.as_str()),
                     kind,
-                    type_params: self.convert_generic_params_to_type_params(&type_decl.generics),
+                    type_params: self.convert_generic_params_to_type_params(&type_decl.generics)?,
                     methods: protocol_methods.clone(),
                     associated_types: protocol_assoc_types,
                     associated_consts: Map::new(),
@@ -2775,25 +2781,7 @@ impl TypeChecker {
                 self.unifier
                     .register_type_alias(type_name.clone(), resolved_type.clone());
                 // Register type parameter names for generic alias expansion in unifier
-                if !type_decl.generics.is_empty() {
-                    let alias_param_names: List<Text> = type_decl
-                        .generics
-                        .iter()
-                        .filter_map(|param| {
-                            use verum_ast::ty::GenericParamKind;
-                            match &param.kind {
-                                GenericParamKind::Type { name, .. } => Some(name.name.clone()),
-                                _ => None,
-                            }
-                        })
-                        .collect();
-                    self.unifier.register_type_alias_params(
-                        self.declared_type_key(type_name.as_str()),
-                        alias_param_names.clone(),
-                    );
-                    self.unifier
-                        .register_type_alias_params(type_name.clone(), alias_param_names);
-                }
+                self.register_source_alias_parameters(&type_name, &type_decl.generics);
                 // For type_defs, store a Named type reference (not the resolved type)
                 // This preserves the indirection needed for generic alias substitution
                 let named_type = Type::Named {
@@ -3835,10 +3823,11 @@ impl TypeChecker {
                 };
 
                 let protocol = crate::protocol::Protocol {
+                    source_parameters: Some(std::sync::Arc::new(type_decl.generics.clone())),
                     constraints: constraint_scope,
                     name: self.declared_type_key(type_name.as_str()),
                     kind,
-                    type_params: self.convert_generic_params_to_type_params(&type_decl.generics),
+                    type_params: self.convert_generic_params_to_type_params(&type_decl.generics)?,
                     methods: protocol_methods.clone(),
                     associated_types: protocol_assoc_types,
                     associated_consts: Map::new(),
@@ -5008,10 +4997,11 @@ impl TypeChecker {
 
         // Register protocol
         let protocol = crate::protocol::Protocol {
+            source_parameters: Some(std::sync::Arc::new(proto_decl.generics.clone())),
             constraints: constraint_scope,
             name: self.declared_type_key(type_name.as_str()),
             kind,
-            type_params: self.convert_generic_params_to_type_params(&proto_decl.generics),
+            type_params: self.convert_generic_params_to_type_params(&proto_decl.generics)?,
             methods: protocol_methods,
             associated_types,
             associated_consts: verum_common::Map::new(),
@@ -5252,15 +5242,15 @@ impl TypeChecker {
                     // For const generics like `const SIZE: Int`, register them as their declared type.
                     // This prevents "type not found" errors when used in type arguments like StackAllocator<SIZE>.
                     let name_text: Text = name.name.clone();
-                    let const_type = self.ast_to_type(ty).unwrap_or(Type::Int);
-                    self.ctx.define_type(name_text.clone(), const_type);
+                    let value_type = self.source_value_parameter(generic_param)?;
+                    self.ctx.define_type(name_text.clone(), value_type);
                     type_param_names.push(name_text);
                 }
                 GenericParamKind::Meta { name, ty, .. } => {
                     // For meta parameters like `N: meta usize`, similar handling as const generics
                     let name_text: Text = name.name.clone();
-                    let meta_type = self.ast_to_type(ty).unwrap_or(Type::Int);
-                    self.ctx.define_type(name_text.clone(), meta_type);
+                    let value_type = self.source_value_parameter(generic_param)?;
+                    self.ctx.define_type(name_text.clone(), value_type);
                     type_param_names.push(name_text);
                 }
                 _ => {}
@@ -6062,6 +6052,8 @@ impl TypeChecker {
                     let self_type = resolved_self_type;
                     let previous_self_type = self.current_self_type.clone();
                     self.set_current_self_type(Maybe::Some(self_type));
+                    let preparation = (|| -> Result<()> {
+
 
                     for item in &impl_decl.items {
                         if let ImplItemKind::Function(func) = &item.kind {
@@ -6553,8 +6545,7 @@ impl TypeChecker {
                                     self.ctx.lookup_type(name_text.as_str()).cloned();
                                 if let Some(type_var) = type_var_opt {
                                     // Convert bounds to protocol bounds
-                                    if let Ok(protocol_bounds) =
-                                        self.convert_type_bounds_to_protocol_bounds(bounds)
+                                    let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&type_var))?;
                                     {
                                         impl_where_clauses.push(crate::protocol::WhereClause {
                                             ty: type_var.clone(),
@@ -6700,23 +6691,10 @@ impl TypeChecker {
 
                     // CRITICAL FIX: Resolve protocol type arguments (e.g., Result<Never, E> in FromResidual<Result<Never, E>>)
                     // This is essential for protocol matching in ? operator desugaring
-                    let resolved_protocol_args: List<Type> = protocol_args
-                        .iter()
-                        .filter_map(|arg| {
-                            use verum_ast::ty::GenericArg;
-                            match arg {
-                                GenericArg::Type(ty) => Some(
-                                    self.ast_to_type(ty)
-                                        .unwrap_or_else(|_| self.ast_to_type_lenient(ty)),
-                                ),
-                                GenericArg::Const(_)
-                                | GenericArg::Lifetime(_)
-                                | GenericArg::Binding(_) => None,
-                            }
-                        })
-                        .collect();
-                    let resolved_protocol_args = resolved_protocol_args.iter()
-                        .map(|arg| self.unifier.normalize_aliases(arg)).collect();
+                    let resolved_protocol_args = self.protocol_application_arguments(
+                        &verum_ast::Path { span: protocol.span, ..Self::text_to_path(&protocol_identity) },
+                        protocol_args, Some(&for_type_resolved),
+                    )?;
 
                     // Process where clause for additional function type bounds.
                     // This captures bounds like `F: Fn(I.Item) -> U` from where clauses
@@ -6734,9 +6712,8 @@ impl TypeChecker {
                                             self.ctx.lookup_type(param_name.as_str()).cloned()
                                         {
                                             // Add where clause to impl_where_clauses
-                                            if let Ok(protocol_bounds) =
-                                                self.convert_type_bounds_to_protocol_bounds(bounds)
-                                            {
+                                            let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&type_var))?;
+                                    {
                                                 impl_where_clauses.push(
                                                     crate::protocol::WhereClause {
                                                         ty: type_var.clone(),
@@ -6796,8 +6773,10 @@ impl TypeChecker {
                     let publication = self.protocol_checker.write().register_source_impl(
                         &self.current_module_path, impl_decl, protocol_impl,
                     );
+                    publication
+                    })();
                     self.set_current_self_type(previous_self_type);
-                    publication?;
+                    preparation?;
                 }
         Ok(())
     }
@@ -6845,9 +6824,9 @@ impl TypeChecker {
         func: &verum_ast::FunctionDecl,
         protocol_bounds_out: &mut Map<TypeVar, List<crate::protocol::ProtocolBound>>,
         type_bounds_out: &mut Map<TypeVar, List<Type>>,
-    ) {
+    ) -> Result<()> {
         let Some(ref where_clause) = func.generic_where_clause else {
-            return;
+            return Ok(());
         };
         for predicate in &where_clause.predicates {
             use verum_ast::ty::WherePredicateKind;
@@ -6866,8 +6845,8 @@ impl TypeChecker {
             else {
                 continue;
             };
-            if let Ok(protocol_bounds) = self.convert_type_bounds_to_protocol_bounds(bounds)
-                && !protocol_bounds.is_empty()
+            let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(tvar)))?;
+            if !protocol_bounds.is_empty()
             {
                 // MERGE, never replace: `fn f<T: Clone>(…) where T: Ord` is
                 // one parameter carrying both, and dropping either half
@@ -6882,6 +6861,7 @@ impl TypeChecker {
                 type_bounds_out.entry(tvar).or_default().extend(type_bounds);
             }
         }
+        Ok(())
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
@@ -7059,17 +7039,16 @@ impl TypeChecker {
 
 
                 }
-                GenericParamKind::Meta { name, ty, .. } => {
+                GenericParamKind::Meta { name, ty, .. } | GenericParamKind::Const { name, ty } => {
                     // Meta (const generic) parameters are compile-time values.
                     // Create a fresh TypeVar so they are included in the scheme's vars list,
                     // allowing explicit type arguments `foo<N>(args)` to bind meta values.
                     let fresh_var = TypeVar::fresh();
-                    let meta_type = self.ast_to_type(ty)?;
+                    let meta_type = self.source_value_parameter(generic_param)?;
                     let name_text: Text = name.name.clone();
                     saved_types
                         .push((name_text.clone(), self.ctx.lookup_type(&name_text).cloned()));
-                    // Define the meta param as its underlying type (e.g., Int)
-                    // so that references to N in the function body resolve correctly
+                    // Preserve the declared value role in signature bounds.
                     self.ctx.define_type(name_text.clone(), meta_type);
                     type_param_names.push(name_text);
                     type_param_vars.push(fresh_var);
@@ -7095,7 +7074,8 @@ impl TypeChecker {
             let Some(Type::Var(var)) = self.ctx.lookup_type(name.name.as_str()).cloned() else {
                 continue;
             };
-            if let Ok(protocol_bounds) = self.convert_type_bounds_to_protocol_bounds(bounds) {
+            let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(var)))?;
+            {
                 if !protocol_bounds.is_empty() {
                     param_protocol_bounds.insert(var, protocol_bounds);
                 }
@@ -7114,7 +7094,7 @@ impl TypeChecker {
             func,
             &mut param_protocol_bounds,
             &mut param_type_bounds,
-        );
+        )?;
 
         // Build parameter types
         let param_types: Result<List<_>> = func
@@ -7337,9 +7317,9 @@ impl TypeChecker {
                         implicit_type_vars.insert(fresh_var);
                     }
                 }
-                GenericParamKind::Meta { name, ty, .. } => {
+                GenericParamKind::Meta { name, ty, .. } | GenericParamKind::Const { name, ty } => {
                     let fresh_var = TypeVar::fresh();
-                    let meta_type = self.ast_to_type(ty)?;
+                    let meta_type = self.source_value_parameter(generic_param)?;
                     let name_text: Text = name.name.clone();
                     saved_types
                         .push((name_text.clone(), self.ctx.lookup_type(&name_text).cloned()));
@@ -7541,19 +7521,10 @@ impl TypeChecker {
 
                     type_param_names.push(name_text);
                 }
-                GenericParamKind::Meta { name, .. } => {
-                    // Meta parameters (compile-time values) need type variables too.
-                    // E.g., implement<D: meta USize{D > 0}, N: meta USize{N > 0}> StateSpaceKernel<D, N>
-                    let type_var = Type::Var(TypeVar::fresh());
-                    let name_text: Text = name.name.clone();
-                    self.ctx.define_type(name_text.clone(), type_var);
-                    type_param_names.push(name_text);
-                }
-                GenericParamKind::Const { name, ty } => {
-                    // Const generic parameters need type registration too.
-                    let name_text: Text = name.name.clone();
-                    let const_type = self.ast_to_type(ty).unwrap_or(Type::Int);
-                    self.ctx.define_type(name_text.clone(), const_type);
+                GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
+                    let value_type = self.source_value_parameter(generic_param)?;
+                    let name_text = name.name.clone();
+                    self.ctx.define_type(name_text.clone(), value_type);
                     type_param_names.push(name_text);
                 }
                 _ => {} // Lifetime, Context, Level params handled elsewhere
@@ -7842,7 +7813,7 @@ impl TypeChecker {
     }
 
     /// Conformance requires the actual declaration behind the resolved path.
-    fn resolve_protocol_conformance_identity(
+    pub(super) fn resolve_protocol_conformance_identity(
         &mut self,
         protocol: &verum_ast::Path,
     ) -> Result<Text> {

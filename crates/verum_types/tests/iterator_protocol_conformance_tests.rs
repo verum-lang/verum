@@ -65,6 +65,7 @@ fn register_iterator_protocol(checker: &mut ProtocolChecker) {
     associated_types.insert("Item".into(), item_assoc);
 
     let protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         name: "Iterator".into(),
         kind: ProtocolKind::Constraint,

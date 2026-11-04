@@ -1554,6 +1554,14 @@ fn substitute_refinement_binder(
     }
 
     fn ast_to_generic_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        self.apply_generic_type_arguments(ast_ty, None)
+    }
+
+    pub(super) fn apply_generic_type_arguments(
+        &mut self,
+        ast_ty: &verum_ast::ty::Type,
+        elaborated: Option<List<Type>>,
+    ) -> Result<Type> {
         use verum_ast::ty::TypeKind;
         let TypeKind::Generic { base, args } = &ast_ty.kind
             else { unreachable!() };
@@ -1588,6 +1596,9 @@ fn substitute_refinement_binder(
                 let mut type_args: List<Type> = List::new();
                 let mut lifetime_args: List<verum_common::Text> = List::new();
 
+                if let Some(arguments) = elaborated {
+                    type_args = arguments;
+                } else {
                 for arg in args {
                     use verum_ast::ty::GenericArg;
                     match arg {
@@ -1640,6 +1651,8 @@ fn substitute_refinement_binder(
                             type_args.push(arg_ty);
                         }
                     }
+                }
+
                 }
 
                 // Validate and default arguments using the registration selected

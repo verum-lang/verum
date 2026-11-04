@@ -781,6 +781,7 @@ mod tests {
 
         // Register Iterator protocol with Item associated type
         let iterator_proto = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Iterator".into(),
             kind: crate::protocol::ProtocolKind::Constraint,

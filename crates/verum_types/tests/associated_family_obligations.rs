@@ -10,18 +10,18 @@ fn errors(source: &str) -> Vec<String> {
     let mut errors: Vec<String> = checker
         .prepare_module_declarations(&module)
         .iter()
-        .map(|error| error.to_string())
+        .map(|error| format!("{:?}", error.to_diagnostic()))
         .collect();
     for item in &module.items {
         if let Err(error) = checker.check_item(item) {
-            errors.push(error.to_string());
+            errors.push(format!("{:?}", error.to_diagnostic()));
         }
     }
     errors.extend(
         checker
             .take_deferred_errors()
             .iter()
-            .map(|error| error.to_string()),
+            .map(|error| format!("{:?}", error.to_diagnostic())),
     );
     errors.extend(
         checker
@@ -346,5 +346,5 @@ fn refined_value_protocol_is_not_an_empty_constraint_scope() {
     "#,
     );
     assert!(diagnostics.iter().any(|error| error.contains("E405")
-        && error.contains("universal protocol constraints")), "{diagnostics:#?}");
+        && error.contains("refined protocol values") && error.contains("refinement witness")), "{diagnostics:#?}");
 }

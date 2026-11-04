@@ -427,6 +427,9 @@ pub enum ProtocolConstraints {
 
 #[derive(Debug, Clone)]
 pub struct Protocol {
+    /// The declaration's positional kind/default/span authority. Typed parameter
+    /// projections cannot recover a missing source roster.
+    pub source_parameters: Option<Arc<List<verum_ast::ty::GenericParam>>>,
     /// Declaration-owned variables and constraints; absence is not proof of an empty telescope.
     pub constraints: ProtocolConstraints,
     /// Protocol name
@@ -2282,6 +2285,7 @@ impl ProtocolChecker {
 
         // Eq protocol
         let eq = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Eq".into(),
             kind: ProtocolKind::Constraint,
@@ -2350,6 +2354,7 @@ impl ProtocolChecker {
         // KNOW them — an impl of an unregistered protocol has nothing
         // to attach to.
         let partial_eq = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "PartialEq".into(),
             kind: ProtocolKind::Constraint,
@@ -2384,6 +2389,7 @@ impl ProtocolChecker {
         self.derivable.insert("PartialEq".into());
 
         let partial_ord = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "PartialOrd".into(),
             kind: ProtocolKind::Constraint,
@@ -2443,6 +2449,7 @@ impl ProtocolChecker {
             variants
         });
         let ord = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Ord".into(),
             kind: ProtocolKind::Constraint,
@@ -2499,6 +2506,7 @@ impl ProtocolChecker {
 
         // Show protocol (for display/debug)
         let show = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Show".into(),
             kind: ProtocolKind::Constraint,
@@ -2536,6 +2544,7 @@ impl ProtocolChecker {
 
         // Functor protocol
         let functor = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Functor".into(),
             kind: ProtocolKind::Constraint,
@@ -2586,6 +2595,7 @@ impl ProtocolChecker {
 
         // Iterator protocol
         let iterator = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Iterator".into(),
             kind: ProtocolKind::Constraint,
@@ -2631,6 +2641,7 @@ impl ProtocolChecker {
         // Concurrency model: structured concurrency with nurseries, async/await, channels, Send/Sync protocol bounds — Section 12 - AsyncIterator protocol
         // Grammar: grammar/verum.ebnf - for_await_loop consumes AsyncIterator<Item = T>
         let async_iterator = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "AsyncIterator".into(),
             kind: ProtocolKind::Constraint,
@@ -2699,6 +2710,7 @@ impl ProtocolChecker {
         // Hash protocol: fn hash(&self, hasher: &mut Hasher) for use in Map/Set, must be consistent with Eq
         // Protocol signature: fn hash(&self, hasher: &mut Hasher)
         let hash = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Hash".into(),
             kind: ProtocolKind::Constraint,
@@ -2749,6 +2761,7 @@ impl ProtocolChecker {
         // Clone protocol
         // Clone protocol: deep copy semantics via fn clone(&self) -> Self, opt-in via @derive(Clone)
         let clone = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Clone".into(),
             kind: ProtocolKind::Constraint,
@@ -2790,6 +2803,7 @@ impl ProtocolChecker {
         // Default protocol
         // Default protocol: fn default() -> Self for zero/empty/identity value construction
         let default = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Default".into(),
             kind: ProtocolKind::Constraint,
@@ -2834,6 +2848,7 @@ impl ProtocolChecker {
         // Deref protocol
         // Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .4.1 - Deref protocol for smart pointers
         let deref = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Deref".into(),
             kind: ProtocolKind::Constraint,
@@ -2884,6 +2899,7 @@ impl ProtocolChecker {
         // DerefMut protocol
         // Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .4.2 - DerefMut extends Deref
         let deref_mut = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "DerefMut".into(),
             kind: ProtocolKind::Constraint,
@@ -2943,6 +2959,7 @@ impl ProtocolChecker {
         // LendingIterator protocol (with GAT)
         // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 lines 143-193
         let lending_iterator = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "LendingIterator".into(),
             kind: ProtocolKind::Constraint,
@@ -2991,6 +3008,7 @@ impl ProtocolChecker {
         // StreamingIterator protocol (with GAT)
         // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 lines 196-242
         let streaming_iterator = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "StreamingIterator".into(),
             kind: ProtocolKind::Constraint,
@@ -3059,6 +3077,7 @@ impl ProtocolChecker {
         // Functor with GAT (higher-kinded type)
         // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 lines 410-437
         let functor_gat = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "FunctorGAT".into(),
             kind: ProtocolKind::Constraint,
@@ -3120,6 +3139,7 @@ impl ProtocolChecker {
         // Monad with GAT
         // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 lines 116-142
         let monad_gat = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "MonadGAT".into(),
             kind: ProtocolKind::Constraint,
@@ -3198,6 +3218,7 @@ impl ProtocolChecker {
         // Try protocol - enables the ? operator
         // Protocol-based Try resolution: ? operator uses Carrier protocol to convert between error types
         let try_protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Try".into(),
             kind: ProtocolKind::Constraint,
@@ -3269,6 +3290,7 @@ impl ProtocolChecker {
         // FromResidual protocol - enables error type conversion in ? chains
         // Protocol-based Try resolution: ? operator uses Carrier protocol to convert between error types
         let from_residual = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "FromResidual".into(),
             kind: ProtocolKind::Constraint,
@@ -3313,6 +3335,7 @@ impl ProtocolChecker {
 
         // BitAnd protocol (&)
         let bitand = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "BitAnd".into(),
             kind: ProtocolKind::Constraint,
@@ -3359,6 +3382,7 @@ impl ProtocolChecker {
 
         // BitOr protocol (|)
         let bitor = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "BitOr".into(),
             kind: ProtocolKind::Constraint,
@@ -3405,6 +3429,7 @@ impl ProtocolChecker {
 
         // BitXor protocol (^)
         let bitxor = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "BitXor".into(),
             kind: ProtocolKind::Constraint,
@@ -3451,6 +3476,7 @@ impl ProtocolChecker {
 
         // Shl protocol (<<)
         let shl = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Shl".into(),
             kind: ProtocolKind::Constraint,
@@ -3497,6 +3523,7 @@ impl ProtocolChecker {
 
         // Shr protocol (>>)
         let shr = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Shr".into(),
             kind: ProtocolKind::Constraint,
@@ -3547,6 +3574,7 @@ impl ProtocolChecker {
         // Valid SimdElement types: Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64,
         // Float32, Float64, and Bool.
         let simd_element = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "SimdElement".into(),
             kind: ProtocolKind::Constraint, // Marker protocol (constraint with no methods)
@@ -3566,6 +3594,7 @@ impl ProtocolChecker {
         // Marks types that support numeric operations (add, sub, mul, div).
         // Used for SIMD type bounds: Vec<T: SimdElement + Numeric, N>
         let numeric = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Numeric".into(),
             kind: ProtocolKind::Constraint, // Marker protocol (constraint with no methods)
@@ -5488,7 +5517,15 @@ impl ProtocolChecker {
         // Stage 1: Try exact match first
         if let Some(&idx) = self.impl_index.get(&(type_key, exact_key)) {
             if let Some(impl_) = self.impls.get(idx) {
-                if self.check_where_clauses_satisfied(&impl_.where_clauses, &Map::new()) {
+                let exact_arguments = args.is_none_or(|args| {
+                    impl_.protocol_args.len() == args.len()
+                        && impl_.protocol_args.iter().zip(args)
+                            .all(|(expected, actual)| self.types_structurally_equal(expected, actual))
+                });
+                if exact_arguments
+                    && self.types_structurally_equal(&impl_.for_type, ty)
+                    && self.check_where_clauses_satisfied(&impl_.where_clauses, &Map::new())
+                {
                     return Maybe::Some((impl_, Map::new()));
                 }
             }
@@ -5658,6 +5695,15 @@ impl ProtocolChecker {
     /// On success, the substitution map contains bindings for type variables.
     fn unify_types(&self, pattern: &Type, concrete: &Type, subst: &mut Map<Text, Type>) -> bool {
         match (pattern, concrete) {
+            // A value argument is not its runtime carrier. Only an exact
+            // represented value can discharge a concrete value obligation.
+            (Type::Meta { value: Some(left), ty: left_ty, refinement: left_ref, .. },
+             Type::Meta { value: Some(right), ty: right_ty, refinement: right_ref, .. }) => {
+                left == right && left_ref == right_ref
+                    && self.types_structurally_equal(left_ty, right_ty)
+            }
+            (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
+
             // Type variable matches anything and records the binding
             (Type::Var(tv), _) => {
                 let var_name: Text = format!("T{}", tv.id()).into();
@@ -10987,8 +11033,13 @@ impl ProtocolChecker {
                 verum_common::Text::from(format!("refined:{}", self.make_type_key(base)))
             }
             Var(_) => "var".into(),
-            Meta { name, ty, .. } => {
-                verum_common::Text::from(format!("meta:{}:{}", name, self.make_type_key(ty)))
+            Meta { name, ty, refinement, value } => {
+                // Keep scalar sort and concrete value in the index. Display
+                // names are diagnostic data, never concrete value identity.
+                let identity = value.as_ref().map_or_else(
+                    || format!("symbol:{name:?}"), |value| format!("value:{value:?}"),
+                );
+                format!("meta:{identity}:{refinement:?}:{}", self.make_type_key(ty)).into()
             }
             // Handle other Type variants
             Ownership { inner, .. } => {
@@ -11587,7 +11638,7 @@ impl ProtocolChecker {
                 .protocol_args
                 .iter()
                 .zip(impl2.protocol_args.iter())
-                .any(|(arg1, arg2)| self.types_could_unify(arg1, arg2));
+                .all(|(arg1, arg2)| self.types_could_unify(arg1, arg2));
             if !args_could_unify {
                 return Ok(()); // Different protocol_args means no overlap
             }
@@ -11739,6 +11790,13 @@ impl ProtocolChecker {
     /// Helper: Check if two types could unify (simple heuristic)
     fn types_could_unify(&self, ty1: &Type, ty2: &Type) -> bool {
         match (ty1, ty2) {
+            (Type::Meta { value: Some(left), ty: left_ty, .. },
+             Type::Meta { value: Some(right), ty: right_ty, .. }) => {
+                left == right && self.types_could_unify(left_ty, right_ty)
+            }
+            // An unevaluated value is not proof of disjointness.
+            (Type::Meta { .. }, Type::Meta { .. }) => true,
+
             // Type variables can unify with anything
             (Type::Var(_), _) | (_, Type::Var(_)) => true,
 
@@ -14899,6 +14957,7 @@ mod tests {
 
     fn rollback_protocol(name: &str, kind: ProtocolKind) -> Protocol {
         Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: name.into(),
             kind,
@@ -15627,6 +15686,7 @@ mod tests {
     #[test]
     fn test_protocol_with_specialization_info() {
         let proto = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Specialized".into(),
             kind: ProtocolKind::Constraint,
@@ -15871,6 +15931,7 @@ mod tests {
         };
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Container".into(),
             kind: ProtocolKind::Constraint,
@@ -15930,6 +15991,7 @@ mod tests {
         };
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Container".into(),
             kind: ProtocolKind::Constraint,
@@ -15983,6 +16045,7 @@ mod tests {
         );
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Show".into(),
             kind: ProtocolKind::Constraint,
@@ -16045,6 +16108,7 @@ mod tests {
         );
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Eq".into(),
             kind: ProtocolKind::Constraint,
@@ -16110,6 +16174,7 @@ mod tests {
         );
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Iterator".into(),
             kind: ProtocolKind::Constraint,
@@ -16183,6 +16248,7 @@ mod tests {
         );
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "ToText".into(),
             kind: ProtocolKind::Constraint,
@@ -16249,6 +16315,7 @@ mod tests {
         );
 
         let eq_protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Eq".into(),
             kind: ProtocolKind::Constraint,
@@ -16281,6 +16348,7 @@ mod tests {
         );
 
         let ord_protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Ord".into(),
             kind: ProtocolKind::Constraint,
@@ -16357,6 +16425,7 @@ mod tests {
 
         // For testing, we need to set up protocol_methods with defaults
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Validator".into(),
             kind: ProtocolKind::Constraint,
@@ -16389,6 +16458,7 @@ mod tests {
         validator_methods.insert("validate".into(), validate_method);
 
         let validator_protocol_updated = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Validator".into(),
             kind: ProtocolKind::Constraint,
@@ -16450,6 +16520,7 @@ mod tests {
         );
 
         let clone_protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Clone".into(),
             kind: ProtocolKind::Constraint,
@@ -16485,6 +16556,7 @@ mod tests {
         associated_types.insert("Element".into(), assoc_type);
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Container".into(),
             kind: ProtocolKind::Constraint,
@@ -16657,6 +16729,7 @@ mod tests {
         associated_types.insert("Output".into(), assoc_type);
 
         let protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Processor".into(),
             kind: ProtocolKind::Constraint,
@@ -16713,6 +16786,7 @@ mod tests {
         );
 
         let eq_protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Eq".into(),
             kind: ProtocolKind::Constraint,
@@ -16767,6 +16841,7 @@ mod tests {
         );
 
         let ord_protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Ord".into(),
             kind: ProtocolKind::Constraint,
@@ -16841,6 +16916,7 @@ mod tests {
             ProtocolMethod::simple("show".into(), show_method_ty, false),
         );
         let show_protocol = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: "Show".into(),
             kind: ProtocolKind::Constraint,
@@ -17089,6 +17165,7 @@ mod tests {
         // Register a protocol declared in a foreign cog.
         let proto_name = "OrphanRuleProto";
         let proto = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: proto_name.into(),
             kind: ProtocolKind::Constraint,

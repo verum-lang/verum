@@ -200,7 +200,9 @@ pub(super) fn checked_scalar_expression(
     expression: &Expr,
     resolve: &mut impl FnMut(&Expr) -> CodegenResult<Option<i64>>,
 ) -> CodegenResult<i64> {
-    validate_scalar_literals(expression)?;
+    verum_ast::checked_const::validate_i64_expression(expression).map_err(|span| invalid(
+        "scalar expression has an unsupported literal type or exceeds its structural limit", span,
+    ))?;
     verum_ast::checked_const::evaluate(expression, 0, &mut |leaf, _| {
         resolve(leaf).map(|value| value.map(verum_ast::checked_const::Scalar::Int))
     })
@@ -220,55 +222,6 @@ pub(super) fn checked_scalar_expression(
     })
 }
 
-fn validate_scalar_literals(expression: &Expr) -> CodegenResult<()> {
-    use verum_ast::{
-        literal::{IntSuffix, LiteralKind},
-        visitor::{Visitor, walk_expr},
-    };
-    struct Literals {
-        depth: usize,
-        steps: usize,
-        invalid: Option<verum_ast::Span>,
-    }
-    impl Visitor for Literals {
-        fn visit_type(&mut self, ty: &verum_ast::Type) {
-            // The scalar evaluator has no typed-expression or cast semantics.
-            // Refuse here instead of descending through unbounded type nodes.
-            self.invalid = Some(ty.span);
-        }
-
-        fn visit_expr(&mut self, expr: &Expr) {
-            self.steps += 1;
-            if self.depth >= 128
-                || self.steps > 4096
-                || matches!(&expr.kind,
-                ExprKind::Literal(literal) if matches!(&literal.kind,
-                    LiteralKind::Int(integer) if integer.suffix.as_ref().is_some_and(|suffix| *suffix != IntSuffix::I64)))
-            {
-                self.invalid = Some(expr.span);
-            }
-            if self.invalid.is_some() {
-                return;
-            }
-            self.depth += 1;
-            walk_expr(self, expr);
-            self.depth -= 1;
-        }
-    }
-    let mut literals = Literals {
-        depth: 0,
-        steps: 0,
-        invalid: None,
-    };
-    literals.visit_expr(expression);
-    match literals.invalid {
-        Some(span) => Err(invalid(
-            "scalar expression has an unsupported literal type or exceeds its structural limit",
-            span,
-        )),
-        None => Ok(()),
-    }
-}
 
 fn invalid(message: &str, span: verum_ast::Span) -> CodegenError {
     CodegenError::with_span(

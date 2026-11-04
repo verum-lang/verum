@@ -407,6 +407,7 @@ fn test_string_implements_display() {
 
     // Register Display protocol with a format method
     let display_protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         name: display_name.clone(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
@@ -476,6 +477,7 @@ fn test_string_implements_eq() {
 
     // Register Eq protocol with eq and ne methods
     let eq_protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         name: eq_name.clone(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
@@ -563,6 +565,7 @@ fn test_string_implements_add() {
     // Register Add protocol with add method
     // Add<Rhs, Output> where add(self, rhs: Rhs) -> Output
     let add_protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         name: add_name.clone(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
@@ -651,6 +654,7 @@ fn test_string_implements_clone() {
     let clone_from_name: Text = "clone_from".into();
 
     let clone_protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         name: clone_name.clone(),
         kind: verum_types::protocol::ProtocolKind::Constraint,

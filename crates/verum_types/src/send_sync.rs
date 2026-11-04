@@ -625,6 +625,7 @@ pub fn register_send_sync_protocols(checker: &mut ProtocolChecker) {
     // canonical list from MARKER_PROTOCOL_NAMES in verum_common.
     for name in verum_common::well_known_types::MARKER_PROTOCOL_NAMES {
         let proto = Protocol {
+            source_parameters: None,
             constraints: Default::default(),
             name: (*name).into(),
             kind: crate::protocol::ProtocolKind::Constraint,

@@ -117,6 +117,7 @@ fn test_orphan_rule_local_protocol_foreign_type() {
 
     // Register local protocol
     let protocol = verum_types::protocol::Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "MyProtocol".into(),
@@ -214,6 +215,7 @@ fn test_orphan_rule_generic_with_local_type_param() {
 
     // Register local protocol
     let protocol = verum_types::protocol::Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "MyProtocol".into(),
@@ -408,6 +410,7 @@ fn test_coherence_check_full_pipeline() {
 
     // Register local protocol
     let protocol = verum_types::protocol::Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "MyProtocol".into(),
@@ -445,6 +448,7 @@ fn test_register_impl_with_coherence() {
 
     // Register local protocol
     let protocol = verum_types::protocol::Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "MyProtocol".into(),

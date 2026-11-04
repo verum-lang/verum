@@ -186,6 +186,7 @@ fn test_protocol_inheritance_transitive() {
 
     // Register protocol A (base)
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "A".into(),
@@ -209,6 +210,7 @@ fn test_protocol_inheritance_transitive() {
     });
 
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "B".into(),
@@ -232,6 +234,7 @@ fn test_protocol_inheritance_transitive() {
     });
 
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "C".into(),
@@ -442,6 +445,7 @@ fn test_default_method_ne_from_eq() {
 
     // Register Eq protocol manually
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
@@ -532,6 +536,7 @@ fn test_explicit_method_overrides_default() {
 
     // Register Eq protocol manually
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
@@ -626,6 +631,7 @@ fn test_missing_required_method_error() {
 
     // Register Eq protocol manually
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
@@ -710,6 +716,7 @@ fn test_associated_type_simple() {
     );
 
     let iterator = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Iterator".into(),
@@ -764,6 +771,7 @@ fn test_associated_type_with_bounds() {
 
     // Register Eq protocol first
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
@@ -803,6 +811,7 @@ fn test_associated_type_with_bounds() {
     );
 
     let collection = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Collection".into(),
@@ -848,6 +857,7 @@ fn test_nested_associated_types() {
     );
 
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Container".into(),
@@ -910,6 +920,7 @@ fn test_orphan_rule_local_protocol() {
 
     // Register local protocol
     let protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "MyProtocol".into(),
@@ -961,6 +972,7 @@ fn test_orphan_rule_local_type() {
 
     // Register foreign protocol
     let protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "ForeignProtocol".into(),
@@ -1012,6 +1024,7 @@ fn test_orphan_rule_violation() {
 
     // Register foreign protocol
     let protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "ForeignProtocol".into(),
@@ -1063,6 +1076,7 @@ fn test_orphan_rule_with_generic_type_parameter() {
 
     // Register foreign protocol
     let protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "ForeignProtocol".into(),
@@ -1130,6 +1144,7 @@ fn test_generic_protocol_simple() {
     });
 
     let from_protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "From".into(),
@@ -1186,6 +1201,7 @@ fn test_generic_protocol_multiple_params() {
     });
 
     let into_protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "TryInto".into(),
@@ -1231,6 +1247,7 @@ fn test_generic_protocol_with_constraints() {
 
     // Register Eq first
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
@@ -1261,6 +1278,7 @@ fn test_generic_protocol_with_constraints() {
     });
 
     let contains_protocol = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Contains".into(),
@@ -1317,6 +1335,7 @@ fn test_error_message_method_not_found() {
 
     // Register Eq protocol manually
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
@@ -1388,6 +1407,7 @@ fn test_error_message_orphan_rule_violation() {
 
     // Register foreign protocol
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "ForeignProtocol".into(),
@@ -1454,6 +1474,7 @@ fn test_error_message_overlapping_implementations() {
 
     // Register protocol
     checker.register_protocol(Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "TestProtocol".into(),

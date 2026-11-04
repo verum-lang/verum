@@ -69,6 +69,7 @@ fn create_eq_protocol() -> Protocol {
     );
 
     Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Eq".into(),
@@ -137,6 +138,7 @@ fn create_ord_protocol() -> Protocol {
     });
 
     Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Ord".into(),
@@ -199,6 +201,7 @@ fn create_iterator_protocol() -> Protocol {
     );
 
     Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Iterator".into(),
@@ -260,6 +263,7 @@ fn test_transitive_inheritance() {
 
     // Create protocol hierarchy: Show <- Debug <- DetailedDebug
     let show = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Show".into(),
@@ -282,6 +286,7 @@ fn test_transitive_inheritance() {
     });
 
     let debug = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Debug".into(),
@@ -304,6 +309,7 @@ fn test_transitive_inheritance() {
     });
 
     let detailed_debug = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "DetailedDebug".into(),
@@ -511,6 +517,7 @@ fn test_method_override_in_subprotocol() {
     );
 
     let base = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Base".into(),
@@ -550,6 +557,7 @@ fn test_method_override_in_subprotocol() {
     });
 
     let derived = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Derived".into(),
@@ -991,6 +999,7 @@ fn test_multiple_inheritance_levels() {
 
     // Level 1: Base
     let base = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Base".into(),
@@ -1014,6 +1023,7 @@ fn test_multiple_inheritance_levels() {
     });
 
     let middle = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Middle".into(),
@@ -1037,6 +1047,7 @@ fn test_multiple_inheritance_levels() {
     });
 
     let top = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Top".into(),
@@ -1066,6 +1077,7 @@ fn test_diamond_inheritance_pattern() {
 
     // Base protocol
     let base = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Base".into(),
@@ -1089,6 +1101,7 @@ fn test_diamond_inheritance_pattern() {
     });
 
     let left = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Left".into(),
@@ -1111,6 +1124,7 @@ fn test_diamond_inheritance_pattern() {
     });
 
     let right = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Right".into(),
@@ -1140,6 +1154,7 @@ fn test_diamond_inheritance_pattern() {
     });
 
     let diamond = Protocol {
+        source_parameters: None,
         constraints: Default::default(),
         kind: verum_types::protocol::ProtocolKind::Constraint,
         name: "Diamond".into(),

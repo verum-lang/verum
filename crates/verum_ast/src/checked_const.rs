@@ -112,6 +112,57 @@ pub enum EvalError<E> {
     Resolver(E),
 }
 
+/// Check the source type boundary of the exact signed integer scalar domain.
+/// The evaluator may use booleans internally, but typed literals of a different
+/// integer sort and type-bearing expressions require a separate typed evaluator.
+pub fn validate_i64_expression(expression: &Expr) -> Result<(), Span> {
+    use crate::{
+        literal::{IntSuffix, LiteralKind},
+        visitor::{Visitor, walk_expr},
+    };
+    struct Literals {
+        depth: usize,
+        steps: usize,
+        invalid: Option<Span>,
+    }
+    impl Visitor for Literals {
+        fn visit_type(&mut self, ty: &crate::Type) {
+            // The scalar evaluator has no typed-expression or cast semantics.
+            // Refuse here instead of descending through unbounded type nodes.
+            self.invalid = Some(ty.span);
+        }
+
+        fn visit_expr(&mut self, expr: &Expr) {
+            self.steps += 1;
+            if self.depth >= 128
+                || self.steps > 4096
+                || matches!(&expr.kind,
+                ExprKind::Literal(literal) if matches!(&literal.kind,
+                    LiteralKind::Int(integer) if integer.suffix.as_ref().is_some_and(|suffix| *suffix != IntSuffix::I64)))
+            {
+                self.invalid = Some(expr.span);
+            }
+            if self.invalid.is_some() {
+                return;
+            }
+            self.depth += 1;
+            walk_expr(self, expr);
+            self.depth -= 1;
+        }
+    }
+    let mut literals = Literals {
+        depth: 0,
+        steps: 0,
+        invalid: None,
+    };
+    literals.visit_expr(expression);
+    match literals.invalid {
+        Some(span) => Err(span),
+        None => Ok(()),
+    }
+}
+
+
 /// Resolve only declaration-owned leaves. `depth` crosses resolver boundaries so
 /// a dependency chain cannot restart the recursion budget at every declaration.
 pub fn evaluate<E>(
