@@ -1,12 +1,9 @@
 //! Implementation family bodies own their local telescope independently of
 //! protocol re-elaboration. Source names may shadow owner binders.
 use super::TypeChecker;
-use crate::{Result, Type, TypeError, protocol::AssociatedTypeAssignment, ty::TypeVar};
-use verum_ast::{
-    decl::{ImplDecl, ImplItemKind},
-    ty::GenericParamKind,
-};
-use verum_common::{List, Map, Text};
+use crate::{Result, Type, TypeError, protocol::AssociatedTypeAssignment};
+use verum_ast::decl::{ImplDecl, ImplItemKind};
+use verum_common::{Map, Text};
 
 fn invalid(span: verum_ast::Span, message: impl Into<Text>) -> TypeError {
     TypeError::OtherWithCodeSpanned {
@@ -91,24 +88,12 @@ impl TypeChecker {
                         "associated assignment does not match its declared local telescope",
                     ));
                 }
-                let mut frame = owner.clone();
-                let mut local_parameters = List::new();
-                for parameter in type_params {
-                    let GenericParamKind::Type { name, .. } = &parameter.kind else {
-                        return Err(invalid(
-                            parameter.span,
-                            "associated assignment kind requires exact declared type evidence",
-                        ));
-                    };
-                    let variable = TypeVar::fresh();
-                    local_parameters.push(variable);
-                    frame.insert(name.name.clone(), Type::Var(variable));
-                }
+                let (frame, local_parameters) = self.associated_parameter_frame(type_params)?;
                 self.push_decl_param_frame(frame);
                 let lowered = self.ast_to_type(ty);
                 self.pop_decl_param_frame();
                 let lowered = self.unifier.normalize_aliases(&lowered?);
-                let assignment = AssociatedTypeAssignment::family(local_parameters, lowered)
+                let assignment = AssociatedTypeAssignment::mixed_family(local_parameters, lowered)
                     .map_err(|message| invalid(item.span, message))?;
                 if assignments.insert(name.name.clone(), assignment).is_some() {
                     return Err(invalid(item.span, "duplicate associated assignment"));

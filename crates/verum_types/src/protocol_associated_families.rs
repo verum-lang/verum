@@ -1,11 +1,12 @@
 //! Family application uses its declared local telescope, never RHS variable order.
 use super::{
-    AssociatedType, ProtocolBound, ProtocolChecker, ProtocolImpl, WhereClause,
+    AssociatedFamilyBinders, AssociatedType, ProtocolBound, ProtocolChecker, ProtocolImpl, WhereClause,
     implementation_match::CandidateMatch,
 };
 use crate::{
     advanced_protocols::AssociatedTypeKind,
-    ty::{Substitution, Type},
+    context::GenericBinder,
+    ty::{Substitution, Type, ValueTerm},
 };
 use verum_common::{List, Text};
 
@@ -138,11 +139,14 @@ impl ProtocolChecker {
                 };
                 let owner_arguments = selected_declaration.arguments;
                 let receiver_variables = receiver.free_vars();
+                let receiver_values = receiver.value_ids();
                 if owner_arguments.iter().any(|argument| {
                     argument
                         .free_vars()
                         .iter()
                         .any(|variable| !receiver_variables.contains(variable))
+                        || argument.value_ids().iter().any(|id| !receiver_values.contains(id))
+                        || argument.has_value_inference()
                 }) {
                     return Err("family owner application is not determined by its receiver".into());
                 }
@@ -201,14 +205,15 @@ impl ProtocolChecker {
             .self_type
             .ok_or_else(|| Text::from("associated family lacks its declaring Self binder"))?;
         declaration_scope.insert(self_variable, receiver.clone());
-        for (position, variable) in &declaration.binders.owner {
+        for (position, binder) in &declaration.binders.owner {
             let argument = owner_arguments
                 .get(*position)
                 .ok_or_else(|| Text::from("associated family owner application is incomplete"))?;
-            declaration_scope.insert(*variable, argument.clone());
+            AssociatedFamilyBinders::bind_argument_normalized(binder, argument, &mut declaration_scope,
+                |ty| self.normalize_projection_type(ty))?;
         }
         let mut arguments = List::new();
-        for (position, (parameter, variable)) in declaration
+        for (position, (parameter, binder)) in declaration
             .type_params
             .iter()
             .zip(&declaration.binders.local)
@@ -222,15 +227,8 @@ impl ProtocolChecker {
                     .ok_or_else(|| Text::from("missing required associated family argument"))?
                     .try_apply_subst(&declaration_scope)?,
             };
-            if matches!(
-                argument,
-                Type::Meta { .. } | Type::TypeConstructor { .. } | Type::Lifetime { .. }
-            ) {
-                return Err(
-                    "an associated type parameter requires an ordinary type argument".into(),
-                );
-            }
-            declaration_scope.insert(*variable, argument.clone());
+            AssociatedFamilyBinders::bind_argument_normalized(binder, &argument, &mut declaration_scope,
+                |ty| self.normalize_projection_type(ty))?;
             arguments.push(argument);
         }
         for (parameter, argument) in declaration.type_params.iter().zip(&arguments) {
@@ -306,8 +304,10 @@ impl ProtocolChecker {
             return Err("associated family has no assignment or declared default".into());
         };
         let mut allowed = receiver.free_vars();
+        let mut allowed_values = receiver.value_ids();
         for argument in owner_arguments.iter().chain(&arguments) {
             allowed.extend(argument.free_vars());
+            allowed_values.extend(argument.value_ids());
         }
         if result
             .free_vars()
@@ -315,6 +315,9 @@ impl ProtocolChecker {
             .any(|variable| !allowed.contains(variable))
         {
             return Err("associated family result contains an unbound declaration variable".into());
+        }
+        if result.has_value_inference() || result.value_ids().iter().any(|id| !allowed_values.contains(id)) {
+            return Err("associated family result contains an unbound declaration value".into());
         }
         let bounds: List<_> = declaration
             .bounds
@@ -361,22 +364,38 @@ impl ProtocolChecker {
         {
             return Err("associated assignment lacks its declaration telescope".into());
         }
-        for (position, variable) in &declaration.binders.owner {
+        for (position, binder) in &declaration.binders.owner {
             let argument = owner_arguments
                 .get(*position)
                 .ok_or_else(|| Text::from("associated owner application is incomplete"))?;
-            scope.insert(*variable, argument.clone());
+            AssociatedFamilyBinders::bind_argument_normalized(binder, argument, &mut scope,
+                |ty| self.normalize_projection_type(ty))?;
         }
         if declaration.binders.local.len() != assignment.parameters().len() {
             return Err("associated assignment lacks its declared local telescope".into());
         }
-        let arguments: List<_> = assignment
-            .parameters()
-            .iter()
-            .map(|variable| Type::Var(*variable))
-            .collect();
-        for (variable, argument) in declaration.binders.local.iter().zip(&arguments) {
-            scope.insert(*variable, argument.clone());
+        let mut arguments = List::new();
+        let mut implementation_locals = Substitution::new();
+        for (declared, implemented) in declaration.binders.local.iter().zip(assignment.parameters()) {
+            let argument = match (declared, implemented) {
+                (GenericBinder::Type(_), GenericBinder::Type(variable)) => Type::Var(*variable),
+                (GenericBinder::Value(domain), GenericBinder::Value(Type::Meta {
+                    name, value: ValueTerm::Parameter(id), ..
+                })) => {
+                    let Type::Meta { ty, refinement, value: ValueTerm::Parameter(_), .. } = domain.try_apply_subst(&scope)? else {
+                        return Err("associated assignment has no declared value domain".into());
+                    };
+                    // Use the declaration's domain with the implementation's
+                    // rigid identity. A narrower implementation must fail.
+                    Type::Meta { name: name.clone(), ty, refinement, value: ValueTerm::Parameter(*id) }
+                }
+                _ => return Err("associated assignment parameter role differs from its declaration".into()),
+            };
+            AssociatedFamilyBinders::bind_argument_normalized(implemented, &argument, &mut implementation_locals,
+                |ty| self.normalize_projection_type(ty))?;
+            AssociatedFamilyBinders::bind_argument_normalized(declared, &argument, &mut scope,
+                |ty| self.normalize_projection_type(ty))?;
+            arguments.push(argument);
         }
         let mut assumptions = implementation.where_clauses.clone();
         for (parameter, argument) in declaration.type_params.iter().zip(&arguments) {

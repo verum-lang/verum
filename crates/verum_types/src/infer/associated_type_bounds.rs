@@ -4,8 +4,9 @@ use super::TypeChecker;
 use crate::advanced_protocols::{AssociatedTypeKind, GATTypeParam, GATWhereClause, Variance};
 use crate::{
     Result, TypeError,
+    context::GenericBinder,
     protocol::{
-        AssociatedType, DeclarationBinders, ProtocolBound, ProtocolConstraints, WhereClause,
+        AssociatedFamilyBinders, AssociatedType, ProtocolBound, ProtocolConstraints, WhereClause,
     },
     ty::{Type, TypeVar},
 };
@@ -168,30 +169,23 @@ impl TypeChecker {
             ));
         };
         let mut frame = indexmap::IndexMap::new();
-        let mut binders = DeclarationBinders::default();
+        let mut binders = AssociatedFamilyBinders::default();
         for (position, parameter) in owner.iter().enumerate() {
-            if let Some(name) = type_parameter_name(parameter) {
-                let var = match scope {
-                    ProtocolConstraints::Declared { parameters, .. } => parameters[position],
-                    _ => TypeVar::fresh(),
-                };
-                frame.insert(name.clone(), Type::Var(var));
-                binders.owner.push((position, var));
-            }
-        }
-        if let ProtocolConstraints::Declared { self_type, .. } = scope {
-            binders.self_type = Some(*self_type);
-        }
-        for parameter in type_params {
             let Some(name) = type_parameter_name(parameter) else {
                 return Err(unsupported(
                     parameter.span,
-                    "associated family value, level and context parameters are not supported",
+                    "associated family owner requires a checked protocol telescope",
                 ));
             };
-            let var = TypeVar::fresh();
+            let var = match scope {
+                ProtocolConstraints::Declared { parameters, .. } => parameters[position],
+                _ => TypeVar::fresh(),
+            };
             frame.insert(name.clone(), Type::Var(var));
-            binders.local.push(var);
+            binders.owner.push((position, GenericBinder::Type(var)));
+        }
+        if let ProtocolConstraints::Declared { self_type, .. } = scope {
+            binders.self_type = Some(*self_type);
         }
         self.push_decl_param_frame(frame);
         let old_self = self.current_self_type.clone();
@@ -199,89 +193,163 @@ impl TypeChecker {
             self.set_current_self_type(Some(Type::Var(var)));
         }
         let result = (|| {
-            let mut parameters = List::new();
-            let mut higher_kinded = false;
-            for parameter in type_params {
-                let (name, bounds, default) = match &parameter.kind {
-                    GenericParamKind::Type {
-                        name,
-                        bounds,
-                        default,
-                    } => (name, bounds, default.as_ref()),
-                    GenericParamKind::HigherKinded { name, bounds, .. }
-                    | GenericParamKind::KindAnnotated { name, bounds, .. } => {
-                        higher_kinded = true;
-                        (name, bounds, None)
-                    }
-                    _ => unreachable!("family parameter kinds checked before entering scope"),
-                };
-                parameters.push(GATTypeParam {
-                    name: name.name.clone(),
-                    bounds: self.elaborate_family_bounds(bounds)?,
-                    default: default.map(|ty| self.ast_to_type(ty)).transpose()?.into(),
-                    variance: Variance::Invariant,
-                });
-            }
-            let mut clauses = List::new();
-            if let Some(clause) = where_clause {
-                for predicate in &clause.predicates {
-                    let WherePredicateKind::Type { ty, bounds } = &predicate.kind else {
-                        return Err(unsupported(
-                            predicate.span,
-                            "associated family where clauses require a type parameter bound",
-                        ));
+            let (frame, local) = self.associated_parameter_frame(type_params)?;
+            binders.local = local;
+            self.push_decl_param_frame(frame);
+            let result = (|| {
+                let mut parameters = List::new();
+                let mut higher_kinded = false;
+                for parameter in type_params {
+                    let (name, bounds, default) = match &parameter.kind {
+                        GenericParamKind::Type {
+                            name,
+                            bounds,
+                            default,
+                        } => (name, bounds, default.as_ref()),
+                        GenericParamKind::HigherKinded { name, bounds, .. }
+                        | GenericParamKind::KindAnnotated { name, bounds, .. } => {
+                            higher_kinded = true;
+                            (name, bounds, None)
+                        }
+                        GenericParamKind::Meta { name, .. }
+                        | GenericParamKind::Const { name, .. } => {
+                            parameters.push(GATTypeParam {
+                                name: name.name.clone(),
+                                bounds: List::new(),
+                                default: Maybe::None,
+                                variance: Variance::Invariant,
+                            });
+                            continue;
+                        }
+                        _ => unreachable!("family parameter kinds checked before entering scope"),
                     };
-                    let verum_ast::ty::TypeKind::Path(path) = &ty.kind else {
-                        return Err(unsupported(
-                            predicate.span,
-                            "associated family where clauses require a type parameter bound",
-                        ));
-                    };
-                    let Some(ident) = path.as_ident() else {
-                        return Err(unsupported(
-                            predicate.span,
-                            "associated family where clauses require a type parameter bound",
-                        ));
-                    };
-                    if !parameters
-                        .iter()
-                        .any(|parameter: &GATTypeParam| parameter.name == ident.name)
-                    {
-                        return Err(unsupported(
-                            predicate.span,
-                            "associated family where clause must constrain a family parameter",
-                        ));
-                    }
-                    clauses.push(GATWhereClause {
-                        param: ident.name.clone(),
-                        constraints: self.elaborate_family_bounds(bounds)?,
-                        span: predicate.span,
+                    parameters.push(GATTypeParam {
+                        name: name.name.clone(),
+                        bounds: self.elaborate_family_bounds(bounds)?,
+                        default: default.map(|ty| self.ast_to_type(ty)).transpose()?.into(),
+                        variance: Variance::Invariant,
                     });
                 }
-            }
-            let mut associated = AssociatedType::generic(
-                name.name.clone(),
-                parameters,
-                self.elaborate_family_bounds(bounds)?,
-                clauses,
-            );
-            associated.binders = binders;
-            associated.default = default_type
-                .as_ref()
-                .map(|ty| self.ast_to_type(ty))
-                .transpose()?
-                .into();
-            if type_params.is_empty() {
-                associated.kind = AssociatedTypeKind::Regular;
-            } else if higher_kinded {
-                associated.kind = AssociatedTypeKind::HigherKinded {
-                    arity: type_params.len(),
-                };
-            }
-            Ok(associated)
+                let mut clauses = List::new();
+                if let Some(clause) = where_clause {
+                    for predicate in &clause.predicates {
+                        let WherePredicateKind::Type { ty, bounds } = &predicate.kind else {
+                            return Err(unsupported(
+                                predicate.span,
+                                "associated family where clauses require a type parameter bound",
+                            ));
+                        };
+                        let verum_ast::ty::TypeKind::Path(path) = &ty.kind else {
+                            return Err(unsupported(
+                                predicate.span,
+                                "associated family where clauses require a type parameter bound",
+                            ));
+                        };
+                        let Some(ident) = path.as_ident() else {
+                            return Err(unsupported(
+                                predicate.span,
+                                "associated family where clauses require a type parameter bound",
+                            ));
+                        };
+                        if !parameters
+                            .iter()
+                            .any(|parameter: &GATTypeParam| parameter.name == ident.name)
+                        {
+                            return Err(unsupported(
+                                predicate.span,
+                                "associated family where clause must constrain a family parameter",
+                            ));
+                        }
+                        clauses.push(GATWhereClause {
+                            param: ident.name.clone(),
+                            constraints: self.elaborate_family_bounds(bounds)?,
+                            span: predicate.span,
+                        });
+                    }
+                }
+                let mut associated = AssociatedType::generic(
+                    name.name.clone(),
+                    parameters,
+                    self.elaborate_family_bounds(bounds)?,
+                    clauses,
+                );
+                associated.binders = binders;
+                associated.default = default_type
+                    .as_ref()
+                    .map(|ty| self.ast_to_type(ty))
+                    .transpose()?
+                    .into();
+                if type_params.is_empty() {
+                    associated.kind = AssociatedTypeKind::Regular;
+                } else if higher_kinded {
+                    associated.kind = AssociatedTypeKind::HigherKinded {
+                        arity: type_params.len(),
+                    };
+                }
+                Ok(associated)
+            })();
+            self.pop_decl_param_frame();
+            result
         })();
         self.pop_decl_param_frame();
         self.set_current_self_type(old_self);
+        result
+    }
+
+    /// Elaborate each local in lexical declaration order. The existing value
+    /// binder constructor preserves its normalized sort and source refinement.
+    pub(super) fn associated_parameter_frame(
+        &mut self,
+        parameters: &[GenericParam],
+    ) -> Result<(indexmap::IndexMap<Text, Type>, List<GenericBinder>)> {
+        // Declaration lookup deliberately reads only the innermost frame.
+        // Carry this family's lexical owner explicitly, then shadow in order.
+        let owner = self.decl_param_frames.last().cloned().unwrap_or_default();
+        self.push_decl_param_frame(owner);
+        let result = (|| {
+            let mut binders = List::new();
+            let mut local_names = verum_common::Set::new();
+            for parameter in parameters {
+                let (name, value) = match &parameter.kind {
+                    GenericParamKind::Type { name, .. }
+                    | GenericParamKind::HigherKinded { name, .. }
+                    | GenericParamKind::KindAnnotated { name, .. } => {
+                        (&name.name, Type::Var(TypeVar::fresh()))
+                    }
+                    GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
+                        (&name.name, self.source_value_parameter(parameter)?)
+                    }
+                    _ => {
+                        return Err(unsupported(
+                            parameter.span,
+                            "associated family level, lifetime and context parameters require represented kind evidence",
+                        ));
+                    }
+                };
+                let binder = GenericBinder::declared(&value)
+                    .map_err(|message| unsupported(parameter.span, &message))?;
+                let frame = self
+                    .decl_param_frames
+                    .last_mut()
+                    .expect("family lexical scope");
+                if !local_names.insert(name.clone()) {
+                    return Err(unsupported(
+                        parameter.span,
+                        "duplicate associated family parameter",
+                    ));
+                }
+                frame.insert(name.clone(), value);
+                binders.push(binder);
+            }
+            Ok((
+                self.decl_param_frames
+                    .last()
+                    .expect("family lexical scope")
+                    .clone(),
+                binders,
+            ))
+        })();
+        self.pop_decl_param_frame();
         result
     }
 

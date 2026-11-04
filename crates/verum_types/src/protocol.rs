@@ -762,9 +762,63 @@ pub struct DeclarationBinders {
     pub local: List<crate::ty::TypeVar>,
 }
 
+/// An associated family's telescope preserves type and value roles separately.
+#[derive(Debug, Clone, Default)]
+pub struct AssociatedFamilyBinders {
+    pub self_type: Maybe<TypeVar>,
+    pub owner: List<(usize, crate::context::GenericBinder)>,
+    pub local: List<crate::context::GenericBinder>,
+}
+
+impl AssociatedFamilyBinders {
+    pub(crate) fn binder_type(binder: &crate::context::GenericBinder) -> Result<Type, Text> {
+        use crate::{context::GenericBinder, ty::ValueTerm};
+        match binder {
+            GenericBinder::Type(variable) => Ok(Type::Var(*variable)),
+            GenericBinder::Value(value @ Type::Meta { value: ValueTerm::Parameter(_), .. }) => Ok(value.clone()),
+            _ => Err("associated family requires an owned type or value binder".into()),
+        }
+    }
+
+    /// Check the declared role and domain before publishing a simultaneous binding.
+    pub(crate) fn bind_argument(
+        binder: &crate::context::GenericBinder,
+        argument: &Type,
+        scope: &mut Substitution,
+    ) -> Result<(), Text> {
+        Self::bind_argument_normalized(binder, argument, scope, Type::clone)
+    }
+
+    pub(crate) fn bind_argument_normalized(
+        binder: &crate::context::GenericBinder,
+        argument: &Type,
+        scope: &mut Substitution,
+        normalize: impl FnMut(&Type) -> Type,
+    ) -> Result<(), Text> {
+        use crate::{context::GenericBinder, ty::ValueTerm};
+        match binder {
+            GenericBinder::Type(variable) => {
+                if matches!(argument, Type::Meta { .. } | Type::TypeConstructor { .. } | Type::Lifetime { .. }) {
+                    return Err("an associated type parameter requires an ordinary type argument".into());
+                }
+                scope.insert(*variable, argument.clone());
+            }
+            GenericBinder::Value(parameter @ Type::Meta { value: ValueTerm::Parameter(id), .. }) => {
+                let parameter = parameter.try_apply_subst(scope)?;
+                if !crate::value_parameter_domain::argument_satisfies_domain(&parameter, argument, normalize) {
+                    return Err("associated value argument does not establish its declared sort and domain".into());
+                }
+                scope.value_bindings.insert(*id, argument.clone());
+            }
+            _ => return Err("associated family requires an owned type or value binder".into()),
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AssociatedType {
-    pub binders: DeclarationBinders,
+    pub binders: AssociatedFamilyBinders,
     /// Type name
     pub name: Text,
     /// Type parameters for GATs (empty for regular associated types)

@@ -2,7 +2,8 @@
 use super::TypeChecker;
 use crate::{
     Result, TypeError,
-    protocol::{ProtocolBound, ProtocolConstraints, WhereClause},
+    context::GenericBinder,
+    protocol::{AssociatedFamilyBinders, ProtocolBound, ProtocolConstraints, WhereClause},
     ty::{Substitution, Type, TypeVar},
 };
 use verum_ast::{
@@ -89,7 +90,13 @@ impl TypeChecker {
         // has no bounds. Prove it from the declared domain using the same rigid
         // variables and implication checker as result obligations.
         let needs_domain_check = |name: &Text| {
-            provided.get(name).is_some_and(|(parameters, _, _)| {
+            associated_types.get(name).is_some_and(|associated| {
+                associated
+                    .binders
+                    .local
+                    .iter()
+                    .any(|binder| matches!(binder, GenericBinder::Value(_)))
+            }) || provided.get(name).is_some_and(|(parameters, _, _)| {
                 parameters.iter().any(|parameter| match &parameter.kind {
                     GenericParamKind::Type { bounds, .. } => !bounds.is_empty(),
                     _ => true,
@@ -107,7 +114,11 @@ impl TypeChecker {
             parameter_bounds,
         } = &constraints
         else {
-            return if has_associated_bounds || has_family_domains || has_parameter_bounds || !super_protocols.is_empty() {
+            return if has_associated_bounds
+                || has_family_domains
+                || has_parameter_bounds
+                || !super_protocols.is_empty()
+            {
                 Err(refusal(
                     declaration.span,
                     "protocol obligations lack their declaration-owned telescope",
@@ -133,16 +144,7 @@ impl TypeChecker {
         else {
             unreachable!()
         };
-        let mut frame = indexmap::IndexMap::new();
-        for parameter in &declaration.generics {
-            let GenericParamKind::Type { name, .. } = &parameter.kind else {
-                return Err(refusal(
-                    parameter.span,
-                    "universal associated obligations currently require ordinary implementation type parameters",
-                ));
-            };
-            frame.insert(name.name.clone(), Type::Var(TypeVar::fresh()));
-        }
+        let (frame, _) = self.associated_parameter_frame(&declaration.generics)?;
         self.push_decl_param_frame(frame.clone());
         let previous_self = self.current_self_type.clone();
         let result = (|| {
@@ -179,7 +181,8 @@ impl TypeChecker {
             let mut assumptions = List::new();
             for parameter in &declaration.generics {
                 let GenericParamKind::Type { name, bounds, .. } = &parameter.kind else {
-                    unreachable!()
+                    // Value domains travel in their Type::Meta declaration binder.
+                    continue;
                 };
                 assumptions.push(WhereClause {
                     ty: frame[&name.name].clone(),
@@ -227,29 +230,85 @@ impl TypeChecker {
                 let mut family_substitution = substitution.clone();
                 let mut family_assumptions = assumptions.clone();
                 let provided = provided.get(name);
-                let mut family_variables = List::new();
+                // Elaborate implementation domains before any local shadows its
+                // own carrier annotation. The retained identities are then bound
+                // to the declaration's rigid arguments in declaration order.
+                let implementation_parameters = match provided {
+                    Some((parameters, _, _)) => self.associated_parameter_frame(parameters)?.1,
+                    None => List::new(),
+                };
+                let mut implementation_scope = Substitution::new();
+                let mut family_arguments = List::new();
                 for (index, parameter) in associated.type_params.iter().enumerate() {
-                    let variable = TypeVar::fresh();
-                    family_variables.push(variable);
-                    let Some(source_variable) = associated.binders.local.get(index) else {
-                        return Err(refusal(
+                    let source_binder = associated.binders.local.get(index).ok_or_else(|| {
+                        refusal(
                             declaration.span,
                             "family parameter lacks its declaration identity",
-                        ));
-                    };
-                    family_substitution.insert(*source_variable, Type::Var(variable));
-                    let local_name = if let Some((parameters, _, _)) = provided {
-                        let GenericParamKind::Type { name, .. } = &parameters[index].kind else {
+                        )
+                    })?;
+                    let argument = match source_binder {
+                        GenericBinder::Type(_) => Type::Var(TypeVar::fresh()),
+                        GenericBinder::Value(value) => {
+                            let Type::Meta {
+                                name,
+                                ty,
+                                refinement,
+                                ..
+                            } = value
+                                .try_apply_subst(&family_substitution)
+                                .map_err(|message| refusal(declaration.span, message))?
+                            else {
+                                return Err(refusal(
+                                    declaration.span,
+                                    "family value binder lost its domain",
+                                ));
+                            };
+                            Type::meta(name, *ty, refinement)
+                        }
+                        _ => {
                             return Err(refusal(
-                                parameters[index].span,
-                                "universal family constraints require ordinary type parameters",
+                                declaration.span,
+                                "universal family constraints require represented kind evidence",
                             ));
-                        };
-                        &name.name
+                        }
+                    };
+                    AssociatedFamilyBinders::bind_argument(
+                        source_binder,
+                        &argument,
+                        &mut family_substitution,
+                    )
+                    .map_err(|message| refusal(declaration.span, message))?;
+                    let local_name = if let Some((parameters, _, _)) = provided {
+                        match (&parameters[index].kind, source_binder) {
+                            (GenericParamKind::Type { name, .. }, GenericBinder::Type(_)) => {
+                                &name.name
+                            }
+                            (
+                                GenericParamKind::Meta { name, .. }
+                                | GenericParamKind::Const { name, .. },
+                                GenericBinder::Value(_),
+                            ) => &name.name,
+                            _ => {
+                                return Err(refusal(
+                                    parameters[index].span,
+                                    "associated implementation parameter role differs from its declaration",
+                                ));
+                            }
+                        }
                     } else {
                         &parameter.name
                     };
-                    family_frame.insert(local_name.clone(), Type::Var(variable));
+                    if let Some(parameter) = implementation_parameters.get(index) {
+                        AssociatedFamilyBinders::bind_argument_normalized(
+                            parameter,
+                            &argument,
+                            &mut implementation_scope,
+                            |ty| self.normalize_type(ty),
+                        )
+                        .map_err(|message| refusal(declaration.span, message))?;
+                    }
+                    family_frame.insert(local_name.clone(), argument.clone());
+                    family_arguments.push(argument);
                 }
                 if matches!(
                     associated.kind,
@@ -260,7 +319,7 @@ impl TypeChecker {
                         "universal family constraints require declared kind evidence",
                     ));
                 }
-                for (parameter, variable) in associated.type_params.iter().zip(&family_variables) {
+                for (parameter, argument) in associated.type_params.iter().zip(&family_arguments) {
                     let bounds = parameter
                         .bounds
                         .iter()
@@ -268,7 +327,7 @@ impl TypeChecker {
                         .collect::<std::result::Result<List<_>, _>>()
                         .map_err(|error| refusal(declaration.span, error))?;
                     family_assumptions.push(WhereClause {
-                        ty: Type::Var(*variable),
+                        ty: argument.clone(),
                         bounds,
                     });
                 }
@@ -290,24 +349,35 @@ impl TypeChecker {
                         .collect::<std::result::Result<List<_>, _>>()
                         .map_err(|error| refusal(clause.span, error))?;
                     family_assumptions.push(WhereClause {
-                        ty: Type::Var(family_variables[index]),
+                        ty: family_arguments[index].clone(),
                         bounds,
                     });
                 }
                 self.push_decl_param_frame(family_frame);
                 let checked = (|| {
                     let (actual, span) = if let Some((parameters, ty, span)) = provided {
-                        for (parameter, variable) in parameters.iter().zip(&family_variables) {
-                            let GenericParamKind::Type { bounds, .. } = &parameter.kind else {
-                                unreachable!()
-                            };
-                            let required = self.elaborate_family_bounds(bounds)?;
-                            self.prove_associated_bounds(
-                                &Type::Var(*variable),
-                                &required,
-                                &family_assumptions,
-                                *span,
-                            )?;
+                        for (parameter, argument) in parameters.iter().zip(&family_arguments) {
+                            match &parameter.kind {
+                                GenericParamKind::Type { bounds, .. } => {
+                                    let required = self.elaborate_family_bounds(bounds)?;
+                                    self.prove_associated_bounds(
+                                        argument,
+                                        &required,
+                                        &family_assumptions,
+                                        *span,
+                                    )?;
+                                }
+                                GenericParamKind::Meta { .. } | GenericParamKind::Const { .. } => {
+                                    // The complete value domain was checked in its
+                                    // prefix lexical scope before installing locals.
+                                }
+                                _ => {
+                                    return Err(refusal(
+                                        parameter.span,
+                                        "associated implementation parameter lacks represented kind evidence",
+                                    ));
+                                }
+                            }
                         }
                         (self.ast_to_type(ty)?, *span)
                     } else {
