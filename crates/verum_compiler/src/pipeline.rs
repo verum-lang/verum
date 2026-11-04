@@ -108,6 +108,10 @@ mod llvm_lowering;
 mod loading;
 
 #[cfg(test)]
+#[path = "../tests/unit/meta_evaluation_failures.rs"]
+mod meta_evaluation_failure_tests;
+
+#[cfg(test)]
 #[path = "../tests/unit/external_cog_sources.rs"]
 mod external_cog_source_tests;
 #[cfg(test)]
@@ -2001,19 +2005,14 @@ impl<'s> CompilationPipeline<'s> {
                         continue;
                     }
                 }
-                match ctx.ast_expr_to_meta_expr(&body_expr) {
-                    Ok(meta_expr) => {
-                        if let Err(e) = ctx.eval_meta_expr(&meta_expr) {
-                            if Self::is_reportable_meta_error(&e) {
-                                errors.push((fn_name, e));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        if Self::is_reportable_meta_error(&e) {
-                            errors.push((fn_name, e));
-                        }
-                    }
+                // An attempted zero-argument evaluation must not turn a failed
+                // conversion or execution into a successful validation phase.
+                // Unsupported syntax is an evaluator error, including Other.
+                let result = ctx
+                    .ast_expr_to_meta_expr(&body_expr)
+                    .and_then(|expr| ctx.eval_meta_expr(&expr));
+                if let Err(error) = result {
+                    errors.push((fn_name, error));
                 }
             }
         }

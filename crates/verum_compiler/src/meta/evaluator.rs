@@ -432,6 +432,8 @@ impl MetaContext {
     /// Convert AST Expr to MetaExpr
     pub fn ast_expr_to_meta_expr(&self, expr: &Expr) -> Result<MetaExpr, MetaError> {
         match &expr.kind {
+            ExprKind::Paren(inner) => self.ast_expr_to_meta_expr(inner),
+            ExprKind::Quote { .. } => Ok(MetaExpr::Quote(expr.clone())),
             ExprKind::Literal(lit) => {
                 let val = ConstValue::from_literal(lit);
                 Ok(MetaExpr::Literal(val))
@@ -591,15 +593,18 @@ impl MetaContext {
                         // For repeat syntax [value; count], evaluate count
                         let val = self.ast_expr_to_meta_expr(value)?;
                         let count_val = self.ast_expr_to_meta_expr(count)?;
-                        // For now, just quote the repeat expression
+                        // A repeat must be evaluated; it is not an implicit quotation.
                         if let (MetaExpr::Literal(v), MetaExpr::Literal(ConstValue::UInt(n))) =
                             (&val, &count_val)
                         {
                             let arr: List<ConstValue> = (0..*n).map(|_| v.clone()).collect();
                             Ok(MetaExpr::Literal(ConstValue::Array(arr)))
                         } else {
-                            // Can't evaluate at compile time - quote it
-                            Ok(MetaExpr::Quote(expr.clone()))
+                            Err(MetaError::MetaEvaluationFailed {
+                                message: Text::from(
+                                    "Array repeat is not supported by this meta evaluator",
+                                ),
+                            })
                         }
                     }
                 }
@@ -847,8 +852,11 @@ impl MetaContext {
                         _ => {}
                     }
                 }
-                // Fall through to quote for complex patterns or compound ops
-                Ok(MetaExpr::Quote(expr.clone()))
+                Err(MetaError::MetaEvaluationFailed {
+                    message: Text::from(
+                        "Assignment pattern or operator is not supported by this meta evaluator",
+                    ),
+                })
             }
 
             // Priority 3: Lift - M401 error when used outside quote
@@ -871,14 +879,11 @@ impl MetaContext {
                 }
                 Err(MetaError::UnquoteOutsideQuote)
             }
-            _ => {
-                // For unsupported expressions, return them as quoted AST
-                #[cfg(debug_assertions)]
-                {
-                    // eprintln!("[DEBUG] ast_expr_to_meta_expr fallback: expr.kind = {:?}", std::mem::discriminant(&expr.kind));
-                }
-                Ok(MetaExpr::Quote(expr.clone()))
-            }
+            _ => Err(MetaError::MetaEvaluationFailed {
+                message: Text::from(
+                    "Expression is not supported by this meta evaluator; use explicit quote to produce syntax",
+                ),
+            }),
         }
     }
 
