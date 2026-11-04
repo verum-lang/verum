@@ -78,6 +78,106 @@ fn supported_pool_callback_paths_still_invoke_their_owned_callable() {
     );
 }
 
+#[test]
+fn contended_exchange_that_observes_unlock_acquires_the_mutex() {
+    use verum_llvm::{
+        AtomicOrdering, AtomicRMWBinOp, IntPredicate,
+        values::{BasicValue, InstructionOpcode},
+    };
+
+    let context = Context::create();
+    let lowering = runtime(
+        &context,
+        "mutex_race",
+        PanicStrategy::Unwind,
+        "aarch64-apple-darwin",
+    );
+    let mutex = lowering.module().get_function("verum_mutex_lock").unwrap();
+    let contended = mutex
+        .get_basic_blocks()
+        .into_iter()
+        .find(|block| block.get_name().to_bytes() == b"contended")
+        .unwrap();
+    let branch = contended.get_terminator().unwrap();
+    assert!(
+        branch.is_conditional(),
+        "first exchange cannot unconditionally sleep"
+    );
+    let comparison = branch
+        .get_operand(0)
+        .unwrap()
+        .value()
+        .unwrap()
+        .into_int_value()
+        .as_instruction_value()
+        .unwrap();
+    assert_eq!(comparison.get_icmp_predicate(), Some(IntPredicate::EQ));
+    let exchange = comparison
+        .get_operand(0)
+        .unwrap()
+        .value()
+        .unwrap()
+        .into_int_value()
+        .as_instruction_value()
+        .unwrap();
+    assert_eq!(exchange.get_opcode(), InstructionOpcode::AtomicRMW);
+    assert_eq!(exchange.get_atomic_rmw_bin_op(), Some(AtomicRMWBinOp::Xchg));
+    assert_eq!(
+        exchange.get_atomic_ordering().unwrap(),
+        AtomicOrdering::Acquire
+    );
+    assert_eq!(
+        exchange
+            .get_operand(1)
+            .unwrap()
+            .value()
+            .unwrap()
+            .into_int_value()
+            .get_zero_extended_constant(),
+        Some(2)
+    );
+    assert_eq!(exchange.get_parent(), Some(contended));
+    assert_eq!(
+        comparison
+            .get_operand(1)
+            .unwrap()
+            .value()
+            .unwrap()
+            .into_int_value()
+            .get_zero_extended_constant(),
+        Some(0)
+    );
+
+    // Causal schedule: CAS observed a holder, that holder unlocks, then
+    // exchange(2) observes zero. Its successful acquire must return without
+    // waiting for a nonexistent owner. Other observations must still wait.
+    for previous in [0, 1, 2] {
+        // LLVM conditional branch operands are condition, false, true.
+        let destination = branch
+            .get_operand(if previous == 0 { 2 } else { 1 })
+            .unwrap()
+            .block()
+            .unwrap();
+        if previous == 0 {
+            assert_eq!(
+                destination.get_terminator().unwrap().get_opcode(),
+                InstructionOpcode::Return
+            );
+            assert!(
+                !destination
+                    .get_instructions()
+                    .any(|i| i.get_opcode() == InstructionOpcode::Call)
+            );
+        } else {
+            assert!(destination.get_instructions().any(|i| {
+                i.print_to_string()
+                    .to_string()
+                    .contains("@verum_futex_wait(")
+            }));
+        }
+    }
+}
+
 fn runtime<'ctx>(
     context: &'ctx Context,
     name: &str,
@@ -402,13 +502,18 @@ mod native {
                 .into_int_value();
             builder.build_return(Some(&status)).unwrap();
             let directory = tempfile::tempdir().unwrap();
-            let child = run_binary(&emit_binary(module, directory.path()));
-            assert_eq!(
-                child.status.code(),
-                Some(42),
-                "wire={wire}: {}",
-                String::from_utf8_lossy(&child.stderr)
-            );
+            let binary = emit_binary(module, directory.path());
+            // T2268: real startup/teardown contention exercised the mutex's
+            // CAS-to-exchange window. Keep the same per-process deadline.
+            for iteration in 0..16 {
+                let child = run_binary(&binary);
+                assert_eq!(
+                    child.status.code(),
+                    Some(42),
+                    "wire={wire}, iteration={iteration}: {}",
+                    String::from_utf8_lossy(&child.stderr)
+                );
+            }
         }
     }
 }

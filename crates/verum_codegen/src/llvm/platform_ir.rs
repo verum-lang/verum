@@ -2937,9 +2937,10 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(cas_ok, locked, contended)
             .or_llvm_err()?;
 
-        // contended: exchange to 2 (mark as contended)
+        // The owner may unlock after our failed CAS. In that case this
+        // exchange acquires the mutex; waiting would strand its new owner.
         builder.position_at_end(contended);
-        let _prev = builder
+        let previous = builder
             .build_atomicrmw(
                 verum_llvm::AtomicRMWBinOp::Xchg,
                 m,
@@ -2947,8 +2948,11 @@ impl<'ctx> PlatformIR<'ctx> {
                 verum_llvm::AtomicOrdering::Acquire,
             )
             .or_llvm_err()?;
+        let acquired = builder
+            .build_int_compare(IntPredicate::EQ, previous, zero, "acquired_contended")
+            .or_llvm_err()?;
         builder
-            .build_unconditional_branch(spin_loop)
+            .build_conditional_branch(acquired, locked, spin_loop)
             .or_llvm_err()?;
 
         // spin_loop: futex_wait, then try xchg(2)
